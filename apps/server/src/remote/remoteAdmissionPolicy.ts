@@ -8,7 +8,13 @@
 
 import type { RequestTransportFacts } from "../server";
 
-export type RemoteAdmissionSurface = "pairing" | "auth" | "product" | "server-proxy" | "pre-auth";
+export type RemoteAdmissionSurface =
+  | "pairing"
+  | "pairing-status"
+  | "auth"
+  | "product"
+  | "server-proxy"
+  | "pre-auth";
 
 export type RemoteAdmissionPathSurface = RemoteAdmissionSurface | "static-asset";
 
@@ -17,6 +23,14 @@ export interface RemoteAdmissionLimits {
   readonly pairingPerSourcePerMinute: number;
   /** Pairing token bucket for the whole host per minute. */
   readonly pairingPerHostPerMinute: number;
+  /**
+   * Status reads for one live, pending pairing ticket per minute. The pairing
+   * window polls once a second, so this is that rate (60) with room for a
+   * retry or a second window (2x). It keeps a ticket's whole five-minute life
+   * (at most 600 reads) bounded without charging the per-source budget that
+   * hello and claim share.
+   */
+  readonly pairingStatusPerTicketPerMinute: number;
   /** Authentication token bucket per opaque source key per minute. */
   readonly authPerSourcePerMinute: number;
   /** Authentication token bucket per opaque device key per minute. */
@@ -39,6 +53,7 @@ export interface RemoteAdmissionLimits {
 export const DEFAULT_REMOTE_ADMISSION_LIMITS: RemoteAdmissionLimits = {
   pairingPerSourcePerMinute: 10,
   pairingPerHostPerMinute: 60,
+  pairingStatusPerTicketPerMinute: 120,
   authPerSourcePerMinute: 30,
   authPerDevicePerMinute: 12,
   productConcurrentPerDevice: 8,
@@ -55,6 +70,12 @@ const DEFAULT_MAX_MAP_ENTRIES = 4096;
 export interface RemoteAdmissionIdentity {
   readonly sourceKey: string;
   readonly deviceKey?: string;
+  /**
+   * Opaque id of a live, pending pairing ticket the caller proved it holds.
+   * Only the `pairing-status` surface reads it; any other request, and a
+   * status read without it, is charged to the per-source pairing budget.
+   */
+  readonly pairingTicketKey?: string;
 }
 
 export interface RemoteAdmissionAcquireInput {
@@ -75,6 +96,7 @@ export interface RemoteAdmissionCounts {
 
 export interface RemoteAdmissionDiagnostics {
   readonly pairingSourceMapSize: number;
+  readonly pairingStatusTicketMapSize: number;
   readonly authSourceMapSize: number;
   readonly authDeviceMapSize: number;
   readonly productDeviceConcurrentMapSize: number;
@@ -120,6 +142,10 @@ export function createRemoteAdmissionPolicy(
   // misconfiguration cannot silently disable a bucket or produce NaN state.
   assertFinitePositiveInteger(limits.pairingPerSourcePerMinute, "pairingPerSourcePerMinute");
   assertFinitePositiveInteger(limits.pairingPerHostPerMinute, "pairingPerHostPerMinute");
+  assertFinitePositiveInteger(
+    limits.pairingStatusPerTicketPerMinute,
+    "pairingStatusPerTicketPerMinute",
+  );
   assertFinitePositiveInteger(limits.authPerSourcePerMinute, "authPerSourcePerMinute");
   assertFinitePositiveInteger(limits.authPerDevicePerMinute, "authPerDevicePerMinute");
   assertFinitePositiveInteger(limits.productConcurrentPerDevice, "productConcurrentPerDevice");
@@ -137,6 +163,7 @@ export function createRemoteAdmissionPolicy(
 
   const pairingSource = new Map<string, number[]>();
   let pairingHost: number[] = [];
+  const pairingStatusTicket = new Map<string, number[]>();
   const authSource = new Map<string, number[]>();
   const authDevice = new Map<string, number[]>();
   const productDeviceConcurrent = new Map<string, number>();
@@ -161,6 +188,7 @@ export function createRemoteAdmissionPolicy(
   /** Sweep all token-bucket maps. Called on each acquire to bound cardinality. */
   const sweepAll = (current: number): void => {
     sweepMap(pairingSource, current);
+    sweepMap(pairingStatusTicket, current);
     sweepMap(authSource, current);
     sweepMap(authDevice, current);
     sweepMap(productDeviceStateChanging, current);
@@ -230,7 +258,29 @@ export function createRemoteAdmissionPolicy(
       return { kind: "admitted", release: NOOP_RELEASE };
     }
 
-    if (input.surface === "pairing") {
+    if (input.surface === "pairing-status" && input.identity.pairingTicketKey !== undefined) {
+      // A window waiting for approval polls its own ticket for the ticket's
+      // whole life. Charging those reads to the source and host budgets that
+      // hello and claim share would starve the wait after ten seconds, so a
+      // proven live ticket has a bucket of its own. A full map falls back to
+      // the shared budget below instead of admitting without a bound.
+      const ticketKey = input.identity.pairingTicketKey;
+      if (canInsertKey(pairingStatusTicket, ticketKey)) {
+        if (
+          !tryBucket(
+            pairingStatusTicket,
+            ticketKey,
+            limits.pairingStatusPerTicketPerMinute,
+            current,
+          )
+        ) {
+          return reject(limits);
+        }
+        return { kind: "admitted", release: NOOP_RELEASE };
+      }
+    }
+
+    if (input.surface === "pairing" || input.surface === "pairing-status") {
       if (!canInsertKey(pairingSource, sourceKey)) return reject(limits);
       if (!tryBucket(pairingSource, sourceKey, limits.pairingPerSourcePerMinute, current)) {
         return reject(limits);
@@ -314,6 +364,7 @@ export function createRemoteAdmissionPolicy(
   const reset = (): void => {
     pairingSource.clear();
     pairingHost = [];
+    pairingStatusTicket.clear();
     authSource.clear();
     authDevice.clear();
     productDeviceConcurrent.clear();
@@ -329,6 +380,7 @@ export function createRemoteAdmissionPolicy(
 
   const diagnostics = (): RemoteAdmissionDiagnostics => ({
     pairingSourceMapSize: pairingSource.size,
+    pairingStatusTicketMapSize: pairingStatusTicket.size,
     authSourceMapSize: authSource.size,
     authDeviceMapSize: authDevice.size,
     productDeviceConcurrentMapSize: productDeviceConcurrent.size,
@@ -355,6 +407,7 @@ function reject(limits: RemoteAdmissionLimits): RemoteAdmissionDecision {
 export function classifyRemoteAdmissionPath(pathname: string): RemoteAdmissionPathSurface {
   if (pathname === "/health" || pathname === "/api/hosts") return "pre-auth";
   if (pathname === "/api/remote/hello") return "pairing";
+  if (pathname === "/api/remote/pairing/status") return "pairing-status";
   if (matchPathPrefix(pathname, "/api/remote/pairing")) return "pairing";
   if (matchPathPrefix(pathname, "/api/remote/auth")) return "auth";
   if (matchPathPrefix(pathname, "/api/server-proxy")) return "server-proxy";
@@ -386,6 +439,77 @@ export interface RemoteBoundaryFetchOptions {
   readonly fetch: (request: Request, facts?: RequestTransportFacts) => Response | Promise<Response>;
   readonly admission: RemoteAdmissionPolicy;
   readonly deviceKeyResolver?: RemoteAdmissionDeviceKeyResolver;
+  /**
+   * True when the ticket exists, has not expired, is still pending, and the
+   * proof is the one issued with it. Only such a ticket earns its own status
+   * budget; without this resolver every status read counts against the shared
+   * per-source pairing budget.
+   */
+  readonly pairingTicketIsPending?: (ticket: {
+    readonly ticketId: string;
+    readonly ticketProof: string;
+  }) => boolean;
+}
+
+const PAIRING_STATUS_BODY_MAX_BYTES = 4_096;
+// The read happens before any budget is charged, so a client that dribbles its
+// body must not hold the connection: past this it is charged like an unknown
+// ticket and the handler's own bounded read takes over.
+const PAIRING_STATUS_BODY_READ_MS = 1_000;
+
+/**
+ * Read the ticket a pairing-status request names, from a clone so the handler
+ * still sees the whole body. Anything oversized, malformed, or unreadable
+ * yields `undefined` and the read is charged to the shared per-source budget.
+ */
+async function readPairingStatusTicket(
+  request: Request,
+): Promise<{ readonly ticketId: string; readonly ticketProof: string } | undefined> {
+  if (request.body === null || request.method.toUpperCase() !== "POST") return undefined;
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (!Number.isFinite(declared) || declared > PAIRING_STATUS_BODY_MAX_BYTES) return undefined;
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    reader = request.clone().body?.getReader();
+    if (reader === undefined) return undefined;
+    const timedOut = new Promise<"timed-out">((resolve) => {
+      timer = setTimeout(() => resolve("timed-out"), PAIRING_STATUS_BODY_READ_MS);
+    });
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    while (true) {
+      const next = await Promise.race([reader.read(), timedOut]);
+      if (next === "timed-out") {
+        // A tee settles its cancel only when both branches do; do not wait on it.
+        void reader.cancel().catch(() => undefined);
+        return undefined;
+      }
+      if (next.done || next.value === undefined) break;
+      total += next.value.byteLength;
+      if (total > PAIRING_STATUS_BODY_MAX_BYTES) {
+        void reader.cancel().catch(() => undefined);
+        return undefined;
+      }
+      chunks.push(next.value);
+    }
+    const body = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(body));
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    const { ticketId, ticketProof } = parsed as Record<string, unknown>;
+    if (typeof ticketId !== "string" || typeof ticketProof !== "string") return undefined;
+    return { ticketId, ticketProof };
+  } catch {
+    void reader?.cancel().catch(() => undefined);
+    return undefined;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 /**
@@ -423,11 +547,23 @@ export function createRemoteBoundaryFetch(
     }
 
     const deviceKey = resolveDeviceKey(request, facts);
+    let pairingTicketKey: string | undefined;
+    if (pathSurface === "pairing-status" && options.pairingTicketIsPending !== undefined) {
+      const ticket = await readPairingStatusTicket(request);
+      try {
+        if (ticket !== undefined && options.pairingTicketIsPending(ticket)) {
+          pairingTicketKey = ticket.ticketId;
+        }
+      } catch {
+        pairingTicketKey = undefined;
+      }
+    }
     const decision = options.admission.acquire({
       surface: pathSurface,
       identity: {
         sourceKey: facts.sourceKey,
         ...(deviceKey === undefined ? {} : { deviceKey }),
+        ...(pairingTicketKey === undefined ? {} : { pairingTicketKey }),
       },
       method: request.method,
     });

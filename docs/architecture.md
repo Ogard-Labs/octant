@@ -6327,6 +6327,27 @@ mechanisms are:
   and keys can still follow a link or submit a form within the context's
   approved origins; the host's navigation guards refuse any page outside them,
   so a paired client cannot take the host browser to a new origin.
+  - **Pairing budgets.** Hello and claim share ten requests per source per
+    minute and sixty per host. A window waiting for approval polls its ticket's
+    status once a second for up to the ticket's five minutes, which that budget
+    cannot carry, so a status read for a ticket that exists, has not expired,
+    is still undecided, and arrives with that ticket's own proof draws on a
+    bucket of its own: 120 reads per ticket per minute (the window's 60 with
+    room for a retry), at most 600 over the ticket's life, and none of it
+    counts against the per-source or per-host budget. Every other status read
+    (an unknown, expired, decided, or wrongly proved ticket, an unreadable
+    body, or a request the host cannot check) stays on the per-source budget,
+    so the route cannot be used to probe for tickets or to flood. The check
+    reads the ticket without recording a failed attempt. A person who approves
+    after the window has failed, closed, or never reached the key step leaves
+    an approved device that no client holds a key for, so the host removes it:
+    an approved device that has not signed in once (no session) by the time its
+    ticket would have expired, or 30 seconds after the approval if that is
+    later, is revoked with reason `pairing-abandoned`, journaled as any revoke
+    is, by the gateway's one-minute sweep. A device that has signed in, or
+    whose credential has rotated, is never removed this way, and a restart
+    forgets the deadline rather than risk removing a device whose client still
+    holds its key.
   - **Host identity on every connection.** Every hello request a client
     makes names a fresh client nonce, 32 random bytes in unpadded base64url:
     `GET /api/remote/hello?clientNonce=…`. The host hello carries the host

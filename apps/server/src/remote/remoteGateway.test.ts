@@ -36,6 +36,7 @@ import {
   type RemoteGatewayConfig,
   type RemoteGatewayOptions,
 } from "./remoteGateway";
+import { canonicalDeviceKeyFacts } from "./deviceKeyFacts";
 import { executeFinalizationSequence } from "./remoteGatewayFinalization";
 
 const hostId = decodeStableHostId("11111111-1111-4111-8111-111111111111");
@@ -1159,6 +1160,185 @@ describe("RemoteGateway — clock-recovery gates trust issuance", () => {
     wall = nowMs + 5_000;
     await capturedFetch!(trustIssuingPost("/api/remote/pairing"), lanFacts);
     expect(storedMark()).toBe(nowMs + 5_000);
+    await gateway.stop();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A window waiting for approval, and a device approved for a window that gave up.
+// ---------------------------------------------------------------------------
+
+const TICKET_LIFE_MS = 5 * 60 * 1_000;
+
+function postJson(path: string, body: unknown): Request {
+  return new Request(`${ORIGIN}${path}`, {
+    method: "POST",
+    headers: {
+      host: "192.168.1.20:9443",
+      origin: ORIGIN,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("RemoteGateway — waiting for approval", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("answers a pending ticket's status polls once a second for the ticket's whole life", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const { serve, getFetch } = createCapturingServe();
+    const { gateway } = setup({ serve });
+    await gateway.start();
+    const fetch = getFetch()!;
+    const ticket = gateway.localDeviceAdministration()!.createPairingTicket({
+      sourceClass: "lan-private",
+    });
+    const poll = { ticketId: ticket.ticketId, ticketProof: ticket.ticketProof };
+
+    const statuses: number[] = [];
+    for (let second = 0; second < 300; second += 1) {
+      const response = await fetch(postJson("/api/remote/pairing/status", poll), lanFacts);
+      statuses.push(response.status);
+      expect(await response.json()).toEqual({ status: "pending" });
+      vi.advanceTimersByTime(1_000);
+    }
+    expect(statuses.every((status) => status === 200)).toBe(true);
+
+    // The same source can still say hello (ten a minute), and an unknown
+    // ticket's status reads draw on that same ten.
+    const unknown = { ticketId: "99999999-9999-4999-8999-999999999999", ticketProof: "x" };
+    const unknownStatuses: number[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const response = await fetch(postJson("/api/remote/pairing/status", unknown), lanFacts);
+      unknownStatuses.push(response.status);
+    }
+    expect(unknownStatuses.filter((status) => status === 200)).toHaveLength(10);
+    expect(unknownStatuses.slice(-2)).toEqual([429, 429]);
+    await gateway.stop();
+  });
+
+  it("does not let the wrong proof for a live ticket reach the ticket's own budget", async () => {
+    const { serve, getFetch } = createCapturingServe();
+    const { gateway } = setup({ serve });
+    await gateway.start();
+    const fetch = getFetch()!;
+    const ticket = gateway.localDeviceAdministration()!.createPairingTicket({
+      sourceClass: "lan-private",
+    });
+    const statuses: number[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      const response = await fetch(
+        postJson("/api/remote/pairing/status", {
+          ticketId: ticket.ticketId,
+          ticketProof: "not-the-proof",
+        }),
+        lanFacts,
+      );
+      statuses.push(response.status);
+    }
+    expect(statuses.filter((status) => status === 200)).toHaveLength(10);
+    expect(statuses.slice(-2)).toEqual([429, 429]);
+    await gateway.stop();
+  });
+});
+
+describe("RemoteGateway — approval for a window that never finished", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function approveForWindow(wall: { value: number }) {
+    const { serve, getFetch } = createCapturingServe();
+    const made = setup({ serve, now: () => wall.value });
+    await made.gateway.start();
+    const fetch = getFetch()!;
+    const admin = made.gateway.localDeviceAdministration()!;
+    const ticket = admin.createPairingTicket({ sourceClass: "lan-private" });
+
+    const hello = await (
+      await fetch(
+        new Request(`${ORIGIN}/api/remote/hello`, { headers: { host: "192.168.1.20:9443" } }),
+        lanFacts,
+      )
+    ).json();
+    const keys = generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const publicPem = keys.publicKey.export({ format: "pem", type: "spki" }).toString().trim();
+    const claim = await fetch(
+      postJson("/api/remote/pairing", {
+        ticketId: ticket.ticketId,
+        ticketProof: ticket.ticketProof,
+        hostHelloNonce: hello.nonce,
+        devicePublicKey: publicPem,
+        deviceKeyFingerprint: canonicalDeviceKeyFacts(publicPem)!.fingerprint,
+        deviceLabel: "Second window",
+        origin: ORIGIN,
+        clientHello: {
+          webBuildVersion: "0.1.0",
+          supportedProtocolRange: { min: 1, max: 1 },
+          browserCapabilities: ["webcrypto"],
+        },
+      }),
+      lanFacts,
+    );
+    expect(claim.status).toBe(200);
+    const { device } = admin.approvePairing({ ticketId: ticket.ticketId });
+    return { ...made, admin, device };
+  }
+
+  it("removes the approved device after the ticket's life, with a journaled revoke", async () => {
+    vi.useFakeTimers();
+    const wall = { value: nowMs };
+    const { gateway, admin, device, connection } = await approveForWindow(wall);
+    expect(admin.listDevices().map((entry) => entry.state)).toEqual(["active"]);
+
+    wall.value += TICKET_LIFE_MS + 1_000;
+    await vi.advanceTimersByTimeAsync(TICKET_LIFE_MS + 2 * 60_000);
+
+    const [removed] = admin.listDevices();
+    expect(removed).toMatchObject({ deviceId: device.deviceId, state: "revoked" });
+    expect(removed?.revokedReason).toBe("pairing-abandoned");
+    expect(
+      connection
+        .prepare(
+          "SELECT count(*) AS n FROM event_journal WHERE event_name = 'remote.device-revoked@1'",
+        )
+        .get(),
+    ).toEqual({ n: 1 });
+    await gateway.stop();
+  });
+
+  it("keeps a device whose window signed in with its key", async () => {
+    vi.useFakeTimers();
+    const wall = { value: nowMs };
+    const { gateway, admin, device, connection } = await approveForWindow(wall);
+    connection
+      .prepare(
+        `INSERT INTO remote_session_store (
+          session_id_digest, host_id, device_id, credential_generation, origin,
+          protocol_version, capability_digest, issued_at, last_seen_at,
+          idle_expires_at, absolute_expires_at, csrf_digest, state
+        ) VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, 'active')`,
+      )
+      .run(
+        "d".repeat(64),
+        hostId,
+        device.deviceId,
+        ORIGIN,
+        "c".repeat(64),
+        wall.value,
+        wall.value,
+        wall.value + 60_000,
+        wall.value + 600_000,
+        "e".repeat(64),
+      );
+
+    wall.value += TICKET_LIFE_MS + 1_000;
+    await vi.advanceTimersByTimeAsync(TICKET_LIFE_MS + 2 * 60_000);
+
+    expect(admin.listDevices().map((entry) => entry.state)).toEqual(["active"]);
     await gateway.stop();
   });
 });

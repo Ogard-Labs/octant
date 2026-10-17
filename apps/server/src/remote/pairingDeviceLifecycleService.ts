@@ -58,6 +58,19 @@ export class PairingDeviceLifecycleError extends Error {
 
 type SourceClass = PairingTicketV1["sourceClass"];
 
+/**
+ * An approved device must sign in with its key by the time its ticket would
+ * have expired, or this long after the approval if that is later: the window
+ * learns of an approval on its next poll and signs in at once, so a person who
+ * approves in the ticket's last seconds still leaves the window time to finish.
+ */
+const APPROVAL_KEY_STEP_GRACE_MS = 30_000;
+
+interface AwaitingKeyStep {
+  readonly deviceId: DeviceId;
+  readonly deadline: number;
+}
+
 interface TicketRecord {
   readonly ticketId: PairingTicketId;
   readonly hostId: StableHostId;
@@ -132,7 +145,9 @@ export class PairingDeviceLifecycleService {
   readonly #correlationId: () => string;
   readonly #actorId: () => string;
   readonly #tickets = new Map<string, TicketRecord>();
+  readonly #awaitingKeyStep = new Map<string, AwaitingKeyStep>();
   readonly #selectAggregateHead;
+  readonly #selectDeviceSession;
 
   constructor(options: PairingDeviceLifecycleServiceOptions) {
     this.#hostId = options.hostId;
@@ -147,6 +162,12 @@ export class PairingDeviceLifecycleService {
       `SELECT aggregate_version
        FROM aggregate_heads
        WHERE aggregate_type = ? AND aggregate_id = ?`,
+    );
+    this.#selectDeviceSession = options.connection.prepare(
+      `SELECT 1 AS present
+       FROM remote_session_store
+       WHERE host_id = ? AND device_id = ?
+       LIMIT 1`,
     );
   }
 
@@ -344,6 +365,25 @@ export class PairingDeviceLifecycleService {
       });
   }
 
+  /**
+   * True when the ticket exists, has not expired, is still undecided, and the
+   * proof is the one issued with it. A pure read: it records no failed attempt,
+   * so the caller can use it to decide which admission budget a status read
+   * belongs to without changing what the read itself answers.
+   */
+  isPendingTicket(input: { readonly ticketId: string; readonly ticketProof: string }): boolean {
+    const now = this.#now();
+    this.#purgeExpired(now);
+    const record = this.#tickets.get(input.ticketId);
+    return (
+      record !== undefined &&
+      record.hostId === this.#hostId &&
+      record.state === "pending" &&
+      now < record.expiresAt &&
+      proofMatches(record.proofDigest, input.ticketProof)
+    );
+  }
+
   ticketStatus(input: {
     readonly ticketId: string;
     readonly ticketProof: string;
@@ -466,6 +506,10 @@ export class PairingDeviceLifecycleService {
     record.state = "approved";
     record.decision = decision;
     record.deviceId = device.deviceId;
+    this.#awaitingKeyStep.set(device.deviceId, {
+      deviceId: device.deviceId,
+      deadline: Math.max(record.expiresAt, now + APPROVAL_KEY_STEP_GRACE_MS),
+    });
     // The comparison code is no longer derivable after a decision; the claim
     // is cleared so deriveComparisonCode returns undefined. Same-decision
     // idempotency survives from decision/deviceId, not the retained claim.
@@ -606,8 +650,45 @@ export class PairingDeviceLifecycleService {
     );
   }
 
+  /**
+   * Remove each approved device whose client never signed in with its key by
+   * the deadline set at approval: the window gave up, closed, or failed after
+   * the person approved, so no client holds the key and the device would sit
+   * approved for good. A device that has signed in even once (a session row
+   * exists) or whose credential has rotated completed pairing and is never
+   * touched, and neither is one that is no longer active. `remove` revokes
+   * through the credential lifecycle, so the removal is journaled like any
+   * revoke; if it throws, the device is tried again on the next sweep.
+   */
+  removeApprovalsWithoutKeyStep(remove: (deviceId: string) => void): void {
+    const now = this.#now();
+    for (const [deviceId, awaiting] of this.#awaitingKeyStep) {
+      const device = this.#readDevice(deviceId);
+      if (
+        device === undefined ||
+        device.state !== "active" ||
+        device.credentialGeneration !== 1 ||
+        this.#selectDeviceSession.get(this.#hostId, deviceId) !== undefined
+      ) {
+        this.#awaitingKeyStep.delete(deviceId);
+        continue;
+      }
+      if (now < awaiting.deadline) continue;
+      try {
+        remove(deviceId);
+      } catch {
+        continue;
+      }
+      this.#awaitingKeyStep.delete(deviceId);
+    }
+  }
+
   clearEphemeralState(): void {
     this.#tickets.clear();
+    // After a restart the host cannot tell a window that is still finishing
+    // from one that gave up, and removing a device whose client holds its key
+    // is worse than leaving one that no client does.
+    this.#awaitingKeyStep.clear();
   }
 
   #requireClaimedPending(ticketId: string, now: number): TicketRecord {

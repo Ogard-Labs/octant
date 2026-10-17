@@ -50,6 +50,7 @@ describe("remoteAdmissionPolicy surface classification", () => {
     // Actual Phase 14B endpoints are under /api/remote/pairing and /api/remote/auth.
     expect(classifyRemoteAdmissionPath("/api/remote/pairing")).toBe("pairing");
     expect(classifyRemoteAdmissionPath("/api/remote/pairing/hello")).toBe("pairing");
+    expect(classifyRemoteAdmissionPath("/api/remote/pairing/status")).toBe("pairing-status");
     expect(classifyRemoteAdmissionPath("/api/remote/auth")).toBe("auth");
     expect(classifyRemoteAdmissionPath("/api/remote/auth/session")).toBe("auth");
     expect(classifyRemoteAdmissionPath("/api/remote/auth/server-proxy-session")).toBe("auth");
@@ -173,6 +174,98 @@ describe("remoteAdmissionPolicy pairing buckets", () => {
         method: "POST",
       }).kind,
     ).toBe("admitted");
+  });
+});
+
+describe("remoteAdmissionPolicy pairing status budget", () => {
+  const pairingSource = { sourceKey: sourceKey(1) };
+
+  it("admits a pending ticket's status polls for its whole five-minute life while hello and claim keep ten a minute", () => {
+    let time = 0;
+    const policy = createRemoteAdmissionPolicy({ now: () => time });
+    let admitted = 0;
+    // One poll a second for the ticket's five minutes.
+    for (let second = 0; second < 300; second += 1) {
+      time = second * 1_000;
+      const decision = acquire(policy, {
+        surface: "pairing-status",
+        identity: { ...pairingSource, pairingTicketKey: "ticket-1" },
+        method: "POST",
+      });
+      if (decision.kind === "admitted") admitted += 1;
+    }
+    expect(admitted).toBe(300);
+
+    // The same source's hello and claim budget is untouched by the polling...
+    time = 299_000;
+    let helloAndClaim = 0;
+    for (let i = 0; i < 12; i += 1) {
+      const decision = acquire(policy, {
+        surface: "pairing",
+        identity: pairingSource,
+        method: "POST",
+      });
+      if (decision.kind === "admitted") helloAndClaim += 1;
+    }
+    // ...and still stops at ten.
+    expect(helloAndClaim).toBe(DEFAULT_REMOTE_ADMISSION_LIMITS.pairingPerSourcePerMinute);
+  });
+
+  it("charges a status read with no live ticket to the per-source pairing budget", () => {
+    const policy = createRemoteAdmissionPolicy({ now: () => 1_000 });
+    let admitted = 0;
+    for (let i = 0; i < 30; i += 1) {
+      const decision = acquire(policy, {
+        surface: "pairing-status",
+        identity: pairingSource,
+        method: "POST",
+      });
+      if (decision.kind === "admitted") admitted += 1;
+    }
+    expect(admitted).toBe(DEFAULT_REMOTE_ADMISSION_LIMITS.pairingPerSourcePerMinute);
+  });
+
+  it("bounds one ticket's status reads per minute and keeps other tickets apart", () => {
+    const policy = createRemoteAdmissionPolicy({ now: () => 1_000 });
+    let admitted = 0;
+    for (let i = 0; i < 500; i += 1) {
+      const decision = acquire(policy, {
+        surface: "pairing-status",
+        identity: { ...pairingSource, pairingTicketKey: "ticket-1" },
+        method: "POST",
+      });
+      if (decision.kind === "admitted") admitted += 1;
+    }
+    expect(admitted).toBe(DEFAULT_REMOTE_ADMISSION_LIMITS.pairingStatusPerTicketPerMinute);
+    expect(
+      acquire(policy, {
+        surface: "pairing-status",
+        identity: { ...pairingSource, pairingTicketKey: "ticket-2" },
+        method: "POST",
+      }).kind,
+    ).toBe("admitted");
+  });
+
+  it("falls back to the shared pairing budget when the ticket map is full", () => {
+    const policy = createRemoteAdmissionPolicy({ now: () => 1_000, maxMapEntries: 1 });
+    expect(
+      acquire(policy, {
+        surface: "pairing-status",
+        identity: { sourceKey: sourceKey(1), pairingTicketKey: "ticket-1" },
+        method: "POST",
+      }).kind,
+    ).toBe("admitted");
+    let admitted = 0;
+    for (let i = 0; i < 30; i += 1) {
+      const decision = acquire(policy, {
+        surface: "pairing-status",
+        identity: { sourceKey: sourceKey(2), pairingTicketKey: "ticket-2" },
+        method: "POST",
+      });
+      if (decision.kind === "admitted") admitted += 1;
+    }
+    expect(admitted).toBe(DEFAULT_REMOTE_ADMISSION_LIMITS.pairingPerSourcePerMinute);
+    expect(policy.diagnostics().pairingStatusTicketMapSize).toBe(1);
   });
 });
 
@@ -591,6 +684,88 @@ describe("createRemoteBoundaryFetch admission and release", () => {
     expect(r3.headers.get("retry-after")).toBeTruthy();
     // Product concurrency must not be affected.
     expect(admission.counts().productConcurrentListener).toBe(0);
+  });
+});
+
+describe("createRemoteBoundaryFetch pairing status", () => {
+  const statusRequest = (body: string = JSON.stringify({ ticketId: "t-1", ticketProof: "p-1" })) =>
+    new Request("https://h:9443/api/remote/pairing/status", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body,
+    });
+
+  it("gives a live pending ticket its own budget and leaves the handler the whole body", async () => {
+    const admission = createRemoteAdmissionPolicy();
+    const bodies: string[] = [];
+    const boundary = createRemoteBoundaryFetch({
+      fetch: async (request) => {
+        bodies.push(await request.text());
+        return Response.json({ status: "pending" });
+      },
+      admission,
+      pairingTicketIsPending: ({ ticketId, ticketProof }) =>
+        ticketId === "t-1" && ticketProof === "p-1",
+    });
+    for (let i = 0; i < 60; i += 1) {
+      expect((await boundary(statusRequest(), lanFacts())).status).toBe(200);
+    }
+    expect(bodies).toHaveLength(60);
+    expect(bodies.every((body) => JSON.parse(body).ticketId === "t-1")).toBe(true);
+    // hello shares the source with the polling window and is still admitted.
+    expect(
+      (await boundary(new Request("https://h:9443/api/remote/hello"), lanFacts())).status,
+    ).toBe(200);
+  });
+
+  it.each([
+    ["an unknown ticket", JSON.stringify({ ticketId: "t-2", ticketProof: "p-1" })],
+    ["a wrong proof", JSON.stringify({ ticketId: "t-1", ticketProof: "nope" })],
+    ["a malformed body", "{not json"],
+    ["an oversize body", JSON.stringify({ ticketId: "t-1", ticketProof: "x".repeat(5_000) })],
+  ])("keeps %s on the per-source pairing budget", async (_label, body) => {
+    const inner = vi.fn(() => Response.json({ status: "failed" }));
+    const boundary = createRemoteBoundaryFetch({
+      fetch: inner,
+      admission: createRemoteAdmissionPolicy(),
+      pairingTicketIsPending: ({ ticketId, ticketProof }) =>
+        ticketId === "t-1" && ticketProof === "p-1",
+    });
+    const statuses: number[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      statuses.push((await boundary(statusRequest(body), lanFacts())).status);
+    }
+    expect(statuses.filter((status) => status === 200)).toHaveLength(
+      DEFAULT_REMOTE_ADMISSION_LIMITS.pairingPerSourcePerMinute,
+    );
+    expect(statuses.slice(-2)).toEqual([429, 429]);
+  });
+
+  it("charges every status read to the per-source budget when the host cannot vouch for tickets", async () => {
+    const boundary = createRemoteBoundaryFetch({
+      fetch: () => Response.json({ status: "pending" }),
+      admission: createRemoteAdmissionPolicy(),
+    });
+    const statuses: number[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      statuses.push((await boundary(statusRequest(), lanFacts())).status);
+    }
+    expect(statuses.filter((status) => status === 200)).toHaveLength(10);
+  });
+
+  it("charges the shared budget when the ticket check throws", async () => {
+    const boundary = createRemoteBoundaryFetch({
+      fetch: () => Response.json({ status: "pending" }),
+      admission: createRemoteAdmissionPolicy(),
+      pairingTicketIsPending: () => {
+        throw new Error("store unavailable");
+      },
+    });
+    const statuses: number[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      statuses.push((await boundary(statusRequest(), lanFacts())).status);
+    }
+    expect(statuses.filter((status) => status === 200)).toHaveLength(10);
   });
 });
 
