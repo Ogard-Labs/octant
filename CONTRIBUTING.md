@@ -217,7 +217,11 @@ What has to exist, none of it in this repository:
 - A tailnet policy that lets that tag reach the feed host on `tcp:22` and
   nothing else.
 - On the feed host, an account that can only write the feed directory: its key
-  in `authorized_keys` behind `restrict,command="rrsync -wo <feed directory>"`.
+  in `authorized_keys` behind
+  `restrict,command="rrsync -wo -no-lock <feed directory>"`. `-no-lock` is
+  needed because the matrix jobs and the workflows upload as the same user at
+  once, and rrsync otherwise refuses a second run per user. Uploads write
+  distinct files without `--delete`, and rsync replaces each file atomically.
   Its private key is the environment secret `OCTANT_FEED_SSH_KEY`.
 - The feed directory served by the website at `/updates/`, so that
   `<ring>/<platform>-<arch>.json` and `<ring>/<platform>-<arch>.preview-key.json`
