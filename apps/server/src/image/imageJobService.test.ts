@@ -271,6 +271,33 @@ describe("image job service", () => {
     expect(imageRow?.attribution[0]?.plannedTokens).toBe(0);
   });
 
+  it("records a completed image with no reported usage as unavailable, not as a measured zero", async () => {
+    const silentAdapter: ImageGenerationAdapter = {
+      generate: async () => ({
+        status: "completed",
+        images: [{ bytes: png, mediaType: "image/png" }],
+      }),
+    };
+    const { service, connection } = openHarness(silentAdapter);
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "a red cube",
+    });
+    expect((await service.whenTerminal(queued.id)).status).toBe("completed");
+
+    const dashboard = readUsageDashboard(
+      connection,
+      { filter: { requestShape: IMAGE_GENERATION_REQUEST_SHAPE } },
+      { queryAt: now, projectScope: { kind: "unfiled" } },
+    );
+    const imageRow = dashboard.detail.find((row) => row.requestShape === "image-generation");
+    expect(imageRow?.quality).toBe("unavailable");
+    expect(imageRow?.attribution[0]?.imageCount).toBe(1);
+  });
+
   it("finds the completed job that made an image by the image's id alone", async () => {
     const { service } = openHarness(successfulAdapter());
     const queued = await service.enqueue({
