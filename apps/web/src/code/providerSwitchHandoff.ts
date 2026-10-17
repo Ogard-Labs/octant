@@ -40,7 +40,9 @@ function count(value: number, one: string, many: string): string {
 type TextHandoff = Exclude<CodeConversationTurnHandoff, { readonly reason: "fork-native-session" }>;
 
 /** Every omission the host counted, named, so a short handoff never reads as a short conversation. */
-function omissionsDisclosure(handoff: Pick<TextHandoff | CodeForkMergeBack, "omissions">): string {
+export function omissionsDisclosure(
+  handoff: Pick<TextHandoff | CodeForkMergeBack, "omissions">,
+): string {
   const { omissions } = handoff;
   const left = [
     omissions.earlierMessages > 0

@@ -364,7 +364,11 @@ mid-turn; a note the lead never reached before the turn ended is sent as the
 next prompt. Notes are saved as you send them, so one typed just before
 Octant restarts still reaches the lead on the next turn. `/steer <note>` queues
 one explicitly. Left-over notes are sent once, even with the thread open in
-more than one terminal. `Esc` stops the
+more than one terminal. The app has the same
+note box beside the composer, shown only while the lead works: a note is queued the same way and
+marked queued, then delivered. A note the lead never reached is marked not
+reached and can be discarded there; only the terminal sends it as the next
+prompt. `Esc` stops the
 running turn; `Ctrl+C` stops it too, and a second press right after quits.
 
 `/side <question>` asks the thread's Side Chat — the same one the app's Side
@@ -390,7 +394,9 @@ panel, as a numbered prompt in the CLI, and in a Chat thread's own transcript
 as a card on the turn that asked — with any options it offered, each with the
 meaning the lead wrote for it, and a field for an answer no option covers.
 Pick one or type an answer; the turn continues the moment it lands, and the
-same question can be answered from any surface. A question nobody answers
+same question can be answered from any surface. The terminal
+shows a Chat thread's question too, read from the turn that asked, and closes
+its prompt with a note when the app answers first. A question nobody answers
 within ten minutes expires and the lead is told to continue with its best
 judgment; interrupting the turn cancels it. Every question and answer is
 journaled with the session.

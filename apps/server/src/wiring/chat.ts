@@ -1,6 +1,7 @@
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import {
+  type ChatThread,
   type ChatThreadId,
   decodeAgentRunParentThreadId,
   decodeChatThreadId,
@@ -75,6 +76,7 @@ import { hydrateAgentMessageProjectionFromJournal } from "../agentMessage/agentM
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
 import { defaultShellSettings, findWorkspacePresetTarget } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
+import type { AppManagedToolSet } from "../chat/chatTurnRunner";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import { requireJournalHydration } from "../persistence/journalHydration";
@@ -82,10 +84,12 @@ import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers"
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkspaceWiring } from "./workspace";
+import type { WorkRequestStateWiring } from "./workRequestState";
 import type { CodeWiring } from "./code";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessWiring } from "./harness";
@@ -99,10 +103,7 @@ const SIDE_CHAT_WORK_READ_MAX_BYTES = 2 * 1024 * 1024;
 
 export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<
-    LateBindings,
-    "canvasAgentToolPort" | "purgeQueuedChatMessages" | "workRequestRuntime" | "zenAssistantTools"
-  >;
+  readonly late: Pick<LateBindings, "canvasAgentToolPort">;
 } & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
@@ -132,6 +133,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
   Pick<WorkspaceWiring, "contextHarness" | "shellService"> &
+  Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<CodeWiring, "codeService" | "environmentService"> &
   Pick<
     ProvidersWiring,
@@ -143,7 +145,6 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "extensionActivationService"
     | "extensionApiService"
     | "extensionPackageStore"
-    | "providerRuntimeRegistry"
     | "reviewedModelManifest"
     | "skillDiscoveryService"
   > &
@@ -155,7 +156,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     readonly workThreadService: () => WorkThreadService;
     /** Wired by wireWork; read only after startup. */
     readonly workTurnService: () => WorkTurnService;
-  };
+  } & Pick<FoundationsWiring, "providerRuntimeRegistry">;
 
 export function wireChat(deps: ChatDependencies) {
   const {
@@ -204,6 +205,7 @@ export function wireChat(deps: ChatDependencies) {
     workFileListingService,
     workThreadService,
     workTurnService,
+    workRequestRuntime,
   } = deps;
   return Effect.gen(function* () {
     let threadDialogueService: ThreadDialogueService | undefined;
@@ -354,6 +356,21 @@ export function wireChat(deps: ChatDependencies) {
       }
       return createSideChatSourceTools({ source, authorize });
     };
+    // Areas built after Chat contribute to it here, so Chat never holds them:
+    // a guard that must settle before a thread's attachments are purged, and
+    // a source of app-managed tools for a thread's turns.
+    const attachmentPurgeGuards: Array<(threadId: ChatThreadId) => Promise<void>> = [];
+    const guardChatAttachmentPurge = (guard: (threadId: ChatThreadId) => Promise<void>): void => {
+      attachmentPurgeGuards.push(guard);
+    };
+    const chatToolContributors: Array<
+      (windowId: WindowId, thread: ChatThread) => AppManagedToolSet | undefined
+    > = [];
+    const contributeChatTools = (
+      contributor: (windowId: WindowId, thread: ChatThread) => AppManagedToolSet | undefined,
+    ): void => {
+      chatToolContributors.push(contributor);
+    };
     let imageJobService!: ImageJobService;
     const chatService = new ChatService({
       liveTurns,
@@ -362,9 +379,9 @@ export function wireChat(deps: ChatDependencies) {
       outsideContentMarks: runtimeOutsideContentMarks,
       attachmentStore: chatAttachmentStore,
       beforeAttachmentPurge: async (threadId) => {
-        if (late.purgeQueuedChatMessages.current === undefined)
+        if (attachmentPurgeGuards.length === 0)
           throw new Error("Queued attachment cleanup is not available.");
-        await late.purgeQueuedChatMessages.current(threadId);
+        for (const guard of attachmentPurgeGuards) await guard(threadId);
       },
       agentRuns: agentRunPersistence,
       resolveComputerUseTools: ({ windowId, thread, selection }) =>
@@ -446,7 +463,7 @@ export function wireChat(deps: ChatDependencies) {
         }
         return attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, configuredDriverOptions),
-          () => late.workRequestRuntime.current,
+          () => workRequestRuntime,
         );
       },
       contextHarness,
@@ -465,7 +482,7 @@ export function wireChat(deps: ChatDependencies) {
                 windowId,
                 sideChat,
               }),
-              late.zenAssistantTools.current?.forThread(windowId, thread),
+              ...chatToolContributors.map((contribute) => contribute(windowId, thread)),
               sideChatFileTools(windowId, thread.id),
               threadDialogueService?.forThread({
                 windowId,
@@ -796,7 +813,9 @@ export function wireChat(deps: ChatDependencies) {
       chatRoutes,
       chatService,
       codeThreadMentionDirectory,
+      contributeChatTools,
       generatedImageStore,
+      guardChatAttachmentPurge,
       imageJobService,
       linkedThreadRoutes,
       navigatorAssistantBindings,

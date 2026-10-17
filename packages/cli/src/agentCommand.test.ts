@@ -704,6 +704,174 @@ describe("octant agent helper agents", () => {
   });
 });
 
+describe("octant agent Chat lead question", () => {
+  const threadId = "00000000-0000-4000-8000-000000000201";
+  const turnId = "61000000-0000-4000-8000-000000000001";
+  const attemptId = "62000000-0000-4000-8000-000000000001";
+  const now = "2026-10-16T09:00:00.000Z";
+
+  /** The Chat thread as the host reads it: parked on a question, then finished. */
+  function chatView(state: "parked" | "answered") {
+    const digest = "a".repeat(64);
+    const base = chatThreadOpening(threadId, { path: `/api/chat/threads/${threadId}` } as never);
+    const thread = (base?.body as { thread: Record<string, unknown> }).thread;
+    return {
+      thread: { ...thread, version: 4 },
+      turns: [
+        {
+          id: turnId,
+          threadId,
+          sequence: 1,
+          userMessageRef: {
+            contentId: "63000000-0000-4000-8000-000000000001",
+            digest,
+            byteLength: 4,
+          },
+          attachmentIds: [],
+          attempts: [
+            {
+              id: attemptId,
+              turnId,
+              threadId,
+              providerInstanceId: "50000000-0000-4000-8000-000000000001",
+              providerSessionId: "64000000-0000-4000-8000-000000000001",
+              modelId: "loopback-model",
+              contextManifestId: "65000000-0000-4000-8000-000000000001",
+              outcome: state === "parked" ? "waiting" : "completed",
+              responseRefs: [],
+              citationIds: [],
+              ...(state === "parked"
+                ? {
+                    pendingQuestion: {
+                      requestId: "call_1",
+                      prompt: "Which database?",
+                      options: [
+                        { label: "sqlite", description: "one file, no server" },
+                        { label: "postgres" },
+                      ],
+                    },
+                  }
+                : {}),
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+          createdAt: now,
+        },
+      ],
+      lastSequence: 2,
+      contents: [
+        {
+          contentId: "63000000-0000-4000-8000-000000000001",
+          role: "user",
+          body: "plan",
+          digest,
+          byteLength: 4,
+        },
+      ],
+      attachments: [],
+      citations: [],
+      workItems: [],
+      workListVersion: 0,
+      followUpVersion: 0,
+    };
+  }
+
+  async function run(options: { readonly json: boolean; readonly typed: string }) {
+    const stdout = sink();
+    const stderr = sink();
+    const posted: Array<{ readonly kind?: string; readonly [key: string]: unknown }> = [];
+    let answered = false;
+    const code = await runAgentCliCommand({
+      command: {
+        action: "agent",
+        threadId,
+        prompt: "plan",
+        json: options.json,
+        plain: true,
+        last: false,
+        quiet: false,
+        mode: "chat",
+      },
+      session: session((request) => {
+        if (request.path === `/api/chat/threads/${threadId}`) {
+          return { status: 200, body: chatView(answered ? "answered" : "parked") };
+        }
+        const opened = chatThreadOpening(threadId, request);
+        if (opened !== undefined) return opened;
+        if (request.path === "/api/chat/commands") {
+          const body = request.body as { kind?: string };
+          posted.push(body);
+          if (body.kind === "answer-chat-turn-question" || body.kind === "interrupt-chat-turn") {
+            answered = true;
+          }
+          return { status: 200, body: {} };
+        }
+        if (request.path.startsWith("/api/native-harness/sessions/")) {
+          return { status: 200, body: { view: null } };
+        }
+        return { status: 200, body: [] };
+      }),
+      stdin: Readable.from([options.typed]),
+      stdout,
+      stderr,
+      pollIntervalMs: 5,
+    });
+    return { code, stdout: stdout.text(), stderr: stderr.text(), posted };
+  }
+
+  it("shows the question with numbered options and sends the picked option as the answer", async () => {
+    const result = await run({ json: false, typed: "2\n" });
+    expect(result.stdout).toContain("? Which database?");
+    expect(result.stdout).toContain("  1. sqlite — one file, no server");
+    expect(result.stdout).toContain("  2. postgres");
+    expect(result.posted.filter((body) => body.kind === "answer-chat-turn-question")).toEqual([
+      {
+        kind: "answer-chat-turn-question",
+        threadId,
+        expectedVersion: 4,
+        turnId,
+        attemptId,
+        requestId: "call_1",
+        answer: "postgres",
+      },
+    ]);
+    expect(result.code).toBe(0);
+  });
+
+  it("stops the parked turn when stdin ends before an answer, instead of waiting forever", async () => {
+    const result = await run({ json: false, typed: "" });
+    expect(result.stderr).toContain("Input ended before the question was answered");
+    expect(result.posted.map((body) => body.kind)).toContain("interrupt-chat-turn");
+    expect(result.posted.map((body) => body.kind)).not.toContain("answer-chat-turn-question");
+  });
+
+  it("asks again after a blank line rather than leaving the turn parked", async () => {
+    const result = await run({ json: false, typed: "\n2\n" });
+    expect(result.stdout.match(/\? Which database\?/g)).toHaveLength(2);
+    expect(result.posted.filter((body) => body.kind === "answer-chat-turn-question")).toMatchObject(
+      [{ answer: "postgres" }],
+    );
+  });
+
+  it("emits the question as a JSON line and reads the answer from stdin", async () => {
+    const result = await run({ json: true, typed: "use sqlite\n" });
+    const lines = result.stdout
+      .split("\n")
+      .filter((line) => line.startsWith("{"))
+      .map((line) => JSON.parse(line) as { kind: string; question?: { prompt: string } });
+    expect(lines.find((line) => line.kind === "question")?.question).toMatchObject({
+      id: "call_1",
+      prompt: "Which database?",
+      options: ["sqlite", "postgres"],
+      status: "pending",
+    });
+    expect(result.posted.find((body) => body.kind === "answer-chat-turn-question")).toMatchObject({
+      answer: "use sqlite",
+    });
+  });
+});
+
 describe("octant agent approval prompt", () => {
   const threadId = "00000000-0000-4000-8000-000000000101";
   const leadRequest = {

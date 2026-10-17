@@ -2,9 +2,6 @@ import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
-  type AndroidRpcEnvelope,
-  type AppleRpcEnvelope,
-  type CodeProjectPullRequestRow,
   decodeCodeEvidenceContentId,
   decodeCodeFailure,
   decodeCodeRelativePath,
@@ -13,7 +10,6 @@ import {
   decodeThreadWorkingDirectory,
   LOCAL_TOOL_HOST_ID,
   THREAD_RETENTION_EVENT_NAMES,
-  type WindowId,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -61,12 +57,7 @@ import { createSiblingThreadTools } from "../siblingThreads/siblingThreadTools";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
-import { type AppleExecutionContext, AppleToolchainService } from "../apple/appleToolchainService";
-import {
-  type AndroidExecutionContext,
-  AndroidToolchainService,
-  isReplayedAndroidEvidence,
-} from "../android/androidToolchainService";
+import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
 import { isNativeHarnessDriverKind } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
@@ -74,10 +65,14 @@ import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers"
 import type { ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
 import type { WorkspaceWiring } from "./workspace";
+import type { WorkRequestStateWiring } from "./workRequestState";
+import type { HarnessStateWiring } from "./harnessState";
+import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 
 function withCodeOperationRuntime(
@@ -211,13 +206,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   /** Cells settled by a later wiring call; read per use, never at construction. */
   readonly late: Pick<
     LateBindings,
-    | "canvasAgentToolPort"
-    | "codeOperationRuntime"
-    | "nativeHarnessComposition"
-    | "observeRefreshedPullRequestRows"
-    | "terminalBrowserGrants"
-    | "terminalProcessPort"
-    | "workRequestRuntime"
+    "canvasAgentToolPort" | "codeOperationRuntime" | "nativeHarnessComposition"
   >;
 } & Pick<
     AuthorityWiring,
@@ -227,8 +216,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "codeSessionAuthority"
     | "liveTurns"
     | "machineChangeFeed"
-    | "requireBrowserAutomationService"
-    | "requireBrowserToolApprovalService"
+    | "onWindowRevoked"
     | "simulatorInputGrants"
   > &
   Pick<
@@ -253,20 +241,28 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   > &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
   Pick<WorkspaceWiring, "codeBoardPlanProgressSource" | "contextHarness" | "projectService"> &
+  Pick<WorkRequestStateWiring, "workRequestRuntime"> &
+  Pick<HarnessStateWiring, "onHarnessQuestionAsked" | "onHarnessQuestionSettled"> &
+  Pick<
+    DevicesWiring,
+    | "androidToolchainService"
+    | "appleToolchainService"
+    | "recordAppleEvidence"
+    | "resolveAndroidContext"
+    | "resolveAppleContext"
+  > &
   Pick<
     CodeWiring,
     | "canAccessCodeProject"
     | "codeAttachments"
-    | "codeBoardEventStore"
-    | "codeEvidence"
     | "codeProjectAccess"
     | "codeService"
     | "codeTestDiscovery"
     | "isCodeProviderModelAllowed"
+    | "onPullRequestSnapshotRefreshed"
     | "projectPullRequestCadence"
     | "projectPullRequestService"
     | "roots"
-    | "selectCodeConversation"
   > &
   Pick<
     ProvidersWiring,
@@ -277,46 +273,26 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "nativeHarnessTranscripts"
     | "probeProviderForThreads"
     | "providerDataDirectory"
-    | "providerRuntimeRegistry"
     | "resolveSelectedExtensions"
   > &
-  Pick<BrowserWiring, "browserAuthority" | "productFeedbackService"> & {
-    /** Wired by wireDevices; read only after startup. */
-    readonly androidToolchainService: () => AndroidToolchainService;
-    /** Wired by wireDevices; read only after startup. */
-    readonly appleToolchainService: () => AppleToolchainService;
+  Pick<
+    BrowserWiring,
+    "browserAutomationService" | "browserToolApprovalService" | "productFeedbackService"
+  > & {
     /** Wired by wireChat; read only after startup. */
     readonly codeThreadMentionDirectory: () => ReturnType<typeof createCodeThreadMentionDirectory>;
     /** Wired by wireWork; read only after startup. */
     readonly fileMentionService: () => FileMentionService;
-    /** Wired by wireDevices; read only after startup. */
-    readonly recordAppleEvidence: () => (
-      evidence: import("@octant/contracts").AppleBuildEvidence,
-      startedAt: string,
-    ) => void;
-    /** Wired by wireDevices; read only after startup. */
-    readonly resolveAndroidContext: () => (
-      windowId: WindowId,
-      scope: {
-        readonly authority: import("@octant/contracts").ToolActionAuthority;
-        readonly threadId: import("@octant/contracts").CodeThreadId;
-        readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
-      },
-      envelope: AndroidRpcEnvelope,
-    ) => Promise<AndroidExecutionContext | undefined>;
-    /** Wired by wireDevices; read only after startup. */
-    readonly resolveAppleContext: () => (
-      windowId: WindowId,
-      scope: {
-        readonly authority: import("@octant/contracts").ToolActionAuthority;
-        readonly threadId: import("@octant/contracts").CodeThreadId;
-        readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
-      },
-      envelope: AppleRpcEnvelope,
-    ) => Promise<AppleExecutionContext | undefined>;
     /** Wired by wireChat; read only after startup. */
     readonly threadMentionService: () => ThreadMentionService;
-  };
+  } & Pick<
+    FoundationsWiring,
+    | "browserAuthority"
+    | "codeBoardEventStore"
+    | "codeEvidence"
+    | "providerRuntimeRegistry"
+    | "selectCodeConversation"
+  >;
 
 export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const {
@@ -329,6 +305,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     androidToolchainService,
     appleToolchainService,
     browserAuthority,
+    browserAutomationService,
+    browserToolApprovalService,
     canAccessCodeProject,
     codeApprovalStore,
     codeAttachments,
@@ -356,6 +334,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     liveTurns,
     machineChangeFeed,
     nativeHarnessHooks,
+    onHarnessQuestionAsked,
+    onHarnessQuestionSettled,
+    onPullRequestSnapshotRefreshed,
+    onWindowRevoked,
     nativeHarnessTranscripts,
     options,
     peekCreateFromIssueFramed,
@@ -368,8 +350,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     providerDataDirectory,
     providerRuntimeRegistry,
     recordAppleEvidence,
-    requireBrowserAutomationService,
-    requireBrowserToolApprovalService,
     resolveAndroidContext,
     resolveAppleContext,
     resolveSelectedExtensions,
@@ -382,10 +362,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     spendCeiling,
     threadMentionService,
     threadOutsideContentMarks,
+    workRequestRuntime,
   } = deps;
   return Effect.gen(function* () {
+    let terminalProcessPort: TerminalProcessPort | undefined;
     if (late.codeOperationRuntime.current === undefined && options.codeService === undefined) {
-      late.terminalProcessPort.current = new TerminalProcessPort({
+      terminalProcessPort = new TerminalProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "terminal-receipts"),
         shellStateDirectory: join(providerDataDirectory, "code", "terminal-shell"),
       });
@@ -440,13 +422,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
           automation: {
             inspectThread: (windowId, threadId) =>
-              requireBrowserAutomationService().inspectThread(windowId, threadId),
-            create: (input) => requireBrowserAutomationService().create(input),
-            act: (input) => requireBrowserAutomationService().act(input),
+              browserAutomationService.inspectThread(windowId, threadId),
+            create: (input) => browserAutomationService.create(input),
+            act: (input) => browserAutomationService.act(input),
             releaseThread: (windowId, threadId) =>
-              requireBrowserAutomationService().releaseThread(windowId, threadId),
+              browserAutomationService.releaseThread(windowId, threadId),
           },
-          approvals: requireBrowserToolApprovalService(),
+          approvals: browserToolApprovalService,
         },
         ...(options.terminalLauncher === undefined ? {} : { launcher: options.terminalLauncher }),
         journal: persistence.journal,
@@ -455,7 +437,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         uuid: randomUUID,
         clock: () => new Date().toISOString(),
       });
-      late.terminalBrowserGrants.current = grants;
+      onWindowRevoked((windowId) => grants.revokeWindow(windowId));
       const unsubscribeTerminalBrowserGrants = persistence.journal.subscribeCommitted((append) => {
         for (const event of append.events) {
           if (
@@ -518,7 +500,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             }),
           ),
         spendCeiling,
-        terminalProcessPort: late.terminalProcessPort.current,
+        terminalProcessPort,
         repositoryTestProcessPort,
         scaffoldProcess: {
           execute: (input, signal) => scaffoldProcessPort.execute(input, signal),
@@ -577,7 +559,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               return retained.driver;
             const driver = attachWorkRequestRuntime(
               makeConfiguredProviderDriver(instance, configuredDriverOptions),
-              () => late.workRequestRuntime.current,
+              () => workRequestRuntime,
             );
             codeThreadDrivers.set(key, {
               instanceId: String(instance.id),
@@ -667,14 +649,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         browserAutomation: {
           resolveAuthority: (threadId, mode) => browserAuthority.resolve(threadId, mode),
           inspectThread: (windowId, threadId) =>
-            requireBrowserAutomationService().inspectThread(windowId, threadId),
-          create: (input) => requireBrowserAutomationService().create(input),
-          act: (input) => requireBrowserAutomationService().act(input),
+            browserAutomationService.inspectThread(windowId, threadId),
+          create: (input) => browserAutomationService.create(input),
+          act: (input) => browserAutomationService.act(input),
           releaseThread: (windowId, threadId) =>
-            requireBrowserAutomationService().releaseThread(windowId, threadId),
+            browserAutomationService.releaseThread(windowId, threadId),
         },
-        isBrowserOriginRemembered: (origin) =>
-          requireBrowserToolApprovalService().isRemembered(origin),
+        isBrowserOriginRemembered: (origin) => browserToolApprovalService.isRemembered(origin),
         // The agent's Apple capability resolves its execution context through
         // exactly the resolver the workbench route uses, so a tool call and a
         // click are the same request to the same policy.
@@ -687,7 +668,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             extension: { kind: "core" as const },
           }),
           discover: async (windowId, request) => {
-            const context = await resolveAppleContext()(
+            const context = await resolveAppleContext(
               windowId,
               {
                 authority: request.authority,
@@ -697,11 +678,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               { kind: "apple-discovery-request", request },
             );
             if (context === undefined) return undefined;
-            return await appleToolchainService().discover(request, context);
+            return await appleToolchainService.discover(request, context);
           },
           execute: async (windowId, request) => {
             const startedAt = new Date().toISOString();
-            const context = await resolveAppleContext()(
+            const context = await resolveAppleContext(
               windowId,
               {
                 authority: request.authority,
@@ -711,45 +692,42 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               { kind: "apple-action-request", request },
             );
             if (context === undefined) return undefined;
-            const evidence = await appleToolchainService().execute(request, context);
+            const evidence = await appleToolchainService.execute(request, context);
             // An agent's shutdown closes a Simulator to every thread, and its
             // input keeps a live grant open, the same as the pane's.
             simulatorInputGrants.settle(String(windowId), request, evidence, context);
-            await recordAppleEvidence()(evidence, startedAt);
+            await recordAppleEvidence(evidence, startedAt);
             return evidence;
           },
           readScreenshot: async (windowId, scope, reference) => {
-            const context = await resolveAppleContext()(windowId, scope, {
+            const context = await resolveAppleContext(windowId, scope, {
               kind: "apple-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
             if (context === undefined) return undefined;
-            const artifact = await appleToolchainService().readScreenshotArtifact(
-              reference,
-              context,
-            );
+            const artifact = await appleToolchainService.readScreenshotArtifact(reference, context);
             return artifact.kind === "found" ? artifact.bytes : undefined;
           },
           snapshot: async (windowId, scope) => {
-            const context = await resolveAppleContext()(windowId, scope, {
+            const context = await resolveAppleContext(windowId, scope, {
               kind: "apple-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
-            return context === undefined ? undefined : appleToolchainService().snapshot(context);
+            return context === undefined ? undefined : appleToolchainService.snapshot(context);
           },
           requestPaneOpen: async (windowId, scope, simulatorId) => {
-            const context = await resolveAppleContext()(windowId, scope, {
+            const context = await resolveAppleContext(windowId, scope, {
               kind: "apple-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
             if (context === undefined) return undefined;
-            return appleToolchainService().requestPaneOpen(context, simulatorId);
+            return appleToolchainService.requestPaneOpen(context, simulatorId);
           },
           inputGrantIsOpen: (windowId, threadId, simulatorId) =>
             simulatorInputGrants.isOpen({
@@ -767,7 +745,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             extension: { kind: "core" as const },
           }),
           discover: async (windowId, request) => {
-            const context = await resolveAndroidContext()(
+            const context = await resolveAndroidContext(
               windowId,
               {
                 authority: request.authority,
@@ -777,10 +755,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               { kind: "android-discovery-request", request },
             );
             if (context === undefined) return undefined;
-            return await androidToolchainService().discover(request, context);
+            return await androidToolchainService.discover(request, context);
           },
           execute: async (windowId, request) => {
-            const context = await resolveAndroidContext()(
+            const context = await resolveAndroidContext(
               windowId,
               {
                 authority: request.authority,
@@ -790,7 +768,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               { kind: "android-action-request", request },
             );
             if (context === undefined) return undefined;
-            const evidence = await androidToolchainService().execute(request, context);
+            const evidence = await androidToolchainService.execute(request, context);
             if (!isReplayedAndroidEvidence(evidence)) {
               androidInputGrants.settle(
                 String(windowId),
@@ -802,37 +780,37 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             return evidence;
           },
           readScreenshot: async (windowId, scope, reference) => {
-            const context = await resolveAndroidContext()(windowId, scope, {
+            const context = await resolveAndroidContext(windowId, scope, {
               kind: "android-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
             if (context === undefined) return undefined;
-            const artifact = await androidToolchainService().readScreenshotArtifact(
+            const artifact = await androidToolchainService.readScreenshotArtifact(
               reference,
               context,
             );
             return artifact.kind === "found" ? artifact.bytes : undefined;
           },
           snapshot: async (windowId, scope) => {
-            const context = await resolveAndroidContext()(windowId, scope, {
+            const context = await resolveAndroidContext(windowId, scope, {
               kind: "android-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
-            return context === undefined ? undefined : androidToolchainService().snapshot(context);
+            return context === undefined ? undefined : androidToolchainService.snapshot(context);
           },
           requestPaneOpen: async (windowId, scope, emulatorId) => {
-            const context = await resolveAndroidContext()(windowId, scope, {
+            const context = await resolveAndroidContext(windowId, scope, {
               kind: "android-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
             if (context === undefined) return undefined;
-            return androidToolchainService().requestPaneOpen(context, emulatorId);
+            return androidToolchainService.requestPaneOpen(context, emulatorId);
           },
           inputGrantIsOpen: (windowId, threadId, emulatorId) =>
             androidInputGrants.isOpen({
@@ -1051,6 +1029,22 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     yield* Effect.promise(
       () => late.codeOperationRuntime.current?.reconcile?.() ?? Promise.resolve(),
     );
+    // Code threads already have an inline question surface; the same question
+    // shows there so the answer can come from the thread itself.
+    onHarnessQuestionAsked(({ threadId, mode, question }) => {
+      if (mode !== "code" || question.source !== undefined) return;
+      late.codeOperationRuntime.current?.raiseHarnessQuestion?.({
+        threadId,
+        questionId: String(question.id),
+        prompt: question.prompt,
+        options: question.options,
+      });
+    });
+    // Settled anywhere (another surface, expiry, cancellation): the inline
+    // copy goes too, so Code never lists or accepts an answer to it.
+    onHarnessQuestionSettled((input) =>
+      late.codeOperationRuntime.current?.withdrawHarnessQuestion?.(input),
+    );
     const baseRouteCodeService: CodeRouteService =
       late.codeOperationRuntime.current === undefined
         ? codeService
@@ -1132,12 +1126,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
-    const observeRefreshedPullRequestRows:
-      | ((rows: ReadonlyArray<CodeProjectPullRequestRow>) => void)
-      | undefined = (rows) => {
+    onPullRequestSnapshotRefreshed((rows) => {
       void failingChecksFollowUps.observe(rows);
-    };
-    late.observeRefreshedPullRequestRows.current = observeRefreshedPullRequestRows;
+    });
     const boardRouteCodeService: CodeRouteService = withCodeBoard(
       baseRouteCodeService,
       async (windowId, query) => {
@@ -1239,7 +1230,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeOperationRuntime: late.codeOperationRuntime.current,
       codeTurnDecisions,
       routeCodeService,
-      terminalProcessPort: late.terminalProcessPort.current,
+      terminalProcessPort,
     };
   });
 }

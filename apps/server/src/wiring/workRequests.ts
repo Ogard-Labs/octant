@@ -5,13 +5,10 @@ import {
   decodeWindowId,
   decodeWorkThreadId,
   type WindowId,
-  type WorkThreadId,
 } from "@octant/contracts";
 import { createWorkOverviewRouteHandler } from "../workOverviewRoutes";
 import {
-  boardRuntimeActivityFromTurnsAndSignals,
   composeWorkBoardEvidence,
-  type WorkBoardRuntimeActivity,
   type WorkBoardThread,
   WorkThreadBoardService,
 } from "../work/workThreadBoardService";
@@ -23,10 +20,6 @@ import { WorkPromotionProjection } from "../work/workPromotionProjection";
 import { WorkPromotionService } from "../work/workPromotionService";
 import { createWorkPromotionRouteHandler } from "../workPromotionRoutes";
 import { WorkRequestApplicationService } from "../work/workRequestApplicationService";
-import { WorkRequestEventStore } from "../work/workRequestEventStore";
-import { WorkRequestProjection } from "../work/workRequestProjection";
-import { WorkRequestRuntime } from "../work/workRequestRuntime";
-import { WorkRequestService } from "../work/workRequestService";
 import { createWorkRequestRouteHandler } from "../workRequestRoutes";
 import { createFleetActivityRouteHandler } from "../fleetActivityRoutes";
 import {
@@ -46,42 +39,27 @@ import {
 import { listWorkFolderTopLevel } from "../work/workProjectStatusReader";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { listWorkTurnDecisions, workTurnDecision } from "../turnDecisions/workTurnDecisions";
-import {
-  defaultShellSettings,
-  isAgentRunActiveStatus,
-  workProjectKeepsStatusFile,
-} from "@octant/domain";
-import {
-  type AgentRunsWiring,
-  resolveAgentRunParentThreadTitle,
-  resolveHarnessThreadFacts,
-} from "./agentRuns";
+import { defaultShellSettings, workProjectKeepsStatusFile } from "@octant/domain";
+import { resolveAgentRunParentThreadTitle, resolveHarnessThreadFacts } from "./agentRuns";
 import { listLeadApprovalRequests } from "../harness/leadApprovalAttention";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
+import type { WorkRequestStateWiring } from "./workRequestState";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
 import type { CodeRuntimeWiring } from "./codeRuntime";
-import type { HarnessWiring } from "./harness";
+import type { HarnessStateWiring } from "./harnessState";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 import type { WorkFilesWiring } from "./workFiles";
 
-export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<
-    LateBindings,
-    "observeWorkThreadRuntime" | "workRequestRuntime" | "workRequestService"
-  >;
-} & Pick<AuthorityWiring, "agentRunPersistence" | "windowAuthorityStore"> &
+export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> &
+  Pick<AuthorityWiring, "agentRunPersistence" | "windowAuthorityStore"> &
+  Pick<WorkRequestStateWiring, "workRequestService"> &
   Pick<
     WorkspaceWiring,
-    | "gitObservationPort"
-    | "goalService"
-    | "projectService"
-    | "workProjectStatusReader"
-    | "workThreadProjection"
+    "gitObservationPort" | "goalService" | "projectService" | "workProjectStatusReader"
   > &
   Pick<ProvidersWiring, "providerDataDirectory"> &
   Pick<
@@ -89,25 +67,23 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> & {
     "baseRouteCodeService" | "codeOperationRuntime" | "codeTurnDecisions" | "routeCodeService"
   > &
   Pick<
-    HarnessWiring,
-    "nativeHarnessApprovals" | "nativeHarnessQuestionsLive" | "nativeHarnessSessionsLive"
+    HarnessStateWiring,
+    "nativeHarnessApprovals" | "nativeHarnessQuestions" | "nativeHarnessSessions"
   > &
   Pick<ChatWiring, "chatService"> &
-  Pick<AgentRunsWiring, "threadAwaitsHarnessApproval"> &
   Pick<
     WorkWiring,
+    | "observeWorkThreadRuntime"
     | "workArtifactProjection"
     | "workflowService"
     | "workThreadService"
     | "workThreadServiceWithWorkflows"
-    | "workTurnProjection"
   > &
-  Pick<WorkFilesWiring, "workResearchProjection">;
+  Pick<WorkFilesWiring, "workResearchProjection"> &
+  Pick<FoundationsWiring, "workThreadProjection" | "workTurnProjection">;
 
 export function wireWorkRequests(deps: WorkRequestsDependencies) {
   const {
-    threadAwaitsHarnessApproval,
-    late,
     agentRunPersistence,
     baseRouteCodeService,
     chatService,
@@ -116,8 +92,9 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     gitObservationPort,
     goalService,
     nativeHarnessApprovals,
-    nativeHarnessQuestionsLive,
-    nativeHarnessSessionsLive,
+    nativeHarnessQuestions,
+    nativeHarnessSessions,
+    observeWorkThreadRuntime,
     persistence,
     projectService,
     providerDataDirectory,
@@ -126,6 +103,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     workArtifactProjection,
     workflowService,
     workProjectStatusReader,
+    workRequestService,
     workResearchProjection,
     workThreadProjection,
     workThreadService,
@@ -175,91 +153,6 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     windowAuthorityStore,
     maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
-  const workRequestProjection = new WorkRequestProjection();
-  const workRequestEventStore = new WorkRequestEventStore({
-    journal: persistence.journal,
-    uuid: randomUUID,
-  });
-  const workRequestService = new WorkRequestService({
-    projects: {
-      projectType: (projectId) => persistence.readProject(projectId)?.type ?? "unknown",
-      isActiveWorkProject: (projectId) => {
-        const project = persistence.readProject(projectId);
-        return project?.type === "work" && project.lifecycle === "active";
-      },
-      workCanonicalRoot: (projectId) => {
-        const project = persistence.readProject(projectId);
-        if (project === undefined || project.type !== "work") return undefined;
-        const root = project.binding.canonicalRoot;
-        return root.length > 0 ? root : undefined;
-      },
-      threadProjectId: (threadId) => workThreadProjection.read(threadId)?.projectId,
-      threadProviderInstanceId: (threadId) =>
-        workThreadProjection.read(threadId)?.providerInstanceId,
-    },
-    projection: workRequestProjection,
-    eventStore: workRequestEventStore,
-    providerSessions: {
-      answerApproval: (input) => {
-        if (late.workRequestRuntime.current === undefined) {
-          return Promise.reject(new Error("Work provider session runtime is unavailable."));
-        }
-        return late.workRequestRuntime.current.answerApproval(input);
-      },
-      answerUserInput: (input) => {
-        if (late.workRequestRuntime.current === undefined) {
-          return Promise.reject(new Error("Work provider session runtime is unavailable."));
-        }
-        return late.workRequestRuntime.current.answerUserInput(input);
-      },
-      cancel: (input) => {
-        if (late.workRequestRuntime.current === undefined) {
-          return Promise.reject(new Error("Work provider session runtime is unavailable."));
-        }
-        return late.workRequestRuntime.current.cancel(input);
-      },
-    },
-    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-    clock: () => new Date().toISOString(),
-  });
-  late.workRequestService.current = workRequestService;
-  const workRequestRuntime = new WorkRequestRuntime({
-    requests: workRequestService,
-    uuid: randomUUID,
-  });
-  late.workRequestRuntime.current = workRequestRuntime;
-  workRequestService.hydrate();
-  workRequestService.interruptOnRestart();
-  workRequestService.reconcileUnavailableRequests();
-  const observeWorkThreadRuntime:
-    | ((threadId: WorkThreadId) => WorkBoardRuntimeActivity)
-    | undefined = (threadId) => {
-    const thread = workThreadProjection.read(threadId);
-    const pendingRequests = thread
-      ? workRequestService
-          .listForThread(thread.projectId, threadId)
-          .filter((request) => request.status === "pending")
-      : [];
-    const pendingRequest = pendingRequests.at(0);
-    const leadApprovalWaiting = threadAwaitsHarnessApproval(String(threadId));
-    const childRuns = persistence.agentRunProjection.parentSummary(
-      decodeAgentRunParentThreadId(String(threadId)),
-    );
-    return boardRuntimeActivityFromTurnsAndSignals({
-      turns: workTurnProjection.listForThread(threadId),
-      pendingRequest: pendingRequest !== undefined || leadApprovalWaiting,
-      ...(pendingRequest !== undefined
-        ? { pendingRequestKind: pendingRequest.detail.kind }
-        : leadApprovalWaiting
-          ? { pendingRequestKind: "approval" as const }
-          : {}),
-      childActive: childRuns.filter(
-        (run) => isAgentRunActiveStatus(run.lifecycleStatus) && run.lifecycleStatus !== "waiting",
-      ).length,
-      childWaiting: childRuns.filter((run) => run.lifecycleStatus === "waiting").length,
-    });
-  };
-  late.observeWorkThreadRuntime.current = observeWorkThreadRuntime;
   projectService.onWorkProjectArchived((project) => {
     workRequestService.interruptProject(project.id);
   });
@@ -315,8 +208,8 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     ...(await listChildPendingRequests(
       {
         approvals: nativeHarnessApprovals,
-        questions: nativeHarnessQuestionsLive,
-        readSession: (threadId) => nativeHarnessSessionsLive.read(threadId),
+        questions: nativeHarnessQuestions,
+        readSession: (threadId) => nativeHarnessSessions.read(threadId),
         getRun: (id) => agentRunPersistence.getById(id),
         parentThreadTitle: (run) =>
           resolveAgentRunParentThreadTitle({
@@ -332,7 +225,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
     ...(await listLeadApprovalRequests(
       {
         approvals: nativeHarnessApprovals,
-        sessions: nativeHarnessSessionsLive,
+        sessions: nativeHarnessSessions,
         threadFacts: ({ threadId, mode }) =>
           resolveHarnessThreadFacts({ persistence, workThreadProjection, threadId, mode }),
         authorizeThread: ({ threadId, mode, windowId: asking }) =>
@@ -493,7 +386,7 @@ export function wireWorkRequests(deps: WorkRequestsDependencies) {
           },
           runtime: {
             observe: (threadId) => {
-              const activity = observeWorkThreadRuntime?.(threadId) ?? {
+              const activity = observeWorkThreadRuntime(threadId) ?? {
                 executing: false,
                 awaitingInput: false,
                 interrupted: false,

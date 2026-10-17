@@ -23,6 +23,7 @@ import {
   decodeHostAnswer,
 } from "@octant/contracts";
 import {
+  answerAgentTurnQuestion,
   interruptAgentTurn,
   listAgentModels,
   refusalMessage,
@@ -56,6 +57,19 @@ export interface AgentThreadTurn {
   readonly inputTokens?: number;
 }
 
+/**
+ * A question the thread's turn is parked on. Chat keeps it on the turn's
+ * attempt rather than in the harness session, so the thread port carries it:
+ * `id` is the request id the host knows it by.
+ */
+export interface AgentPendingQuestion {
+  readonly id: string;
+  readonly prompt: string;
+  readonly options: ReadonlyArray<string>;
+  /** What choosing each option means, by index; present only when the provider gave any. */
+  readonly descriptions?: ReadonlyArray<string | undefined>;
+}
+
 export interface AgentThreadSnapshot {
   readonly id: string;
   readonly mode: OctantMode;
@@ -72,6 +86,8 @@ export interface AgentThreadSnapshot {
     readonly status: "pending" | "in-progress" | "blocked" | "completed" | "cancelled";
     readonly position: number;
   }>;
+  /** Present only on a thread whose question is not in the harness session (Chat). */
+  readonly pendingQuestion?: AgentPendingQuestion;
 }
 
 export interface AgentThreadPort {
@@ -88,6 +104,15 @@ export interface AgentThreadPort {
   interrupt(): Promise<
     HostRefusal | { readonly kind: "interrupted" } | { readonly kind: "nothing-running" }
   >;
+  /**
+   * Answers a question `read` reported as pending. Absent where the harness
+   * session holds the question (Work and Code); a refusal names why the host
+   * would not take it, such as the question being answered elsewhere first.
+   */
+  answerQuestion?(
+    question: AgentPendingQuestion,
+    answer: string,
+  ): Promise<HostRefusal | { readonly kind: "answered" }>;
 }
 
 export function isAgentSnapshotRunning(snapshot: AgentThreadSnapshot | undefined): boolean {
@@ -95,8 +120,23 @@ export function isAgentSnapshotRunning(snapshot: AgentThreadSnapshot | undefined
   return outcome === "streaming" || outcome === "queued" || outcome === "waiting";
 }
 
+/** The question the newest turn is parked on, if its attempt is still waiting for the answer. */
+export function pendingQuestionOf(view: ChatThreadView): AgentPendingQuestion | undefined {
+  const attempt = view.turns.at(-1)?.attempts.at(-1);
+  const question = attempt?.outcome === "waiting" ? attempt.pendingQuestion : undefined;
+  if (question === undefined) return undefined;
+  const hasMeanings = question.options.some((option) => option.description !== undefined);
+  return {
+    id: String(question.requestId),
+    prompt: question.prompt,
+    options: question.options.map((option) => option.label),
+    ...(hasMeanings ? { descriptions: question.options.map((option) => option.description) } : {}),
+  };
+}
+
 export function snapshotFromChat(view: ChatThreadView): AgentThreadSnapshot {
   const bodies = new Map(view.contents.map((content) => [String(content.contentId), content.body]));
+  const pendingQuestion = pendingQuestionOf(view);
   return {
     id: String(view.thread.id),
     mode: "chat",
@@ -126,6 +166,7 @@ export function snapshotFromChat(view: ChatThreadView): AgentThreadSnapshot {
       status: item.status,
       position: item.position,
     })),
+    ...(pendingQuestion === undefined ? {} : { pendingQuestion }),
   };
 }
 
@@ -166,6 +207,27 @@ function chatThreadPort(session: OpenedLocalControlSession, threadId: string): A
       const current = view ?? (await load());
       if (current === undefined) return { kind: "nothing-running" };
       return interruptAgentTurn(session, current);
+    },
+    answerQuestion: async (question, answer) => {
+      // The host checks the answer against the thread's current version and
+      // the attempt that still holds this question, so read both fresh.
+      const current = await load();
+      const turn = current?.turns.at(-1);
+      const attempt = turn?.attempts.at(-1);
+      if (
+        current === undefined ||
+        turn === undefined ||
+        attempt === undefined ||
+        pendingQuestionOf(current)?.id !== question.id
+      ) {
+        return { kind: "refused", message: "That question is no longer open." };
+      }
+      return answerAgentTurnQuestion(session, current, {
+        turnId: String(turn.id),
+        attemptId: String(attempt.id),
+        requestId: question.id,
+        answer,
+      });
     },
   };
 }

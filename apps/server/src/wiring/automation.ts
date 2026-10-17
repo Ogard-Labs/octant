@@ -34,6 +34,7 @@ import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { defaultShellSettings } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { WorkspaceWiring } from "./workspace";
 import type { CodeWiring } from "./code";
@@ -44,11 +45,12 @@ import type { WorkWiring } from "./work";
 export type AutomationDependencies = Pick<ServerStart, "persistence"> &
   Pick<AuthorityWiring, "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "capacityScheduler"> &
-  Pick<WorkspaceWiring, "projectService" | "workThreadProjection"> &
+  Pick<WorkspaceWiring, "projectService"> &
   Pick<CodeWiring, "codeCompletedThreadSource"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &
-  Pick<WorkWiring, "workThreadService" | "workThreadServiceWithWorkflows" | "workTurnService">;
+  Pick<WorkWiring, "workThreadService" | "workThreadServiceWithWorkflows" | "workTurnService"> &
+  Pick<FoundationsWiring, "workThreadProjection">;
 
 export function wireAutomation(deps: AutomationDependencies) {
   const {
