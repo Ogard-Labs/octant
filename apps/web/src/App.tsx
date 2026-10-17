@@ -15,7 +15,7 @@ import { ImageJobChangeRevisionContext } from "./image/ImageJobChangeRevision";
 import type { ContextClient } from "@octant/client-runtime/context-client";
 import type { ChatClient } from "@octant/client-runtime/chat-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
-import { listEligibleImageProfiles } from "@octant/domain";
+import { harnessAsksUnderSessionFullAccess, listEligibleImageProfiles } from "@octant/domain";
 import { SpeechCapabilityProvider } from "./voice/SpeechCapabilityContext";
 import { buildAutomationEditorCatalog } from "./automation/automationEditorCatalog";
 import type { ComputerUseClient } from "@octant/client-runtime/computer-use-client";
@@ -360,7 +360,10 @@ import {
   navigatorConfigurationKey,
   useNavigatorAssistant,
 } from "./navigator/useNavigatorAssistant";
-import { CODE_ACCESS_POSTURE_LABEL } from "./code/CodeAccessPicker";
+import {
+  CODE_ACCESS_POSTURE_LABEL,
+  HARNESS_SESSION_FULL_ACCESS_LABEL,
+} from "./code/CodeAccessPicker";
 import { useThreadTurnMetrics } from "./threadStats/useThreadTurnMetrics";
 import { useContextController } from "./context/useContextController";
 import { useSessionCompaction } from "./context/useSessionCompaction";
@@ -4226,9 +4229,19 @@ function LaunchedShell(
       : workNavigation.bootstrap?.threads.find(
           (thread) => String(thread.id) === String(dockThreadId),
         );
+  const overviewCodeDriverKind = providerController.instances.find(
+    (instance) => String(instance.id) === String(overviewCodeThread?.providerInstanceId),
+  )?.driverKind;
   const overviewAccess =
     overviewCodeThread !== undefined
-      ? CODE_ACCESS_POSTURE_LABEL[overviewCodeThread.executionPolicy]
+      ? overviewCodeDriverKind !== undefined &&
+        harnessAsksUnderSessionFullAccess({
+          executionPolicy: overviewCodeThread.executionPolicy,
+          permissionPersistence: overviewCodeThread.permissionPersistence,
+          driverKind: overviewCodeDriverKind,
+        })
+        ? HARNESS_SESSION_FULL_ACCESS_LABEL
+        : CODE_ACCESS_POSTURE_LABEL[overviewCodeThread.executionPolicy]
       : overviewWorkThread === undefined
         ? undefined
         : overviewWorkThread.access === "auto-accept-edits"

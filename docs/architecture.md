@@ -5445,6 +5445,19 @@ mechanisms are:
   The access picker also offers "Lower thread" to durably return a thread to
   approval-gated and revoke a session-only Full-access grant for that window
   without confirmation.
+  A session-only grant of Full access is honoured by provider runtimes and not
+  by Octant Harness. The grant lives in the window's memory and the journaled
+  thread stays approval-gated; a provider turn receives the window's grant, but
+  the harness decides each tool call from the journaled thread
+  (`createNativeHarnessAuthority`), so it still asks before a write or a
+  command. Decision of 2026-10-17: the harness is not loosened, and the
+  access surfaces say so instead: for a thread on a native harness
+  driver whose Full access is session-only (`harnessAsksUnderSessionFullAccess`
+  in `packages/domain/src/codePolicy.ts`), the access picker and the
+  dock's Access fact read "Full access · asks first", and the picker's tooltip
+  says "Full access this session. Octant Harness still asks before writes and
+  commands." A remembered Full access is journaled and honoured, and reads as
+  plain Full access. The tool-call taint rule is unchanged.
   On a host with no native confirmation surface — a headless Linux station
   has none — session-only Full access cannot be raised from any client: the
   access picker refuses the raise and names the remembered route, so Full

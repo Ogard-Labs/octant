@@ -74,6 +74,42 @@ describe("CodeAccessPicker", () => {
     expect(props.autoApprove.onChange).not.toHaveBeenCalled();
   });
 
+  it("says Octant Harness still asks under a session-only Full access, and only for Full access", () => {
+    const props = {
+      ceiling: "full-access" as const,
+      harnessAsksUnderFullAccess: true,
+      nativeConfirmationAvailable: true,
+      onLowerThread: vi.fn(),
+      onRaiseThread: vi.fn(),
+      onSelect: vi.fn(),
+    };
+    const { rerender } = render(<CodeAccessPicker {...props} value="full-access" />);
+    const trigger = screen.getByRole("button", { name: "Next turn access" });
+    expect(trigger).toHaveTextContent("Full access · asks first");
+    expect(trigger).toHaveAttribute(
+      "title",
+      "Full access this session. Octant Harness still asks before writes and commands.",
+    );
+
+    rerender(<CodeAccessPicker {...props} value="approval-gated" />);
+    expect(screen.getByRole("button", { name: "Next turn access" })).toHaveTextContent("Ask");
+    expect(screen.getByRole("button", { name: "Next turn access" })).toHaveAttribute(
+      "title",
+      "Ask for approvals",
+    );
+
+    rerender(
+      <CodeAccessPicker {...props} harnessAsksUnderFullAccess={false} value="full-access" />,
+    );
+    expect(screen.getByRole("button", { name: "Next turn access" })).toHaveTextContent(
+      "Full access",
+    );
+    expect(screen.getByRole("button", { name: "Next turn access" })).toHaveAttribute(
+      "title",
+      "Full access",
+    );
+  });
+
   it("lets a full-access thread pick auto-accept edits for the next turn", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
