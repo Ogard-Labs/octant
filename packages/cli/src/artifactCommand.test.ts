@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -183,6 +191,32 @@ describe("runHeadlessArtifactCliCommand", () => {
     expect(code).toBe(0);
     expect(stdout.text()).toContain("1.0.0");
     expect(readlinkSync(join(installRoot, "current"))).toBe(join(installRoot, "versions", "1.0.0"));
+  });
+
+  it("leaves the state directory private when the install root is created inside it", async () => {
+    const stateDirectory = join(
+      temporaryRoot("octant-cmd-fresh-home-"),
+      ".local",
+      "state",
+      "octant",
+    );
+    const installRoot = join(stateDirectory, "install");
+    const code = await runHeadlessArtifactCliCommand({
+      command: {
+        action: "install",
+        artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
+        installRoot,
+      },
+      runtime,
+      dataDirectory: join(stateDirectory, "..", "data"),
+      stateDirectory,
+      ports: fixturePorts(),
+      stdout: collector(),
+      stderr: collector(),
+    });
+    expect(code).toBe(0);
+    // The host refuses a state directory any other user can read.
+    expect(statSync(stateDirectory).mode & 0o777).toBe(0o700);
   });
 
   it("maps a rejected artifact to a non-zero exit and stderr guidance", async () => {

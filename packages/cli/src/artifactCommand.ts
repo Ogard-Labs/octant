@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import { sep } from "node:path";
 import {
   acquireHostRuntimeOwner,
   deriveHostRuntimeHostId,
@@ -98,6 +100,13 @@ export interface RunHeadlessArtifactCliCommandOptions {
   readonly command: HeadlessArtifactCliCommand;
   readonly runtime: HeadlessArtifactRuntimeFacts;
   readonly dataDirectory: string;
+  /**
+   * The host's state directory. The default install root sits inside it, and
+   * creating it there with the default mode would leave it open to other users,
+   * which the host then refuses to start in. An install inside it makes it
+   * private first.
+   */
+  readonly stateDirectory?: string;
   readonly ports: HeadlessUpgradePorts;
   readonly stdout: OutputWriter;
   readonly stderr: OutputWriter;
@@ -109,6 +118,14 @@ export async function runHeadlessArtifactCliCommand(
   const { command, stdout, stderr } = options;
   try {
     if (command.action === "install") {
+      const { stateDirectory } = options;
+      if (
+        stateDirectory !== undefined &&
+        (command.installRoot === stateDirectory ||
+          command.installRoot.startsWith(stateDirectory + sep))
+      ) {
+        await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+      }
       const report = await installHeadlessArtifact({
         artifactRoot: command.artifactRoot,
         installRoot: command.installRoot,
