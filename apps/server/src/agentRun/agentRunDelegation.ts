@@ -22,6 +22,7 @@ import {
   clampAgentRunAuthority,
   effectiveAgentRunExecutionTarget,
   allowedAgentRunRolesForMode,
+  modelCanTakeDelegatedWork,
   nativeHarnessJobForRole,
   redactDiagnosticText,
 } from "@octant/domain";
@@ -361,7 +362,10 @@ export function agentRunEligibleTargets(input: {
   >;
   readonly observedState: (
     instanceId: ProviderInstance["id"],
-  ) => Pick<ProviderObservedState, "readiness" | "models"> | undefined;
+  ) =>
+    | (Pick<ProviderObservedState, "readiness" | "models"> &
+        Partial<Pick<ProviderObservedState, "capabilities" | "verifiedToolModelIds">>)
+    | undefined;
   readonly isTargetAllowed: (
     project: Exclude<Project, { readonly type: "chat" }>,
     providerInstanceId: ProviderInstance["id"],
@@ -372,11 +376,14 @@ export function agentRunEligibleTargets(input: {
   return input.instances.flatMap((instance) => {
     if (!instance.enabled) return [];
     const observed = input.observedState(instance.id);
-    if (observed?.readiness !== "ready") return [];
+    if (observed === undefined) return [];
+    const serving = observed.models.filter((model) =>
+      modelCanTakeDelegatedWork(instance.driverKind, observed, model.id),
+    );
     const models =
       project === undefined || project.type === "chat"
-        ? observed.models
-        : observed.models.filter((model) => input.isTargetAllowed(project, instance.id, model.id));
+        ? serving
+        : serving.filter((model) => input.isTargetAllowed(project, instance.id, model.id));
     if (models.length === 0) return [];
     return [
       {

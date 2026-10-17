@@ -24,6 +24,7 @@ import {
   type ModelPickerInput,
 } from "./modelPickerPolicy";
 import { isDraftSelectionSelectable, resolveDraftProviderSelection } from "./modelPickerPolicy";
+import { modelCanTakeDelegatedWork } from "./modelPickerPolicy";
 
 const now = "2026-07-21T10:00:00.000Z" as UtcTimestamp;
 
@@ -1231,5 +1232,42 @@ describe("upstream catalogs behind one provider", () => {
       }),
     );
     expect(pickerCatalogs(groups[0]!)).toEqual([]);
+  });
+});
+
+describe("delegated work eligibility", () => {
+  const flash = decodeProviderModelId("flash");
+  const observed = (
+    readiness: "ready" | "degraded",
+    verified: boolean,
+  ): Pick<ProviderObservedState, "readiness" | "models" | "verifiedToolModelIds"> => ({
+    readiness,
+    models: [
+      decodeProviderModel({
+        id: "flash",
+        displayName: "flash",
+        source: "manual",
+        verification: "unverified",
+        reasoning: "unsupported",
+        inputModalities: ["text"],
+        options: [],
+      }),
+    ],
+    ...(verified ? { verifiedToolModelIds: [flash] } : {}),
+  });
+
+  it("admits a degraded endpoint deployment only once its tools are verified", () => {
+    expect(modelCanTakeDelegatedWork("azure-foundry", observed("degraded", true), flash)).toBe(
+      true,
+    );
+    expect(modelCanTakeDelegatedWork("azure-foundry", observed("degraded", false), flash)).toBe(
+      false,
+    );
+    expect(modelCanTakeDelegatedWork("azure-foundry", observed("ready", false), flash)).toBe(false);
+  });
+
+  it("keeps an agent runtime to ready providers that list the model", () => {
+    expect(modelCanTakeDelegatedWork("codex", observed("ready", false), flash)).toBe(true);
+    expect(modelCanTakeDelegatedWork("codex", observed("degraded", false), flash)).toBe(false);
   });
 });

@@ -2503,6 +2503,52 @@ describe("ProviderSettingsView", () => {
     expect(screen.getByText(/No configured, ready models are available/i)).toBeVisible();
   });
 
+  it("offers a tool-verified endpoint model to the agent-eligible pool and withholds an unverified one", async () => {
+    const user = userEvent.setup();
+    const endpoint = provider({
+      id: "80000000-0000-4000-8000-000000000012" as never,
+      displayName: "Foundry",
+      driverKind: "azure-foundry",
+      configuration: {
+        kind: "azure-foundry-openai-http",
+        baseUrl: "https://example.services.ai.azure.com/openai/v1/",
+        authentication: "api-key",
+        protocol: "auto",
+        manualModelIds: ["flash" as never, "plain" as never],
+      },
+    });
+    const endpointId = endpoint.id;
+    const [template] = observation().models;
+    if (template === undefined) throw new Error("fixture has a model");
+    const endpointObserved = observation({
+      instanceId: endpointId,
+      readiness: "degraded",
+      models: [
+        { ...template, id: "flash" as never, displayName: "Flash" },
+        { ...template, id: "plain" as never, displayName: "Plain" },
+      ],
+      verifiedToolModelIds: ["flash" as never],
+    });
+    const props = fixture({ observed: observation() });
+    render(
+      <ProviderSettingsView
+        {...props}
+        instances={[provider(), endpoint]}
+        observedByInstance={
+          new Map([
+            [id, observation()],
+            [endpointId, endpointObserved],
+          ])
+        }
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Agent-eligible models" }));
+
+    expect(screen.getByRole("checkbox", { name: "Foundry — Flash" })).toBeVisible();
+    expect(screen.queryByRole("checkbox", { name: "Foundry — Plain" })).toBeNull();
+  });
+
   it("hides an observed model from new pickers while keeping its Settings toggle reversible", async () => {
     const user = userEvent.setup();
     const props = fixture({ observed: observation() });
