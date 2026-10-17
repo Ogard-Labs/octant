@@ -119,8 +119,9 @@ function isFileEditToolName(toolName: string): boolean {
  */
 export function settledTurnActivitySummary(activity: TurnActivity): string {
   const toolCalls = activity.rows.filter((row) => row.kind === "tool").length;
+  // A denied or failed write changed nothing, so only a completed call is an edit.
   const filesEdited = activity.rows.filter(
-    (row) => row.kind === "tool" && isFileEditToolName(row.toolName),
+    (row) => row.kind === "tool" && row.state === "completed" && isFileEditToolName(row.toolName),
   ).length;
   const tasks = activity.rows.filter((row) => row.kind === "task").length;
   const thinking = activity.reasoning.trim().length > 0;
