@@ -188,6 +188,7 @@ export function ProjectOverview(props: ProjectOverviewProps) {
                   onBlur={() => void commitName()}
                   readOnly={archived || connectionStale}
                   ref={nameInput}
+                  unstyled
                 />
               </h1>
             </form>

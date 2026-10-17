@@ -584,7 +584,7 @@ function DestinationStep(props: {
         disabled={choosing}
         onClick={() => void choose()}
         type="button"
-        variant="ghost"
+        variant="outline"
       >
         <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
         <span className="project-dialog__folder-name">

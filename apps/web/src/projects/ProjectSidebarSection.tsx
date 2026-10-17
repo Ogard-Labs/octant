@@ -785,7 +785,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                     className="project-row__select justify-start window-no-drag"
                     onClick={() => setUnfiledCollapsed((collapsed) => !collapsed)}
                     type="button"
-                    variant="ghost"
+                    variant="bare"
                   >
                     <Folder aria-hidden="true" size={16} strokeWidth={1.5} />
                     <span className="project-row__copy">{unfiledLabel}</span>
@@ -886,6 +886,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                   aria-label={`Restore ${project.name}`}
                   className="project-row__action window-no-drag"
                   onClick={() => props.onRestore(project.id)}
+                  size="sm"
                   type="button"
                   variant="ghost"
                 >
@@ -968,7 +969,7 @@ function ProjectGroup(props: {
                 }
                 className="project-section__add"
                 onClick={props.onAddProject}
-                size="icon"
+                size="icon-sm"
                 title={props.addProjectLabel === "chat-project" ? "New Chat Project" : "Add folder"}
                 type="button"
                 variant="ghost"
@@ -1059,7 +1060,7 @@ function ProjectGroup(props: {
                 className="project-row__select justify-start window-no-drag"
                 onClick={() => props.onToggleProject(project.id)}
                 type="button"
-                variant="ghost"
+                variant="bare"
               >
                 <ProjectTile project={project} />
                 <span className="project-row__copy">
@@ -1106,7 +1107,7 @@ function ProjectGroup(props: {
                   }
                   className="project-row__action project-row__action--icon project-row__new-thread window-no-drag"
                   onClick={() => props.onNewThreadInProject!(project.id)}
-                  size="icon"
+                  size="icon-sm"
                   title={props.newThreadVerb === "thread" ? "New task" : "New chat"}
                   type="button"
                   variant="ghost"
@@ -1215,6 +1216,7 @@ function ProjectActionsMenu(props: {
       <OctantMenuTrigger
         aria-label={`Project actions for ${project.name}`}
         className="project-row__action project-row__action--icon inline-flex items-center justify-center window-no-drag"
+        render={<OctantButton size="icon-sm" variant="ghost" />}
       >
         <MoreHorizontal aria-hidden="true" size={14} strokeWidth={1.8} />
       </OctantMenuTrigger>
