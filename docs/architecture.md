@@ -4871,6 +4871,24 @@ Project, thread, and provider policy allow it. Any other state — `not-installe
 `host-prohibited`, `stale-catalog-epoch`, `broken`, `draining` — contributes no
 prompt, schema, tool, route, model, or capability.
 
+**Selection epoch.** A selected plugin, MCP server, or skill carries the
+catalog epoch it was resolved under, and the host re-resolves it on send, replay,
+resume, and at provider handoff. The epoch is a hash of the facts a selection
+depends on, and any difference blocks it as `stale-catalog-epoch`: the scope
+(host, mode, Project, thread, provider family), the skill collisions, each
+package's identity, version, digest, state version, activation switches and
+environment compatibility, each component's activation switches, and the
+policy's outcomes (host, mode, Project, thread, and combined `allowed`, plus the
+policy's own revision). The thread's and Project's aggregate versions are not
+facts: a send, a rename, or any other update bumps them without changing what
+an extension may do, and hashing them made every selection stale the moment the
+send that carried it was journaled. What the versions used to stand for is
+already in the hash. The thread allows an extension only while it is active and
+belongs to the scope's Project, so archiving it or moving it to another Project
+changes `allowed` (and a move changes the scope); the Project allows it only
+while it is active and of the scope's mode, so archiving or removing it does the
+same. This holds in Chat, Work, and Code.
+
 - Executable components are quarantined until explicitly reviewed and then run
   in supervised, sandboxed processes with a ready handshake, bounded output,
   durable process receipts, and drain-then-stop on disable.

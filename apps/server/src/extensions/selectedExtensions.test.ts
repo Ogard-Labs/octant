@@ -15,6 +15,7 @@ import {
   ExtensionActivationService,
   createLocalExtensionActivationPolicy,
 } from "./extensionActivationService";
+import { createPersistedExtensionActivationPolicy } from "./persistedExtensionActivationPolicy";
 import {
   createStoredExtensionMaterialLoader,
   type ExtensionToolExecutionPort,
@@ -365,6 +366,128 @@ describe("selected MCP servers in Work and Code", () => {
       );
     }
   });
+
+  it.each(["work", "code"] as const)(
+    "keeps a selected MCP server through the thread updates a %s turn makes, until the thread is archived",
+    async (mode) => {
+      const component = {
+        id: "notes-server",
+        kind: "mcp-server",
+        displayName: "Notes server",
+        declaredCapabilities: ["mcp"],
+      };
+      const activationState = {
+        installed: true,
+        trusted: true,
+        pluginDesired: true,
+        componentDesired: true,
+        compatible: true,
+        policyAllowed: true,
+        quarantined: false,
+        draining: false,
+        broken: false,
+        unavailable: false,
+        interrupted: false,
+        waiting: false,
+      };
+      const snapshot = {
+        sequence: 1,
+        snapshotAt: now,
+        skills: [],
+        collisions: [],
+        packages: [
+          {
+            extensionId,
+            packageId,
+            slug: "notes",
+            displayName: "Notes",
+            stateVersion: 1,
+            version: "1.0.0",
+            digest,
+            source: { kind: "catalog", catalogId: "octant", entryId: "notes" },
+            compatibility: { platforms: ["macos"], modes: [mode], providerFamilies: [] },
+            activation: activationState,
+            components: [
+              { component, activation: activationState, effectiveState: { kind: "effective" } },
+            ],
+            diagnostics: [],
+          },
+        ],
+      } as unknown as ExtensionSnapshot;
+      // The thread record the host reads moves on with every turn, as a
+      // journaled thread does; the chip was resolved against version 3.
+      const record = { lifecycle: "active", projectId: thread.projectId, version: 3 };
+      const readThread = () => record as never;
+      const activation = new ExtensionActivationService({
+        policy: createPersistedExtensionActivationPolicy({
+          readProject: () => ({ lifecycle: "active", type: mode, version: 1 }) as never,
+          readChatThread: () => undefined,
+          readWorkThread: readThread,
+          readCodeThread: readThread,
+        }),
+        compatibility: () => true,
+        catalogStatus: () => "available",
+      });
+      const providerFamily = Schema.decodeUnknownSync(ExtensionProviderFamily)("openai-compatible");
+      const selection = Schema.decodeUnknownSync(ExtensionSelection)({
+        kind: "plugin",
+        extensionId,
+        packageId,
+        componentId: "notes-server",
+        packageVersion: "1.0.0",
+        packageDigest: digest,
+        catalogEpoch: activation.resolve(snapshot, {
+          scope: {
+            hostId: LOCAL_HOST_ID,
+            mode,
+            projectId: thread.projectId,
+            threadId: thread.id,
+            providerFamily,
+          },
+        }).catalogEpoch,
+        origin: { kind: "draft", reference: "notes" },
+      });
+      const resolve = createSelectedExtensionResolver({
+        snapshot: async () => snapshot,
+        resolveEffectiveState: (state, query) => activation.resolve(state, query),
+        providerFamily: () => providerFamily,
+        materialLoader: {
+          load: async () => ({
+            tools: [{ name: "notes_search", inputSchema: { type: "object" } }],
+          }),
+        },
+        toolExecution: {
+          availability: () => "available",
+          execute: async () => ({ result: "framed notes" }),
+        },
+        carriesAppManagedTools: () => true,
+      });
+
+      record.version = 9;
+      const afterTurns = await resolve({
+        mode,
+        thread: { ...thread, version: 9 } as never,
+        selections: [selection],
+        windowId,
+      });
+      if (afterTurns.kind !== "resolved" || afterTurns.tools === undefined) {
+        throw new Error(`Expected tools, got ${JSON.stringify(afterTurns)}`);
+      }
+      expect(afterTurns.tools.definitions.map((definition) => definition.name)).toEqual([
+        "notes_search",
+      ]);
+
+      record.lifecycle = "archived";
+      await expect(
+        resolve({
+          mode,
+          thread: { ...thread, version: 10 } as never,
+          selections: [selection],
+          windowId,
+        }),
+      ).resolves.toMatchObject({ kind: "unavailable" });
+    },
+  );
 
   it("refuses a tool the turn did not select", async () => {
     const test = mcpFixture("work");
