@@ -191,13 +191,14 @@ describe("createCanvasAgentTools", () => {
       createCanvasAgentTools({ windowId, thread, port }),
       createCanvasAgentTools({ windowId, mode: "work", thread, port }),
       createCanvasAgentTools({ windowId, mode: "code", thread, port }),
-      ...(["chat", "work", "code"] as const).map((mode) =>
+      ...(["work", "code"] as const).map((mode) =>
         createChildCanvasAgentTools({
           port,
           run: {
             id: "run-1",
             parentThreadId: threadId,
             mode,
+            projectId,
             providerInstanceId: "44444444-4444-4444-8444-444444444444" as never,
             modelId: "octant-test-model" as never,
           },
@@ -1647,6 +1648,31 @@ describe("a managed child's Canvas tool", () => {
       }),
     };
   }
+
+  it("is not offered to a Chat run or a run with no Project, where every call is refused", async () => {
+    const port = { resolveChildWorkspace: vi.fn() } as never;
+    const run = {
+      id: runId,
+      parentThreadId,
+      providerInstanceId: "44444444-4444-4444-8444-444444444444" as never,
+      modelId: "octant-test-model" as never,
+    };
+    const sets = [
+      createChildCanvasAgentTools({ port, run: { ...run, mode: "chat", projectId } }),
+      createChildCanvasAgentTools({ port, run: { ...run, mode: "chat" } }),
+      createChildCanvasAgentTools({ port, run: { ...run, mode: "work" } }),
+    ];
+
+    for (const set of sets) {
+      expect(set.definitions).toEqual([]);
+      expect(await set.execute({ name: CANVAS_TOOL_NAME, inputJson: "{}" })).toMatchObject({
+        isError: true,
+      });
+    }
+    expect(childTools().set.definitions.map((definition) => definition.name)).toEqual([
+      CANVAS_TOOL_NAME,
+    ]);
+  });
 
   it("marks the child's own run, not its parent, when the child reads a Canvas", async () => {
     const markReader = vi.fn(() => ({ status: "marked" as const }));

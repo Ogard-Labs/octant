@@ -875,6 +875,15 @@ export function createChildCanvasAgentTools(options: {
     readonly modelId: CanvasAuthoringThread["modelId"];
   };
 }): AppManagedToolSet {
+  // A Chat run has no workspace to bind a Canvas to, and a run with no Project
+  // has none either, so every call would be refused. Offer nothing; the refusal
+  // in `resolveChildCanvasTarget` stays as the backstop.
+  if (options.run.mode === "chat" || options.run.projectId === undefined) {
+    return {
+      definitions: [],
+      execute: async () => ({ result: { error: "tool-unavailable" }, isError: true }),
+    };
+  }
   const author = childAuthor(options.run.id);
   return canvasToolSet({
     mode: options.run.mode,

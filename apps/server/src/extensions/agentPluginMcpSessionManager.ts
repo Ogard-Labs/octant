@@ -643,9 +643,11 @@ async function resolveApprovedExecutable(command: string, approvedPath: string |
 
 /**
  * The sandbox grants read access around the file it launches, not around the
- * interpreter a `#!` line hands it to, so a server declared as a script exits
- * right after it starts. It is refused before spawn instead, with the fix.
- * A command that cannot be opened is left to the normal start path.
+ * interpreter a `#!` line hands it to, so a server declared as a script inside
+ * the plugin exits right after it starts. It is refused before spawn instead,
+ * with the fix. Only a command under the plugin's own directory is checked; a
+ * launcher found on the host path or at an absolute path outside it is left to
+ * the normal start path, as is a command that cannot be opened.
  */
 async function startsWithShebang(command: string): Promise<boolean> {
   let handle;
@@ -662,7 +664,7 @@ async function startsWithShebang(command: string): Promise<boolean> {
 
 function shebangCommandRefusal(serverName: string): string {
   return (
-    `MCP server ${serverName} runs a script that starts with a #! line, which the sandbox cannot run. ` +
+    `MCP server ${serverName} runs a script from the plugin that starts with a #! line, which the sandbox cannot run. ` +
     'Declare the interpreter as the command instead, for example "command": "node", ' +
     '"args": ["${PLUGIN_ROOT}/server.mjs"].'
   );
@@ -687,7 +689,10 @@ function supervisedStdioProcessPort(input: {
       ) {
         throw new Error("MCP stdio sandbox roots are unavailable.");
       }
-      if (await startsWithShebang(launch.command)) {
+      if (
+        isContainedPath(pluginRoot, launch.command) &&
+        (await startsWithShebang(launch.command))
+      ) {
         throw new Error(shebangCommandRefusal(launch.name));
       }
       const runtime: ExtensionRuntimeStartInput = {

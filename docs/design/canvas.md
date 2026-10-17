@@ -63,8 +63,9 @@ it in: after the Canvas exists, the renderer sends an ordinary turn on the
 thread with the new Canvas attached as whole-canvas context, so the agent
 revises it with its own tools under the thread's existing authority.
 
-A Chat thread outside a Chat Project is not offered `octant_canvas`: a Canvas
-there has no Project to belong to. The refusal for a window without a Chat
+A Chat thread outside a Chat Project, and a managed child run in Chat mode or with
+no Project, are not offered `octant_canvas`: a Canvas there has nowhere to belong
+and every call would be refused. The refusal for a window without a Chat
 Project stays as the backstop.
 
 ## Presentation and schema versions

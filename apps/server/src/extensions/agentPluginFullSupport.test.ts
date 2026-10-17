@@ -1941,15 +1941,24 @@ describe("Agent Plugin MCP session manager", () => {
   });
 
   describe("a stdio server declared as a script", () => {
-    async function connectWith(command: string, args: ReadonlyArray<string>) {
+    async function connectWith(
+      command: string,
+      args: ReadonlyArray<string>,
+      options: { readonly launcher?: string } = {},
+    ) {
       const contentRoot = await realpath(await mkdtemp(join(tmpdir(), "octant-mcp-script-")));
       const pluginDataRoot = await mkdtemp(join(tmpdir(), "octant-mcp-script-data-"));
       await writeFile(join(contentRoot, "server.mjs"), "#!/usr/bin/env node\nconsole.log('x');\n");
       await chmod(join(contentRoot, "server.mjs"), 0o755);
+      const launcherRoot = await realpath(await mkdtemp(join(tmpdir(), "octant-mcp-launcher-")));
+      if (options.launcher !== undefined) {
+        await writeFile(join(launcherRoot, options.launcher), "#!/usr/bin/env node\n");
+        await chmod(join(launcherRoot, options.launcher), 0o755);
+      }
       let starts = 0;
       let launched: ReadonlyArray<string> = [];
       const manager = new AgentPluginMcpSessionManager({
-        baseEnv: { HOME: tmpdir(), PATH: dirname(process.execPath) },
+        baseEnv: { HOME: tmpdir(), PATH: [launcherRoot, dirname(process.execPath)].join(":") },
         store: {
           contentRoot: () => contentRoot,
           pluginDataRoot: () => pluginDataRoot,
@@ -2007,8 +2016,10 @@ describe("Agent Plugin MCP session manager", () => {
         starts: () => starts,
         launched: () => launched,
         contentRoot,
+        launcherRoot,
         cleanup: async () => {
           await manager.drainAll();
+          await rm(launcherRoot, { recursive: true, force: true });
           await rm(contentRoot, { recursive: true, force: true });
           await rm(pluginDataRoot, { recursive: true, force: true });
         },
@@ -2025,10 +2036,26 @@ describe("Agent Plugin MCP session manager", () => {
           expect.objectContaining({
             componentId: "mcp-local",
             reason: expect.stringMatching(
-              /local runs a script that starts with a #! line.*"command": "node".*"args": \["\$\{PLUGIN_ROOT\}\/server\.mjs"\]/,
+              /local runs a script from the plugin that starts with a #! line.*"command": "node".*"args": \["\$\{PLUGIN_ROOT\}\/server\.mjs"\]/,
             ),
           }),
         ]);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    it("leaves a shebang launcher found on the host path to start as before", async () => {
+      const harness = await connectWith("npx", ["-y", "some-server"], { launcher: "npx" });
+      try {
+        expect(harness.starts()).toBe(1);
+        expect(harness.launched()).toEqual([
+          join(harness.launcherRoot, "npx"),
+          "-y",
+          "some-server",
+        ]);
+        expect(harness.manager.sessions()).toHaveLength(1);
+        expect(harness.manager.failedComponents()).toEqual([]);
       } finally {
         await harness.cleanup();
       }
