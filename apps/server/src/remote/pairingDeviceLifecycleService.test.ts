@@ -2,7 +2,7 @@ import { generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEVICE_ABSOLUTE_TTL_MS,
   DEVICE_INACTIVITY_TTL_MS,
@@ -547,6 +547,175 @@ describe("PairingDeviceLifecycleService", () => {
     });
     expect(JSON.stringify(status)).not.toContain(ticket.ticketProof);
     expect(fieldsMatching(status, /comparisonCode|devicePublicKey|private ?key/i)).toEqual([]);
+  });
+
+  it("recognizes a ticket still being waited on only by its own proof, without counting a failed attempt", () => {
+    const clock = { nowMs };
+    const { service } = createService({ clock });
+    const ticket = service.createTicket({ sourceClass: "lan-private" });
+    const known = { ticketId: ticket.ticketId, ticketProof: ticket.ticketProof };
+
+    expect(service.isLiveTicket(known)).toBe(true);
+    for (let i = 0; i < PAIRING_MAX_FAILED_ATTEMPTS + 2; i += 1) {
+      expect(service.isLiveTicket({ ...known, ticketProof: "wrong_proof" })).toBe(false);
+    }
+    expect(service.isLiveTicket(known)).toBe(true);
+    expect(service.isLiveTicket({ ...known, ticketId: "unknown-ticket" })).toBe(false);
+
+    service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
+    expect(service.isLiveTicket(known)).toBe(true);
+    service.approveTicket({ ticketId: ticket.ticketId });
+    // An approved ticket is still waited on: its status read delivers the approval.
+    expect(service.isLiveTicket(known)).toBe(true);
+    expect(service.isLiveTicket({ ...known, ticketProof: "wrong_proof" })).toBe(false);
+    clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS + 30_000;
+    expect(service.isLiveTicket(known)).toBe(false);
+    clock.nowMs = nowMs;
+
+    const other = service.createTicket({ sourceClass: "lan-private" });
+    clock.nowMs += PAIRING_TICKET_TTL_MS;
+    expect(service.isLiveTicket({ ticketId: other.ticketId, ticketProof: other.ticketProof })).toBe(
+      false,
+    );
+  });
+
+  describe("an approved device whose window never signs in with its key", () => {
+    function approveOne(setup: ReturnType<typeof createService>) {
+      const ticket = setup.service.createTicket({ sourceClass: "lan-private" });
+      setup.service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
+      return setup.service.approveTicket({ ticketId: ticket.ticketId }).device;
+    }
+
+    function recordSignIn(setup: ReturnType<typeof createService>, deviceId: string) {
+      setup.connection
+        .prepare(
+          `INSERT INTO remote_session_store (
+             session_id_digest, host_id, device_id, credential_generation, origin,
+             protocol_version, capability_digest, issued_at, last_seen_at,
+             idle_expires_at, absolute_expires_at, csrf_digest, state
+           ) VALUES (?, ?, ?, 1, ?, 1, ?, ?, ?, ?, ?, ?, 'active')`,
+        )
+        .run(
+          "a".repeat(64),
+          hostId,
+          deviceId,
+          "https://mac.example.test",
+          "b".repeat(64),
+          setup.clock.nowMs,
+          setup.clock.nowMs,
+          setup.clock.nowMs + 1_000,
+          setup.clock.nowMs + 2_000,
+          "c".repeat(64),
+        );
+    }
+
+    it("is removed once its ticket would have expired", () => {
+      const setup = createService();
+      const device = approveOne(setup);
+      const remove = vi.fn();
+
+      setup.clock.nowMs += PAIRING_TICKET_TTL_MS - 1;
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      expect(remove).not.toHaveBeenCalled();
+
+      setup.clock.nowMs += 1;
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      expect(remove).toHaveBeenCalledExactlyOnceWith(device.deviceId);
+
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      expect(remove).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a person's late approval alive long enough for the window to sign in", () => {
+      const setup = createService();
+      const ticket = setup.service.createTicket({ sourceClass: "lan-private" });
+      setup.service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
+      setup.clock.nowMs += PAIRING_TICKET_TTL_MS - 2_000;
+      const device = setup.service.approveTicket({ ticketId: ticket.ticketId }).device;
+      const remove = vi.fn();
+
+      setup.clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS + 5_000;
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      expect(remove).not.toHaveBeenCalled();
+
+      setup.clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS + 60_000;
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      expect(remove).toHaveBeenCalledExactlyOnceWith(device.deviceId);
+    });
+
+    it("lets the window learn of an approval made in the ticket's last poll interval", () => {
+      const setup = createService();
+      const ticket = setup.service.createTicket({ sourceClass: "lan-private" });
+      setup.service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
+      const poll = { ticketId: ticket.ticketId, ticketProof: ticket.ticketProof };
+      setup.clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS - 200;
+      const device = setup.service.approveTicket({ ticketId: ticket.ticketId }).device;
+
+      setup.clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS + 500;
+      expect(setup.service.ticketStatus(poll)).toEqual({
+        status: "approved",
+        deviceId: device.deviceId,
+        credentialGeneration: 1,
+      });
+
+      // No sign-in by the grace deadline: the status ends and the device goes.
+      const remove = vi.fn();
+      setup.clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS - 200 + 30_000;
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      expect(remove).toHaveBeenCalledExactlyOnceWith(device.deviceId);
+      expect(setup.service.ticketStatus(poll)).toEqual({ status: "failed" });
+    });
+
+    it("still ends a pending ticket at its expiry", () => {
+      const setup = createService();
+      const ticket = setup.service.createTicket({ sourceClass: "lan-private" });
+      setup.service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
+      setup.clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS + 1;
+      expect(
+        setup.service.ticketStatus({ ticketId: ticket.ticketId, ticketProof: ticket.ticketProof }),
+      ).toEqual({ status: "failed" });
+    });
+
+    it("is never removed once it has signed in, however late the sweep runs", () => {
+      const setup = createService();
+      const device = approveOne(setup);
+      recordSignIn(setup, device.deviceId);
+      const remove = vi.fn();
+
+      setup.clock.nowMs += PAIRING_TICKET_TTL_MS * 10;
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      expect(remove).not.toHaveBeenCalled();
+    });
+
+    it("is left alone after a restart, because the host can no longer tell the window gave up", () => {
+      const setup = createService();
+      approveOne(setup);
+      const remove = vi.fn();
+
+      setup.service.clearEphemeralState();
+      setup.clock.nowMs += PAIRING_TICKET_TTL_MS * 2;
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      expect(remove).not.toHaveBeenCalled();
+      expect(readDeviceRegistrations(setup.connection)).toHaveLength(1);
+    });
+
+    it("is tried again on the next sweep when the removal fails", () => {
+      const setup = createService();
+      const device = approveOne(setup);
+      setup.clock.nowMs += PAIRING_TICKET_TTL_MS;
+      const remove = vi
+        .fn<(deviceId: string) => void>()
+        .mockImplementationOnce(() => {
+          throw new Error("journal busy");
+        })
+        .mockImplementation(() => {});
+
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      expect(remove).toHaveBeenCalledTimes(2);
+      expect(remove).toHaveBeenLastCalledWith(device.deviceId);
+    });
   });
 
   it("returns generic failure for unknown, denied, and expired tickets without state leaks", () => {

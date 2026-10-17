@@ -94,7 +94,10 @@ const TRUST_ISSUING_PRE_AUTH_ROUTE_IDS: ReadonlySet<string> = new Set([
   REMOTE_AUTH_ROUTE_IDS.serverProxySession,
 ]);
 
-/** How often a ready gateway ends proxy sessions past their expiry, closing their grants. */
+/**
+ * How often a ready gateway ends proxy sessions past their expiry, closing their
+ * grants, and removes approved devices whose pairing window never finished.
+ */
 const SERVER_PROXY_SWEEP_INTERVAL_MS = 60_000;
 
 /**
@@ -257,6 +260,13 @@ interface GatewayServices {
   readonly persistClockGuard: () => void;
   /** End proxy sessions past their expiry, so the grants bound to them close. */
   readonly sweepServerProxySessions: () => void;
+  /** Remove approved devices whose pairing window never signed in with its key. */
+  readonly sweepAbandonedPairings: () => void;
+  /** True for a live, pending pairing ticket whose proof matches. */
+  readonly pairingTicketIsLive: (ticket: {
+    readonly ticketId: string;
+    readonly ticketProof: string;
+  }) => boolean;
 }
 
 interface RemoteCredentialInvalidationResult {
@@ -304,6 +314,7 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
       listener = createPrivateListener({
         config: generation.config.listener,
         fetch: generation.services.gatewayFetch,
+        pairingTicketIsLive: generation.services.pairingTicketIsLive,
         serve: options.serve,
         // The largest body any route takes is a relayed dev-server upload; every
         // other route keeps its own smaller budget in the route policy.
@@ -320,10 +331,20 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
       shutdownCommandIdRef.value = options.uuid?.() ?? defaultRandomUUID();
       state = "ready";
       const sweeping = generation.services;
-      proxySweep = setInterval(
-        () => sweeping.sweepServerProxySessions(),
-        SERVER_PROXY_SWEEP_INTERVAL_MS,
-      );
+      proxySweep = setInterval(() => {
+        // Each sweep has its own guard: one that throws must not skip the other
+        // this tick, and the next tick retries both.
+        try {
+          sweeping.sweepServerProxySessions();
+        } catch {
+          // Retried on the next tick.
+        }
+        try {
+          sweeping.sweepAbandonedPairings();
+        } catch {
+          // Retried on the next tick.
+        }
+      }, SERVER_PROXY_SWEEP_INTERVAL_MS);
       proxySweep.unref?.();
       // Persist the monotonic high-water mark now that the listener
       // is bound. Best-effort — a failure must not destabilize the ready
@@ -739,6 +760,16 @@ function assembleServices(
     cancelWork: () => registry.cancelAll(),
     persistClockGuard: () => monotonicClock.persist(),
     sweepServerProxySessions: () => proxySessions?.sweepExpired(),
+    sweepAbandonedPairings: () =>
+      lifecycle.removeApprovalsWithoutKeyStep((deviceId) => {
+        credentialLifecycle.revokeDevice({
+          commandId: uuid(),
+          hostId: identity.hostId,
+          deviceId,
+          reasonCode: "pairing-abandoned",
+        });
+      }),
+    pairingTicketIsLive: (ticket) => lifecycle.isLiveTicket(ticket),
   };
 }
 

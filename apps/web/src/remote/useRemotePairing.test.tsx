@@ -246,6 +246,112 @@ describe("useRemotePairing resume", () => {
     expect(pollPairingStatus.mock.calls[1]?.[0].claim).toBe(claim);
   });
 
+  it("keeps waiting through a twenty-second approval and then finishes pairing", async () => {
+    vi.useFakeTimers();
+    try {
+      const claim = {
+        ticketId: TICKET_ID,
+        hostId,
+        hostDisplayName: "This Mac",
+        hostKeyFingerprint: "a".repeat(64),
+        origin: ORIGIN,
+        comparisonCode: "123456",
+        deviceKeyFingerprint: "b".repeat(64),
+        deviceKeyId: "00000000-0000-4000-8000-000000000003",
+        deviceLabel: "Browser",
+        sourceClass: "lan-private",
+        claimedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 300_000).toISOString(),
+      } as Awaited<ReturnType<RemotePairingClient["claimPairing"]>>;
+      const hostHello = {
+        productId: "octant",
+        hostId,
+        displayName: "This Mac",
+        hostKeyFingerprint: "a".repeat(64),
+        serverBuildVersion: "0.1.0",
+        supportedProtocolRange: { min: 1, max: 1 },
+        authenticationProtocolVersions: [1],
+        securityFloor: 1,
+        remoteOrigin: ORIGIN,
+        nonce: "nonce1234567890",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        signature: "sig_123",
+      } as unknown as Awaited<ReturnType<RemotePairingClient["requestHostHello"]>>;
+      const approval = {
+        ticketId: TICKET_ID,
+        hostId,
+        deviceId,
+        credentialGeneration: 1,
+        deviceKeyId: claim.deviceKeyId,
+        origin: ORIGIN,
+        hostKeyFingerprint: claim.hostKeyFingerprint,
+        listenerTrust: PLATFORM_LISTENER_TRUST,
+      };
+      const approvedAt = Date.now() + 20_000;
+      const pollPairingStatus = vi.fn<RemotePairingClient["pollPairingStatus"]>(async () =>
+        Date.now() >= approvedAt
+          ? { kind: "approved" as const, approval }
+          : { kind: "pending" as const, claim },
+      );
+      const client: RemotePairingClient = {
+        requestHostHello: vi.fn(async () => hostHello),
+        claimPairing: vi.fn(async () => claim),
+        pollPairingStatus,
+        removeDeviceKey: vi.fn(async () => undefined),
+      };
+      const connect = vi.fn();
+      const sessionClient = {
+        getState: () => ({ kind: "idle" as const }),
+        subscribe: () => () => undefined,
+        connect,
+        resume: vi.fn(),
+        reconnect: vi.fn(),
+        disconnect: vi.fn(),
+        connection: () => undefined,
+        forgetDeviceKey: vi.fn(async () => undefined),
+        stageDeviceKeyRotation: vi.fn(async () => {
+          throw new Error("Device key rotation is not part of this test double.");
+        }),
+      } as unknown as RemoteSessionBridge;
+      const hostRegistry = createClientHostRegistry(createInMemoryClientHostRegistryStorage());
+
+      const { result } = renderHook(() =>
+        useRemotePairing({
+          baseUrl: ORIGIN,
+          ticket: { ticketId: TICKET_ID, ticketProof: "ticket_proof_1234567890" },
+          client,
+          sessionClient,
+          hostRegistry,
+        }),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.screen.kind).toBe("confirm");
+      act(() => result.current.confirmPairing("Browser"));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(result.current.screen.kind).toBe("waiting");
+
+      for (let second = 0; second < 19; second += 1) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1_000);
+        });
+        expect(result.current.screen.kind).toBe("waiting");
+      }
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(result.current.screen.kind).toBe("approved");
+      expect(connect).toHaveBeenCalledWith(approval);
+      // One poll a second for the whole wait, which the host now admits.
+      expect(pollPairingStatus.mock.calls.length).toBeGreaterThanOrEqual(20);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("writes the approved host into the federation registry", async () => {
     const claim = {
       ticketId: TICKET_ID,
