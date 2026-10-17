@@ -1,13 +1,23 @@
+import { randomUUID } from "node:crypto";
 import {
   decodeContextCompactionId,
   decodeContextSubjectRef,
   decodeProviderRuntimeEvent,
+  decodeNativeHarnessSlotCandidate,
+  EventActor,
 } from "@octant/contracts";
 import { makeProviderCapacityScheduler } from "../context/contextRuntime";
 import { SessionCompactionService } from "../context/sessionCompaction";
 import { ContextHarnessError, ContextHarnessService } from "../context/contextHarnessService";
 import { automaticCompactionId } from "../context/automaticCompaction";
+import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
+import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
+import { ProjectionRegistry } from "../persistence/projection";
+import { leadApprovalFor } from "../harness/leadApprovalAttention";
+import { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
+import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
+import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import { openSqlite } from "../persistence/sqlitePort";
@@ -38,7 +48,7 @@ import {
   type UtcTimestamp,
   type WorkTurnStreamFrame,
 } from "@octant/contracts";
-import { Effect, Queue, Stream } from "effect";
+import { Effect, Queue, Schema, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { browserUseSelection } from "@octant/plugin-host/browser-use";
@@ -2110,6 +2120,208 @@ describe("WorkTurnService", () => {
     expect(transcript.turns).toHaveLength(1);
     expect(fixture.threads.read).toHaveBeenCalledWith(ids.window, ids.thread);
     expect(fixture.threads.bootstrap).not.toHaveBeenCalled();
+  });
+
+  describe("a turn a host restart cut off", () => {
+    const restartedAt = "2026-08-11T12:05:00.000Z";
+
+    /** Replays what the first host journaled into a fresh host, as a start does. */
+    function restart(
+      before: ReturnType<typeof serviceFixture>,
+      options: Parameters<typeof serviceFixture>[0] = {},
+    ) {
+      const after = serviceFixture(options);
+      for (const [call] of before.persistence.journal.append.mock.calls) {
+        const event = call?.events[0];
+        if (event === undefined) continue;
+        after.projection.apply(event.payload as never);
+      }
+      after.projection.markInterruptedOnRestart(restartedAt);
+      return after;
+    }
+
+    async function streamingTurn(options: { readonly nativeConversation?: boolean } = {}) {
+      const gate = deferred<void>();
+      const before = serviceFixture({
+        ...options,
+        turnRuntime: {
+          run: async (input) => {
+            input.onDelta?.("Half a sent");
+            await gate.promise;
+            return { kind: "completed", response: "never" };
+          },
+        },
+      });
+      await before.service.startFirstTurn(ids.window, startCommand());
+      return { before, release: gate.resolve };
+    }
+
+    it("settles as interrupted, not as a wait on the person", async () => {
+      const { before, release } = await streamingTurn();
+      const after = restart(before);
+      release();
+
+      expect(after.projection.lookup(ids.request)).toMatchObject({
+        status: "failed",
+        failure: {
+          category: "interrupted",
+          message: expect.stringContaining("Octant restarted"),
+        },
+        transcript: [{ role: "user" }, { role: "assistant", status: "interrupted" }],
+      });
+    });
+
+    it("leaves the thread free to take the next message", async () => {
+      const { before, release } = await streamingTurn();
+      const run = vi.fn<WorkTurnRuntimePort["run"]>().mockResolvedValue({
+        kind: "completed",
+        response: "Picked up again",
+      });
+      const after = restart(before, { turnRuntime: { run } });
+      release();
+      expect(after.service.isTurnActive(ids.thread)).toBe(false);
+
+      const next = decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2");
+      await expect(
+        after.service.startFirstTurn(ids.window, {
+          ...startCommand(),
+          requestId: next,
+          turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2"),
+          prompt: "Carry on",
+        }),
+      ).resolves.toMatchObject({ kind: "accepted" });
+      await after.waitForIdle(next);
+
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(after.projection.lookup(next)).toMatchObject({
+        status: "completed",
+        response: "Picked up again",
+      });
+    });
+
+    it("starts a fresh session with the conversation when a native session never recorded a cursor", async () => {
+      const { before, release } = await streamingTurn({ nativeConversation: true });
+      const run = vi.fn<WorkTurnRuntimePort["run"]>().mockResolvedValue({
+        kind: "completed",
+        response: "Picked up in a new session",
+      });
+      const after = restart(before, { nativeConversation: true, turnRuntime: { run } });
+      release();
+      expect(after.projection.lookup(ids.request)?.resumeCursor).toBeUndefined();
+
+      const next = decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3");
+      await expect(
+        after.service.startFirstTurn(ids.window, {
+          ...startCommand(),
+          requestId: next,
+          turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3"),
+          prompt: "Carry on",
+        }),
+      ).resolves.toMatchObject({ kind: "accepted" });
+      await after.waitForIdle(next);
+
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(after.projection.lookup(next)).toMatchObject({
+        status: "completed",
+        handoff: { reason: "provider-switch", nativeSessionTransferred: false },
+      });
+    });
+
+    it("reads the same after every rebuild", async () => {
+      const { before, release } = await streamingTurn();
+      const first = restart(before);
+      const second = restart(before);
+      release();
+      first.projection.markInterruptedOnRestart("2026-08-11T12:09:00.000Z");
+
+      expect(first.projection.lookup(ids.request)).toEqual(second.projection.lookup(ids.request));
+    });
+
+    it("keeps a stop at a usage limit waiting for its reset", async () => {
+      const resetsAt = "2026-08-11T18:00:00.000Z" as UtcTimestamp;
+      const before = serviceFixture({
+        turnRuntime: {
+          run: async () => ({
+            kind: "waiting",
+            failure: {
+              category: "interrupted",
+              message: "Usage limit reached.",
+              usageLimit: { kind: "temporary", resetsAt },
+            },
+          }),
+        },
+      });
+      await before.service.startFirstTurn(ids.window, startCommand());
+      await before.waitForIdle();
+      const after = restart(before);
+
+      expect(after.projection.lookup(ids.request)).toMatchObject({
+        status: "waiting",
+        failure: { usageLimit: { resetsAt } },
+      });
+    });
+
+    it("still offers only a resume for an approval it was parked on, and never runs the old call", async () => {
+      const { before, release } = await streamingTurn();
+      const directory = await mkdtemp(join(tmpdir(), "octant-work-restart-approval-"));
+      attachmentRoots.push(directory);
+      const connection = openSqlite(join(directory, "events.sqlite3"));
+      try {
+        applyMigrations(connection, MIGRATIONS, () => now);
+        const open = () => {
+          const sessions = new NativeHarnessSessionStore({
+            journal: new Journal({
+              connection,
+              registry: registerNativeHarnessEvents(new EventRegistry()),
+              projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
+              clock: () => now,
+            }),
+            uuid: () => randomUUID(),
+            actor: Schema.decodeUnknownSync(EventActor)({
+              kind: "local-user",
+              actorId: "77777777-7777-4777-8777-777777777777",
+            }),
+            clock: () => now,
+          });
+          return {
+            sessions,
+            approvals: new NativeHarnessApprovalStore({
+              sessions,
+              uuid: () => randomUUID(),
+              clock: () => now,
+            }),
+          };
+        };
+        const parked = open();
+        const outcome = parked.approvals.ask({
+          threadId: String(ids.thread),
+          mode: "work",
+          lead: decodeNativeHarnessSlotCandidate({
+            hostId: "00000000-0000-4000-8000-0000000000aa",
+            providerInstanceId: ids.provider,
+            modelId: "model-a",
+          }),
+          toolName: "write",
+          summary: "write: notes.md",
+          approvalClass: "file-writes",
+        });
+        const pendingId = String(parked.sessions.read(String(ids.thread))?.approvals?.[0]?.id);
+
+        const after = restart(before);
+        const stores = open();
+
+        expect(after.service.isTurnActive(ids.thread)).toBe(false);
+        expect(leadApprovalFor(stores, String(ids.thread))).toMatchObject({ lostInRestart: true });
+        expect(stores.approvals.decide(String(ids.thread), pendingId, "approve")).toBe(
+          "lost-in-restart",
+        );
+        expect(stores.sessions.read(String(ids.thread))?.approvals?.[0]?.status).toBe("cancelled");
+        void outcome;
+        release();
+      } finally {
+        connection.close();
+      }
+    });
   });
 
   describe("a thread with more turns than one transcript carries", () => {

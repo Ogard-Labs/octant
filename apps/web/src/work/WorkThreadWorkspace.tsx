@@ -376,7 +376,8 @@ function turnHeaderOutcome(turn: WorkTurnState): TurnHeaderOutcome {
     case "cancelled":
       return "cancelled";
     case "failed":
-      return "failed";
+      // A turn the host ended because it restarted did not fail; it was cut off.
+      return turn.failure?.category === "interrupted" ? "interrupted" : "failed";
     case "completed":
       return "completed";
   }

@@ -127,20 +127,28 @@ export class WorkTurnProjection {
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
-  /** Mark non-terminal turns interrupted after a host restart with no live runtime. */
+  /**
+   * A host restart ends every turn the journal still reads as running: nothing
+   * is left that could finish it. Such a turn settles as interrupted, as a Code
+   * turn does, so the thread takes its next message instead of waiting on a
+   * runtime that is gone. A turn already `waiting` on a provider usage limit
+   * waits on the reset, not on a runtime, so the restart leaves it alone.
+   * Settling a settled turn changes nothing, so a rebuild reads the same.
+   */
   markInterruptedOnRestart(updatedAt: string): void {
     for (const [requestId, turn] of this.#byRequest) {
       if (turn.status !== "accepted" && turn.status !== "running" && turn.status !== "waiting") {
         continue;
       }
+      if (turn.status === "waiting" && turn.failure?.usageLimit !== undefined) continue;
       this.#byRequest.set(
         requestId,
         decodeWorkTurnState({
           ...turn,
-          status: "waiting",
+          status: "failed",
           failure: {
             category: "interrupted",
-            message: "Work provider turn was interrupted by a host restart.",
+            message: RESTART_INTERRUPTED_MESSAGE,
           },
           transcript: [
             { role: "user", text: turn.prompt },
@@ -158,6 +166,9 @@ export class WorkTurnProjection {
     }
   }
 }
+
+const RESTART_INTERRUPTED_MESSAGE =
+  "Octant restarted while this turn was running, so it did not finish. Send a new message to continue.";
 
 export function hydrateWorkTurnProjectionFromJournal(input: {
   readonly replay: (cursor: {
