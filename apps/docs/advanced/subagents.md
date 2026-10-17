@@ -214,7 +214,10 @@ its own. Chat has no Agents tab, so a Chat subagent does not appear.
 **Steer** sends a note to a running child when its provider supports it.
 Octant's harness applies the note at the next complete response or tool-results
 boundary; Codex delivers it to the active turn. An unsupported provider reports
-that the note was not delivered.
+that the note was not delivered. The host answers only once the
+child has taken the note, which can be most of a long response away, so the
+subagent's page says **Sending the steering note** while it waits, then
+**Steering note delivered**, and gives the reason when the host refuses one.
 
 A run waiting for other runs to finish never starts on its own after a
 restart, even once they finish: **Resume** on the run, or resuming the parent

@@ -39,6 +39,8 @@ export function AgentRunDetail(props: {
   readonly onAcknowledge?: RunCommand;
   readonly onCancel?: (input: { runId: string }) => void;
   readonly onSteer?: (input: { runId: string; version: number; message: string }) => void;
+  /** What the page says about a steering note in flight or delivered; a refusal's reason goes through the page's alert. */
+  readonly steerNotice?: string;
   readonly onRetry?: RunCommand;
   readonly onResume?: RunCommand;
   readonly onFollowUp?: (input: {
@@ -143,6 +145,11 @@ export function AgentRunDetail(props: {
         />
       </div>
 
+      {props.steerNotice === undefined ? null : (
+        <p className="agent-run-detail__note" role="status">
+          {props.steerNotice}
+        </p>
+      )}
       <div aria-label="Subagent actions" className="agent-run-detail__actions" role="group">
         {row.needsAcknowledgement ? (
           <OctantButton onClick={() => props.onAcknowledge?.(command)} size="sm" type="button">

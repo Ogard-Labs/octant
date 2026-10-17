@@ -50,6 +50,16 @@ export function AgentRunHierarchy(props: {
   const observations = currentRead?.observations ?? [];
   const [status, setStatus] = useState<"loading" | "ready" | "refreshing" | "error">("loading");
   const [errorMessage, setErrorMessage] = useState<string>();
+  // The host answers a steering note only once the child has taken it at its
+  // next step, which can be most of a long response away, so the page says so
+  // while it waits and again when the note has landed.
+  const [steer, setSteer] = useState<{
+    readonly runId: string;
+    readonly phase: "sending" | "delivered";
+  }>();
+  // Only the latest note may set the status: notes can overlap, and an older
+  // answer arriving late must not relabel or erase a newer one.
+  const latestSteer = useRef(0);
   const [summaryReconnecting, setSummaryReconnecting] = useState(false);
   const [posture, setPosture] = useState<AgentRunCreationPosture | undefined>(
     props.creationPosture,
@@ -68,6 +78,8 @@ export function AgentRunHierarchy(props: {
   }, [props.requestedView]);
   const leaveSelectedRun = () => {
     setSelectedRunId(undefined);
+    latestSteer.current += 1;
+    setSteer(undefined);
     if (props.requestedView !== undefined) onRequestedViewHandled.current?.();
   };
   // Only an identity resolved from the managed list may open a conversation.
@@ -293,7 +305,25 @@ export function AgentRunHierarchy(props: {
             : { onReviewChanges: props.onReviewChanges })}
           onAcknowledge={(input) => void acknowledge(input)}
           onCancel={(input) => void cancel(input)}
-          onSteer={(input) => void controls.steer(input).then(setErrorMessage)}
+          onSteer={(input) => {
+            const request = ++latestSteer.current;
+            setSteer({ runId: input.runId, phase: "sending" });
+            void controls.steer(input).then((message) => {
+              if (request !== latestSteer.current) return;
+              setErrorMessage(message);
+              setSteer(
+                message === undefined ? { runId: input.runId, phase: "delivered" } : undefined,
+              );
+            });
+          }}
+          {...(steer?.runId === selectedRow.runId
+            ? {
+                steerNotice:
+                  steer.phase === "sending"
+                    ? "Sending the steering note. The subagent takes it at its next step."
+                    : "Steering note delivered.",
+              }
+            : {})}
           onRetry={(input) => void controls.retry(input).then(setErrorMessage)}
           onResume={(input) => void controls.resume(input).then(setErrorMessage)}
           onFollowUp={controls.resume}
