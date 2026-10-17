@@ -151,7 +151,12 @@ Agent Plugins MCP servers receive `PLUGIN_ROOT` and a dedicated persistent
 `PLUGIN_DATA` directory. Octant expands only those two placeholders in
 `args`, `env` values, and `cwd`, connects with the declared stdio or Streamable
 HTTP transport when a component becomes effective, and isolates invalid skills
-or MCP entries so siblings continue loading. Marketplace supports importing a
+or MCP entries so siblings continue loading. A stdio server runs in a sandbox
+that cannot follow a script's `#!` line to its interpreter, so declare the
+interpreter as the `command` and the script as an argument, for example
+`"command": "node", "args": ["${PLUGIN_ROOT}/server.mjs"]`. Octant refuses a
+`command` that is itself a script starting with `#!`, names the fix, and never
+shows that server as ready. Marketplace supports importing a
 local Agent Plugins folder from disk through the native folder picker. The
 selected absolute path remains in the desktop/server boundary; Settings receives
 only a short-lived, single-use receipt bound to the exact native window.

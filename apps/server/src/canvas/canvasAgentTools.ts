@@ -826,6 +826,19 @@ export function createCanvasAgentTools(
     options.mode === "work" || options.mode === "code"
       ? { mode: options.mode, thread: options.thread }
       : { mode: "chat", thread: options.thread };
+  // A Chat thread outside a Chat Project has nowhere for a Canvas to live, so
+  // every call would be refused. Offer nothing rather than a tool that cannot
+  // succeed; the refusal in `resolveCanvasTarget` stays as the backstop.
+  if (
+    options.mode !== "work" &&
+    options.mode !== "code" &&
+    options.thread.projectId === undefined
+  ) {
+    return {
+      definitions: [],
+      execute: async () => ({ result: { error: "tool-unavailable" }, isError: true }),
+    };
+  }
   return canvasToolSet({
     mode: owner.mode,
     scope: "thread",

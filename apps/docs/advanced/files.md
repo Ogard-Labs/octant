@@ -74,7 +74,9 @@ deep links, and recent items.
 Agents receive usage instructions with the tools available to their current
 task. In Chat, Work, and Code, and for a managed child run bound to its own
 workspace, `octant_canvas` creates and revises structured
-plans, designs, reports, reviews, diagrams, tables, and dashboards. When you ask
+plans, designs, reports, reviews, diagrams, tables, and dashboards. A Chat thread
+outside a Chat Project is not offered the tool, because a Canvas there has no
+Project to belong to. When you ask
 for something substantial, the agent builds it as a Canvas and replies with a
 short pointer; brief answers stay in the conversation. A follow-up such as "add
 a risks section" revises the existing Canvas: the read-only `list` operation

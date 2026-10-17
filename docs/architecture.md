@@ -5192,7 +5192,10 @@ same. This holds in Chat, Work, and Code.
   An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
-  carried it.
+  carried it. The sandbox grants reads around the file it launches, not around
+  the interpreter a `#!` line names, so a stdio server whose command is itself
+  a script is refused before it starts, with the interpreter-as-command form to
+  declare instead, and is never reported ready.
 
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in

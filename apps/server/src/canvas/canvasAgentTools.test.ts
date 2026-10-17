@@ -166,6 +166,20 @@ describe("createCanvasAgentTools", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("offers no Canvas tool to a Chat thread that is outside a Chat Project", () => {
+    const { projectId: _projectId, ...projectless } = thread as unknown as Record<string, unknown>;
+    const set = createCanvasAgentTools({
+      windowId,
+      thread: projectless as never,
+      port: { activeContext: vi.fn(), project: vi.fn(), canvas: {} } as never,
+    });
+
+    expect(set.definitions).toEqual([]);
+    expect(tools().set.definitions.map((definition) => definition.name)).toEqual([
+      CANVAS_TOOL_NAME,
+    ]);
+  });
+
   it("keeps the always-visible definition small in every mode and for a managed child", () => {
     const port = {
       activeContext: vi.fn(),
