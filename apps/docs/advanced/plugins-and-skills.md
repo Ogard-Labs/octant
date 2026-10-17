@@ -151,13 +151,7 @@ Agent Plugins MCP servers receive `PLUGIN_ROOT` and a dedicated persistent
 `PLUGIN_DATA` directory. Octant expands only those two placeholders in
 `args`, `env` values, and `cwd`, connects with the declared stdio or Streamable
 HTTP transport when a component becomes effective, and isolates invalid skills
-or MCP entries so siblings continue loading. A stdio server runs in a sandbox
-that cannot follow a `#!` line to its interpreter, so a script shipped inside
-the plugin cannot be the `command`. Declare the interpreter as the `command` and
-the script as an argument, for example
-`"command": "node", "args": ["${PLUGIN_ROOT}/server.mjs"]`. Octant refuses a
-plugin script that starts with `#!`, names the fix, and never shows that server
-as ready. Marketplace supports importing a
+or MCP entries so siblings continue loading. Marketplace supports importing a
 local Agent Plugins folder from disk through the native folder picker. The
 selected absolute path remains in the desktop/server boundary; Settings receives
 only a short-lived, single-use receipt bound to the exact native window.
@@ -176,6 +170,30 @@ leaves no visible partial package. Updates preserve desired-enable choices
 for unchanged components; new or capability-expanded executable components
 are **quarantined** until reviewed, and rollback selects only retained,
 integrity-verified earlier versions.
+
+### Starting an MCP server
+
+On macOS an MCP server runs in a sandbox that cannot follow a `#!` line to its
+interpreter. Declare the interpreter as the `command` and the script as an
+argument, with the script's absolute path or `${PLUGIN_ROOT}`:
+
+```json
+{ "type": "stdio", "command": "node", "args": ["${PLUGIN_ROOT}/server.mjs"] }
+```
+
+A `command` that is itself a script, either one shipped in the plugin or a
+launcher such as `npx`, `npm`, or `uvx`, is refused before it starts, with this fix in
+the message, and the server is never shown as ready. The server reads only the
+plugin's own folder, so a package installed globally on the Mac is out of reach.
+Put the package inside the plugin when you build it, for example
+`npm install --prefix "${PLUGIN_ROOT}" <package>`, and point `node` at
+`${PLUGIN_ROOT}/node_modules/<package>/<entry>.js`. `uvx` and `uv tool run` /
+`uv run` are refused the same way. For Python, build a virtual environment
+inside the plugin, for example
+`uv venv "${PLUGIN_ROOT}/.venv"` and `uv pip install --python "${PLUGIN_ROOT}/.venv/bin/python" <package>`,
+and set `"command": "${PLUGIN_ROOT}/.venv/bin/python"` with the package's script
+or `["-m", "<module>"]` as `args`. A virtual environment built from Homebrew
+Python runs under the sandbox.
 
 ### Structured references
 

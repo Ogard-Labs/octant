@@ -1944,7 +1944,12 @@ describe("Agent Plugin MCP session manager", () => {
     async function connectWith(
       command: string,
       args: ReadonlyArray<string>,
-      options: { readonly launcher?: string } = {},
+      options: {
+        readonly launcher?: string;
+        /** A native launcher has no `#!` line; the default is a script. */
+        readonly nativeLauncher?: boolean;
+        readonly platform?: NodeJS.Platform;
+      } = {},
     ) {
       const contentRoot = await realpath(await mkdtemp(join(tmpdir(), "octant-mcp-script-")));
       const pluginDataRoot = await mkdtemp(join(tmpdir(), "octant-mcp-script-data-"));
@@ -1952,12 +1957,16 @@ describe("Agent Plugin MCP session manager", () => {
       await chmod(join(contentRoot, "server.mjs"), 0o755);
       const launcherRoot = await realpath(await mkdtemp(join(tmpdir(), "octant-mcp-launcher-")));
       if (options.launcher !== undefined) {
-        await writeFile(join(launcherRoot, options.launcher), "#!/usr/bin/env node\n");
+        await writeFile(
+          join(launcherRoot, options.launcher),
+          options.nativeLauncher === true ? "\u0000native\n" : "#!/usr/bin/env node\n",
+        );
         await chmod(join(launcherRoot, options.launcher), 0o755);
       }
       let starts = 0;
       let launched: ReadonlyArray<string> = [];
       const manager = new AgentPluginMcpSessionManager({
+        platform: options.platform ?? "linux",
         baseEnv: { HOME: tmpdir(), PATH: [launcherRoot, dirname(process.execPath)].join(":") },
         store: {
           contentRoot: () => contentRoot,
@@ -2045,7 +2054,90 @@ describe("Agent Plugin MCP session manager", () => {
       }
     });
 
-    it("leaves a shebang launcher found on the host path to start as before", async () => {
+    it("refuses a shebang launcher found on the host path under the macOS profile", async () => {
+      const harness = await connectWith("npx", ["-y", "some-server"], {
+        launcher: "npx",
+        platform: "darwin",
+      });
+      try {
+        expect(harness.starts()).toBe(0);
+        expect(harness.manager.sessions()).toHaveLength(0);
+        expect(harness.manager.failedComponents()).toEqual([
+          expect.objectContaining({
+            componentId: "mcp-local",
+            reason: expect.stringMatching(
+              /local starts npx, a launcher script.*inside the plugin.*npm install --prefix "\$\{PLUGIN_ROOT\}".*"command" to "node".*\$\{PLUGIN_ROOT\}\/node_modules\//,
+            ),
+          }),
+        ]);
+        expect(harness.manager.failedComponents()[0]?.reason).not.toMatch(/\/opt\/homebrew|global/);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    it("refuses uvx and uv tool run under the macOS profile", async () => {
+      const uvx = await connectWith("uvx", ["some-server"], {
+        launcher: "uvx",
+        nativeLauncher: true,
+        platform: "darwin",
+      });
+      try {
+        expect(uvx.starts()).toBe(0);
+        expect(uvx.manager.sessions()).toHaveLength(0);
+        expect(uvx.manager.failedComponents()).toEqual([
+          expect.objectContaining({
+            reason: expect.stringMatching(
+              /local starts uvx.*\$\{PLUGIN_ROOT\}\/\.venv.*"command" to "\$\{PLUGIN_ROOT\}\/\.venv\/bin\/python"/,
+            ),
+          }),
+        ]);
+      } finally {
+        await uvx.cleanup();
+      }
+      for (const args of [
+        ["tool", "run", "some-server"],
+        ["run", "some-server"],
+      ]) {
+        const uv = await connectWith("uv", args, {
+          launcher: "uv",
+          nativeLauncher: true,
+          platform: "darwin",
+        });
+        try {
+          expect(uv.starts()).toBe(0);
+        } finally {
+          await uv.cleanup();
+        }
+      }
+    });
+
+    it("leaves another uv command and a native binary to start as before", async () => {
+      const harness = await connectWith("uv", ["pip", "list"], {
+        launcher: "uv",
+        nativeLauncher: true,
+        platform: "darwin",
+      });
+      try {
+        expect(harness.starts()).toBe(1);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    it("starts the interpreter with a plugin script under the macOS profile", async () => {
+      const harness = await connectWith("node", ["${PLUGIN_ROOT}/server.mjs"], {
+        platform: "darwin",
+      });
+      try {
+        expect(harness.starts()).toBe(1);
+        expect(harness.manager.sessions()).toHaveLength(1);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    it("leaves a shebang launcher to start where the macOS profile does not apply", async () => {
       const harness = await connectWith("npx", ["-y", "some-server"], { launcher: "npx" });
       try {
         expect(harness.starts()).toBe(1);

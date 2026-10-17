@@ -5192,10 +5192,20 @@ same. This holds in Chat, Work, and Code.
   An MCP
   server's launch command starts the server, not a shell the model holds, so
   a stdio server is declared `mcp`, not `shell`, whichever package format
-  carried it. The sandbox grants reads around the file it launches, not around
-  the interpreter a `#!` line names, so a stdio server whose command is itself
-  a `#!` script inside the plugin is refused before it starts, with the interpreter-as-command form to
-  declare instead, and is never reported ready.
+  carried it. The sandbox grants reads around the file it launches, not around the
+  interpreter a `#!` line names, so a stdio server whose command is a `#!`
+  script is refused before it starts and is never reported ready. A script
+  inside the plugin is refused on any host. On macOS a launcher found on the
+  host path or outside the plugin (`npx` and `npm` measured, which fail at exec
+  under the profile) is refused as well, with the form to declare instead:
+  `node` as the command and a script from a package installed inside the
+  plugin's own folder (`${PLUGIN_ROOT}/node_modules/...`) as an argument; the
+  profile reads that folder and not a global install. `uvx`, and `uv` run
+  as `tool` or `run`, are native binaries that fail under the profile for a
+  different reason (they read `uv` beside them through a Homebrew link), so
+  they are refused by name; the working form is a virtual environment inside the
+  plugin with its `.venv/bin/python` as the command. Extension processes have no Linux confinement, so no other host
+  starts one in the first place.
 
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with
   "always allow in this Project". That journals a grant for that one tool in
