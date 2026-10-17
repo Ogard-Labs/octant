@@ -118,11 +118,16 @@ export function requireLinuxConfinement(bwrapPath: string): void {
   }
   try {
     accessSync(bwrapPath, constants.X_OK);
-  } catch {
+  } catch (error) {
+    // Only an absent runtime is fixed by installing it. One that is there but
+    // cannot be run (no execute bit, an unreadable parent) needs a different
+    // fix, so it keeps the generic refusal rather than the install notice.
+    const code = (error as NodeJS.ErrnoException).code;
+    const absent = code === "ENOENT" || code === "ENOTDIR";
     throw new ProcessConfinementError(
       "incompatible",
       "Linux confinement requires an executable bubblewrap (bwrap) runtime.",
-      "linux-bubblewrap-missing",
+      absent ? "linux-bubblewrap-missing" : undefined,
     );
   }
 }

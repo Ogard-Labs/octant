@@ -19,6 +19,7 @@ import {
   buildLinuxAllowDefaultDenyLaunch,
   buildBubblewrapLaunch,
   DEFAULT_BWRAP_PATH,
+  requireLinuxConfinement,
 } from "./linuxConfinement";
 import { LINUX_EGRESS_FORWARDER_PORT, LINUX_EGRESS_FORWARDER_SOURCE } from "./proxiedNetworkEgress";
 import { ProcessConfinementError } from "./seatbeltProfile";
@@ -136,6 +137,31 @@ describe("Linux Full access extension denials", () => {
 });
 
 describe("Linux Bubblewrap confinement", () => {
+  it("names only an absent runtime as one a person can fix by installing it", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-linux-bwrap-")));
+    directories.push(root);
+    const notExecutable = join(root, "bwrap");
+    writeFileSync(notExecutable, "");
+    chmodSync(notExecutable, 0o644);
+
+    const refusal = (path: string) => {
+      try {
+        requireLinuxConfinement(path);
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    };
+
+    const absent = refusal(join(root, "missing", "bwrap"));
+    expect(absent).toBeInstanceOf(ProcessConfinementError);
+    expect((absent as ProcessConfinementError).userFixable).toBe("linux-bubblewrap-missing");
+
+    const unusable = refusal(notExecutable);
+    expect(unusable).toBeInstanceOf(ProcessConfinementError);
+    expect((unusable as ProcessConfinementError).userFixable).toBeUndefined();
+  });
+
   it("uses a private tmpfs for /tmp instead of binding the host directory", () => {
     const { boundRoot, bwrapPath } = fixture();
     const launch = buildBubblewrapLaunch(
