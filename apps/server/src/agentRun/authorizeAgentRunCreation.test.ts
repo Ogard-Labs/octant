@@ -17,16 +17,23 @@ import {
   type ChatThreadId,
   type CodeThreadId,
   type Project,
+  type ProviderExecutionPolicy,
   type WindowWorkspace,
   type WorkThreadId,
   type WorkspaceLayoutNode,
   type WorkspaceTab,
 } from "@octant/contracts";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
-import { contextKeyForProject, defaultWindowWorkspace } from "@octant/domain";
+import {
+  clampTurnAccessPosture,
+  contextKeyForProject,
+  defaultWindowWorkspace,
+} from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import { WINDOW_AUTHORITY_TTL_MS, WindowAuthorityStore } from "../windowAuthorityStore";
 import { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
+import { createNativeHarnessComposition } from "../harness/nativeHarnessComposition";
+import { resolveAgentRunControlFacts } from "./agentRunControlService";
 import {
   authorizeAgentRunCreation,
   boundAgentRunLiveAuthority,
@@ -104,7 +111,7 @@ function workThread() {
   });
 }
 
-function codeThread(executionPolicy: "plan" | "approval-gated" = "approval-gated") {
+function codeThread(executionPolicy: ProviderExecutionPolicy = "approval-gated") {
   return decodeCodeThread({
     id: ids.code,
     projectId: ids.project,
@@ -163,6 +170,7 @@ function authorize(input: {
   readonly project?: Project;
   readonly parentThreadId: string;
   readonly authority?: CodeSessionAuthorityStore;
+  readonly activeTurn?: (thread: ReturnType<typeof codeThread>) => ReturnType<typeof codeThread>;
 }) {
   return authorizeAgentRunCreation({
     persistence: {
@@ -189,8 +197,19 @@ function authorize(input: {
     parentThreadId: parentId(input.parentThreadId),
     windowId: String(ids.window),
     codeSessionAuthority: input.authority ?? new CodeSessionAuthorityStore(),
+    ...(input.activeTurn === undefined ? {} : { activeTurn: input.activeTurn }),
   });
 }
+
+/** What the host's running-turn lookup returns for a turn that holds `posture`. */
+const turnHolding = (posture: ProviderExecutionPolicy) => (thread: ReturnType<typeof codeThread>) =>
+  decodeCodeThread({
+    ...thread,
+    executionPolicy: clampTurnAccessPosture({
+      requested: posture,
+      thread: thread.executionPolicy,
+    }),
+  });
 
 describe("live child execution authority", () => {
   it("expires a cached child execution window without waiting for renderer authentication", () => {
@@ -518,5 +537,150 @@ describe("layoutContainsAgentRunThread", () => {
     };
     expect(layoutContainsAgentRunThread(split, String(ids.code), String(LOCAL_HOST_ID))).toBe(true);
     expect(layoutContainsAgentRunThread(split, String(ids.code), "other-host")).toBe(false);
+  });
+});
+
+describe("a Code parent whose running turn is narrower than its thread", () => {
+  function workspaceFor(thread: ReturnType<typeof codeThread>) {
+    return withSurface(
+      {
+        ...defaultWindowWorkspace(ids.window),
+        contextByMode: {
+          ...defaultWindowWorkspace(ids.window).contextByMode,
+          code: contextKeyForProject("code", LOCAL_HOST_ID, ids.project, "/repo"),
+        },
+      },
+      "code",
+      decodeWorkspaceTab({
+        kind: "code-overview",
+        id: ids.tab,
+        threadId: thread.id,
+        mode: "code",
+        title: thread.title,
+      }),
+    );
+  }
+  const admit = (stored: ProviderExecutionPolicy, activeTurn?: ReturnType<typeof turnHolding>) => {
+    const thread = codeThread(stored);
+    return authorize({
+      workspace: workspaceFor(thread),
+      code: thread,
+      parentThreadId: String(thread.id),
+      ...(activeTurn === undefined ? {} : { activeTurn }),
+    });
+  };
+  const planOnly = { executionPolicy: "plan", shell: false, git: false, network: false };
+
+  it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
+    "gives a child only Plan when the turn is narrowed to Plan on a %s thread",
+    (stored) => {
+      expect(admit(stored)?.liveAuthority.executionPolicy).toBe(stored);
+      const facts = admit(stored, turnHolding("plan"));
+      expect(facts?.liveAuthority).toMatchObject(planOnly);
+      const child = resolveAgentRunControlFacts({
+        parent: facts!,
+        role: "implementation",
+        creationPosture: "automatic",
+        nativeEvidence: {
+          claimedNativeSupport: "unsupported",
+          workspace: false,
+          authority: false,
+          observability: false,
+          cancellation: false,
+          steering: false,
+          recovery: false,
+        },
+      });
+      expect(child.authority).toMatchObject(planOnly);
+    },
+  );
+
+  it("gives a child the turn's narrower posture, not the session grant's Full access", () => {
+    const authority = new CodeSessionAuthorityStore();
+    authority.grantFullAccess(ids.window, ids.code);
+    const thread = codeThread("approval-gated");
+    const input = {
+      workspace: workspaceFor(thread),
+      code: thread,
+      parentThreadId: String(thread.id),
+      authority,
+    };
+    expect(authorize(input)?.liveAuthority.executionPolicy).toBe("full-access");
+    expect(
+      authorize({ ...input, activeTurn: turnHolding("approval-gated") })?.liveAuthority,
+    ).toMatchObject({ executionPolicy: "approval-gated", shell: true });
+    expect(authorize({ ...input, activeTurn: turnHolding("plan") })?.liveAuthority).toMatchObject(
+      planOnly,
+    );
+  });
+
+  it("clamps a scheduled resume by the parent's running turn", () => {
+    const authority = new CodeSessionAuthorityStore();
+    authority.grantFullAccess(ids.window, ids.code);
+    const input = {
+      persistence: { readCodeThread: () => codeThread("full-access") } as never,
+      run: { parentThreadId: parentId(ids.code), routingReceipt: { mode: "code" } } as never,
+      executionWindow: { windowId: ids.window, codeSessionAuthority: authority },
+    };
+    expect(scheduledAgentRunLiveAuthority(input)?.executionPolicy).toBe("full-access");
+    expect(
+      scheduledAgentRunLiveAuthority({ ...input, activeTurn: turnHolding("plan") }),
+    ).toMatchObject(planOnly);
+  });
+
+  it("refuses the Plan child's write, edit and shell", async () => {
+    const facts = admit("full-access", turnHolding("plan"));
+    const child = resolveAgentRunControlFacts({
+      parent: facts!,
+      role: "implementation",
+      creationPosture: "automatic",
+      nativeEvidence: {
+        claimedNativeSupport: "unsupported",
+        workspace: false,
+        authority: false,
+        observability: false,
+        cancellation: false,
+        steering: false,
+        recovery: false,
+      },
+    });
+    const hostId = "00000000-0000-4000-8000-0000000000aa";
+    const composition = createNativeHarnessComposition({
+      isChildAuthorityCurrent: () => true,
+      authority: { resolve: () => undefined, service: undefined as never },
+      isHarnessProvider: () => true,
+      shell: { run: async () => ({ status: "ran", exitCode: 0, output: "", truncated: false }) },
+      hostId: hostId as never,
+      readThreadTaint: () => false,
+      recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+      uuid: () => "00000000-0000-4000-8000-000000000099",
+      clock: () => now,
+    });
+    const tools = composition.forAgentRun({
+      run: {
+        id: "00000000-0000-4000-8000-00000000a0c0",
+        parentThreadId: ids.code,
+        routingReceipt: { mode: "code", selectedProviderInstanceId: ids.provider },
+        workspaceReceipt: { kind: "code-worktree", projectId: ids.project },
+      } as never,
+      authority: child.authority,
+      projectRoot: "/nonexistent",
+    })!;
+    for (const [name, input] of [
+      ["write", { path: "a.ts", content: "x" }],
+      ["edit", { path: "a.ts", oldText: "a", newText: "b" }],
+      ["bash", { command: "echo hi" }],
+    ] as const) {
+      expect(
+        await tools.execute({
+          name,
+          inputJson: JSON.stringify(input),
+          signal: new AbortController().signal,
+        }),
+      ).toMatchObject({
+        isError: true,
+        result: { error: expect.stringMatching(/^(tool-unavailable|plan-mode-denied)$/) },
+      });
+    }
   });
 });
