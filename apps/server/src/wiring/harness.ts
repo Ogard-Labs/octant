@@ -5,7 +5,6 @@ import { join } from "node:path";
 import {
   AggregateId,
   decodeCodeThreadId,
-  decodeWindowId,
   LOCAL_HOST_ID,
   type OctantMode,
   ToolEgressLaunchId,
@@ -15,6 +14,7 @@ import { ResearchRouter } from "../chat/research/researchRouter";
 import { SearxngClient } from "../chat/research/searxngClient";
 import { ThreadWorkService } from "../chat/threadWorkService";
 import { GoalLoopService } from "../goal/goalLoopService";
+import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { nativeHarnessRecoveryBlockers } from "../harness/nativeHarnessRecovery";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
@@ -469,20 +469,11 @@ export function wireHarness(deps: HarnessDependencies) {
     // The posture a command's network follows is the one its turn may use:
     // the window's session grant, clamped to the running turn's posture, so
     // a thread widened mid-turn keeps that turn's commands on `proxied`.
-    readCodeExecutionPolicy: (threadId, windowId) => {
-      try {
-        const stored = persistence.readCodeThread(decodeCodeThreadId(threadId));
-        if (stored === undefined) return undefined;
-        const session =
-          windowId === undefined
-            ? stored
-            : codeSessionAuthority.effectiveThread(decodeWindowId(windowId), stored);
-        return (codeOperationRuntime?.threadWithActiveTurnPosture?.(session) ?? session)
-          .executionPolicy;
-      } catch {
-        return undefined;
-      }
-    },
+    readCodeExecutionPolicy: codeTurnExecutionPolicyReader({
+      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
+      codeSessionAuthority,
+      codeOperationRuntime,
+    }),
     resolveWebSearch: () =>
       searxngHarnessWebSearch({
         readBaseUrl: () => persistence.readChatSettings()?.settings.searxngBaseUrl,

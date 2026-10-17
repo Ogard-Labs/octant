@@ -481,6 +481,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
 } & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
+    | "codeParentActiveTurn"
     | "codeSessionAuthority"
     | "onAgentRunExecutionAccepted"
     | "windowAuthorityStore"
@@ -514,6 +515,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     agentRunPersistence,
     chatService,
     codeBoardEventStore,
+    codeParentActiveTurn,
     codeSessionAuthority,
     configuredDriverOptions,
     isProjectPolicyTargetAllowed,
@@ -1026,6 +1028,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         parentThreadId,
         windowId,
         codeSessionAuthority,
+        activeTurn: codeParentActiveTurn,
       }),
     poolRouting: ({ request }) => {
       if (request.pool === undefined) return undefined;

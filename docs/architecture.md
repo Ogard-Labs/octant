@@ -4260,8 +4260,15 @@ native harness in `apps/server/src/harness`:
      a call from tools composed before the narrowing. A turn's posture only
      narrows the thread's, never widens it. Work and Chat have no Plan
      posture (a Work turn is ask-first or auto-accept-edits; Chat is
-     approval-gated), so no narrowed turn reaches them. A managed child admitted in Plan is offered the same reduced
-     set. `nativeHarnessComposition.test.ts` pins the full
+     approval-gated), so no narrowed turn reaches them. A child agent
+     is admitted, and a scheduled resume is granted, under the same narrower
+     posture: the parent's live grant is its thread (with the window's session
+     grant) clamped to the posture its running turn holds, so a turn narrowed to
+     Plan delegates only Plan children, and a turn narrowed to approval-gated
+     only approval-gated ones, whichever route starts them (`delegate` or the
+     `agents` tool). A posture that cannot be read counts as Plan. A managed
+     child admitted in Plan is offered the same reduced set.
+     `nativeHarnessComposition.test.ts` pins the full
      set per mode with every port supplied, the Code set under each access
      posture, the Side Chat set, the reduced set without them, and that the
      composition call site still supplies each port.

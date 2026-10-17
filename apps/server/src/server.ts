@@ -193,6 +193,7 @@ export function startOctantServer(
       browserCaptures,
       browserModelBindings,
       codeApprovalStore,
+      codeParentActiveTurn,
       codeSessionAuthority,
       extensionToolApprovalService,
       isPairedDeviceScope,
@@ -206,6 +207,7 @@ export function startOctantServer(
       windowAuthorityStore,
     } = wireAuthority({
       browserAuthority,
+      late,
       persistence,
     });
     const {
@@ -250,6 +252,7 @@ export function startOctantServer(
       agentRunPersistence,
       chatService: (): ChatService => chatService,
       codeBoardEventStore,
+      codeParentActiveTurn,
       codeSessionAuthority,
       configuredDriverOptions: (): ConfiguredProviderDriverOptions => configuredDriverOptions,
       isProjectPolicyTargetAllowed,

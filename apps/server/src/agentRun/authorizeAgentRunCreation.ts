@@ -67,12 +67,20 @@ const codeParentLiveGrant = (
   });
 };
 
+/**
+ * The Code parent as its running turn may use it: a turn narrowed below the
+ * thread (to Plan, say) gives its children no more than the turn holds. The
+ * host supplies this; without one the thread is judged as it is stored.
+ */
+export type CodeParentActiveTurn = (thread: CodeThread) => CodeThread;
+
 export function authorizeAgentRunCreation(input: {
   readonly persistence: PersistenceService;
   readonly workThreadProjection: WorkThreadProjection;
   readonly parentThreadId: AgentRunParentThreadId;
   readonly windowId: string;
   readonly codeSessionAuthority: CodeSessionAuthorityStore;
+  readonly activeTurn?: CodeParentActiveTurn;
 }): AgentRunControlParentFacts | undefined {
   const workspace = input.persistence.readWindowWorkspace(input.windowId as WindowId)?.workspace;
   if (workspace === undefined) return undefined;
@@ -172,10 +180,11 @@ export function authorizeAgentRunCreation(input: {
       String(codeContext.host),
     )
   ) {
-    const effectiveThread = input.codeSessionAuthority.effectiveThread(
+    const sessionThread = input.codeSessionAuthority.effectiveThread(
       input.windowId as WindowId,
       codeThread,
     );
+    const effectiveThread = input.activeTurn?.(sessionThread) ?? sessionThread;
     const parentAuthority = defaultAgentRunAuthorityCeilingForMode("code");
     const liveAuthority = codeParentLiveGrant(
       effectiveThread.executionPolicy,
@@ -213,11 +222,13 @@ export function boundAgentRunLiveAuthority(input: {
   >;
   readonly codeSessionAuthority: CodeSessionAuthorityStore;
   readonly windowAuthorityStore: Pick<WindowAuthorityStore, "listWindowIds">;
+  readonly activeTurn?: CodeParentActiveTurn;
 }): AgentRunAuthority | undefined {
   const binding = input.executionWindows.get(input.run.requestId);
   return scheduledAgentRunLiveAuthority({
     persistence: input.persistence,
     run: input.run,
+    ...(input.activeTurn === undefined ? {} : { activeTurn: input.activeTurn }),
     // Cached bindings do not extend a window's lifetime. The store's read
     // expires capabilities and revokes their session grants even when no
     // renderer request has authenticated since the child was admitted.
@@ -253,6 +264,7 @@ export function scheduledAgentRunLiveAuthority(input: {
     readonly windowId: WindowId;
     readonly codeSessionAuthority: CodeSessionAuthorityStore;
   };
+  readonly activeTurn?: CodeParentActiveTurn;
 }): AgentRunAuthority | undefined {
   switch (input.run.routingReceipt.mode) {
     case "chat":
@@ -269,11 +281,13 @@ export function scheduledAgentRunLiveAuthority(input: {
         return undefined;
       }
       if (codeThread === undefined || codeThread.lifecycle !== "active") return undefined;
-      const thread =
+      const sessionThread =
         input.executionWindow?.codeSessionAuthority.effectiveThread(
           input.executionWindow.windowId,
           codeThread,
         ) ?? codeThread;
+      // A resume while the parent is mid-turn is bound by that turn's posture too.
+      const thread = input.activeTurn?.(sessionThread) ?? sessionThread;
       return codeParentLiveGrant(thread.executionPolicy, thread.permissionPersistence);
     }
     default:
