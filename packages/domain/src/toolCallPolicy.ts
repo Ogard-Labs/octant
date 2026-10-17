@@ -320,6 +320,26 @@ function requiredCapabilityClassForExtension(
   return entry.requiredCapabilityClass;
 }
 
+/**
+ * Plan is read-only: it refuses every class that writes, runs a command, leaves
+ * the project, or publishes. Network access is not among them, so a Plan
+ * thread's `web-fetch` and `web-search` are allowed (a tainted thread still
+ * confirms the fetch afresh). A tool set offers only the tools this lets
+ * through, so the model is never invited to call one it will be refused.
+ */
+export function planRefusesApprovalClass(approvalClass: ToolApprovalClass): boolean {
+  return (
+    approvalClass === "external-application" ||
+    approvalClass === "shell-commands" ||
+    approvalClass === "project-file-writes" ||
+    approvalClass === "destructive-irreversible" ||
+    approvalClass === "credential-secret-access" ||
+    approvalClass === "privilege-expansion" ||
+    approvalClass === "access-outside-project" ||
+    approvalClass === "publish-to-target"
+  );
+}
+
 function resolveThreadElevation(input: {
   readonly entry: ClosedToolCatalogEntry;
   readonly executionPolicy: ProviderExecutionPolicy;
@@ -329,19 +349,8 @@ function resolveThreadElevation(input: {
   | { readonly kind: "allow" }
   | { readonly kind: "prompt"; readonly reason: string }
   | { readonly kind: "deny"; readonly reason: string } {
-  if (input.executionPolicy === "plan") {
-    if (
-      input.entry.approvalClass === "external-application" ||
-      input.entry.approvalClass === "shell-commands" ||
-      input.entry.approvalClass === "project-file-writes" ||
-      input.entry.approvalClass === "destructive-irreversible" ||
-      input.entry.approvalClass === "credential-secret-access" ||
-      input.entry.approvalClass === "privilege-expansion" ||
-      input.entry.approvalClass === "access-outside-project" ||
-      input.entry.approvalClass === "publish-to-target"
-    ) {
-      return { kind: "deny", reason: "plan-mode-denied" };
-    }
+  if (input.executionPolicy === "plan" && planRefusesApprovalClass(input.entry.approvalClass)) {
+    return { kind: "deny", reason: "plan-mode-denied" };
   }
 
   // Taint hook: thread-lifetime taint forces fresh confirmation for irreversible classes.
