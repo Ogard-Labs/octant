@@ -10,6 +10,7 @@ import {
   onboardingFlowExampleBlock,
   searchSpecExampleBlock,
 } from "@octant/domain";
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CanvasDocument } from "../CanvasDocument";
 import { canvasFixture } from "../test-fixtures";
@@ -53,21 +54,61 @@ function runRuntime(fields: Partial<DesignRunRuntime> = {}) {
   };
 }
 
-/** What the desktop's surface for a prototype reports for its page, as the element delivers it. */
-function surfaceBridge(view: Element, data: Record<string, unknown>, channel?: string) {
-  const event = Object.assign(new Event("ipc-message"), {
-    channel: channel ?? "octant-canvas-prototype-bridge",
-    args: [{ channel: "octant-design-frame@1", ...data }],
+/**
+ * The desktop's prototype host as the renderer sees it: what it was asked to
+ * open, the input it was sent, and a way to report events for a prototype.
+ */
+const prototypeHost = {
+  listeners: new Set<(event: unknown) => void>(),
+  opened: [] as Array<{ readonly surfaceId: string; readonly src: string }>,
+  closed: [] as Array<string>,
+  drawn: [] as Array<string>,
+  inputs: [] as Array<Record<string, unknown>>,
+  emit(event: Record<string, unknown>) {
+    for (const listener of this.listeners) listener(event);
+  },
+  reset() {
+    this.listeners.clear();
+    this.opened.length = 0;
+    this.closed.length = 0;
+    this.drawn.length = 0;
+    this.inputs.length = 0;
+  },
+};
+
+/** What the prototype host reports for the latest page, or for another surface. */
+function surfaceBridge(data: Record<string, unknown>, surfaceId?: string) {
+  prototypeHost.emit({
+    kind: "bridge",
+    surfaceId: surfaceId ?? prototypeHost.opened.at(-1)?.surfaceId,
+    payload: { channel: "octant-design-frame@1", ...data },
   });
-  view.dispatchEvent(event);
 }
 
 function views(container: ParentNode): ReadonlyArray<Element> {
-  return Array.from(container.querySelectorAll("webview"));
+  return Array.from(container.querySelectorAll("canvas[aria-roledescription='running prototype']"));
 }
 
 function installDesktopBridge(fields: Record<string, unknown> = {}) {
   (window as { octantHost?: unknown }).octantHost = {
+    openCanvasPrototype: async (request: { readonly surfaceId: string; readonly src: string }) => {
+      prototypeHost.opened.push(request);
+      return { status: "open" };
+    },
+    subscribeCanvasPrototypeEvents: (listener: (event: unknown) => void) => {
+      prototypeHost.listeners.add(listener);
+      return () => prototypeHost.listeners.delete(listener);
+    },
+    sendCanvasPrototypeInput: async (_surfaceId: string, input: Record<string, unknown>) => {
+      prototypeHost.inputs.push(input);
+    },
+    resizeCanvasPrototype: async () => undefined,
+    acknowledgeCanvasPrototypeFrame: async (surfaceId: string) => {
+      prototypeHost.drawn.push(surfaceId);
+    },
+    closeCanvasPrototype: async (surfaceId: string) => {
+      prototypeHost.closed.push(surfaceId);
+    },
     setProviderCredential: () => undefined,
     providerCredentialStatus: () => undefined,
     clearProviderCredential: () => undefined,
@@ -105,6 +146,7 @@ function design(fields: Partial<Pick<CanvasDesignBlock, "size" | "theme">>): Can
 afterEach(() => {
   vi.useRealTimers();
   delete (window as { octantHost?: unknown }).octantHost;
+  prototypeHost.reset();
   const root = document.documentElement;
   delete root.dataset.octantThemeMode;
   root.style.removeProperty("--oct-fg");
@@ -451,7 +493,7 @@ describe("running prototype", () => {
     expect(within(region).getByRole("button", { name: "Run again" })).toBeVisible();
   });
 
-  it("runs on open in the sidebar without taking focus, reachable by Tab, and in the desktop app says it has no network and what still leaves", async () => {
+  it("runs on open in the sidebar without taking focus, reachable by Tab, and in the desktop app says it has no network", async () => {
     installDesktopBridge({ prepareCanvasPrototypeSurface: async () => ({ status: "ready" }) });
     const { start, runtime } = runRuntime({
       runsOnOpen: true,
@@ -466,16 +508,16 @@ describe("running prototype", () => {
     );
     const view = await screen.findByTitle("Checkout, running prototype");
     expect(start).toHaveBeenCalledOnce();
-    expect(view.tagName).toBe("WEBVIEW");
+    expect(view.tagName).toBe("CANVAS");
     // Reachable by Tab, but opening did not move focus into it.
     expect(view).toHaveAttribute("tabindex", "0");
     expect(document.activeElement).toBe(document.body);
-    // The desktop draws it in a surface of its own, never in a frame.
+    // The desktop draws it from the prototype host, never in a frame.
     expect(frames(document)).toHaveLength(0);
     expect(screen.queryByText(/not network-contained/)).toBeNull();
     expect(screen.queryByText(/can still connect to another computer/)).toBeNull();
     expect(screen.getByText(/no network connection/)).toBeVisible();
-    expect(screen.getByText(/look up host names/)).toBeVisible();
+    expect(screen.queryByText(/look up host names/)).toBeNull();
   });
 
   it("leaves a prototype that started by itself in the tab order, right after Stop, without opening it there", async () => {
@@ -672,19 +714,49 @@ describe("running prototype in the desktop app", () => {
     return run;
   }
 
-  it("draws the page in a surface of its own with the host's ticketed address and nothing else", async () => {
+  it("opens the host's ticketed page in the prototype host and draws it on a canvas, never in a frame", async () => {
     runDesktop();
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     const view = await screen.findByTitle("Checkout, running prototype");
-    expect(view.tagName).toBe("WEBVIEW");
-    expect(view).toHaveAttribute("src", PAGE);
-    // The renderer names no partition, preload, or preference of its own.
-    for (const attribute of ["partition", "preload", "webpreferences", "allowpopups"]) {
-      expect(view).not.toHaveAttribute(attribute);
-    }
-    expect(view).not.toHaveAttribute("sandbox");
+    expect(view.tagName).toBe("CANVAS");
+    expect(prototypeHost.opened).toEqual([
+      expect.objectContaining({
+        src: PAGE,
+        width: CANVAS_DESIGN_VIEWPORT.phone.width,
+        height: CANVAS_DESIGN_VIEWPORT.phone.height,
+      }),
+    ]);
     expect(frames(document)).toHaveLength(0);
     expect(view).toHaveAttribute("tabindex", "0");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+      await Promise.resolve();
+    });
+    expect(prototypeHost.closed).toEqual([prototypeHost.opened[0]?.surfaceId]);
+  });
+
+  it("answers each frame of its own prototype, drawn or malformed, so the host sends the next", async () => {
+    runDesktop({ runsOnOpen: true });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const surfaceId = prototypeHost.opened[0]?.surfaceId;
+    const frame = {
+      kind: "frame",
+      frameWidth: 2,
+      frameHeight: 2,
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      pixels: new Uint8Array(4),
+    };
+    act(() => prototypeHost.emit({ ...frame, surfaceId }));
+    act(() => prototypeHost.emit({ ...frame, surfaceId, pixels: new Uint8Array(3) }));
+    act(() => prototypeHost.emit({ ...frame, surfaceId: "33333333-3333-4333-8333-333333333333" }));
+    act(() => prototypeHost.emit({ kind: "cursor", surfaceId, cursor: "pointer" }));
+    expect(prototypeHost.drawn).toEqual([surfaceId, surfaceId]);
   });
 
   it("keeps a prototype running while its page beats, stops it when the beats stop, and offers to run it again", async () => {
@@ -693,19 +765,18 @@ describe("running prototype in the desktop app", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    const view = screen.getByTitle("Checkout, running prototype");
     for (let second = 0; second < 12; second += 1) {
       act(() => {
-        surfaceBridge(view, { type: "heartbeat" });
+        surfaceBridge({ type: "heartbeat" });
         vi.advanceTimersByTime(1_000);
       });
     }
     expect(views(document)).toHaveLength(1);
 
-    // Beats on any other channel keep nothing alive.
+    // Beats for any other prototype keep nothing alive.
     for (let second = 0; second <= RUNNING_DESIGN_HEARTBEAT_TIMEOUT_MS / 1_000 + 1; second += 1) {
       act(() => {
-        surfaceBridge(view, { type: "heartbeat" }, "other-channel");
+        surfaceBridge({ type: "heartbeat" }, "33333333-3333-4333-8333-333333333333");
         vi.advanceTimersByTime(1_000);
       });
     }
@@ -721,17 +792,17 @@ describe("running prototype in the desktop app", () => {
       await Promise.resolve();
     });
     const view = screen.getByTitle("Checkout, running prototype");
-    act(() => surfaceBridge(view, { type: "size", height: 640 }));
+    act(() => surfaceBridge({ type: "size", height: 640 }));
     expect((view as HTMLElement).style.height).toBe("640px");
-    act(() => surfaceBridge(view, { type: "size", height: 10_000_000 }));
+    act(() => surfaceBridge({ type: "size", height: 10_000_000 }));
     expect((view as HTMLElement).style.height).toBe("12000px");
-    act(() => surfaceBridge(view, { type: "size", height: "300" }));
-    act(() => surfaceBridge(view, { channel: "other", type: "size", height: 300 }));
-    act(() => surfaceBridge(view, { type: "navigate", url: "https://example.test" }));
-    act(() => surfaceBridge(view, { type: "size", height: 300 }, "other-channel"));
+    act(() => surfaceBridge({ type: "size", height: "300" }));
+    act(() => surfaceBridge({ channel: "other", type: "size", height: 300 }));
+    act(() => surfaceBridge({ type: "navigate", url: "https://example.test" }));
+    act(() => surfaceBridge({ type: "size", height: 300 }, "33333333-3333-4333-8333-333333333333"));
     expect((view as HTMLElement).style.height).toBe("12000px");
 
-    act(() => surfaceBridge(view, { type: "error", message: `<b>boom</b>${"x".repeat(1_000)}` }));
+    act(() => surfaceBridge({ type: "error", message: `<b>boom</b>${"x".repeat(1_000)}` }));
     const errors = screen.getByRole("list", { name: "Prototype script errors" });
     expect(errors.textContent?.startsWith("<b>boom</b>")).toBe(true);
     expect(errors.querySelector("b")).toBeNull();
@@ -756,95 +827,87 @@ describe("running prototype in the desktop app", () => {
     await act(async () => {
       await Promise.resolve();
     });
-    const view = screen.getByTitle("Checkout, running prototype");
     act(() => {
       for (let sent = 0; sent <= RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND; sent += 1) {
-        surfaceBridge(view, { type: "error", message: `boom ${String(sent)}` });
+        surfaceBridge({ type: "error", message: `boom ${String(sent)}` });
       }
     });
     expect(views(document)).toHaveLength(0);
     expect(screen.getByText(/sent too many messages/)).toBeVisible();
   });
 
-  it("removes a prototype that loads a second page or whose surface goes away", async () => {
+  it("removes a prototype whose page went away in the prototype host, or that the host would not open", async () => {
     runDesktop({ runsOnOpen: true });
-    const view = await screen.findByTitle("Checkout, running prototype");
-    fireEvent(view, new Event("did-navigate"));
-    expect(views(document)).toHaveLength(1);
-    fireEvent(view, new Event("did-navigate"));
-    expect(views(document)).toHaveLength(0);
-    expect(screen.getByText(/tried to load another page/)).toBeVisible();
-    cleanup();
-
-    runDesktop({ runsOnOpen: true });
-    const crashed = await screen.findByTitle("Checkout, running prototype");
-    fireEvent(crashed, new Event("render-process-gone"));
+    await screen.findByTitle("Checkout, running prototype");
+    act(() => prototypeHost.emit({ kind: "gone", surfaceId: prototypeHost.opened[0]?.surfaceId }));
     expect(views(document)).toHaveLength(0);
     expect(screen.getByText(/stopped responding/)).toBeVisible();
-  });
+    cleanup();
 
-  it("hands focus to Stop when the desktop's reserved shortcut fires while the prototype holds it", async () => {
-    let escape: (() => void) | undefined;
     installDesktopBridge({
       prepareCanvasPrototypeSurface: async () => ({ status: "ready" }),
-      subscribeCanvasFrameFocusEscape: (listener: () => void) => {
-        escape = listener;
-        return () => {
-          escape = undefined;
-        };
-      },
-    });
-    runDesktop();
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
-    const view = await screen.findByTitle("Checkout, running prototype");
-    (view as HTMLElement).focus();
-    expect(document.activeElement).toBe(view);
-    act(() => escape?.());
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
-  });
-
-  it("hands focus to Stop from a prototype that started by itself once the person has tabbed into it", async () => {
-    let escape: (() => void) | undefined;
-    installDesktopBridge({
-      prepareCanvasPrototypeSurface: async () => ({ status: "ready" }),
-      subscribeCanvasFrameFocusEscape: (listener: () => void) => {
-        escape = listener;
-        return () => {
-          escape = undefined;
-        };
-      },
+      openCanvasPrototype: async () => ({ status: "refused", reason: "Not this page." }),
     });
     runDesktop({ runsOnOpen: true });
-    const view = await screen.findByTitle("Checkout, running prototype");
-    expect(document.activeElement).toBe(document.body);
-    (view as HTMLElement).focus();
-    expect(document.activeElement).toBe(view);
-    act(() => escape?.());
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
+    expect(await screen.findByText(/stopped responding/)).toBeVisible();
+    expect(views(document)).toHaveLength(0);
   });
 
-  it("stops a prototype that takes the keyboard straight back after the reserved shortcut", async () => {
-    let escape: (() => void) | undefined;
-    installDesktopBridge({
-      prepareCanvasPrototypeSurface: async () => ({ status: "ready" }),
-      subscribeCanvasFrameFocusEscape: (listener: () => void) => {
-        escape = listener;
-        return () => undefined;
-      },
+  it("opens the page once when its effect is run twice, as React's development checks do", async () => {
+    installDesktopBridge({ prepareCanvasPrototypeSurface: async () => ({ status: "ready" }) });
+    const run = runRuntime({ contained: true, drawnIn: "desktop-surface", runsOnOpen: true });
+    render(
+      <StrictMode>
+        <CanvasDocument
+          definition={{ ...canvasFixture, blocks: [prototype()] }}
+          designRunRuntime={run.runtime}
+        />
+      </StrictMode>,
+    );
+    await screen.findByTitle("Checkout, running prototype");
+    await act(async () => {
+      await Promise.resolve();
     });
+    expect(prototypeHost.opened).toHaveLength(1);
+    expect(prototypeHost.closed).toEqual([]);
+  });
+
+  it("forwards clicks in the page's own pixels, however the prototype is scaled", async () => {
+    runDesktop({ runsOnOpen: true });
+    const view = await screen.findByTitle("Checkout, running prototype");
+    // Drawn at half size, 20 pixels in from the window's corner.
+    view.getBoundingClientRect = () =>
+      DOMRect.fromRect({
+        x: 20,
+        y: 20,
+        width: CANVAS_DESIGN_VIEWPORT.phone.width / 2,
+        height: CANVAS_DESIGN_VIEWPORT.phone.height / 2,
+      });
+    fireEvent.mouseDown(view, { clientX: 150, clientY: 350, button: 0, detail: 1 });
+    expect(prototypeHost.inputs).toEqual([
+      { type: "mouseDown", x: 260, y: 660, button: "left", clickCount: 1, modifiers: [] },
+    ]);
+  });
+
+  it("types into the page, and hands focus to Stop on the reserved shortcut without the page seeing it", async () => {
     runDesktop();
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     const view = await screen.findByTitle("Checkout, running prototype");
-    vi.useFakeTimers();
     (view as HTMLElement).focus();
-    act(() => escape?.());
+    expect(document.activeElement).toBe(view);
+    prototypeHost.inputs.length = 0;
+    fireEvent.keyDown(view, { key: "a" });
+    fireEvent.keyDown(view, { key: "ArrowLeft" });
+    expect(prototypeHost.inputs).toEqual([
+      { type: "keyDown", keyCode: "a", modifiers: [] },
+      { type: "char", keyCode: "a", modifiers: [] },
+      { type: "keyDown", keyCode: "Left", modifiers: [] },
+    ]);
+    prototypeHost.inputs.length = 0;
+    // jsdom reports no Mac, so the reserved shortcut is Control-Escape.
+    fireEvent.keyDown(view, { key: "Escape", ctrlKey: true });
+    expect(prototypeHost.inputs.filter((input) => input.type !== "blur")).toEqual([]);
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Stop" }));
-    // The page refocuses itself, as one listening for blur can.
-    (view as HTMLElement).focus();
-    act(() => vi.advanceTimersByTime(200));
-    expect(views(document)).toHaveLength(0);
-    expect(screen.getByText(/kept taking the keyboard back/)).toBeVisible();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Run again" }));
   });
 });
 
@@ -883,8 +946,8 @@ describe("where a running prototype is drawn", () => {
   });
 
   it("draws the preview browser's prototype in a frame, because that browser has no route out and no desktop surface", async () => {
-    // The preview page says it is contained and draws a frame: ordinary
-    // Chromium does not know a webview, so a surface there would never load.
+    // The preview page says it is contained and draws a frame: there is no
+    // prototype host in the preview browser to draw it from.
     const prepare = vi.fn(async () => ({ status: "ready" as const }));
     installDesktopBridge({ prepareCanvasPrototypeSurface: prepare });
     const { start, runtime } = runRuntime({ contained: true, drawnIn: "frame", runsOnOpen: true });
@@ -920,7 +983,8 @@ describe("where a running prototype is drawn", () => {
       return { kind: "ready" as const, url: PAGE };
     });
     runFromThread(runtime!);
-    expect(await screen.findByTitle("Checkout, running prototype")).toHaveAttribute("src", PAGE);
+    await screen.findByTitle("Checkout, running prototype");
+    expect(prototypeHost.opened.map((request) => request.src)).toEqual([PAGE]);
     expect(order).toEqual(["surface", "ticket"]);
   });
 

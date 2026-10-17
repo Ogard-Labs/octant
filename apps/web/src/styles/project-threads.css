@@ -227,6 +227,8 @@
   align-items: center;
   gap: 2px;
   overflow: hidden;
+  /* The Add button takes the group's tint; hover reads in the foreground. */
+  color: var(--oct-meta);
   opacity: 0;
   transition: opacity var(--oct-motion-fast) ease;
 }
@@ -259,12 +261,13 @@
   min-height: 0;
   justify-content: center;
   padding: 0;
+}
+
+.project-section__header .octant-menu__trigger {
   color: var(--oct-meta);
   border-radius: var(--oct-radius-sm);
 }
 
-.project-section__add:hover,
-.project-section__add:focus-visible,
 .project-section__header .octant-menu__trigger:hover,
 .project-section__header .octant-menu__trigger:focus-visible {
   color: var(--oct-fg);
@@ -329,16 +332,11 @@
   align-items: center;
   min-height: var(--oct-nav-row-h);
   padding: 0 var(--oct-nav-inset);
+  /* The bare variant draws nothing, and an open Project is not a filled row:
+     the row's own wash is the only fill. It keeps a corner for the focus edge. */
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   text-align: left;
-}
-
-/* The name button is what opens and closes the Project, so the recipe marks
-   it expanded and would fill it; that turned every open Project into a
-   highlighted row, which is the header's mistake all over again. */
-.project-row__select:hover,
-.project-row__select[aria-expanded] {
-  background: transparent;
 }
 
 /* A Project's identity: its first letter on a tile in the colour the person
@@ -463,16 +461,8 @@
 .project-row__action {
   min-height: var(--oct-nav-row-h);
   padding: 0 var(--oct-space-2);
-  color: var(--oct-meta);
-  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: var(--oct-text-xs);
-}
-
-.project-row__action:hover,
-.project-row__action:focus-visible {
-  color: var(--oct-fg);
-  background: var(--oct-fg-soft);
 }
 
 .project-row__action:disabled {
@@ -692,25 +682,15 @@
   gap: var(--oct-space-2);
   min-height: var(--oct-control-height-sm);
   padding: 0 var(--oct-space-3);
-  color: var(--oct-fg);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-border);
   cursor: pointer;
   font: inherit;
   font-size: var(--oct-text-sm);
   text-align: left;
 }
 
-.project-dialog__folder[data-chosen="false"] {
+/* Until a folder is chosen the label reads as a placeholder. */
+.project-dialog__folder[data-chosen="false"] .project-dialog__folder-name {
   color: var(--oct-muted);
-}
-
-.project-dialog__folder:hover:not(:disabled) {
-  background: var(--oct-fg-soft);
-}
-
-.project-dialog__folder:focus-visible {
-  background: var(--octant-control-hover);
 }
 
 .project-dialog__folder:disabled {
@@ -765,26 +745,14 @@
 .project-button {
   min-height: 31px;
   padding: 0 var(--oct-space-3);
-  color: var(--octant-text-primary);
-  background: var(--octant-control-hover);
-  border: 1px solid var(--octant-border-strong);
-  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: var(--oct-text-xs);
   font-weight: 500;
 }
 
-.project-button:hover {
-  background: var(--octant-control-pressed);
-}
-
 .project-button:disabled {
   cursor: default;
   opacity: 0.45;
-}
-.project-button--quiet {
-  color: var(--octant-text-muted);
-  background: transparent;
 }
 
 .project-dialog__status {
@@ -1452,7 +1420,6 @@ button[aria-expanded="true"] > .project-overview-inspector__chevron {
 .chat-project-overview__archived > .project-button {
   min-height: 0;
   padding: 0;
-  color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
 

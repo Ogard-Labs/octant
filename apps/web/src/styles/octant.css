@@ -966,6 +966,9 @@ h4 {
   color: var(--oct-danger-fg);
   font-family: var(--oct-font-mono);
 }
+/* Layout only. A field's paint (rest, hover, focus, invalid) is the shared
+   field recipe's, in ui/shadcn/field-paint.ts, so a text area, an input and a select
+   cannot drift apart. */
 .input,
 .textarea,
 .select {
@@ -975,29 +978,6 @@ h4 {
   padding-inline: var(--oct-space-4);
   font-family: var(--oct-font-body);
   font-size: var(--oct-text-base);
-}
-/* A text area keeps this layout but takes the field recipe's paint, so only
-   the single-line field and the select carry the system's own face. */
-.input,
-.select {
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: var(--oct-surface);
-  color: var(--oct-fg);
-}
-.input::placeholder {
-  color: var(--oct-muted);
-}
-.input:hover,
-.select:hover {
-  border-color: color-mix(in oklab, var(--oct-fg) 26%, transparent);
-}
-.input:focus-visible,
-.select:focus-visible {
-  background: var(--octant-control-hover);
-}
-.input[aria-invalid="true"] {
-  border-color: var(--oct-danger-fg);
 }
 .input[disabled],
 .textarea[disabled],

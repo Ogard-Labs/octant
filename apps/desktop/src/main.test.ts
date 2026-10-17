@@ -238,8 +238,6 @@ describe("Project window BrowserWindow construction", () => {
         preload: "/app/preload.mjs",
         sandbox: true,
         webSecurity: true,
-        // Only so a running Canvas prototype can be drawn in its own surface.
-        webviewTag: true,
       },
     });
   });

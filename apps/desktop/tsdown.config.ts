@@ -21,6 +21,12 @@ export default defineConfig([
   {
     ...shared,
     clean: false,
+    entry: ["src/entry.ts"],
+    format: ["esm"],
+  },
+  {
+    ...shared,
+    clean: false,
     entry: ["src/preload.ts"],
     format: [DESKTOP_PRELOAD_FORMAT],
   },
