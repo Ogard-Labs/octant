@@ -373,22 +373,23 @@ export class PairingDeviceLifecycleService {
   }
 
   /**
-   * True when the ticket exists, has not expired, is still undecided, and the
-   * proof is the one issued with it. A pure read: it records no failed attempt,
-   * so the caller can use it to decide which admission budget a status read
-   * belongs to without changing what the read itself answers.
+   * True when the ticket exists, the proof is the one issued with it, and its
+   * status is still being waited on: undecided and unexpired, or approved and
+   * not yet past the deadline until which the approval stays readable. A pure
+   * read: it records no failed attempt, so the caller can use it to decide
+   * which admission budget a status read belongs to without changing what the
+   * read itself answers.
    */
-  isPendingTicket(input: { readonly ticketId: string; readonly ticketProof: string }): boolean {
+  isLiveTicket(input: { readonly ticketId: string; readonly ticketProof: string }): boolean {
     const now = this.#now();
     this.#purgeExpired(now);
     const record = this.#tickets.get(input.ticketId);
-    return (
-      record !== undefined &&
-      record.hostId === this.#hostId &&
-      record.state === "pending" &&
-      now < record.expiresAt &&
-      proofMatches(record.proofDigest, input.ticketProof)
-    );
+    if (record === undefined || record.hostId !== this.#hostId) return false;
+    const live =
+      record.state === "pending"
+        ? now < record.expiresAt
+        : record.state === "approved" && now < (record.approvedUntil ?? record.expiresAt);
+    return live && proofMatches(record.proofDigest, input.ticketProof);
   }
 
   ticketStatus(input: {

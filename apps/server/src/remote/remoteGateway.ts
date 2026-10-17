@@ -263,7 +263,7 @@ interface GatewayServices {
   /** Remove approved devices whose pairing window never signed in with its key. */
   readonly sweepAbandonedPairings: () => void;
   /** True for a live, pending pairing ticket whose proof matches. */
-  readonly pairingTicketIsPending: (ticket: {
+  readonly pairingTicketIsLive: (ticket: {
     readonly ticketId: string;
     readonly ticketProof: string;
   }) => boolean;
@@ -314,7 +314,7 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
       listener = createPrivateListener({
         config: generation.config.listener,
         fetch: generation.services.gatewayFetch,
-        pairingTicketIsPending: generation.services.pairingTicketIsPending,
+        pairingTicketIsLive: generation.services.pairingTicketIsLive,
         serve: options.serve,
         // The largest body any route takes is a relayed dev-server upload; every
         // other route keeps its own smaller budget in the route policy.
@@ -332,11 +332,17 @@ export function createRemoteGateway(options: RemoteGatewayOptions): RemoteGatewa
       state = "ready";
       const sweeping = generation.services;
       proxySweep = setInterval(() => {
-        sweeping.sweepServerProxySessions();
+        // Each sweep has its own guard: one that throws must not skip the other
+        // this tick, and the next tick retries both.
+        try {
+          sweeping.sweepServerProxySessions();
+        } catch {
+          // Retried on the next tick.
+        }
         try {
           sweeping.sweepAbandonedPairings();
         } catch {
-          // The next sweep retries; a failed read must not escape the timer.
+          // Retried on the next tick.
         }
       }, SERVER_PROXY_SWEEP_INTERVAL_MS);
       proxySweep.unref?.();
@@ -763,7 +769,7 @@ function assembleServices(
           reasonCode: "pairing-abandoned",
         });
       }),
-    pairingTicketIsPending: (ticket) => lifecycle.isPendingTicket(ticket),
+    pairingTicketIsLive: (ticket) => lifecycle.isLiveTicket(ticket),
   };
 }
 

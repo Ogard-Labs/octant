@@ -1285,7 +1285,7 @@ describe("RemoteGateway — approval for a window that never finished", () => {
     );
     expect(claim.status).toBe(200);
     const { device } = admin.approvePairing({ ticketId: ticket.ticketId });
-    return { ...made, admin, device };
+    return { ...made, admin, device, ticket, fetch };
   }
 
   it("removes the approved device after the ticket's life, with a journaled revoke", async () => {
@@ -1307,6 +1307,39 @@ describe("RemoteGateway — approval for a window that never finished", () => {
         )
         .get(),
     ).toEqual({ n: 1 });
+    await gateway.stop();
+  });
+
+  it("still tells the window it was approved when other sources have used up the host's pairing budget", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const wall = { value: nowMs };
+    const { gateway, device, ticket, fetch } = await approveForWindow(wall);
+    // Six other addresses say hello until the host-wide budget is gone.
+    let refused = false;
+    for (let source = 0; source < 8 && !refused; source += 1) {
+      for (let i = 0; i < 10; i += 1) {
+        const response = await fetch(
+          new Request(`${ORIGIN}/api/remote/hello`, { headers: { host: "192.168.1.20:9443" } }),
+          { ...lanFacts, sourceKey: `other-source-${source}` },
+        );
+        if (response.status === 429) refused = true;
+      }
+    }
+    expect(refused).toBe(true);
+
+    const response = await fetch(
+      postJson("/api/remote/pairing/status", {
+        ticketId: ticket.ticketId,
+        ticketProof: ticket.ticketProof,
+      }),
+      lanFacts,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      status: "approved",
+      deviceId: device.deviceId,
+      credentialGeneration: 1,
+    });
     await gateway.stop();
   });
 

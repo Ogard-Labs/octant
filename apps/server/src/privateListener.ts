@@ -90,7 +90,7 @@ export interface PrivateListenerOptions {
    * for such a ticket is charged to the ticket's own budget instead of the
    * per-source budget that hello and claim share.
    */
-  readonly pairingTicketIsPending?: RemoteBoundaryFetchOptions["pairingTicketIsPending"];
+  readonly pairingTicketIsLive?: RemoteBoundaryFetchOptions["pairingTicketIsLive"];
   /**
    * Resolve an opaque device key for authenticated requests. When the
    * session-cookie/request-proof boundary supplies a verified device identity,
@@ -132,9 +132,9 @@ export function createPrivateListener(options: PrivateListenerOptions): PrivateL
     ...(options.deviceKeyResolver === undefined
       ? {}
       : { deviceKeyResolver: options.deviceKeyResolver }),
-    ...(options.pairingTicketIsPending === undefined
+    ...(options.pairingTicketIsLive === undefined
       ? {}
-      : { pairingTicketIsPending: options.pairingTicketIsPending }),
+      : { pairingTicketIsLive: options.pairingTicketIsLive }),
   });
 
   let config = options.config;

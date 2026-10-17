@@ -549,29 +549,34 @@ describe("PairingDeviceLifecycleService", () => {
     expect(fieldsMatching(status, /comparisonCode|devicePublicKey|private ?key/i)).toEqual([]);
   });
 
-  it("recognizes a pending ticket only by its own proof, without counting a failed attempt", () => {
+  it("recognizes a ticket still being waited on only by its own proof, without counting a failed attempt", () => {
     const clock = { nowMs };
     const { service } = createService({ clock });
     const ticket = service.createTicket({ sourceClass: "lan-private" });
     const known = { ticketId: ticket.ticketId, ticketProof: ticket.ticketProof };
 
-    expect(service.isPendingTicket(known)).toBe(true);
+    expect(service.isLiveTicket(known)).toBe(true);
     for (let i = 0; i < PAIRING_MAX_FAILED_ATTEMPTS + 2; i += 1) {
-      expect(service.isPendingTicket({ ...known, ticketProof: "wrong_proof" })).toBe(false);
+      expect(service.isLiveTicket({ ...known, ticketProof: "wrong_proof" })).toBe(false);
     }
-    expect(service.isPendingTicket(known)).toBe(true);
-    expect(service.isPendingTicket({ ...known, ticketId: "unknown-ticket" })).toBe(false);
+    expect(service.isLiveTicket(known)).toBe(true);
+    expect(service.isLiveTicket({ ...known, ticketId: "unknown-ticket" })).toBe(false);
 
     service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
-    expect(service.isPendingTicket(known)).toBe(true);
+    expect(service.isLiveTicket(known)).toBe(true);
     service.approveTicket({ ticketId: ticket.ticketId });
-    expect(service.isPendingTicket(known)).toBe(false);
+    // An approved ticket is still waited on: its status read delivers the approval.
+    expect(service.isLiveTicket(known)).toBe(true);
+    expect(service.isLiveTicket({ ...known, ticketProof: "wrong_proof" })).toBe(false);
+    clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS + 30_000;
+    expect(service.isLiveTicket(known)).toBe(false);
+    clock.nowMs = nowMs;
 
     const other = service.createTicket({ sourceClass: "lan-private" });
     clock.nowMs += PAIRING_TICKET_TTL_MS;
-    expect(
-      service.isPendingTicket({ ticketId: other.ticketId, ticketProof: other.ticketProof }),
-    ).toBe(false);
+    expect(service.isLiveTicket({ ticketId: other.ticketId, ticketProof: other.ticketProof })).toBe(
+      false,
+    );
   });
 
   describe("an approved device whose window never signs in with its key", () => {

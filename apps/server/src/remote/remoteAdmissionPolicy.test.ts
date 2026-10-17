@@ -246,6 +246,29 @@ describe("remoteAdmissionPolicy pairing status budget", () => {
     ).toBe("admitted");
   });
 
+  it("caps one source's ticket-bucket reads however many tickets it holds", () => {
+    const policy = createRemoteAdmissionPolicy({ now: () => 1_000 });
+    let admitted = 0;
+    for (let i = 0; i < 32 * 120; i += 1) {
+      const decision = acquire(policy, {
+        surface: "pairing-status",
+        identity: { ...pairingSource, pairingTicketKey: `ticket-${i % 32}` },
+        method: "POST",
+      });
+      if (decision.kind === "admitted") admitted += 1;
+    }
+    expect(admitted).toBe(DEFAULT_REMOTE_ADMISSION_LIMITS.pairingStatusPerSourcePerMinute);
+    expect(policy.pairingStatusSourceExhausted(pairingSource.sourceKey)).toBe(true);
+    expect(policy.pairingStatusSourceExhausted(sourceKey(2))).toBe(false);
+    expect(
+      acquire(policy, {
+        surface: "pairing-status",
+        identity: { sourceKey: sourceKey(2), pairingTicketKey: "ticket-other" },
+        method: "POST",
+      }).kind,
+    ).toBe("admitted");
+  });
+
   it("falls back to the shared pairing budget when the ticket map is full", () => {
     const policy = createRemoteAdmissionPolicy({ now: () => 1_000, maxMapEntries: 1 });
     expect(
@@ -704,7 +727,7 @@ describe("createRemoteBoundaryFetch pairing status", () => {
         return Response.json({ status: "pending" });
       },
       admission,
-      pairingTicketIsPending: ({ ticketId, ticketProof }) =>
+      pairingTicketIsLive: ({ ticketId, ticketProof }) =>
         ticketId === "t-1" && ticketProof === "p-1",
     });
     for (let i = 0; i < 60; i += 1) {
@@ -728,7 +751,7 @@ describe("createRemoteBoundaryFetch pairing status", () => {
     const boundary = createRemoteBoundaryFetch({
       fetch: inner,
       admission: createRemoteAdmissionPolicy(),
-      pairingTicketIsPending: ({ ticketId, ticketProof }) =>
+      pairingTicketIsLive: ({ ticketId, ticketProof }) =>
         ticketId === "t-1" && ticketProof === "p-1",
     });
     const statuses: number[] = [];
@@ -749,7 +772,7 @@ describe("createRemoteBoundaryFetch pairing status", () => {
       const boundary = createRemoteBoundaryFetch({
         fetch: inner,
         admission: createRemoteAdmissionPolicy(),
-        pairingTicketIsPending: ticketCheck,
+        pairingTicketIsLive: ticketCheck,
       });
       const stalled = () =>
         new Request("https://h:9443/api/remote/pairing/status", {
@@ -783,6 +806,23 @@ describe("createRemoteBoundaryFetch pairing status", () => {
     }
   });
 
+  it("refuses a source past its ticket-bucket allowance before reading any body", async () => {
+    const ticketCheck = vi.fn(() => true);
+    const boundary = createRemoteBoundaryFetch({
+      fetch: () => Response.json({ status: "pending" }),
+      admission: createRemoteAdmissionPolicy({
+        limits: { pairingStatusPerSourcePerMinute: 3 },
+      }),
+      pairingTicketIsLive: ticketCheck,
+    });
+    const statuses: number[] = [];
+    for (let i = 0; i < 5; i += 1) {
+      statuses.push((await boundary(statusRequest(), lanFacts())).status);
+    }
+    expect(statuses).toEqual([200, 200, 200, 429, 429]);
+    expect(ticketCheck).toHaveBeenCalledTimes(3);
+  });
+
   it("charges every status read to the per-source budget when the host cannot vouch for tickets", async () => {
     const boundary = createRemoteBoundaryFetch({
       fetch: () => Response.json({ status: "pending" }),
@@ -799,7 +839,7 @@ describe("createRemoteBoundaryFetch pairing status", () => {
     const boundary = createRemoteBoundaryFetch({
       fetch: () => Response.json({ status: "pending" }),
       admission: createRemoteAdmissionPolicy(),
-      pairingTicketIsPending: () => {
+      pairingTicketIsLive: () => {
         throw new Error("store unavailable");
       },
     });

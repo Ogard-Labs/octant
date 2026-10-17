@@ -31,6 +31,12 @@ export interface RemoteAdmissionLimits {
    * hello and claim share.
    */
   readonly pairingStatusPerTicketPerMinute: number;
+  /**
+   * All ticket-bucket status reads from one source per minute, so a source
+   * that holds many tickets cannot multiply the per-ticket rate. Twice one
+   * ticket's rate: a few windows behind one address, none of them starved.
+   */
+  readonly pairingStatusPerSourcePerMinute: number;
   /** Authentication token bucket per opaque source key per minute. */
   readonly authPerSourcePerMinute: number;
   /** Authentication token bucket per opaque device key per minute. */
@@ -54,6 +60,7 @@ export const DEFAULT_REMOTE_ADMISSION_LIMITS: RemoteAdmissionLimits = {
   pairingPerSourcePerMinute: 10,
   pairingPerHostPerMinute: 60,
   pairingStatusPerTicketPerMinute: 120,
+  pairingStatusPerSourcePerMinute: 240,
   authPerSourcePerMinute: 30,
   authPerDevicePerMinute: 12,
   productConcurrentPerDevice: 8,
@@ -97,6 +104,7 @@ export interface RemoteAdmissionCounts {
 export interface RemoteAdmissionDiagnostics {
   readonly pairingSourceMapSize: number;
   readonly pairingStatusTicketMapSize: number;
+  readonly pairingStatusSourceMapSize: number;
   readonly authSourceMapSize: number;
   readonly authDeviceMapSize: number;
   readonly productDeviceConcurrentMapSize: number;
@@ -113,6 +121,12 @@ export interface RemoteAdmissionPolicyOptions {
 
 export interface RemoteAdmissionPolicy {
   readonly acquire: (input: RemoteAdmissionAcquireInput) => RemoteAdmissionDecision;
+  /**
+   * True when the source has used its whole ticket-bucket status allowance this
+   * minute. The boundary asks before reading a request body, so a source over
+   * its allowance costs no clone, read, or hash.
+   */
+  readonly pairingStatusSourceExhausted: (sourceKey: string, now?: number) => boolean;
   readonly reset: () => void;
   readonly counts: () => RemoteAdmissionCounts;
   readonly diagnostics: () => RemoteAdmissionDiagnostics;
@@ -146,6 +160,10 @@ export function createRemoteAdmissionPolicy(
     limits.pairingStatusPerTicketPerMinute,
     "pairingStatusPerTicketPerMinute",
   );
+  assertFinitePositiveInteger(
+    limits.pairingStatusPerSourcePerMinute,
+    "pairingStatusPerSourcePerMinute",
+  );
   assertFinitePositiveInteger(limits.authPerSourcePerMinute, "authPerSourcePerMinute");
   assertFinitePositiveInteger(limits.authPerDevicePerMinute, "authPerDevicePerMinute");
   assertFinitePositiveInteger(limits.productConcurrentPerDevice, "productConcurrentPerDevice");
@@ -164,6 +182,7 @@ export function createRemoteAdmissionPolicy(
   const pairingSource = new Map<string, number[]>();
   let pairingHost: number[] = [];
   const pairingStatusTicket = new Map<string, number[]>();
+  const pairingStatusSource = new Map<string, number[]>();
   const authSource = new Map<string, number[]>();
   const authDevice = new Map<string, number[]>();
   const productDeviceConcurrent = new Map<string, number>();
@@ -189,6 +208,7 @@ export function createRemoteAdmissionPolicy(
   const sweepAll = (current: number): void => {
     sweepMap(pairingSource, current);
     sweepMap(pairingStatusTicket, current);
+    sweepMap(pairingStatusSource, current);
     sweepMap(authSource, current);
     sweepMap(authDevice, current);
     sweepMap(productDeviceStateChanging, current);
@@ -262,15 +282,30 @@ export function createRemoteAdmissionPolicy(
       // A window waiting for approval polls its own ticket for the ticket's
       // whole life. Charging those reads to the source and host budgets that
       // hello and claim share would starve the wait after ten seconds, so a
-      // proven live ticket has a bucket of its own. A full map falls back to
-      // the shared budget below instead of admitting without a bound.
+      // proven live ticket has a bucket of its own, under a looser ceiling for
+      // the whole source. A full map falls back to the shared budget below
+      // instead of admitting without a bound. A ticket over its own limit is
+      // refused before it touches the source's allowance.
       const ticketKey = input.identity.pairingTicketKey;
-      if (canInsertKey(pairingStatusTicket, ticketKey)) {
+      if (
+        canInsertKey(pairingStatusTicket, ticketKey) &&
+        canInsertKey(pairingStatusSource, sourceKey)
+      ) {
         if (
           !tryBucket(
             pairingStatusTicket,
             ticketKey,
             limits.pairingStatusPerTicketPerMinute,
+            current,
+          )
+        ) {
+          return reject(limits);
+        }
+        if (
+          !tryBucket(
+            pairingStatusSource,
+            sourceKey,
+            limits.pairingStatusPerSourcePerMinute,
             current,
           )
         ) {
@@ -365,6 +400,7 @@ export function createRemoteAdmissionPolicy(
     pairingSource.clear();
     pairingHost = [];
     pairingStatusTicket.clear();
+    pairingStatusSource.clear();
     authSource.clear();
     authDevice.clear();
     productDeviceConcurrent.clear();
@@ -381,6 +417,7 @@ export function createRemoteAdmissionPolicy(
   const diagnostics = (): RemoteAdmissionDiagnostics => ({
     pairingSourceMapSize: pairingSource.size,
     pairingStatusTicketMapSize: pairingStatusTicket.size,
+    pairingStatusSourceMapSize: pairingStatusSource.size,
     authSourceMapSize: authSource.size,
     authDeviceMapSize: authDevice.size,
     productDeviceConcurrentMapSize: productDeviceConcurrent.size,
@@ -388,7 +425,13 @@ export function createRemoteAdmissionPolicy(
     maxMapEntries,
   });
 
-  return { acquire, reset, counts, diagnostics };
+  const pairingStatusSourceExhausted = (sourceKey: string, at?: number): boolean => {
+    const threshold = (at ?? now()) - WINDOW_MS;
+    const used = (pairingStatusSource.get(sourceKey) ?? []).filter((ts) => ts > threshold).length;
+    return used >= limits.pairingStatusPerSourcePerMinute;
+  };
+
+  return { acquire, pairingStatusSourceExhausted, reset, counts, diagnostics };
 }
 
 function reject(limits: RemoteAdmissionLimits): RemoteAdmissionDecision {
@@ -440,12 +483,12 @@ export interface RemoteBoundaryFetchOptions {
   readonly admission: RemoteAdmissionPolicy;
   readonly deviceKeyResolver?: RemoteAdmissionDeviceKeyResolver;
   /**
-   * True when the ticket exists, has not expired, is still pending, and the
-   * proof is the one issued with it. Only such a ticket earns its own status
+   * True when the ticket exists, is waited on (undecided, or approved and
+   * still readable), and the proof is the one issued with it. Only such a ticket earns its own status
    * budget; without this resolver every status read counts against the shared
    * per-source pairing budget.
    */
-  readonly pairingTicketIsPending?: (ticket: {
+  readonly pairingTicketIsLive?: (ticket: {
     readonly ticketId: string;
     readonly ticketProof: string;
   }) => boolean;
@@ -553,9 +596,12 @@ export function createRemoteBoundaryFetch(
 
     const deviceKey = resolveDeviceKey(request, facts);
     let pairingTicketKey: string | undefined;
-    if (pathSurface === "pairing-status" && options.pairingTicketIsPending !== undefined) {
+    if (pathSurface === "pairing-status" && options.pairingTicketIsLive !== undefined) {
       const open = statusReadsInFlight.get(facts.sourceKey) ?? 0;
-      if (open >= PAIRING_STATUS_READS_IN_FLIGHT_PER_SOURCE) {
+      if (
+        open >= PAIRING_STATUS_READS_IN_FLIGHT_PER_SOURCE ||
+        options.admission.pairingStatusSourceExhausted(facts.sourceKey)
+      ) {
         // Reads end within a second, so a second is how long to wait.
         return remoteBoundaryRejection(429, { "retry-after": "1" });
       }
@@ -569,7 +615,7 @@ export function createRemoteBoundaryFetch(
         else statusReadsInFlight.set(facts.sourceKey, remaining);
       }
       try {
-        if (ticket !== undefined && options.pairingTicketIsPending(ticket)) {
+        if (ticket !== undefined && options.pairingTicketIsLive(ticket)) {
           pairingTicketKey = ticket.ticketId;
         }
       } catch {
