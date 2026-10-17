@@ -8,7 +8,7 @@ export PATH="${HOME}/.bun/bin:${HOME}/.local/bin:${PATH}"
 mkdir -p "${HOME}/.local/bin" "${HOME}/.config/octant-host"
 
 need_apt=0
-for cmd in bwrap secret-tool gnome-keyring-daemon dbus-launch zsh; do
+for cmd in bwrap lsof secret-tool gnome-keyring-daemon dbus-launch zsh; do
   if ! command -v "${cmd}" >/dev/null 2>&1; then
     need_apt=1
     break
@@ -19,6 +19,7 @@ if [[ "${need_apt}" -eq 1 ]]; then
   sudo DEBIAN_FRONTEND=noninteractive apt-get update
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     bubblewrap \
+    lsof \
     libsecret-tools \
     gnome-keyring \
     dbus-x11 \

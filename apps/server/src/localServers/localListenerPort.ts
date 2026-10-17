@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { MAX_LOCAL_SERVER_LISTENERS } from "@octant/contracts";
 import type { LocalListenerOwnership } from "@octant/domain";
@@ -109,6 +110,97 @@ export interface LiveLocalListenerPortOptions {
   ) => Promise<string | undefined>;
   /** One snapshot of the host process table, read once per scan. */
   readonly readProcessTable?: (signal?: AbortSignal) => Promise<ReadonlyMap<number, PsTableEntry>>;
+  /** Injected so tests drive the Linux command-line read without a `/proc`. */
+  readonly readCommandLine?: CommandLineReader;
+}
+
+/** The argument vector of one process, or `undefined` when the host cannot read it. */
+export type CommandLineReader = (pid: number) => Promise<ReadonlyArray<string> | undefined>;
+
+/**
+ * What a Node main thread is called in `/proc/<pid>/comm` on Linux, and so in
+ * `lsof` and `ps`: under Node 24 every server reads `MainThread`, so the name
+ * says nothing about the program. Only this name triggers the command-line
+ * read; every other name is taken as the host reported it.
+ */
+const RENAMED_MAIN_THREAD = "MainThread";
+
+/** Command-line read from `/proc`, which exists only on Linux. */
+export const readProcCommandLine: CommandLineReader = async (pid) => {
+  if (process.platform !== "linux" || !Number.isSafeInteger(pid) || pid <= 0) return undefined;
+  try {
+    const args = (await readFile(`/proc/${pid}/cmdline`, "utf8")).split("\0").filter(Boolean);
+    return args.length === 0 ? undefined : args;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Replace a thread-renamed process name with the program it really runs.
+ *
+ * The name becomes the base name of argv[0] (`node`), and the first non-flag
+ * argument after it, minus a script extension, becomes the command hint
+ * (`vite` for `node .../node_modules/.bin/vite`), which the classifier matches
+ * against known frameworks. A command line the host cannot read leaves the
+ * listener as reported, so it stays unclassified rather than guessed at.
+ */
+function nameThreadRenamedListeners<
+  T extends Pick<ObservedLocalListener, "pid" | "processName" | "commandName">,
+>(
+  listeners: ReadonlyArray<T>,
+  commandLines: ReadonlyMap<number, ReadonlyArray<string>>,
+): ReadonlyArray<T> {
+  return listeners.map((listener) => {
+    if (listener.processName !== RENAMED_MAIN_THREAD) return listener;
+    const args = commandLines.get(listener.pid);
+    const program = args?.[0] === undefined ? undefined : baseName(args[0]);
+    if (args === undefined || program === undefined || program === "") return listener;
+    const script = args.slice(1).find((arg) => !arg.startsWith("-"));
+    const hint =
+      script === undefined ? undefined : baseName(script).replace(/\.(?:[cm]?js|ts)$/, "");
+    return {
+      ...listener,
+      processName: program,
+      ...(hint === undefined || hint === "" ? {} : { commandName: hint }),
+    };
+  });
+}
+
+/** The pids that kept the thread's name and so need their command line read. */
+function threadRenamedPids(
+  listeners: ReadonlyArray<Pick<ObservedLocalListener, "pid" | "processName">>,
+): ReadonlyArray<number> {
+  return [
+    ...new Set(
+      listeners.filter((entry) => entry.processName === RENAMED_MAIN_THREAD).map((e) => e.pid),
+    ),
+  ];
+}
+
+/**
+ * Read each pid's command line into `into` as the reads settle, and return when
+ * all have or `signal` aborts. A read that never settles is abandoned, leaving
+ * that pid unnamed rather than holding the scan.
+ */
+async function readCommandLines(
+  pids: ReadonlyArray<number>,
+  readCommandLine: CommandLineReader,
+  into: Map<number, ReadonlyArray<string>>,
+  signal: AbortSignal,
+): Promise<void> {
+  if (pids.length === 0 || signal.aborted) return;
+  const reads = Promise.all(
+    pids.map(async (pid) => {
+      const args = await readCommandLine(pid).catch(() => undefined);
+      if (args !== undefined) into.set(pid, args);
+    }),
+  );
+  await Promise.race([reads, aborted(signal)]);
+}
+
+function baseName(path: string): string {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
 }
 
 /** Ancestor walk bound so a corrupt ppid table can never loop the scan. */
@@ -149,6 +241,7 @@ export function createLiveLocalListenerPort(
   const resolveWorkingDirectory =
     options.resolveWorkingDirectory ?? createLsofWorkingDirectoryResolver(execute);
   const readProcessTable = options.readProcessTable ?? createPsProcessTableReader(execute);
+  const readCommandLine = options.readCommandLine ?? readProcCommandLine;
 
   return {
     async observe(signal) {
@@ -176,16 +269,19 @@ export function createLiveLocalListenerPort(
       // same rule: these are exactly the entries the service slices. Its own
       // limit is overridable and may be smaller, which only makes this a
       // superset — never a second, larger number that could disagree.
-      const parsed = parseLsofFields(output, uid).slice(0, MAX_LOCAL_SERVER_LISTENERS);
+      const unnamed = parseLsofFields(output, uid).slice(0, MAX_LOCAL_SERVER_LISTENERS);
       // A process serving several ports repeats in the parse; resolve each
       // pid's facts once so one wedged listener cannot multiply host queries.
-      const pids = [...new Set(parsed.map((entry) => entry.pid))];
-      const { workingDirectories, processTable } = await resolveListenerFacts(
+      const pids = [...new Set(unnamed.map((entry) => entry.pid))];
+      const { workingDirectories, processTable, commandLines } = await resolveListenerFacts(
         pids,
+        threadRenamedPids(unnamed),
         resolveWorkingDirectory,
         readProcessTable,
+        readCommandLine,
         signal,
       );
+      const parsed = nameThreadRenamedListeners(unnamed, commandLines);
 
       let ownedRoots: ReadonlySet<number> = new Set();
       try {
@@ -229,6 +325,7 @@ export interface LiveLocalListenerHoldingProbeOptions {
   readonly ownedProcessRoots: () => Promise<ReadonlySet<number>>;
   readonly execute?: ListenerCommandExecutor;
   readonly currentUid?: number;
+  readonly readCommandLine?: CommandLineReader;
 }
 
 /**
@@ -247,6 +344,7 @@ export function createLiveLocalListenerHoldingProbe(
 ): (holder: LocalListenerHolder, signal?: AbortSignal) => Promise<LocalListenerHolding> {
   const execute = options.execute ?? defaultExecute;
   const uid = options.currentUid ?? process.getuid?.();
+  const readCommandLine = options.readCommandLine ?? readProcCommandLine;
 
   return async (holder, signal) => {
     if (uid === undefined || !Number.isSafeInteger(holder.port) || holder.port <= 0) {
@@ -281,9 +379,28 @@ export function createLiveLocalListenerHoldingProbe(
     // Only the sockets that can answer the address the host connects to
     // count: the granted process may still hold the port on the other loopback
     // family while another process took this one.
-    const holders = parseLsofFields(output, uid).filter(
+    // The holder's name was minted by the listing scan, so it is named the same
+    // way here or a Node server would read as another process.
+    const unnamed = parseLsofFields(output, uid).filter(
       (entry) => entry.port === holder.port && answersOn(entry.bindAddress, holder.host),
     );
+    const commandLines = new Map<number, ReadonlyArray<string>>();
+    const deadline = new AbortController();
+    const stop = () => deadline.abort();
+    const timer = setTimeout(stop, LISTENER_ENRICHMENT_DEADLINE_MS);
+    signal?.addEventListener("abort", stop, { once: true });
+    try {
+      await readCommandLines(
+        threadRenamedPids(unnamed),
+        readCommandLine,
+        commandLines,
+        deadline.signal,
+      );
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
+    }
+    const holders = nameThreadRenamedListeners(unnamed, commandLines);
     if (holders.length === 0) return "stopped";
     if (
       holders.some((entry) => entry.pid !== holder.pid || entry.processName !== holder.processName)
@@ -350,6 +467,7 @@ export function createLsofWorkingDirectoryResolver(
 interface ListenerFacts {
   readonly workingDirectories: ReadonlyMap<number, string | undefined>;
   readonly processTable: ReadonlyMap<number, PsTableEntry>;
+  readonly commandLines: ReadonlyMap<number, ReadonlyArray<string>>;
 }
 
 /**
@@ -367,8 +485,10 @@ interface ListenerFacts {
  */
 async function resolveListenerFacts(
   pids: ReadonlyArray<number>,
+  renamedPids: ReadonlyArray<number>,
   resolveWorkingDirectory: (pid: number, signal?: AbortSignal) => Promise<string | undefined>,
   readProcessTable: (signal?: AbortSignal) => Promise<ReadonlyMap<number, PsTableEntry>>,
+  readCommandLine: CommandLineReader,
   signal?: AbortSignal,
 ): Promise<ListenerFacts> {
   const deadline = new AbortController();
@@ -377,6 +497,7 @@ async function resolveListenerFacts(
   signal?.addEventListener("abort", stop, { once: true });
 
   const workingDirectories = new Map<number, string | undefined>();
+  const commandLines = new Map<number, ReadonlyArray<string>>();
   let processTable: ReadonlyMap<number, PsTableEntry> = new Map();
   try {
     if (signal?.aborted !== true) {
@@ -391,13 +512,14 @@ async function resolveListenerFacts(
         workingDirectories,
         deadline.signal,
       );
-      await Promise.race([Promise.all([table, cwds]), aborted(deadline.signal)]);
+      const names = readCommandLines(renamedPids, readCommandLine, commandLines, deadline.signal);
+      await Promise.race([Promise.all([table, cwds, names]), aborted(deadline.signal)]);
     }
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener("abort", stop);
   }
-  return { workingDirectories, processTable };
+  return { workingDirectories, processTable, commandLines };
 }
 
 /** Resolves — never rejects — the moment `signal` aborts. */
