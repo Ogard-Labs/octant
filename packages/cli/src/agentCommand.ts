@@ -39,6 +39,7 @@ import {
   agentThreadPort,
   openAgentThreadById,
   openChatAgentThread,
+  type AgentPendingQuestion,
   type AgentThreadPort,
   createAgentThread,
   isAgentSnapshotRunning,
@@ -689,31 +690,106 @@ function watchApprovalSettled(
  * from: the options are numbered so a digit picks one, and any other line is
  * the answer itself. In JSON mode the question is emitted as a line and the
  * answer is read the same way, so a script can answer too.
+ *
+ * Resolves with the answer, `"elsewhere"` when `settled` aborted the wait
+ * (the question was answered on another surface, so the next typed line is
+ * not swallowed), or undefined when stdin ended or the line was empty.
  */
+async function readQuestionAnswer(
+  input: Pick<RunAgentCliCommandInput, "stdout"> & {
+    readonly command: { readonly json: boolean };
+  },
+  question: {
+    readonly id: string;
+    readonly prompt: string;
+    readonly options: ReadonlyArray<string>;
+  },
+  shown: unknown,
+  lines: Pick<LineSource, "next">,
+  settled?: AbortSignal,
+): Promise<string | "elsewhere" | undefined> {
+  if (input.command.json) {
+    input.stdout.write(`${JSON.stringify({ kind: "question", question: shown })}\n`);
+  } else {
+    input.stdout.write(`\n? ${question.prompt}\n`);
+    question.options.forEach((option, index) => input.stdout.write(`  ${index + 1}. ${option}\n`));
+    input.stdout.write("> ");
+  }
+  const line = await lines.next(settled);
+  if (line === undefined) {
+    if (settled?.aborted !== true) return undefined;
+    if (input.command.json) {
+      input.stdout.write(
+        `${JSON.stringify({ kind: "question-settled", questionId: question.id })}\n`,
+      );
+    } else {
+      input.stdout.write("\n(answered elsewhere)\n");
+    }
+    return "elsewhere";
+  }
+  const trimmed = line.trim();
+  const picked = /^\d+$/.test(trimmed) ? question.options[Number(trimmed) - 1] : undefined;
+  const answer = picked ?? trimmed;
+  return answer.length === 0 ? undefined : answer;
+}
+
 async function answerPendingQuestion(
   input: RunAgentCliCommandInput,
   threadId: string,
   question: NativeHarnessSessionView["questions"][number],
   lines: LineSource,
 ): Promise<void> {
-  if (input.command.json) {
-    input.stdout.write(`${JSON.stringify({ kind: "question", question })}\n`);
-  } else {
-    input.stdout.write(`\n? ${question.prompt}\n`);
-    question.options.forEach((option, index) => input.stdout.write(`  ${index + 1}. ${option}\n`));
-    input.stdout.write("> ");
-  }
-  const line = await lines.next();
-  if (line === undefined) return;
-  const trimmed = line.trim();
-  const picked = /^\d+$/.test(trimmed) ? question.options[Number(trimmed) - 1] : undefined;
-  const answer = picked ?? trimmed;
-  if (answer.length === 0) return;
+  const answer = await readQuestionAnswer(
+    input,
+    { id: String(question.id), prompt: question.prompt, options: question.options },
+    question,
+    lines,
+  );
+  if (answer === undefined || answer === "elsewhere") return;
   await input.session.send({
     path: `/api/native-harness/sessions/${encodeURIComponent(threadId)}/questions`,
     method: "POST",
     body: { questionId: String(question.id), answer },
   });
+}
+
+/**
+ * The question a Chat turn is parked on lives on the turn, not in the harness
+ * session, so the thread port reads and answers it. The prompt closes with a
+ * note when the app answers first; a refused answer is printed, not dropped.
+ */
+async function answerThreadQuestion(
+  input: RunAgentCliCommandInput,
+  port: AgentThreadPort,
+  question: AgentPendingQuestion,
+  lines: LineSource,
+): Promise<void> {
+  const answeredElsewhere = new AbortController();
+  const interval = input.pollIntervalMs ?? 1_000;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const check = async () => {
+    const current = await port.read().catch(() => undefined);
+    if (stopped) return;
+    if (current !== undefined && current.pendingQuestion?.id !== question.id) {
+      answeredElsewhere.abort();
+      return;
+    }
+    timer = setTimeout(() => void check(), interval);
+  };
+  timer = setTimeout(() => void check(), interval);
+  const answer = await readQuestionAnswer(
+    input,
+    question,
+    { id: question.id, prompt: question.prompt, options: question.options, status: "pending" },
+    lines,
+    answeredElsewhere.signal,
+  );
+  stopped = true;
+  if (timer !== undefined) clearTimeout(timer);
+  if (answer === undefined || answer === "elsewhere") return;
+  const result = await port.answerQuestion?.(question, answer);
+  if (result?.kind === "refused") input.stderr.write(`${result.message}\n`);
 }
 
 async function readSession(
@@ -929,8 +1005,14 @@ async function followTurn(
         answered.delete(site.id);
       }
     }
-    const current = await port.read();
+    let current = await port.read();
     if (current === undefined) continue;
+    const asked = current.pendingQuestion;
+    if (asked !== undefined && port.answerQuestion !== undefined && !answered.has(asked.id)) {
+      answered.add(asked.id);
+      await answerThreadQuestion(input, port, asked, lines);
+      current = (await port.read()) ?? current;
+    }
     const turn = current.turns.at(-1);
     if (turn?.id === before && sent === undefined) continue;
     const reply = turn?.reply ?? "";

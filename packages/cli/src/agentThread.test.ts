@@ -268,6 +268,144 @@ describe("a Chat thread in the terminal's window", () => {
   });
 });
 
+/** A Chat thread whose newest turn is parked on the lead's question. */
+function chatViewParkedOnQuestion(version = 7, outcome: "waiting" | "completed" = "waiting") {
+  const digest = "a".repeat(64);
+  const turnId = "61000000-0000-4000-8000-000000000001";
+  const attemptId = "62000000-0000-4000-8000-000000000001";
+  return {
+    thread: { ...chatThread, version },
+    turns: [
+      {
+        id: turnId,
+        threadId: chatThread.id,
+        sequence: 1,
+        userMessageRef: {
+          contentId: "63000000-0000-4000-8000-000000000001",
+          digest,
+          byteLength: 4,
+        },
+        attachmentIds: [],
+        attempts: [
+          {
+            id: attemptId,
+            turnId,
+            threadId: chatThread.id,
+            providerInstanceId: ids.provider,
+            providerSessionId: "64000000-0000-4000-8000-000000000001",
+            modelId: "loopback-model",
+            contextManifestId: "65000000-0000-4000-8000-000000000001",
+            outcome,
+            responseRefs: [],
+            citationIds: [],
+            ...(outcome === "waiting"
+              ? {
+                  pendingQuestion: {
+                    requestId: "call_1",
+                    prompt: "Which database?",
+                    options: [{ label: "sqlite" }, { label: "postgres" }],
+                  },
+                }
+              : {}),
+            createdAt: now,
+            updatedAt: now,
+          },
+        ],
+        createdAt: now,
+      },
+    ],
+    lastSequence: 2,
+    contents: [
+      {
+        contentId: "63000000-0000-4000-8000-000000000001",
+        role: "user",
+        body: "plan",
+        digest,
+        byteLength: 4,
+      },
+    ],
+    attachments: [],
+    citations: [],
+    workItems: [],
+    workListVersion: 0,
+    followUpVersion: 0,
+  };
+}
+
+describe("a Chat lead's question in the terminal", () => {
+  function questionHost(view: () => unknown) {
+    const sent: LocalControlRequest[] = [];
+    const session: OpenedLocalControlSession = {
+      kind: "opened",
+      windowId: "11111111-1111-4111-8111-111111111111",
+      send: async (request) => {
+        sent.push(request);
+        if (request.path === `/api/chat/threads/${chatThread.id}`) {
+          return { status: 200, body: view() };
+        }
+        if (request.path === "/api/chat/commands") {
+          return { status: 200, body: { kind: "attempt-updated", attempt: {} } };
+        }
+        return { status: 404, body: {} };
+      },
+      close: async () => undefined,
+    };
+    return { session, sent };
+  }
+
+  it("is read from the turn's attempt while it waits for the answer", async () => {
+    const host = questionHost(() => chatViewParkedOnQuestion());
+    const snapshot = await agentThreadPort(host.session, "chat", chatThread.id).read();
+    expect(snapshot?.pendingQuestion).toEqual({
+      id: "call_1",
+      prompt: "Which database?",
+      options: ["sqlite", "postgres"],
+    });
+  });
+
+  it("is not offered once the attempt has moved on", async () => {
+    const host = questionHost(() => chatViewParkedOnQuestion(8, "completed"));
+    const snapshot = await agentThreadPort(host.session, "chat", chatThread.id).read();
+    expect(snapshot?.pendingQuestion).toBeUndefined();
+  });
+
+  it("is answered with the command the app's transcript card sends, against the thread's current version", async () => {
+    const host = questionHost(() => chatViewParkedOnQuestion(9));
+    const port = agentThreadPort(host.session, "chat", chatThread.id);
+    const snapshot = await port.read();
+    const result = await port.answerQuestion?.(snapshot!.pendingQuestion!, "sqlite");
+    expect(result).toEqual({ kind: "answered" });
+    expect(host.sent.at(-1)).toMatchObject({
+      path: "/api/chat/commands",
+      method: "POST",
+      body: {
+        kind: "answer-chat-turn-question",
+        threadId: chatThread.id,
+        expectedVersion: 9,
+        turnId: "61000000-0000-4000-8000-000000000001",
+        attemptId: "62000000-0000-4000-8000-000000000001",
+        requestId: "call_1",
+        answer: "sqlite",
+      },
+    });
+  });
+
+  it("refuses an answer once the question was answered elsewhere, sending nothing", async () => {
+    let answered = false;
+    const host = questionHost(() =>
+      answered ? chatViewParkedOnQuestion(10, "completed") : chatViewParkedOnQuestion(9),
+    );
+    const port = agentThreadPort(host.session, "chat", chatThread.id);
+    const question = (await port.read())!.pendingQuestion!;
+    answered = true;
+    expect(await port.answerQuestion?.(question, "sqlite")).toMatchObject({
+      kind: "refused",
+      message: "That question is no longer open.",
+    });
+    expect(host.sent.some((request) => request.path === "/api/chat/commands")).toBe(false);
+  });
+});
+
 describe("reading a long Code thread in the terminal", () => {
   const threadId = "84000000-0000-4000-8000-000000000001";
   const threadView = {

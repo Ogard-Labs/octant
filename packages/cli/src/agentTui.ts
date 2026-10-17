@@ -606,7 +606,10 @@ class AgentScreen {
     this.#header.content = t`${fg(p.accent)(bold("◆ Octant"))} ${fg(p.muted)("·")} ${fg(p.text)(title)}${dim(fg(p.muted)(mode))}  ${fg(statusColor)(status === "running" ? `${spinner} running` : status)}${dim(fg(percent !== undefined && percent >= 80 ? p.warning : p.muted)(context))}`;
 
     const entries = transcriptFrom(this.#thread, session);
-    const pending = session?.questions.find((question) => question.status === "pending");
+    // Chat keeps its question on the turn, not in the harness session.
+    const pending =
+      session?.questions.find((question) => question.status === "pending") ??
+      this.#thread?.pendingQuestion;
     const digest = JSON.stringify([
       entries,
       pending?.id,
@@ -1210,7 +1213,15 @@ class AgentScreen {
       await this.refresh();
       return;
     }
+    const threadQuestion = this.#thread?.pendingQuestion;
     const question = this.#session?.questions.find((entry) => entry.status === "pending");
+    if (question === undefined && threadQuestion !== undefined && this.#port.answerQuestion) {
+      const picked = /^\d+$/.test(text) ? threadQuestion.options[Number(text) - 1] : undefined;
+      const result = await this.#port.answerQuestion(threadQuestion, picked ?? text);
+      if (result.kind === "refused") this.#note = result.message;
+      await this.refresh();
+      return;
+    }
     if (question !== undefined) {
       const picked = /^\d+$/.test(text) ? question.options[Number(text) - 1] : undefined;
       const result = await answerAgentQuestion(

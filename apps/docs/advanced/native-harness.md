@@ -383,7 +383,9 @@ panel, as a numbered prompt in the CLI, and in a Chat thread's own transcript
 as a card on the turn that asked — with any options it offered, each with the
 meaning the lead wrote for it, and a field for an answer no option covers.
 Pick one or type an answer; the turn continues the moment it lands, and the
-same question can be answered from any surface. A question nobody answers
+same question can be answered from any surface. The terminal
+shows a Chat thread's question too, read from the turn that asked, and closes
+its prompt with a note when the app answers first. A question nobody answers
 within ten minutes expires and the lead is told to continue with its best
 judgment; interrupting the turn cancels it. Every question and answer is
 journaled with the session.
