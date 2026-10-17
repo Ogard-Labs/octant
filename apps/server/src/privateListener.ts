@@ -7,6 +7,7 @@ import {
   createRemoteBoundaryFetch,
   type RemoteAdmissionDeviceKeyResolver,
   type RemoteAdmissionLimits,
+  type RemoteBoundaryFetchOptions,
 } from "./remote/remoteAdmissionPolicy";
 import type { OctantServer, RequestTransportFacts, Serve } from "./server";
 
@@ -85,6 +86,12 @@ export interface PrivateListenerOptions {
   readonly signal?: AbortSignal;
   readonly admissionLimits?: Partial<RemoteAdmissionLimits>;
   /**
+   * True for a live, pending pairing ticket whose proof matches. A status read
+   * for such a ticket is charged to the ticket's own budget instead of the
+   * per-source budget that hello and claim share.
+   */
+  readonly pairingTicketIsLive?: RemoteBoundaryFetchOptions["pairingTicketIsLive"];
+  /**
    * Resolve an opaque device key for authenticated requests. When the
    * session-cookie/request-proof boundary supplies a verified device identity,
    * this resolver activates per-device admission limits (8 concurrent,
@@ -125,6 +132,9 @@ export function createPrivateListener(options: PrivateListenerOptions): PrivateL
     ...(options.deviceKeyResolver === undefined
       ? {}
       : { deviceKeyResolver: options.deviceKeyResolver }),
+    ...(options.pairingTicketIsLive === undefined
+      ? {}
+      : { pairingTicketIsLive: options.pairingTicketIsLive }),
   });
 
   let config = options.config;
