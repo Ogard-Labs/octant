@@ -16,6 +16,7 @@ import {
   decodeCodeOperationCommand,
   decodeCodeOperationId,
   decodeCodeTerminalInspectionRequest,
+  decodeCodeTerminalLiveRequest,
   decodeCodeRelativePath,
   decodeCodeAttachmentId,
   decodeCodeAttachmentMediaType,
@@ -62,7 +63,9 @@ import {
   type CodeOperationId,
   CodeOperationResult,
   CodeTerminalInspection,
+  CodeTerminalLiveFrame,
   type CodeTerminalInspectionRequest,
+  type CodeTerminalLiveRequest,
   type CodeFileOpenPublicResult,
   type CodeFileSavePublicResult,
   type CodeRelativePath,
@@ -128,6 +131,17 @@ export interface CodeClient {
   execute(command: CodeCommand, signal?: AbortSignal): Promise<CodeCommandResult>;
   executeOperation(command: CodeOperationCommand): Promise<CodeOperationResult>;
   inspectTerminal(request: CodeTerminalInspectionRequest): Promise<CodeTerminalInspection>;
+  /**
+   * A terminal's output as it is printed, outside the journal, for as long as
+   * the caller keeps the signal open. A frame's `characters` is the offset to
+   * resume from if the stream drops. A host that refuses the stream, or has
+   * none, throws a failure before the first frame, and the caller reads the
+   * journal instead; the stream ending is only "not live any more".
+   */
+  watchTerminal?(
+    request: CodeTerminalLiveRequest,
+    signal: AbortSignal,
+  ): AsyncIterable<CodeTerminalLiveFrame>;
   conversation(
     threadId: CodeThreadId,
     afterCursor: number,
@@ -364,6 +378,29 @@ export function createCodeClient(options: CodeClientOptions): CodeClient {
           body: JSON.stringify(validated),
         },
         decodeHostAnswer(CodeTerminalInspection),
+      );
+    },
+    watchTerminal(input, signal) {
+      let validated: CodeTerminalLiveRequest;
+      try {
+        validated = decodeCodeTerminalLiveRequest(input);
+      } catch {
+        return rejectedFrames<CodeTerminalLiveFrame>(invalidCommand());
+      }
+      const url = new URL("/api/code/terminals/live", options.baseUrl);
+      url.searchParams.set("threadId", String(validated.threadId));
+      url.searchParams.set("checkoutId", String(validated.checkoutId));
+      url.searchParams.set("terminalId", String(validated.terminalId));
+      if (validated.afterCharacters !== undefined) {
+        url.searchParams.set("afterCharacters", String(validated.afterCharacters));
+      }
+      if (validated.operationId !== undefined) {
+        url.searchParams.set("operationId", String(validated.operationId));
+      }
+      return parseTerminalLiveFrames(
+        requestRaw(fetch, url.toString(), { method: "GET", headers, signal }),
+        validated.terminalId,
+        signal,
       );
     },
     async queryBoard(query) {
@@ -1056,6 +1093,83 @@ async function* parseOperationNdjsonFrames(
       // Ignore a reader already released by cancellation.
     }
   }
+}
+
+async function* parseTerminalLiveFrames(
+  responsePromise: Promise<Response>,
+  terminalId: CodeTerminalLiveRequest["terminalId"],
+  signal: AbortSignal,
+): AsyncGenerator<CodeTerminalLiveFrame> {
+  const response = await responsePromise;
+  if (!response.ok) await rejectFailure(response);
+  if (response.headers.get("content-type")?.split(";", 1)[0] !== "application/x-ndjson") {
+    throw malformedResponse();
+  }
+  if (response.body === null) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let lastCharacters = -1;
+  const decodeLine = (line: string): CodeTerminalLiveFrame => {
+    if (utf8ByteLength(line) > MAX_CODE_NDJSON_LINE_BYTES) throw malformedResponse();
+    let frame: CodeTerminalLiveFrame;
+    try {
+      frame = decodeHostAnswer(CodeTerminalLiveFrame)(JSON.parse(line));
+    } catch {
+      throw malformedResponse();
+    }
+    // A frame for another shell, or one that moves the offset backwards without
+    // replacing, would corrupt what the window holds; end the stream instead.
+    if (
+      String(frame.terminalId) !== String(terminalId) ||
+      (!frame.replace && frame.characters < lastCharacters)
+    ) {
+      throw malformedResponse();
+    }
+    lastCharacters = frame.characters;
+    return frame;
+  };
+  try {
+    for (;;) {
+      if (signal.aborted) return;
+      const next = await readStreamChunk(reader, signal);
+      if (next.done) break;
+      buffer += decoder.decode(next.value, { stream: true });
+      let newlineIndex = buffer.indexOf("\n");
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex);
+        buffer = buffer.slice(newlineIndex + 1);
+        if (line.length > 0) yield decodeLine(line);
+        newlineIndex = buffer.indexOf("\n");
+      }
+      if (utf8ByteLength(buffer) > MAX_CODE_NDJSON_LINE_BYTES) throw malformedResponse();
+    }
+    const trailing = buffer.trim();
+    if (trailing.length > 0) yield decodeLine(trailing);
+  } catch (error) {
+    // A connection that drops mid-stream is an ordinary end of a live stream;
+    // the caller resumes from the last offset it was given.
+    if (error instanceof CodeClientFailure) throw error;
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      // Ignore cancellation races while tearing down the stream.
+    }
+    try {
+      reader.releaseLock();
+    } catch {
+      // Ignore a reader already released by cancellation.
+    }
+  }
+}
+
+function rejectedFrames<T>(error: Error): AsyncIterable<T> {
+  return {
+    [Symbol.asyncIterator]() {
+      return { next: () => Promise.reject(error) };
+    },
+  };
 }
 
 function decodeReplayLine(

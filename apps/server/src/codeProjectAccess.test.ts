@@ -202,3 +202,49 @@ it("refuses a closed window on its standing authority until the same window is l
   live = true;
   expect(standing()).toBe(true);
 });
+
+describe("retained Code admission for a held stream", () => {
+  it("lets a device's stream keep asking after its request returned, until the connection ends or the Project goes", async () => {
+    let active = true;
+    const access = new CodeProjectAccess({
+      readWorkspace: () => undefined,
+      hasActiveCodeProject: () => active,
+      isWindowLive: () => true,
+    });
+    const connection = new AbortController();
+    const context = resolvePrincipalRouteContext({
+      request: new Request("https://octant.example/api/code/terminals/live"),
+      principal,
+      abortSignal: connection.signal,
+    });
+    let retained: ((id: typeof projectId) => boolean) | undefined;
+    await access.run(context, async () => {
+      retained = access.retain(scopeId);
+    });
+
+    // The request has returned, so a plain check is deferred work and refused.
+    expect(access.canAccessProject(scopeId, projectId)).toBe(false);
+    expect(retained?.(projectId)).toBe(true);
+    active = false;
+    expect(retained?.(projectId)).toBe(false);
+    active = true;
+    connection.abort();
+    expect(retained?.(projectId)).toBe(false);
+  });
+
+  it("keeps nothing for a scope no request admitted", async () => {
+    const access = new CodeProjectAccess({
+      readWorkspace: () => undefined,
+      hasActiveCodeProject: () => true,
+      isWindowLive: () => true,
+    });
+    expect(access.retain(scopeId)).toBeUndefined();
+    const context = resolvePrincipalRouteContext({
+      request: new Request("https://octant.example/api/code/terminals/live"),
+      principal,
+    });
+    await access.run(context, async () => {
+      expect(access.retain(decodeWindowId("00000000-0000-4000-8000-00000000c004"))).toBeUndefined();
+    });
+  });
+});

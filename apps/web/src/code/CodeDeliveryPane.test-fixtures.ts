@@ -1,4 +1,4 @@
-import type { CodeClient } from "@octant/client-runtime/code-client";
+import { CodeClientFailure, type CodeClient } from "@octant/client-runtime/code-client";
 import type { CodeOperationResult } from "@octant/contracts/code-operations";
 import type { CodeRepositoryTestDefinition } from "@octant/contracts/code-test-definitions";
 import { decodeCodeProjectPullRequestView } from "@octant/contracts";
@@ -43,6 +43,15 @@ export function codeClient(options: { readonly evidence?: string } = {}): CodeCl
     inspectTerminal: vi.fn(async (input) => ({
       terminalId: input.terminalId,
       state: "running" as const,
+    })),
+    // A host with no live stream, so panes read the journal unless a test says otherwise.
+    watchTerminal: vi.fn(() => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          Promise.reject(
+            new CodeClientFailure({ category: "unavailable", message: "No live stream." }),
+          ),
+      }),
     })),
     operationContent: vi.fn(async () =>
       new TextEncoder().encode(options.evidence ?? "authoritative evidence"),

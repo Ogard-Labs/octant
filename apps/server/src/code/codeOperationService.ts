@@ -27,6 +27,8 @@ import {
   type CodeOperationId,
   type CodeOperationResult,
   type CodeTerminalId,
+  type CodeTerminalLiveFrame,
+  type CodeTerminalLiveRequest,
   type TerminalBrowserGrantOutcome,
   type CodeRepositoryTestDefinition,
   type CodeRepositoryTestRun,
@@ -68,7 +70,8 @@ import {
 } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
-import type { TerminalLauncher } from "./terminalService";
+import type { TerminalLauncher, TerminalObserveOptions } from "./terminalService";
+import { liveFramesOf } from "./terminalLiveFrames";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
 import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoveryService";
@@ -86,6 +89,14 @@ export interface CodeOperationAuthorityPort {
     windowId: WindowId,
     projectId: CodeThread["projectId"],
   ) => Awaitable<boolean>;
+  /**
+   * Keeps the running request's admission for a held stream, which must prove
+   * its window may still read after that request has returned. Called inside
+   * the request; absent where nothing outlives a request.
+   */
+  readonly retainProjectAccess?: (
+    windowId: WindowId,
+  ) => ((projectId: CodeThread["projectId"]) => Awaitable<boolean>) | undefined;
   readonly approvalContextDigest?: (
     windowId: WindowId,
     command: CodeOperationCommand,
@@ -207,8 +218,22 @@ export interface CodeOperationTerminalPort {
   readonly observe?: (
     terminalId: string,
     listener: (emission: TerminalOutputEmission) => void,
-    options?: { readonly afterCharacters: number },
+    options?: TerminalObserveOptions,
   ) => () => void;
+  /**
+   * What the terminal printed after an absolute offset, without disturbing any
+   * observer. The live path starts from it, so catching a window up and
+   * observing from where that answer ended are one step with nothing between.
+   */
+  readonly readSince?: (
+    terminalId: string,
+    afterCharacters: number,
+  ) => {
+    readonly text: string;
+    readonly replace: boolean;
+    readonly characters: number;
+    readonly snapshot: CodeOperationTerminalSnapshot;
+  };
   readonly write: (terminalId: string, data: string) => void;
   readonly resize: (terminalId: string, columns: number, rows: number) => void;
   readonly terminate: (terminalId: string) => Promise<CodeOperationTerminalSnapshot>;
@@ -228,6 +253,8 @@ export interface CodeOperationTerminalSnapshot {
 interface TerminalOutputEmission {
   readonly text: string;
   readonly replace: boolean;
+  /** Absolute offset one past the last character this emission accounts for. */
+  readonly characters: number;
   readonly snapshot: CodeOperationTerminalSnapshot;
 }
 
@@ -260,6 +287,39 @@ interface TerminalOutputReader {
  */
 const MAX_TERMINAL_READERS = 4;
 
+/**
+ * One frame, the interval the live path coalesces over. The record path keeps
+ * its own, slower window (see the terminal service), so this number sets how
+ * late a window sees output and has no effect on what is written to the store.
+ */
+const LIVE_TERMINAL_WINDOW_MS = 16;
+
+/**
+ * The most characters one publish carries to a live reader before it is sent
+ * the transcript's tail instead. Characters, not bytes: the frames made from a
+ * publish are split by encoded size afterwards.
+ */
+const MAX_LIVE_TERMINAL_PUBLISH_CHARACTERS = 64 * 1024;
+
+/** Frames a slow reader may fall behind before it is resynchronised instead. */
+const MAX_LIVE_TERMINAL_FRAMES_QUEUED = 8;
+
+/** Live streams one terminal, and one window, may hold open at once. */
+const MAX_LIVE_TERMINAL_STREAMS_PER_TERMINAL = 4;
+const MAX_LIVE_TERMINAL_STREAMS_PER_WINDOW = 16;
+
+/** How often an open live stream proves its window may still read the terminal. */
+const LIVE_TERMINAL_RECHECK_MS = 1_000;
+
+/** One open live output stream, registered from the moment it is asked for. */
+interface LiveTerminalStream {
+  readonly controller: AbortController;
+  readonly terminalId: string;
+  readonly operationId: string | undefined;
+  /** Ends the stream now, whether or not its reader is pulling. */
+  end: () => void;
+}
+
 interface TerminalOwner {
   readonly windowId: string;
   readonly threadId: string;
@@ -275,6 +335,12 @@ interface TerminalOwner {
   removeOutputListener?: () => void;
   /** How far the surface has already been caught up by the snapshot it was sent. */
   outputBaseline?: number;
+  /**
+   * Where the journal's observer had reached, as the terminal's own offset. A
+   * surface joining without a snapshot of its own re-arms from here; from the
+   * launch it would journal everything printed since a second time.
+   */
+  journaledCharacters?: number;
 }
 
 export interface CodeOperationRepositoryTestPort {
@@ -919,6 +985,14 @@ interface StartingTurn {
 export class CodeOperationService {
   readonly #options: CodeOperationServiceOptions;
   readonly #terminalOwners = new Map<string, TerminalOwner>();
+  /** Live output streams each window holds open, so revoking the window ends them. */
+  readonly #liveTerminalStreams = new Map<string, Set<LiveTerminalStream>>();
+  /**
+   * Operations whose window is reading live. Their journal is not being read,
+   * so without this they look like surfaces that walked away and are the first
+   * reader collected when another surface opens the terminal.
+   */
+  readonly #liveReaderOperations = new Map<string, number>();
   readonly #pendingTests = new Map<
     string,
     {
@@ -1549,6 +1623,224 @@ export class CodeOperationService {
     return snapshot;
   }
 
+  /**
+   * Follow a terminal's output live, without the journal.
+   *
+   * Authority is the same as reading the terminal's snapshot: the window that
+   * owns the shell, for the thread and checkout it was started in. It is
+   * proven before the stream exists, so a refusal can still become a status,
+   * and proven again every second the stream stays open. The frames are the
+   * host's own transcript, redacted and held back at a credential prefix the
+   * way the journal's are, so nothing reaches a window here that the journal
+   * would not also hand it.
+   */
+  async watchTerminal(
+    windowId: WindowId,
+    input: CodeTerminalLiveRequest & { readonly signal?: AbortSignal | undefined },
+  ): Promise<AsyncIterable<CodeTerminalLiveFrame>> {
+    const terminals = this.#options.terminals;
+    if (terminals.observe === undefined || terminals.readSince === undefined) {
+      throw new CodeOperationServiceError("unavailable");
+    }
+    // Asked for inside the request that opens the stream, which is the only
+    // place its admission can be kept for the rechecks that follow it.
+    const retained = this.#options.authority.retainProjectAccess?.(windowId);
+    const windowKey = String(windowId);
+    const terminalKey = String(input.terminalId);
+    const open = this.#liveTerminalStreams.get(windowKey) ?? new Set<LiveTerminalStream>();
+    let onTerminal = 0;
+    for (const holders of this.#liveTerminalStreams.values()) {
+      for (const stream of holders) if (stream.terminalId === terminalKey) onTerminal += 1;
+    }
+    if (
+      open.size >= MAX_LIVE_TERMINAL_STREAMS_PER_WINDOW ||
+      onTerminal >= MAX_LIVE_TERMINAL_STREAMS_PER_TERMINAL
+    ) {
+      throw new CodeOperationServiceError("unavailable");
+    }
+    // Registered before the first await: a window revoked while the launch or
+    // the authority check is still pending must end this stream too.
+    const stream: LiveTerminalStream = {
+      controller: new AbortController(),
+      terminalId: terminalKey,
+      operationId: input.operationId === undefined ? undefined : String(input.operationId),
+      end: () => {},
+    };
+    open.add(stream);
+    this.#liveTerminalStreams.set(windowKey, open);
+    if (stream.operationId !== undefined) {
+      this.#liveReaderOperations.set(
+        stream.operationId,
+        (this.#liveReaderOperations.get(stream.operationId) ?? 0) + 1,
+      );
+    }
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      input.signal?.removeEventListener("abort", onClientGone);
+      const remaining = this.#liveTerminalStreams.get(windowKey);
+      remaining?.delete(stream);
+      if (remaining?.size === 0) this.#liveTerminalStreams.delete(windowKey);
+      if (stream.operationId !== undefined) {
+        const readers = (this.#liveReaderOperations.get(stream.operationId) ?? 1) - 1;
+        if (readers <= 0) this.#liveReaderOperations.delete(stream.operationId);
+        else this.#liveReaderOperations.set(stream.operationId, readers);
+      }
+    };
+    // A client that leaves before its first pull never starts the generator,
+    // so the stream cannot count on the generator's cleanup.
+    const onClientGone = () => {
+      stream.controller.abort();
+      release();
+    };
+    input.signal?.addEventListener("abort", onClientGone, { once: true });
+    if (input.signal?.aborted === true) onClientGone();
+    try {
+      await this.#requireOwnedTerminal(windowId, input, true);
+      if (stream.controller.signal.aborted) throw new CodeOperationServiceError("unauthorized");
+    } catch (error) {
+      stream.controller.abort();
+      release();
+      throw error;
+    }
+    const frames = this.#liveTerminalFrames(windowId, input, stream, retained, release);
+    stream.end = () => {
+      stream.controller.abort();
+      // A generator suspended at its yield, or never started, cannot notice the
+      // abort; closing it runs its cleanup now.
+      void frames.return(undefined);
+      release();
+    };
+    return frames;
+  }
+
+  /** End every live output stream a window holds, because its capability was revoked. */
+  revokeTerminalStreams(windowId: WindowId): void {
+    const open = this.#liveTerminalStreams.get(String(windowId));
+    if (open === undefined) return;
+    this.#liveTerminalStreams.delete(String(windowId));
+    for (const stream of Array.from(open)) {
+      stream.controller.abort();
+      stream.end();
+    }
+  }
+
+  async *#liveTerminalFrames(
+    windowId: WindowId,
+    input: CodeTerminalLiveRequest,
+    stream: LiveTerminalStream,
+    retained: ((projectId: CodeThread["projectId"]) => Awaitable<boolean>) | undefined,
+    release: () => void,
+  ): AsyncGenerator<CodeTerminalLiveFrame> {
+    const terminals = this.#options.terminals;
+    // Bound, because the port keeps its own state.
+    const observe = terminals.observe?.bind(terminals);
+    const readSince = terminals.readSince?.bind(terminals);
+    const revocation = stream.controller;
+    const terminalId = String(input.terminalId);
+    const owner = this.#terminalOwners.get(terminalId);
+    if (observe === undefined || readSince === undefined || owner === undefined) {
+      release();
+      return;
+    }
+
+    const queue: CodeTerminalLiveFrame[] = [];
+    let wake: (() => void) | undefined;
+    let resynchronise = false;
+    let stopObserving: (() => void) | undefined;
+    const framesOf = (emission: {
+      readonly text: string;
+      readonly replace: boolean;
+      readonly characters: number;
+      readonly snapshot: CodeOperationTerminalSnapshot;
+    }): ReadonlyArray<CodeTerminalLiveFrame> =>
+      liveFramesOf({
+        terminalId: input.terminalId,
+        text: emission.text,
+        replace: emission.replace,
+        characters: emission.characters,
+        state: emission.snapshot.status,
+        ...(emission.snapshot.exitCode === undefined
+          ? {}
+          : { exitCode: emission.snapshot.exitCode }),
+      });
+    const follow = (afterCharacters: number) => {
+      stopObserving?.();
+      stopObserving = observe(
+        terminalId,
+        (emission) => {
+          if (resynchronise) return;
+          if (queue.length >= MAX_LIVE_TERMINAL_FRAMES_QUEUED) {
+            // A reader this far behind is sent where the terminal is now, not
+            // every step it missed; continuing from its queue would hand it
+            // output the replacement already carries.
+            queue.length = 0;
+            resynchronise = true;
+          } else {
+            queue.push(...framesOf(emission));
+          }
+          wake?.();
+        },
+        {
+          afterCharacters,
+          windowMs: LIVE_TERMINAL_WINDOW_MS,
+          maxDeltaCharacters: MAX_LIVE_TERMINAL_PUBLISH_CHARACTERS,
+        },
+      );
+    };
+    const stillAuthorized = async (): Promise<boolean> => {
+      if (this.#terminalOwners.get(terminalId) !== owner) return false;
+      try {
+        await this.#requireOwnedTerminal(windowId, input, true, retained);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const wakeOnRevocation = () => wake?.();
+    revocation.signal.addEventListener("abort", wakeOnRevocation, { once: true });
+    try {
+      let checkedAt = 0;
+      // Catching the window up and observing from where that answer ended is one
+      // synchronous step, so no output falls between the two.
+      const first = readSince(terminalId, input.afterCharacters ?? Number.MAX_SAFE_INTEGER);
+      queue.push(...framesOf(first));
+      follow(first.characters);
+      for (;;) {
+        if (revocation.signal.aborted) return;
+        if (Date.now() - checkedAt >= LIVE_TERMINAL_RECHECK_MS) {
+          if (!(await stillAuthorized()) || revocation.signal.aborted) return;
+          checkedAt = Date.now();
+        }
+        if (resynchronise) {
+          const current = readSince(terminalId, Number.MAX_SAFE_INTEGER);
+          resynchronise = false;
+          queue.push(...framesOf(current));
+          follow(current.characters);
+        }
+        const next = queue.shift();
+        if (next !== undefined) {
+          yield next;
+          if (next.state !== "running") return;
+          continue;
+        }
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, LIVE_TERMINAL_RECHECK_MS);
+          wake = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+        });
+        wake = undefined;
+      }
+    } finally {
+      stopObserving?.();
+      revocation.signal.removeEventListener("abort", wakeOnRevocation);
+      release();
+    }
+  }
+
   async #requireOwnedTerminal(
     windowId: WindowId,
     input: {
@@ -1557,6 +1849,8 @@ export class CodeOperationService {
       readonly terminalId: CodeTerminalId;
     },
     useEffectiveThread: boolean,
+    /** A kept admission, for a check made after the request that held it returned. */
+    access?: (projectId: CodeThread["projectId"]) => Awaitable<boolean>,
   ): Promise<void> {
     const stored = this.#options.authority.readThread(input.threadId);
     const thread =
@@ -1571,9 +1865,11 @@ export class CodeOperationService {
     ) {
       throw new CodeOperationServiceError("invalid");
     }
-    if (!(await this.#options.authority.canAccessProject(windowId, thread.projectId))) {
-      throw new CodeOperationServiceError("unauthorized");
-    }
+    const allowed =
+      access === undefined
+        ? await this.#options.authority.canAccessProject(windowId, thread.projectId)
+        : await access(thread.projectId);
+    if (!allowed) throw new CodeOperationServiceError("unauthorized");
     const checkout = this.#options.authority.readCheckout(input.checkoutId);
     if (
       checkout === undefined ||
@@ -2600,9 +2896,11 @@ export class CodeOperationService {
     this.#admitTerminalReader(owner, operationId, nextCursor);
     const outputBaseline = owner.outputBaseline;
     delete owner.outputBaseline;
+    const resumeFrom = outputBaseline ?? owner.journaledCharacters;
     owner.removeOutputListener = this.#options.terminals.observe(
       terminalId,
       (emission) => {
+        owner.journaledCharacters = emission.characters;
         let content: CodeEvidenceReference | undefined;
         try {
           content =
@@ -2630,7 +2928,9 @@ export class CodeOperationService {
           this.#deactivateTerminalOutput(terminalId);
         }
       },
-      outputBaseline === undefined ? undefined : { afterCharacters: outputBaseline },
+      // The joining surface's own snapshot when it has one; otherwise where the
+      // journal had reached. Neither is the launch, which would journal it all again.
+      resumeFrom === undefined ? undefined : { afterCharacters: resumeFrom },
     );
   }
 
@@ -2649,7 +2949,13 @@ export class CodeOperationService {
   ): void {
     owner.readers.delete(String(operationId));
     while (owner.readers.size >= MAX_TERMINAL_READERS) {
-      const quietest = [...owner.readers.values()].reduce((oldest, candidate) =>
+      // A window reading live is on screen even though it reads no journal, so
+      // it is the last to be collected.
+      const all = [...owner.readers.values()];
+      const idle = all.filter(
+        (reader) => !this.#liveReaderOperations.has(String(reader.operationId)),
+      );
+      const quietest = (idle.length === 0 ? all : idle).reduce((oldest, candidate) =>
         candidate.lastReadTick < oldest.lastReadTick ? candidate : oldest,
       );
       owner.readers.delete(String(quietest.operationId));

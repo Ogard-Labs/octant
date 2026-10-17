@@ -15,6 +15,7 @@ import {
   type CodeReviewFinding,
   type CodeReviewFindingId,
   type CodeFileId,
+  type CodeTerminalLiveFrame,
   type WindowId,
 } from "@octant/contracts";
 import { turnBlocksInPlaceRestore } from "@octant/domain/code-policy";
@@ -26,6 +27,13 @@ import {
   type CodeOperationServiceOptions,
 } from "./codeOperationService";
 import { ReviewFindingServiceError } from "./reviewFindingService";
+import { TerminalService } from "./terminalService";
+import { Schema } from "effect";
+import { DeviceId, StableHostId, RemoteSessionId } from "@octant/contracts/remote-access";
+import { createAuthenticatedProductDispatch } from "../authenticatedProductRoutes";
+import { CodeProjectAccess } from "../codeProjectAccess";
+import { createCodeRouteHandler } from "../codeRoutes";
+import { WindowAuthorityStore } from "../windowAuthorityStore";
 
 const ids = {
   window: "11111111-1111-4111-8111-111111111111" as WindowId,
@@ -3648,5 +3656,546 @@ describe("CodeOperationService terminal Browser grant", () => {
       browserGrant: revoked,
     });
     expect(JSON.stringify(result)).not.toContain('"granted"');
+  });
+});
+
+describe("CodeOperationService live terminal output", () => {
+  const scope = { threadId: ids.thread, checkoutId: ids.checkout, terminalId: ids.terminal };
+  const otherWindow = "99999999-9999-4999-8999-aaaaaaaaaaaa" as WindowId;
+
+  function fakeShell(receiptReady: Promise<void> = Promise.resolve()) {
+    let data: (value: string) => void = () => undefined;
+    let exit: (event: { exitCode: number }) => void = () => undefined;
+    return {
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(async () => undefined),
+      onData: vi.fn((listener: (value: string) => void) => {
+        data = listener;
+        return () => undefined;
+      }),
+      onExit: vi.fn((listener: (event: { exitCode: number }) => void) => {
+        exit = listener;
+        return () => undefined;
+      }),
+      pause: vi.fn(),
+      resume: vi.fn(),
+      receiptReady,
+      print: (value: string) => data(value),
+      exit: (exitCode: number) => exit({ exitCode }),
+    };
+  }
+
+  async function fixture(
+    options: {
+      readonly canAccessProject?: (windowId: WindowId) => boolean;
+      readonly retainProjectAccess?: (
+        windowId: WindowId,
+      ) => ((projectId: CodeThread["projectId"]) => boolean) | undefined;
+      /** Hold the launch open until `finishLaunch` is called. */
+      readonly deferLaunch?: boolean;
+    } = {},
+  ) {
+    let finishLaunch = () => {};
+    const shell = fakeShell(
+      options.deferLaunch === true
+        ? new Promise<void>((resolve) => {
+            finishLaunch = resolve;
+          })
+        : Promise.resolve(),
+    );
+    const evidenceTexts: string[] = [];
+    const terminals = new TerminalService({
+      port: { start: () => shell },
+      inheritedEnvironment: {},
+      credentials: { resolve: async () => "" },
+    });
+    let puts = 0;
+    const events = {
+      replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
+      append: vi.fn(),
+      historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+    };
+    const service = new CodeOperationService({
+      authority: {
+        readThread: vi.fn(() => thread()),
+        readCheckout: vi.fn(() =>
+          decodeCodeCheckoutIdentity({
+            id: ids.checkout,
+            repositoryId: `repo_${"8".repeat(64)}`,
+            kind: "existing-worktree",
+            availability: "available",
+            head: { kind: "branch", name: "feature/exact", oid: "b".repeat(40) },
+            observedAt: "2026-07-21T10:00:00.000Z",
+          }),
+        ),
+        canAccessProject: vi.fn(
+          async (windowId: WindowId) => options.canAccessProject?.(windowId) ?? true,
+        ),
+        ...(options.retainProjectAccess === undefined
+          ? {}
+          : { retainProjectAccess: options.retainProjectAccess }),
+        approvalContextDigest: vi.fn(async () => "a".repeat(64)),
+        resolveCheckoutRoot: vi.fn(async () => ({
+          checkoutRoot: "/private/exact-checkout",
+          workingDirectory: "/private/exact-checkout",
+          shell: "/bin/zsh",
+          credentialReferences: [],
+          environment: {},
+        })),
+      } as never,
+      approvals: { validate: vi.fn(async () => true) } as never,
+      terminals: terminals as never,
+      repositoryTests: {} as never,
+      git: {} as never,
+      pullRequests: {} as never,
+      reviewFindings: {} as never,
+      turns: {} as never,
+      evidence: {
+        put: vi.fn((content: string) => {
+          puts += 1;
+          evidenceTexts.push(content);
+          return decodeCodeEvidenceReference({
+            contentId: `00000000-0000-4000-8000-${String(puts).padStart(12, "0")}`,
+            digest: "a".repeat(64),
+            byteLength: Buffer.byteLength(content),
+          });
+        }),
+        read: vi.fn(async () => ""),
+      } as never,
+      events: events as never,
+    } as CodeOperationServiceOptions);
+    const launched = service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    if (options.deferLaunch !== true) await launched;
+    return {
+      service,
+      shell,
+      events,
+      evidenceTexts,
+      launched,
+      finishLaunch: () => finishLaunch(),
+      evidencePuts: () => puts,
+    };
+  }
+
+  /** Collects frames in the background, the way the route's stream does. */
+  function follow(frames: AsyncIterable<CodeTerminalLiveFrame>) {
+    const received: CodeTerminalLiveFrame[] = [];
+    const finished = (async () => {
+      for await (const frame of frames) received.push(frame);
+    })();
+    return { received, finished };
+  }
+
+  /** What a window holds after applying frames the way the terminal pane does. */
+  function applied(frames: ReadonlyArray<CodeTerminalLiveFrame>): string {
+    return frames.reduce((held, frame) => (frame.replace ? frame.text : held + frame.text), "");
+  }
+
+  it("refuses a window, a thread, or a terminal that is not the one the shell was started for", async () => {
+    const { service } = await fixture();
+
+    await expect(service.watchTerminal(otherWindow, scope)).rejects.toMatchObject({
+      category: "unauthorized",
+    });
+    await expect(
+      service.watchTerminal(ids.window, {
+        ...scope,
+        threadId: decodeCodeThreadId("22222222-2222-4222-8222-222222222223"),
+      }),
+    ).rejects.toMatchObject({ category: "invalid" });
+    await expect(
+      service.watchTerminal(ids.window, {
+        ...scope,
+        terminalId: "55555555-5555-4555-8555-555555555556" as CodeTerminalId,
+      }),
+    ).rejects.toMatchObject({ category: "unavailable" });
+  });
+
+  it("delivers output at frame rate while the store is written no faster than before", async () => {
+    vi.useFakeTimers();
+    try {
+      const flood = async (watched: boolean) => {
+        const { service, shell, evidencePuts } = await fixture();
+        const live = watched
+          ? follow(await service.watchTerminal(ids.window, scope))
+          : { received: [], finished: Promise.resolve() };
+        for (let ms = 0; ms < 1000; ms += 1) {
+          shell.print("x");
+          await vi.advanceTimersByTimeAsync(1);
+        }
+        const received = live.received.length;
+        shell.exit(0);
+        await vi.advanceTimersByTimeAsync(100);
+        await live.finished;
+        return { received, puts: evidencePuts() };
+      };
+
+      const unwatched = await flood(false);
+      const watched = await flood(true);
+
+      // One leading-edge write, then one per 50 ms window, with or without a
+      // window reading live: a flooding shell reaches the evidence store's
+      // 100,000-entry ceiling no sooner for being watched.
+      expect(unwatched.puts).toBeLessThanOrEqual(23);
+      expect(watched.puts).toBe(unwatched.puts);
+      // Live frames arrive at the 16 ms window, so about three for each write.
+      expect(watched.received).toBeGreaterThan(50);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("starts a window with no offset from where the shell is, and resumes one that has an offset from there", async () => {
+    vi.useFakeTimers();
+    try {
+      const { service, shell } = await fixture();
+      shell.print("one\n");
+      await vi.advanceTimersByTimeAsync(100);
+
+      const first = new AbortController();
+      const live = follow(
+        await service.watchTerminal(ids.window, { ...scope, signal: first.signal }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(live.received).toMatchObject([{ text: "one\n", replace: true, state: "running" }]);
+      const held = live.received[0]!.characters;
+
+      shell.print("two\n");
+      await vi.advanceTimersByTimeAsync(20);
+      expect(applied(live.received)).toBe("one\ntwo\n");
+
+      // The stream drops; the shell keeps printing.
+      first.abort();
+      await live.finished;
+      const resumedFrom = live.received.at(-1)!.characters;
+      shell.print("three\n");
+      await vi.advanceTimersByTimeAsync(100);
+
+      const second = new AbortController();
+      const resumed = follow(
+        await service.watchTerminal(ids.window, {
+          ...scope,
+          afterCharacters: resumedFrom,
+          signal: second.signal,
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      // Only what the window missed, appended, so it holds the same bytes the
+      // journal holds.
+      expect(resumed.received).toMatchObject([{ text: "three\n", replace: false }]);
+      expect(held).toBeLessThan(resumedFrom);
+      second.abort();
+      await resumed.finished;
+
+      // An offset the host does not hold is answered with the current output.
+      const stale = new AbortController();
+      const behind = follow(
+        await service.watchTerminal(ids.window, {
+          ...scope,
+          afterCharacters: 10_000_000,
+          signal: stale.signal,
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(behind.received).toMatchObject([{ text: "one\ntwo\nthree\n", replace: true }]);
+      stale.abort();
+      await behind.finished;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("splits a burst of CJK output into frames that stay within the byte bound and add up to what was printed", async () => {
+    vi.useFakeTimers();
+    try {
+      const { service, shell } = await fixture();
+      const live = follow(await service.watchTerminal(ids.window, scope));
+      await vi.advanceTimersByTimeAsync(0);
+
+      // 40,000 characters is under the publish limit but about 120 KiB encoded.
+      const burst = "界".repeat(40_000);
+      shell.print(burst);
+      await vi.advanceTimersByTimeAsync(20);
+
+      const printed = live.received.filter((frame) => frame.text !== "");
+      expect(printed.length).toBe(2);
+      for (const frame of printed) {
+        expect(Buffer.byteLength(frame.text, "utf8")).toBeLessThanOrEqual(64 * 1024);
+      }
+      expect(applied(live.received)).toBe(burst);
+      expect(live.received.at(-1)?.characters).toBe(burst.length);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sends a reader that falls behind where the shell is now instead of every step it missed", async () => {
+    vi.useFakeTimers();
+    try {
+      const { service, shell } = await fixture();
+      const frames = (await service.watchTerminal(ids.window, scope))[Symbol.asyncIterator]();
+      const initial = await frames.next();
+      expect(initial.value).toMatchObject({ replace: true });
+
+      let printed = "";
+      for (let step = 0; step < 20; step += 1) {
+        const line = `line ${step}\n`;
+        printed += line;
+        shell.print(line);
+        await vi.advanceTimersByTimeAsync(20);
+      }
+      shell.print("last\n");
+      printed += "last\n";
+      await vi.advanceTimersByTimeAsync(20);
+
+      const received: CodeTerminalLiveFrame[] = [initial.value as CodeTerminalLiveFrame];
+      for (;;) {
+        const next = await frames.next();
+        if (next.done === true) break;
+        received.push(next.value);
+        if (applied(received) === printed) break;
+      }
+      await frames.return?.(undefined);
+
+      expect(applied(received)).toBe(printed);
+      expect(received.length).toBeLessThan(12);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ends the stream with the shell's exit and with the window's revocation", async () => {
+    vi.useFakeTimers();
+    try {
+      const ended = await fixture();
+      const exited = follow(await ended.service.watchTerminal(ids.window, scope));
+      await vi.advanceTimersByTimeAsync(0);
+      ended.shell.exit(3);
+      await vi.advanceTimersByTimeAsync(100);
+      await exited.finished;
+      expect(exited.received.at(-1)).toMatchObject({ state: "exited", exitCode: 3 });
+
+      const revoked = await fixture();
+      const open = follow(await revoked.service.watchTerminal(ids.window, scope));
+      await vi.advanceTimersByTimeAsync(0);
+      revoked.service.revokeTerminalStreams(ids.window);
+      await vi.advanceTimersByTimeAsync(0);
+      await open.finished;
+      expect(open.received.at(-1)).toMatchObject({ state: "running" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ends the stream once the window can no longer open the thread's Project", async () => {
+    vi.useFakeTimers();
+    try {
+      let allowed = true;
+      const { service, shell } = await fixture({ canAccessProject: () => allowed });
+      const live = follow(await service.watchTerminal(ids.window, scope));
+      await vi.advanceTimersByTimeAsync(1_100);
+      shell.print("while allowed\n");
+      await vi.advanceTimersByTimeAsync(20);
+      expect(applied(live.received)).toBe("while allowed\n");
+
+      allowed = false;
+      await vi.advanceTimersByTimeAsync(1_100);
+      await live.finished;
+      shell.print("after revocation\n");
+      await vi.advanceTimersByTimeAsync(100);
+      expect(applied(live.received)).toBe("while allowed\n");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a paired device's stream open past the first recheck, which no request still backs", async () => {
+    vi.useFakeTimers();
+    try {
+      let strict = false;
+      const access = new CodeProjectAccess({
+        readWorkspace: () => undefined,
+        hasActiveCodeProject: () => true,
+        isWindowLive: () => true,
+      });
+      const { service, shell } = await fixture({
+        canAccessProject: (windowId) =>
+          !strict || access.canAccessProject(windowId, thread().projectId),
+        retainProjectAccess: (windowId) => access.retain(windowId),
+      });
+      strict = true;
+      const clientLeaves = new AbortController();
+      const handler = createCodeRouteHandler({
+        service: {
+          watchTerminal: (windowId: WindowId, input: never) =>
+            service.watchTerminal(windowId, input),
+        } as never,
+        windowAuthorityStore: new WindowAuthorityStore(),
+      });
+      const dispatch = createAuthenticatedProductDispatch({
+        dispatch: (request, context) => access.run(context, () => handler(request)),
+      });
+      const response = await dispatch({
+        principal: {
+          kind: "remote-device",
+          deviceId: Schema.decodeUnknownSync(DeviceId)(String(ids.window)),
+          hostId: Schema.decodeUnknownSync(StableHostId)("00000000-0000-4000-8000-00000000c002"),
+          credentialGeneration: 1,
+          origin: "https://octant.example",
+          protocolVersion: 1,
+          capabilityDigest: "b".repeat(64),
+          sessionId: Schema.decodeUnknownSync(RemoteSessionId)(
+            "00000000-0000-4000-8000-00000000c003",
+          ),
+        },
+        request: new Request(
+          `https://octant.example/api/code/terminals/live?threadId=${ids.thread}&checkoutId=${ids.checkout}&terminalId=${ids.terminal}`,
+          { signal: clientLeaves.signal },
+        ),
+      });
+      expect(response?.status).toBe(200);
+      const reader = response!.body!.getReader();
+      const lines: string[] = [];
+      let ended = false;
+      const decoder = new TextDecoder();
+      const pump = (async () => {
+        for (;;) {
+          const next = await reader.read();
+          if (next.done) {
+            ended = true;
+            return;
+          }
+          lines.push(...decoder.decode(next.value).split("\n").filter(Boolean));
+        }
+      })();
+
+      await vi.advanceTimersByTimeAsync(2_500);
+      shell.print("still here\n");
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(ended).toBe(false);
+      expect(lines.map((line) => JSON.parse(line).text).join("")).toContain("still here");
+      clientLeaves.abort();
+      await vi.advanceTimersByTimeAsync(0);
+      await reader.cancel();
+      await pump;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("journals only new output when two surfaces attach together", async () => {
+    vi.useFakeTimers();
+    try {
+      const { service, shell, events, evidenceTexts } = await fixture();
+      shell.print("one\n");
+      await vi.advanceTimersByTimeAsync(100);
+      const outputAppends = () =>
+        events.append.mock.calls.filter(([entry]) => entry.event.kind === "terminal-output").length;
+      const before = outputAppends();
+      const attach = (operationId: string) =>
+        service.execute(ids.window, {
+          kind: "attach-terminal",
+          operationId: decodeCodeOperationId(operationId),
+          ...scope,
+        });
+
+      await Promise.all([
+        attach("6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a"),
+        attach("6b6b6b6b-6b6b-4b6b-8b6b-6b6b6b6b6b6b"),
+      ]);
+
+      // Both surfaces were handed everything printed so far as their replay,
+      // so attaching journals no output at all.
+      expect(outputAppends()).toBe(before);
+      evidenceTexts.length = 0;
+      shell.print("two\n");
+      await vi.advanceTimersByTimeAsync(100);
+      expect(evidenceTexts).toEqual(["two\n"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps journaling the surface whose live stream is open when older readers are collected", async () => {
+    vi.useFakeTimers();
+    try {
+      const { service, shell, events } = await fixture();
+      const live = follow(
+        await service.watchTerminal(ids.window, { ...scope, operationId: ids.operation }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      for (const id of [
+        "6a6a6a6a-6a6a-4a6a-8a6a-6a6a6a6a6a6a",
+        "6b6b6b6b-6b6b-4b6b-8b6b-6b6b6b6b6b6b",
+        "6c6c6c6c-6c6c-4c6c-8c6c-6c6c6c6c6c6c",
+        "6d6d6d6d-6d6d-4d6d-8d6d-6d6d6d6d6d6d",
+      ]) {
+        await service.execute(ids.window, {
+          kind: "attach-terminal",
+          operationId: decodeCodeOperationId(id),
+          ...scope,
+        });
+      }
+      shell.print("after\n");
+      await vi.advanceTimersByTimeAsync(100);
+
+      const journaled = events.append.mock.calls
+        .map(([entry]) => entry)
+        .filter((entry) => entry.event.kind === "terminal-output")
+        .map((entry) => String(entry.operationId));
+      expect(journaled).toContain(String(ids.operation));
+      service.revokeTerminalStreams(ids.window);
+      await live.finished;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ends a stream whose window was revoked while the shell was still launching", async () => {
+    const { service, finishLaunch, launched } = await fixture({ deferLaunch: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const opening = service.watchTerminal(ids.window, scope);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    service.revokeTerminalStreams(ids.window);
+    finishLaunch();
+    await launched;
+
+    await expect(opening).rejects.toMatchObject({ category: "unauthorized" });
+  });
+
+  it("holds each terminal to four live streams and frees one the moment its window is revoked", async () => {
+    vi.useFakeTimers();
+    try {
+      const { service } = await fixture();
+      const open = async () => {
+        const frames = (await service.watchTerminal(ids.window, scope))[Symbol.asyncIterator]();
+        // Taking the first frame leaves the stream stalled at its yield.
+        await frames.next();
+        return frames;
+      };
+      const streams = [await open(), await open(), await open(), await open()];
+      await expect(service.watchTerminal(ids.window, scope)).rejects.toMatchObject({
+        category: "unavailable",
+      });
+
+      service.revokeTerminalStreams(ids.window);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // No reader had to pull again for the streams to be released.
+      await expect(open()).resolves.toBeDefined();
+      for (const stream of streams) await stream.return?.(undefined);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

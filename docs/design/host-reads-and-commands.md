@@ -180,6 +180,16 @@ A thread's kept Browser screenshots use three local-window routes:
 `POST /api/browser/captures/take` (the Screenshot control). The behavior rule is
 in [Browser captures](browser-captures.md).
 
+## Terminal output
+
+A Code thread terminal's live output is `GET /api/code/terminals/live` with
+`threadId`, `checkoutId`, `terminalId`, and an optional `afterCharacters`
+resume offset. It is a held stream of newline-delimited frames that never
+touches the journal; the journal read stays `GET
+/api/code/threads/:threadId/operations/:operationId/events`. The rule is in
+[Architecture: security and authority](../architecture.md#security-and-authority)
+under Terminal output paths.
+
 ## GitHub issues
 
 The issue browser's catalogue reads stay on the existing `githubCatalogue`

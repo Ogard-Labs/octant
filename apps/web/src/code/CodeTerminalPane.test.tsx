@@ -583,6 +583,210 @@ describe("CodeTerminalPane", () => {
     expect(client.operationContent).toHaveBeenCalledTimes(2);
   });
 
+  it("paints output from the live stream without reading the journal", async () => {
+    const client = codeClient({ evidence: "ready\n" });
+    const frames = [{ text: "TERMINAL_OK\n", replace: false, characters: 18, state: "running" }];
+    (client.watchTerminal as ReturnType<typeof vi.fn>).mockImplementation(async function* (
+      _request: unknown,
+      signal: AbortSignal,
+    ) {
+      for (const frame of frames) yield { terminalId: ids.terminal, ...frame } as never;
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+    });
+    const runtime = xtermRuntime();
+
+    const { unmount } = render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={runtime.loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    await waitFor(() => expect(runtime.setOutput).toHaveBeenCalledWith("ready\nTERMINAL_OK\n"));
+    // It continues the replay the pane already holds, so scrollback is not replaced.
+    expect(client.watchTerminal).toHaveBeenCalledWith(
+      {
+        threadId: scope.threadId,
+        checkoutId: scope.checkoutId,
+        terminalId: ids.terminal,
+        operationId: terminalResult.operationId,
+        afterCharacters: 6,
+      },
+      expect.any(AbortSignal),
+    );
+    expect(client.subscribeOperation).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("asks for the current output when the replay it holds was truncated by the host", async () => {
+    const client = codeClient({ evidence: "tail only\n" });
+    const requests: unknown[] = [];
+    (client.watchTerminal as ReturnType<typeof vi.fn>).mockImplementation(async function* (
+      request: unknown,
+      signal: AbortSignal,
+    ) {
+      requests.push(request);
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+    });
+    const runtime = xtermRuntime();
+
+    const { unmount } = render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={runtime.loadRuntime}
+        result={{
+          ...terminalResult,
+          transcript: { ...terminalResult.transcript!, truncated: true },
+        }}
+        scope={scope}
+      />,
+    );
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]).not.toHaveProperty("afterCharacters");
+    unmount();
+  });
+
+  it("resumes a dropped live stream from the last offset it received", async () => {
+    const client = codeClient({ evidence: "" });
+    const requests: unknown[] = [];
+    let attempt = 0;
+    (client.watchTerminal as ReturnType<typeof vi.fn>).mockImplementation(async function* (
+      request: unknown,
+      signal: AbortSignal,
+    ) {
+      requests.push(request);
+      attempt += 1;
+      if (attempt === 1) {
+        yield {
+          terminalId: ids.terminal,
+          text: "one\n",
+          replace: true,
+          characters: 4,
+          state: "running",
+        } as never;
+        return;
+      }
+      yield {
+        terminalId: ids.terminal,
+        text: "two\n",
+        replace: false,
+        characters: 8,
+        state: "running",
+      } as never;
+      await new Promise<void>((resolve) =>
+        signal.addEventListener("abort", () => resolve(), { once: true }),
+      );
+    });
+    const runtime = xtermRuntime();
+
+    const { unmount } = render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={runtime.loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    await waitFor(() => expect(runtime.setOutput).toHaveBeenCalledWith("one\ntwo\n"));
+    expect(requests[0]).toMatchObject({ afterCharacters: 0 });
+    expect(requests[1]).toMatchObject({ afterCharacters: 4 });
+    unmount();
+  });
+
+  it("reads the journal once the host refuses the live stream, without showing a byte twice", async () => {
+    const client = codeClient();
+    (client.operationContent as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(new TextEncoder().encode("ready\n"))
+      .mockResolvedValueOnce(new TextEncoder().encode("TERMINAL_OK\n"));
+    let attempt = 0;
+    (client.watchTerminal as ReturnType<typeof vi.fn>).mockImplementation(async function* () {
+      attempt += 1;
+      // The stream delivers a frame, drops, and the host then refuses it.
+      if (attempt === 1) {
+        yield {
+          terminalId: ids.terminal,
+          text: "live\n",
+          replace: true,
+          characters: 5,
+          state: "running",
+        } as never;
+        return;
+      }
+      throw new CodeClientFailure({ category: "unauthorized", message: "Refused." });
+    });
+    (client.subscribeOperation as ReturnType<typeof vi.fn>).mockImplementationOnce(() =>
+      (async function* () {
+        yield terminalOutputFrame(2);
+      })(),
+    );
+    const runtime = xtermRuntime();
+
+    const { unmount } = render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={runtime.loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    await waitFor(() => expect(runtime.setOutput).toHaveBeenLastCalledWith("ready\nTERMINAL_OK\n"));
+    unmount();
+  });
+
+  it("shows the shell's exit from the live stream and stops reading", async () => {
+    const client = codeClient({ evidence: "" });
+    (client.watchTerminal as ReturnType<typeof vi.fn>).mockImplementation(async function* () {
+      yield {
+        terminalId: ids.terminal,
+        text: "bye\n",
+        replace: true,
+        characters: 4,
+        state: "running",
+      } as never;
+      yield {
+        terminalId: ids.terminal,
+        text: "",
+        replace: false,
+        characters: 4,
+        state: "exited",
+        exitCode: 2,
+      } as never;
+    });
+    const runtime = xtermRuntime();
+
+    render(
+      <CodeTerminalPane
+        client={client}
+        createOperationId={() => ids.operation as never}
+        executionPolicy="full-access"
+        loadRuntime={runtime.loadRuntime}
+        result={terminalResult}
+        scope={scope}
+      />,
+    );
+
+    expect(await screen.findByText("Exited with code 2")).toBeVisible();
+    expect(runtime.setOutput).toHaveBeenLastCalledWith("bye\n");
+    expect(client.subscribeOperation).not.toHaveBeenCalled();
+  });
+
   it("replays a terminal-output frame when its content fetch fails transiently", async () => {
     const client = codeClient();
     (client.operationContent as ReturnType<typeof vi.fn>)

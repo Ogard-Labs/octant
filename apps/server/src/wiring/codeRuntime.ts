@@ -87,6 +87,7 @@ function withCodeOperationRuntime(
     execute: (windowId, command) => service.execute(windowId, command),
     executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
     inspectTerminal: (windowId, input) => runtime.inspectTerminal(windowId, input),
+    watchTerminal: (windowId, input) => runtime.watchTerminal(windowId, input),
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
     subscribeOperation: async function* (windowId, threadId, operationId, afterCursor) {
@@ -169,6 +170,9 @@ function withCodeBoard(
     ...(service.inspectTerminal === undefined
       ? {}
       : { inspectTerminal: service.inspectTerminal.bind(service) }),
+    ...(service.watchTerminal === undefined
+      ? {}
+      : { watchTerminal: service.watchTerminal.bind(service) }),
     ...(service.subscribeOperation === undefined
       ? {}
       : { subscribeOperation: service.subscribeOperation.bind(service) }),
@@ -438,6 +442,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         clock: () => new Date().toISOString(),
       });
       onWindowRevoked((windowId) => grants.revokeWindow(windowId));
+      onWindowRevoked((windowId) =>
+        late.codeOperationRuntime.current?.revokeTerminalStreams(windowId),
+      );
       const unsubscribeTerminalBrowserGrants = persistence.journal.subscribeCommitted((append) => {
         for (const event of append.events) {
           if (
@@ -530,6 +537,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         windowAccess: {
           canAccessProject: canAccessCodeProject,
           standingAuthority: (run) => codeProjectAccess.standingAuthority(run),
+          retainProjectAccess: (windowId) => codeProjectAccess.retain(windowId),
         },
         resolveCheckoutRoot: async (windowId, thread, checkout) => {
           const root = await roots.resolve(windowId, thread, checkout, rootProbePath);

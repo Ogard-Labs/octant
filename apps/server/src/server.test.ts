@@ -1125,6 +1125,8 @@ describe("startOctantServer", () => {
       revokeApprovals: vi.fn(),
       execute: vi.fn(async () => result),
       inspectTerminal: vi.fn(),
+      watchTerminal: vi.fn(),
+      revokeTerminalStreams: vi.fn(),
       subscribe: vi.fn(async () => []),
       conversation: vi.fn(async (_windowId, threadId, _afterCursor, _limit) => ({
         version: 3 as const,

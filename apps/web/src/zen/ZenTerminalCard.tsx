@@ -15,7 +15,11 @@ type TerminalResult = Extract<CodeOperationResult, { readonly kind: "terminal-st
 export interface ZenTerminalCardProps {
   readonly client: Pick<
     CodeClient,
-    "executeOperation" | "inspectTerminal" | "operationContent" | "subscribeOperation"
+    | "executeOperation"
+    | "inspectTerminal"
+    | "operationContent"
+    | "subscribeOperation"
+    | "watchTerminal"
   >;
   readonly createOperationId: () => CodeOperationId;
   /**
