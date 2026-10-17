@@ -151,13 +151,7 @@ Agent Plugins MCP servers receive `PLUGIN_ROOT` and a dedicated persistent
 `PLUGIN_DATA` directory. Octant expands only those two placeholders in
 `args`, `env` values, and `cwd`, connects with the declared stdio or Streamable
 HTTP transport when a component becomes effective, and isolates invalid skills
-or MCP entries so siblings continue loading. A stdio server runs in a sandbox
-that cannot follow a `#!` line to its interpreter, so a script shipped inside
-the plugin cannot be the `command`. Declare the interpreter as the `command` and
-the script as an argument, for example
-`"command": "node", "args": ["${PLUGIN_ROOT}/server.mjs"]`. Octant refuses a
-plugin script that starts with `#!`, names the fix, and never shows that server
-as ready. Marketplace supports importing a
+or MCP entries so siblings continue loading. Marketplace supports importing a
 local Agent Plugins folder from disk through the native folder picker. The
 selected absolute path remains in the desktop/server boundary; Settings receives
 only a short-lived, single-use receipt bound to the exact native window.
@@ -176,6 +170,21 @@ leaves no visible partial package. Updates preserve desired-enable choices
 for unchanged components; new or capability-expanded executable components
 are **quarantined** until reviewed, and rollback selects only retained,
 integrity-verified earlier versions.
+
+### Starting an MCP server
+
+On macOS an MCP server runs in a sandbox that cannot follow a `#!` line to its
+interpreter. Declare the interpreter as the `command` and the script as an
+argument, with the script's absolute path or `${PLUGIN_ROOT}`:
+
+```json
+{ "type": "stdio", "command": "node", "args": ["${PLUGIN_ROOT}/server.mjs"] }
+```
+
+A `command` that is itself a script, either one shipped in the plugin or a
+launcher such as `npx` or `npm`, is refused before it starts, with this fix in
+the message, and the server is never shown as ready. Install the server's
+package first, then point `node` at its script.
 
 ### Structured references
 

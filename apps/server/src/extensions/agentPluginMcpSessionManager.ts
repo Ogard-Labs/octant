@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { access, open } from "node:fs/promises";
 import { homedir } from "node:os";
-import { delimiter, isAbsolute, join, relative } from "node:path";
+import { basename, delimiter, isAbsolute, join, relative } from "node:path";
 import type {
   ExtensionEffectiveSnapshot,
   ExtensionSnapshot,
@@ -82,6 +82,8 @@ export interface AgentPluginMcpSessionManagerOptions {
   readonly idleTimeoutMs?: number;
   readonly stdioSupervisor?: Pick<ExtensionSupervisor, "startInteractive">;
   readonly baseEnv?: Readonly<Record<string, string>>;
+  /** The host platform; the macOS profile is the one that cannot run a launcher script. */
+  readonly platform?: NodeJS.Platform;
   readonly authorizeToolCall?: (call: ExtensionToolCall) => Promise<boolean>;
   readonly recordExternalContentIngestion?: (
     input: RecordExternalContentIngestionInput,
@@ -101,6 +103,7 @@ export class AgentPluginMcpSessionManager {
   readonly #idleTimeoutMs: number;
   readonly #stdioSupervisor: Pick<ExtensionSupervisor, "startInteractive"> | undefined;
   readonly #baseEnv: Readonly<Record<string, string>>;
+  readonly #platform: NodeJS.Platform;
   readonly #authorizeToolCall: AgentPluginMcpSessionManagerOptions["authorizeToolCall"];
   readonly #recordExternalContentIngestion: AgentPluginMcpSessionManagerOptions["recordExternalContentIngestion"];
   readonly #uuid: () => string;
@@ -131,6 +134,7 @@ export class AgentPluginMcpSessionManager {
     this.#idleTimeoutMs = boundedTimeout(options.idleTimeoutMs, 5 * 60_000, 30 * 60_000);
     this.#stdioSupervisor = options.stdioSupervisor;
     this.#baseEnv = options.baseEnv ?? approvedAgentPluginMcpBaseEnvironment();
+    this.#platform = options.platform ?? process.platform;
     this.#authorizeToolCall = options.authorizeToolCall;
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#uuid = options.uuid ?? randomUUID;
@@ -493,6 +497,7 @@ export class AgentPluginMcpSessionManager {
               stdioProcess: supervisedStdioProcessPort({
                 supervisor: this.#stdioSupervisor,
                 target,
+                platform: this.#platform,
               }),
             }),
       });
@@ -645,9 +650,10 @@ async function resolveApprovedExecutable(command: string, approvedPath: string |
  * The sandbox grants read access around the file it launches, not around the
  * interpreter a `#!` line hands it to, so a server declared as a script inside
  * the plugin exits right after it starts. It is refused before spawn instead,
- * with the fix. Only a command under the plugin's own directory is checked; a
- * launcher found on the host path or at an absolute path outside it is left to
- * the normal start path, as is a command that cannot be opened.
+ * with the fix. The same holds for a launcher found on the host path or at an
+ * absolute path outside the plugin, such as `npx`, whose `env` interpreter lookup
+ * the profile blocks before the server runs; on macOS that is refused too. A
+ * command that cannot be opened is left to the normal start path.
  */
 async function startsWithShebang(command: string): Promise<boolean> {
   let handle;
@@ -670,9 +676,18 @@ function shebangCommandRefusal(serverName: string): string {
   );
 }
 
+function launcherCommandRefusal(serverName: string, command: string): string {
+  return (
+    `MCP server ${serverName} starts ${basename(command)}, a launcher script that the sandbox cannot run. ` +
+    'Install the server\'s package and set "command" to "node" (or the script\'s real interpreter) ' +
+    'with the absolute path to the package\'s script in "args".'
+  );
+}
+
 function supervisedStdioProcessPort(input: {
   readonly supervisor: Pick<ExtensionSupervisor, "startInteractive">;
   readonly target: AgentPluginMcpSessionKey;
+  readonly platform: NodeJS.Platform;
 }): AgentPluginMcpStdioProcessPort {
   return {
     start: async (launch, signal) => {
@@ -689,11 +704,16 @@ function supervisedStdioProcessPort(input: {
       ) {
         throw new Error("MCP stdio sandbox roots are unavailable.");
       }
+      const insidePlugin = isContainedPath(pluginRoot, launch.command);
       if (
-        isContainedPath(pluginRoot, launch.command) &&
+        (insidePlugin || input.platform === "darwin") &&
         (await startsWithShebang(launch.command))
       ) {
-        throw new Error(shebangCommandRefusal(launch.name));
+        throw new Error(
+          insidePlugin
+            ? shebangCommandRefusal(launch.name)
+            : launcherCommandRefusal(launch.name, launch.command),
+        );
       }
       const runtime: ExtensionRuntimeStartInput = {
         extensionId: input.target.extensionId,
