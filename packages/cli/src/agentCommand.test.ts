@@ -550,6 +550,328 @@ describe("octant agent command line", () => {
   );
 });
 
+describe("octant agent helper agents", () => {
+  const threadId = "00000000-0000-4000-8000-000000000301";
+  const runId = "72000000-0000-4000-8000-000000000001";
+  const now = "2026-10-16T09:00:00.000Z";
+  const row = {
+    runId,
+    requestId: "71000000-0000-4000-8000-000000000001",
+    parentThreadId: threadId,
+    parentThreadTitle: "Plan the parser",
+    mode: "chat",
+    role: "research",
+    task: "Find where the lexer handles escapes",
+    lifecycleStatus: "running",
+    executionKind: "octant-managed",
+    authority: {
+      filesystem: false,
+      shell: false,
+      git: false,
+      network: false,
+      tools: true,
+      subagents: false,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    },
+    workspaceKind: "chat-virtual",
+    usageQuality: "unavailable",
+    route: {
+      requestedProviderInstanceId: "50000000-0000-4000-8000-000000000001",
+      requestedModelId: "loopback-model",
+      executionProviderInstanceId: "50000000-0000-4000-8000-000000000001",
+      executionModelId: "loopback-model",
+      poolDerived: false,
+    },
+    resultAcknowledgement: { required: false, acknowledged: false },
+    version: 3,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  function hostSession(posted: LocalControlRequest[] = []) {
+    return session((request) => {
+      const opened = chatThreadOpening(threadId, request);
+      if (opened !== undefined) return opened;
+      if (request.path.startsWith("/api/agent-runs/center")) {
+        return { status: 200, body: { items: [row] } };
+      }
+      if (request.path.startsWith("/api/agent-runs/results")) {
+        return { status: 200, body: { runId, packets: [], truncated: false } };
+      }
+      if (request.path.startsWith("/api/agent-runs/conversation")) {
+        return {
+          status: 200,
+          body: {
+            runId,
+            parentThreadId: threadId,
+            executionKind: "octant-managed",
+            modelId: "loopback-model",
+            lifecycleStatus: "running",
+            status: "live",
+            entries: [
+              { sequence: 1, kind: "assistant", text: "Reading the lexer.", occurredAt: now },
+            ],
+            truncated: false,
+          },
+        };
+      }
+      if (request.path === "/api/agent-runs/steer") {
+        posted.push(request);
+        return { status: 200, body: { kind: "run-updated" } };
+      }
+      if (request.path.startsWith("/api/native-harness/sessions/")) {
+        return { status: 200, body: { view: null } };
+      }
+      return { status: 404, body: {} };
+    });
+  }
+
+  async function harness(
+    command: { readonly child?: string; readonly json: boolean },
+    posted: LocalControlRequest[] = [],
+  ) {
+    const stdout = sink();
+    const stderr = sink();
+    const code = await runAgentCliCommand({
+      command: { action: "harness-agents", threadId, ...command },
+      session: hostSession(posted),
+      stdin: Readable.from([]),
+      stdout,
+      stderr,
+    });
+    return { code, stdout: stdout.text(), stderr: stderr.text() };
+  }
+
+  it("parses the harness agents form with an optional helper", () => {
+    expect(resolveAgentCliCommand("harness", ["agents", threadId], {})).toEqual({
+      action: "harness-agents",
+      threadId,
+      json: false,
+    });
+    expect(resolveAgentCliCommand("harness", ["agents", threadId, "1"], { json: true })).toEqual({
+      action: "harness-agents",
+      threadId,
+      child: "1",
+      json: true,
+    });
+    expect(resolveAgentCliCommand("harness", ["agents"], {})).toBeUndefined();
+  });
+
+  it("lists the thread's helpers, and as JSON the host's own rows", async () => {
+    const plain = await harness({ json: false });
+    expect(plain.code).toBe(0);
+    expect(plain.stdout).toContain("1. [72000000] working · research · loopback-model");
+    expect(plain.stdout).toContain("Find where the lexer handles escapes");
+    const json = await harness({ json: true });
+    expect(JSON.parse(json.stdout.trim())).toMatchObject({ children: [{ runId, task: row.task }] });
+  });
+
+  it("shows one helper's brief, live text and how to reply", async () => {
+    const result = await harness({ child: "1", json: false });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Brief: Find where the lexer handles escapes");
+    expect(result.stdout).toContain("Reading the lexer.");
+    expect(result.stdout).toContain("Steer it with: /agent <n> <message>");
+    expect((await harness({ child: "7", json: false })).code).toBe(1);
+  });
+
+  it("lists, shows and steers helpers from the prompt loop", async () => {
+    const posted: LocalControlRequest[] = [];
+    const stdout = sink();
+    const code = await runAgentCliCommand({
+      command: {
+        action: "agent",
+        threadId,
+        json: false,
+        plain: true,
+        last: false,
+        quiet: false,
+        mode: "chat",
+      },
+      session: hostSession(posted),
+      stdin: Readable.from(["/agents\n", "/agent 1\n", "/agent 1 use sqlite\n", "/quit\n"]),
+      stdout,
+      stderr: sink(),
+    });
+    expect(code).toBe(0);
+    expect(stdout.text()).toContain("1. [72000000] working");
+    expect(stdout.text()).toContain("Reading the lexer.");
+    expect(stdout.text()).toContain("Sent to the helper; it reads it at its next step.");
+    expect(posted[0]).toMatchObject({
+      body: { runId, expectedVersion: 3, message: "use sqlite" },
+    });
+  });
+});
+
+describe("octant agent Chat lead question", () => {
+  const threadId = "00000000-0000-4000-8000-000000000201";
+  const turnId = "61000000-0000-4000-8000-000000000001";
+  const attemptId = "62000000-0000-4000-8000-000000000001";
+  const now = "2026-10-16T09:00:00.000Z";
+
+  /** The Chat thread as the host reads it: parked on a question, then finished. */
+  function chatView(state: "parked" | "answered") {
+    const digest = "a".repeat(64);
+    const base = chatThreadOpening(threadId, { path: `/api/chat/threads/${threadId}` } as never);
+    const thread = (base?.body as { thread: Record<string, unknown> }).thread;
+    return {
+      thread: { ...thread, version: 4 },
+      turns: [
+        {
+          id: turnId,
+          threadId,
+          sequence: 1,
+          userMessageRef: {
+            contentId: "63000000-0000-4000-8000-000000000001",
+            digest,
+            byteLength: 4,
+          },
+          attachmentIds: [],
+          attempts: [
+            {
+              id: attemptId,
+              turnId,
+              threadId,
+              providerInstanceId: "50000000-0000-4000-8000-000000000001",
+              providerSessionId: "64000000-0000-4000-8000-000000000001",
+              modelId: "loopback-model",
+              contextManifestId: "65000000-0000-4000-8000-000000000001",
+              outcome: state === "parked" ? "waiting" : "completed",
+              responseRefs: [],
+              citationIds: [],
+              ...(state === "parked"
+                ? {
+                    pendingQuestion: {
+                      requestId: "call_1",
+                      prompt: "Which database?",
+                      options: [
+                        { label: "sqlite", description: "one file, no server" },
+                        { label: "postgres" },
+                      ],
+                    },
+                  }
+                : {}),
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+          createdAt: now,
+        },
+      ],
+      lastSequence: 2,
+      contents: [
+        {
+          contentId: "63000000-0000-4000-8000-000000000001",
+          role: "user",
+          body: "plan",
+          digest,
+          byteLength: 4,
+        },
+      ],
+      attachments: [],
+      citations: [],
+      workItems: [],
+      workListVersion: 0,
+      followUpVersion: 0,
+    };
+  }
+
+  async function run(options: { readonly json: boolean; readonly typed: string }) {
+    const stdout = sink();
+    const stderr = sink();
+    const posted: Array<{ readonly kind?: string; readonly [key: string]: unknown }> = [];
+    let answered = false;
+    const code = await runAgentCliCommand({
+      command: {
+        action: "agent",
+        threadId,
+        prompt: "plan",
+        json: options.json,
+        plain: true,
+        last: false,
+        quiet: false,
+        mode: "chat",
+      },
+      session: session((request) => {
+        if (request.path === `/api/chat/threads/${threadId}`) {
+          return { status: 200, body: chatView(answered ? "answered" : "parked") };
+        }
+        const opened = chatThreadOpening(threadId, request);
+        if (opened !== undefined) return opened;
+        if (request.path === "/api/chat/commands") {
+          const body = request.body as { kind?: string };
+          posted.push(body);
+          if (body.kind === "answer-chat-turn-question" || body.kind === "interrupt-chat-turn") {
+            answered = true;
+          }
+          return { status: 200, body: {} };
+        }
+        if (request.path.startsWith("/api/native-harness/sessions/")) {
+          return { status: 200, body: { view: null } };
+        }
+        return { status: 200, body: [] };
+      }),
+      stdin: Readable.from([options.typed]),
+      stdout,
+      stderr,
+      pollIntervalMs: 5,
+    });
+    return { code, stdout: stdout.text(), stderr: stderr.text(), posted };
+  }
+
+  it("shows the question with numbered options and sends the picked option as the answer", async () => {
+    const result = await run({ json: false, typed: "2\n" });
+    expect(result.stdout).toContain("? Which database?");
+    expect(result.stdout).toContain("  1. sqlite — one file, no server");
+    expect(result.stdout).toContain("  2. postgres");
+    expect(result.posted.filter((body) => body.kind === "answer-chat-turn-question")).toEqual([
+      {
+        kind: "answer-chat-turn-question",
+        threadId,
+        expectedVersion: 4,
+        turnId,
+        attemptId,
+        requestId: "call_1",
+        answer: "postgres",
+      },
+    ]);
+    expect(result.code).toBe(0);
+  });
+
+  it("stops the parked turn when stdin ends before an answer, instead of waiting forever", async () => {
+    const result = await run({ json: false, typed: "" });
+    expect(result.stderr).toContain("Input ended before the question was answered");
+    expect(result.posted.map((body) => body.kind)).toContain("interrupt-chat-turn");
+    expect(result.posted.map((body) => body.kind)).not.toContain("answer-chat-turn-question");
+  });
+
+  it("asks again after a blank line rather than leaving the turn parked", async () => {
+    const result = await run({ json: false, typed: "\n2\n" });
+    expect(result.stdout.match(/\? Which database\?/g)).toHaveLength(2);
+    expect(result.posted.filter((body) => body.kind === "answer-chat-turn-question")).toMatchObject(
+      [{ answer: "postgres" }],
+    );
+  });
+
+  it("emits the question as a JSON line and reads the answer from stdin", async () => {
+    const result = await run({ json: true, typed: "use sqlite\n" });
+    const lines = result.stdout
+      .split("\n")
+      .filter((line) => line.startsWith("{"))
+      .map((line) => JSON.parse(line) as { kind: string; question?: { prompt: string } });
+    expect(lines.find((line) => line.kind === "question")?.question).toMatchObject({
+      id: "call_1",
+      prompt: "Which database?",
+      options: ["sqlite", "postgres"],
+      status: "pending",
+    });
+    expect(result.posted.find((body) => body.kind === "answer-chat-turn-question")).toMatchObject({
+      answer: "use sqlite",
+    });
+  });
+});
+
 describe("octant agent approval prompt", () => {
   const threadId = "00000000-0000-4000-8000-000000000101";
   const leadRequest = {

@@ -3474,27 +3474,13 @@ identities, as it did within one host lifetime; the resume checks (instance,
 authentication, Project root, account directory history) still decide. A
 thread purge erases the identity of the session the thread recorded. Codex restates the model and its
 reasoning effort on each turn, and Claude resumes the SDK session under the new
-model. Another model on any other driver still fails closed. In Code, a
-change of provider instance starts a new session with a provider-switch
-handoff (below); in Chat and Work it still fails closed. A started Code
-thread's model picker offers its own provider's models only where its next
-turn will accept them, and every other provider. Work and Chat also refuse
-a follow-up that switches between provider-owned and host-owned conversation
-history; switching adapters cannot implicitly replace an existing native task.
-A Chat branch (`branch-chat-thread`, also behind a Chat checkpoint's restore)
-refuses as `unsupported` before creating anything when the source's provider,
-or the provider of the last completed attempt it would carry, owns its
-conversation, or when that attempt's provider can no longer be resolved: the
-native session already holds the source's later turns, and a copied attempt
-has no resume cursor of its own, so the branch could only refuse its first
-message. Host-owned conversations branch as before, because the
-branch's next turn is planned again from its own journaled copy. The Chat
-transcript omits Fork, Branch from here, and Restore from here on a turn the
-host would refuse this way, reading each listed provider's kind through the
-shared `providerKeepsConversation` policy; a provider the picker does not
-list is left to the host, so the renderer never hides a branch it would accept.
-Work also refuses when the previous driver is unavailable and its conversation
-ownership cannot be established.
+model. Another model on any other driver still fails closed. A change of
+provider instance starts a new session with a provider-switch handoff in Code
+(below) and, where the new provider keeps its conversation in a session of its
+own, in Chat and Work ("Chat and Work handoff", below). A started Code, Chat or
+Work thread's model picker offers its own provider's models only where its
+next turn will accept them, and every other provider. A Chat or Work thread
+whose own provider is gone is offered every provider.
 
 **Provider-switch handoff (Code).** A Code turn whose last recorded session
 belongs to another provider instance on the same checkout starts a new session
@@ -3634,6 +3620,77 @@ conversation that changed during the read, an inconsistent page, a history
 beyond the bounded scan, or a journaled handoff that can no longer be read or
 saved. A model change within a provider that cannot carry its session, and a
 change of checkout, still refuse as before.
+
+**Chat and Work handoff.** Whether a Chat or Work turn needs a handoff
+depends only on the provider it is sent to, decided by the pure
+`decideConversationSession` policy: a provider whose history the host holds
+(`providerKeepsConversation` false) is sent the history again every turn, from
+whatever provider wrote it, so moving to one needs nothing handed over and no
+longer refuses when the previous provider kept a session or is gone. A
+provider that keeps its conversation in a session of its own continues that
+session only when it is the same provider instance with a recorded resume
+cursor (and, for another model, the `modelSwitch` capability; in Work also the
+same folder binding). Any other provider instance starts a new session with a
+disclosed text handoff built by the same selector as Code's (purpose
+`provider-switch`, or `branch` for a branch): the thread's own active
+conversation, at most 24 blocks of 4,000 characters including the summary,
+each message attributed to its provider and model, with the thread's taint and
+every omission counted (earlier messages, purged or oversized or empty bodies,
+unfinished replies, attachments, truncation). Superseded turns, reasoning, tool
+activity, research and attachment bodies, `#thread` mention and preview
+context, and Project memory are never part of it; the host adds the ordinary
+per-turn context beside it as it does for any turn. Chat has no filesystem or
+shell authority and gains none: the handoff is text the thread already
+holds. The turn being sent is not in the thread yet, so it is never part of
+its own handoff.
+
+The selection runs before the turn is journaled, and the host checks that what
+it returned is this thread's, in this thread's Project (a Chat outside any
+Project has none). The record is journaled with the turn, before the provider
+is sent anything: on the Chat attempt (`handoff`, with the attempt's
+`attempt-updated` events) and on Work's `work.turn-accepted@1`. It holds the
+reason, the previous provider and model (a switch), the number of messages
+carried, the omission counts, whether the thread had taken in outside content,
+and fixed `nativeSessionTransferred` and `hiddenReasoningTransferred` values of
+`false`. The record keeps counts, not a second copy of the text: Chat and Work
+have no recovered start that re-sends a handoff, and every block is a verbatim
+excerpt of the thread's own journaled messages. A replay of the journal
+rebuilds the same record. The thread's own mark is unchanged by the move, so
+the handoff reports it and does not re-mark. A new message (or a delivered
+subagent result) starts a handed-over session, and so does a Chat retry whose
+own session may not have received its handoff; a resume and an edit continue
+or rewrite a conversation that already has a session, so a switch they would
+need still refuses with the native-session message. The session's resume
+cursor is recorded when the session starts, before the provider is sent
+anything, so an attempt or turn that carried a handoff and did not complete is
+not taken up again: the next message, retry or usage-limit continuation hands
+the conversation over again in a fresh session and journals a new record
+(naming the provider the conversation came from), and a resume of it refuses.
+The Side Chat source is likewise sent in full to a session that has just
+started. The same provider with no recoverable cursor, a model change without
+`modelSwitch`, and in Work a changed folder binding or folder still refuse as
+before, because a handoff would replace a conversation that provider still
+holds.
+
+A switch that cannot hand over refuses before the provider is started, with
+the reason and a way forward: no host selector, a thread that is gone,
+another thread's or Project's conversation, no recorded or readable message
+(for example every body purged), a conversation that changed during the read,
+or a history the read could not complete. Nothing is journaled and no
+session starts.
+
+**Chat branch.** A branch (`branch-chat-thread`, also behind a Chat
+checkpoint's restore) copies message text and never the source's session, so
+on a provider that keeps its conversation in a session of its own the branch
+has no session to resume. It is created, and its first turn starts a new
+session with the carried conversation as a `branch` handoff (framed as the
+conversation it was branched from, through the reply it was branched at); a
+branch that moves to another provider before that turn gets the same handoff.
+Once the branch has run a turn of its own the thread continues natively, and a
+later provider change is an ordinary switch. A host-held conversation branches
+as before. The branch's mark is inherited from the source when the branch is
+made, and the handoff reports it. The branch is not refused up front: its first
+turn refuses with the reason if the carried conversation cannot be read.
 
 Optional Project and
 thread spend ceilings (0060) are host owner policy over four dimensions:
@@ -4047,7 +4104,15 @@ native harness in `apps/server/src/harness`:
   cannot both send them. A person redirects running work only through these
   ordered notes and through goal revisions checked against the goal's
   version (a stale one is refused, never merged); Side Chat is a separate
-  read-only Chat and can do neither. A turn's start is journaled
+  read-only Chat and can do neither. The terminal and the web queue notes
+  through the same `steering` route: the web shows its note input beside
+  the composer in every mode, only while a turn runs (a note reaches the lead inside a tool result,
+  so between turns the composer sends an ordinary message), mints each note's
+  id once per send so a retry lands once, and labels a queued note the lead
+  never reached as not reached, with a way to discard them. Only the terminal
+  sends unreached notes as the next prompt; the route allows exactly the
+  windows and paired devices that may already answer the thread's questions,
+  and the web adds no authority to it. A turn's start is journaled
   (`native-harness-turn-started`) and closed by its completed record or a
   `native-harness-turn-settled` frame, which every mode's turn path writes
   however the turn ended. A person's pause drains: the running turn and the
@@ -4135,8 +4200,24 @@ native harness in `apps/server/src/harness`:
   Work, and for Code the `/api/pending-requests` approvals that carry
   `browserOrigin` (answered with `answer-provider-approval`). A Code
   approval without `browserOrigin` is a provider's own tool approval and is
-  never offered as a site ask. A terminal whose stdin has ended denies the
-  ask instead of leaving the turn waiting.
+  never offered as a site ask. A Chat lead's question is not in the harness
+  session: Chat parks the turn on it and journals it on the attempt, so the
+  Chat thread port reads it from the thread (`pendingQuestion` on the snapshot)
+  and answers it with `answer-chat-turn-question` against the thread's current
+  version, the command the transcript card sends. Line mode prompts for it and
+  closes the prompt with a note when the app answers first; the terminal UI
+  shows it in its question panel. Work and Code questions still come from the
+  harness session. A terminal whose stdin has ended denies the
+  ask instead of leaving the turn waiting. The thread's helper agents are read through the
+  Agents Center list filtered to the thread (`/api/agent-runs/center`) and a
+  child's retained result and bounded conversation, and answered or steered
+  through the routes the Agents tab uses (`/api/agent-runs/steer` for a working
+  child, `/api/agent-runs/resume` as a follow-up on a finished one, and the
+  session question route for a question the child asked). `agentChildren.ts`
+  holds those reads and replies; line mode (`/agents`, `/agent N`,
+  `/agent N text`), the terminal UI panel, and `octant harness agents` share
+  it, and the host authorizes each call against the window that opened the
+  thread.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
@@ -6988,14 +7069,24 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   `bun run --cwd apps/desktop build`.
 - The server is composed by a root in `apps/server/src/server.ts` that calls
   the per-area wiring modules under `apps/server/src/wiring/` in a fixed
-  order. Each module declares the reach it has as a `Pick` of the upstream
-  modules' wiring types. A dependency a later module creates is passed as a
-  getter and read per use. A value one module assigns after another has
-  captured it, or writes at runtime (the remote gateway and its listener),
-  lives in a `late` cell the root creates, written at the original point and
-  read per call. This keeps the startup side-effect order identical to the
-  single closure it replaced, and each cell marks a dependency cycle still to
-  be removed.
+  order, and every module declares the reach it has as a `Pick` of the
+  upstream modules' wiring types. The order is the dependency order: a value
+  that depends on persistence and options alone is built first
+  (`foundations`, `harnessState`, `workRequestState`), an area that holds
+  per-window state registers its revocation with the authority, and an area
+  that reacts to another's change subscribes to it (GitHub sign-in, pull
+  request refreshes, harness questions, Chat's attachment purge and tools)
+  instead of holding it. The gateway and listener the remote area rebuilds at
+  runtime live in that area behind `remoteHost`.
+- Two forward references remain, and `bun run wiring:check` pins their
+  number so one can be removed but not added: `LateBindings` cells, which a
+  module assigns after another has captured them, and dependency getters
+  marked "Wired by wireX; read only after startup", which read a value a
+  later module creates per use. Each marks a cycle between areas that needs a
+  seam of its own to remove (the native harness against agent runs and
+  providers, Chat against Work, Canvas against Chat and Work, and the Code
+  runtime against the Code service); lower the ceiling in
+  `scripts/check-module-wiring.ts` in the change that removes one.
 - A headless Linux station: `octant server run`, then `octant web` (or
   `octant web --dev` for Vite), run as the OS user that started the host so
   it can read the bridge secret and mint the browser's launch link. Linux requires `bubblewrap` and Git 2.36 or

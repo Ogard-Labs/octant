@@ -623,6 +623,21 @@ example older messages, messages no longer stored, or messages too large to
 read. If nothing readable is left to hand over, the message is refused with
 the reason, and you can switch back or start a new task.
 
+Chat and Work threads can switch provider in the same way. A provider that
+keeps no session of its own (see **Replayed** above) is simply sent the thread's
+history again, so moving to one, even from a provider that kept a session, needs
+no handoff. Choosing a different provider that does keep its own session, such
+as a CLI agent, starts a new session on the next message with the same handoff
+described above for Code, and says so under the composer before you send. The
+reply shows how many messages were handed over and which were left out, whether
+the thread had taken in outside content, and that hidden reasoning, tool
+activity and the previous session did not transfer. A Chat branch from a
+conversation held by such a provider works the same way: its first message
+starts a new session with the carried messages as text. If the conversation
+cannot be read for the handoff, the message is refused with the reason and
+nothing is sent. Retrying, resuming or editing a message never starts a handed
+over session; switching back, or sending a new message, does.
+
 A fork that switches provider also hands over the conversation it was forked
 from, up to the reply it was forked at, ahead of its own messages, within the
 same limit; the oldest messages are left out first. The reply says how many

@@ -50,7 +50,7 @@ import type { AuthorityWiring } from "./authority";
 import type { WorkspaceWiring } from "./workspace";
 import type { CodeWiring } from "./code";
 import type { ProvidersWiring } from "./providers";
-import type { CodeRuntimeWiring } from "./codeRuntime";
+import type { LateBindings } from "./lateBindings";
 
 export function stableAppleRootId(rootPath: string): string {
   const digest = createHash("sha256")
@@ -102,21 +102,22 @@ function appleRestartContext(
   };
 }
 
-export type DevicesDependencies = Pick<ServerStart, "persistence"> &
-  Pick<
+export type DevicesDependencies = Pick<ServerStart, "persistence"> & {
+  /** Settled by the Code runtime call that follows; read per use, never at construction. */
+  readonly late: Pick<LateBindings, "codeOperationRuntime">;
+} & Pick<
     AuthorityWiring,
     "androidInputGrants" | "codeSessionAuthority" | "simulatorInputGrants" | "windowAuthorityStore"
   > &
   Pick<WorkspaceWiring, "projectService"> &
   Pick<CodeWiring, "roots"> &
-  Pick<ProvidersWiring, "providerDataDirectory"> &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime">;
+  Pick<ProvidersWiring, "providerDataDirectory">;
 
 export function wireDevices(deps: DevicesDependencies) {
   const {
     androidInputGrants,
-    codeOperationRuntime,
     codeSessionAuthority,
+    late,
     persistence,
     projectService,
     providerDataDirectory,
@@ -268,7 +269,8 @@ export function wireDevices(deps: DevicesDependencies) {
         inputGranted = true;
       } else {
         approvalValid =
-          (await codeOperationRuntime?.validateAppleApproval(windowId, action)) ?? false;
+          (await late.codeOperationRuntime.current?.validateAppleApproval(windowId, action)) ??
+          false;
         if (approvalValid && grantDestinationId !== undefined) {
           simulatorInputGrants.open({
             windowId: String(windowId),
@@ -424,7 +426,8 @@ export function wireDevices(deps: DevicesDependencies) {
         inputGranted = true;
       } else {
         approvalValid =
-          (await codeOperationRuntime?.validateAndroidApproval(windowId, action)) ?? false;
+          (await late.codeOperationRuntime.current?.validateAndroidApproval(windowId, action)) ??
+          false;
         if (approvalValid && grantDestinationId !== undefined) {
           androidInputGrants.open({
             windowId: String(windowId),

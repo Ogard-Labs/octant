@@ -132,6 +132,10 @@ import {
   type TurnHeaderOutcome,
 } from "../transcript/TurnHeader";
 import { HarnessRetryStatus, type HarnessRetryStreamEvent } from "../transcript/HarnessRetryStatus";
+import {
+  pendingThreadHandoffNotice,
+  threadHandoffDisclosure,
+} from "../providers/conversationHandoff";
 import { providerModelLabel } from "../providers/providerModelLabel";
 import type { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import { providerFamilyForThread } from "../providers/providerFamily";
@@ -295,6 +299,13 @@ function WorkTurnHeader(props: {
         {...(workedFor === undefined ? {} : { workedFor })}
         {...(props.turn.failure === undefined ? {} : { reason: props.turn.failure.message })}
       />
+      {props.turn.handoff === undefined ? null : (
+        <p className="work-thread-workspace__handoff" role="note">
+          {threadHandoffDisclosure(props.turn.handoff, (selection) =>
+            providerModelLabel(props.providerGroups, selection),
+          )}
+        </p>
+      )}
       {usageLimit === undefined ? null : (
         <UsageLimitNotice
           limit={usageLimit}
@@ -664,6 +675,17 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   const fileMentionListId = useId();
   const trimmed = prompt.trim();
   const completionLocked = thread?.completionConfirmed === true;
+  // The next turn starts a new session with the conversation handed over as
+  // text when the selected provider keeps its own session and the latest turn
+  // ran on another provider; the person hears that before sending.
+  const handoffNotice =
+    thread === undefined
+      ? undefined
+      : pendingThreadHandoffNotice({
+          groups: props.providerGroups ?? [],
+          selected: thread,
+          latest: turns.at(-1)?.authority,
+        });
   const messageQueue = useThreadMessageQueue({
     mode: "work",
     hostId: props.hostId,
@@ -2274,6 +2296,11 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               /* ui-boundary-exception: compact-status */
               <span className="composer-status__notice" role="alert" title={errorMessage}>
                 {errorMessage}
+              </span>
+            )}
+            {handoffNotice === undefined || completionLocked || turnRunning ? null : (
+              <span className="composer-status__hint" role="status">
+                {handoffNotice}
               </span>
             )}
             {completionLocked || turnRunning || props.turnClient === undefined ? (

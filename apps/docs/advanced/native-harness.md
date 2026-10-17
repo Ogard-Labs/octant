@@ -364,7 +364,11 @@ mid-turn; a note the lead never reached before the turn ended is sent as the
 next prompt. Notes are saved as you send them, so one typed just before
 Octant restarts still reaches the lead on the next turn. `/steer <note>` queues
 one explicitly. Left-over notes are sent once, even with the thread open in
-more than one terminal. `Esc` stops the
+more than one terminal. The app has the same
+note box beside the composer, shown only while the lead works: a note is queued the same way and
+marked queued, then delivered. A note the lead never reached is marked not
+reached and can be discarded there; only the terminal sends it as the next
+prompt. `Esc` stops the
 running turn; `Ctrl+C` stops it too, and a second press right after quits.
 
 `/side <question>` asks the thread's Side Chat — the same one the app's Side
@@ -390,7 +394,9 @@ panel, as a numbered prompt in the CLI, and in a Chat thread's own transcript
 as a card on the turn that asked — with any options it offered, each with the
 meaning the lead wrote for it, and a field for an answer no option covers.
 Pick one or type an answer; the turn continues the moment it lands, and the
-same question can be answered from any surface. A question nobody answers
+same question can be answered from any surface. The terminal
+shows a Chat thread's question too, read from the turn that asked, and closes
+its prompt with a note when the app answers first. A question nobody answers
 within ten minutes expires and the lead is told to continue with its best
 judgment; interrupting the turn cancels it. Every question and answer is
 journaled with the session.
@@ -414,7 +420,13 @@ It draws with the app's own theme tokens — `--theme system|light|dark|octant`
 picks the preset, and the terminal's light or dark mode picks the palette.
 Enter sends, Shift+Enter adds a line, `/next N`, `/pause`, and `/resume` work
 as in the app, and a pending question is answered by typing its number or an
-answer. The folder you run it in decides the mode, the way a coding CLI does: inside
+answer. `/agents` lists the thread's helper agents with their state,
+role, model, and age; `/agent N` shows one — its brief, what it has said or
+reported, and anything blocking it — and `/agent N <message>` replies: it
+steers a working helper, follows up on a finished one, or answers a question
+the helper asked. The host decides what a helper accepts, as in the app, and
+a refusal is printed. `octant harness agents <thread-id> [N] [--json]` reads
+the same list or one helper without starting a turn. The folder you run it in decides the mode, the way a coding CLI does: inside
 a folder you have added as a Code Project, `octant agent` starts a Code
 thread there — in the current checkout, approval-gated, so its edits and
 commands ask you first, right there in the terminal. A Project that remembers

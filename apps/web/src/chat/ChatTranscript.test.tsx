@@ -1327,7 +1327,7 @@ describe("ChatTranscript", () => {
     ).toBeVisible();
   });
 
-  it("omits Fork and Restore from here when the thread's or carried reply's provider keeps its own session", async () => {
+  it("offers Fork, Branch and Restore from here whichever provider keeps the conversation", async () => {
     const threadProvider = "10000000-0000-4000-8000-000000000001";
     const replyProvider = "10000000-0000-4000-8000-000000000002";
     const branchActions = async (groups: ReadonlyArray<PickerGroup>) => {
@@ -1357,28 +1357,101 @@ describe("ChatTranscript", () => {
       return offered;
     };
 
-    // Octant replays a host-owned conversation from its journal, so the
-    // branch's next turn can continue.
-    expect(
-      await branchActions([
-        providerGroup(threadProvider, "replayed"),
-        providerGroup(replyProvider, "replayed"),
-      ]),
-    ).toEqual({ fork: true, branch: true, restore: true });
-    // The host refuses a branch when the thread's provider keeps its own session.
-    expect(
-      await branchActions([
-        providerGroup(threadProvider, "native"),
-        providerGroup(replyProvider, "replayed"),
-      ]),
-    ).toEqual({ fork: false, branch: false, restore: false });
-    // ...and when the reply the branch would carry came from such a provider.
-    expect(
-      await branchActions([
-        providerGroup(threadProvider, "replayed"),
-        providerGroup(replyProvider, "native"),
-      ]),
-    ).toEqual({ fork: false, branch: false, restore: false });
+    // A host-held conversation is planned again from its journal; one a
+    // provider keeps in its own session gives the branch's first turn the
+    // carried messages as text. Either way the branch can continue.
+    for (const [thread, reply] of [
+      ["replayed", "replayed"],
+      ["native", "replayed"],
+      ["replayed", "native"],
+    ] as const) {
+      expect(
+        await branchActions([
+          providerGroup(threadProvider, thread),
+          providerGroup(replyProvider, reply),
+        ]),
+      ).toEqual({ fork: true, branch: true, restore: true });
+    }
+  });
+
+  describe("a handoff to a new provider session", () => {
+    const omissions = {
+      earlierMessages: 3,
+      unfinishedReplies: 1,
+      missingBodies: 0,
+      oversizedBodies: 0,
+      emptyBodies: 0,
+      attachments: 0,
+      truncatedMessages: 0,
+      truncatedCharacters: 0,
+      sourceTruncatedMessages: 0,
+    };
+    const withHandoff = (handoff: Record<string, unknown>) => {
+      const view = viewFixture();
+      const turn = view.turns[0]!;
+      const [first, second] = turn.attempts;
+      return {
+        ...view,
+        turns: [{ ...turn, attempts: [first!, { ...second!, handoff }] }],
+      } as never;
+    };
+
+    it("says what a provider switch handed over, what it left out, and what did not transfer", () => {
+      render(
+        <ChatTranscript
+          providerGroups={[
+            providerGroup("10000000-0000-4000-8000-000000000001", "replayed"),
+            providerGroup("10000000-0000-4000-8000-000000000002", "native"),
+          ]}
+          view={withHandoff({
+            reason: "provider-switch",
+            previousProviderInstanceId: "10000000-0000-4000-8000-000000000001",
+            previousModelId: "model-a",
+            messages: 6,
+            omissions,
+            externalContentIngested: true,
+            nativeSessionTransferred: false,
+            hiddenReasoningTransferred: false,
+          })}
+        />,
+      );
+
+      const note = screen.getByRole("note");
+      expect(note).toHaveTextContent("Handed over 6 recent messages from Endpoint");
+      expect(note).toHaveTextContent("Left out: 3 earlier messages, 1 unfinished reply.");
+      expect(note).toHaveTextContent("This thread has taken in outside content.");
+      expect(note).toHaveTextContent(
+        "Hidden reasoning, tool activity and the previous session did not transfer.",
+      );
+    });
+
+    it("says a branch started its session from the original conversation's messages", () => {
+      render(
+        <ChatTranscript
+          view={withHandoff({
+            reason: "branch",
+            messages: 2,
+            omissions: { ...omissions, earlierMessages: 0, unfinishedReplies: 0 },
+            externalContentIngested: false,
+            nativeSessionTransferred: false,
+            hiddenReasoningTransferred: false,
+          })}
+        />,
+      );
+
+      const note = screen.getByRole("note");
+      expect(note).toHaveTextContent(
+        "Branched with 2 recent messages of the original conversation as text",
+      );
+      expect(note).toHaveTextContent("the original session and its later replies did not transfer");
+      expect(note).not.toHaveTextContent("outside content");
+    });
+
+    it("shows nothing for an attempt that continued a session", () => {
+      render(<ChatTranscript view={viewFixture()} />);
+
+      expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    });
   });
 
   it("keeps revising and branching unavailable while a response is running", async () => {

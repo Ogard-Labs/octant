@@ -38,6 +38,7 @@ import {
   decodeChatTurn,
   type ChatAttachment,
   type ChatAttempt,
+  type ChatAttemptHandoff,
   type ChatAttemptOutcome,
   type ChatBootstrap,
   type ChatNavigation,
@@ -159,6 +160,7 @@ import {
   type ChatProviderTurnFacts,
 } from "@octant/domain/chat-provider-fallback-policy";
 import {
+  decideConversationSession,
   defaultShellSettings,
   reapsStaleProviderSession,
   SIDE_CHAT_SOURCE_UNCHANGED_CONTEXT,
@@ -166,6 +168,17 @@ import {
 } from "@octant/domain";
 import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
 import { agentResultDeliveryBatchPrompt } from "../agentRun/agentResultDeliveryPrompt";
+import {
+  admittedChatConversationContext,
+  type AgentRunParentContextSelection,
+} from "../agentRun/agentRunParentContext";
+import {
+  branchHandoffRecord,
+  conversationHandoffRefusalMessage,
+  providerSwitchHandoffRecord,
+  selectionBelongsToThread,
+  type ConversationHandoffRefusal,
+} from "../agentRun/conversationHandoff";
 import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
@@ -444,6 +457,12 @@ interface ChatTurnContextPlan {
 
 interface PreparedChatTurn {
   readonly nativeSession?: ChatAttempt;
+  /**
+   * Set when the turn starts a new provider session with the thread's earlier
+   * conversation handed over as text. The record is journaled with the turn's
+   * attempt; the blocks are already in `context`.
+   */
+  readonly handoff?: ChatAttemptHandoff;
   /**
    * The thread as this turn actually runs it. Preparation can move a turn onto
    * the user's fallback route, and the attempt has to record the provider and
@@ -2351,6 +2370,7 @@ export class ChatService {
         ...(prepared.nativeSession?.resumeCursor === undefined
           ? {}
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
+        ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
         userMessageRef,
         ...(attachmentIds !== undefined && attachmentIds.length > 0 ? { attachmentIds } : {}),
@@ -2545,6 +2565,7 @@ export class ChatService {
         ...(prepared.nativeSession?.resumeCursor === undefined
           ? {}
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
+        ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
         contextManifestId: prepared.context.snapshot.next.manifest.id,
         userMessageRef,
         delivery: {
@@ -2774,7 +2795,10 @@ export class ChatService {
    * thread and are counted in `branchedFrom.omittedAttachmentCount` rather than
    * silently dropped, and only completed attempts with readable response
    * content are carried, so the branch never shows an exchange that did not
-   * happen.
+   * happen. A source whose provider keeps its conversation in a session of its
+   * own cannot lend that session to the branch, which would share the source's
+   * later turns: the branch's first turn starts a new session with the carried
+   * messages handed over as text, and says so.
    */
   async #branchThread(
     command: Extract<ReturnType<typeof decodeChatCommand>, { kind: "branch-chat-thread" }>,
@@ -2790,17 +2814,6 @@ export class ChatService {
       throw new ChatServiceError({
         category: "invalid",
         message: "Chat turn is not part of the active conversation.",
-      });
-    }
-    if (this.#branchNeedsNativeSession(source, carried)) {
-      // A provider-owned conversation lives in one native session with one
-      // linear history. The branch cannot carry that session (it would share
-      // the source's later turns), and its carried attempts hold no resume
-      // cursor, so its first follow-up would refuse after the branch exists.
-      throw new ChatServiceError({
-        category: "unsupported",
-        message:
-          "This provider keeps its conversation in its own session, so it cannot be branched. Send a correction as a new message to keep the same session.",
       });
     }
     const branchThreadId = command.branchThreadId ?? decodeChatThreadId(this.#uuid());
@@ -2963,33 +2976,72 @@ export class ChatService {
   }
 
   /**
-   * Whether a branch's next turn would need a native session it cannot have:
-   * the branch keeps the source's provider, and its next turn continues from
-   * the last completed attempt of its last carried turn, the only attempts a
-   * branch copies. When that attempt's provider can no longer be resolved its
-   * ownership is unknown, and the send-time check refuses such a turn, so the
-   * branch is refused too. An unresolvable source provider is left to turn
-   * routing, which may move a fresh turn to the fallback route.
+   * The earlier conversation a turn hands to the new provider session it
+   * starts, with the record the attempt journals. The selector reads the
+   * thread's own active conversation, and what it returned is checked to be
+   * this thread's before it is used. A conversation that cannot be handed over
+   * refuses the turn with the reason: the new provider is never started as if
+   * it had seen a conversation it was not given.
    */
-  #branchNeedsNativeSession(source: ChatThread, carried: ReadonlyArray<ChatTurn>): boolean {
-    const providerOwned = (providerInstanceId: string, whenUnknown: boolean): boolean => {
-      try {
-        return (
-          this.#driver(decodeProviderInstanceId(providerInstanceId)).conversationOwnership ===
-          "provider"
-        );
-      } catch {
-        return whenUnknown;
-      }
+  #selectConversationHandoff(
+    thread: ChatThread,
+    view: ChatThreadView | undefined,
+    reason: "provider-switch" | "branch",
+    source: {
+      /** The provider the conversation came from; absent for a branch whose tail kept no attempt. */
+      readonly from:
+        | {
+            readonly providerInstanceId: ProviderInstanceId;
+            readonly modelId: ProviderModelId;
+          }
+        | undefined;
+      readonly excludeTurnId: ChatTurn["id"] | undefined;
+    },
+  ): {
+    readonly blocks: ReadonlyArray<ProviderContextBlock>;
+    readonly record: ChatAttemptHandoff;
+  } {
+    const subject = { thread: "Chat", cause: reason === "branch" ? "branch" : "switch" } as const;
+    const refuse = (why: ConversationHandoffRefusal): never => {
+      throw new ChatServiceError({
+        category: "unavailable",
+        message: conversationHandoffRefusalMessage(why, subject),
+      });
     };
-    const lastCarried = carried
-      .at(-1)
-      ?.attempts.filter((attempt) => attempt.outcome === "completed")
-      .at(-1);
-    return (
-      providerOwned(String(source.providerInstanceId), false) ||
-      (lastCarried !== undefined && providerOwned(String(lastCarried.providerInstanceId), true))
-    );
+    let selection: AgentRunParentContextSelection;
+    try {
+      selection = admittedChatConversationContext({
+        threadId: thread.id,
+        purpose: reason,
+        ...(source.excludeTurnId === undefined
+          ? {}
+          : { excludeTurnId: String(source.excludeTurnId) }),
+        externalContentIngested: readThreadExternalContentTaint(
+          this.#persistence.connection,
+          String(thread.id),
+        ).externalContentIngested,
+        readThread: (threadId) => this.#persistence.readChatThread(threadId),
+        readView: () => view,
+      });
+    } catch {
+      return refuse("source-unavailable");
+    }
+    if (selection.status === "unavailable") return refuse(selection.reason);
+    if (reason === "provider-switch" && source.from === undefined)
+      return refuse("source-point-unavailable");
+    const owned = selectionBelongsToThread(selection, {
+      mode: "chat",
+      id: String(thread.id),
+      projectId: thread.projectId === undefined ? undefined : String(thread.projectId),
+    });
+    if (owned !== "ok") return refuse(owned);
+    return {
+      blocks: selection.blocks,
+      record:
+        reason === "branch" || source.from === undefined
+          ? branchHandoffRecord(selection)
+          : providerSwitchHandoffRecord(selection, source.from),
+    };
   }
 
   async #retryTurn(
@@ -3091,6 +3143,7 @@ export class ChatService {
         ...(prepared.nativeSession?.resumeCursor === undefined
           ? {}
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
+        ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
         newContextManifestId: prepared.context.snapshot.next.manifest.id,
         expectedVersion: command.expectedVersion,
         createdAt: timestamp,
@@ -3642,34 +3695,69 @@ export class ChatService {
     const driver = routed.driver;
     const probe = routed.probe;
     const nativeConversation = driver.conversationOwnership === "provider";
-    const previous = this.#persistence.readChatThreadView(thread.id)?.turns.at(-1)?.attempts.at(-1);
-    let previousNative = false;
-    let previousProviderUnavailable = false;
-    if (previous !== undefined) {
-      try {
-        previousNative =
-          this.#driver(decodeProviderInstanceId(previous.providerInstanceId))
-            .conversationOwnership === "provider";
-      } catch {
-        previousProviderUnavailable = true;
-      }
-    }
-    const nativeSession = nativeConversation ? previous : undefined;
-    if (
-      (nativeConversation || previousNative || previousProviderUnavailable) &&
-      previous !== undefined &&
-      (!nativeConversation ||
-        !previousNative ||
-        previous.resumeCursor === undefined ||
-        String(previous.providerInstanceId) !== String(thread.providerInstanceId) ||
-        (previous.modelId !== thread.modelId && probe.capabilities.modelSwitch !== "supported"))
-    ) {
+    const threadView = this.#persistence.readChatThreadView(thread.id);
+    const previousTurn = threadView?.turns.at(-1);
+    const previous = previousTurn?.attempts.at(-1);
+    const sessionDecision = decideConversationSession({
+      recipient: {
+        providerInstanceId: String(thread.providerInstanceId),
+        owner: nativeConversation ? "runtime" : "host",
+      },
+      ...(previous === undefined
+        ? {}
+        : {
+            previous: {
+              providerInstanceId: String(previous.providerInstanceId),
+              continuable:
+                previous.resumeCursor !== undefined &&
+                (previous.modelId === thread.modelId ||
+                  probe.capabilities.modelSwitch === "supported"),
+              // The session cursor is recorded when the session starts, before
+              // the provider is sent anything, so an attempt that carried a
+              // handoff and did not complete may never have delivered it.
+              ...(previous.handoff === undefined || previous.outcome === "completed"
+                ? {}
+                : { undeliveredHandoff: previous.handoff.reason }),
+            },
+          }),
+      // A branch copies message text, never the source's session, so until it
+      // has run a turn of its own there is no session to resume.
+      branchWithoutSession:
+        thread.branchedFrom !== undefined &&
+        previousTurn !== undefined &&
+        previousTurn.sequence <= thread.branchedFrom.carriedTurnCount,
+      // A resume and an edit continue or rewrite a conversation that already
+      // has a session. A new message may start a handed-over one, and so may
+      // a retry whose own earlier session may never have received its handoff.
+      handoff: extensionPhase !== "resume" && historyTurns === undefined ? "allowed" : "refused",
+    });
+    if (sessionDecision.kind === "refuse") {
       throw new ChatServiceError({
         category: "unavailable",
         message:
           "This Chat task's native session cannot be recovered under the selected provider and model. Its history has been preserved.",
       });
     }
+    const nativeSession = sessionDecision.kind === "continue-session" ? previous : undefined;
+    const handoff =
+      sessionDecision.kind === "new-session-with-handoff"
+        ? this.#selectConversationHandoff(thread, threadView, sessionDecision.reason, {
+            // A handoff that never completed is made again from the provider
+            // the conversation came from, not the one that may not have got it.
+            from:
+              previous?.handoff?.reason === "provider-switch" && previous.outcome !== "completed"
+                ? {
+                    providerInstanceId: previous.handoff.previousProviderInstanceId,
+                    modelId: previous.handoff.previousModelId,
+                  }
+                : previous === undefined
+                  ? undefined
+                  : { providerInstanceId: previous.providerInstanceId, modelId: previous.modelId },
+            excludeTurnId: threadView?.turns.find(
+              (turn) => String(turn.userMessageRef.contentId) === String(currentRef.contentId),
+            )?.id,
+          })
+        : undefined;
     if (nativeConversation && historyTurns !== undefined) {
       throw new ChatServiceError({
         category: "unsupported",
@@ -3733,7 +3821,12 @@ export class ChatService {
             // the session already holds. A host-owned conversation rebuilds
             // its context every turn and never saw the earlier snapshot, and
             // an edit, retry, or resume may rewind the session behind it.
-            reusable: nativeConversation && extensionPhase === "send" && historyTurns === undefined,
+            // Only a continued session still holds the earlier snapshot; a new
+            // one, handed over or not, has never seen it.
+            reusable:
+              sessionDecision.kind === "continue-session" &&
+              extensionPhase === "send" &&
+              historyTurns === undefined,
             previous,
           });
     const threadMentionContexts = await this.#resolveThreadMentions(
@@ -3756,6 +3849,7 @@ export class ChatService {
       nativeConversation ? [] : historyTurns,
       sideChatSourceContext,
       threadMentionContexts,
+      handoff?.blocks,
     );
     const maintained = nativeConversation
       ? context
@@ -3763,6 +3857,7 @@ export class ChatService {
     return {
       executionThread: thread,
       ...(nativeSession === undefined ? {} : { nativeSession }),
+      ...(handoff === undefined ? {} : { handoff: handoff.record }),
       context: maintained,
       attachments,
       researchRoute,
@@ -4737,6 +4832,12 @@ export class ChatService {
       readonly threadId: MentionableThreadId;
       readonly text: string;
     }>,
+    /**
+     * The earlier conversation, as text, for a turn that starts a new provider
+     * session. Required: a handoff the plan could drop would leave the new
+     * provider answering as if it had never seen the conversation.
+     */
+    handoffBlocks?: ReadonlyArray<ProviderContextBlock>,
   ): ChatTurnContextPlan {
     const providerInstanceId = decodeProviderInstanceId(thread.providerInstanceId);
     const subject = decodeContextSubjectRef({
@@ -4995,6 +5096,19 @@ export class ChatService {
         { kind: "user-message", text: mention.text },
       ),
     );
+    const handoffEntries = (handoffBlocks ?? []).map((block, index) =>
+      contextEntry(
+        this.#contextEntry(
+          thread,
+          "conversation",
+          block.text,
+          Math.max(16, Math.ceil(block.text.length / 4)),
+          "required",
+          { kind: "message", referenceId: `conversation-handoff:${thread.id}:${index}` },
+        ),
+        block,
+      ),
+    );
     const priorTurns = this.#persistence.readChatThreadView(thread.id)?.turns ?? [];
     const stillFirstTurn = priorTurns.every((turn) => turn.sequence === 1);
     if (!stillFirstTurn) {
@@ -5065,6 +5179,7 @@ export class ChatService {
       ...memoryEntries,
       ...summaryEntries,
       ...transcriptEntries,
+      ...handoffEntries,
       ...work.workList.items
         .filter((item) => item.status !== "completed" && item.status !== "cancelled")
         .map((item) =>

@@ -23,8 +23,6 @@ import {
   type OctantMode,
   type ProjectId,
   type ProviderContextBlock,
-  type ProviderInstance,
-  type ProviderModel,
   type UtcTimestamp,
   type WindowId,
 } from "@octant/contracts";
@@ -35,8 +33,6 @@ import {
 import { ChatService } from "../chat/chatService";
 import { WorkThreadProjection } from "../work/workThreadProjection";
 import { awaitsLeadApproval } from "../harness/leadApprovalAttention";
-import { WorkTurnProjection } from "../work/workTurnProjection";
-import { CodeOperationEventStore } from "../code/codeOperationEventStore";
 import { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
 import {
   makeProviderCapacityScheduler,
@@ -54,11 +50,7 @@ import {
   createAgentRunRouteHandler,
 } from "../agentRun/agentRunRoutes";
 import type { AgentRunControlAdmissionDependencies } from "../agentRun/agentRunControlAdmission";
-import {
-  admittedParentCodeContext,
-  type AdmittedParentCodeContextInput,
-  admittedParentWorkContext,
-} from "../agentRun/agentRunParentContext";
+import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { createAgentsManagedTools } from "../agentRun/agentRunManagedTools";
 import { agentRunEligibleTargets as eligibleAgentRunTargets } from "../agentRun/agentRunDelegation";
 import {
@@ -79,7 +71,6 @@ import { recordAgentRunTurnUsage } from "../agentRun/agentRunUsageLedger";
 import { AgentRunSessionStore } from "../agentRun/agentRunSessionStore";
 import { createAgentRunClaudeResumeIdentityPort } from "../agentRun/agentRunClaudeResumeIdentity";
 import { AgentRunLiveConversationStore } from "../agentRun/agentRunLiveConversationStore";
-import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
 import { TurnMetricsStore } from "../metrics/turnMetricsStore";
@@ -88,7 +79,7 @@ import { ExternalContentIngestionStore } from "../context/externalContentIngesti
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
-import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
+import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
 import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
@@ -105,6 +96,8 @@ import { type ConfiguredProviderDriverOptions, makeConfiguredProviderDriver } fr
 import type { ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
+import type { HarnessStateWiring } from "./harnessState";
 
 function authorizeAgentRunCancellation(input: {
   readonly persistence: PersistenceService;
@@ -479,14 +472,10 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
   /** Cells settled by a later wiring call; read per use, never at construction. */
   readonly late: Pick<
     LateBindings,
-    | "agentRunInteractions"
     | "canvasAgentToolPort"
     | "nativeHarnessComposition"
     | "nativeHarnessLeadFallback"
     | "nativeHarnessObserver"
-    | "nativeHarnessApprovalStore"
-    | "nativeHarnessQuestions"
-    | "nativeHarnessSessions"
     | "snapshotCanvasImpl"
   >;
 } & Pick<
@@ -495,53 +484,42 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     | "codeSessionAuthority"
     | "onAgentRunExecutionAccepted"
     | "windowAuthorityStore"
+  > &
+  Pick<
+    HarnessStateWiring,
+    | "agentRunInteractions"
+    | "nativeHarnessApprovals"
+    | "nativeHarnessQuestions"
+    | "nativeHarnessSessions"
+  > &
+  Pick<
+    FoundationsWiring,
+    | "codeBoardEventStore"
+    | "isProjectPolicyTargetAllowed"
+    | "providerRuntimeRegistry"
+    | "selectCodeConversation"
+    | "workThreadProjection"
+    | "workTurnProjection"
   > & {
     /** Wired by wireChat; read only after startup. */
     readonly chatService: () => ChatService;
-    /** Wired by wireCode; read only after startup. */
-    readonly codeBoardEventStore: () => CodeOperationEventStore;
     /** Wired by wireProviders; read only after startup. */
     readonly configuredDriverOptions: () => ConfiguredProviderDriverOptions;
-    /** Wired by wireCode; read only after startup. */
-    readonly isProjectPolicyTargetAllowed: () => (
-      project: Exclude<
-        ReturnType<PersistenceService["readProject"]>,
-        undefined | { readonly type: "chat" }
-      >,
-      providerInstanceId: ProviderInstance["id"],
-      modelId: ProviderModel["id"],
-    ) => boolean;
-    /** Wired by wireHarness; read only after startup. */
-    readonly nativeHarnessRouterLive: () => NativeHarnessRouter;
-    /** Wired by wireHarness; read only after startup. */
-    readonly nativeHarnessSessionsLive: () => NativeHarnessSessionStore;
-    /** Wired by wireProviders; read only after startup. */
-    readonly providerRuntimeRegistry: () => ProviderRuntimeRegistry;
-    /** Wired by wireCode; read only after startup. */
-    readonly selectCodeConversation: () => (
-      threadId: CodeThreadId,
-      options?: Pick<
-        AdmittedParentCodeContextInput,
-        "purpose" | "excludeOperationId" | "throughOperationId" | "afterOperationId" | "inherited"
-      >,
-    ) => ReturnType<typeof admittedParentCodeContext>;
-    /** Wired by wireWorkspace; read only after startup. */
-    readonly workThreadProjection: () => WorkThreadProjection;
-    /** Wired by wireWork; read only after startup. */
-    readonly workTurnProjection: () => WorkTurnProjection;
   };
 
 export function wireAgentRuns(deps: AgentRunsDependencies) {
   const {
     late,
+    agentRunInteractions,
     agentRunPersistence,
     chatService,
     codeBoardEventStore,
     codeSessionAuthority,
     configuredDriverOptions,
     isProjectPolicyTargetAllowed,
-    nativeHarnessRouterLive,
-    nativeHarnessSessionsLive,
+    nativeHarnessApprovals,
+    nativeHarnessQuestions,
+    nativeHarnessSessions,
     onAgentRunExecutionAccepted,
     options,
     persistence,
@@ -556,12 +534,10 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   // go on until a person decides, so every mode's sidebar, board, and Needs you
   // read treats it as parked on the person. Read per request, long after boot.
   const threadAwaitsHarnessApproval = (threadId: string): boolean =>
-    late.nativeHarnessApprovalStore.current !== undefined &&
-    late.nativeHarnessSessions.current !== undefined &&
     awaitsLeadApproval(
       {
-        approvals: late.nativeHarnessApprovalStore.current,
-        sessions: late.nativeHarnessSessions.current,
+        approvals: nativeHarnessApprovals,
+        sessions: nativeHarnessSessions,
       },
       threadId,
     );
@@ -589,7 +565,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   });
   const nativeHarnessHooks = {
     answerQuestion: (threadId: string, questionId: string, answer: string) => {
-      late.nativeHarnessQuestions.current?.answer(threadId, questionId, answer);
+      nativeHarnessQuestions.answer(threadId, questionId, answer);
     },
     contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) => [
       ...(late.nativeHarnessObserver.current?.contextFor(scope) ?? []),
@@ -779,7 +755,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         const target = effectiveAgentRunExecutionTarget(run.routingReceipt);
         const reasoning = run.routingReceipt.rawReasoning;
         if (reasoning === undefined) return undefined;
-        const model = providerRuntimeRegistry()
+        const model = providerRuntimeRegistry
           .observedState(target.providerInstanceId)
           ?.models.find((model) => String(model.id) === String(target.modelId));
         const supported = model?.options.filter(
@@ -792,7 +768,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         return option === undefined ? undefined : { [option.id]: reasoning };
       },
       supportsResume: (providerInstanceId) =>
-        providerRuntimeRegistry().observedState(providerInstanceId)?.capabilities.resume ===
+        providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.resume ===
         "supported",
       appManagedTools: (input) => {
         const native = late.nativeHarnessComposition.current?.forAgentRun(input);
@@ -863,7 +839,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         return combineAppManagedToolSets(native, canvas);
       },
       appManagedToolTransport: ({ providerInstanceId, modelId }) => {
-        const observed = providerRuntimeRegistry().observedState(providerInstanceId);
+        const observed = providerRuntimeRegistry.observedState(providerInstanceId);
         const supported =
           observed?.capabilities.appManagedTools === "supported" ||
           observed?.verifiedToolModelIds?.some(
@@ -873,10 +849,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         return observed === undefined ? ("unavailable" as const) : ("unsupported" as const);
       },
       interactions: {
-        approve: (input) =>
-          late.agentRunInteractions.current?.approve(input) ?? Promise.resolve(false),
-        askUser: (input) =>
-          late.agentRunInteractions.current?.askUser(input) ?? Promise.resolve(undefined),
+        approve: (input) => agentRunInteractions.approve(input),
+        askUser: (input) => agentRunInteractions.askUser(input),
       },
       // A Work or Code child answers to the Project its workspace recorded; a
       // missing or retyped Project fails closed rather than lifting the policy.
@@ -884,7 +858,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         if (run.workspaceReceipt.kind === "chat-virtual") return true;
         const project = persistence.readProject(run.workspaceReceipt.projectId);
         if (project?.type !== run.workspaceReceipt.mode) return false;
-        return isProjectPolicyTargetAllowed()(project, providerInstanceId, modelId);
+        return isProjectPolicyTargetAllowed(project, providerInstanceId, modelId);
       },
       // `configuredDriverOptions` is declared later in this scope; the closure
       // only runs when a child starts, long after boot, so the reference is safe.
@@ -997,8 +971,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       // The same rule `delegate` refuses by: a paused session, or one a
       // restart left needing a check, starts no child until it is resumed.
       isHeld: (parentThreadId) => {
-        const status = late.nativeHarnessSessions.current?.read(String(parentThreadId))?.session
-          .status;
+        const status = nativeHarnessSessions.read(String(parentThreadId))?.session.status;
         return (
           status === "paused-by-user" ||
           status === "paused-by-advisor" ||
@@ -1019,7 +992,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       isReady: ({ providerInstanceId, modelId }) => {
         const instance = persistence.readProviderInstance(providerInstanceId as never);
         if (instance === undefined || !instance.enabled) return false;
-        const observed = providerRuntimeRegistry().observedState(providerInstanceId as never);
+        const observed = providerRuntimeRegistry.observedState(providerInstanceId as never);
         return (
           observed?.readiness === "ready" &&
           observed.models.some((model) => String(model.id) === modelId)
@@ -1027,7 +1000,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       },
     },
     nativeEvidence: ({ parent }) => {
-      const observed = providerRuntimeRegistry().observedState(
+      const observed = providerRuntimeRegistry.observedState(
         parent.parentRoute.providerInstanceId as never,
       );
       const capabilities = observed?.capabilities;
@@ -1049,7 +1022,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     authorizeCreation: ({ parentThreadId, windowId }) =>
       authorizeAgentRunCreation({
         persistence,
-        workThreadProjection: workThreadProjection(),
+        workThreadProjection: workThreadProjection,
         parentThreadId,
         windowId,
         codeSessionAuthority,
@@ -1112,10 +1085,10 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
               ? admittedParentWorkContext({
                   threadId: decodeWorkThreadId(String(parentThreadId)),
                   externalContentIngested,
-                  readThread: (id) => workThreadProjection().read(id),
-                  readTurns: (id) => workTurnProjection().listForThread(id),
+                  readThread: (id) => workThreadProjection.read(id),
+                  readTurns: (id) => workTurnProjection.listForThread(id),
                 })
-              : selectCodeConversation()(decodeCodeThreadId(String(parentThreadId)));
+              : selectCodeConversation(decodeCodeThreadId(String(parentThreadId)));
           return selection.status === "available"
             ? selection.blocks
             : { unavailable: selection.reason };
@@ -1130,11 +1103,25 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     eligibleAgentRunTargets({
       project: projectId === undefined ? undefined : persistence.readProject(projectId),
       instances: persistence.readProviderInstances(),
-      observedState: (instanceId) => providerRuntimeRegistry().observedState(instanceId),
+      observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
       // Deferred: the policy check is declared later in this scope.
       isTargetAllowed: (project, instanceId, modelId) =>
-        isProjectPolicyTargetAllowed()(project, instanceId, modelId),
+        isProjectPolicyTargetAllowed(project, instanceId, modelId),
     });
+  const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
+    journal: persistence.journal,
+    uuid: randomUUID,
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    clock: () => new Date().toISOString(),
+  });
+  const nativeHarnessRouter = new NativeHarnessRouter({
+    store: nativeHarnessRoutingStore,
+    isReady: (candidate) =>
+      agentRunAdmission.providerReadiness.isReady({
+        providerInstanceId: String(candidate.providerInstanceId),
+        modelId: String(candidate.modelId),
+      }),
+  });
   // Every turn's `octant_agents` tool set binds to the calling thread: the
   // delegation and the cancellation authority it petitions are the same ones
   // the Agents dock uses, so a tool call and a click are the same request.
@@ -1153,9 +1140,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       parentThreadId: input.parentThreadId,
       listTargets: () => agentRunEligibleTargets(input.projectId),
       routing: {
-        router: { resolve: (request) => nativeHarnessRouterLive().resolve(request) },
+        router: { resolve: (request) => nativeHarnessRouter.resolve(request) },
         recordDecision: (parent, decision) => {
-          nativeHarnessSessionsLive().ensure({
+          nativeHarnessSessions.ensure({
             threadId: input.parentThreadId,
             mode: parent.parentMode,
             projectId:
@@ -1172,11 +1159,11 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
                 : { reasoning: parent.parentRoute.reasoning }),
             },
           });
-          nativeHarnessSessionsLive().recordRouteDecision(input.parentThreadId, decision);
+          nativeHarnessSessions.recordRouteDecision(input.parentThreadId, decision);
         },
       },
       isPaused: () => {
-        const status = nativeHarnessSessionsLive().read(input.parentThreadId)?.session.status;
+        const status = nativeHarnessSessions.read(input.parentThreadId)?.session.status;
         return (
           status === "paused-by-user" ||
           status === "paused-by-advisor" ||
@@ -1189,7 +1176,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       authorizeCancel: (run) =>
         authorizeAgentRunCancellation({
           persistence,
-          workThreadProjection: workThreadProjection(),
+          workThreadProjection: workThreadProjection,
           run,
           windowId: input.windowId,
         }),
@@ -1198,7 +1185,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   const agentRunRouteDependencies: AgentRunRouteDependencies = {
     readObservations: ({ parentThreadId }) => {
       const chat = persistence.readChatThread(decodeChatThreadId(String(parentThreadId)));
-      const work = workThreadProjection().read(decodeWorkThreadId(String(parentThreadId)));
+      const work = workThreadProjection.read(decodeWorkThreadId(String(parentThreadId)));
       const code = persistence.readCodeThread(decodeCodeThreadId(String(parentThreadId)));
       if ([chat, work, code].filter((thread) => thread !== undefined).length !== 1) {
         return { observations: [], observationsTruncated: false };
@@ -1220,7 +1207,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         });
       }
       if (work !== undefined) {
-        const turns = workTurnProjection().listForThread(work.id);
+        const turns = workTurnProjection.listForThread(work.id);
         return observedChildren({
           parentThreadId,
           mode: "work",
@@ -1232,7 +1219,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           truncated: turns.length > 64,
         });
       }
-      const history = codeBoardEventStore().historyForThread(
+      const history = codeBoardEventStore.historyForThread(
         decodeCodeThreadId(String(parentThreadId)),
       );
       return observedChildren({
@@ -1264,7 +1251,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     authorizeCancellation: ({ run, windowId }) =>
       authorizeAgentRunCancellation({
         persistence,
-        workThreadProjection: workThreadProjection(),
+        workThreadProjection: workThreadProjection,
         run,
         windowId,
       }),
@@ -1276,14 +1263,14 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     authorizeParentThread: ({ parentThreadId, windowId }) =>
       authorizeAgentRunParentThread({
         persistence,
-        workThreadProjection: workThreadProjection(),
+        workThreadProjection: workThreadProjection,
         parentThreadId,
         windowId,
       }),
     resolveCenterContext: ({ parentThreadId, mode, requestId, workspaceReceipt }) =>
       resolveAgentRunCenterContext({
         persistence,
-        workThreadProjection: workThreadProjection(),
+        workThreadProjection: workThreadProjection,
         parentThreadId,
         mode,
         requestId,
@@ -1323,7 +1310,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     const instance = persistence.readProviderInstance(candidate.providerInstanceId as never);
     if (instance === undefined) return ineligible("unconfigured", false);
     if (!instance.enabled) return ineligible(instance.driverKind, true);
-    const observed = providerRuntimeRegistry().observedState(candidate.providerInstanceId as never);
+    const observed = providerRuntimeRegistry.observedState(candidate.providerInstanceId as never);
     return {
       candidate,
       routingVendorId: decodeMultiModelRoutingVendorId(instance.driverKind),
@@ -1357,6 +1344,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     externalContentIngestionStore,
     managedWorktreeReceipts,
     nativeHarnessHooks,
+    nativeHarnessRouter,
+    nativeHarnessRoutingStore,
     runtimeOutsideContentMarks,
     sideTasks,
     spendCeiling,

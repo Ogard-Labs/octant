@@ -32,6 +32,15 @@ import {
   restoreAgentCheckpoint,
   type AgentBranchResult,
 } from "./agentBranches";
+import {
+  childDetailLines,
+  childListLines,
+  childQuestion,
+  listAgentChildren,
+  pickAgentChild,
+  readAgentChild,
+  replyToAgentChild,
+} from "./agentChildren";
 import { AgentWake, followAgentThread } from "./agentLiveFeed";
 import { askSiteApproval, listAgentSiteApprovals } from "./agentSiteApprovals";
 import {
@@ -39,6 +48,7 @@ import {
   agentThreadPort,
   openAgentThreadById,
   openChatAgentThread,
+  type AgentPendingQuestion,
   type AgentThreadPort,
   createAgentThread,
   isAgentSnapshotRunning,
@@ -74,7 +84,14 @@ export type AgentCliCommand =
       readonly model?: string;
     }
   | { readonly action: "harness-slots"; readonly json: boolean }
-  | { readonly action: "harness-session"; readonly threadId: string; readonly json: boolean };
+  | { readonly action: "harness-session"; readonly threadId: string; readonly json: boolean }
+  | {
+      readonly action: "harness-agents";
+      readonly threadId: string;
+      /** A helper by list number or the start of its id; absent lists them all. */
+      readonly child?: string;
+      readonly json: boolean;
+    };
 
 const AGENT_FLAGS: ReadonlyArray<string> = [
   "prompt",
@@ -132,6 +149,15 @@ export function resolveAgentCliCommand(
     }
     if (action === "session" && threadId !== undefined && positional.length === 2) {
       return { action: "harness-session", threadId, json: flags.json === true };
+    }
+    if (action === "agents" && threadId !== undefined && positional.length <= 3) {
+      const child = positional[2];
+      return {
+        action: "harness-agents",
+        threadId,
+        ...(child === undefined ? {} : { child }),
+        json: flags.json === true,
+      };
     }
   }
   return undefined;
@@ -265,6 +291,20 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
     return 0;
   }
 
+  if (input.command.action === "harness-agents") {
+    const opened = await openAgentThreadById(input.session, input.command.threadId);
+    if (opened.kind === "refused") {
+      input.stderr.write(`${opened.message}\n`);
+      return 1;
+    }
+    return showAgentChildren(
+      input,
+      input.command.threadId,
+      input.command.child,
+      input.command.json,
+    );
+  }
+
   const threadId = await resolveThread(input);
   if (threadId === undefined) return 1;
   if (input.command.json) input.stdout.write(`${JSON.stringify({ kind: "thread", threadId })}\n`);
@@ -294,7 +334,7 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
       return (await runTurn(input, threadId, input.command.prompt, lines)) ? 0 : 1;
     }
     input.stdout.write(
-      "Type a prompt and press Enter. /session shows the harness session; /next N takes a suggested follow-up; /pause and /resume hold or release the run; /side asks Side Chat, which only reads; /goal shows the goal and /goal revise changes its objective; /fork forks at the last reply; /checkpoint marks it, /checkpoints lists them, /restore N starts a thread from one; /quit exits.\n",
+      "Type a prompt and press Enter. /session shows the harness session; /next N takes a suggested follow-up; /pause and /resume hold or release the run; /side asks Side Chat, which only reads; /goal shows the goal and /goal revise changes its objective; /agents lists the helper agents, /agent N shows one and /agent N <message> replies to it; /fork forks at the last reply; /checkpoint marks it, /checkpoints lists them, /restore N starts a thread from one; /quit exits.\n",
     );
     for (;;) {
       const line = await lines.next();
@@ -323,6 +363,10 @@ export async function runAgentCliCommand(input: RunAgentCliCommandInput): Promis
       }
       if (prompt === "/goal" || prompt.startsWith("/goal ")) {
         await goalCommand(input, threadId, prompt.slice("/goal".length).trim());
+        continue;
+      }
+      if (prompt === "/agents" || prompt === "/agent" || prompt.startsWith("/agent ")) {
+        await agentChildCommand(input, threadId, prompt);
         continue;
       }
       if (
@@ -418,6 +462,108 @@ async function branchCommand(
   created(
     await restoreAgentCheckpoint(input.session, picked, `${snapshot.title} (${picked.label})`),
   );
+}
+
+/**
+ * `octant harness agents <thread> [n]`: the thread's helper agents, or one of
+ * them. With `--json` the list is the host's own rows and one helper adds what
+ * it said and what it waits on. Read-only; replies go through `octant agent`.
+ */
+async function showAgentChildren(
+  input: Pick<RunAgentCliCommandInput, "session" | "stdout" | "stderr">,
+  threadId: string,
+  reference: string | undefined,
+  json: boolean,
+): Promise<number> {
+  const listed = await listAgentChildren(input.session, threadId);
+  if (listed.kind === "refused") {
+    input.stderr.write(`${listed.message}\n`);
+    return 1;
+  }
+  const session = await readSession(input, threadId, true);
+  const now = Date.now();
+  if (reference === undefined) {
+    if (json) {
+      input.stdout.write(`${JSON.stringify({ children: listed.children })}\n`);
+      return 0;
+    }
+    const waiting = new Set(
+      listed.children
+        .filter((child) => childQuestion(session, child) !== undefined)
+        .map((child) => String(child.runId)),
+    );
+    for (const line of childListLines(listed.children, now, waiting)) {
+      input.stdout.write(`${line}\n`);
+    }
+    return 0;
+  }
+  const child = pickAgentChild(listed.children, reference);
+  if (child === undefined) {
+    input.stderr.write(
+      "No helper agent matches that. List them with: octant harness agents <thread>\n",
+    );
+    return 1;
+  }
+  const read = await readAgentChild(input.session, child);
+  const question = childQuestion(session, child);
+  if (json) {
+    input.stdout.write(
+      `${JSON.stringify({ child, ...read, ...(question === undefined ? {} : { question }) })}\n`,
+    );
+    return 0;
+  }
+  for (const line of childDetailLines(child, read, question, now)) input.stdout.write(`${line}\n`);
+  return 0;
+}
+
+/** `/agents` lists the helpers, `/agent N` shows one, `/agent N <message>` replies to it. */
+async function agentChildCommand(
+  input: RunAgentCliCommandInput,
+  threadId: string,
+  prompt: string,
+): Promise<void> {
+  if (prompt === "/agents") {
+    await showAgentChildren(input, threadId, undefined, input.command.json);
+    return;
+  }
+  const argument = prompt.slice("/agent".length).trim();
+  const [reference = "", ...rest] = argument.split(/\s+/);
+  const message = argument.slice(reference.length).trim();
+  if (reference.length === 0) {
+    input.stderr.write("Pick a helper by number from /agents: /agent 1\n");
+    return;
+  }
+  if (rest.length === 0) {
+    await showAgentChildren(input, threadId, reference, input.command.json);
+    return;
+  }
+  const listed = await listAgentChildren(input.session, threadId);
+  if (listed.kind === "refused") {
+    input.stderr.write(`${listed.message}\n`);
+    return;
+  }
+  const child = pickAgentChild(listed.children, reference);
+  if (child === undefined) {
+    input.stderr.write("No helper agent matches that. List them with /agents.\n");
+    return;
+  }
+  const session = await readSession(input, threadId, true);
+  const replied = await replyToAgentChild(
+    input.session,
+    threadId,
+    child,
+    message,
+    childQuestion(session, child),
+  );
+  if (replied.kind === "refused") input.stderr.write(`${replied.message}\n`);
+  else
+    input.stdout.write(
+      replied.how === "answered"
+        ? "Answered.\n"
+        : replied.how === "steered"
+          ? "Sent to the helper; it reads it at its next step.\n"
+          : "Sent to the helper; it picks the work back up.\n",
+    );
 }
 
 /** Shows the goal, or revises its objective against the version just read. */
@@ -690,31 +836,134 @@ function watchApprovalSettled(
  * from: the options are numbered so a digit picks one, and any other line is
  * the answer itself. In JSON mode the question is emitted as a line and the
  * answer is read the same way, so a script can answer too.
+ *
+ * Resolves with the answer, or says why there is none: `elsewhere` when
+ * `settled` aborted the wait (the question was answered on another surface, so
+ * the next typed line is not swallowed), `eof` when stdin ended, `empty` for a
+ * blank line.
  */
+type QuestionReading =
+  | { readonly kind: "answer"; readonly text: string }
+  | { readonly kind: "elsewhere" | "eof" | "empty" };
+
+async function readQuestionAnswer(
+  input: Pick<RunAgentCliCommandInput, "stdout"> & {
+    readonly command: { readonly json: boolean };
+  },
+  question: {
+    readonly id: string;
+    readonly prompt: string;
+    readonly options: ReadonlyArray<string>;
+    readonly descriptions?: ReadonlyArray<string | undefined>;
+  },
+  shown: unknown,
+  lines: Pick<LineSource, "next">,
+  settled?: AbortSignal,
+): Promise<QuestionReading> {
+  if (input.command.json) {
+    input.stdout.write(`${JSON.stringify({ kind: "question", question: shown })}\n`);
+  } else {
+    input.stdout.write(`\n? ${question.prompt}\n`);
+    question.options.forEach((option, index) => {
+      const meaning = question.descriptions?.[index];
+      input.stdout.write(
+        `  ${index + 1}. ${option}${meaning === undefined ? "" : ` — ${meaning}`}\n`,
+      );
+    });
+    input.stdout.write("> ");
+  }
+  const line = await lines.next(settled);
+  if (line === undefined) {
+    if (settled?.aborted !== true) return { kind: "eof" };
+    if (input.command.json) {
+      input.stdout.write(
+        `${JSON.stringify({ kind: "question-settled", questionId: question.id })}\n`,
+      );
+    } else {
+      input.stdout.write("\n(answered elsewhere)\n");
+    }
+    return { kind: "elsewhere" };
+  }
+  const trimmed = line.trim();
+  const picked = /^\d+$/.test(trimmed) ? question.options[Number(trimmed) - 1] : undefined;
+  const answer = picked ?? trimmed;
+  return answer.length === 0 ? { kind: "empty" } : { kind: "answer", text: answer };
+}
+
 async function answerPendingQuestion(
   input: RunAgentCliCommandInput,
   threadId: string,
   question: NativeHarnessSessionView["questions"][number],
   lines: LineSource,
 ): Promise<void> {
-  if (input.command.json) {
-    input.stdout.write(`${JSON.stringify({ kind: "question", question })}\n`);
-  } else {
-    input.stdout.write(`\n? ${question.prompt}\n`);
-    question.options.forEach((option, index) => input.stdout.write(`  ${index + 1}. ${option}\n`));
-    input.stdout.write("> ");
-  }
-  const line = await lines.next();
-  if (line === undefined) return;
-  const trimmed = line.trim();
-  const picked = /^\d+$/.test(trimmed) ? question.options[Number(trimmed) - 1] : undefined;
-  const answer = picked ?? trimmed;
-  if (answer.length === 0) return;
+  const answer = await readQuestionAnswer(
+    input,
+    { id: String(question.id), prompt: question.prompt, options: question.options },
+    question,
+    lines,
+  );
+  if (answer.kind !== "answer") return;
   await input.session.send({
     path: `/api/native-harness/sessions/${encodeURIComponent(threadId)}/questions`,
     method: "POST",
-    body: { questionId: String(question.id), answer },
+    body: { questionId: String(question.id), answer: answer.text },
   });
+}
+
+/**
+ * The question a Chat turn is parked on lives on the turn, not in the harness
+ * session, so the thread port reads and answers it. The prompt closes with a
+ * note when the app answers first; a refused answer is printed, not dropped.
+ */
+async function answerThreadQuestion(
+  input: RunAgentCliCommandInput,
+  port: AgentThreadPort,
+  question: AgentPendingQuestion,
+  lines: LineSource,
+): Promise<"settled" | "ask-again"> {
+  const answeredElsewhere = new AbortController();
+  const interval = input.pollIntervalMs ?? 1_000;
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const check = async () => {
+    const current = await port.read().catch(() => undefined);
+    if (stopped) return;
+    if (current !== undefined && current.pendingQuestion?.id !== question.id) {
+      answeredElsewhere.abort();
+      return;
+    }
+    timer = setTimeout(() => void check(), interval);
+  };
+  timer = setTimeout(() => void check(), interval);
+  const answer = await readQuestionAnswer(
+    input,
+    question,
+    {
+      id: question.id,
+      prompt: question.prompt,
+      options: question.options,
+      ...(question.descriptions === undefined ? {} : { descriptions: question.descriptions }),
+      status: "pending",
+    },
+    lines,
+    answeredElsewhere.signal,
+  );
+  stopped = true;
+  if (timer !== undefined) clearTimeout(timer);
+  if (answer.kind !== "answer") {
+    // A blank line answers nothing; ask again rather than leave it parked.
+    if (answer.kind === "empty") return "ask-again";
+    if (answer.kind === "eof") {
+      // Nobody can answer from here any more, and the turn is parked on it, so
+      // stop the turn rather than leave it waiting for an answer that cannot come.
+      input.stderr.write("Input ended before the question was answered; stopping the turn.\n");
+      await port.interrupt().catch(() => undefined);
+    }
+    return "settled";
+  }
+  const result = await port.answerQuestion?.(question, answer.text);
+  if (result?.kind === "refused") input.stderr.write(`${result.message}\n`);
+  return "settled";
 }
 
 async function readSession(
@@ -930,8 +1179,16 @@ async function followTurn(
         answered.delete(site.id);
       }
     }
-    const current = await port.read();
+    let current = await port.read();
     if (current === undefined) continue;
+    const asked = current.pendingQuestion;
+    if (asked !== undefined && port.answerQuestion !== undefined && !answered.has(asked.id)) {
+      answered.add(asked.id);
+      if ((await answerThreadQuestion(input, port, asked, lines)) === "ask-again") {
+        answered.delete(asked.id);
+      }
+      current = (await port.read()) ?? current;
+    }
     const turn = current.turns.at(-1);
     if (turn?.id === before && sent === undefined) continue;
     const reply = turn?.reply ?? "";

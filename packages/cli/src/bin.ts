@@ -424,6 +424,7 @@ function printUsage(): void {
       "  octant agent [--mode auto|chat|work|code] [--project <name>] [--thread <id>] [--prompt <text>] [--title <title>] [--model <model or endpoint/model>] [--last] [--json] [--plain] [--quiet] [--theme system|light|dark|octant]",
       "  octant harness slots [--json]",
       "  octant harness session <thread-id> [--json]",
+      "  octant harness agents <thread-id> [<n>|<id>] [--json]",
       "  octant project add <path> [--type work|code] [--name <name>]",
       "  octant project remove <name>",
       "  octant project rename <name> <new name>",
