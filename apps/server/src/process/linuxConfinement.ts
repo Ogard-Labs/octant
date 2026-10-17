@@ -21,6 +21,15 @@ import { buildLinuxProcessDenySeccompFilter } from "./linuxProcessDenySeccomp";
 import { LINUX_EGRESS_FORWARDER_PORT, LINUX_EGRESS_FORWARDER_SOURCE } from "./proxiedNetworkEgress";
 
 export const DEFAULT_BWRAP_PATH = "/usr/bin/bwrap";
+
+/**
+ * What a person sees when this host cannot confine a terminal for want of
+ * bubblewrap. The command matches the one the `octant` command-line launcher
+ * prints, so both places give the same fix.
+ */
+export const LINUX_BUBBLEWRAP_MISSING_NOTICE =
+  "This Linux host is missing bubblewrap, which Octant needs to start a terminal safely. " +
+  "Install it with: sudo apt-get install -y bubblewrap. Then start the terminal again.";
 const HOST_SH_PATH = "/bin/sh";
 
 export interface BuildLinuxConfinementLaunchInput {
@@ -113,6 +122,7 @@ export function requireLinuxConfinement(bwrapPath: string): void {
     throw new ProcessConfinementError(
       "incompatible",
       "Linux confinement requires an executable bubblewrap (bwrap) runtime.",
+      "linux-bubblewrap-missing",
     );
   }
 }

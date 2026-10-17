@@ -26,6 +26,7 @@ import {
   CodeOperationSnapshotRequiredError,
   type CodeOperationServiceOptions,
 } from "./codeOperationService";
+import { requireLinuxConfinement } from "../process/linuxConfinement";
 import { ReviewFindingServiceError } from "./reviewFindingService";
 import { TerminalService } from "./terminalService";
 import { Schema } from "effect";
@@ -3497,6 +3498,47 @@ describe("CodeOperationService terminal Browser grant", () => {
     terminals.launch.mockRejectedValueOnce(new Error("no shell"));
     await service.execute(ids.window, startWithGrant, { initiator: "user" });
     expect(grants.abandon).toHaveBeenCalledWith(ids.terminal);
+  });
+
+  it("tells the person a Linux host without bubblewrap needs it installed, not that the operation failed", async () => {
+    const { service, terminals } = fixture({
+      kind: "granted",
+      outcome: granted,
+      credentialReferences: references,
+    });
+    let missing: unknown;
+    try {
+      requireLinuxConfinement("/nonexistent/bwrap");
+    } catch (error) {
+      missing = error;
+    }
+    terminals.launch.mockRejectedValueOnce(missing);
+
+    const result = await service.execute(
+      ids.window,
+      {
+        kind: "start-terminal",
+        operationId: ids.operation,
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        terminalId: ids.terminal,
+        columns: 80,
+        rows: 24,
+        credentialRefs: [],
+      },
+      { initiator: "user" },
+    );
+
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: {
+        category: "unavailable",
+        message: expect.stringContaining("sudo apt-get install -y bubblewrap"),
+      },
+    });
+    const message = result.kind === "operation-failed" ? result.failure.message : "";
+    expect(message).not.toContain("/nonexistent");
+    expect(message).not.toBe("Code operation failed.");
   });
 
   it("ends the grant when the terminal it was minted for stops being followed", async () => {
