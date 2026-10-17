@@ -240,7 +240,11 @@ and the plan shrinks accordingly.
    in device-key metadata and the host registry, the shared rule, and its
    Node implementation. Recording a staged trust waits for the rotation
    route in slice 7.
-4. _Desktop._ **Built**; its rules are in Architecture. Not yet done: the
+4. _Desktop._ **Built**; its rules are in Architecture. Reworked: main
+   keeps the pin and sends the main window's requests to a listed computer
+   over the pinned transport; the main window claims the ticket and holds the
+   device key, so the computer joins its Environments filter and Running
+   services. The earlier per-computer window is gone. Not yet done: the
    packaged-app smoke and a live pairing of a second machine.
 5. _Phone._ **Built**; its rules are in Architecture. The native module,
    in-app scanner, and pasted code. The iOS exchange is tested on a Mac

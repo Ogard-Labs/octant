@@ -138,7 +138,7 @@ async function seedDeviceKey(
 
 async function seedTwoRemotes(input?: {
   readonly deviceKeyStore?: RemoteDeviceKeyStore;
-  readonly onHostCleared?: (hostId: string) => Promise<void>;
+  readonly onHostCleared?: (hostId: string, origin: string | undefined) => Promise<void>;
 }): Promise<{
   readonly registry: ReturnType<typeof createClientHostRegistry>;
   readonly deviceKeyStore: RemoteDeviceKeyStore;
@@ -536,9 +536,11 @@ describe("HostFederationLifecycle (Post-preview B6)", () => {
 
   it("tells its owner which host was cleared, after revoke and after removal, and survives the owner failing", async () => {
     const cleared: string[] = [];
+    const origins: Array<string | undefined> = [];
     const { lifecycle, registry } = await seedTwoRemotes({
-      onHostCleared: async (hostId) => {
+      onHostCleared: async (hostId, origin) => {
         cleared.push(hostId);
+        origins.push(origin);
         throw new Error("page storage busy");
       },
     });
@@ -551,6 +553,8 @@ describe("HostFederationLifecycle (Post-preview B6)", () => {
     expect(removed.warning).toBe("page storage busy");
     expect(revoked.warning).toBe("page storage busy");
     expect(cleared).toEqual([HOST_B, HOST_A]);
+    // The registered origin outlives the record, so the owner can drop what it keeps by origin.
+    expect(origins).toEqual(["https://laptop.tailnet:8443", "https://studio.tailnet:8443"]);
     expect(await registry.get(HOST_A)).toBeUndefined();
     expect(await registry.get(HOST_B)).toBeUndefined();
   });

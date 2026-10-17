@@ -1,12 +1,13 @@
 // The desktop app's side of pairing with another computer from its app
 // pairing code. Main reads the code, reaches the listener only through the
 // Node transport held to the code's pin, verifies the host hello, and only
-// then records the pin and opens the host's own pairing page in a window
-// whose session checks every certificate against the recorded pins. The
-// renderer hands over the pasted text and nothing else: it cannot name a pin,
-// an origin, or a page to open.
+// then stages the pin and hands the ticket back to the window that pasted the
+// code, which claims it with its own device key; the pin is kept only once the
+// window reports the other computer approved. From then on that window
+// reaches the computer only through `requestPairedComputer`, over the same
+// pinned transport. The renderer hands over the pasted text and nothing else:
+// it cannot name a pin or an origin to trust.
 
-import { createHash, X509Certificate } from "node:crypto";
 import {
   closeSync,
   fsyncSync,
@@ -17,24 +18,10 @@ import {
   writeSync,
 } from "node:fs";
 import { openAppPairingCode } from "@octant/client-runtime/app-pairing-code";
-import {
-  connectListener,
-  createListenerFetch,
-} from "@octant/client-runtime/remote-listener-tls-node";
-import {
-  judgeListenerCertificate,
-  LISTENER_TRUST_REFUSAL_COPY,
-  listenerPinFromSha256,
-  type ListenerOriginTrust,
-} from "@octant/client-runtime/remote-listener-trust";
+import { createListenerFetch } from "@octant/client-runtime/remote-listener-tls-node";
+import type { ListenerOriginTrust } from "@octant/client-runtime/remote-listener-trust";
 import { classifyRemoteListenerAddress } from "@octant/domain";
-
-/** The session partition every paired computer's window uses, and nothing else. */
-export const PAIRED_COMPUTER_PARTITION = "persist:octant-paired-computers";
-
-/** Chromium's verification results a certificate verification hook answers with. */
-export const CERTIFICATE_ACCEPTED = 0;
-export const CERTIFICATE_REFUSED = -2;
+import { requestPairedComputer } from "./pairedComputerRequests";
 
 export interface PairedComputer {
   readonly origin: string;
@@ -47,22 +34,88 @@ interface PinRecord {
   readonly pin: string;
 }
 
+/** The single-use ticket a pairing code carried, for the window that claims it. */
+export interface PairedComputerTicket {
+  readonly ticketId: string;
+  readonly ticketProof: string;
+}
+
 export type PairedComputerOutcome =
-  | { readonly status: "opened"; readonly computer: PairedComputer }
+  | {
+      readonly status: "verified";
+      readonly computer: PairedComputer;
+      readonly ticket: PairedComputerTicket;
+      /** The pin the window records with its device; it is public and grants nothing by itself. */
+      readonly pin: string;
+    }
   | { readonly status: "refused"; readonly message: string };
+
+/** How long a pin staged from a pairing code is reachable before the pairing is settled. */
+export const STAGED_PIN_MS = 10 * 60 * 1_000;
+
+export type SettleOutcome = "approved" | "abandoned";
 
 /**
  * The pins main keeps, one per paired origin, in an owner-only file under the
  * app's data. A file that cannot be read holds no pins, so nothing is
- * trusted rather than something wrongly.
+ * trusted rather than something wrongly. An origin is reachable from a window
+ * only while it is listed here, or while a pairing code's pin for it is staged.
+ *
+ * A pairing code's pin is staged in memory, not written: the window may reach
+ * the origin through it so it can claim the ticket, but it replaces nothing
+ * recorded until the pairing is approved. Abandoning the pairing, or letting it
+ * lapse, therefore never touches a computer that was already paired.
  */
 export class PairedComputerPins {
   readonly #path: string;
+  readonly #now: () => number;
+  readonly #staged = new Map<string, { readonly record: PinRecord; readonly expiresAt: number }>();
   #records: ReadonlyArray<PinRecord>;
 
-  constructor(path: string) {
+  constructor(path: string, now: () => number = Date.now) {
     this.#path = path;
+    this.#now = now;
     this.#records = readPinRecords(path);
+  }
+
+  /**
+   * The pin a request to this origin is held to. A computer already recorded
+   * is always held to its recorded pin, so a code pasted for it never
+   * redirects the session it already has (its hello is a live session's first
+   * call as much as a pairing's). A pairing request (`pairing`) to a computer
+   * not yet recorded is held to the staged pin while one is open, so the
+   * ticket can be claimed.
+   */
+  reachPinFor(origin: string, pairing: boolean): string | undefined {
+    const recorded = this.pinFor(origin);
+    if (recorded !== undefined || !pairing) return recorded;
+    const staged = this.#staged.get(origin);
+    return staged !== undefined && staged.expiresAt > this.#now() ? staged.record.pin : undefined;
+  }
+
+  /** Drops a staged pairing without touching what is recorded. Returns whether one was open. */
+  unstage(origin: string): boolean {
+    return this.#staged.delete(origin);
+  }
+
+  /** Holds a pairing code's pin for the claim, without recording it. */
+  stage(input: PinRecord): void {
+    if (!isPrivateListenerOrigin(input.origin)) {
+      throw new Error("Octant pins only a private network or Tailscale address.");
+    }
+    this.#staged.set(input.origin, { record: input, expiresAt: this.#now() + STAGED_PIN_MS });
+  }
+
+  /**
+   * Ends an open pairing. Approved records the staged pin; abandoned drops it.
+   * Returns whether a pairing was open (and unexpired).
+   */
+  settle(origin: string, outcome: SettleOutcome): boolean {
+    const staged = this.#staged.get(origin);
+    this.#staged.delete(origin);
+    if (staged === undefined || staged.expiresAt <= this.#now()) return false;
+    if (outcome === "approved") this.record(staged.record);
+    return true;
   }
 
   list(): ReadonlyArray<PairedComputer> {
@@ -98,46 +151,6 @@ export class PairedComputerPins {
     this.#records = next;
     return true;
   }
-
-  /**
-   * Judges a certificate the paired computers' session was served. Chromium
-   * names only the host, not the port, so a name is held to every pin
-   * recorded for it; a name with no pin is refused, because that session
-   * opens nothing but paired computers.
-   */
-  judgeCertificate(hostname: string, certificatePem: string, now: number): number {
-    const pins = this.#records
-      .filter((record) => hostOf(record.origin) === hostname)
-      .map((record) => record.pin);
-    if (pins.length === 0) return CERTIFICATE_REFUSED;
-    let servedPin: string;
-    try {
-      const spki = new X509Certificate(certificatePem).publicKey.export({
-        type: "spki",
-        format: "der",
-      });
-      servedPin = listenerPinFromSha256(createHash("sha256").update(spki).digest());
-    } catch {
-      return CERTIFICATE_REFUSED;
-    }
-    const accepted = pins.some(
-      (pin) =>
-        judgeListenerCertificate({
-          trust: pinnedTrust(pin),
-          servedPin,
-          platformTrusted: false,
-          now,
-        }).status === "accepted",
-    );
-    return accepted ? CERTIFICATE_ACCEPTED : CERTIFICATE_REFUSED;
-  }
-}
-
-export interface PairedComputerWindows {
-  /** Opens a window on `url`, held to `origin`, in the paired computers' session. */
-  readonly open: (input: { readonly origin: string; readonly url: string }) => void;
-  /** Closes every open window held to `origin`, without waiting on the page. */
-  readonly closeAll: (origin: string) => void;
 }
 
 /** The part of an Electron session that holds what a page left behind. */
@@ -150,10 +163,10 @@ export interface PageStoragePort {
 /**
  * Clears everything a remote page left in a session for one origin: cookies,
  * local and session storage, IndexedDB, service workers, and the HTTP and
- * authentication caches. Every unpair path (forgetting a paired computer, and
- * dropping a remote dev server's page) calls this one helper, so none of them
- * leaves a page's data behind. The caches are session-wide, which is safe
- * because these sessions open nothing but remote computers.
+ * authentication caches. Every path that drops a remote page (a remote dev
+ * server's page) calls this one helper, so none of them leaves a page's data
+ * behind. The caches are session-wide, which is safe because these sessions
+ * open nothing but remote computers.
  */
 export async function clearRemotePageStorage(
   storage: PageStoragePort,
@@ -172,20 +185,20 @@ export async function clearRemotePageStorage(
 }
 
 export type ForgetOutcome =
-  | { readonly status: "forgotten" }
+  /** `warning` says what could not be cleared; the computer is forgotten either way. */
+  | { readonly status: "forgotten"; readonly warning?: string }
   | { readonly status: "refused"; readonly message: string };
 
 /**
- * Forgets a paired computer. Its windows close first so no page outlives its
- * trust, then the pin goes, so that computer's key is trusted by nothing, and
- * last its page storage and session are cleared. This only ends this app's
- * side: the other computer keeps listing this device until it is revoked there.
+ * Forgets a paired computer: the pin goes first, so no window can reach that
+ * computer and its key is trusted by nothing, then the pages of its servers
+ * Octant's browser opened. The window that holds the device key removes its
+ * own record and key. This only ends this app's side: the other computer keeps
+ * listing this device until it is revoked there.
  */
 export async function forgetPairedComputer(input: {
   readonly origin: unknown;
   readonly pins: PairedComputerPins;
-  readonly windows: PairedComputerWindows;
-  readonly storage: PageStoragePort;
   /** The pages of that computer's servers Octant's browser opened, which go with it. */
   readonly serverPages?: {
     readonly forgetListener: (
@@ -194,26 +207,26 @@ export async function forgetPairedComputer(input: {
   };
 }): Promise<ForgetOutcome> {
   const origin = typeof input.origin === "string" ? input.origin : "";
+  // A pairing still open for this origin goes first, so a later approval
+  // cannot record what was forgotten.
+  const pairing = input.pins.unstage(origin);
   if (input.pins.pinFor(origin) === undefined) {
-    return { status: "refused", message: "Octant isn't paired with that computer." };
+    return pairing
+      ? { status: "forgotten" }
+      : { status: "refused", message: "Octant isn't paired with that computer." };
   }
-  input.windows.closeAll(origin);
   input.pins.forget(origin);
-  // Both clear whatever the other does: the pin is gone, so a step skipped
-  // here would never be retried.
-  const [session, pages] = await Promise.allSettled([
-    clearRemotePageStorage(input.storage, origin),
-    input.serverPages?.forgetListener(origin),
-  ]);
-  if (
-    session.status === "rejected" ||
-    pages.status === "rejected" ||
-    pages.value?.status === "incomplete"
-  ) {
+  let pages: { readonly status: "forgotten" | "incomplete" } | undefined;
+  try {
+    pages = await input.serverPages?.forgetListener(origin);
+  } catch {
+    pages = { status: "incomplete" };
+  }
+  if (pages?.status === "incomplete") {
     return {
-      status: "refused",
-      message:
-        "Octant forgot that computer, but couldn't clear everything its page stored. Quit and reopen Octant, then pair again if you want it back.",
+      status: "forgotten",
+      warning:
+        "Octant forgot that computer, but couldn't clear everything its servers' pages stored. Quit and reopen Octant, then pair again if you want it back.",
     };
   }
   return { status: "forgotten" };
@@ -221,14 +234,14 @@ export async function forgetPairedComputer(input: {
 
 /**
  * Pairs with the computer a pasted code names: verifies its host hello over a
- * connection held to the code's pin, records the pin, and opens the host's
- * pairing page with the code's ticket, where the person confirms and the
- * host approves.
+ * connection held to the code's pin, stages the pin, and hands back the
+ * ticket. The window then claims the ticket with its own device key through
+ * `requestPairedComputer`, the person compares the codes and approves on the
+ * other computer, and the window settles the pairing.
  */
 export async function pairFromPairingCode(input: {
   readonly code: unknown;
   readonly pins: PairedComputerPins;
-  readonly windows: PairedComputerWindows;
   readonly webBuildVersion: string;
   /** The Node transport; replaced only by tests. */
   readonly fetchFor?: (origin: string, trust: ListenerOriginTrust) => typeof globalThis.fetch;
@@ -247,51 +260,60 @@ export async function pairFromPairingCode(input: {
     return { status: "refused", message: "This pairing code carries no certificate pin." };
   }
   const computer = { origin: opened.origin, displayName: opened.hostHello.displayName };
-  input.pins.record({ ...computer, pin: opened.listenerTrust.pin });
-  const fragment = new URLSearchParams({
-    ticketId: opened.ticket.ticketId,
-    ticketProof: opened.ticket.ticketProof,
-  });
-  input.windows.open({ origin: opened.origin, url: `${opened.origin}/#${fragment.toString()}` });
-  return { status: "opened", computer };
+  const recorded = input.pins.pinFor(opened.origin);
+  if (recorded !== undefined && recorded !== opened.listenerTrust.pin) {
+    // Its recorded pin keeps holding every request, so a different key could
+    // not be claimed through it; the person starts over from Forget.
+    return {
+      status: "refused",
+      message:
+        "That computer's security key is different from the one Octant has. Forget the computer first, then pair again with the new code.",
+    };
+  }
+  try {
+    input.pins.stage({ ...computer, pin: opened.listenerTrust.pin });
+  } catch {
+    return {
+      status: "refused",
+      message: "Octant pins only a private network or Tailscale address.",
+    };
+  }
+  return {
+    status: "verified",
+    computer,
+    ticket: { ticketId: opened.ticket.ticketId, ticketProof: opened.ticket.ticketProof },
+    pin: opened.listenerTrust.pin,
+  };
 }
+
+export type SettleResult =
+  | { readonly status: "settled" }
+  | { readonly status: "refused"; readonly message: string };
 
 /**
- * Opens a paired computer again. Its address is resolved and judged and its
- * key checked against the pin before the window loads anything.
+ * Ends the pairing open for an origin. Abandoning one touches only what the
+ * pairing staged, never a computer already paired; approving one needs the
+ * pairing to still be open.
  */
-export async function openPairedComputer(input: {
+export function settlePairedComputer(input: {
   readonly origin: unknown;
+  readonly outcome: unknown;
   readonly pins: PairedComputerPins;
-  readonly windows: PairedComputerWindows;
-  /** The Node connection; replaced only by tests. */
-  readonly connect?: typeof connectListener;
-}): Promise<PairedComputerOutcome> {
-  const origin = typeof input.origin === "string" ? input.origin : "";
-  const pin = input.pins.pinFor(origin);
-  const computer = input.pins.list().find((entry) => entry.origin === origin);
-  if (pin === undefined || computer === undefined) {
-    return { status: "refused", message: "Octant isn't paired with that computer." };
+}): SettleResult {
+  if (typeof input.origin !== "string") {
+    return { status: "refused", message: "Octant isn't pairing with that computer." };
   }
-  const connection = await (input.connect ?? connectListener)({ origin, trust: pinnedTrust(pin) });
-  if (connection.status === "connected") {
-    connection.socket.destroy();
-    // The person may have forgotten this computer while the connection was
-    // being made; a window opened now would outlive its trust.
-    if (input.pins.pinFor(origin) !== pin) {
-      return { status: "refused", message: "Octant isn't paired with that computer." };
-    }
-    input.windows.open({ origin, url: `${origin}/` });
-    return { status: "opened", computer };
+  if (input.outcome !== "approved" && input.outcome !== "abandoned") {
+    return { status: "refused", message: "Octant refused that pairing answer." };
   }
-  if (connection.status === "refused") {
-    return { status: "refused", message: LISTENER_TRUST_REFUSAL_COPY[connection.reason] };
+  const open = input.pins.settle(input.origin, input.outcome);
+  if (input.outcome === "approved" && !open) {
+    return {
+      status: "refused",
+      message: "That pairing is no longer open. Forget the computer and pair again.",
+    };
   }
-  return { status: "refused", message: "Octant couldn't reach that computer." };
-}
-
-function pinnedTrust(pin: string): ListenerOriginTrust {
-  return { current: { kind: "pinned", pin } };
+  return { status: "settled" };
 }
 
 function hostOf(origin: string): string {
@@ -354,14 +376,15 @@ function writePinRecords(path: string, records: ReadonlyArray<PinRecord>): void 
 export const PAIRED_COMPUTER_CHANNELS = {
   pair: "octant:paired-computers:pair",
   list: "octant:paired-computers:list",
-  open: "octant:paired-computers:open",
   forget: "octant:paired-computers:forget",
+  settle: "octant:paired-computers:settle",
+  request: "octant:paired-computers:request",
 } as const;
 
 /**
  * The paired-computer actions a trusted local window may ask for: pair from a
- * pasted code, list paired computers, open one, and forget one. Each refusal is a value
- * with one line of copy.
+ * pasted code, list paired computers, forget one, and send one request to a
+ * listed computer. Each refusal is a value with one line of copy.
  */
 export function installPairedComputerIpcHandlers(options: {
   readonly handle: (
@@ -370,10 +393,10 @@ export function installPairedComputerIpcHandlers(options: {
   ) => void;
   readonly resolveOwnedWindow: (event: unknown) => void;
   readonly pins: () => PairedComputerPins;
-  readonly windows: PairedComputerWindows;
-  readonly storage: PageStoragePort;
   readonly serverPages?: Parameters<typeof forgetPairedComputer>[0]["serverPages"];
   readonly webBuildVersion: string;
+  /** The Node transport; replaced only by tests. */
+  readonly fetchFor?: (origin: string, trust: ListenerOriginTrust) => typeof globalThis.fetch;
 }): void {
   const authorize = (event: unknown): void => {
     try {
@@ -387,26 +410,32 @@ export function installPairedComputerIpcHandlers(options: {
     return await pairFromPairingCode({
       code,
       pins: options.pins(),
-      windows: options.windows,
       webBuildVersion: options.webBuildVersion,
+      ...(options.fetchFor === undefined ? {} : { fetchFor: options.fetchFor }),
     });
   });
   options.handle(PAIRED_COMPUTER_CHANNELS.list, (event) => {
     authorize(event);
     return options.pins().list();
   });
-  options.handle(PAIRED_COMPUTER_CHANNELS.open, async (event, origin) => {
-    authorize(event);
-    return await openPairedComputer({ origin, pins: options.pins(), windows: options.windows });
-  });
   options.handle(PAIRED_COMPUTER_CHANNELS.forget, async (event, origin) => {
     authorize(event);
     return await forgetPairedComputer({
       origin,
       pins: options.pins(),
-      windows: options.windows,
-      storage: options.storage,
       ...(options.serverPages === undefined ? {} : { serverPages: options.serverPages }),
+    });
+  });
+  options.handle(PAIRED_COMPUTER_CHANNELS.settle, (event, origin, outcome) => {
+    authorize(event);
+    return settlePairedComputer({ origin, outcome, pins: options.pins() });
+  });
+  options.handle(PAIRED_COMPUTER_CHANNELS.request, async (event, request) => {
+    authorize(event);
+    return await requestPairedComputer({
+      request,
+      pins: options.pins(),
+      ...(options.fetchFor === undefined ? {} : { fetchFor: options.fetchFor }),
     });
   });
 }

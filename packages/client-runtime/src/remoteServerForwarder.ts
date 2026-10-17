@@ -140,6 +140,8 @@ export interface RemoteServerForwarder {
   readonly accessFor: (origin: string) => string | undefined;
   /** Stops serving every page of a host and closes their WebSockets, as when it is removed or the device unpaired. */
   readonly closeHost: (hostId: string) => void;
+  /** The same for every page now served from one listener, whichever host it belongs to, when that listener's pairing ends. */
+  readonly closeListener: (listenerOrigin: string) => void;
   readonly stop: () => Promise<void>;
 }
 
@@ -599,6 +601,13 @@ export function createRemoteServerForwarder(
     closeHost: (hostId) => {
       for (const [name, page] of pages) {
         if (page.hostId !== hostId) continue;
+        pages.delete(name);
+        closeSockets(page);
+      }
+    },
+    closeListener: (listenerOrigin) => {
+      for (const [name, page] of pages) {
+        if (page.listenerOrigin !== listenerOrigin) continue;
         pages.delete(name);
         closeSockets(page);
       }

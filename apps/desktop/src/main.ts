@@ -222,7 +222,6 @@ import {
 import {
   installPairedComputerIpcHandlers,
   type PageStoragePort,
-  PAIRED_COMPUTER_PARTITION,
   PairedComputerPins,
 } from "./pairedComputers";
 import { markHostInteraction } from "./interactionTrace";
@@ -1456,70 +1455,6 @@ function pairedComputerPins(): PairedComputerPins {
     join(app.getPath("userData"), "paired-computer-pins.json"),
   );
   return pairedComputerPinStore;
-}
-
-/**
- * The session every paired computer's window uses. Its certificate check is
- * the pin alone: a name with a recorded pin passes only on that key, and
- * every other name is refused, since this session opens nothing else.
- * Installing the check again drops the network service's cached results, so
- * a pin recorded since then applies to the next connection.
- */
-function pairedComputerSession(): Electron.Session {
-  const pairedSession = session.fromPartition(PAIRED_COMPUTER_PARTITION);
-  pairedSession.setCertificateVerifyProc((request, callback) => {
-    callback(
-      pairedComputerPins().judgeCertificate(request.hostname, request.certificate.data, Date.now()),
-    );
-  });
-  pairedSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  pairedSession.setPermissionCheckHandler(() => false);
-  return pairedSession;
-}
-
-/** Open paired-computer windows and the origin each is held to, kept until each closes so none is collected mid-pairing. */
-const pairedComputerWindows = new Map<BrowserWindow, string>();
-
-function closePairedComputerWindows(origin: string): void {
-  for (const [window, held] of [...pairedComputerWindows]) {
-    if (held === origin && !window.isDestroyed()) window.destroy();
-  }
-}
-
-/**
- * A window on another computer's own Octant page. It gets no preload and no
- * desktop bridge, stays on that one origin, and opens no other window.
- */
-function openPairedComputerWindow(input: { readonly origin: string; readonly url: string }): void {
-  const window = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: {
-      session: pairedComputerSession(),
-      sandbox: true,
-      contextIsolation: true,
-      nodeIntegration: false,
-      webSecurity: true,
-      allowRunningInsecureContent: false,
-    },
-  });
-  const staysOnOrigin = (url: string): boolean => {
-    try {
-      return new URL(url).origin === input.origin;
-    } catch {
-      return false;
-    }
-  };
-  window.webContents.on("will-navigate", (event) => {
-    if (!staysOnOrigin(event.url)) event.preventDefault();
-  });
-  window.webContents.on("will-redirect", (event) => {
-    if (!staysOnOrigin(event.url)) event.preventDefault();
-  });
-  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  pairedComputerWindows.set(window, input.origin);
-  window.once("closed", () => pairedComputerWindows.delete(window));
-  void window.loadURL(input.url);
 }
 
 function installTrustedRendererRequestHeaders(): void {
@@ -3089,8 +3024,6 @@ function installIpcHandlers(): void {
     handle: (channel, handler) => ipcMain.handle(channel, handler),
     resolveOwnedWindow: (event) => void ownedWindowContext(event as IpcMainInvokeEvent),
     pins: pairedComputerPins,
-    windows: { open: openPairedComputerWindow, closeAll: closePairedComputerWindows },
-    storage: pairedComputerSession(),
     serverPages: { forgetListener: (origin) => remoteServerPages().forgetListener(origin) },
     webBuildVersion: app.getVersion(),
   });
@@ -3898,6 +3831,10 @@ function remoteServerPages(): RemoteServerPages {
     pageStorage: remoteServerPageStorage,
     showInOctantBrowser: showRemoteServerPage,
     openExternal: (url) => shell.openExternal(url),
+    pairedTrust: (listenerOrigin) => {
+      const pin = pairedComputerPins().pinFor(listenerOrigin);
+      return pin === undefined ? undefined : { current: { kind: "pinned", pin } };
+    },
   });
   return remoteServerPagesInstance;
 }

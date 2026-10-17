@@ -114,6 +114,74 @@ describe("desktop preload bridge", () => {
     unsubscribe();
   });
 
+  it("sends a paired-computer request on its own channel with only the named fields", async () => {
+    const invoke = vi.fn().mockResolvedValue({
+      status: "answered",
+      httpStatus: 200,
+      headers: [["content-type", "application/json"]],
+      body: new Uint8Array([123, 125]),
+    });
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+    );
+
+    const answer = await bridge.requestPairedComputer?.({
+      origin: "https://100.101.102.103:8443",
+      method: "GET",
+      path: "/api/host/resources",
+      headers: { accept: "application/json" },
+      deviceKey: "never sent",
+    } as never);
+
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.pairedComputerRequest, {
+      origin: "https://100.101.102.103:8443",
+      method: "GET",
+      path: "/api/host/resources",
+      headers: { accept: "application/json" },
+    });
+    expect(answer).toMatchObject({ status: "answered", httpStatus: 200 });
+  });
+
+  it("settles a pairing on its own channel and refuses an answer it does not know", async () => {
+    const invoke = vi.fn().mockResolvedValue({ status: "settled" });
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+    );
+
+    await expect(
+      bridge.settlePairedComputer?.("https://100.101.102.103:8443", "abandoned"),
+    ).resolves.toEqual({ status: "settled" });
+    expect(invoke).toHaveBeenCalledWith(
+      IPC_CHANNELS.pairedComputerSettle,
+      "https://100.101.102.103:8443",
+      "abandoned",
+    );
+    await expect(
+      bridge.settlePairedComputer?.("https://x", "forgotten" as never),
+    ).resolves.toMatchObject({ status: "refused" });
+    expect(invoke).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a paired-computer answer that is not in the agreed shape", async () => {
+    for (const reply of [
+      { status: "answered", httpStatus: 200, headers: [["set-cookie"]], body: new Uint8Array() },
+      { status: "answered", httpStatus: 99, headers: [], body: new Uint8Array() },
+      { status: "answered", httpStatus: 200, headers: [], body: "text" },
+      { status: "something-else" },
+      undefined,
+    ]) {
+      const bridge = createHostBridge(
+        { invoke: vi.fn().mockResolvedValue(reply), on: vi.fn(), removeListener: vi.fn() },
+        projectWindowCapability,
+      );
+      await expect(
+        bridge.requestPairedComputer?.({ origin: "https://x", method: "GET", path: "/" }),
+      ).rejects.toThrow("Octant returned an invalid paired-computer answer.");
+    }
+  });
+
   it("keeps the sandboxed preload free of runtime package imports", () => {
     const source = readFileSync(fileURLToPath(new URL("./preload.ts", import.meta.url)), "utf8");
     expect(source).not.toMatch(/import\s*\{[^}]*\}\s*from ["']@octant\//);
@@ -216,7 +284,6 @@ describe("desktop preload bridge", () => {
       "openCodeExternalEditor",
       "openComputerUsePermissionSettings",
       "openInNewWindow",
-      "openPairedComputer",
       "openRemoteServerPage",
       "pairWithPairingCode",
       "popupNativeMenu",
@@ -233,6 +300,7 @@ describe("desktop preload bridge", () => {
       "replaceProviderApiKey",
       "requestCodeOperationApproval",
       "requestComputerUsePermissions",
+      "requestPairedComputer",
       "resetBounds",
       "resizeCanvasPrototype",
       "restartPrivateListener",
@@ -253,6 +321,7 @@ describe("desktop preload bridge", () => {
       "setProviderCredential",
       "setSidebarMaterialPreference",
       "setSidebarVibrancyMode",
+      "settlePairedComputer",
       "subscribeAppUpdateState",
       "subscribeBrowserSurfaceState",
       "subscribeCanvasPrototypeEvents",

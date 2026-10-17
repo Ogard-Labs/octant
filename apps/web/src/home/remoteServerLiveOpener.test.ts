@@ -10,7 +10,6 @@ const HOST: RemoteServerLiveHost = {
   hostId: "11111111-1111-4111-8111-111111111111",
   hostName: "Studio Mac",
   origin: "https://192.168.1.20:9443",
-  listenerTrust: { current: { kind: "platform" } },
   issueSession: async () => ({
     hostId: "11111111-1111-4111-8111-111111111111",
     deviceId: "22222222-2222-4222-8222-222222222222",
@@ -59,7 +58,6 @@ describe("opening another computer's server live from this window", () => {
       hostId: HOST.hostId,
       hostName: "Studio Mac",
       listenerOrigin: HOST.origin,
-      listenerTrust: HOST.listenerTrust,
       grant: { grantId: GRANT_ID, threadId: THREAD_ID, port: 5173 },
       mode: "octant-browser",
     });
@@ -71,6 +69,21 @@ describe("opening another computer's server live from this window", () => {
       bodyDigest: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     })) as { status: string };
     expect(signing.status).toBe("signed");
+  });
+
+  it("asks for the grant over the host's own transport, so a computer reached through the desktop never meets the page's fetch", async () => {
+    const desktop = bridge();
+    const pageFetch = vi.fn(async () => granted());
+    const hostFetch = vi.fn<typeof globalThis.fetch>(async () => granted());
+    const opener = createRemoteServerLiveOpener(desktop, pageFetch);
+
+    expect(await opener.openLive({ ...HOST, fetch: hostFetch }, SERVICE, "octant-browser")).toEqual(
+      { kind: "opened" },
+    );
+
+    expect(hostFetch).toHaveBeenCalledOnce();
+    expect(String(hostFetch.mock.calls[0]?.[0])).toBe(`${HOST.origin}/api/server-proxy/grants`);
+    expect(pageFetch).not.toHaveBeenCalled();
   });
 
   it("shows the host's refusal and asks the desktop for nothing", async () => {

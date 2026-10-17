@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
+import { PassThrough } from "node:stream";
 import { createServer, type Server } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import type { RemoteServerGrant } from "@octant/contracts";
@@ -449,5 +450,66 @@ describe("the desktop's forwarder for another computer's dev server", () => {
     forwarder.closeHost(HOST_ID);
     const reply = await get(port, host, { headers: { "x-octant-page-access": access } });
     expect(reply.status).toBe(404);
+  });
+
+  it("stops serving the pages of one listener, and closes their WebSockets, leaving other listeners' pages up", async () => {
+    const key = "dGhlIHNhbXBsZSBub25jZQ==";
+    const accept = createHash("sha1")
+      .update(`${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`)
+      .digest("base64");
+    const { forwarder, port } = await harness({
+      upgradeToHost: async () => ({
+        status: "switched",
+        headers: [
+          ["upgrade", "websocket"],
+          ["sec-websocket-accept", accept],
+        ],
+        socket: new PassThrough(),
+        head: new Uint8Array(),
+      }),
+    });
+    const OTHER = "https://192.168.1.21:9443";
+    const a = opened(forwarder);
+    const secondPage = forwarder.open({
+      hostId: HOST_ID,
+      hostName: "Studio Mac",
+      listenerOrigin: OTHER,
+      grant: { ...GRANT, port: 3000 } as RemoteServerGrant,
+    });
+    const b = {
+      host: new URL(secondPage.pageOrigin).host,
+      access: forwarder.accessFor(secondPage.pageOrigin) ?? "",
+    };
+    const closed = await new Promise<boolean>((resolve, reject) => {
+      const request = httpRequest({
+        host: "127.0.0.1",
+        port,
+        path: "/hmr",
+        headers: {
+          host: a.host,
+          "x-octant-page-access": a.access,
+          origin: `http://${a.host}`,
+          connection: "Upgrade",
+          upgrade: "websocket",
+          "sec-websocket-key": key,
+          "sec-websocket-version": "13",
+        },
+      });
+      request.on("upgrade", (_response, socket) => {
+        socket.on("close", () => resolve(true));
+        socket.on("error", () => undefined);
+        forwarder.closeListener(LISTENER);
+      });
+      request.on("error", reject);
+      request.end();
+    });
+
+    expect(closed).toBe(true);
+    expect(
+      (await get(port, a.host, { headers: { "x-octant-page-access": a.access } })).status,
+    ).toBe(404);
+    expect(
+      (await get(port, b.host, { headers: { "x-octant-page-access": b.access } })).status,
+    ).toBe(200);
   });
 });
