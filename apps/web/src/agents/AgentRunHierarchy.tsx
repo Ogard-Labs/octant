@@ -57,6 +57,9 @@ export function AgentRunHierarchy(props: {
     readonly runId: string;
     readonly phase: "sending" | "delivered";
   }>();
+  // Only the latest note may set the status: notes can overlap, and an older
+  // answer arriving late must not relabel or erase a newer one.
+  const latestSteer = useRef(0);
   const [summaryReconnecting, setSummaryReconnecting] = useState(false);
   const [posture, setPosture] = useState<AgentRunCreationPosture | undefined>(
     props.creationPosture,
@@ -75,6 +78,7 @@ export function AgentRunHierarchy(props: {
   }, [props.requestedView]);
   const leaveSelectedRun = () => {
     setSelectedRunId(undefined);
+    latestSteer.current += 1;
     setSteer(undefined);
     if (props.requestedView !== undefined) onRequestedViewHandled.current?.();
   };
@@ -302,8 +306,10 @@ export function AgentRunHierarchy(props: {
           onAcknowledge={(input) => void acknowledge(input)}
           onCancel={(input) => void cancel(input)}
           onSteer={(input) => {
+            const request = ++latestSteer.current;
             setSteer({ runId: input.runId, phase: "sending" });
             void controls.steer(input).then((message) => {
+              if (request !== latestSteer.current) return;
               setErrorMessage(message);
               setSteer(
                 message === undefined ? { runId: input.runId, phase: "delivered" } : undefined,

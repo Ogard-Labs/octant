@@ -719,6 +719,63 @@ describe("AgentRunHierarchy", () => {
     expect(await screen.findByText("Steering note delivered.")).toBeVisible();
   });
 
+  it("lets only the latest steering note set the status when two are in flight", async () => {
+    const user = userEvent.setup();
+    const answers: Array<(result: { kind: "run-updated"; run: never }) => void> = [];
+    const steer = vi.fn(
+      () =>
+        new Promise<{ readonly kind: "run-updated"; readonly run: never }>((resolve) => {
+          answers.push(resolve);
+        }),
+    );
+    const client = emptyClient({
+      steer,
+      parentSummary: vi.fn(async () => ({
+        parentThreadId,
+        entries: [
+          {
+            runId,
+            requestId: "request-1",
+            parentThreadId,
+            role: "research",
+            task: "Draft the release notes",
+            lifecycleStatus: "running",
+            executionKind: "octant-managed",
+            usageQuality: "provider-reported",
+            resultAcknowledgement: { required: false, acknowledged: false },
+            version: 3,
+            updatedAt: "2026-08-01T15:01:00.000Z",
+          },
+        ],
+      })),
+    });
+    render(
+      <AgentRunHierarchy
+        client={client}
+        parentThreadId={parentThreadId}
+        creationPosture="automatic"
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: /Draft the release notes/ }));
+    for (const note of ["First note.", "Second note."]) {
+      await user.click(screen.getByRole("button", { name: "Steer Draft the release notes" }));
+      await user.type(screen.getByLabelText("Steering instruction"), note);
+      await user.click(screen.getByRole("button", { name: "Send steering" }));
+    }
+    expect(steer).toHaveBeenCalledTimes(2);
+
+    // The older note is taken first. The newer one has not been, so the page
+    // must not say delivered.
+    act(() => answers[0]?.({ kind: "run-updated", run: {} as never }));
+    await waitFor(() => expect(screen.queryByText("Steering note delivered.")).toBeNull());
+    expect(
+      screen.getByText("Sending the steering note. The subagent takes it at its next step."),
+    ).toBeVisible();
+
+    act(() => answers[1]?.({ kind: "run-updated", run: {} as never }));
+    expect(await screen.findByText("Steering note delivered.")).toBeVisible();
+  });
+
   it("says why a steering note was refused and does not claim it was sent", async () => {
     const user = userEvent.setup();
     const steer = vi.fn(async () => ({
