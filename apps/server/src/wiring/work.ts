@@ -17,7 +17,6 @@ import {
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
   type ProjectId,
-  type WorkAccess,
   type WorkThreadId,
   type WorkStatusDatedItem,
 } from "@octant/contracts";
@@ -72,7 +71,6 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
@@ -87,10 +85,8 @@ import type { ChatWiring } from "./chat";
 import type { CanvasWiring } from "./canvas";
 import type { WorkRequestStateWiring } from "./workRequestState";
 
-export type WorkDependencies = Pick<ServerStart, "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "runningWorkTurnAccess">;
-} & Pick<
+export type WorkDependencies = Pick<ServerStart, "persistence"> &
+  Pick<
     AuthorityWiring,
     | "agentRunPersistence"
     | "browserCaptures"
@@ -111,7 +107,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     | "spendCeiling"
     | "threadAwaitsHarnessApproval"
   > &
-  Pick<WorkRequestStateWiring, "workRequestRuntime" | "workRequestService"> &
+  Pick<WorkRequestStateWiring, "runningWorkTurns" | "workRequestRuntime" | "workRequestService"> &
   Pick<
     IntegrationsWiring,
     | "consumeCreateFromIssueFramed"
@@ -153,7 +149,13 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     "browserAutomationService" | "browserToolApprovalService" | "windowHoldsProject"
   > &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
-  Pick<HarnessWiring, "followUpCreation" | "nativeHarnessComposition" | "sideTaskFirstMessage"> &
+  Pick<
+    HarnessWiring,
+    | "followUpCreation"
+    | "nativeHarnessComposition"
+    | "onHarnessPausedByPerson"
+    | "sideTaskFirstMessage"
+  > &
   Pick<ChatWiring, "chatService" | "guardChatAttachmentPurge" | "threadMentionService"> &
   Pick<CanvasWiring, "canvasAgentToolPort" | "canvasService" | "resolveCanvasWorkspace"> &
   Pick<
@@ -167,7 +169,6 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
 
 export function wireWork(deps: WorkDependencies) {
   const {
-    late,
     agentRunPersistence,
     agentsManagedToolsFor,
     authorizeWorkThreadForWindow,
@@ -201,6 +202,7 @@ export function wireWork(deps: WorkDependencies) {
     managedWorktreeReceipts,
     nativeHarnessComposition,
     nativeHarnessHooks,
+    onHarnessPausedByPerson,
     onWindowRevoked,
     peekCreateFromIssueFramed,
     persistence,
@@ -212,6 +214,7 @@ export function wireWork(deps: WorkDependencies) {
     resolveSelectedExtensions,
     roots,
     routeCodeService,
+    runningWorkTurns,
     runtimeOutsideContentMarks,
     sideTaskFirstMessage,
     sideTasks,
@@ -302,6 +305,7 @@ export function wireWork(deps: WorkDependencies) {
     });
     const workTurnService = new WorkTurnService({
       liveTurns,
+      runningAccess: runningWorkTurns,
       outsideContentMarks: runtimeOutsideContentMarks,
       usageStore: workTurnUsageStore,
       agentRuns: agentRunPersistence,
@@ -477,10 +481,6 @@ export function wireWork(deps: WorkDependencies) {
       uuid: randomUUID,
       clock: () => new Date().toISOString(),
     });
-    const runningWorkTurnAccess: ((threadId: string) => WorkAccess | undefined) | undefined = (
-      threadId,
-    ) => workTurnService.runningTurnAccess(threadId);
-    late.runningWorkTurnAccess.current = runningWorkTurnAccess;
     const fileMentionService = new FileMentionService({
       authority: {
         resolveCodeRoot: async (windowId, threadId, checkoutId) => {
@@ -880,6 +880,16 @@ export function wireWork(deps: WorkDependencies) {
       service: goalLoopService,
       windowAuthorityStore,
       authorizeThread: authorizeWorkThreadForWindow,
+    });
+    // A goal loop schedules its own rounds, so a person's pause of the
+    // thread's harness session must stop it too; it stays paused until a
+    // person resumes the loop itself.
+    onHarnessPausedByPerson(({ threadId }) => {
+      const loop = goalLoopService.read(threadId).loop;
+      if (loop?.status !== "running") return;
+      void goalLoopService
+        .execute({ kind: "pause-goal-loop", threadId, expectedVersion: loop.version })
+        .catch(() => undefined);
     });
 
     const workflowProjection = new WorkflowProjection();

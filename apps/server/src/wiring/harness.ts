@@ -13,7 +13,6 @@ import { Schema } from "effect";
 import { ResearchRouter } from "../chat/research/researchRouter";
 import { SearxngClient } from "../chat/research/searxngClient";
 import { ThreadWorkService } from "../chat/threadWorkService";
-import { GoalLoopService } from "../goal/goalLoopService";
 import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { nativeHarnessRecoveryBlockers } from "../harness/nativeHarnessRecovery";
@@ -54,15 +53,13 @@ import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessStateWiring } from "./harnessState";
+import type { WorkRequestStateWiring } from "./workRequestState";
 
 export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
   readonly late: Pick<
     LateBindings,
-    | "nativeHarnessComposition"
-    | "nativeHarnessLeadFallback"
-    | "nativeHarnessObserver"
-    | "runningWorkTurnAccess"
+    "nativeHarnessComposition" | "nativeHarnessLeadFallback" | "nativeHarnessObserver"
   >;
 } & Pick<
     AuthorityWiring,
@@ -95,10 +92,9 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
     | "nativeHarnessApprovals"
     | "nativeHarnessQuestions"
     | "nativeHarnessSessions"
-  > & {
-    /** Wired by wireWork; read only after startup. */
-    readonly goalLoopService: () => GoalLoopService;
-  } & Pick<FoundationsWiring, "workThreadProjection">;
+  > &
+  Pick<WorkRequestStateWiring, "runningWorkTurnAccess"> &
+  Pick<FoundationsWiring, "workThreadProjection">;
 
 export function wireHarness(deps: HarnessDependencies) {
   const {
@@ -113,7 +109,6 @@ export function wireHarness(deps: HarnessDependencies) {
     configuredDriverOptions,
     contextHarness,
     externalContentIngestionStore,
-    goalLoopService,
     goalService,
     nativeHarnessApprovals,
     nativeHarnessEndpoints,
@@ -123,6 +118,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessSessions,
     persistence,
     providerDataDirectory,
+    runningWorkTurnAccess,
     sideTasks,
     threadFollowUpSuggestions,
     toolEgressRules,
@@ -274,6 +270,14 @@ export function wireHarness(deps: HarnessDependencies) {
     rules: toolEgressRules,
     authorizeThread: authorizeFollowUpThread,
   });
+  // A person's pause of a harness session reaches the areas that keep work
+  // going on the thread by themselves (a Work goal loop), which subscribe here.
+  const pausedByPersonListeners: Array<(input: { readonly threadId: string }) => void> = [];
+  const onHarnessPausedByPerson = (
+    listener: (input: { readonly threadId: string }) => void,
+  ): void => {
+    pausedByPersonListeners.push(listener);
+  };
   const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
     windowAuthorityStore,
     store: {
@@ -294,14 +298,8 @@ export function wireHarness(deps: HarnessDependencies) {
       resume: (...args) => nativeHarnessSessions.resume(...args),
       turnInFlight: (threadId) => nativeHarnessSessions.turnInFlight(threadId),
     },
-    // A goal loop schedules its own rounds, so a pause must stop it too;
-    // it stays paused until a person resumes the loop itself.
-    onPaused: ({ threadId }) => {
-      const loop = goalLoopService().read(threadId).loop;
-      if (loop?.status !== "running") return;
-      void goalLoopService()
-        .execute({ kind: "pause-goal-loop", threadId, expectedVersion: loop.version })
-        .catch(() => undefined);
+    onPaused: (input) => {
+      for (const listener of pausedByPersonListeners) listener(input);
     },
     onRecoveryLifted: ({ threadId, mode }) => {
       if (mode === "code") codeOperationRuntime?.settleCutOffTurns?.(threadId);
@@ -443,7 +441,7 @@ export function wireHarness(deps: HarnessDependencies) {
       hostId: deriveToolHostId(providerDataDirectory),
       persistence,
       workThreads: workThreadProjection,
-      runningWorkTurnAccess: (threadId) => late.runningWorkTurnAccess.current?.(threadId),
+      runningWorkTurnAccess,
       readThreadTaint: (threadId) =>
         readThreadExternalContentTaint(persistence.connection, threadId),
     }),
@@ -502,6 +500,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessEgressRoutes,
     nativeHarnessRoutingRoutes,
     nativeHarnessSessionRoutes,
+    onHarnessPausedByPerson,
     researchRouter,
     sideTaskFirstMessage,
     sideTaskRoutes,

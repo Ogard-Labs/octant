@@ -7343,9 +7343,13 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   (`foundations`, `harnessState`, `workRequestState`), an area that holds
   per-window state registers its revocation with the authority, and an area
   that reacts to another's change subscribes to it (GitHub sign-in, pull
-  request refreshes, harness questions, Chat's attachment purge and tools)
-  instead of holding it. The gateway and listener the remote area rebuilds at
-  runtime live in that area behind `remoteHost`. Canvas is built right after
+  request refreshes, harness questions, a person's harness pause stopping a
+  Work goal loop, Chat's attachment purge and tools) instead of holding it.
+  A value written at runtime has one owned holder with a read-only accessor:
+  the access each running Work turn holds is recorded in `workRequestState`,
+  written by the Work turn service and read by the native harness. The
+  gateway and listener the remote area rebuilds at runtime live in that area
+  behind `remoteHost`. Canvas is built right after
   the Code area, from the Work artifact projection (a foundation) and the
   image jobs the providers area owns, so Chat, Work, and the Code runtime
   take its agent tool port as a value. Agent runs come before it: Canvas adds
