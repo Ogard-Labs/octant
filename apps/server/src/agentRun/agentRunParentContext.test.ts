@@ -946,6 +946,42 @@ describe("admitted Chat conversation context", () => {
     expect(JSON.stringify(result.blocks)).not.toContain("answer 2");
   });
 
+  it("reads a reply streamed as many chunks as one message, so the prompt and earlier turns stay in the window", () => {
+    const chunks = Array.from({ length: 40 }, (_, index) => reference(6_000 + index, 3));
+    const streamed = turn(2, [attempt(2, "completed", chunks)]);
+    const turns = [turn(1), streamed];
+    const contents = [
+      ...bodies(turns).filter(
+        (content) =>
+          !chunks.some((chunk) => String(chunk.contentId) === content.contentId) &&
+          content.body !== "answer 2",
+      ),
+      ...chunks.map((chunk, index) => ({
+        contentId: String(chunk.contentId),
+        role: "assistant" as const,
+        body: `<${index}>`,
+        digest,
+        byteLength: 3,
+      })),
+    ];
+    const result = admittedChatConversationContext(
+      input(turns, { readView: () => ({ turns, contents }) as never }),
+    );
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.blocks.map((block) => block.kind)).toEqual([
+      "conversation-summary",
+      "user-message",
+      "assistant-message",
+      "user-message",
+      "assistant-message",
+    ]);
+    expect(result.omissions.earlierMessages).toBe(0);
+    expect(result.blocks[4]?.text).toContain(chunks.map((_, index) => `<${index}>`).join(""));
+    expect(result.blocks[3]?.text).toContain("question 2");
+  });
+
   it("refuses when no message is readable rather than hand over an empty conversation", () => {
     const turns = [turn(1)];
     const missing = new Set(bodies(turns).map((content) => content.contentId));

@@ -28,7 +28,9 @@ export interface ConversationSessionInput {
   };
   /**
    * The thread is a branch that carries a copy of its source's messages and
-   * has run no turn of its own yet, so it has no session to resume.
+   * has run no turn of its own yet, so it has no session to resume. It may
+   * have no `previous` attempt at all when it was branched from a turn that
+   * kept none.
    */
   readonly branchWithoutSession?: boolean;
   /**
@@ -62,13 +64,16 @@ export function decideConversationSession(
   input: ConversationSessionInput,
 ): ConversationSessionDecision {
   if (input.recipient.owner === "host") return { kind: "host-rebuild" };
-  const { previous } = input;
-  if (previous === undefined) return { kind: "new-session" };
+  // A branch carries messages even when its tail turn kept no attempt (it was
+  // branched from a turn that failed or was interrupted), so it is checked
+  // before "nothing ran yet".
   if (input.branchWithoutSession === true) {
     return input.handoff === "allowed"
       ? { kind: "new-session-with-handoff", reason: "branch" }
       : { kind: "refuse", reason: "handoff-unavailable" };
   }
+  const { previous } = input;
+  if (previous === undefined) return { kind: "new-session" };
   if (previous.providerInstanceId === input.recipient.providerInstanceId) {
     return previous.continuable
       ? { kind: "continue-session" }

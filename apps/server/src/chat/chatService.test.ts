@@ -10299,6 +10299,55 @@ describe("handing a Chat conversation to a new provider session", () => {
       expect(fixture.service.read(source.threadId)).toEqual(sourceBefore);
     });
 
+    it("hands a branch made from a turn that kept no answer the messages it did carry", async () => {
+      const fixture = openMoving({ nativeConversationFor: ownsConversation });
+      const source = await twoTurns(fixture);
+      const view = fixture.service.read(source.threadId);
+      const tail = view.turns.at(-1)?.attempts.at(-1);
+      const tailTurn = view.turns.at(-1);
+      if (tail === undefined || tailTurn === undefined) throw new Error("Expected a tail attempt.");
+      // The second reply never finished, so a branch from it copies no attempt.
+      fixture.persistence.journal.append({
+        aggregate: { aggregateType: "chat-thread", aggregateId: source.threadId },
+        expectedVersion: view.thread.version,
+        events: [
+          {
+            eventId: crypto.randomUUID(),
+            eventName: "chat.attempt-updated@1",
+            eventVersion: 1,
+            correlationId: crypto.randomUUID(),
+            actor: { kind: "local-user", actorId: ids.actor },
+            occurredAt: now,
+            payload: {
+              kind: "attempt-updated",
+              attempt: { ...tail, outcome: "failed", updatedAt: now },
+            },
+          },
+        ],
+      } as never);
+
+      await fixture.service.execute({
+        kind: "branch-chat-thread",
+        threadId: source.threadId,
+        expectedVersion: fixture.service.read(source.threadId).thread.version,
+        turnId: tailTurn.id,
+        title: "From the failed turn",
+        branchThreadId,
+      });
+      expect(fixture.service.read(branchThreadId).turns.at(-1)?.attempts).toEqual([]);
+      await sendFollowUp(fixture, branchThreadId, "Branch question");
+
+      expect(lastAttempt(fixture, branchThreadId)?.handoff).toMatchObject({
+        reason: "branch",
+        messages: 3,
+      });
+      const text = (fixture.fakeDriver.sentTurns.at(-1)?.context ?? [])
+        .map((block) => block.text)
+        .join("\n");
+      expect(text).toContain("Remember the walrus");
+      expect(text).toContain("Later question");
+    });
+
     it("continues the branch in its own session after that first turn", async () => {
       const fixture = openMoving({ nativeConversationFor: ownsConversation });
       const source = await twoTurns(fixture);

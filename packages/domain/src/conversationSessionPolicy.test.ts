@@ -70,6 +70,16 @@ describe("decideConversationSession", () => {
     ).toEqual({ kind: "new-session-with-handoff", reason: "branch" });
   });
 
+  it("hands a branch its carried messages even when its tail turn kept no attempt", () => {
+    expect(
+      decideConversationSession({
+        recipient: runtime,
+        branchWithoutSession: true,
+        handoff: "allowed",
+      }),
+    ).toEqual({ kind: "new-session-with-handoff", reason: "branch" });
+  });
+
   it("never starts a handed-over session for a retry, resume or edit", () => {
     expect(
       decideConversationSession({

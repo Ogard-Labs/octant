@@ -444,21 +444,30 @@ export function admittedChatConversationContext(
         if (turn.attempts.some((attempt) => attempt.responseRefs.length > 0)) unfinishedReplies++;
         continue;
       }
-      for (const response of answered.responseRefs) {
+      // A streamed reply is journaled as one reference per text delta, but it
+      // is one message: joined before the window is applied, so the chunks of
+      // one reply cannot push the prompt and earlier turns out of it.
+      const responses = answered.responseRefs;
+      const first = responses[0];
+      if (first !== undefined) {
         selected.add({
           kind: "assistant-message",
           point: {
             turnId: String(turn.id),
             attemptId: String(answered.id),
-            contentId: String(response.contentId),
-            digest: response.digest,
+            contentId: String(first.contentId),
+            digest: first.digest,
+            parts: responses.length,
             role: "assistant",
             providerInstanceId: String(answered.providerInstanceId),
             modelId: String(answered.modelId),
             updatedAt: answered.updatedAt,
           },
-          byteLength: response.byteLength,
-          read: () => bodies.get(String(response.contentId)),
+          byteLength: responses.reduce((total, response) => total + response.byteLength, 0),
+          read: () => {
+            const parts = responses.map((response) => bodies.get(String(response.contentId)));
+            return parts.every((part) => part !== undefined) ? parts.join("") : undefined;
+          },
         });
       }
     }

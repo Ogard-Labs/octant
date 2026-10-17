@@ -2987,7 +2987,8 @@ export class ChatService {
     thread: ChatThread,
     view: ChatThreadView | undefined,
     reason: "provider-switch" | "branch",
-    previous: ChatAttempt,
+    /** Absent for a branch whose tail turn kept no attempt. */
+    previous: ChatAttempt | undefined,
   ): {
     readonly blocks: ReadonlyArray<ProviderContextBlock>;
     readonly record: ChatAttemptHandoff;
@@ -3015,6 +3016,8 @@ export class ChatService {
       return refuse("source-unavailable");
     }
     if (selection.status === "unavailable") return refuse(selection.reason);
+    if (reason === "provider-switch" && previous === undefined)
+      return refuse("source-point-unavailable");
     const owned = selectionBelongsToThread(selection, {
       mode: "chat",
       id: String(thread.id),
@@ -3024,7 +3027,7 @@ export class ChatService {
     return {
       blocks: selection.blocks,
       record:
-        reason === "branch"
+        reason === "branch" || previous === undefined
           ? branchHandoffRecord(selection)
           : providerSwitchHandoffRecord(selection, {
               providerInstanceId: previous.providerInstanceId,
@@ -3721,7 +3724,7 @@ export class ChatService {
     }
     const nativeSession = sessionDecision.kind === "continue-session" ? previous : undefined;
     const handoff =
-      sessionDecision.kind === "new-session-with-handoff" && previous !== undefined
+      sessionDecision.kind === "new-session-with-handoff"
         ? this.#selectConversationHandoff(thread, threadView, sessionDecision.reason, previous)
         : undefined;
     if (nativeConversation && historyTurns !== undefined) {
