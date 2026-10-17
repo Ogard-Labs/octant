@@ -38,6 +38,12 @@ export class ProcessConfinementError extends Error {
   constructor(
     readonly reason: "incompatible" | "invalid-configuration",
     message: string,
+    /**
+     * Names the one refusal whose cause is safe to show a person and which they
+     * can fix themselves. Every other message here may carry paths or launch
+     * detail, so a caller that shows text must key on this, never on `message`.
+     */
+    readonly userFixable?: "linux-bubblewrap-missing",
   ) {
     super(message);
   }

@@ -69,6 +69,8 @@ import {
   THREAD_MENTION_UNREADABLE_CONTEXT,
 } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { LINUX_BUBBLEWRAP_MISSING_NOTICE } from "../process/linuxConfinement";
+import { ProcessConfinementError } from "../process/seatbeltProfile";
 import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
 import type { TerminalLauncher, TerminalObserveOptions } from "./terminalService";
 import { liveFramesOf } from "./terminalLiveFrames";
@@ -2412,6 +2414,19 @@ export class CodeOperationService {
         } catch (error) {
           this.#terminalOwners.delete(command.terminalId);
           this.#options.terminalBrowserGrants?.abandon(command.terminalId);
+          // A host without bubblewrap refuses every terminal. The person can
+          // fix that, so they get the reason rather than the generic failure.
+          if (
+            error instanceof ProcessConfinementError &&
+            error.userFixable === "linux-bubblewrap-missing"
+          ) {
+            console.warn(`Octant terminal could not start: ${error.message}`);
+            return this.#failed(
+              command.operationId,
+              "unavailable",
+              LINUX_BUBBLEWRAP_MISSING_NOTICE,
+            );
+          }
           throw error;
         }
         delete owner.starting;

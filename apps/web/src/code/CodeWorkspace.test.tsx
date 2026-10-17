@@ -114,6 +114,36 @@ describe("CodeWorkspace", () => {
     expect(await screen.findByRole("region", { name: "Repository terminal" })).toBeVisible();
   });
 
+  it("tells the person to install bubblewrap when the host cannot confine a terminal without it", async () => {
+    const notice =
+      "This Linux host is missing bubblewrap, which Octant needs to start a terminal safely. Install it with: sudo apt-get install -y bubblewrap. Then start the terminal again.";
+    const client = codeClient();
+    (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
+    (client.executeOperation as ReturnType<typeof vi.fn>).mockImplementation(async (command) =>
+      command.kind === "start-terminal"
+        ? {
+            kind: "operation-failed",
+            operationId: command.operationId,
+            failure: { category: "unavailable", message: notice },
+          }
+        : terminalUnavailableResult(),
+    );
+
+    render(
+      activated(
+        <CodeWorkspace
+          client={client}
+          controller={controller("approval-gated")}
+          createUuid={uuidFactory()}
+          tab={tab("code-terminal", "Terminal")}
+        />,
+      ),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(notice);
+    expect(screen.queryByText("Code operation failed.")).not.toBeInTheDocument();
+  });
+
   it("replaces a terminal id owned by another thread before starting", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());

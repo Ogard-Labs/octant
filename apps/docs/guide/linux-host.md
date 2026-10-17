@@ -17,8 +17,10 @@ does not work yet.
 - **x64 Linux.** Ubuntu is the tested distribution.
 - **Bun 1.3.14 or later** and a source checkout of Octant.
 - **Bubblewrap** (`bwrap`). Code shell commands and terminals run inside it.
-  Without it a provider reports **Incompatible**; Octant never runs an
-  unconfined shell instead.
+  Without it a provider reports **Incompatible**, and a task terminal says
+  that bubblewrap is missing and how to install it
+  (`sudo apt-get install -y bubblewrap`); Octant never runs an unconfined
+  shell instead.
 - **`lsof`.** Running services and Local servers use it to find the servers
   your projects started. A stock Ubuntu install lacks it; without it the card
   says Octant could not check this computer for local servers.

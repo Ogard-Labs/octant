@@ -15,6 +15,7 @@ import {
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { requireLinuxConfinement } from "../process/linuxConfinement";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import {
@@ -316,6 +317,22 @@ describe("Project terminals", () => {
 
     expect(refusal(result)).toBe("unavailable");
     expect(terminals.launches).toEqual([]);
+    expect(events()).toEqual([]);
+  });
+
+  it("tells the person a Linux host without bubblewrap needs it installed, and starts no shell", async () => {
+    const { service, terminals, events } = harness();
+    terminals.launch = async () => {
+      requireLinuxConfinement("/nonexistent/bwrap");
+      throw new Error("unreachable");
+    };
+
+    const result = await service.execute(windowId, "local-window", start());
+
+    expect(refusal(result)).toBe("unavailable");
+    const message = result.kind === "project-terminal-refused" ? result.message : "";
+    expect(message).toContain("sudo apt-get install -y bubblewrap");
+    expect(message).not.toContain("/nonexistent");
     expect(events()).toEqual([]);
   });
 
