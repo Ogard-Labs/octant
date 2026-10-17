@@ -2140,9 +2140,10 @@ describe("WorkTurnService", () => {
       return after;
     }
 
-    async function streamingTurn() {
+    async function streamingTurn(options: { readonly nativeConversation?: boolean } = {}) {
       const gate = deferred<void>();
       const before = serviceFixture({
+        ...options,
         turnRuntime: {
           run: async (input) => {
             input.onDelta?.("Half a sent");
@@ -2195,6 +2196,34 @@ describe("WorkTurnService", () => {
       expect(after.projection.lookup(next)).toMatchObject({
         status: "completed",
         response: "Picked up again",
+      });
+    });
+
+    it("starts a fresh session with the conversation when a native session never recorded a cursor", async () => {
+      const { before, release } = await streamingTurn({ nativeConversation: true });
+      const run = vi.fn<WorkTurnRuntimePort["run"]>().mockResolvedValue({
+        kind: "completed",
+        response: "Picked up in a new session",
+      });
+      const after = restart(before, { nativeConversation: true, turnRuntime: { run } });
+      release();
+      expect(after.projection.lookup(ids.request)?.resumeCursor).toBeUndefined();
+
+      const next = decodeWorkTurnRequestId("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3");
+      await expect(
+        after.service.startFirstTurn(ids.window, {
+          ...startCommand(),
+          requestId: next,
+          turnId: decodeWorkTurnId("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb3"),
+          prompt: "Carry on",
+        }),
+      ).resolves.toMatchObject({ kind: "accepted" });
+      await after.waitForIdle(next);
+
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(after.projection.lookup(next)).toMatchObject({
+        status: "completed",
+        handoff: { reason: "provider-switch", nativeSessionTransferred: false },
       });
     });
 
