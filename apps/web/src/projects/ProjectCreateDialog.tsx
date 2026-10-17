@@ -363,7 +363,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
           disabled={choosing || submitting}
           onClick={() => void chooseFolder()}
           type="button"
-          variant="ghost"
+          variant="outline"
         >
           <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
           <span className="project-dialog__folder-name">
@@ -411,7 +411,7 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
             disabled={browsing === "create"}
             onClick={() => setBrowsing("create")}
             type="button"
-            variant="ghost"
+            variant="outline"
           >
             <FolderOpen aria-hidden="true" size={16} strokeWidth={1.6} />
             <span className="project-dialog__folder-name">

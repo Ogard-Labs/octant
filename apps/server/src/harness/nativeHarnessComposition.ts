@@ -289,11 +289,13 @@ export function createNativeHarnessComposition(
     readonly threadId: string;
     readonly mode: "chat" | "work" | "code";
     readonly ports: NativeHarnessToolPorts;
+    readonly executionPolicy?: ProviderExecutionPolicy;
   }): AppManagedToolSet =>
     taintAppManagedToolResults({
       tools: createNativeHarnessTools({
         threadId: input.threadId,
         mode: input.mode,
+        ...(input.executionPolicy === undefined ? {} : { executionPolicy: input.executionPolicy }),
         authority: options.authority.service,
         resolveAuthority: () => options.authority.resolve(input.threadId, input.mode),
         ports: input.ports,
@@ -519,9 +521,15 @@ export function createNativeHarnessComposition(
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
       const shell = codeShell({ threadId, projectId: String(thread.projectId) }, windowId);
+      // Plan is the floor: a thread stored as Plan, or a turn narrowed to it,
+      // is offered only the tools Plan allows.
+      const planned =
+        thread.executionPolicy === "plan" ||
+        options.readCodeExecutionPolicy?.(threadId, windowId) === "plan";
       return compose({
         threadId,
         mode: "code",
+        ...(planned ? { executionPolicy: "plan" as const } : {}),
         ports: {
           ...shared(threadId),
           ...delegateFor({
@@ -642,6 +650,7 @@ export function createNativeHarnessComposition(
       const tools = createNativeHarnessTools({
         threadId: runId,
         mode,
+        executionPolicy: authority.executionPolicy,
         authority: service,
         resolveAuthority: () => granted,
         ports: {

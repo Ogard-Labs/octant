@@ -515,6 +515,105 @@ describe("native harness composition", () => {
       });
     });
 
+    // Plan is read-only, so its lead is offered only what Plan lets through. Every other
+    // posture keeps the full Code set; the matrix is the second half of the parity checklist's
+    // first item in docs/architecture.md.
+    it.each([
+      ["approval-gated", true],
+      ["auto-accept-edits", true],
+      ["full-access", true],
+      ["plan", false],
+    ] as const)(
+      "offers a Code thread under %s the writing and shell tools only when it can use them",
+      (executionPolicy, writes) => {
+        const { composition } = harness(false, productionPorts);
+        const code = names(
+          composition.forCode({
+            thread: { ...codeThread, executionPolicy } as CodeThread,
+            checkoutRoot: "/nonexistent",
+            windowId: "window-1",
+          })!,
+        );
+        const readOnly = ["read", "grep", "glob"];
+        const web = ["web-fetch", "web-search"];
+        const lead = [
+          "todo-write",
+          "context-remaining",
+          "second-opinion",
+          "delegate",
+          "ask-user",
+          "goal",
+        ];
+        expect(code).toEqual(
+          writes
+            ? [...readOnly, "bash", "edit", "write", ...web, ...lead, "goal-check"]
+            : [...readOnly, ...web, ...lead],
+        );
+      },
+    );
+
+    it("offers only the Plan tools to a turn narrowed to Plan on a thread that is not", () => {
+      const { composition } = harness(false, {
+        ...productionPorts,
+        readCodeExecutionPolicy: () => "plan",
+      });
+      const code = names(
+        composition.forCode({
+          thread: { ...codeThread, executionPolicy: "approval-gated" } as CodeThread,
+          checkoutRoot: "/nonexistent",
+          windowId: "window-1",
+        })!,
+      );
+      for (const refused of ["bash", "edit", "write", "goal-check"]) {
+        expect(code).not.toContain(refused);
+      }
+      expect(code).toContain("read");
+    });
+
+    it("keeps web-fetch available to a Plan thread because Plan's rule does not refuse it", async () => {
+      const { composition } = harness(false, {
+        ...productionPorts,
+        webFetch: async () => ({
+          status: 200,
+          text: "page",
+          truncated: false,
+          finalUrl: "https://example.com/",
+        }),
+      });
+      const tools = composition.forCode({
+        thread: { ...codeThread, executionPolicy: "plan" } as CodeThread,
+        checkoutRoot: "/nonexistent",
+        windowId: "window-1",
+      })!;
+      expect(names(tools)).toContain("web-fetch");
+      expect(
+        await tools.execute({
+          name: "web-fetch",
+          inputJson: JSON.stringify({ url: "https://example.com/" }),
+          signal: new AbortController().signal,
+        }),
+      ).toMatchObject({ isError: false });
+    });
+
+    it("still refuses a write with the policy's own reason when the posture narrowed to Plan after the tools were composed", async () => {
+      // The authority service here reads Plan, as it does once a thread is moved to Plan
+      // mid-turn; the tool set was composed while the thread could still write.
+      const { composition } = harness(false, productionPorts);
+      const tools = composition.forCode({
+        thread: { ...codeThread, executionPolicy: "approval-gated" } as CodeThread,
+        checkoutRoot: "/nonexistent",
+        windowId: "window-1",
+      })!;
+      expect(names(tools)).toContain("write");
+      expect(
+        await tools.execute({
+          name: "write",
+          inputJson: JSON.stringify({ path: "a.ts", content: "x" }),
+          signal: new AbortController().signal,
+        }),
+      ).toMatchObject({ isError: true, result: { error: "plan-mode-denied" } });
+    });
+
     it("offers a Side Chat only the advice tools and the web, never a task list, goal, question or delegation", () => {
       const { composition } = harness(false, productionPorts);
       const sideChat = composition.forChat({
