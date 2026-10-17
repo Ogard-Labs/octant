@@ -13,6 +13,7 @@ import {
 import { defaultShellSettings, enabledModes } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { WorkspaceWiring } from "./workspace";
 import type { CodeRuntimeWiring } from "./codeRuntime";
@@ -22,10 +23,11 @@ import type { WorkWiring } from "./work";
 export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
   Pick<AuthorityWiring, "agentRunParentAuthority" | "agentRunPersistence"> &
   Pick<AgentRunsWiring, "agentRunOrchestration" | "externalContentIngestionStore"> &
-  Pick<WorkspaceWiring, "contextHarness" | "workThreadProjection"> &
+  Pick<WorkspaceWiring, "contextHarness"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &
-  Pick<WorkWiring, "workTurnProjection" | "workTurnService">;
+  Pick<WorkWiring, "workTurnService"> &
+  Pick<FoundationsWiring, "workThreadProjection" | "workTurnProjection">;
 
 export function wireContinuation(deps: ContinuationDependencies) {
   const {

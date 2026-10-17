@@ -1,10 +1,16 @@
-import { mkdtemp, writeFile, appendFile, readFile, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, appendFile, readFile, mkdir, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { decodeLocalUsageHistoryRecord, decodeLocalUsageHistoryRequest } from "@octant/contracts";
 import { createLocalUsageHistoryCheckpointStore } from "../persistence/localUsageHistoryCheckpointStore";
+
+// Passes through; the close test below wraps it to watch how each handle ends.
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...actual, open: vi.fn(actual.open) };
+});
 
 const request = decodeLocalUsageHistoryRequest({
   from: "2026-09-01T00:00:00.000Z",
@@ -155,6 +161,48 @@ describe("persistent provider usage", () => {
     );
     expect(cached.records).toHaveLength(2);
     expect(cached.coverage.scannedFileCount).toBe(0);
+  });
+
+  it("closes every history file through its handle without a failed second close", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-usage-close-"));
+    for (const id of ["one", "two"]) {
+      await writeFile(
+        join(root, `${id}.jsonl`),
+        JSON.stringify({
+          type: "assistant",
+          sessionId: id,
+          timestamp: "2026-09-09T10:00:00.000Z",
+          message: {
+            id,
+            model: "claude-sonnet-4-6",
+            usage: { input_tokens: 10, output_tokens: 2 },
+          },
+        }) + "\n",
+      );
+    }
+    const actual = await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
+    const closes: Array<Promise<void>> = [];
+    vi.mocked(open).mockImplementation(async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args);
+      const close = handle.close;
+      handle.close = () => {
+        const closing = close();
+        closes.push(closing);
+        return closing;
+      };
+      return handle;
+    });
+    try {
+      const source = await import("./claudeUsageHistory");
+      await Effect.runPromise(source.createClaudeLocalUsageHistorySource({ root }).read(request));
+      // A stream that closes the descriptor behind the handle's back leaves a
+      // stale descriptor number that a later open can reuse and then lose.
+      const outcomes = await Promise.allSettled(closes);
+      expect(outcomes.length).toBeGreaterThanOrEqual(2);
+      expect(outcomes.filter((outcome) => outcome.status === "rejected")).toEqual([]);
+    } finally {
+      vi.mocked(open).mockImplementation(actual.open);
+    }
   });
 
   it("returns current usage with an honest warning when its restart checkpoint cannot be saved", async () => {

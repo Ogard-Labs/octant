@@ -12,7 +12,6 @@ import {
 import { ChevronLeft, ChevronRight, Play, RotateCcw, Square, X } from "lucide-react";
 import {
   CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS,
-  CANVAS_DESIGN_SURFACE_BRIDGE_EVENT,
   CANVAS_DESIGN_VIEWPORT,
   type CanvasDesignAssetResolution,
   type CanvasDesignBlock,
@@ -44,7 +43,7 @@ import {
   type DesignBridgeMessage,
   type DesignRunRuntime,
 } from "./designRunningFrame";
-import { getInjectedHostBridge } from "../../shell/hostBridge";
+import { DesktopPrototypeSurface } from "./DesktopPrototypeSurface";
 
 const SIZE_NAME: Record<CanvasDesignSize, string> = {
   phone: "Phone",
@@ -553,7 +552,6 @@ type RunStopReason =
   | { readonly kind: "stopped" }
   | { readonly kind: "unresponsive" }
   | { readonly kind: "navigated" }
-  | { readonly kind: "held-focus" }
   | { readonly kind: "flooded" }
   | { readonly kind: "refused"; readonly reason: string };
 
@@ -567,17 +565,13 @@ const STOPPED_TEXT: Record<Exclude<RunStopReason["kind"], "refused">, string> = 
   stopped: "Stopped.",
   unresponsive: "Stopped because the prototype stopped responding.",
   navigated: "Stopped because the prototype tried to load another page.",
-  "held-focus": "Stopped because the prototype kept taking the keyboard back.",
   flooded: "Stopped because the prototype sent too many messages.",
 };
-
-/** How long after the reserved shortcut a page that takes focus back is stopped. */
-const FOCUS_RECAPTURE_MS = 1_000;
 
 /**
  * A design that runs its own script: a prototype a person can click through
  * with state. Its page is served by the host for a single-use ticket. In the
- * desktop app it is drawn in a surface of its own with no route out, and when
+ * desktop app it is drawn from a process of its own with no route out, and when
  * that cannot be made it does not run; in a browser it is drawn in a frame
  * sandboxed to `allow-scripts` alone. Octant's chrome around it says it is
  * running and holds Stop, which the page cannot reach. It is removed and shown
@@ -656,49 +650,9 @@ function RunningDesignBlock({
     setErrors((current) => [...current, message].slice(-RUNNING_DESIGN_MAX_ERRORS));
   }, []);
 
-  // The desktop's reserved shortcut reaches Octant before the frame sees the
-  // key. A frame that holds focus here gives it up to its own Stop control.
-  // A page can take focus straight back from script, as one that refocuses
-  // itself on blur does in Electron 43, so a page that does so within a moment
-  // of the shortcut is stopped: the keyboard always comes back to Octant.
-  const running = state.kind === "running";
-  useEffect(() => {
-    if (!running) return;
-    let bridge;
-    try {
-      bridge = getInjectedHostBridge();
-    } catch {
-      return;
-    }
-    const subscribe = bridge?.subscribeCanvasFrameFocusEscape;
-    if (subscribe === undefined) return;
-    const watches = new Set<number>();
-    const unsubscribe = subscribe(() => {
-      if (frameRef.current === null || document.activeElement !== frameRef.current) return;
-      stopButton.current?.focus();
-      const escapedAt = Date.now();
-      const watch = window.setInterval(() => {
-        if (document.activeElement === frameRef.current && frameRef.current !== null) {
-          stop({ kind: "held-focus" });
-        }
-        if (Date.now() - escapedAt >= FOCUS_RECAPTURE_MS) {
-          window.clearInterval(watch);
-          watches.delete(watch);
-        }
-      }, 100);
-      watches.add(watch);
-    });
-    return () => {
-      unsubscribe();
-      for (const watch of watches) window.clearInterval(watch);
-    };
-  }, [running, stop]);
-
-  // When a stop takes the frame away, the keyboard lands on Run again.
-  const heldFocus = state.kind === "stopped" && state.why.kind === "held-focus";
-  useEffect(() => {
-    if (heldFocus) runButton.current?.focus();
-  }, [heldFocus]);
+  // The desktop's reserved shortcut is read before anything reaches the page,
+  // and hands the keyboard to Stop.
+  const leave = useCallback(() => stopButton.current?.focus(), []);
 
   const contained = runtime?.contained === true;
   const onDesktopSurface = runtime?.drawnIn === "desktop-surface";
@@ -763,15 +717,10 @@ function RunningDesignBlock({
       ) : null}
       {/* A page's policy does not cover a peer connection, and a browser has no
           way to stop one, so a prototype there can still connect to another
-          computer. The desktop app gives the page no network at all; only the
-          names it asks the app to look up leave. The preview browser has no
-          route out either, and says only that. */}
+          computer. The desktop app runs the page in a process with no network
+          and no resolver, and the preview browser has no route out either. */}
       {runtime === undefined ? null : contained ? (
-        <p className="canvas-design__notice">
-          {onDesktopSurface
-            ? "A prototype runs with no network connection. Its script can still make Octant look up host names, which can carry a little of what the prototype holds."
-            : "A prototype runs with no network connection."}
-        </p>
+        <p className="canvas-design__notice">A prototype runs with no network connection.</p>
       ) : (
         <p className="canvas-design__notice">
           A prototype&apos;s script can still connect to another computer and send what the
@@ -795,6 +744,7 @@ function RunningDesignBlock({
           frameRef={frameRef}
           key={state.url}
           onError={reportError}
+          onLeave={leave}
           onStop={stop}
           url={state.url}
         />
@@ -871,15 +821,19 @@ function useBridgeWatchdog(onStop: (why: RunStopReason) => void) {
   return { admit, heard };
 }
 
+/** How wide a running document's page is opened before its column is measured. */
+const UNMEASURED_DOCUMENT_WIDTH = 640;
+
 /**
  * The page a running design is drawn as, and its watchdog. In the desktop app
- * it is a `<webview>` in the surface the main process made for prototypes: this
- * names only the host's ticketed page, and the main process attaches the
- * surface to nothing else and speaks for the page's bridge through its preload.
- * In a browser it is a frame. A device size is drawn at its viewport and scaled
- * to the column; a document is as wide as the column and as tall as the page
- * says, within bounds. The page's first load is its own; any later load is a
- * page it navigated to, which is removed.
+ * it is drawn from the prototype host, a process of its own with no network and
+ * no resolver: this names only the host's ticketed page, the main process opens
+ * nothing else, and the page's bridge messages arrive as the host's events. In
+ * a browser it is a frame. A device size is drawn at its viewport and scaled to
+ * the column; a document is as wide as the column and as tall as the page
+ * says, within bounds. In a frame, the page's first load is its own; any later
+ * load is a page it navigated to, which is removed. The prototype host refuses
+ * every navigation itself.
  */
 function RunningFrame({
   block,
@@ -888,6 +842,7 @@ function RunningFrame({
   frameRef,
   onStop,
   onError,
+  onLeave,
 }: {
   readonly block: CanvasDesignBlock;
   readonly url: string;
@@ -895,6 +850,7 @@ function RunningFrame({
   readonly frameRef: RefObject<HTMLElement | null>;
   readonly onStop: (why: RunStopReason) => void;
   readonly onError: (message: string) => void;
+  readonly onLeave: () => void;
 }) {
   const [height, setHeight] = useState(RUNNING_DESIGN_MIN_HEIGHT);
   const loads = useRef(0);
@@ -933,38 +889,33 @@ function RunningFrame({
     return () => window.removeEventListener("message", onMessage);
   }, [admit, onDesktopSurface, frameRef, take]);
 
-  // A surface of its own has no window to post to: its preload forwards the
-  // page's bridge messages as events of the element, and the element reports
-  // its loads and its renderer going away.
-  useEffect(() => {
-    const element = frameRef.current;
-    if (!onDesktopSurface || element === null) return;
-    const onBridge = (event: Event) => {
-      const { channel, args } = event as Event & { channel?: unknown; args?: unknown };
-      if (channel !== CANVAS_DESIGN_SURFACE_BRIDGE_EVENT || !Array.isArray(args) || !admit())
-        return;
-      take(readDesignBridgePayload(args[0]));
-    };
-    const onGone = () => onStop({ kind: "unresponsive" });
-    element.addEventListener("ipc-message", onBridge);
-    element.addEventListener("did-navigate", countLoad);
-    element.addEventListener("render-process-gone", onGone);
-    return () => {
-      element.removeEventListener("ipc-message", onBridge);
-      element.removeEventListener("did-navigate", countLoad);
-      element.removeEventListener("render-process-gone", onGone);
-    };
-  }, [admit, onDesktopSurface, countLoad, frameRef, onStop, take]);
+  // The prototype host has no window to post to: its page's bridge messages
+  // arrive as the host's events, and so does a page that went away.
+  const onBridge = useCallback(
+    (payload: unknown) => {
+      if (admit()) take(readDesignBridgePayload(payload));
+    },
+    [admit, take],
+  );
+  const onGone = useCallback(() => onStop({ kind: "unresponsive" }), [onStop]);
 
-  const frame = (style: CSSProperties, className: string) =>
+  const frame = (
+    style: CSSProperties,
+    className: string,
+    page: { readonly width: number; readonly height: number },
+  ) =>
     onDesktopSurface ? (
-      <webview
+      <DesktopPrototypeSurface
+        attach={attach}
         className={className}
-        ref={attach}
+        height={page.height}
+        onBridge={onBridge}
+        onGone={onGone}
+        onLeave={onLeave}
         src={url}
         style={style}
-        tabIndex={0}
         title={`${block.title}, running prototype`}
+        width={page.width}
       />
     ) : (
       <iframe
@@ -980,7 +931,16 @@ function RunningFrame({
     );
 
   if (block.size === "document") {
-    return frame({ height }, "canvas-design__document");
+    const width = Math.round(stage?.width ?? UNMEASURED_DOCUMENT_WIDTH);
+    return (
+      <div ref={stageRef}>
+        {frame(
+          onDesktopSurface ? { width: "100%", height } : { height },
+          "canvas-design__document",
+          { width, height },
+        )}
+      </div>
+    );
   }
   const viewport = CANVAS_DESIGN_VIEWPORT[block.size];
   const scale = stage === undefined ? 1 : Math.min(1, stage.width / viewport.width);
@@ -997,6 +957,7 @@ function RunningFrame({
             transform: `scale(${String(scale)})`,
           },
           "canvas-design__page",
+          viewport,
         )}
       </div>
     </div>

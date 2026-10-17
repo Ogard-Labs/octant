@@ -35,6 +35,7 @@ export class WorkTurnProjection {
         authority: accepted.authority,
         providerSessionId: accepted.providerSessionId,
         ...(accepted.resumeCursor === undefined ? {} : { resumeCursor: accepted.resumeCursor }),
+        ...(accepted.handoff === undefined ? {} : { handoff: accepted.handoff }),
         status: "accepted",
         prompt: accepted.prompt,
         transcript: [{ role: "user", text: accepted.prompt }],

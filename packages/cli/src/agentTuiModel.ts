@@ -297,6 +297,62 @@ export function describeAgentGoal(goal: ThreadGoal): string {
   return `Goal (${goal.status}): ${goal.objective}${progress}`;
 }
 
+/**
+ * The goal and its ledger, one block per criterion: whether it holds, how it
+ * is checked, and what the last check observed. Plain words and no colour, so
+ * the same lines serve a piped command and the terminal panel. A screen with
+ * little room asks for one page of criteria; the last line then says which
+ * ones are shown and how to reach the rest.
+ */
+export function describeAgentGoalLedger(
+  goal: ThreadGoal,
+  page?: { readonly size: number; readonly number: number },
+): ReadonlyArray<string> {
+  const lines = [describeAgentGoal(goal)];
+  const criteria = goal.criteria ?? [];
+  const size = page === undefined ? Math.max(criteria.length, 1) : Math.max(page.size, 1);
+  const pages = Math.max(Math.ceil(criteria.length / size), 1);
+  const number = page === undefined ? 1 : Math.min(Math.max(page.number, 1), pages);
+  const shown = criteria.slice((number - 1) * size, number * size);
+  const width = Math.max(...criteria.map((criterion) => criterion.id.length), 0);
+  const indent = "    ";
+  for (const criterion of shown) {
+    lines.push(
+      `  ${criterion.status === "met" ? "met  " : "unmet"}  ${criterion.id.padEnd(width)}  ${criterion.text}`,
+      `${indent}check: ${criterion.check ?? "confirmed by a person"}`,
+      criterion.evidence === undefined
+        ? `${indent}evidence: none yet`
+        : `${indent}evidence (${criterion.evidence.kind}, ${criterion.evidence.observedAt}): ${criterion.evidence.summary}`,
+    );
+  }
+  if (pages > 1) {
+    const first = (number - 1) * size + 1;
+    const last = first + shown.length - 1;
+    lines.push(
+      `criteria ${String(first)}-${String(last)} of ${String(criteria.length)} · /goal ${String(number === pages ? 1 : number + 1)} shows ${number === pages ? "the first page" : "the next page"}`,
+    );
+  }
+  return lines;
+}
+
+/**
+ * What `/goal` with no revision asks of the Goal panel: a bare `/goal` opens
+ * the first page, or closes the panel when it is already open; `/goal 2` opens
+ * that page and never closes it. Anything else is not a panel request.
+ */
+export function goalPanelRequest(
+  argument: string,
+  panelOpen: boolean,
+): { readonly kind: "close" } | { readonly kind: "page"; readonly number: number } | undefined {
+  if (argument.length === 0) return panelOpen ? { kind: "close" } : { kind: "page", number: 1 };
+  return /^\d+$/.test(argument) ? { kind: "page", number: Number(argument) } : undefined;
+}
+
+/** How many criteria fit above the composer on a screen this tall: three lines each. */
+export function goalPanelPageSize(terminalRows: number): number {
+  return Math.max(Math.floor((terminalRows - 18) / 3), 1);
+}
+
 /** A checkpoint's default name: when it was marked, to the minute. */
 export function defaultCheckpointLabel(now: Date = new Date()): string {
   return `Checkpoint ${now.toISOString().slice(0, 16).replace("T", " ")}`;

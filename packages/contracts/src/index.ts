@@ -8,6 +8,7 @@ export * from "./threadBoard";
 export * from "./threadBoardPullRequests";
 export * from "./codeTestDefinitions";
 export * from "./context";
+export * from "./contextHandoff";
 export * from "./contextRpc";
 export * from "./workArtifacts";
 export * from "./workFileListing";

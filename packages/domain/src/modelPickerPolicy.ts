@@ -694,10 +694,12 @@ export function startedCodeThreadPickerGroups(
 
 /**
  * The choices a started Chat or Work thread can take. A provider that keeps
- * the conversation itself binds the thread the way Code is bound; a thread
- * whose history the host holds may move to any provider whose history the
- * host also holds, but never into a provider-kept session, which the host
- * refuses rather than silently start a second conversation.
+ * the conversation itself holds the thread's session, so only the models it
+ * can carry that session on to are offered from it. Every other provider is
+ * offered: one that keeps its own session starts a new session with a
+ * disclosed text handoff, and one whose history the host holds is sent the
+ * history again, as it is every turn. That includes a thread whose own
+ * provider is gone.
  */
 export function startedConversationPickerGroups(
   groups: ReadonlyArray<PickerGroup>,
@@ -706,13 +708,10 @@ export function startedConversationPickerGroups(
   const current = groups.find(
     (candidate) => String(candidate.instance.id) === String(selection.providerInstanceId),
   );
-  // Chat and Work refuse a follow-up when the bound provider is unavailable, so
-  // a thread whose provider is missing has no switch to offer.
-  if (current === undefined) return [];
-  if (providerKeepsConversation(current.instance.driverKind)) {
-    return startedThreadPickerGroups(groups, selection);
+  if (current !== undefined && providerKeepsConversation(current.instance.driverKind)) {
+    return startedCodeThreadPickerGroups(groups, selection);
   }
-  return groups.filter((group) => !providerKeepsConversation(group.instance.driverKind));
+  return groups;
 }
 
 export function filterModelPickerGroups(

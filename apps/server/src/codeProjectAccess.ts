@@ -55,6 +55,42 @@ export class CodeProjectAccess {
     return this.#requests.exit(() => this.#standing.run(true, read));
   }
 
+  /**
+   * Keeps the admission of the request that is running now, for a stream that
+   * outlives it. The stream has no request of its own to judge each recheck
+   * by, and judged outside the request it would read as deferred work and be
+   * refused. What is kept is the principal and its lifetime, never a verdict:
+   * the returned check is asked again each time and re-reads whether the
+   * Project is still active (for a device) or the window's binding (for a
+   * local window), and it refuses once the request's own signal has aborted.
+   * Absent when no request admitted this scope.
+   */
+  retain(scopeId: WindowId): ((projectId: ProjectId) => boolean) | undefined {
+    const request = this.#requests.getStore();
+    if (
+      request === undefined ||
+      !request.active ||
+      String(request.context.scopeId) !== String(scopeId)
+    ) {
+      return undefined;
+    }
+    const { context } = request;
+    return (projectId) => {
+      if (context.abortSignal?.aborted === true) return false;
+      if (context.principal.kind === "remote-device") {
+        return this.#options.hasActiveCodeProject(projectId);
+      }
+      return (
+        this.#options.isWindowLive(scopeId) &&
+        windowCanAccessCodeProject({
+          workspace: this.#options.readWorkspace(scopeId),
+          projectId,
+          hasActiveCodeProject: this.#options.hasActiveCodeProject,
+        })
+      );
+    };
+  }
+
   canAccessProject(scopeId: WindowId, projectId: ProjectId): boolean {
     // A routine runs as the host, which owns every Project; a window's binding
     // narrows what that window drives, not what the host may. The dispatcher

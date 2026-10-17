@@ -1,5 +1,6 @@
 import { personDecides } from "./hostAnswer";
 import { HarnessRetryEventFields } from "./harnessRetry";
+import { ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
@@ -138,6 +139,47 @@ export const CodeTerminalInspection = Schema.Struct({
   state: Schema.Literal("running", "exited", "interrupted"),
 }).annotations(strict);
 export type CodeTerminalInspection = typeof CodeTerminalInspection.Type;
+
+/** The most UTF-8 bytes of text one live terminal frame carries; longer output is split across frames. */
+export const MAX_CODE_TERMINAL_LIVE_FRAME_BYTES = 64 * 1024;
+
+/**
+ * What a window asks to follow a terminal's output live. `afterCharacters` is
+ * the absolute offset of the last character the window holds, as the previous
+ * frame's `characters` reported it; absent, the host answers with the terminal's
+ * current output as a replace.
+ */
+export const CodeTerminalLiveRequest = Schema.Struct({
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  terminalId: CodeTerminalId,
+  afterCharacters: Schema.optional(Schema.Int.pipe(Schema.greaterThanOrEqualTo(0))),
+  /**
+   * The operation whose journal the window also follows this terminal through.
+   * A window reading live stops reading that journal, and the host collects the
+   * journals nobody reads; naming it keeps a window that is on screen from
+   * being collected. It grants nothing and is never trusted for authority.
+   */
+  operationId: Schema.optional(CodeOperationId),
+}).annotations(strict);
+export type CodeTerminalLiveRequest = typeof CodeTerminalLiveRequest.Type;
+
+/**
+ * One publish of a terminal's output on the live path. The journal is not
+ * involved: `characters` is the terminal's own absolute offset, so a window
+ * that lost the stream resumes from it, and `replace` says the text stands in
+ * for everything the window held (the host's answer when it cannot continue
+ * from the offset it was given).
+ */
+export const CodeTerminalLiveFrame = Schema.Struct({
+  terminalId: CodeTerminalId,
+  text: boundedText(MAX_CODE_TERMINAL_LIVE_FRAME_BYTES),
+  replace: Schema.Boolean,
+  characters: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
+  state: Schema.Literal("running", "exited", "interrupted"),
+  exitCode: Schema.optional(Schema.NullOr(Schema.Int)),
+}).annotations(strict);
+export type CodeTerminalLiveFrame = typeof CodeTerminalLiveFrame.Type;
 
 const TerminalGeometry = {
   columns: Schema.Int.pipe(Schema.between(1, 500)),
@@ -1356,26 +1398,8 @@ const ProviderSessionReadyEvent = Schema.Struct({
   resumeCursor: Schema.optional(ProviderResumeCursor),
 }).annotations(strict);
 
-const nonNegativeCount = Schema.Int.pipe(Schema.nonNegative());
-
-/**
- * What a handoff left out of the conversation it carried, by cause. Every
- * count is explicit so a reader never mistakes a short handoff for a short
- * conversation: purged bodies are `missingBodies`, bodies over the read bound
- * are `oversizedBodies`, and replies a turn never finished are
- * `unfinishedReplies`.
- */
-export const CodeContextHandoffOmissions = Schema.Struct({
-  earlierMessages: nonNegativeCount,
-  unfinishedReplies: nonNegativeCount,
-  missingBodies: nonNegativeCount,
-  oversizedBodies: nonNegativeCount,
-  emptyBodies: nonNegativeCount,
-  attachments: nonNegativeCount,
-  truncatedMessages: nonNegativeCount,
-  truncatedCharacters: nonNegativeCount,
-  sourceTruncatedMessages: nonNegativeCount,
-}).annotations(strict);
+/** The omissions a Code handoff counts; Chat and Work journal the same shape. */
+export const CodeContextHandoffOmissions = ContextHandoffOmissions;
 export type CodeContextHandoffOmissions = typeof CodeContextHandoffOmissions.Type;
 
 const handoffMessages = Schema.Int.pipe(
@@ -2387,6 +2411,8 @@ export const decodeCodeTerminalInspectionRequest = Schema.decodeUnknownSync(
   CodeTerminalInspectionRequest,
 );
 export const decodeCodeTerminalInspection = Schema.decodeUnknownSync(CodeTerminalInspection);
+export const decodeCodeTerminalLiveFrame = Schema.decodeUnknownSync(CodeTerminalLiveFrame);
+export const decodeCodeTerminalLiveRequest = Schema.decodeUnknownSync(CodeTerminalLiveRequest);
 export const decodeCodeApprovalId = Schema.decodeUnknownSync(CodeApprovalId);
 export const decodeCodeEvidenceReference = Schema.decodeUnknownSync(CodeEvidenceReference);
 export const decodeCodeFileOpenResultEnvelope = Schema.decodeUnknownSync(

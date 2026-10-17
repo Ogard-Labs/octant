@@ -4,6 +4,17 @@ import type {
   OctantMode,
 } from "@octant/contracts";
 import {
+  childDetailLines,
+  childListLines,
+  childrenAfterRead,
+  childQuestion,
+  listAgentChildren,
+  pickAgentChild,
+  readAgentChild,
+  replyToAgentChild,
+  type AgentChild,
+} from "./agentChildren";
+import {
   agentThreadPort,
   attachAgentThread,
   isAgentSnapshotRunning,
@@ -54,6 +65,9 @@ import { notifyDesktop } from "./agentNotify";
 import {
   defaultCheckpointLabel,
   describeAgentGoal,
+  describeAgentGoalLedger,
+  goalPanelPageSize,
+  goalPanelRequest,
   approvalPanelHosts,
   paletteFor,
   readTuiApprovalAnswer,
@@ -93,6 +107,9 @@ const HINT =
   "Enter sends · Enter while working queues a note · Esc stops · Ctrl+E details · Ctrl+R reasoning · PgUp/PgDn scroll · ? help";
 const REASONING_FENCE = /```(?:reasoning|thinking)\n([\s\S]*?)```|<think>([\s\S]*?)<\/think>/g;
 const QUIT_WINDOW_MS = 1_500;
+/** Which list or panel the screen shows in place of the hint, if any. */
+type TuiListing = "threads" | "models" | "agents" | "agent" | "goal" | undefined;
+
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const SHOWN_TOOL_LINES = 4;
 const SHOWN_TASKS = 6;
@@ -172,7 +189,12 @@ class AgentScreen {
   readonly #wake = new AgentWake();
   /** Ends the live feed of the thread on screen; a switch starts a new one. */
   #feed = new AbortController();
-  #listing: "threads" | "models" | undefined;
+  #listing: TuiListing;
+  /** The helper agents `/agents` last listed, and the lines of the one `/agent N` opened. */
+  #children: ReadonlyArray<AgentChild> = [];
+  #childLines: ReadonlyArray<string> = [];
+  /** The goal ledger the Goal panel shows, read when /goal opened it. */
+  #goalLines: ReadonlyArray<string> = [];
   #suggestions:
     | { readonly kind: "file" | "thread"; readonly items: ReadonlyArray<string> }
     | undefined;
@@ -474,6 +496,8 @@ class AgentScreen {
     this.#follow(mode);
     this.#drawn = "";
     this.#listing = undefined;
+    this.#children = [];
+    this.#childLines = [];
     this.#pendingFollowUp = undefined;
     for (const child of this.#transcript.getChildren()) child.destroyRecursively();
     await this.refresh();
@@ -606,7 +630,10 @@ class AgentScreen {
     this.#header.content = t`${fg(p.accent)(bold("◆ Octant"))} ${fg(p.muted)("·")} ${fg(p.text)(title)}${dim(fg(p.muted)(mode))}  ${fg(statusColor)(status === "running" ? `${spinner} running` : status)}${dim(fg(percent !== undefined && percent >= 80 ? p.warning : p.muted)(context))}`;
 
     const entries = transcriptFrom(this.#thread, session);
-    const pending = session?.questions.find((question) => question.status === "pending");
+    // Chat keeps its question on the turn, not in the harness session.
+    const pending =
+      session?.questions.find((question) => question.status === "pending") ??
+      this.#thread?.pendingQuestion;
     const digest = JSON.stringify([
       entries,
       pending?.id,
@@ -647,6 +674,15 @@ class AgentScreen {
       });
       this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No threads yet." : lines.join("\n"))}\n${dim(fg(p.muted)("/open N switches to one."))}`;
       this.#panel.visible = true;
+    } else if (this.#listing === "agents" || this.#listing === "agent") {
+      const listed = this.#listing === "agents";
+      this.#panel.title = listed ? " Helper agents " : " Helper agent ";
+      this.#panel.borderColor = p.border;
+      const lines = listed
+        ? childListLines(this.#children, Date.now(), this.#childrenAsking(this.#session))
+        : this.#childLines;
+      this.#panelText.content = t`${fg(p.textSecondary)(lines.join("\n"))}\n${dim(fg(p.muted)(listed ? "/agent N shows one; /agent N <message> replies." : "/agents lists them again."))}`;
+      this.#panel.visible = true;
     } else if (this.#listing === "models") {
       this.#panel.title = " Models ";
       this.#panel.borderColor = p.border;
@@ -658,6 +694,11 @@ class AgentScreen {
         return `${here ? "●" : "○"} ${index + 1}. ${model.displayName}  ${model.endpoint}${model.contextLimit === undefined ? "" : `  ${Math.round(model.contextLimit / 1000)}k`}`;
       });
       this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No harness endpoint offers a model yet. Add one in Settings → Providers." : lines.join("\n"))}\n${dim(fg(p.muted)("/model N switches the thread's model."))}`;
+      this.#panel.visible = true;
+    } else if (this.#listing === "goal") {
+      this.#panel.title = " Goal ";
+      this.#panel.borderColor = p.border;
+      this.#panelText.content = t`${fg(p.textSecondary)(this.#goalLines.join("\n"))}\n${dim(fg(p.muted)("/goal revise text changes the objective. /goal closes this; /goal 2 shows another page."))}`;
       this.#panel.visible = true;
     } else if (this.#showHelp) {
       this.#panel.title = " Keys ";
@@ -673,6 +714,7 @@ class AgentScreen {
           "/side text   ask Side Chat, which only reads  /back  return to the thread",
           "/steer text  note for the lead's next step    /goal · /goal revise text",
           "/fork        fork at the last reply           /checkpoint · /checkpoints · /restore N",
+          "/agents      list the helper agents           /agent N shows one · /agent N text replies",
           "drag + Ctrl+C  copy selected text           /copy   copy the last reply",
           "y · a · n    answer an approval            1..9 or text  answer a question",
         ].join("\n"),
@@ -709,7 +751,11 @@ class AgentScreen {
     } else if (pending !== undefined) {
       this.#panel.title = " Question ";
       this.#panel.borderColor = p.accent;
-      const options = pending.options.map((option, index) => `  ${index + 1}. ${option}`);
+      const meanings = "descriptions" in pending ? pending.descriptions : undefined;
+      const options = pending.options.map((option, index) => {
+        const meaning = meanings?.[index];
+        return `  ${index + 1}. ${option}${meaning === undefined ? "" : ` — ${meaning}`}`;
+      });
       this.#panelText.content = t`${fg(p.text)(pending.prompt)}${options.length === 0 ? "" : "\n"}${fg(p.textSecondary)(options.join("\n"))}\n${dim(fg(p.muted)("Type a number or an answer, then Enter."))}`;
       this.#panel.visible = true;
     } else if (this.#pendingFollowUp !== undefined) {
@@ -1048,6 +1094,20 @@ class AgentScreen {
       this.#draw();
       return;
     }
+    if (text === "/agents") {
+      if (!(await this.#loadChildren())) {
+        this.#listing = undefined;
+        this.#draw();
+        return;
+      }
+      this.#listing = this.#listing === "agents" ? undefined : "agents";
+      this.#draw();
+      return;
+    }
+    if (text === "/agent" || text.startsWith("/agent ")) {
+      await this.#agent(text.slice("/agent".length).trim());
+      return;
+    }
     if (text.startsWith("/open")) {
       const index = Number(text.slice("/open".length).trim()) - 1;
       const target = this.#threads[index];
@@ -1095,6 +1155,8 @@ class AgentScreen {
       await this.refresh();
       return;
     }
+    // /goal toggles its own panel, so it needs the listing this command found.
+    const listingBefore = this.#listing;
     this.#listing = undefined;
     if (this.#pendingFollowUp !== undefined) {
       const pending = this.#pendingFollowUp;
@@ -1123,7 +1185,7 @@ class AgentScreen {
       return;
     }
     if (text === "/goal" || text.startsWith("/goal ")) {
-      await this.#goal(text.slice("/goal".length).trim());
+      await this.#goal(text.slice("/goal".length).trim(), listingBefore);
       return;
     }
     if (
@@ -1210,7 +1272,15 @@ class AgentScreen {
       await this.refresh();
       return;
     }
+    const threadQuestion = this.#thread?.pendingQuestion;
     const question = this.#session?.questions.find((entry) => entry.status === "pending");
+    if (question === undefined && threadQuestion !== undefined && this.#port.answerQuestion) {
+      const picked = /^\d+$/.test(text) ? threadQuestion.options[Number(text) - 1] : undefined;
+      const result = await this.#port.answerQuestion(threadQuestion, picked ?? text);
+      if (result.kind === "refused") this.#note = result.message;
+      await this.refresh();
+      return;
+    }
     if (question !== undefined) {
       const picked = /^\d+$/.test(text) ? question.options[Number(text) - 1] : undefined;
       const result = await answerAgentQuestion(
@@ -1378,8 +1448,74 @@ class AgentScreen {
     );
   }
 
+  /** Reads the thread's helpers; a refusal clears the list so another thread's are never offered. */
+  async #loadChildren(): Promise<boolean> {
+    const read = childrenAfterRead(await listAgentChildren(this.#input.session, this.#threadId));
+    this.#children = read.children;
+    if (read.refusal === undefined) return true;
+    this.#childLines = [];
+    this.#note = read.refusal;
+    return false;
+  }
+
+  /** The helpers whose question is waiting on the person, by run id. */
+  #childrenAsking(session: NativeHarnessSessionView | null | undefined): ReadonlySet<string> {
+    return new Set(
+      this.#children
+        .filter((child) => childQuestion(session, child) !== undefined)
+        .map((child) => String(child.runId)),
+    );
+  }
+
+  /** `/agent N` opens one helper; `/agent N <message>` steers, follows up on, or answers it. */
+  async #agent(argument: string): Promise<void> {
+    if (this.#home !== undefined) {
+      this.#note = "Side Chat only reads; /back to work with the thread's helpers.";
+      this.#draw();
+      return;
+    }
+    const [reference = ""] = argument.split(/\s+/);
+    const message = argument.slice(reference.length).trim();
+    if (!(await this.#loadChildren())) {
+      this.#draw();
+      return;
+    }
+    const child = pickAgentChild(this.#children, reference);
+    if (child === undefined) {
+      this.#note = "Pick a helper by number from /agents: /agent 1";
+      this.#draw();
+      return;
+    }
+    const session = this.#session ?? null;
+    if (message.length > 0) {
+      const replied = await replyToAgentChild(
+        this.#input.session,
+        this.#threadId,
+        child,
+        message,
+        childQuestion(session, child),
+      );
+      this.#note =
+        replied.kind === "refused"
+          ? replied.message
+          : replied.how === "answered"
+            ? "Answered."
+            : "Sent to the helper.";
+      await this.refresh();
+    }
+    const read = await readAgentChild(this.#input.session, child);
+    this.#childLines = childDetailLines(
+      child,
+      read,
+      childQuestion(this.#session ?? null, child),
+      Date.now(),
+    );
+    this.#listing = "agent";
+    this.#draw();
+  }
+
   /** Shows the goal, or revises its objective against the version just read. */
-  async #goal(argument: string): Promise<void> {
+  async #goal(argument: string, listingBefore: TuiListing): Promise<void> {
     if (this.#home !== undefined) {
       this.#note = "Side Chat only reads; /back to change the goal.";
       this.#draw();
@@ -1392,13 +1528,20 @@ class AgentScreen {
       return;
     }
     const revise = /^revise\s+(.+)$/s.exec(argument);
-    if (argument.length > 0 && revise === null) {
+    const request = goalPanelRequest(argument, listingBefore === "goal");
+    if (revise === null && request === undefined) {
       this.#note = "Revise the objective with: /goal revise <new objective>";
       this.#draw();
       return;
     }
     if (revise === null) {
-      this.#note = describeAgentGoal(read.goal);
+      if (request?.kind === "page") {
+        this.#goalLines = describeAgentGoalLedger(read.goal, {
+          size: goalPanelPageSize(this.#renderer.terminalHeight),
+          number: request.number,
+        });
+        this.#listing = "goal";
+      }
       this.#draw();
       return;
     }

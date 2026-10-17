@@ -861,33 +861,52 @@ describe("model picker policy", () => {
     const providers = (picked: ReturnType<typeof startedConversationPickerGroups>) =>
       picked.map((group) => group.instance.displayName);
 
-    it("binds a thread whose provider keeps the conversation to that provider", () => {
+    it("keeps a native thread on its own model unless the provider can carry the session over", () => {
       const picked = startedConversationPickerGroups(groups, {
         providerInstanceId: codex.id,
         modelId: decodeProviderModelId("m-a"),
       });
-      expect(providers(picked)).toEqual(["Codex"]);
-      expect(picked[0]?.sections.flatMap((section) => section.models)).toHaveLength(1);
-    });
-
-    it("offers no switch when the thread's provider is missing", () => {
       expect(
-        startedConversationPickerGroups(groups, {
-          providerInstanceId: "00000000-0000-4000-8000-000000000199" as never,
-          modelId: decodeProviderModelId("m-a"),
-        }),
-      ).toEqual([]);
+        picked
+          .find((group) => group.instance.displayName === "Codex")
+          ?.sections.flatMap((section) => section.models),
+      ).toHaveLength(1);
     });
 
-    it("lets a host-held conversation move between host-held providers only", () => {
+    it("keeps every other provider for a native thread, since a switch hands its conversation over", () => {
       expect(
         providers(
           startedConversationPickerGroups(groups, {
-            providerInstanceId: gateway.id,
+            providerInstanceId: codex.id,
             modelId: decodeProviderModelId("m-a"),
           }),
         ).toSorted(),
-      ).toEqual(["Foundry", "Gateway"]);
+      ).toEqual(["Codex", "Foundry", "Gateway"]);
+    });
+
+    it("still offers every provider when the thread's own provider is gone", () => {
+      expect(
+        providers(
+          startedConversationPickerGroups(groups, {
+            providerInstanceId: "00000000-0000-4000-8000-000000000199" as never,
+            modelId: decodeProviderModelId("m-a"),
+          }),
+        ).toSorted(),
+      ).toEqual(["Codex", "Foundry", "Gateway"]);
+    });
+
+    it("lets a host-held conversation move to a provider that keeps its own session", () => {
+      const picked = startedConversationPickerGroups(groups, {
+        providerInstanceId: gateway.id,
+        modelId: decodeProviderModelId("m-a"),
+      });
+      expect(providers(picked).toSorted()).toEqual(["Codex", "Foundry", "Gateway"]);
+      // Its own provider stays fully open: the host rebuilds the history.
+      expect(
+        picked
+          .find((group) => group.instance.displayName === "Gateway")
+          ?.sections.flatMap((section) => section.models),
+      ).toHaveLength(2);
     });
   });
 

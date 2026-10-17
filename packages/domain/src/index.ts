@@ -7,6 +7,7 @@ export * from "./appleToolchainPolicy";
 export * from "./androidToolchainPolicy";
 export * from "./appleSimulatorLiveFrame";
 export * from "./chatPolicy";
+export * from "./conversationSessionPolicy";
 export * from "./providerSessionReaping";
 export * from "./chatProviderFallbackPolicy";
 export * from "./chatMessageParts";

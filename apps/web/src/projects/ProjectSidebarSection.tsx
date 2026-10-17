@@ -1514,7 +1514,7 @@ function CodeProjectViewSwitcher(props: {
       size="icon"
       title="New project view"
       type="button"
-      variant="ghost"
+      variant="bare"
     >
       <Plus aria-hidden="true" size={14} strokeWidth={1.7} />
     </OctantButton>
@@ -1650,7 +1650,7 @@ function CodeProjectViewChip(props: {
         size="icon"
         title={props.view.name}
         type="button"
-        variant="ghost"
+        variant="bare"
       >
         <CodeProjectViewGlyph color={props.view.color} icon={props.view.icon} />
       </OctantButton>
@@ -2179,7 +2179,7 @@ function CodeProjectViewEditorDialog(props: {
                 size="icon"
                 title={CODE_PROJECT_VIEW_ICON_LABELS[candidate]}
                 type="button"
-                variant="ghost"
+                variant="bare"
               >
                 <CodeProjectViewGlyph color={color} icon={candidate} size={16} />
               </OctantButton>
@@ -2199,7 +2199,7 @@ function CodeProjectViewEditorDialog(props: {
                 size="icon"
                 title={CODE_PROJECT_VIEW_COLOR_LABELS[candidate]}
                 type="button"
-                variant="ghost"
+                variant="bare"
               >
                 <span
                   aria-hidden="true"

@@ -37,6 +37,67 @@ const authority = {
   modelId: "gpt-5",
 } as const;
 
+describe("work turn handoff", () => {
+  const handoff = {
+    reason: "provider-switch",
+    previousProviderInstanceId: ids.provider,
+    previousModelId: "gpt-5",
+    messages: 3,
+    omissions: {
+      earlierMessages: 2,
+      unfinishedReplies: 0,
+      missingBodies: 0,
+      oversizedBodies: 0,
+      emptyBodies: 0,
+      attachments: 1,
+      truncatedMessages: 0,
+      truncatedCharacters: 0,
+      sourceTruncatedMessages: 0,
+    },
+    externalContentIngested: false,
+    nativeSessionTransferred: false,
+    hiddenReasoningTransferred: false,
+  } as const;
+  const accepted = {
+    kind: "turn-accepted",
+    requestId: ids.request,
+    threadId: ids.thread,
+    turnId: ids.turn,
+    projectId: ids.project,
+    authority,
+    providerSessionId: ids.session,
+    prompt: "Continue",
+    capabilities: WORK_TURN_CAPABILITIES,
+    acceptedAt: now,
+  } as const;
+
+  it("journals the handoff with the acceptance of the turn that carried it", () => {
+    expect(decodeWorkTurnAccepted({ ...accepted, handoff }).handoff).toEqual(handoff);
+    expect(decodeWorkTurnAccepted(accepted).handoff).toBeUndefined();
+  });
+
+  it("keeps the handoff on the turn state and refuses a record claiming a native session moved", () => {
+    const { kind: _kind, ...acceptedFields } = accepted;
+    const withoutKind = {
+      ...acceptedFields,
+      status: "accepted",
+      transcript: [{ role: "user", text: "Continue" }],
+      version: 1,
+      updatedAt: now,
+    };
+    expect(decodeWorkTurnState({ ...withoutKind, handoff }).handoff).toEqual(handoff);
+    expect(() =>
+      decodeWorkTurnState({
+        ...withoutKind,
+        handoff: { ...handoff, nativeSessionTransferred: true },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeWorkTurnAccepted({ ...accepted, handoff: { ...handoff, reason: "branch" } }),
+    ).toThrow();
+  });
+});
+
 describe("work turn contracts", () => {
   it("decodes an exact Project-backed start-turn command", () => {
     const command = decodeStartWorkThreadTurnCommand({

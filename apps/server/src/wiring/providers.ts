@@ -83,7 +83,6 @@ import { createProviderRouteHandler } from "../providers/providerRoutes";
 import { createDiscoveryRouteHandler } from "../providers/discoveryRoutes";
 import { createProviderFromDiscoveryCandidate } from "../providers/discoveryProviderCreate";
 import { makeDiscoveryService } from "../providers/discoveryService";
-import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { isProviderExecutableAvailable, ProviderService } from "../providers/providerService";
 import {
   CANONICAL_REVIEWED_MODEL_MANIFEST,
@@ -154,10 +153,12 @@ import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart, ServerStartupFailed } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
+import type { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { ComputerUseWiring } from "./computerUse";
-import type { WorkspaceWiring } from "./workspace";
+import type { WorkRequestStateWiring } from "./workRequestState";
 
 export interface ConfiguredProviderDriverOptions {
   readonly openCodeProcess: OpenCodeProcessPort;
@@ -338,17 +339,7 @@ export type ProvidersDependencies = Pick<
   "latencyStats" | "options" | "persistence" | "version"
 > & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<
-    LateBindings,
-    | "codeOperationRuntime"
-    | "managedCodeThreadCreation"
-    | "managedWorktreeRefsList"
-    | "managedWorktreeSourcePreview"
-    | "nativeHarnessLeadFallback"
-    | "probeProviderForThreads"
-    | "refreshStandaloneSkills"
-    | "workRequestRuntime"
-  >;
+  readonly late: Pick<LateBindings, "nativeHarnessLeadFallback">;
 } & Pick<
     AuthorityWiring,
     | "extensionToolApprovalService"
@@ -366,7 +357,8 @@ export type ProvidersDependencies = Pick<
   > &
   Pick<IntegrationsWiring, "githubExtensionSnapshot"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
-  Pick<WorkspaceWiring, "workThreadProjection">;
+  Pick<WorkRequestStateWiring, "workRequestRuntime"> &
+  Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection">;
 
 export function wireProviders(deps: ProvidersDependencies) {
   const {
@@ -379,14 +371,15 @@ export function wireProviders(deps: ProvidersDependencies) {
     externalContentIngestionStore,
     githubExtensionSnapshot,
     isPairedDeviceScope,
-    latencyStats,
     managedWorktreeReceipts,
     options,
     persistence,
     processAuthorityNow,
+    providerRuntimeRegistry,
     version,
     windowAuthorityStore,
     workThreadProjection,
+    workRequestRuntime,
   } = deps;
   return Effect.gen(function* () {
     const codeThreadDrivers = new Map<
@@ -394,16 +387,6 @@ export function wireProviders(deps: ProvidersDependencies) {
       { readonly instanceId: string; readonly version: number; readonly driver: ProviderDriver }
     >();
     const providerDataDirectory = persistence.dataDirectory;
-    const providerRuntimeRegistry =
-      options.providerRuntimeRegistry ??
-      new ProviderRuntimeRegistry({
-        receiptDirectory: join(providerDataDirectory, "providers", "runtime-receipts"),
-        observeAcquireMs: (durationMs, kind) =>
-          latencyStats.record(
-            kind === "started" ? "provider-runtime-acquire" : "provider-runtime-reuse",
-            durationMs,
-          ),
-      });
     const providerRuntimeUsageLimitsStore = new ProviderRuntimeUsageLimitsStore();
     const providerAccountPlanUsageStore = new ProviderAccountPlanUsageStore(
       join(providerDataDirectory, "providers", "plan-usage.json"),
@@ -510,12 +493,11 @@ export function wireProviders(deps: ProvidersDependencies) {
     const refreshStandaloneSkills: () => Promise<void> = async () => {
       await standaloneSkillService.reconcile();
     };
-    late.refreshStandaloneSkills.current = refreshStandaloneSkills;
     yield* Effect.tryPromise({
       try: async () => {
         await extensionPackageStore.initialize();
         await providerRuntimeRegistry.reconcile();
-        await late.codeOperationRuntime.current?.reconcile?.();
+        await options.codeOperationRuntime?.reconcile?.();
         await computerUseProcess.reconcile?.();
         await agentRunProcessSupervisor.reconcile?.();
         await extensionSupervisor.reconcile?.();
@@ -723,7 +705,6 @@ export function wireProviders(deps: ProvidersDependencies) {
       const entries = await listWorktreeRefs(project.binding.canonicalRoot, signal);
       return entries.map((entry) => decodeCodeWorktreeRef(entry));
     };
-    late.managedWorktreeRefsList.current = managedWorktreeRefsList;
     const managedWorktreeSourcePreview: CodeWorktreeSourcePreviewPort["preview"] = async (
       input,
       signal,
@@ -767,7 +748,6 @@ export function wireProviders(deps: ProvidersDependencies) {
       }
       return { kind: "failed", reason: result.reason };
     };
-    late.managedWorktreeSourcePreview.current = managedWorktreeSourcePreview;
     // Its own mutation port: laying a fork's files down happens once, in a
     // worktree no thread is bound to yet, so nothing else is serialized on it.
     const forkFileWriter = new GitMutationPort();
@@ -784,7 +764,6 @@ export function wireProviders(deps: ProvidersDependencies) {
         return applied.status === "applied" ? "applied" : "failed";
       },
     });
-    late.managedCodeThreadCreation.current = managedCodeThreadCreation;
     const acpHome =
       options.acpHome ??
       ((kind: AcpProviderKind, instanceId: ProviderInstance["id"]) =>
@@ -949,14 +928,13 @@ export function wireProviders(deps: ProvidersDependencies) {
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
           }),
-          () => late.workRequestRuntime.current,
+          () => workRequestRuntime,
         ),
     });
     const probeProviderForThreads: (
       providerInstanceId: ProviderInstance["id"],
     ) => Promise<ProviderProbeResult> = (providerInstanceId) =>
       providerService.probe(LOCAL_HOST_ID as never, providerInstanceId);
-    late.probeProviderForThreads.current = probeProviderForThreads;
     const reviewedModelManifest = new ReviewedModelManifest();
     // Model classification tracks the canonical manifest branch by commit
     // rather than by app release. It is opt-in so the local-first default
@@ -1233,13 +1211,15 @@ export function wireProviders(deps: ProvidersDependencies) {
       extensionPackageStore,
       extensionRoutes,
       localUsageHistoryRoutes,
+      managedCodeThreadCreation,
+      managedWorktreeRefsList,
+      managedWorktreeSourcePreview,
       nativeHarnessEndpoints,
       nativeHarnessTranscripts,
       probeProviderForThreads,
       providerDataDirectory,
       providerOAuthRoutes,
       providerRoutes,
-      providerRuntimeRegistry,
       providerService,
       providerUsageLimitsRoutes,
       providerUsageLimitsService,

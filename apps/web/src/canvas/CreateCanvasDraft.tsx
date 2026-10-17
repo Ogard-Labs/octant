@@ -148,7 +148,6 @@ export function CreateCanvasDraft({
         placeholder={recipe?.title ?? "Untitled canvas"}
         value={title}
         onChange={(e) => setTitle(e.target.value)}
-        unstyled
       />
       {recipe === undefined ? (
         <OctantTextarea

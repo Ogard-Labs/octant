@@ -112,6 +112,40 @@ export async function sendAgentPrompt(
   return { kind: "sent" };
 }
 
+/**
+ * Answers the question a Chat turn is parked on, through the same command the
+ * app's transcript card sends. The host refuses it when the thread moved on or
+ * the question was answered first, and the refusal says so.
+ */
+export async function answerAgentTurnQuestion(
+  session: OpenedLocalControlSession,
+  thread: ChatThreadView,
+  question: {
+    readonly turnId: string;
+    readonly attemptId: string;
+    readonly requestId: string;
+    readonly answer: string;
+  },
+): Promise<HostRefusal | { readonly kind: "answered" }> {
+  const response = await session.send({
+    path: "/api/chat/commands",
+    method: "POST",
+    body: {
+      kind: "answer-chat-turn-question",
+      threadId: String(thread.thread.id),
+      expectedVersion: thread.thread.version,
+      turnId: question.turnId,
+      attemptId: question.attemptId,
+      requestId: question.requestId,
+      answer: question.answer,
+    },
+  });
+  if (response.status !== 200) {
+    return { kind: "refused", message: refusalMessage(response, "The answer was refused.") };
+  }
+  return { kind: "answered" };
+}
+
 export async function answerAgentQuestion(
   session: OpenedLocalControlSession,
   threadId: string,

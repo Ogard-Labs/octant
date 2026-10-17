@@ -12,6 +12,7 @@ import {
   extractSpecifiers,
   findBarrelOnlyModules,
   findStaleIslandExemptions,
+  findWiringCycleDebt,
   findTypeOnlyReferencedModules,
   findUncalledEndpoints,
   findUnreachableModules,
@@ -824,5 +825,71 @@ describe("findStaleIslandExemptions", () => {
     expect(violations.map(({ reason }) => reason)).toEqual([
       expect.stringMatching(/no longer exists/),
     ]);
+  });
+});
+
+describe("findWiringCycleDebt", () => {
+  const lateBindings = (cells: ReadonlyArray<string>): ScannedFile => ({
+    path: "apps/server/src/wiring/lateBindings.ts",
+    content: `import type { A } from "./a";\nexport interface LateBindings {\n${cells
+      .map((cell) => `  readonly ${cell}: { current: A | undefined };`)
+      .join("\n")}\n}\n`,
+  });
+  const wiring = (getters: ReadonlyArray<string>): ScannedFile => ({
+    path: "apps/server/src/wiring/chat.ts",
+    content: `export type ChatDependencies = {\n${getters
+      .map(
+        (getter) =>
+          `  /** Wired by wireWork; read only after startup. */\n  readonly ${getter}: () => A;`,
+      )
+      .join("\n")}\n};\n`,
+  });
+
+  it("accepts the counts the ceiling names", () => {
+    const violations = findWiringCycleDebt(
+      [server(""), lateBindings(["one", "two"]), wiring(["workTurnService"])],
+      { lateCells: 2, forwardGetters: 1 },
+    );
+
+    expect(violations).toEqual([]);
+  });
+
+  it("rejects a new late cell or forward getter above the ceiling", () => {
+    const violations = findWiringCycleDebt(
+      [server(""), lateBindings(["one", "two"]), wiring(["a", "b"])],
+      { lateCells: 1, forwardGetters: 1 },
+    );
+
+    expect(violations.map(({ reason }) => reason)).toEqual([
+      expect.stringMatching(/2 late cells exceed the ceiling of 1/),
+      expect.stringMatching(/2 forward getters exceed the ceiling of 1/),
+    ]);
+  });
+
+  it("asks for the ceiling to be lowered once a reference is gone", () => {
+    const violations = findWiringCycleDebt([server(""), lateBindings(["one"]), wiring([])], {
+      lateCells: 2,
+      forwardGetters: 0,
+    });
+
+    expect(violations.map(({ reason }) => reason)).toEqual([
+      expect.stringMatching(/1 late cells remain but the ceiling is 2/),
+    ]);
+  });
+
+  it("ignores a function-valued field that is not a forward getter", () => {
+    const violations = findWiringCycleDebt(
+      [
+        server(""),
+        lateBindings([]),
+        {
+          path: "apps/server/src/wiring/code.ts",
+          content: "export interface Clock {\n  readonly clock: () => string;\n}\n",
+        },
+      ],
+      { lateCells: 0, forwardGetters: 0 },
+    );
+
+    expect(violations).toEqual([]);
   });
 });

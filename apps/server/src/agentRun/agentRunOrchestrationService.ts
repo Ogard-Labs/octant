@@ -475,13 +475,20 @@ export class AgentRunOrchestrationService {
           this.#releaseReservation(started.run.id);
           return waited;
         }
-        if (error instanceof AgentRunSessionError && error.reason === "tools-unsupported") {
+        if (error instanceof AgentRunSessionError) {
+          // A typed start refusal means the child never reached its provider, so
+          // no process died. Recording a death would hide what is missing (a
+          // full provider, a spent ceiling, an unavailable workspace) from the
+          // person and from the parent that started the child.
           this.#releaseReservation(started.run.id);
           return this.#persistence.applyCommand({
             kind: "interrupt-agent-run",
             runId: started.run.id,
             expectedVersion: started.run.version as never,
-            recoveryReason: error.reason,
+            recoveryReason:
+              error.reason === "tools-unsupported"
+                ? error.reason
+                : boundedRecoveryReason(`${error.reason}: ${error.message}`),
           });
         }
         return this.onProcessDeath(started.run.id, started.run.version);

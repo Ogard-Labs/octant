@@ -271,6 +271,7 @@ export interface CodeOperationRuntimeOptions {
      * judged when each check inside runs, never a request's admission.
      */
     readonly standingAuthority: <T>(run: () => T) => T;
+    readonly retainProjectAccess?: CodeOperationAuthorityPort["retainProjectAccess"];
   };
   readonly resolveCheckoutRoot: CodeOperationAuthorityPort["resolveCheckoutRoot"];
   readonly resolveProviderDriver: (thread: CodeThread) => Awaitable<ProviderDriver | undefined>;
@@ -582,6 +583,18 @@ export interface CodeOperationRuntime {
     windowId: WindowId,
     input: import("@octant/contracts").CodeTerminalInspectionRequest,
   ): Promise<import("@octant/contracts").CodeTerminalInspection>;
+  /**
+   * Follow a terminal's output live, outside the journal. The authority check
+   * runs before the stream exists, so a refusal still has a status to become.
+   */
+  watchTerminal(
+    windowId: WindowId,
+    input: import("@octant/contracts").CodeTerminalLiveRequest & {
+      readonly signal?: AbortSignal | undefined;
+    },
+  ): Promise<AsyncIterable<import("@octant/contracts").CodeTerminalLiveFrame>>;
+  /** End the live output streams a window holds, because its capability was revoked. */
+  revokeTerminalStreams(windowId: WindowId): void;
   subscribe(
     windowId: WindowId,
     threadId: CodeThreadId,
@@ -770,6 +783,9 @@ export function createCodeOperationRuntime(
       options.sessionAuthority?.effectiveThread(windowId, thread) ?? thread,
     readCheckout: (checkoutId) => options.persistence.readCodeCheckout(checkoutId),
     canAccessProject: options.windowAccess.canAccessProject,
+    ...(options.windowAccess.retainProjectAccess === undefined
+      ? {}
+      : { retainProjectAccess: options.windowAccess.retainProjectAccess }),
     approvalContextDigest: async (_windowId, command, thread, checkout) => {
       const context = await approvalContext(options, command, thread, checkout);
       return context === undefined ? undefined : approvalContextDigest(context);
@@ -1419,6 +1435,14 @@ export function createCodeOperationRuntime(
       const snapshot = await service.readTerminal(windowId, input);
       return { terminalId: input.terminalId, state: snapshot.status };
     },
+    watchTerminal: async (windowId, input) => {
+      try {
+        return await service.watchTerminal(windowId, input);
+      } catch (error) {
+        throw terminalLiveFailure(error);
+      }
+    },
+    revokeTerminalStreams: (windowId) => service.revokeTerminalStreams(windowId),
     raiseHarnessQuestion: (input) => turns.raiseHarnessQuestion(input),
     withdrawHarnessQuestion: (input) => turns.withdrawHarnessQuestion(input),
     pendingRequests: (windowId) => service.listPendingForWindow(windowId),
@@ -1593,6 +1617,20 @@ export function createCodeOperationRuntime(
       ]);
     },
   };
+}
+
+function terminalLiveFailure(error: unknown): Error {
+  const category =
+    error instanceof CodeOperationServiceError ? error.category : ("unavailable" as const);
+  return Object.assign(new Error("Terminal output is unavailable."), {
+    failure: {
+      category,
+      message:
+        category === "unauthorized"
+          ? "Terminal output is unauthorized."
+          : "Terminal output is unavailable.",
+    },
+  });
 }
 
 function codeEvidenceReadFailure(error: unknown): Error {
