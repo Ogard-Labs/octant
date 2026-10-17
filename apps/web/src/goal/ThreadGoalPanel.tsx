@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { GoalClient } from "@octant/client-runtime/goal-client";
 import type { GoalLoopClient } from "@octant/client-runtime/goal-loop-client";
 import { AlertTriangle, CloudOff, Loader, ShieldAlert, Target } from "lucide-react";
@@ -7,6 +7,13 @@ import { OctantInput } from "../ui/base/OctantInput";
 import { GoalCard } from "./GoalCard";
 import { GoalLoopPanel } from "./GoalLoopPanel";
 import { useGoalController, type GoalStatus } from "./useGoalController";
+
+/**
+ * How often an open panel re-reads a goal that is still active. A goal loop
+ * records check outcomes and completes the goal in the background, so a panel
+ * left open would otherwise keep showing the evidence it first loaded.
+ */
+export const GOAL_REFRESH_INTERVAL_MS = 10_000;
 
 export interface ThreadGoalPanelProps {
   readonly client?: GoalClient;
@@ -35,6 +42,15 @@ export function ThreadGoalPanel(props: ThreadGoalPanelProps) {
   const [revision, setRevision] = useState("");
 
   const goal = controller.goal;
+  const { pending, reload } = controller;
+  const refreshing = goal?.status === "active" && !pending;
+  useEffect(() => {
+    if (!refreshing) return;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "hidden") reload();
+    }, GOAL_REFRESH_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [refreshing, reload]);
 
   if (controller.status !== "ready") {
     return (

@@ -55,6 +55,8 @@ import {
   defaultCheckpointLabel,
   describeAgentGoal,
   describeAgentGoalLedger,
+  goalPanelPageSize,
+  goalPanelRequest,
   approvalPanelHosts,
   paletteFor,
   readTuiApprovalAnswer,
@@ -665,7 +667,7 @@ class AgentScreen {
     } else if (this.#listing === "goal") {
       this.#panel.title = " Goal ";
       this.#panel.borderColor = p.border;
-      this.#panelText.content = t`${fg(p.textSecondary)(this.#goalLines.join("\n"))}\n${dim(fg(p.muted)("/goal revise text changes the objective. /goal closes this."))}`;
+      this.#panelText.content = t`${fg(p.textSecondary)(this.#goalLines.join("\n"))}\n${dim(fg(p.muted)("/goal revise text changes the objective. /goal closes this; /goal 2 shows another page."))}`;
       this.#panel.visible = true;
     } else if (this.#showHelp) {
       this.#panel.title = " Keys ";
@@ -1103,6 +1105,8 @@ class AgentScreen {
       await this.refresh();
       return;
     }
+    // /goal toggles its own panel, so it needs the listing this command found.
+    const listingBefore = this.#listing;
     this.#listing = undefined;
     if (this.#pendingFollowUp !== undefined) {
       const pending = this.#pendingFollowUp;
@@ -1131,7 +1135,7 @@ class AgentScreen {
       return;
     }
     if (text === "/goal" || text.startsWith("/goal ")) {
-      await this.#goal(text.slice("/goal".length).trim());
+      await this.#goal(text.slice("/goal".length).trim(), listingBefore);
       return;
     }
     if (
@@ -1387,7 +1391,10 @@ class AgentScreen {
   }
 
   /** Shows the goal, or revises its objective against the version just read. */
-  async #goal(argument: string): Promise<void> {
+  async #goal(
+    argument: string,
+    listingBefore: "threads" | "models" | "goal" | undefined,
+  ): Promise<void> {
     if (this.#home !== undefined) {
       this.#note = "Side Chat only reads; /back to change the goal.";
       this.#draw();
@@ -1400,14 +1407,20 @@ class AgentScreen {
       return;
     }
     const revise = /^revise\s+(.+)$/s.exec(argument);
-    if (argument.length > 0 && revise === null) {
+    const request = goalPanelRequest(argument, listingBefore === "goal");
+    if (revise === null && request === undefined) {
       this.#note = "Revise the objective with: /goal revise <new objective>";
       this.#draw();
       return;
     }
     if (revise === null) {
-      this.#goalLines = describeAgentGoalLedger(read.goal);
-      this.#listing = this.#listing === "goal" ? undefined : "goal";
+      if (request?.kind === "page") {
+        this.#goalLines = describeAgentGoalLedger(read.goal, {
+          size: goalPanelPageSize(this.#renderer.terminalHeight),
+          number: request.number,
+        });
+        this.#listing = "goal";
+      }
       this.#draw();
       return;
     }

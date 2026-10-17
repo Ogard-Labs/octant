@@ -1,9 +1,10 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { act } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ThreadGoal } from "@octant/contracts";
 import { GoalClientFailure, type GoalClient } from "@octant/client-runtime/goal-client";
-import { ThreadGoalPanel } from "./ThreadGoalPanel";
+import { GOAL_REFRESH_INTERVAL_MS, ThreadGoalPanel } from "./ThreadGoalPanel";
 
 const threadId = "00000000-0000-4000-8000-000000000208";
 
@@ -57,6 +58,60 @@ const ledgerCriteria = [
 ];
 
 describe("ThreadGoalPanel", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("keeps an open ledger current while a background goal loop records checks", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const client: GoalClient = {
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({
+          goal: goalWith({ criteria: ledgerCriteria } as Partial<ThreadGoal>),
+          history: [],
+        })
+        .mockResolvedValue({
+          goal: goalWith({
+            version: 2 as ThreadGoal["version"],
+            criteria: ledgerCriteria.map((criterion) => ({ ...criterion, status: "met" })),
+          } as Partial<ThreadGoal>),
+          history: [],
+        }),
+      execute: vi.fn(),
+    };
+
+    render(<ThreadGoalPanel client={client} threadId={threadId} />);
+    expect(await screen.findByTestId("goal-criteria-summary")).toHaveTextContent("1 of 3 met");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(GOAL_REFRESH_INTERVAL_MS + 100);
+    });
+
+    // The card stays on screen through the re-read and shows the new state.
+    await waitFor(() =>
+      expect(screen.getByTestId("goal-criteria-summary")).toHaveTextContent("3 of 3 met"),
+    );
+    expect(client.read).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not re-read a paused goal on a timer", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const client: GoalClient = {
+      read: vi.fn().mockResolvedValue({
+        goal: goalWith({ status: "paused" } as Partial<ThreadGoal>),
+        history: [],
+      }),
+      execute: vi.fn(),
+    };
+    render(<ThreadGoalPanel client={client} threadId={threadId} />);
+    await screen.findByTestId("goal-objective");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(GOAL_REFRESH_INTERVAL_MS * 3);
+    });
+    expect(client.read).toHaveBeenCalledOnce();
+  });
+
   it("mounts the Goal card for the thread and states host retention honestly", async () => {
     const client: GoalClient = {
       read: vi.fn().mockResolvedValue({

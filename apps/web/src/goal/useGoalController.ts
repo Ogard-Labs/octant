@@ -75,7 +75,9 @@ export function useGoalController(options: UseGoalControllerOptions): GoalContro
       return;
     }
     const controller = new AbortController();
-    setStatus("loading");
+    // A re-read behind a Goal already on screen keeps it there: replacing the
+    // card with a loading note on every refresh would flicker the ledger.
+    setStatus((current) => (current === "ready" ? current : "loading"));
     void client
       .read(threadId, controller.signal)
       .then((projection) => {
