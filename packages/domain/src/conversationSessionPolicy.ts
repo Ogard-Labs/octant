@@ -25,6 +25,13 @@ export interface ConversationSessionInput {
      * Read only when the recipient is the same provider instance.
      */
     readonly continuable: boolean;
+    /**
+     * That attempt started a new session with a handoff and never completed.
+     * Its session may have started without the provider ever receiving the
+     * handoff, and the person was shown none, so the session is not taken up
+     * again: the conversation is handed over again in a fresh one.
+     */
+    readonly undeliveredHandoff?: "provider-switch" | "branch";
   };
   /**
    * The thread is a branch that carries a copy of its source's messages and
@@ -75,6 +82,11 @@ export function decideConversationSession(
   const { previous } = input;
   if (previous === undefined) return { kind: "new-session" };
   if (previous.providerInstanceId === input.recipient.providerInstanceId) {
+    if (previous.undeliveredHandoff !== undefined) {
+      return input.handoff === "allowed"
+        ? { kind: "new-session-with-handoff", reason: previous.undeliveredHandoff }
+        : { kind: "refuse", reason: "handoff-unavailable" };
+    }
     return previous.continuable
       ? { kind: "continue-session" }
       : { kind: "refuse", reason: "session-unrecoverable" };

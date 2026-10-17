@@ -372,6 +372,11 @@ export interface AdmittedChatConversationInput {
   readonly threadId: ChatThreadId;
   readonly purpose: Extract<ConversationSelectionPurpose, "provider-switch" | "branch">;
   readonly externalContentIngested: boolean;
+  /**
+   * A turn already in the thread whose prompt the new session is sent as the
+   * prompt (a retry): left out, with its attempts, so it is not read twice.
+   */
+  readonly excludeTurnId?: string;
   readonly readThread: (
     threadId: ChatThreadId,
   ) => Pick<ChatThread, "id" | "projectId" | "version" | "lifecycle"> | undefined;
@@ -413,6 +418,7 @@ export function admittedChatConversationContext(
     for (const turn of turns) {
       if (String(turn.threadId) !== String(input.threadId))
         return { status: "unavailable", reason: "foreign-thread" };
+      if (String(turn.id) === input.excludeTurnId) continue;
       if (seen.has(String(turn.id))) return { status: "unavailable", reason: "source-changed" };
       seen.add(String(turn.id));
       const answered = chatTurnAnsweredAttempt(turn);

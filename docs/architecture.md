@@ -3647,13 +3647,21 @@ and fixed `nativeSessionTransferred` and `hiddenReasoningTransferred` values of
 have no recovered start that re-sends a handoff, and every block is a verbatim
 excerpt of the thread's own journaled messages. A replay of the journal
 rebuilds the same record. The thread's own mark is unchanged by the move, so
-the handoff reports it and does not re-mark. Only a plain new message (or a
-delivered subagent result) starts a handed-over session: a retry, a resume and
-an edit continue or rewrite a conversation that already has a session, so a
-switch they would need still refuses with the native-session message. The same
-provider with no recoverable cursor, a model change without `modelSwitch`, and
-in Work a changed folder binding or folder still refuse as before, because a
-handoff would replace a conversation that provider still holds.
+the handoff reports it and does not re-mark. A new message (or a delivered
+subagent result) starts a handed-over session, and so does a Chat retry whose
+own session may not have received its handoff; a resume and an edit continue
+or rewrite a conversation that already has a session, so a switch they would
+need still refuses with the native-session message. The session's resume
+cursor is recorded when the session starts, before the provider is sent
+anything, so an attempt or turn that carried a handoff and did not complete is
+not taken up again: the next message, retry or usage-limit continuation hands
+the conversation over again in a fresh session and journals a new record
+(naming the provider the conversation came from), and a resume of it refuses.
+The Side Chat source is likewise sent in full to a session that has just
+started. The same provider with no recoverable cursor, a model change without
+`modelSwitch`, and in Work a changed folder binding or folder still refuse as
+before, because a handoff would replace a conversation that provider still
+holds.
 
 A switch that cannot hand over refuses before the provider is started, with
 the reason and a way forward: no host selector, a thread that is gone,

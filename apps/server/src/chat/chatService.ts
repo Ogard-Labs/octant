@@ -2987,8 +2987,16 @@ export class ChatService {
     thread: ChatThread,
     view: ChatThreadView | undefined,
     reason: "provider-switch" | "branch",
-    /** Absent for a branch whose tail turn kept no attempt. */
-    previous: ChatAttempt | undefined,
+    source: {
+      /** The provider the conversation came from; absent for a branch whose tail kept no attempt. */
+      readonly from:
+        | {
+            readonly providerInstanceId: ProviderInstanceId;
+            readonly modelId: ProviderModelId;
+          }
+        | undefined;
+      readonly excludeTurnId: ChatTurn["id"] | undefined;
+    },
   ): {
     readonly blocks: ReadonlyArray<ProviderContextBlock>;
     readonly record: ChatAttemptHandoff;
@@ -3005,6 +3013,9 @@ export class ChatService {
       selection = admittedChatConversationContext({
         threadId: thread.id,
         purpose: reason,
+        ...(source.excludeTurnId === undefined
+          ? {}
+          : { excludeTurnId: String(source.excludeTurnId) }),
         externalContentIngested: readThreadExternalContentTaint(
           this.#persistence.connection,
           String(thread.id),
@@ -3016,7 +3027,7 @@ export class ChatService {
       return refuse("source-unavailable");
     }
     if (selection.status === "unavailable") return refuse(selection.reason);
-    if (reason === "provider-switch" && previous === undefined)
+    if (reason === "provider-switch" && source.from === undefined)
       return refuse("source-point-unavailable");
     const owned = selectionBelongsToThread(selection, {
       mode: "chat",
@@ -3027,12 +3038,9 @@ export class ChatService {
     return {
       blocks: selection.blocks,
       record:
-        reason === "branch" || previous === undefined
+        reason === "branch" || source.from === undefined
           ? branchHandoffRecord(selection)
-          : providerSwitchHandoffRecord(selection, {
-              providerInstanceId: previous.providerInstanceId,
-              modelId: previous.modelId,
-            }),
+          : providerSwitchHandoffRecord(selection, source.from),
     };
   }
 
@@ -3135,6 +3143,7 @@ export class ChatService {
         ...(prepared.nativeSession?.resumeCursor === undefined
           ? {}
           : { resumeCursor: prepared.nativeSession.resumeCursor }),
+        ...(prepared.handoff === undefined ? {} : { handoff: prepared.handoff }),
         newContextManifestId: prepared.context.snapshot.next.manifest.id,
         expectedVersion: command.expectedVersion,
         createdAt: timestamp,
@@ -3703,6 +3712,12 @@ export class ChatService {
                 previous.resumeCursor !== undefined &&
                 (previous.modelId === thread.modelId ||
                   probe.capabilities.modelSwitch === "supported"),
+              // The session cursor is recorded when the session starts, before
+              // the provider is sent anything, so an attempt that carried a
+              // handoff and did not complete may never have delivered it.
+              ...(previous.handoff === undefined || previous.outcome === "completed"
+                ? {}
+                : { undeliveredHandoff: previous.handoff.reason }),
             },
           }),
       // A branch copies message text, never the source's session, so until it
@@ -3711,9 +3726,10 @@ export class ChatService {
         thread.branchedFrom !== undefined &&
         previousTurn !== undefined &&
         previousTurn.sequence <= thread.branchedFrom.carriedTurnCount,
-      // A retry, a resume and an edit continue or rewrite a conversation that
-      // already has a session; only a new message may start a handed-over one.
-      handoff: extensionPhase === "send" && historyTurns === undefined ? "allowed" : "refused",
+      // A resume and an edit continue or rewrite a conversation that already
+      // has a session. A new message may start a handed-over one, and so may
+      // a retry whose own earlier session may never have received its handoff.
+      handoff: extensionPhase !== "resume" && historyTurns === undefined ? "allowed" : "refused",
     });
     if (sessionDecision.kind === "refuse") {
       throw new ChatServiceError({
@@ -3725,7 +3741,22 @@ export class ChatService {
     const nativeSession = sessionDecision.kind === "continue-session" ? previous : undefined;
     const handoff =
       sessionDecision.kind === "new-session-with-handoff"
-        ? this.#selectConversationHandoff(thread, threadView, sessionDecision.reason, previous)
+        ? this.#selectConversationHandoff(thread, threadView, sessionDecision.reason, {
+            // A handoff that never completed is made again from the provider
+            // the conversation came from, not the one that may not have got it.
+            from:
+              previous?.handoff?.reason === "provider-switch" && previous.outcome !== "completed"
+                ? {
+                    providerInstanceId: previous.handoff.previousProviderInstanceId,
+                    modelId: previous.handoff.previousModelId,
+                  }
+                : previous === undefined
+                  ? undefined
+                  : { providerInstanceId: previous.providerInstanceId, modelId: previous.modelId },
+            excludeTurnId: threadView?.turns.find(
+              (turn) => String(turn.userMessageRef.contentId) === String(currentRef.contentId),
+            )?.id,
+          })
         : undefined;
     if (nativeConversation && historyTurns !== undefined) {
       throw new ChatServiceError({
@@ -3790,7 +3821,12 @@ export class ChatService {
             // the session already holds. A host-owned conversation rebuilds
             // its context every turn and never saw the earlier snapshot, and
             // an edit, retry, or resume may rewind the session behind it.
-            reusable: nativeConversation && extensionPhase === "send" && historyTurns === undefined,
+            // Only a continued session still holds the earlier snapshot; a new
+            // one, handed over or not, has never seen it.
+            reusable:
+              sessionDecision.kind === "continue-session" &&
+              extensionPhase === "send" &&
+              historyTurns === undefined,
             previous,
           });
     const threadMentionContexts = await this.#resolveThreadMentions(

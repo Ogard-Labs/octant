@@ -80,6 +80,33 @@ describe("decideConversationSession", () => {
     ).toEqual({ kind: "new-session-with-handoff", reason: "branch" });
   });
 
+  it("hands the conversation over again rather than resume a session whose handoff never completed", () => {
+    for (const reason of ["provider-switch", "branch"] as const) {
+      expect(
+        decideConversationSession({
+          recipient: runtime,
+          previous: {
+            providerInstanceId: "claude",
+            continuable: true,
+            undeliveredHandoff: reason,
+          },
+          handoff: "allowed",
+        }),
+      ).toEqual({ kind: "new-session-with-handoff", reason });
+    }
+    expect(
+      decideConversationSession({
+        recipient: runtime,
+        previous: {
+          providerInstanceId: "claude",
+          continuable: true,
+          undeliveredHandoff: "provider-switch",
+        },
+        handoff: "refused",
+      }),
+    ).toEqual({ kind: "refuse", reason: "handoff-unavailable" });
+  });
+
   it("never starts a handed-over session for a retry, resume or edit", () => {
     expect(
       decideConversationSession({

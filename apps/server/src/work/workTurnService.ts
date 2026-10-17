@@ -542,10 +542,20 @@ export class WorkTurnService {
     if (owned !== "ok") return refuse(owned);
     return {
       blocks: selection.blocks,
-      record: providerSwitchHandoffRecord(selection, {
-        providerInstanceId: previous.authority.providerInstanceId,
-        modelId: previous.authority.modelId,
-      }),
+      record: providerSwitchHandoffRecord(
+        selection,
+        // A handoff that never completed is made again from the provider the
+        // conversation came from, not the one that may not have received it.
+        previous.handoff !== undefined && previous.status !== "completed"
+          ? {
+              providerInstanceId: previous.handoff.previousProviderInstanceId,
+              modelId: previous.handoff.previousModelId,
+            }
+          : {
+              providerInstanceId: previous.authority.providerInstanceId,
+              modelId: previous.authority.modelId,
+            },
+      ),
     };
   }
 
@@ -844,6 +854,12 @@ export class WorkTurnService {
                   this.#supportsModelSwitch?.(command.authority.providerInstanceId) === true) &&
                 previous.authority.bindingRevisionId === command.authority.bindingRevisionId &&
                 previous.authority.workingDirectory === command.authority.workingDirectory,
+              // The session cursor is recorded when the session starts, before
+              // the provider is sent anything, so a turn that carried a
+              // handoff and did not complete may never have delivered it.
+              ...(previous.handoff === undefined || previous.status === "completed"
+                ? {}
+                : { undeliveredHandoff: previous.handoff.reason }),
             },
           }),
       handoff: "allowed",
@@ -855,6 +871,17 @@ export class WorkTurnService {
       );
     }
     const continuing = sessionDecision.kind === "continue-session" ? previous : undefined;
+    if (sessionDecision.kind === "new-session-with-handoff" && thread === undefined) {
+      // Without the thread there is no conversation to read, and a session
+      // started anyway would answer as if it had never been given one.
+      throw this.#failure(
+        "unavailable",
+        conversationHandoffRefusalMessage("thread-unavailable", {
+          thread: "Work task",
+          cause: "switch",
+        }),
+      );
+    }
     const handoff =
       sessionDecision.kind === "new-session-with-handoff" &&
       previous !== undefined &&

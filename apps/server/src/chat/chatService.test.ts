@@ -248,7 +248,14 @@ function openFixture(options?: {
     readonly readerThreadId: string;
     readonly windowId?: WindowId;
   }) => Promise<ReadonlyArray<import("./chatService").ChatThreadMentionContext>>;
-  readonly turnOutcome?: "completed" | "waiting" | "interrupted" | "limited";
+  readonly turnOutcome?:
+    | "completed"
+    | "waiting"
+    | "interrupted"
+    | "limited"
+    | "failed"
+    /** The outcome of the n-th turn the provider is sent, counting from zero. */
+    | ((turnIndex: number) => "completed" | "waiting" | "interrupted" | "limited" | "failed");
   readonly usageLimitResetsAt?: string;
   readonly providerNativeExecute?: (
     input: import("./research/researchRouter").ResearchExecuteInput,
@@ -542,7 +549,8 @@ function openFixture(options?: {
     }) =>
       Effect.gen(function* () {
         sentTurns.push(input);
-        const outcome = options?.turnOutcome ?? "completed";
+        const planned = options?.turnOutcome ?? "completed";
+        const outcome = typeof planned === "function" ? planned(sentTurns.length - 1) : planned;
         if (outcome === "waiting") {
           yield* Queue.offer(queue, { kind: "waiting", sessionId: input.sessionId } as never);
           return;
@@ -557,6 +565,12 @@ function openFixture(options?: {
                 ? {}
                 : { resetsAt: options.usageLimitResetsAt }),
             },
+          } as never);
+        }
+        if (outcome === "failed") {
+          return yield* Effect.fail({
+            category: "unavailable",
+            message: "The provider dropped the request.",
           } as never);
         }
         if (outcome === "interrupted") {
@@ -10243,6 +10257,158 @@ describe("handing a Chat conversation to a new provider session", () => {
     expect(lastAttempt(fixture, threadId)?.handoff).toBeUndefined();
     expect(fixture.fakeDriver.startedSessionIds).toHaveLength(2);
     expect(fixture.fakeDriver.resumeInputs).toHaveLength(1);
+  });
+
+  it("tells the Side Chat source in full to a provider that has just taken over", async () => {
+    const windowId = "84000000-0000-4000-8000-000000000099" as WindowId;
+    const fixture = openMoving({
+      nativeConversationFor: ownsConversation,
+      resolveSideChatSourceContext: async () => ({
+        kind: "resolved",
+        text: "Subject thread: Release notes\nuser: ship the notes",
+      }),
+    });
+    const created = await fixture.service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Side Chat about Release notes",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const threadId = created.thread.id;
+    const send = (prompt: string) =>
+      fixture.service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId,
+          expectedVersion: fixture.service.read(threadId).thread.version,
+          prompt,
+        },
+        { windowId },
+      );
+    await send("What is it about?");
+    await send("And who asked for it?");
+    await moveTo(fixture, threadId, otherNative);
+
+    await send("Anything else?");
+
+    // The new provider's session never saw the source the old one held.
+    const contextOf = (index: number) =>
+      (fixture.fakeDriver.sentTurns[index]?.context ?? []).map((block) => block.text).join("\n");
+    expect(contextOf(1)).toContain(SIDE_CHAT_SOURCE_UNCHANGED_CONTEXT);
+    expect(contextOf(2)).toContain("ship the notes");
+    expect(contextOf(2)).not.toContain(SIDE_CHAT_SOURCE_UNCHANGED_CONTEXT);
+  });
+
+  describe("a handoff turn that may never have reached the new session", () => {
+    const stopsAtSecond = (outcome: "interrupted" | "failed" | "limited") => (turnIndex: number) =>
+      turnIndex === 1 ? outcome : "completed";
+
+    async function movedAndStopped(outcome: "interrupted" | "failed" | "limited") {
+      const fixture = openMoving({
+        nativeConversationFor: ownsConversation,
+        turnOutcome: stopsAtSecond(outcome),
+      });
+      const threadId = await answeredThread(fixture);
+      await moveTo(fixture, threadId, otherNative);
+      await sendFollowUp(fixture, threadId, "Second question");
+      const stopped = lastAttempt(fixture, threadId);
+      if (stopped === undefined) throw new Error("Expected the stopped attempt.");
+      // The session started and its cursor was recorded, so only the outcome
+      // says whether the provider ever received the handoff.
+      expect(stopped.outcome).not.toBe("completed");
+      expect(stopped.resumeCursor).toBeDefined();
+      expect(stopped.handoff).toMatchObject({ reason: "provider-switch" });
+      return { fixture, threadId, stopped };
+    }
+
+    it.each(["interrupted", "failed", "limited"] as const)(
+      "hands the conversation over again, in a fresh session, after a %s handoff turn",
+      async (outcome) => {
+        const { fixture, threadId } = await movedAndStopped(outcome);
+        const startedBefore = fixture.fakeDriver.startedSessionIds.length;
+
+        await sendFollowUp(fixture, threadId, "Third question");
+
+        expect(fixture.fakeDriver.startedSessionIds).toHaveLength(startedBefore + 1);
+        expect(fixture.fakeDriver.resumeInputs).toEqual([]);
+        expect(lastAttempt(fixture, threadId)).toMatchObject({
+          outcome: "completed",
+          handoff: {
+            reason: "provider-switch",
+            // Still the provider the conversation came from, not the one that never got it.
+            previousProviderInstanceId: native,
+          },
+        });
+        const text = (fixture.fakeDriver.sentTurns.at(-1)?.context ?? [])
+          .map((block) => block.text)
+          .join("\n");
+        expect(text).toContain("Remember the walrus");
+        expect(text).toContain("Second question");
+      },
+    );
+
+    it("hands the conversation over again when the stopped turn is retried, without repeating its own prompt", async () => {
+      const { fixture, threadId, stopped } = await movedAndStopped("limited");
+      const view = fixture.service.read(threadId);
+      const turn = view.turns.at(-1);
+      if (turn === undefined) throw new Error("Expected the stopped turn.");
+
+      await fixture.service.execute({
+        kind: "retry-chat-turn",
+        threadId,
+        expectedVersion: view.thread.version,
+        turnId: turn.id,
+        attemptId: stopped.id,
+      });
+
+      expect(fixture.fakeDriver.resumeInputs).toEqual([]);
+      const retried = lastAttempt(fixture, threadId);
+      expect(retried).toMatchObject({
+        outcome: "completed",
+        handoff: { reason: "provider-switch", previousProviderInstanceId: native, messages: 2 },
+      });
+      expect(retried?.providerSessionId).not.toBe(stopped.providerSessionId);
+      const text = (fixture.fakeDriver.sentTurns.at(-1)?.context ?? [])
+        .map((block) => block.text)
+        .join("\n");
+      expect(text).not.toContain("Second question");
+    });
+
+    it("refuses to resume a session whose handoff never completed instead of reattaching it silently", async () => {
+      const { fixture, threadId, stopped } = await movedAndStopped("interrupted");
+      const view = fixture.service.read(threadId);
+      const turn = view.turns.at(-1);
+      if (turn === undefined) throw new Error("Expected the stopped turn.");
+      const sessionsBefore = fixture.fakeDriver.startedSessionIds.length;
+
+      await expect(
+        fixture.service.execute({
+          kind: "resume-chat-turn",
+          threadId,
+          expectedVersion: view.thread.version,
+          turnId: turn.id,
+          attemptId: stopped.id,
+        }),
+      ).rejects.toMatchObject({
+        failure: { message: expect.stringContaining("native session cannot be recovered") },
+      });
+      expect(fixture.fakeDriver.startedSessionIds).toHaveLength(sessionsBefore);
+      expect(fixture.fakeDriver.resumeInputs).toEqual([]);
+    });
+
+    it("keeps resuming the new session once a handoff turn completed", async () => {
+      const fixture = openMoving({ nativeConversationFor: ownsConversation });
+      const threadId = await answeredThread(fixture);
+      await moveTo(fixture, threadId, otherNative);
+      await sendFollowUp(fixture, threadId, "Second question");
+      const startedBefore = fixture.fakeDriver.startedSessionIds.length;
+
+      await sendFollowUp(fixture, threadId, "Third question");
+
+      expect(fixture.fakeDriver.startedSessionIds).toHaveLength(startedBefore);
+      expect(fixture.fakeDriver.resumeInputs).toHaveLength(1);
+      expect(lastAttempt(fixture, threadId)?.handoff).toBeUndefined();
+    });
   });
 
   describe("branching a conversation that a provider keeps in its own session", () => {

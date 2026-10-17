@@ -2610,13 +2610,21 @@ describe("WorkTurnService", () => {
       readonly nextKeepsSession: boolean;
       readonly firstProviderRetired?: boolean;
       readonly fixture?: Parameters<typeof serviceFixture>[0];
+      /** How the n-th provider run ends once its session is ready; completes by default. */
+      readonly endsWith?: (runIndex: number) => "completed" | "failed" | "waiting" | "cancelled";
     }) {
       let retired = false;
+      let runs = 0;
       const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
         input.onSessionReady?.({
           sessionId: input.providerSessionId,
           resumeCursor: { driverKind: "pi", value: `native-${String(input.providerSessionId)}` },
         });
+        const ending = options.endsWith?.(runs++) ?? "completed";
+        const failure = { category: "unavailable" as const, message: "The provider stopped." };
+        if (ending === "cancelled") return { kind: "cancelled" as const };
+        if (ending === "failed") return { kind: "failed" as const, failure };
+        if (ending === "waiting") return { kind: "waiting" as const, failure };
         return { kind: "completed" as const, response: "Existing conversation" };
       });
       const fixture = serviceFixture({
@@ -2726,6 +2734,81 @@ describe("WorkTurnService", () => {
       expect(acceptedEvents(fixture).at(-1)).toMatchObject({
         handoff: { reason: "provider-switch", previousProviderInstanceId: ids.provider },
       });
+    });
+
+    describe("a handoff turn that may never have reached the new session", () => {
+      const thirdCommand = () => ({
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId("99999999-9999-4999-8999-999999999999"),
+        turnId: decodeWorkTurnId("88888888-8888-4888-8888-888888888888"),
+        authority: { ...startCommand().authority, providerInstanceId: nextProvider },
+        prompt: "Continue again",
+      });
+
+      it.each(["failed", "waiting", "cancelled"] as const)(
+        "hands the conversation over again, in a fresh session, after a %s handoff turn",
+        async (ending) => {
+          const { fixture, run } = await movedFixture({
+            firstKeepsSession: true,
+            nextKeepsSession: true,
+            endsWith: (index) => (index === 1 ? ending : "completed"),
+          });
+          await fixture.service.startFirstTurn(ids.window, followUpCommand());
+          await fixture.waitForIdle();
+          const stopped = (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1);
+          // The session started and its cursor was recorded; only the status
+          // says whether the provider ever received the handoff.
+          expect(stopped?.status).toBe(ending);
+          expect(stopped?.resumeCursor).toBeDefined();
+          expect(stopped?.handoff).toBeDefined();
+
+          await fixture.service.startFirstTurn(ids.window, thirdCommand());
+          await fixture.waitForIdle();
+
+          const third = run.mock.calls[2]?.[0];
+          expect(third?.resumeCursor).toBeUndefined();
+          expect(third?.providerSessionId).not.toBe(run.mock.calls[1]?.[0].providerSessionId);
+          expect(acceptedEvents(fixture).at(-1)).toMatchObject({
+            handoff: {
+              reason: "provider-switch",
+              // Still the provider the conversation came from.
+              previousProviderInstanceId: ids.provider,
+            },
+          });
+          expect(JSON.stringify(third?.context)).toContain("Summarize the brief");
+          expect(JSON.stringify(third?.context)).toContain("Continue");
+        },
+      );
+
+      it("keeps resuming the new session once a handoff turn completed", async () => {
+        const { fixture, run } = await movedFixture({
+          firstKeepsSession: true,
+          nextKeepsSession: true,
+        });
+        await fixture.service.startFirstTurn(ids.window, followUpCommand());
+        await fixture.waitForIdle();
+
+        await fixture.service.startFirstTurn(ids.window, thirdCommand());
+        await fixture.waitForIdle();
+
+        expect(run.mock.calls[2]?.[0].providerSessionId).toBe(
+          run.mock.calls[1]?.[0].providerSessionId,
+        );
+        expect(run.mock.calls[2]?.[0].resumeCursor).toBeDefined();
+        expect(acceptedEvents(fixture).at(-1)?.handoff).toBeUndefined();
+      });
+    });
+
+    it("refuses, and starts no session, when the thread cannot be read for the handoff", async () => {
+      const { fixture, run } = await movedFixture({
+        firstKeepsSession: false,
+        nextKeepsSession: true,
+      });
+      fixture.threads.read.mockResolvedValue(undefined as never);
+
+      await expect(fixture.service.startFirstTurn(ids.window, followUpCommand())).rejects.toThrow();
+
+      expect(run).toHaveBeenCalledTimes(1);
     });
 
     it("sends a host-held provider the history it already holds, with no handoff", async () => {
