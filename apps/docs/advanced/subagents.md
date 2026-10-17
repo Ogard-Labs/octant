@@ -108,7 +108,10 @@ history. **Mark reviewed**, **Steer**, **Retry**, **Resume**, and
 inside the provider's own runtime says so on its page.
 
 **Agents** on the workspace rail is the same hierarchy across Chat, Work, and
-Code. On a wide window it can switch between **List** and **Graph**. Graph
+Code, for the threads open in this window: the thread in each mode's panes,
+including pinned ones. A window reads only the threads in its own workspace, so
+the children of a thread you have not opened here are not listed; open the
+thread and its Agents tool shows them. On a wide window it can switch between **List** and **Graph**. Graph
 places each parent thread above the child runs it launched, and a child under
 the run named by `parentRunId` when that parent is on the same page. It is a
 layout of the current query, not a swarm board and not a live Canvas. Cards

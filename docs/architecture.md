@@ -947,7 +947,10 @@ Octant Harness `delegate` tool or a provider harness's `octant_agents` tool.
 Both entry points use the same host admission, routing, workspace, and lifecycle
 services. Either parent harness can target either child harness; provider-owned
 hidden subagents remain disabled. The host's AgentRun routes read and control
-existing runs but create none. Admission (`admitAgentRunControlRequest`) prepares the child's workspace
+existing runs but create none. Reads, the Agents center list, acknowledgements,
+and cancellation are authorized per window: the window's own workspace must
+currently hold the parent thread on the matching Project, so the center lists
+only the runs of threads the window has open. Admission (`admitAgentRunControlRequest`) prepares the child's workspace
 on the server: Chat a research-only virtual workspace, Work the current
 confined Project root and binding revision, and Code an isolated managed
 worktree that is confirmed before admission. No client supplies a path, a

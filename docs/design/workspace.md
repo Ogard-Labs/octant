@@ -428,7 +428,8 @@ journaled per-record opt-in a thread's own limit stop takes — and Stop
 scheduled resume while it is armed; the row never presents that wait as a
 finished or failed run. A thread with none says subagents appear when the agent
 hands off part of its work, or that they are turned off in Settings. The workspace-rail Agents Center is that same
-hierarchy across modes; on a wide window it can draw the current query as a
+hierarchy across modes for the threads this window holds (the thread in each mode's panes, pinned ones included), because the host
+authorizes a parent's runs only to a window whose workspace contains that thread on the matching Project; on a wide window it can draw the current query as a
 forest of parent threads and the runs they launched, and Graph can save that forest as a Canvas diagram document for the parent thread. The Agents dock shows the host's bounded, process-local child conversation read: entries are
 cursor-readable and byte- and count-bounded, with explicit complete, stale, and
 unavailable states. Provider-native live transcripts remain unavailable unless
