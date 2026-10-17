@@ -3,6 +3,7 @@ import { ProviderChildObservationState } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark } from "./agentRun";
 import { ContextCompactionSettledRecord } from "./context";
+import { ProviderSwitchConversationHandoff } from "./contextHandoff";
 import { ExtensionSelection } from "./extensions";
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { HostId } from "./host";
@@ -194,6 +195,12 @@ export const WorkTurnState = Schema.Struct({
   authority: WorkTurnAuthority,
   providerSessionId: Schema.optional(ProviderSessionId),
   resumeCursor: Schema.optional(ProviderResumeCursor),
+  /**
+   * The conversation text this turn's new provider session was started with,
+   * when the provider changed and the new one keeps its history in a session.
+   * Journaled with the turn's acceptance, before the provider is sent anything.
+   */
+  handoff: Schema.optional(ProviderSwitchConversationHandoff),
   status: WorkTurnLifecycleStatus,
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   extensionSelections: Schema.optional(Schema.Array(ExtensionSelection).pipe(Schema.maxItems(32))),
@@ -429,6 +436,7 @@ export const WorkTurnAccepted = Schema.Struct({
   authority: WorkTurnAuthority,
   providerSessionId: ProviderSessionId,
   resumeCursor: Schema.optional(ProviderResumeCursor),
+  handoff: Schema.optional(ProviderSwitchConversationHandoff),
   prompt: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(200_000)),
   attachments: Schema.optional(
     Schema.Array(WorkAttachmentReference).pipe(Schema.maxItems(MAX_WORK_TURN_ATTACHMENTS)),

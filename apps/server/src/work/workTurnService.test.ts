@@ -46,6 +46,7 @@ import { createWorkThreadMentionDirectory } from "../chat/threadMentionService";
 import { createWorkTurnRouteHandler } from "../workTurnRoutes";
 import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { WorkAttachmentStore } from "./workAttachmentStore";
+import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnProjection } from "./workTurnProjection";
 import {
   WORK_THREAD_MARKED_DONE_TURN_REFUSAL,
@@ -2593,37 +2594,49 @@ describe("WorkTurnService", () => {
     },
   );
 
-  it.each([
-    { nativeFirst: true, retirePrevious: false },
-    { nativeFirst: false, retirePrevious: false },
-    { nativeFirst: true, retirePrevious: true },
-  ])(
-    "refuses a Work conversation replacement when nativeFirst=$nativeFirst and retirePrevious=$retirePrevious",
-    async ({ nativeFirst, retirePrevious }) => {
+  describe("moving a Work conversation to another provider", () => {
+    const nextProvider = decodeProviderInstanceId("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
+    const followUpCommand = () => ({
+      ...startCommand(),
+      requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+      turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+      authority: { ...startCommand().authority, providerInstanceId: nextProvider },
+      prompt: "Continue",
+    });
+
+    /** A first turn on the first provider, then the thread moved to another one. */
+    async function movedFixture(options: {
+      readonly firstKeepsSession: boolean;
+      readonly nextKeepsSession: boolean;
+      readonly firstProviderRetired?: boolean;
+      readonly fixture?: Parameters<typeof serviceFixture>[0];
+    }) {
       let retired = false;
-      const nextProvider = decodeProviderInstanceId("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
       const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
         input.onSessionReady?.({
           sessionId: input.providerSessionId,
-          resumeCursor: { driverKind: "pi", value: "native-work" },
+          resumeCursor: { driverKind: "pi", value: `native-${String(input.providerSessionId)}` },
         });
         return { kind: "completed" as const, response: "Existing conversation" };
       });
       const fixture = serviceFixture({
+        ...options.fixture,
         turnRuntime: { run },
         resolveDriver: (id, fallback) =>
           retired && id === ids.provider
             ? undefined
             : {
                 ...fallback,
-                conversationOwnership: (id === ids.provider ? nativeFirst : !nativeFirst)
+                conversationOwnership: (
+                  id === ids.provider ? options.firstKeepsSession : options.nextKeepsSession
+                )
                   ? "provider"
                   : "host",
               },
       });
       await fixture.service.startFirstTurn(ids.window, startCommand());
       await fixture.waitForIdle();
-      retired = retirePrevious;
+      retired = options.firstProviderRetired === true;
       const previousThread = await fixture.threads.read();
       fixture.threads.read.mockResolvedValue({
         ...previousThread,
@@ -2634,20 +2647,192 @@ describe("WorkTurnService", () => {
         ...previousProvider,
         id: nextProvider,
       });
-      const journalCalls = fixture.persistence.journal.append.mock.calls.length;
+      return { fixture, run };
+    }
+
+    const acceptedEvents = (fixture: ReturnType<typeof serviceFixture>) =>
+      fixture.persistence.journal.append.mock.calls
+        .flatMap(([request]) => request.events)
+        .filter(
+          (event: { readonly eventName: string }) => event.eventName === "work.turn-accepted@1",
+        )
+        .map((event: { readonly payload: unknown }) => event.payload as Record<string, unknown>);
+
+    const noOmissions = {
+      earlierMessages: 0,
+      unfinishedReplies: 0,
+      missingBodies: 0,
+      oversizedBodies: 0,
+      emptyBodies: 0,
+      attachments: 0,
+      truncatedMessages: 0,
+      truncatedCharacters: 0,
+      sourceTruncatedMessages: 0,
+    };
+
+    it("starts a new session with the earlier conversation when a provider that keeps its own session takes over", async () => {
+      const { fixture, run } = await movedFixture({
+        firstKeepsSession: false,
+        nextKeepsSession: true,
+      });
+
       await expect(
-        fixture.service.startFirstTurn(ids.window, {
-          ...startCommand(),
-          requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
-          turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
-          authority: { ...startCommand().authority, providerInstanceId: nextProvider },
-          prompt: "Continue",
-        }),
-      ).rejects.toThrow("native session cannot be recovered");
+        fixture.service.startFirstTurn(ids.window, followUpCommand()),
+      ).resolves.toMatchObject({ kind: "accepted" });
+      await fixture.waitForIdle();
+
+      const second = run.mock.calls[1]?.[0];
+      expect(second?.providerSessionId).not.toBe(run.mock.calls[0]?.[0].providerSessionId);
+      expect(second?.resumeCursor).toBeUndefined();
+      const context = JSON.stringify(second?.context);
+      expect(context).toContain("handed over because the thread moved to a different provider");
+      expect(context).toContain("Summarize the brief");
+      expect(context).toContain("Existing conversation");
+      const expected = {
+        reason: "provider-switch",
+        previousProviderInstanceId: ids.provider,
+        previousModelId: "model-a",
+        messages: 2,
+        omissions: noOmissions,
+        externalContentIngested: false,
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      };
+      // Journaled with the acceptance, before the provider is sent anything.
+      expect(acceptedEvents(fixture).at(-1)).toMatchObject({ handoff: expected });
+      expect(
+        (await fixture.service.transcript(ids.window, ids.thread)).turns.at(-1)?.handoff,
+      ).toEqual(expected);
+      expect(
+        (await fixture.service.transcript(ids.window, ids.thread)).turns[0]?.handoff,
+      ).toBeUndefined();
+      // A replay of the journaled acceptances rebuilds the same turn.
+      const rebuilt = new WorkTurnProjection();
+      for (const payload of acceptedEvents(fixture)) rebuilt.apply(payload as never);
+      expect(rebuilt.latestForThread(ids.thread)?.handoff).toEqual(expected);
+    });
+
+    it("hands the conversation over even when the first provider is gone", async () => {
+      const { fixture, run } = await movedFixture({
+        firstKeepsSession: true,
+        nextKeepsSession: true,
+        firstProviderRetired: true,
+      });
+
+      await fixture.service.startFirstTurn(ids.window, followUpCommand());
+      await fixture.waitForIdle();
+
+      expect(run.mock.calls[1]?.[0].resumeCursor).toBeUndefined();
+      expect(acceptedEvents(fixture).at(-1)).toMatchObject({
+        handoff: { reason: "provider-switch", previousProviderInstanceId: ids.provider },
+      });
+    });
+
+    it("sends a host-held provider the history it already holds, with no handoff", async () => {
+      const { fixture, run } = await movedFixture({
+        firstKeepsSession: true,
+        nextKeepsSession: false,
+      });
+
+      await expect(
+        fixture.service.startFirstTurn(ids.window, followUpCommand()),
+      ).resolves.toMatchObject({ kind: "accepted" });
+      await fixture.waitForIdle();
+
+      expect(acceptedEvents(fixture).at(-1)?.handoff).toBeUndefined();
+      expect(JSON.stringify(run.mock.calls[1]?.[0].context)).toContain("Existing conversation");
+    });
+
+    it("says in the record when the thread had taken in outside content", async () => {
+      const { fixture } = await movedFixture({
+        firstKeepsSession: false,
+        nextKeepsSession: true,
+        fixture: { externalContentIngested: true },
+      });
+
+      await fixture.service.startFirstTurn(ids.window, followUpCommand());
+      await fixture.waitForIdle();
+
+      expect(acceptedEvents(fixture).at(-1)).toMatchObject({
+        handoff: { externalContentIngested: true },
+      });
+    });
+
+    it("refuses, and journals nothing, when the host cannot hand a conversation over", async () => {
+      const { fixture, run } = await movedFixture({
+        firstKeepsSession: false,
+        nextKeepsSession: true,
+        fixture: { withoutConversationHandoff: true },
+      });
+      const journalCalls = fixture.persistence.journal.append.mock.calls.length;
+
+      await expect(fixture.service.startFirstTurn(ids.window, followUpCommand())).rejects.toThrow(
+        "cannot hand a conversation",
+      );
+
       expect(run).toHaveBeenCalledTimes(1);
       expect(fixture.persistence.journal.append.mock.calls).toHaveLength(journalCalls);
-    },
-  );
+    });
+
+    it("refuses with the reason when the conversation cannot be read for the handoff", async () => {
+      const { fixture, run } = await movedFixture({
+        firstKeepsSession: false,
+        nextKeepsSession: true,
+        fixture: {
+          selectConversationHandoff: () => ({ status: "unavailable", reason: "source-empty" }),
+        },
+      });
+      const journalCalls = fixture.persistence.journal.append.mock.calls.length;
+
+      await expect(fixture.service.startFirstTurn(ids.window, followUpCommand())).rejects.toThrow(
+        "no readable messages",
+      );
+
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(fixture.persistence.journal.append.mock.calls).toHaveLength(journalCalls);
+    });
+
+    it("refuses a handoff that was read from another thread", async () => {
+      const { fixture, run } = await movedFixture({
+        firstKeepsSession: false,
+        nextKeepsSession: true,
+        fixture: {
+          selectConversationHandoff: (thread) => {
+            const own = admittedParentWorkContext({
+              threadId: thread.id,
+              purpose: "provider-switch",
+              externalContentIngested: false,
+              readThread: () => thread,
+              readTurns: () => [],
+            });
+            return own.status === "available"
+              ? { ...own, source: { ...own.source, threadId: "another-thread" } }
+              : {
+                  status: "available",
+                  blocks: [
+                    { kind: "conversation-summary", text: "summary" },
+                    { kind: "user-message", text: "another thread's question" },
+                  ],
+                  omissions: noOmissions,
+                  source: {
+                    mode: "work",
+                    threadId: "another-thread",
+                    projectId: String(ids.project),
+                    threadVersion: 1,
+                    externalContentIngested: false,
+                    point: {},
+                  },
+                };
+          },
+        },
+      });
+
+      await expect(fixture.service.startFirstTurn(ids.window, followUpCommand())).rejects.toThrow(
+        "does not belong to this work task",
+      );
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+  });
 
   it("hands a follow-up turn the prior transcript as provider context", async () => {
     const run = vi.fn();
@@ -2925,6 +3110,12 @@ function serviceFixture(
     readonly agentRuns?: WorkTurnServiceDependencies["agentRuns"];
     /** Read on every thread read, so a test can mark and reactivate between turns. */
     readonly completionConfirmed?: () => boolean;
+    /** Replaces the host's selection of a conversation to hand to a new provider session. */
+    readonly selectConversationHandoff?: WorkTurnServiceDependencies["selectConversationHandoff"];
+    /** Leaves the host unable to hand a conversation over at all. */
+    readonly withoutConversationHandoff?: boolean;
+    /** Whether the thread had taken in outside content when a handoff is read. */
+    readonly externalContentIngested?: boolean;
   } = {},
 ) {
   const projection = new WorkTurnProjection();
@@ -3068,6 +3259,20 @@ function serviceFixture(
     ...(options.supportsModelSwitch === undefined
       ? {}
       : { supportsModelSwitch: options.supportsModelSwitch }),
+    ...(options.withoutConversationHandoff === true
+      ? {}
+      : {
+          selectConversationHandoff:
+            options.selectConversationHandoff ??
+            ((thread) =>
+              admittedParentWorkContext({
+                threadId: thread.id,
+                purpose: "provider-switch",
+                externalContentIngested: options.externalContentIngested === true,
+                readThread: () => thread,
+                readTurns: (id) => projection.listForThread(id),
+              })),
+        }),
     turnRuntime: options.turnRuntime ?? defaultRuntime,
     ...(options.safeInputBudgetTokens === undefined
       ? {}

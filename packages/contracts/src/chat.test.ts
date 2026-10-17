@@ -523,6 +523,80 @@ describe("chat contracts", () => {
     ).toThrow();
   });
 
+  describe("a ChatAttempt's handoff", () => {
+    const omissions = {
+      earlierMessages: 0,
+      unfinishedReplies: 1,
+      missingBodies: 0,
+      oversizedBodies: 0,
+      emptyBodies: 0,
+      attachments: 0,
+      truncatedMessages: 0,
+      truncatedCharacters: 0,
+      sourceTruncatedMessages: 0,
+    };
+    const switched = {
+      reason: "provider-switch",
+      previousProviderInstanceId: ids.provider,
+      previousModelId: "model-a",
+      messages: 4,
+      omissions,
+      externalContentIngested: true,
+      nativeSessionTransferred: false,
+      hiddenReasoningTransferred: false,
+    } as const;
+    const branched = {
+      reason: "branch",
+      messages: 2,
+      omissions,
+      externalContentIngested: false,
+      nativeSessionTransferred: false,
+      hiddenReasoningTransferred: false,
+    } as const;
+
+    it("decodes a provider switch and a branch, and leaves an ordinary attempt without one", () => {
+      expect(decodeChatAttempt({ ...attemptFixture, handoff: switched }).handoff).toEqual(switched);
+      expect(decodeChatAttempt({ ...attemptFixture, handoff: branched }).handoff).toEqual(branched);
+      expect(decodeChatAttempt(attemptFixture).handoff).toBeUndefined();
+    });
+
+    it("never records that a native session or hidden reasoning moved", () => {
+      for (const handoff of [switched, branched]) {
+        expect(() =>
+          decodeChatAttempt({
+            ...attemptFixture,
+            handoff: { ...handoff, nativeSessionTransferred: true },
+          }),
+        ).toThrow();
+        expect(() =>
+          decodeChatAttempt({
+            ...attemptFixture,
+            handoff: { ...handoff, hiddenReasoningTransferred: true },
+          }),
+        ).toThrow();
+      }
+    });
+
+    it("bounds the messages carried and refuses an uncounted omission or a stray field", () => {
+      expect(() =>
+        decodeChatAttempt({ ...attemptFixture, handoff: { ...switched, messages: 0 } }),
+      ).toThrow();
+      expect(() =>
+        decodeChatAttempt({ ...attemptFixture, handoff: { ...switched, messages: 24 } }),
+      ).toThrow();
+      const { missingBodies: _missing, ...uncounted } = omissions;
+      expect(() =>
+        decodeChatAttempt({ ...attemptFixture, handoff: { ...switched, omissions: uncounted } }),
+      ).toThrow();
+      expect(() =>
+        decodeChatAttempt({
+          ...attemptFixture,
+          handoff: { ...switched, text: "the conversation" },
+        }),
+      ).toThrow();
+    });
+  });
+
   it("decodes a ChatAttempt failure as a bounded code, never free-form text", () => {
     const withFailure = decodeChatAttempt({
       ...attemptFixture,

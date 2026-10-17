@@ -26,6 +26,7 @@ import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueue
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
 import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMessageQueueRoutes";
 import { startEventLoopLagDetector } from "../eventLoopLag";
+import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
 import { WorkArtifactProjection } from "../work/workArtifactProjection";
 import { WorkThreadService } from "../work/workThreadService";
@@ -421,6 +422,17 @@ export function wireWork(deps: WorkDependencies) {
       supportsModelSwitch: (providerInstanceId) =>
         providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.modelSwitch ===
         "supported",
+      selectConversationHandoff: (thread) =>
+        admittedParentWorkContext({
+          threadId: thread.id,
+          purpose: "provider-switch",
+          externalContentIngested: readThreadExternalContentTaint(
+            persistence.connection,
+            String(thread.id),
+          ).externalContentIngested,
+          readThread: (id) => workThreadProjection.read(id),
+          readTurns: (id) => workTurnProjection.listForThread(id),
+        }),
       supportsAttachments: (thread) => {
         const observed = providerRuntimeRegistry.observedState(thread.providerInstanceId);
         if (observed?.capabilities.nativeAttachments !== "supported") return false;

@@ -19,6 +19,10 @@ import {
   ActorId,
   CodeOperationEventFrame,
   decodeAgentRunAdmittedContext,
+  decodeChatAttempt,
+  decodeChatContentId,
+  decodeChatThreadId,
+  decodeChatTurn,
   decodeCodeConversationTurn,
   decodeCodeEvidenceReference,
   decodeCodeOperationEvent,
@@ -33,6 +37,7 @@ import {
   type WorkTurnState,
 } from "@octant/contracts";
 import {
+  admittedChatConversationContext,
   admittedParentCodeContext,
   admittedParentWorkContext,
   MAX_PARENT_CONTEXT_SOURCE_BYTES,
@@ -752,5 +757,282 @@ describe("a forked thread reading its conversation for a provider switch", () =>
       },
     });
     expect(result).toEqual({ status: "unavailable", reason: "source-empty", part: "inherited" });
+  });
+});
+
+describe("admitted Chat conversation context", () => {
+  const chatThreadId = decodeChatThreadId(id(7));
+  const chatThread = {
+    id: chatThreadId,
+    version: 4 as never,
+    lifecycle: "active" as const,
+  };
+  const digest = "b".repeat(64);
+  const contentId = (n: number) => decodeChatContentId(id(1_000 + n));
+  const reference = (n: number, byteLength = 20) => ({
+    contentId: contentId(n),
+    digest,
+    byteLength,
+  });
+
+  function attempt(
+    n: number,
+    outcome: "completed" | "failed" | "streaming" = "completed",
+    responses: ReadonlyArray<ReturnType<typeof reference>> = [reference(2_000 + n)],
+  ) {
+    return decodeChatAttempt({
+      id: id(3_000 + n),
+      turnId: id(4_000 + n),
+      threadId: chatThreadId,
+      providerInstanceId: id(5),
+      providerSessionId: id(6),
+      modelId: "model",
+      contextManifestId: id(8),
+      outcome,
+      responseRefs: responses,
+      citationIds: [],
+      createdAt: at,
+      updatedAt: at,
+    });
+  }
+  function turn(
+    n: number,
+    attempts: ReadonlyArray<ReturnType<typeof attempt>> = [attempt(n)],
+    extra: { readonly supersedes?: string; readonly attachments?: number } = {},
+  ) {
+    return decodeChatTurn({
+      id: id(4_000 + n),
+      threadId: chatThreadId,
+      sequence: n,
+      userMessageRef: reference(n),
+      attachmentIds: Array.from({ length: extra.attachments ?? 0 }, (_, index) =>
+        id(5_000 + n * 10 + index),
+      ),
+      attempts,
+      ...(extra.supersedes === undefined ? {} : { supersedes: extra.supersedes }),
+      createdAt: at,
+    });
+  }
+  /** Bodies for every reference a turn names, so a test removes the ones it wants purged. */
+  function bodies(
+    turns: ReadonlyArray<ReturnType<typeof turn>>,
+    missing: ReadonlySet<string> = new Set(),
+  ) {
+    const contents: Array<{ contentId: string; role: "user" | "assistant"; body: string }> = [];
+    for (const item of turns) {
+      contents.push({
+        contentId: String(item.userMessageRef.contentId),
+        role: "user",
+        body: `question ${item.sequence}`,
+      });
+      for (const candidate of item.attempts)
+        for (const response of candidate.responseRefs)
+          contents.push({
+            contentId: String(response.contentId),
+            role: "assistant",
+            body: `answer ${item.sequence}`,
+          });
+    }
+    return contents
+      .filter((content) => !missing.has(content.contentId))
+      .map((content) => ({ ...content, digest, byteLength: content.body.length }));
+  }
+  const input = (
+    turns: ReadonlyArray<ReturnType<typeof turn>>,
+    overrides: Partial<Parameters<typeof admittedChatConversationContext>[0]> = {},
+    missing?: ReadonlySet<string>,
+  ): Parameters<typeof admittedChatConversationContext>[0] => ({
+    threadId: chatThreadId,
+    purpose: "provider-switch",
+    externalContentIngested: false,
+    readThread: () => chatThread,
+    readView: () => ({ turns, contents: bodies(turns, missing) }) as never,
+    ...overrides,
+  });
+
+  it("reads the active conversation with each message attributed to the provider and model that wrote it", () => {
+    const result = admittedChatConversationContext(input([turn(1), turn(2)]));
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.blocks.map((block) => block.kind)).toEqual([
+      "conversation-summary",
+      "user-message",
+      "assistant-message",
+      "user-message",
+      "assistant-message",
+    ]);
+    expect(result.blocks[2]?.text).toContain('"modelId":"model"');
+    expect(result.blocks[2]?.text).toContain("answer 1");
+    expect(result.blocks[0]?.text).toContain("handed over because the thread moved");
+    expect(result.blocks[0]?.text).toContain(
+      "The previous provider's native session and hidden reasoning were not transferred",
+    );
+    expect(result.source).toMatchObject({
+      mode: "chat",
+      threadId: chatThreadId,
+      threadVersion: 4,
+      externalContentIngested: false,
+    });
+    expect(result.source.projectId).toBeUndefined();
+    expect(decodeAgentRunAdmittedContext(result.blocks)).toEqual(result.blocks);
+  });
+
+  it("carries the thread's Project and outside-content mark on the source", () => {
+    const result = admittedChatConversationContext(
+      input([turn(1)], {
+        externalContentIngested: true,
+        readThread: () => ({ ...chatThread, projectId }),
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: "available",
+      source: { projectId, externalContentIngested: true },
+    });
+  });
+
+  it("leaves out a superseded turn and an answer the turn did not keep, and counts what it dropped", () => {
+    const edited = turn(3, [attempt(3)], { supersedes: id(4_001) });
+    const result = admittedChatConversationContext(
+      input([turn(1), turn(2, [attempt(2, "failed")], { attachments: 2 }), edited]),
+    );
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    const text = JSON.stringify(result.blocks);
+    // Turn 3 revised turn 1, so neither turn 1 nor the turn after it is the conversation.
+    expect(text).not.toContain("question 1");
+    expect(text).not.toContain("answer 2");
+    expect(text).toContain("question 3");
+    expect(text).toContain("answer 3");
+    expect(result.omissions).toMatchObject({ unfinishedReplies: 0, attachments: 0 });
+  });
+
+  it("counts an unfinished reply and the attachments it never carries", () => {
+    const result = admittedChatConversationContext(
+      input([turn(1), turn(2, [attempt(2, "failed")], { attachments: 2 })]),
+    );
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.blocks.map((block) => block.kind)).toEqual([
+      "conversation-summary",
+      "user-message",
+      "assistant-message",
+      "user-message",
+    ]);
+    expect(JSON.stringify(result.blocks)).not.toContain("answer 2");
+    expect(result.omissions).toMatchObject({ unfinishedReplies: 1, attachments: 2 });
+  });
+
+  it("names a purged body, an oversized body and an empty body instead of dropping them silently", () => {
+    const turns = [
+      turn(1),
+      turn(2, [attempt(2, "completed", [reference(2_002, MAX_PARENT_CONTEXT_SOURCE_BYTES + 1)])]),
+      turn(3),
+    ];
+    const result = admittedChatConversationContext(
+      input(turns, {}, new Set([String(contentId(2))])),
+    );
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.omissions).toMatchObject({
+      missingBodies: 1,
+      oversizedBodies: 1,
+      earlierMessages: 0,
+    });
+    expect(JSON.stringify(result.blocks)).not.toContain("answer 2");
+  });
+
+  it("refuses when no message is readable rather than hand over an empty conversation", () => {
+    const turns = [turn(1)];
+    const missing = new Set(bodies(turns).map((content) => content.contentId));
+
+    expect(admittedChatConversationContext(input(turns, {}, missing))).toEqual({
+      status: "unavailable",
+      reason: "source-empty",
+    });
+  });
+
+  it("keeps the newest messages within the block bound and counts the earlier ones", () => {
+    const turns = Array.from({ length: 15 }, (_, index) => turn(index + 1));
+    const result = admittedChatConversationContext(input(turns));
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.blocks).toHaveLength(MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS);
+    expect(result.omissions.earlierMessages).toBe(30 - (MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS - 1));
+    expect(JSON.stringify(result.blocks)).toContain("question 15");
+    expect(JSON.stringify(result.blocks)).not.toContain('question 1"');
+  });
+
+  it("refuses a thread that is gone, deleting, unreadable or has no recorded conversation", () => {
+    const turns = [turn(1)];
+    expect(admittedChatConversationContext(input(turns, { readThread: () => undefined }))).toEqual({
+      status: "unavailable",
+      reason: "thread-unavailable",
+    });
+    expect(
+      admittedChatConversationContext(
+        input(turns, { readThread: () => ({ ...chatThread, lifecycle: "deleting" as const }) }),
+      ),
+    ).toEqual({ status: "unavailable", reason: "thread-unavailable" });
+    expect(admittedChatConversationContext(input(turns, { readView: () => undefined }))).toEqual({
+      status: "unavailable",
+      reason: "source-point-unavailable",
+    });
+    expect(admittedChatConversationContext(input([]))).toEqual({
+      status: "unavailable",
+      reason: "source-empty",
+    });
+    expect(
+      admittedChatConversationContext(
+        input(turns, {
+          readView: () => {
+            throw new Error("projection unavailable");
+          },
+        }),
+      ),
+    ).toEqual({ status: "unavailable", reason: "source-unavailable" });
+  });
+
+  it("refuses a turn that belongs to another thread", () => {
+    const foreign = decodeChatTurn({
+      ...turn(1),
+      threadId: id(99),
+      attempts: [],
+    });
+
+    expect(admittedChatConversationContext(input([foreign]))).toEqual({
+      status: "unavailable",
+      reason: "foreign-thread",
+    });
+  });
+
+  it("words a branch's handoff for the conversation it was branched from", () => {
+    const result = admittedChatConversationContext(input([turn(1)], { purpose: "branch" }));
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.blocks[0]?.text).toContain("branched from");
+    expect(result.blocks[0]?.text).toContain("Later turns of that conversation are not included");
+    expect(result.blocks[1]?.text).toContain("Branched conversation source");
+  });
+
+  it("words a Work provider switch for the thread's own conversation, not a parent's", () => {
+    const result = admittedParentWorkContext({
+      threadId: workThreadId,
+      purpose: "provider-switch",
+      externalContentIngested: false,
+      readThread: () => workThread,
+      readTurns: () => [workTurn(1)],
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.blocks[0]?.text).toContain("handed over because the thread moved");
+    expect(result.blocks[1]?.text).toContain("Earlier conversation source");
   });
 });

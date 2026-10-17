@@ -3008,6 +3008,13 @@ form > .work-composer-adapter__attachments {
   min-width: 0;
 }
 
+/* What a provider switch handed to the new session, under the turn header. */
+.work-thread-workspace__handoff {
+  margin: 0 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
 .code-composer-adapter {
   display: flex;
   width: 100%;

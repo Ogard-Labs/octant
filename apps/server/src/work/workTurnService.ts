@@ -11,6 +11,13 @@ import {
 } from "../context/contextHarnessService";
 import type { AutomaticCompactionSighting } from "../context/automaticCompaction";
 import { observeWorkContext } from "./workContextInspection";
+import type { AgentRunParentContextSelection } from "../agentRun/agentRunParentContext";
+import {
+  conversationHandoffRefusalMessage,
+  providerSwitchHandoffRecord,
+  selectionBelongsToThread,
+  type ConversationHandoffRefusal,
+} from "../agentRun/conversationHandoff";
 import { unsupportedModelOptionValues } from "@octant/domain/chat-policy";
 import type { SelectedExtensionResolver } from "../extensions/selectedExtensions";
 import {
@@ -61,6 +68,7 @@ import {
   type ProviderResumeCursor,
   type ProviderInstance,
   type ProviderModel,
+  type ProviderSwitchConversationHandoff,
   type ThreadTaskProgressList,
   type ThreadWorkingDirectory,
   type WindowId,
@@ -80,6 +88,7 @@ import type { TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import {
   accumulateTurnUsage,
+  decideConversationSession,
   decideWorkTurnAuthority,
   assertProviderAllowedByProjectPolicy,
   ProjectProviderPolicyRejected,
@@ -261,6 +270,12 @@ export interface WorkTurnServiceDependencies {
    */
   readonly supportsModelSwitch?: (providerInstanceId: WorkThread["providerInstanceId"]) => boolean;
   /**
+   * Selects the thread's own earlier conversation for a turn that moves it to
+   * a provider keeping its history in a session of its own. Absent on a host
+   * that cannot hand a conversation over, which then refuses such a switch.
+   */
+  readonly selectConversationHandoff?: (thread: WorkThread) => AgentRunParentContextSelection;
+  /**
    * Whether the selected provider and model honestly accept images. The host
    * refuses a turn that names attachments when this is false, rather than
    * sending the prompt with its pictures quietly removed.
@@ -410,6 +425,7 @@ export class WorkTurnService {
   readonly #attachments: WorkAttachmentStore | undefined;
   readonly #supportsAttachments: WorkTurnServiceDependencies["supportsAttachments"];
   readonly #supportsModelSwitch: WorkTurnServiceDependencies["supportsModelSwitch"];
+  readonly #selectConversationHandoffContext: WorkTurnServiceDependencies["selectConversationHandoff"];
   readonly #turnRuntime: WorkTurnRuntimePort;
   readonly #outsideContentMarks: RuntimeOutsideContentMarking | undefined;
   readonly #onRequestSettled: WorkTurnServiceDependencies["onRequestSettled"];
@@ -456,6 +472,7 @@ export class WorkTurnService {
     this.#attachments = dependencies.attachments;
     this.#supportsAttachments = dependencies.supportsAttachments;
     this.#supportsModelSwitch = dependencies.supportsModelSwitch;
+    this.#selectConversationHandoffContext = dependencies.selectConversationHandoff;
     this.#turnRuntime = dependencies.turnRuntime ?? new WorkTurnRuntime();
     this.#outsideContentMarks = dependencies.outsideContentMarks;
     this.#onRequestSettled = dependencies.onRequestSettled;
@@ -486,6 +503,50 @@ export class WorkTurnService {
     this.#usageStore = dependencies.usageStore;
     this.#liveTurns = dependencies.liveTurns;
     this.#agentRuns = dependencies.agentRuns;
+  }
+
+  /**
+   * The earlier conversation a turn hands to the new provider session it
+   * starts, with the record the turn's acceptance journals. A conversation
+   * that cannot be handed over refuses the turn with the reason: the new
+   * provider is never started as if it had seen a conversation it was not
+   * given.
+   */
+  #selectConversationHandoff(
+    thread: WorkThread,
+    previous: WorkTurnState,
+  ): {
+    readonly blocks: ReadonlyArray<ProviderContextBlock>;
+    readonly record: ProviderSwitchConversationHandoff;
+  } {
+    const refuse = (reason: ConversationHandoffRefusal): never => {
+      throw this.#failure(
+        "unavailable",
+        conversationHandoffRefusalMessage(reason, { thread: "Work task", cause: "switch" }),
+      );
+    };
+    const select = this.#selectConversationHandoffContext;
+    if (select === undefined) return refuse("unsupported");
+    let selection: AgentRunParentContextSelection;
+    try {
+      selection = select(thread);
+    } catch {
+      return refuse("source-unavailable");
+    }
+    if (selection.status === "unavailable") return refuse(selection.reason);
+    const owned = selectionBelongsToThread(selection, {
+      mode: "work",
+      id: String(thread.id),
+      projectId: String(thread.projectId),
+    });
+    if (owned !== "ok") return refuse(owned);
+    return {
+      blocks: selection.blocks,
+      record: providerSwitchHandoffRecord(selection, {
+        providerInstanceId: previous.authority.providerInstanceId,
+        modelId: previous.authority.modelId,
+      }),
+    };
   }
 
   #agentResultDelivery(command: StartWorkThreadTurnCommand): WorkTurnLookupResult | undefined {
@@ -766,33 +827,43 @@ export class WorkTurnService {
     const acceptedAt = decodeTimestamp(this.#clock());
     const nativeConversation = driver.conversationOwnership === "provider";
     const previous = this.#projection.latestForThread(command.threadId);
-    const previousDriver =
-      previous === undefined
-        ? undefined
-        : this.#resolveDriver(previous.authority.providerInstanceId);
-    const previousNative = previousDriver?.conversationOwnership === "provider";
-    if (
-      (nativeConversation || previousNative || previousDriver === undefined) &&
-      previous !== undefined &&
-      (!nativeConversation ||
-        !previousNative ||
-        previous.providerSessionId === undefined ||
-        previous.resumeCursor === undefined ||
-        previous.authority.providerInstanceId !== command.authority.providerInstanceId ||
-        (previous.authority.modelId !== command.authority.modelId &&
-          this.#supportsModelSwitch?.(command.authority.providerInstanceId) !== true) ||
-        previous.authority.bindingRevisionId !== command.authority.bindingRevisionId ||
-        previous.authority.workingDirectory !== command.authority.workingDirectory)
-    ) {
+    const sessionDecision = decideConversationSession({
+      recipient: {
+        providerInstanceId: String(command.authority.providerInstanceId),
+        owner: nativeConversation ? "runtime" : "host",
+      },
+      ...(previous === undefined
+        ? {}
+        : {
+            previous: {
+              providerInstanceId: String(previous.authority.providerInstanceId),
+              continuable:
+                previous.providerSessionId !== undefined &&
+                previous.resumeCursor !== undefined &&
+                (previous.authority.modelId === command.authority.modelId ||
+                  this.#supportsModelSwitch?.(command.authority.providerInstanceId) === true) &&
+                previous.authority.bindingRevisionId === command.authority.bindingRevisionId &&
+                previous.authority.workingDirectory === command.authority.workingDirectory,
+            },
+          }),
+      handoff: "allowed",
+    });
+    if (sessionDecision.kind === "refuse") {
       throw this.#failure(
         "unavailable",
         "This Work task's native session cannot be recovered under the current provider, model, and folder. Its history has been preserved.",
       );
     }
-    const resumeCursor = nativeConversation ? previous?.resumeCursor : undefined;
+    const continuing = sessionDecision.kind === "continue-session" ? previous : undefined;
+    const handoff =
+      sessionDecision.kind === "new-session-with-handoff" &&
+      previous !== undefined &&
+      thread !== undefined
+        ? this.#selectConversationHandoff(thread, previous)
+        : undefined;
+    const resumeCursor = continuing?.resumeCursor;
     const providerSessionId =
-      (nativeConversation ? previous?.providerSessionId : undefined) ??
-      decodeProviderSessionId(this.#uuid());
+      continuing?.providerSessionId ?? decodeProviderSessionId(this.#uuid());
     const harnessContext =
       thread === undefined
         ? []
@@ -845,6 +916,18 @@ export class WorkTurnService {
         ),
         ...(await this.#projectBriefContributions(project, command.threadId)),
         ...(nativeConversation ? [] : this.#priorTranscriptContributions(command.threadId)),
+        ...(handoff === undefined
+          ? []
+          : handoff.blocks.map(
+              (block, index): WorkTurnContextContribution => ({
+                text: block.text,
+                sourceKind: "message",
+                referenceId: `conversation-handoff:${command.threadId}:${index}`,
+                category: "conversation",
+                posture: "required",
+                block,
+              }),
+            )),
         ...(await this.#threadMentionContributions(
           command.threadId,
           command.threadMentionIds,
@@ -927,6 +1010,7 @@ export class WorkTurnService {
           authority: command.authority,
           providerSessionId,
           ...(resumeCursor === undefined ? {} : { resumeCursor }),
+          ...(handoff === undefined ? {} : { handoff: handoff.record }),
           prompt: command.prompt,
           ...(starting.attachments.length === 0 ? {} : { attachments: starting.attachments }),
           ...(command.extensionSelections === undefined || command.extensionSelections.length === 0
