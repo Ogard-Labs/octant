@@ -19,6 +19,8 @@ import { readThreadExternalContentTaint } from "../context/externalContentTaintP
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
+import { WorkArtifactProjection } from "../work/workArtifactProjection";
+import { hydrateWorkArtifactProjectionFromJournal } from "../work/workPromotionProjectPort";
 import {
   admittedParentCodeContext,
   type AdmittedParentCodeContextInput,
@@ -37,7 +39,7 @@ export type FoundationsDependencies = Pick<ServerStart, "latencyStats" | "option
 
 /**
  * What every other area reads and what depends on persistence and options
- * alone: the Work projections, the provider runtime registry, the browser
+ * alone: the Work projections (threads, turns, and artifacts), the provider runtime registry, the browser
  * authority, and the Code reads an agent run's parent context is built from.
  * They are built first so that no area has to reach for one through a getter.
  */
@@ -75,6 +77,21 @@ export function wireFoundations(deps: FoundationsDependencies) {
     "Work turn",
   );
   workTurnProjection.markInterruptedOnRestart(new Date().toISOString());
+  const workArtifactProjection = new WorkArtifactProjection();
+  requireJournalHydration(
+    hydrateWorkArtifactProjectionFromJournal({
+      replay: (cursor) =>
+        persistence.journal.replayAggregateType({
+          ...Schema.decodeUnknownSync(ReplayCursor)({
+            afterSequence: cursor.afterSequence,
+            limit: cursor.limit,
+          }),
+          aggregateType: cursor.aggregateType ?? "work-artifact",
+        }),
+      projection: workArtifactProjection,
+    }),
+    "Work artifact",
+  );
 
   const providerRuntimeRegistry =
     options.providerRuntimeRegistry ??
@@ -151,6 +168,7 @@ export function wireFoundations(deps: FoundationsDependencies) {
     isProjectPolicyTargetAllowed,
     providerRuntimeRegistry,
     selectCodeConversation,
+    workArtifactProjection,
     workThreadProjection,
     workTurnProjection,
   };

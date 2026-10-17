@@ -7,7 +7,6 @@ import {
   type AgentRunParentThreadId,
   type ChatThreadView,
   type CodeThreadId,
-  decodeAgentRunId,
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeMultiModelRoutingVendorId,
@@ -45,10 +44,7 @@ import {
   AgentRunOrchestrationService,
   createInMemoryCapacityPort,
 } from "../agentRun/agentRunOrchestrationService";
-import {
-  type AgentRunRouteDependencies,
-  createAgentRunRouteHandler,
-} from "../agentRun/agentRunRoutes";
+import type { AgentRunRouteDependencies } from "../agentRun/agentRunRoutes";
 import type { AgentRunControlAdmissionDependencies } from "../agentRun/agentRunControlAdmission";
 import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { createAgentsManagedTools } from "../agentRun/agentRunManagedTools";
@@ -67,6 +63,7 @@ import {
 } from "../agentRun/agentRunWaiterAuthority";
 import { createAgentRunSettingsRouteHandler } from "../agentRun/agentRunSettingsRoutes";
 import {
+  type AgentRunSessionRuntimeOptions,
   createAgentRunSessionRuntime,
   createRecordedAgentRunContextSnapshotPort,
 } from "../agentRun/agentRunSessionRuntime";
@@ -93,8 +90,6 @@ import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-polic
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import { activeChatTurns, chatTurnAnsweredAttempt } from "@octant/domain";
-import { createChildCanvasAgentTools } from "../canvas/canvasAgentTools";
-import { loadChildCanvasWorkspace } from "../canvas/childCanvasWorkspace";
 import { type AppManagedToolSet, combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { type ConfiguredProviderDriverOptions, makeConfiguredProviderDriver } from "./providers";
 import type { ServerStart } from "./serverShape";
@@ -493,15 +488,16 @@ async function resolveAgentRunPrepareCode(
   }
 }
 
+/** What a managed child's session is offering tools for. */
+export type AgentRunChildToolsInput = Parameters<
+  NonNullable<AgentRunSessionRuntimeOptions["appManagedTools"]>
+>[0];
+
 export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
   readonly late: Pick<
     LateBindings,
-    | "canvasAgentToolPort"
-    | "nativeHarnessComposition"
-    | "nativeHarnessLeadFallback"
-    | "nativeHarnessObserver"
-    | "snapshotCanvasImpl"
+    "nativeHarnessComposition" | "nativeHarnessLeadFallback" | "nativeHarnessObserver"
   >;
 } & Pick<
     AuthorityWiring,
@@ -723,6 +719,17 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   const runtimeOutsideContentMarks = new RuntimeOutsideContentMarks((input) =>
     externalContentIngestionStore.record(input),
   );
+  // Areas built after this one add tools to a managed child's session (Canvas
+  // does), the way they add tools to a Chat thread, so agent runs never hold
+  // the service behind them.
+  const childToolContributors: Array<
+    (input: AgentRunChildToolsInput) => AppManagedToolSet | undefined
+  > = [];
+  const contributeChildTools = (
+    contributor: (input: AgentRunChildToolsInput) => AppManagedToolSet | undefined,
+  ): void => {
+    childToolContributors.push(contributor);
+  };
   // Managed subagent execution. A managed child runs as an in-process
   // provider session, not a spawned process, so authority is re-derived from
   // the run rather than inherited from the parent thread at execution time.
@@ -809,71 +816,11 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         "supported",
       appManagedTools: (input) => {
         const native = late.nativeHarnessComposition.current?.forAgentRun(input);
-        const target = effectiveAgentRunExecutionTarget(input.run.routingReceipt);
-        const canvas =
-          late.canvasAgentToolPort.current === undefined
-            ? undefined
-            : createChildCanvasAgentTools({
-                port: {
-                  ...late.canvasAgentToolPort.current,
-                  resolveChildWorkspace: (query) =>
-                    loadChildCanvasWorkspace(
-                      {
-                        readRun: (runId) => {
-                          try {
-                            return agentRunPersistence.getById(decodeAgentRunId(runId));
-                          } catch {
-                            return undefined;
-                          }
-                        },
-                        readProject: (projectId) => {
-                          try {
-                            const project = persistence.readProject(decodeProjectId(projectId));
-                            if (project === undefined) return undefined;
-                            if (project.type === "chat") {
-                              return {
-                                id: String(project.id),
-                                type: project.type,
-                                lifecycle: project.lifecycle,
-                              };
-                            }
-                            return {
-                              id: String(project.id),
-                              type: project.type,
-                              lifecycle: project.lifecycle,
-                              binding: project.binding,
-                              bindingHistory: project.bindingHistory,
-                            };
-                          } catch {
-                            return undefined;
-                          }
-                        },
-                        readCodeThread: (threadId) => {
-                          try {
-                            return persistence.readCodeThread(decodeCodeThreadId(threadId));
-                          } catch {
-                            return undefined;
-                          }
-                        },
-                        findManagedWorktreeReceipt: (lookup) =>
-                          managedWorktreeReceipts.findActive(lookup),
-                      },
-                      query.runId,
-                    ),
-                },
-                run: {
-                  id: String(input.run.id),
-                  parentThreadId: String(input.run.parentThreadId),
-                  mode: input.run.routingReceipt.mode,
-                  ...("projectId" in input.run.workspaceReceipt
-                    ? { projectId: String(input.run.workspaceReceipt.projectId) }
-                    : {}),
-                  providerInstanceId: target.providerInstanceId,
-                  modelId: target.modelId,
-                },
-              });
-        if (native === undefined && canvas === undefined) return undefined;
-        return combineAppManagedToolSets(native, canvas);
+        const contributed = childToolContributors.map((contribute) => contribute(input));
+        if (native === undefined && contributed.every((set) => set === undefined)) {
+          return undefined;
+        }
+        return combineAppManagedToolSets(native, ...contributed);
       },
       appManagedToolTransport: ({ providerInstanceId, modelId }) => {
         const observed = providerRuntimeRegistry.observedState(providerInstanceId);
@@ -1233,7 +1180,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         }),
       uuid: randomUUID,
     });
-  const agentRunRouteDependencies: AgentRunRouteDependencies = {
+  // The routes are built where they are dispatched, with the Canvas snapshot
+  // the Canvas area provides.
+  const agentRunRouteDependencies: Omit<AgentRunRouteDependencies, "snapshotCanvas"> = {
     readObservations: ({ parentThreadId }) => {
       const chat = persistence.readChatThread(decodeChatThreadId(String(parentThreadId)));
       const work = workThreadProjection.read(decodeWorkThreadId(String(parentThreadId)));
@@ -1327,9 +1276,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         requestId,
         workspaceReceipt,
       }),
-    snapshotCanvas: (input) => late.snapshotCanvasImpl.current(input),
   };
-  const agentRunRoutes = createAgentRunRouteHandler(agentRunRouteDependencies);
   /**
    * Synchronous per-candidate runtime facts for child pool routing,
    * mirroring ChatService's probe semantics but reading only the already
@@ -1387,11 +1334,12 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     agentRunLiveConversations,
     agentRunOrchestration,
     agentRunProcessSupervisor,
-    agentRunRoutes,
+    agentRunRouteDependencies,
     agentRunSessionStore,
     agentRunSettingsRoutes,
     agentsManagedToolsFor,
     capacityScheduler,
+    contributeChildTools,
     externalContentIngestionStore,
     managedWorktreeReceipts,
     nativeHarnessHooks,

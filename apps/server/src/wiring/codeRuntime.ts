@@ -74,6 +74,7 @@ import type { WorkRequestStateWiring } from "./workRequestState";
 import type { HarnessStateWiring } from "./harnessState";
 import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
+import type { CanvasWiring } from "./canvas";
 
 function withCodeOperationRuntime(
   service: CodeRouteService,
@@ -208,10 +209,7 @@ function withCodeBoard(
 
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<
-    LateBindings,
-    "canvasAgentToolPort" | "codeOperationRuntime" | "nativeHarnessComposition"
-  >;
+  readonly late: Pick<LateBindings, "codeOperationRuntime" | "nativeHarnessComposition">;
 } & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
@@ -282,7 +280,8 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<
     BrowserWiring,
     "browserAutomationService" | "browserToolApprovalService" | "productFeedbackService"
-  > & {
+  > &
+  Pick<CanvasWiring, "canvasAgentToolPort"> & {
     /** Wired by wireChat; read only after startup. */
     readonly codeThreadMentionDirectory: () => ReturnType<typeof createCodeThreadMentionDirectory>;
     /** Wired by wireWork; read only after startup. */
@@ -312,6 +311,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     browserAutomationService,
     browserToolApprovalService,
     canAccessCodeProject,
+    canvasAgentToolPort,
     codeApprovalStore,
     codeAttachments,
     codeBoardEventStore,
@@ -943,19 +943,17 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             clock: () => new Date().toISOString(),
           }),
         canvas: ({ windowId, thread }) =>
-          late.canvasAgentToolPort.current === undefined
-            ? undefined
-            : createCanvasAgentTools({
-                windowId,
-                mode: "code",
-                thread: {
-                  id: String(thread.id),
-                  projectId: String(thread.projectId),
-                  providerInstanceId: thread.providerInstanceId,
-                  modelId: thread.modelId,
-                },
-                port: late.canvasAgentToolPort.current,
-              }),
+          createCanvasAgentTools({
+            windowId,
+            mode: "code",
+            thread: {
+              id: String(thread.id),
+              projectId: String(thread.projectId),
+              providerInstanceId: thread.providerInstanceId,
+              modelId: thread.modelId,
+            },
+            port: canvasAgentToolPort,
+          }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
         outsideContentMarks: runtimeOutsideContentMarks,
         readThreadExternalContentTaint: (threadId) =>

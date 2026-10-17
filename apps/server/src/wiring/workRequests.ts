@@ -74,13 +74,12 @@ export type WorkRequestsDependencies = Pick<ServerStart, "persistence"> &
   Pick<
     WorkWiring,
     | "observeWorkThreadRuntime"
-    | "workArtifactProjection"
     | "workflowService"
     | "workThreadService"
     | "workThreadServiceWithWorkflows"
   > &
   Pick<WorkFilesWiring, "workResearchProjection"> &
-  Pick<FoundationsWiring, "workThreadProjection" | "workTurnProjection">;
+  Pick<FoundationsWiring, "workArtifactProjection" | "workThreadProjection" | "workTurnProjection">;
 
 export function wireWorkRequests(deps: WorkRequestsDependencies) {
   const {

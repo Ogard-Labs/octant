@@ -94,6 +94,8 @@ import { ProviderAccountPlanUsageStore } from "../providers/providerAccountPlanU
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { GeneratedImageStore } from "../image/generatedImageStore";
+import { ImageJobService } from "../image/imageJobService";
 import { createLocalUsageHistoryRouteHandler } from "../localUsageHistoryRoutes";
 import {
   createLocalUsageHistorySourceForDriver,
@@ -1164,6 +1166,35 @@ export function wireProviders(deps: ProvidersDependencies) {
       service: providerUsageLimitsService,
       windowAuthorityStore,
     });
+    // Image generation runs through a provider instance and its credentials.
+    // Chat, Work, and Canvas all read its jobs, so it is built here, before
+    // any of them.
+    const generatedImageStore = new GeneratedImageStore(persistence.dataDirectory);
+    yield* Effect.promise(() =>
+      generatedImageStore.recover({
+        isFinalizedAttachmentReferenced: (scopeId, attachmentId) =>
+          persistence.imageJobProjection.isFinalizedAttachmentReferenced(scopeId, attachmentId),
+      }),
+    );
+    const imageJobService = new ImageJobService({
+      journal: persistence.journal,
+      projection: persistence.imageJobProjection,
+      attachments: generatedImageStore,
+      readProviderInstance: (id) => persistence.readProviderInstance(id),
+      readImageGenerationCustomSources: () =>
+        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
+          .customSources,
+      credentialResolver:
+        credentialResolver ??
+        ({
+          has: async () => false,
+          resolve: async () => "",
+        } as const),
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
     return {
       agentPluginMcpSessionManager,
       chatAttachmentStore,
@@ -1178,6 +1209,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       extensionApiService,
       extensionPackageStore,
       extensionRoutes,
+      generatedImageStore,
+      imageJobService,
       localUsageHistoryRoutes,
       managedCodeThreadCreation,
       managedWorktreeRefsList,
