@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -17,6 +18,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   buildHeadlessArtifact,
   HEADLESS_ARTIFACT_TARGETS,
+  HEADLESS_CLI_RUNTIME_PACKAGES,
   headlessMigrationsMetadata,
   headlessRuntimeFileRole,
   isHeadlessRuntimeFile,
@@ -207,6 +209,44 @@ describe("buildHeadlessArtifact", () => {
 
 describe("vendored runtime dependencies", () => {
   const linux = { platform: "linux", arch: "x64" } as const;
+
+  it("vendors every third-party package the installed octant command imports", () => {
+    const sourceDirectory = join(import.meta.dirname, "..", "packages", "cli", "src");
+    const imported = new Set<string>();
+    for (const name of readdirSync(sourceDirectory)) {
+      // The terminal launcher is its own fully bundled file; tests never ship.
+      if (
+        !name.endsWith(".ts") ||
+        name.endsWith(".test.ts") ||
+        name === "terminalLauncherMain.ts"
+      ) {
+        continue;
+      }
+      const source = readFileSync(join(sourceDirectory, name), "utf8");
+      for (const match of source.matchAll(/^import[^"']*from "([^"]+)";/gm)) {
+        const specifier = match[1] ?? "";
+        if (
+          specifier.startsWith(".") ||
+          specifier.startsWith("node:") ||
+          specifier.startsWith("bun:")
+        ) {
+          continue;
+        }
+        // A scoped name keeps two segments; a subpath import names its package.
+        const segments = specifier.split("/");
+        imported.add(
+          specifier.startsWith("@") ? segments.slice(0, 2).join("/") : (segments[0] ?? ""),
+        );
+      }
+    }
+    // First-party packages are bundled into the command.
+    const unvendored = [...imported].filter(
+      (name) =>
+        !name.startsWith("@octant/") &&
+        !(HEADLESS_CLI_RUNTIME_PACKAGES as ReadonlyArray<string>).includes(name),
+    );
+    expect(unvendored).toEqual([]);
+  });
 
   it("keeps the files a vendored package loads at runtime on the target", () => {
     for (const path of [
