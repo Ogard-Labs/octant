@@ -416,8 +416,10 @@ describe("ProviderCapacityScheduler", () => {
       enforcement: { kind: "observable-api", maxObservableConcurrency: 2 },
     });
     let freed = 0;
-    const unsubscribe = scheduler.onCapacityFreed(() => {
+    const providers: Array<string> = [];
+    const unsubscribe = scheduler.onCapacityFreed((providerInstanceId) => {
       freed++;
+      providers.push(providerInstanceId);
     });
     expect(scheduler.submit(work(90)).status).toBe("dispatched");
     expect(freed).toBe(0);
@@ -428,6 +430,7 @@ describe("ProviderCapacityScheduler", () => {
     scheduler.releaseUnstarted(id(91));
     expect(freed).toBe(2);
 
+    expect(providers).toEqual([providerA, providerA]);
     unsubscribe();
     expect(scheduler.submit(work(92)).status).toBe("dispatched");
     scheduler.recordTerminal({ reservationId: id(92), outcome: "interrupted" });

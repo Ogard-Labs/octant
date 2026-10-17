@@ -309,7 +309,7 @@ export class ProviderCapacityScheduler {
   readonly #options: ProviderCapacitySchedulerOptions;
   readonly #providers = new Map<ProviderInstanceId, ProviderState>();
   readonly #reservations = new Map<CapacityReservationId, ReservationRecord>();
-  readonly #capacityFreedListeners = new Set<() => void>();
+  readonly #capacityFreedListeners = new Set<(providerInstanceId: ProviderInstanceId) => void>();
   #nextSequence = 1;
 
   constructor(options: ProviderCapacitySchedulerOptions) {
@@ -331,12 +331,13 @@ export class ProviderCapacityScheduler {
   }
 
   /**
-   * Tells the listener each time work that held a slot ends, so work that
-   * waits outside this queue can try again at once instead of on a timer. A
+   * Tells the listener, with the provider it ran on, each time work that held
+   * a slot ends, so work that waits outside this queue knows when to try
+   * again instead of only on a timer. A
    * listener runs inside the ending work's own terminal signal and must not
    * throw or call back into the scheduler: it schedules its retry and returns.
    */
-  onCapacityFreed(listener: () => void): () => void {
+  onCapacityFreed(listener: (providerInstanceId: ProviderInstanceId) => void): () => void {
     this.#capacityFreedListeners.add(listener);
     return () => {
       this.#capacityFreedListeners.delete(listener);
@@ -599,7 +600,7 @@ export class ProviderCapacityScheduler {
     record.dispatched = false;
     record.terminalSignature = "cancelled:";
     const dispatched = this.drain(record.request.providerInstanceId).dispatched;
-    this.#notifyCapacityFreed();
+    this.#notifyCapacityFreed(record.request.providerInstanceId);
     return { reservation: record.reservation, dispatched };
   }
 
@@ -661,7 +662,7 @@ export class ProviderCapacityScheduler {
     }
     record.terminalSignature = signature;
     const dispatched = this.drain(record.request.providerInstanceId).dispatched;
-    this.#notifyCapacityFreed();
+    this.#notifyCapacityFreed(record.request.providerInstanceId);
     return { reservation: record.reservation, dispatched };
   }
 
@@ -699,7 +700,7 @@ export class ProviderCapacityScheduler {
     delete record.ambiguousSinceMs;
     record.reservation = reservation;
     const dispatched = this.drain(record.request.providerInstanceId).dispatched;
-    this.#notifyCapacityFreed();
+    this.#notifyCapacityFreed(record.request.providerInstanceId);
     return { reservation: record.reservation, dispatched };
   }
 
@@ -1054,8 +1055,8 @@ export class ProviderCapacityScheduler {
     return value as SchedulerCapacityAdmission;
   }
 
-  #notifyCapacityFreed(): void {
-    for (const listener of [...this.#capacityFreedListeners]) listener();
+  #notifyCapacityFreed(providerInstanceId: ProviderInstanceId): void {
+    for (const listener of [...this.#capacityFreedListeners]) listener(providerInstanceId);
   }
 
   #removeQueued(record: ReservationRecord): void {

@@ -1643,7 +1643,7 @@ describe("managed child waiting for a provider slot", () => {
       // The journal's clock is fixed, so time runs on from that moment.
       now: () => Date.parse(now) + (Date.now() - startedAt),
       pollMs: 10,
-      graceMs: options.graceMs ?? 20,
+      graceMs: options.graceMs ?? 5,
     });
     slots.start();
     harness.journal.subscribeCommitted((append) => slots.onCommittedAppend(append));
@@ -1688,6 +1688,7 @@ describe("managed child waiting for a provider slot", () => {
     };
     return {
       ...harness,
+      runtime,
       scheduler,
       providerInstanceId,
       parent,
@@ -2244,6 +2245,89 @@ describe("managed child waiting for a provider slot", () => {
       });
     },
   );
+
+  describe("a sibling that becomes ready while the provider is full", () => {
+    function dependentOfFullProvider(driverKind: "claude" | "codex") {
+      // One slot is held elsewhere and the first helper takes the other, so the
+      // provider is full the moment the dependent becomes ready.
+      const provider = fullProvider({
+        holderThreads: ["cccccccc-cccc-4ccc-8ccc-aaaaaaaaaaaa"],
+        driverKind,
+      });
+      const dependencies = new AgentRunDependencyScheduler({
+        agentRuns: provider.persistence,
+        orchestration: provider.orchestration,
+      });
+      provider.journal.subscribeCommitted((append) => dependencies.onCommittedAppend(append));
+      const first = provider.delegate(ids.request);
+      const dependent = provider.delegate(ids.requestChild, ids.thread, "plan", [first.id]);
+      return { provider, first, dependent };
+    }
+
+    it.each(["claude", "codex"] as const)(
+      "asks the provider a bounded number of times, waits, and starts once a %s slot frees",
+      async (driverKind) => {
+        const { provider, first, dependent } = dependentOfFullProvider(driverKind);
+        await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledOnce());
+        const prepareStart = vi.spyOn(provider.runtime, "prepareStart");
+
+        provider.orchestration.onSessionSettled({
+          runId: first.id,
+          outcome: { kind: "completed", responseText: "first finding" },
+        });
+        // The dependent is judged ready on the next tick. Handing the run slot
+        // back after the provider refused it used to pick this same run again
+        // from inside the call, thousands of times, until the stack ran out.
+        await vi.waitFor(() => expect(provider.status(dependent.id)).toBe("waiting"));
+        await Promise.resolve();
+        expect(prepareStart.mock.calls.length).toBeLessThanOrEqual(2);
+        expect(provider.status(dependent.id)).toBe("waiting");
+        expect(provider.orchestration.waitsForProviderSlot(dependent)).toBe(true);
+
+        await provider.supervisor.stop(first.id);
+        await vi.waitFor(() => expect(provider.status(dependent.id)).toBe("starting"));
+        await provider.supervisor.stop(dependent.id);
+      },
+    );
+
+    it("waits under the slot wait and its own clock, not under the reason it was parked for", async () => {
+      const { provider, first, dependent } = dependentOfFullProvider("codex");
+      expect(dependent.recoveryReason).toBe(AGENT_RUN_DEPENDENCY_WAITING_REASON);
+
+      provider.orchestration.onSessionSettled({
+        runId: first.id,
+        outcome: { kind: "completed", responseText: "first finding" },
+      });
+
+      await vi.waitFor(() =>
+        expect(provider.persistence.getById(dependent.id)?.recoveryReason).toBe(
+          AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
+        ),
+      );
+      const waiting = provider.persistence.getById(dependent.id);
+      expect(waiting).toMatchObject({ lifecycleStatus: "waiting" });
+      // It has not waited for a slot yet, so it is not ended as having waited.
+      if (waiting === undefined) throw new Error("The dependent is gone.");
+      provider.orchestration.retryProviderSlotWaiters(Date.parse(waiting.updatedAt));
+      expect(provider.status(dependent.id)).toBe("waiting");
+      await provider.supervisor.stop(first.id);
+      await vi.waitFor(() => expect(provider.status(dependent.id)).toBe("starting"));
+      await provider.supervisor.stop(dependent.id);
+    });
+  });
+
+  it("ends a waiting helper at its limit even while a slot just freed on its provider", () => {
+    const provider = fullProvider();
+    const helper = provider.delegate();
+    const parkedAt = Date.parse(helper.updatedAt);
+
+    provider.orchestration.retryProviderSlotWaiters(
+      parkedAt + AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS,
+      { mayTry: () => false },
+    );
+
+    expect(provider.status(helper.id)).toBe("interrupted");
+  });
 
   it("asks again on a timer, so a limit that frees by the clock starts the helper without any turn ending", async () => {
     const provider = fullProvider({ deaf: true });

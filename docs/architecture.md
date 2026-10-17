@@ -2760,12 +2760,16 @@ text, so a provider's own `waiting` message that reads the same is not one.
 A helper does not queue inside the scheduler: a queued helper would stand ahead
 of every later turn on its provider and refuse them all as waiting on earlier
 work, so a helper nobody is watching would hold up the person's own chat.
-Person-started turns keep precedence instead. A Chat turn is refused at once
-when the provider is full and never waits, so a helper does not take a freed
-slot straight away: after any turn, helper or compaction frees one, helpers
-leave it to the person for two seconds, and only ask after that if nobody took
-it. They also ask every five seconds while any helper waits, because a rate
-limit frees by the clock, oldest first. A helper's own failed try gives its
+Person-started turns keep a head start instead, not strict precedence. A Chat
+turn is refused at once when the provider is full and never waits, so a helper
+does not take a freed slot straight away: after any turn, helper or compaction
+frees one on a provider, that provider's helpers leave it alone for two
+seconds, which protects a follow-up or a quick reply, and only ask after that if
+nobody took it. A person who replies later can still find every slot taken by
+a helper and get `capacity-unavailable`. Another provider's helpers are not held
+back by it. They also ask every five seconds while any helper waits, because a
+rate limit frees by the clock, oldest first, and the five-minute limit is
+checked on that round whatever has freed meanwhile. A helper's own failed try gives its
 slot back without counting as a freed one, so a start that keeps failing is
 retried on that five-second round and never in a loop. The slot is asked for before the child is marked
 Starting, so a try that still finds the provider full journals nothing. The spend reservation that try
@@ -2782,7 +2786,9 @@ moved to another Project than the helper was routed under, or its live grant
 no longer allows starting helpers or covers the helper's, the helper ends
 Interrupted (`authority-drift`) and never starts. The same read gates every
 other child that starts by itself: one that waited on its siblings (`after`)
-and one queued for a run slot. A start refused for the child's own workspace
+and one queued for a run slot. Such a child that then
+finds the provider full takes the slot wait, under its reason and its own clock,
+and hands the run slot it was about to use to the next waiter. A start refused for the child's own workspace
 or authority ends the wait with that reason (`workspace-denied`,
 `authority-drift`) and does not retry. Five minutes, the idle bound of a Chat
 turn, is the longest a helper waits; past it the helper ends Interrupted with
