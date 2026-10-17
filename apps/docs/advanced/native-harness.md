@@ -364,7 +364,11 @@ mid-turn; a note the lead never reached before the turn ended is sent as the
 next prompt. Notes are saved as you send them, so one typed just before
 Octant restarts still reaches the lead on the next turn. `/steer <note>` queues
 one explicitly. Left-over notes are sent once, even with the thread open in
-more than one terminal. `Esc` stops the
+more than one terminal. The app has the same
+note box beside the composer, shown only while the lead works: a note is queued the same way and
+marked queued, then delivered. A note the lead never reached is marked not
+reached and can be discarded there; only the terminal sends it as the next
+prompt. `Esc` stops the
 running turn; `Ctrl+C` stops it too, and a second press right after quits.
 
 `/side <question>` asks the thread's Side Chat — the same one the app's Side
