@@ -3065,39 +3065,67 @@ describe("ChatWorkspace", () => {
     expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
   });
 
-  it("does not show Create image when the image client is missing", () => {
-    // An eligible profile must be present, or this would pass for the wrong
-    // reason: with no profile the action stays hidden even with a client.
-    const snapshot = providerSnapshot();
-    const withEligibleImageProfile = {
-      ...snapshot,
-      instances: [
-        ...snapshot.instances,
-        {
-          id: "image-profile-1" as never,
-          displayName: "Studio images",
-          enabled: true,
-          environmentPolicy: "inherit-host" as const,
-          version: 1 as never,
-          createdAt: now as never,
-          updatedAt: now as never,
-          driverKind: "openai-image" as never,
-          configuration: {
-            kind: "openai-image-http",
-            modelAllowlist: ["gpt-image-2"],
-            defaultModel: "gpt-image-2",
-          } as never,
-        },
-      ],
-    };
+  it("does not show Create image when the host serves no image generation", () => {
+    // A ready profile must be present, or this would pass for the wrong
+    // reason: with no profile the action points at Settings instead.
     render(
       <ChatWorkspace
         controller={controllerFixture()}
+        imageGenerationProfiles={[imageProfile()]}
         onOpenSettings={vi.fn()}
-        providerSnapshot={withEligibleImageProfile}
+        providerSnapshot={providerSnapshot()}
       />,
     );
     expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
+  });
+
+  it("offers Create image in the composer and starts the job in this thread", async () => {
+    const user = userEvent.setup();
+    const { client, enqueue } = imageClient();
+    render(
+      <ChatWorkspace
+        controller={controllerFixture()}
+        imageGenerationClient={client}
+        imageGenerationProfiles={[imageProfile()]}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Create image" }));
+    await user.type(screen.getByLabelText("Image prompt"), "A quiet forest");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() =>
+      expect(enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadKind: "chat-thread",
+          scopeId: threadId,
+          prompt: "A quiet forest",
+        }),
+      ),
+    );
+  });
+
+  it("points the composer at image Settings when no image profile is ready", async () => {
+    const user = userEvent.setup();
+    const onOpenImageSettings = vi.fn();
+    render(
+      <ChatWorkspace
+        controller={controllerFixture()}
+        imageGenerationClient={imageClient().client}
+        imageGenerationProfiles={[]}
+        onOpenImageSettings={onOpenImageSettings}
+        providerSnapshot={providerSnapshot()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Create image" })).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", {
+        name: "Create image unavailable. Open Settings to add an image profile.",
+      }),
+    );
+    expect(onOpenImageSettings).toHaveBeenCalledOnce();
   });
 
   it("does not attach a generated image after the thread has changed", async () => {
@@ -3209,4 +3237,29 @@ function pooledProviderSnapshot(): ProviderRegistrySnapshot {
 async function chooseTurnAction(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(screen.getByRole("button", { name: "More actions" }));
   await user.click(await screen.findByRole("menuitem", { name }));
+}
+
+function imageProfile() {
+  return {
+    instanceId: "a3000000-0000-4000-8000-000000000001",
+    displayName: "OpenAI Image",
+    driverKind: "openai-image" as const,
+    modelAllowlist: ["gpt-image-2"],
+    defaultModel: "gpt-image-2",
+  } as never;
+}
+
+function imageClient() {
+  const enqueue = vi.fn(async () => ({
+    id: "a3000000-0000-4000-8000-000000000003",
+    status: "completed",
+    artifacts: [],
+  }));
+  const client = {
+    list: vi.fn(async () => ({ jobs: [] })),
+    enqueue,
+    get: vi.fn(),
+    cancel: vi.fn(),
+  } as never;
+  return { client, enqueue };
 }

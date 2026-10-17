@@ -2533,6 +2533,85 @@ describe("WorkThreadWorkspace", () => {
     await user.click(await screen.findByRole("button", { name: "Save to Project" }));
     expect(await screen.findByText("The image could not be saved.")).toBeVisible();
   });
+
+  it("offers Create image in the composer and starts the job in this task", async () => {
+    const user = userEvent.setup();
+    const enqueue = vi.fn(async () => ({ ...completedGeneratedJob(), artifacts: [] }));
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        imageGenerationClient={
+          { list: async () => ({ jobs: [] }), enqueue, get: vi.fn(), cancel: vi.fn() } as never
+        }
+        imageGenerationProfiles={[imageProfile()]}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Create image" }));
+    await user.type(screen.getByLabelText("Image prompt"), "A quiet forest");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() =>
+      expect(enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadKind: "work-thread",
+          scopeId: String(threadId),
+          prompt: "A quiet forest",
+        }),
+      ),
+    );
+  });
+
+  it("points the Work composer at image Settings when no image profile is ready", async () => {
+    const user = userEvent.setup();
+    const onOpenImageSettings = vi.fn();
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        imageGenerationClient={{ list: async () => ({ jobs: [] }) } as never}
+        imageGenerationProfiles={[]}
+        onOpenImageSettings={onOpenImageSettings}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Create image unavailable. Open Settings to add an image profile.",
+      }),
+    );
+    expect(onOpenImageSettings).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Create image" })).not.toBeInTheDocument();
+  });
+
+  it("offers no Create image when the host serves no image generation", async () => {
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    render(
+      <WorkThreadWorkspace
+        imageGenerationProfiles={[imageProfile()]}
+        providerGroups={[providerGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+      />,
+    );
+    await screen.findByRole("textbox", { name: "Work prompt" });
+    expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
+  });
 });
 
 function workTurn(overrides: Record<string, unknown> = {}) {

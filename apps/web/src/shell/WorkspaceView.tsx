@@ -528,6 +528,8 @@ export interface WorkspaceViewProps {
   readonly onOpenDraftThread?: (mode: "work" | "code") => void;
   readonly onOpenCodeSettings?: () => void;
   readonly onOpenProviderSettings?: () => void;
+  /** Opens Settings at Image generation, where a thread's Create image action points. */
+  readonly onOpenImageSettings?: () => void;
   readonly onOpenSettings?: () => void;
   readonly providerReady?: boolean;
   readonly providerBootstrapMessage?: string;
@@ -1182,6 +1184,9 @@ function renderCodeTab(
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}
         {...(browserAutomationClient === undefined ? {} : { browserAutomationClient })}
+        {...(props.onOpenImageSettings === undefined
+          ? {}
+          : { onOpenImageSettings: props.onOpenImageSettings })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
         {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
         {...(props.projectWindowCapability === undefined
@@ -1661,6 +1666,9 @@ function renderNonCodeTab(
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}
+        {...(props.onOpenImageSettings === undefined
+          ? {}
+          : { onOpenImageSettings: props.onOpenImageSettings })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvasReference === undefined
           ? {}
@@ -1781,6 +1789,9 @@ function renderNonCodeTab(
                 {...(openProviderSettings === undefined
                   ? {}
                   : { onOpenSettings: openProviderSettings })}
+                {...(props.onOpenImageSettings === undefined
+                  ? {}
+                  : { onOpenImageSettings: props.onOpenImageSettings })}
                 {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
                 {...(props.projectServerUrl === undefined
                   ? {}
@@ -2389,6 +2400,7 @@ function ChatThreadWorkspace(props: {
   readonly imageGenerationClient?: ImageGenerationClient;
   /** Every image profile, custom image sources included, computed once by the shell. */
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
+  readonly onOpenImageSettings?: () => void;
   readonly hostId?: string;
   readonly onOpenCanvasReference?: (card: CanvasThreadReferenceCard) => void;
   readonly onCanvasReferencesObserved?: (
@@ -2484,6 +2496,9 @@ function ChatThreadWorkspace(props: {
         {...(props.imageGenerationProfiles === undefined
           ? {}
           : { imageGenerationProfiles: props.imageGenerationProfiles })}
+        {...(props.onOpenImageSettings === undefined
+          ? {}
+          : { onOpenImageSettings: props.onOpenImageSettings })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId as HostId })}
         {...(props.onOpenCanvasReference === undefined
           ? {}

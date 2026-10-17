@@ -69,6 +69,7 @@ function setup(
     status: "refused" as const,
     reason: "Chat artifacts grant no filesystem authority.",
   }));
+  const authorizeScope = vi.fn(async () => options.authorized !== false);
   const handler = createImageRouteHandler({
     jobs: {
       enqueue,
@@ -82,12 +83,12 @@ function setup(
     } as unknown as ImageJobService,
     listInstances: () => options.instances ?? [imageProfile()],
     readImageGenerationSettings: () => ({ customSources: [] }),
-    authorizeScope: async () => options.authorized !== false,
+    authorizeScope,
     saveToProject,
     windowAuthorityStore,
     now: () => nowMs,
   });
-  return { handler, enqueue, cancel, saveToProject };
+  return { handler, enqueue, cancel, saveToProject, authorizeScope };
 }
 
 function request(
@@ -168,6 +169,31 @@ describe("image routes", () => {
       expect.objectContaining({ prompt: "a red cube", variantCount: 2 }),
     );
   });
+
+  it.each(["work-thread", "code-thread"] as const)(
+    "enqueues a %s job only for a thread the window can open",
+    async (threadKind) => {
+      const allowed = setup();
+      const body = {
+        threadKind,
+        scopeId,
+        profileInstanceId: profileId,
+        modelId: "gpt-image-2",
+        prompt: "a red cube",
+      };
+      const response = await allowed.handler(request("/api/image/jobs", { method: "POST", body }));
+      expect(response?.status).toBe(200);
+      expect(allowed.authorizeScope).toHaveBeenCalledWith(windowId, threadKind, scopeId);
+      expect(allowed.enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({ threadKind, scopeId }),
+      );
+
+      const refused = setup({ authorized: false });
+      const refusal = await refused.handler(request("/api/image/jobs", { method: "POST", body }));
+      expect(refusal?.status).toBe(404);
+      expect(refused.enqueue).not.toHaveBeenCalled();
+    },
+  );
 
   it("cancels a running job", async () => {
     const { handler, cancel } = setup();

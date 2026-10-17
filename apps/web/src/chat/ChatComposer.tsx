@@ -33,6 +33,9 @@ import type {
 import type { ComposerExtensionSelection } from "../composer/composerExtensionSelection";
 import type { ProviderInstanceId, ProviderModelId } from "@octant/contracts/providers";
 import { quoteChipLabel, type TranscriptQuoteChip } from "./quoteSelection";
+import type { ImageGenerationProfileView, ImageGenerationScopeId } from "@octant/contracts";
+import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
+import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import type { ModelPickerSelection, PickerGroup } from "@octant/domain";
 import { pickerGroupCarriesAppManagedTools } from "@octant/domain";
 import { applyComposerCaret } from "../composer/composerThreadDraftStore";
@@ -187,6 +190,13 @@ export interface ChatComposerProps {
   readonly sendDisabledReason?: string;
   readonly statusMessage?: string;
   readonly stopDisabledReason?: string;
+  /** The Create image action. Absent when the host serves no image generation. */
+  readonly imageGeneration?: {
+    readonly profiles: ReadonlyArray<ImageGenerationProfileView>;
+    readonly client: ImageGenerationClient;
+    readonly scopeId: ImageGenerationScopeId;
+    readonly onOpenSettings?: () => void;
+  };
 }
 
 /**
@@ -738,6 +748,18 @@ export function ChatComposer(props: ChatComposerProps) {
             props.onFileSelected(file);
           }}
         />
+        {props.imageGeneration === undefined ? null : (
+          <ImageGenerationAction
+            client={props.imageGeneration.client}
+            {...(props.imageGeneration.onOpenSettings === undefined
+              ? {}
+              : { onOpenSettings: props.imageGeneration.onOpenSettings })}
+            presentation="icon"
+            profiles={props.imageGeneration.profiles}
+            scopeId={props.imageGeneration.scopeId}
+            threadKind="chat-thread"
+          />
+        )}
         <ComposerVoiceButton
           disabled={props.isSending}
           onTranscript={(transcript) =>

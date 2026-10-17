@@ -38,6 +38,7 @@ import type { ImageGenerationProfileView } from "@octant/contracts";
 import { decodeBrowserThreadId, decodeImageGenerationScopeId } from "@octant/contracts";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
+import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
@@ -163,6 +164,8 @@ export interface CodeThreadWorkspaceProps {
   /** Lists and reads the thread's kept Browser screenshots. */
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
+  /** Opens Settings at Image generation, where an image profile is added. */
+  readonly onOpenImageSettings?: () => void;
   /** Opens the pull-request surface from the checkout bar. Absent hides the control. */
   readonly onCreatePullRequest?: () => void;
   readonly hostId?: HostId;
@@ -2013,6 +2016,19 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 onRefused={attachments.refuse}
                 onFileSelected={(file) => void attachments.attach([file])}
               />
+              {props.imageGenerationClient === undefined ||
+              props.imageGenerationProfiles === undefined ? null : (
+                <ImageGenerationAction
+                  client={props.imageGenerationClient}
+                  {...(props.onOpenImageSettings === undefined
+                    ? {}
+                    : { onOpenSettings: props.onOpenImageSettings })}
+                  presentation="icon"
+                  profiles={props.imageGenerationProfiles}
+                  scopeId={decodeImageGenerationScopeId(String(thread.id))}
+                  threadKind="code-thread"
+                />
+              )}
               <ComposerVoiceButton
                 disabled={busy}
                 onTranscript={(transcript) => {

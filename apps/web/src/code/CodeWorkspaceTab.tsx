@@ -49,6 +49,7 @@ export default function CodeWorkspaceTab(props: {
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
+  readonly onOpenImageSettings?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   readonly onCanvasReferencesObserved?: CodeWorkspaceProps["onCanvasReferencesObserved"];
@@ -170,6 +171,9 @@ export default function CodeWorkspaceTab(props: {
           ? {}
           : { browserAutomationClient: props.browserAutomationClient })}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+        {...(props.onOpenImageSettings === undefined
+          ? {}
+          : { onOpenImageSettings: props.onOpenImageSettings })}
         {...(props.hostId === undefined ? {} : { hostId: props.hostId })}
         {...(props.onOpenCanvas === undefined ? {} : { onOpenCanvas: props.onOpenCanvas })}
         {...(props.onCanvasReferencesObserved === undefined

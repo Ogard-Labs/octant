@@ -83,6 +83,7 @@ import {
 } from "@octant/plugin-host/capability-mentions";
 import { BrowserCaptureList } from "../browser/BrowserCaptureList";
 import { GeneratedImageList } from "../image/GeneratedImageList";
+import { ImageGenerationAction } from "../image/ImageGenerationAction";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import { CanvasThreadReferenceCardList } from "../canvas/CanvasThreadReferenceCardList";
@@ -403,6 +404,8 @@ export interface WorkThreadWorkspaceProps {
   readonly imageGenerationClient?: ImageGenerationClient;
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly onOpenSettings?: () => void;
+  /** Opens Settings at Image generation, where an image profile is added. */
+  readonly onOpenImageSettings?: () => void;
   readonly hostId?: HostId;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -2195,6 +2198,20 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                     onFileSelected={(file) => images.attach([file])}
                   />
                 </>
+              )}
+              {props.imageGenerationClient === undefined ||
+              props.imageGenerationProfiles === undefined ? null : (
+                <ImageGenerationAction
+                  client={props.imageGenerationClient}
+                  disabled={completionLocked}
+                  {...(props.onOpenImageSettings === undefined
+                    ? {}
+                    : { onOpenSettings: props.onOpenImageSettings })}
+                  presentation="icon"
+                  profiles={props.imageGenerationProfiles}
+                  scopeId={decodeImageGenerationScopeId(String(props.threadId))}
+                  threadKind="work-thread"
+                />
               )}
               <ComposerVoiceButton
                 disabled={creating || completionLocked}

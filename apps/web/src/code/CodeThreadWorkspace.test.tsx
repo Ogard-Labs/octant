@@ -3361,6 +3361,70 @@ describe("CodeThreadWorkspace", () => {
     expect(await screen.findByText("The image could not be saved.")).toBeVisible();
   });
 
+  it("offers Create image in the composer and starts the job in this thread", async () => {
+    const user = userEvent.setup();
+    const enqueue = vi.fn(async () => ({ ...completedGeneratedJob(), artifacts: [] }));
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        imageGenerationClient={
+          { list: async () => ({ jobs: [] }), enqueue, get: vi.fn(), cancel: vi.fn() } as never
+        }
+        imageGenerationProfiles={[imageProfile()]}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Create image" }));
+    await user.type(screen.getByLabelText("Image prompt"), "A quiet forest");
+    await user.click(screen.getByRole("button", { name: "Generate" }));
+
+    await waitFor(() =>
+      expect(enqueue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          threadKind: "code-thread",
+          scopeId: String(threadId),
+          prompt: "A quiet forest",
+        }),
+      ),
+    );
+  });
+
+  it("points the Code composer at image Settings when no image profile is ready", async () => {
+    const user = userEvent.setup();
+    const onOpenImageSettings = vi.fn();
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        imageGenerationClient={{ list: async () => ({ jobs: [] }) } as never}
+        imageGenerationProfiles={[]}
+        onOpenImageSettings={onOpenImageSettings}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Create image unavailable. Open Settings to add an image profile.",
+      }),
+    );
+    expect(onOpenImageSettings).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Create image" })).not.toBeInTheDocument();
+  });
+
+  it("offers no Create image when the host serves no image generation", async () => {
+    render(
+      <CodeThreadWorkspace
+        controller={controller()}
+        imageGenerationProfiles={[imageProfile()]}
+        providerGroups={[providerGroup()]}
+        threadId={threadId}
+      />,
+    );
+    await screen.findByRole("button", { name: "Add attachment" });
+    expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
+  });
+
   it("marks a stale changed-file observation rather than treating it as current", async () => {
     const queryBoard = vi.fn(async () =>
       boardView([

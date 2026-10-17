@@ -107,6 +107,8 @@ export interface ChatWorkspaceProps {
   readonly providerSnapshot?: ProviderRegistrySnapshot;
   readonly providerGroups?: ReadonlyArray<PickerGroup>;
   readonly onOpenSettings?: () => void;
+  /** Opens Settings at Image generation, where an image profile is added. */
+  readonly onOpenImageSettings?: () => void;
   readonly pendingExtensionSelections?: ReadonlyArray<ChatComposerExtensionSelection>;
   readonly onRemoveExtensionSelection?: ChatComposerProps["onRemoveExtensionSelection"];
   readonly serverUrl?: string;
@@ -1281,9 +1283,9 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                   profiles: props.imageGenerationProfiles ?? [],
                   scopeId: decodeImageGenerationScopeId(String(thread.id)),
                   client: props.imageGenerationClient,
-                  ...(props.onOpenSettings === undefined
+                  ...(props.onOpenImageSettings === undefined
                     ? {}
-                    : { onOpenSettings: props.onOpenSettings }),
+                    : { onOpenSettings: props.onOpenImageSettings }),
                 },
               })}
           draft={props.controller.pendingDraft}
