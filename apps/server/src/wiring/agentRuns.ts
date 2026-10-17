@@ -83,7 +83,11 @@ import { ThreadFollowUpSuggestionStore } from "../followUps/threadFollowUpSugges
 import { SideTaskStore } from "../sideTasks/sideTaskStore";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
-import { activeChatTurns, chatTurnAnsweredAttempt } from "@octant/domain";
+import {
+  activeChatTurns,
+  chatTurnAnsweredAttempt,
+  modelCanTakeDelegatedWork,
+} from "@octant/domain";
 import { type AppManagedToolSet, combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { type ConfiguredProviderDriverOptions, makeConfiguredProviderDriver } from "./providers";
 import type { ServerStart } from "./serverShape";
@@ -910,8 +914,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         if (instance === undefined || !instance.enabled) return false;
         const observed = providerRuntimeRegistry.observedState(providerInstanceId as never);
         return (
-          observed?.readiness === "ready" &&
-          observed.models.some((model) => String(model.id) === modelId)
+          observed !== undefined &&
+          modelCanTakeDelegatedWork(instance.driverKind, observed, modelId as never)
         );
       },
     },

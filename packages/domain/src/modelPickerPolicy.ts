@@ -649,12 +649,13 @@ export function modelCarriesAppManagedTools(
 }
 
 /**
- * Can a delegated child run on `model`? The provider must be able to answer
- * (`providerCanServeModel`: a Foundry deployment that `/models` does not list
- * is `degraded` yet serves its manual deployments), and a direct endpoint runs
- * a child through Octant's own tools, so its model must carry them: the
- * provider supplies them for every model, or a person verified this one.
- * Agent runtimes bring their own tools and need no such proof.
+ * Can a delegated child run on `model`? One rule for advertising a target and
+ * for admitting a child on it, so the two cannot disagree. An agent runtime
+ * must be `ready` and list the model. A direct endpoint runs a child through
+ * Octant's own tools, so its model must also carry them (provider-wide support
+ * or a person's Verify tools); such an endpoint may be `degraded`, because a
+ * Foundry deployment that `/models` does not list still serves its manual
+ * deployments (`providerCanServeModel`).
  */
 export function modelCanTakeDelegatedWork(
   driverKind: ProviderDriverKind,
@@ -662,11 +663,16 @@ export function modelCanTakeDelegatedWork(
     Partial<Pick<ProviderObservedState, "capabilities" | "verifiedToolModelIds">>,
   modelId: ProviderModelId,
 ): boolean {
-  if (!providerCanServeModel(observed, modelId)) return false;
-  if (!isNativeHarnessDriverKind(driverKind)) return true;
+  if (!isNativeHarnessDriverKind(driverKind)) {
+    return (
+      observed.readiness === "ready" &&
+      observed.models.some((model) => String(model.id) === String(modelId))
+    );
+  }
   return (
-    observed.capabilities?.appManagedTools === "supported" ||
-    (observed.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false)
+    providerCanServeModel(observed, modelId) &&
+    (observed.capabilities?.appManagedTools === "supported" ||
+      (observed.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false))
   );
 }
 
