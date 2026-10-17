@@ -481,6 +481,45 @@ describe("a Node server whose main thread was renamed on Linux", () => {
     expect(listener && classifyLocalListener(listener, classification).status).toBe("omitted");
   });
 
+  it("reports a renamed listener unnamed at the deadline when its command line never reads", async () => {
+    vi.useFakeTimers();
+    try {
+      const port = createLiveLocalListenerPort({
+        execute: async () => lsof(6001),
+        currentUid: 1000,
+        resolveWorkingDirectory: async () => "/home/dev/octant-worktree/web",
+        readProcessTable: async () => new Map(),
+        readCommandLine: () => new Promise<ReadonlyArray<string> | undefined>(() => {}),
+      });
+
+      const scan = port.observe();
+      await vi.advanceTimersByTimeAsync(LISTENER_ENRICHMENT_DEADLINE_MS);
+
+      const observation = await scan;
+      expect(observation.status).toBe("observed");
+      expect(observation.status === "observed" && observation.listeners[0]?.processName).toBe(
+        "MainThread",
+      );
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("stops waiting on a command line when the caller aborts", async () => {
+    const abort = new AbortController();
+    const port = createLiveLocalListenerPort({
+      execute: async () => lsof(6001),
+      currentUid: 1000,
+      resolveWorkingDirectory: async () => undefined,
+      readProcessTable: async () => new Map(),
+      readCommandLine: () => new Promise<ReadonlyArray<string> | undefined>(() => {}),
+    });
+    const scan = port.observe(abort.signal);
+    abort.abort();
+    expect((await scan).status).toBe("observed");
+  });
+
   it("does not read the command line of a process that kept its own name", async () => {
     const readCommandLine = vi.fn(async () => ["other"]);
     const port = createLiveLocalListenerPort({

@@ -10,7 +10,6 @@ describe("Linux host tools", () => {
   it("names bubblewrap and lsof when a stock host has neither", () => {
     const missing = missingLinuxHostTools({
       platform: "linux",
-      pathVariable: "/usr/local/bin:/usr/bin",
       isExecutable: present(),
     });
     expect(missing.map((tool) => tool.name)).toEqual(["bwrap", "lsof"]);
@@ -20,20 +19,27 @@ describe("Linux host tools", () => {
     expect(notice).toContain("Running services");
   });
 
-  it("finds lsof anywhere on PATH and bwrap at the path the server confines with", () => {
+  it("finds lsof where the managed service looks and bwrap where the server confines with", () => {
     expect(
       missingLinuxHostTools({
         platform: "linux",
-        pathVariable: "/opt/tools:/usr/bin",
-        isExecutable: present("/opt/tools/lsof", "/usr/bin/bwrap"),
+        isExecutable: present("/usr/sbin/lsof", "/usr/bin/bwrap"),
       }),
     ).toEqual([]);
+  });
+
+  it("does not count an lsof only the interactive shell's PATH can reach", () => {
+    // The user unit sets no PATH, so a copy in ~/.local/bin is invisible to the service.
+    const missing = missingLinuxHostTools({
+      platform: "linux",
+      isExecutable: present("/usr/bin/bwrap", "/home/dev/.local/bin/lsof"),
+    });
+    expect(missing.map((tool) => tool.name)).toEqual(["lsof"]);
   });
 
   it("reports only what is missing", () => {
     const missing = missingLinuxHostTools({
       platform: "linux",
-      pathVariable: "/usr/bin",
       isExecutable: present("/usr/bin/lsof"),
     });
     expect(formatMissingLinuxHostTools(missing)).toContain("install -y bubblewrap\n");

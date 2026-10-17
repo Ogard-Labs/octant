@@ -1,5 +1,5 @@
 import { accessSync, constants } from "node:fs";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 
 /**
  * A program a Linux host needs and a stock install may lack. Neither blocks the
@@ -28,9 +28,23 @@ const LINUX_HOST_TOOLS: ReadonlyArray<LinuxHostTool & { readonly path?: string }
   },
 ];
 
+/**
+ * Where the managed service looks for programs. The systemd user unit sets no
+ * PATH, so the service gets systemd's default rather than the PATH of the shell
+ * that ran `octant`; a tool in `~/.local/bin` or an nvm directory is found by
+ * the shell and missed by the service.
+ */
+const SERVICE_SEARCH_DIRECTORIES: ReadonlyArray<string> = [
+  "/usr/local/sbin",
+  "/usr/local/bin",
+  "/usr/sbin",
+  "/usr/bin",
+  "/sbin",
+  "/bin",
+];
+
 export interface LinuxHostToolProbe {
   readonly platform?: NodeJS.Platform;
-  readonly pathVariable?: string | undefined;
   readonly isExecutable?: (path: string) => boolean;
 }
 
@@ -40,11 +54,10 @@ export function missingLinuxHostTools(
 ): ReadonlyArray<LinuxHostTool> {
   if ((probe.platform ?? process.platform) !== "linux") return [];
   const isExecutable = probe.isExecutable ?? canExecute;
-  const directories = (probe.pathVariable ?? process.env.PATH ?? "").split(delimiter);
   return LINUX_HOST_TOOLS.filter((tool) => {
     const candidates =
       tool.path === undefined
-        ? directories.filter(Boolean).map((directory) => join(directory, tool.name))
+        ? SERVICE_SEARCH_DIRECTORIES.map((directory) => join(directory, tool.name))
         : [tool.path];
     return !candidates.some(isExecutable);
   });
