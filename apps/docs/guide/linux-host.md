@@ -19,6 +19,9 @@ does not work yet.
 - **Bubblewrap** (`bwrap`). Code shell commands and terminals run inside it.
   Without it a provider reports **Incompatible**; Octant never runs an
   unconfined shell instead.
+- **`lsof`.** Running services and Local servers use it to find the servers
+  your projects started. A stock Ubuntu install lacks it; without it the card
+  says Octant could not check this computer for local servers.
 - **Git 2.36 or later.** Code Projects need a Git repository.
 - **A Secret Service session and `secret-tool`**, only for storing provider
   credentials. Without one, `octant status` reports
@@ -30,8 +33,11 @@ does not work yet.
   that needs an API key or bearer token takes it from
   [`octant provider key set`](#save-an-api-key-for-an-endpoint).
 
-`scripts/ade/install-linux-host-deps.sh` installs Bubblewrap, `secret-tool`,
-the GNOME keyring, and a recent Git with `sudo`. If you install packages
+`scripts/ade/install-linux-host-deps.sh` installs Bubblewrap, `lsof`,
+`secret-tool`, the GNOME keyring, and a recent Git with `sudo`. For a packaged
+install, `sudo apt-get install -y bubblewrap lsof` covers the first two;
+`octant server install`, `start`, `restart`, and `enable` print which of them
+are missing but never install anything. If you install packages
 yourself, see [Installation](./installation#headless-linux-for-ade-testing)
 for the keyring session it sets up.
 

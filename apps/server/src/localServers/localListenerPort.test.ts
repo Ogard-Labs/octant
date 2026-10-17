@@ -1,4 +1,5 @@
 import { MAX_LOCAL_SERVER_LISTENERS } from "@octant/contracts";
+import { classifyLocalListener } from "@octant/domain";
 import { describe, expect, it, vi } from "vitest";
 import {
   createLiveLocalListenerHoldingProbe,
@@ -434,6 +435,76 @@ describe("local listener observation", () => {
         bindAddress: "127.0.0.1",
       },
     ]);
+  });
+});
+
+describe("a Node server whose main thread was renamed on Linux", () => {
+  // Node 24 on Ubuntu: `lsof +c 0`, `ps -o comm`, and /proc/<pid>/comm all read
+  // MainThread for a Vite dev server and for a plain `node server.mjs`.
+  const lsof = (pid: number) => [`p${pid}`, "cMainThread", "u1000", "n127.0.0.1:5173"].join("\n");
+  const classification = {
+    currentCheckoutRoot: "/home/dev/octant-worktree",
+    userProjectRoots: ["/home/dev"],
+  };
+
+  function scan(commandLine: ReadonlyArray<string> | undefined) {
+    return createLiveLocalListenerPort({
+      execute: async () => lsof(6001),
+      currentUid: 1000,
+      resolveWorkingDirectory: async () => "/home/dev/octant-worktree/web",
+      readProcessTable: async () => new Map(),
+      readCommandLine: async () => commandLine,
+    });
+  }
+
+  it("names the program from its command line so a Vite server is recognised", async () => {
+    const [listener] = await observed(
+      scan(["node", "/home/dev/octant-worktree/web/node_modules/.bin/vite", "--port", "5173"]),
+    );
+    expect(listener).toMatchObject({ processName: "node", commandName: "vite" });
+    expect(listener && classifyLocalListener(listener, classification)).toMatchObject({
+      status: "listed",
+      framework: "vite",
+      attribution: "current-checkout",
+    });
+  });
+
+  it("recognises a plain script as a node server through its working directory", async () => {
+    const [listener] = await observed(scan(["/usr/bin/node", "--watch", "server.mjs"]));
+    expect(listener).toMatchObject({ processName: "node", commandName: "server" });
+    expect(listener && classifyLocalListener(listener, classification).status).toBe("listed");
+  });
+
+  it("stays unclassified when the command line cannot be read", async () => {
+    const [listener] = await observed(scan(undefined));
+    expect(listener?.processName).toBe("MainThread");
+    expect(listener && classifyLocalListener(listener, classification).status).toBe("omitted");
+  });
+
+  it("does not read the command line of a process that kept its own name", async () => {
+    const readCommandLine = vi.fn(async () => ["other"]);
+    const port = createLiveLocalListenerPort({
+      execute: async () => "p4213\ncnode\nu1000\nn127.0.0.1:5173",
+      currentUid: 1000,
+      resolveWorkingDirectory: async () => undefined,
+      readProcessTable: async () => new Map(),
+      readCommandLine,
+    });
+    expect((await observed(port))[0]?.processName).toBe("node");
+    expect(readCommandLine).not.toHaveBeenCalled();
+  });
+
+  it("holds the same name when the grant is re-observed", async () => {
+    const check = createLiveLocalListenerHoldingProbe({
+      currentUid: 1000,
+      ownedProcessRoots: async () => new Set([300]),
+      readCommandLine: async () => ["node", "server.mjs"],
+      execute: async (command) =>
+        command === "lsof" ? lsof(6001) : [" 300 1 bash", " 6001 300 MainThread"].join("\n"),
+    });
+    expect(await check({ host: "127.0.0.1", port: 5173, pid: 6001, processName: "node" })).toBe(
+      "held",
+    );
   });
 });
 

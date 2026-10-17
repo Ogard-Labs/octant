@@ -6797,7 +6797,10 @@ mechanisms are:
   classifier decides what may be listed at all: a system daemon, another user's
   process, or an interpreter with no project and no editor lineage is omitted
   rather than shown disabled, so no surface can be read as a host process
-  inventory. The Code Environment reads it per thread. The start screen's
+  inventory. On Linux a Node main thread renames itself `MainThread`, so the
+  scan names such a listener from `/proc/<pid>/cmdline` (program and script)
+  before classifying; a command line it cannot read stays unclassified. The
+  Code Environment reads it per thread. The start screen's
   Running services reads the same service host-wide (`list-running-services`
   on the same authenticated route; no thread or Project in the command) and
   adds one filter before anything is probed: a listener is published only when
