@@ -2444,7 +2444,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   kinds `openai-image`, `gemini-native-image`, `bfl-image` (Black Forest Labs),
   and `ideogram-image`, and for an OpenAI-compatible custom image source, a
   bounded generated-image attachment scope, and usage rows attributed as
-  `image-generation`. A job uses exactly one profile; a safety refusal ends it
+  `image-generation` (a provider that returns no token counts leaves its row
+  `unavailable`, never a measured zero). A job uses exactly one profile; a safety refusal ends it
   and is never retried elsewhere; a job found queued or running after a
   restart fails as interrupted and is never resent. Adapters accept only
   inline image bytes, and the journal holds attachment references and a
