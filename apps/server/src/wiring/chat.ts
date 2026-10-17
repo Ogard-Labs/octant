@@ -130,7 +130,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<ComputerUseWiring, "computerToolsFor" | "computerUseTools"> &
   Pick<WorkspaceWiring, "contextHarness" | "shellService"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
-  Pick<CodeWiring, "codeService" | "environmentService"> &
+  Pick<CodeWiring, "environmentService"> &
   Pick<
     ProvidersWiring,
     | "agentPluginMcpSessionManager"
@@ -144,7 +144,7 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "reviewedModelManifest"
     | "skillDiscoveryService"
   > &
-  Pick<CodeRuntimeWiring, "routeCodeService"> &
+  Pick<CodeRuntimeWiring, "codeService" | "routeCodeService"> &
   Pick<CanvasWiring, "canvasAgentToolPort"> &
   Pick<HarnessWiring, "nativeHarnessComposition" | "researchRouter" | "threadWork"> & {
     /** Wired by wireWorkFiles; read only after startup. */

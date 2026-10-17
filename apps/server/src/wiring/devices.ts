@@ -1,5 +1,7 @@
 import {
+  type AndroidEmulatorRequest,
   type AndroidRpcEnvelope,
+  type AppleActionRequest,
   type AppleRpcEnvelope,
   type AppleSimulatorId,
   decodeCodeCheckoutId,
@@ -50,7 +52,6 @@ import type { AuthorityWiring } from "./authority";
 import type { WorkspaceWiring } from "./workspace";
 import type { CodeWiring } from "./code";
 import type { ProvidersWiring } from "./providers";
-import type { LateBindings } from "./lateBindings";
 
 export function stableAppleRootId(rootPath: string): string {
   const digest = createHash("sha256")
@@ -102,10 +103,23 @@ function appleRestartContext(
   };
 }
 
-export type DevicesDependencies = Pick<ServerStart, "persistence"> & {
-  /** Settled by the Code runtime call that follows; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "codeOperationRuntime">;
-} & Pick<
+/**
+ * The Code runtime's check of a device action's one-use approval. Undefined
+ * when the host has no runtime, which refuses the approval.
+ */
+export interface DeviceApprovalChecks {
+  readonly validateAppleApproval: (
+    windowId: WindowId,
+    request: AppleActionRequest,
+  ) => Promise<boolean> | undefined;
+  readonly validateAndroidApproval: (
+    windowId: WindowId,
+    request: AndroidEmulatorRequest,
+  ) => Promise<boolean> | undefined;
+}
+
+export type DevicesDependencies = Pick<ServerStart, "persistence"> &
+  Pick<
     AuthorityWiring,
     "androidInputGrants" | "codeSessionAuthority" | "simulatorInputGrants" | "windowAuthorityStore"
   > &
@@ -117,7 +131,6 @@ export function wireDevices(deps: DevicesDependencies) {
   const {
     androidInputGrants,
     codeSessionAuthority,
-    late,
     persistence,
     projectService,
     providerDataDirectory,
@@ -186,147 +199,6 @@ export function wireDevices(deps: DevicesDependencies) {
       appleValidationEvents.appendEvidence({ evidence: composed.record, expectedVersion: 1 });
       appleValidationEvents.appendReport({ report: composed.report, expectedVersion: 2 });
     };
-    const appleRootProbe = decodeCodeRelativePath("package.json");
-    const resolveAppleContext = async (
-      windowId: WindowId,
-      scope: {
-        readonly authority: import("@octant/contracts").ToolActionAuthority;
-        readonly threadId: import("@octant/contracts").CodeThreadId;
-        readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
-      },
-      envelope: AppleRpcEnvelope,
-    ): Promise<AppleExecutionContext | undefined> => {
-      const thread = persistence.readCodeThread(scope.threadId);
-      const checkout = persistence.readCodeCheckout(scope.checkoutId);
-      if (
-        thread === undefined ||
-        checkout === undefined ||
-        thread.checkoutId !== checkout.id ||
-        thread.repositoryId !== checkout.repositoryId ||
-        thread.lifecycle !== "active" ||
-        checkout.availability !== "available" ||
-        // Apple evidence is pinned to a source revision; a plain folder has none.
-        checkout.head.kind === "none" ||
-        scope.authority.hostId !== LOCAL_TOOL_HOST_ID ||
-        scope.authority.mode !== "code" ||
-        scope.authority.projectId !== thread.projectId ||
-        scope.authority.providerInstanceId !== thread.providerInstanceId ||
-        scope.authority.extension.kind !== "core"
-      ) {
-        return undefined;
-      }
-      const projects = await projectService.bootstrap(windowId);
-      if (
-        !projects.active.some(
-          (project) => project.id === thread.projectId && project.type === "code",
-        )
-      ) {
-        return undefined;
-      }
-      const resolvedRoot = await roots.resolve(windowId, thread, checkout, appleRootProbe);
-      if (resolvedRoot === undefined) return undefined;
-      if (
-        scope.authority.worktreeId !== undefined &&
-        String(scope.authority.worktreeId) !== String(checkout.id)
-      ) {
-        return undefined;
-      }
-      if (
-        scope.authority.rootId !== undefined &&
-        String(scope.authority.rootId) !== stableAppleRootId(resolvedRoot.rootPath)
-      ) {
-        return undefined;
-      }
-      const effectiveThread = codeSessionAuthority.effectiveThread(windowId, thread);
-      const action = envelope.kind === "apple-action-request" ? envelope.request : undefined;
-      const inputSimulatorId =
-        action !== undefined && isAppleSimulatorInputKind(action.kind) && "simulatorId" in action
-          ? action.simulatorId
-          : undefined;
-      const grantDestinationId =
-        action !== undefined && appleActionOpensInputGrant(action.kind) && "simulatorId" in action
-          ? action.simulatorId
-          : undefined;
-      let approvalValid: boolean;
-      let inputGranted = false;
-      if (action === undefined || effectiveThread.executionPolicy === "full-access") {
-        approvalValid = true;
-      } else if (!decidesCodeEffectsByApproval(effectiveThread.executionPolicy)) {
-        approvalValid = false;
-      } else if (
-        inputSimulatorId !== undefined &&
-        simulatorInputGrants.isOpen({
-          windowId: String(windowId),
-          threadId: String(thread.id),
-          simulatorId: String(inputSimulatorId),
-        })
-      ) {
-        // One Allow input opened this Simulator to this window on this thread;
-        // clicks then ride the grant. The grant is the window's, like the
-        // approval it came from, so another client on the thread does not ride
-        // it. Allow input itself never skips its confirmation this way.
-        approvalValid = true;
-        inputGranted = true;
-      } else {
-        approvalValid =
-          (await late.codeOperationRuntime.current?.validateAppleApproval(windowId, action)) ??
-          false;
-        if (approvalValid && grantDestinationId !== undefined) {
-          simulatorInputGrants.open({
-            windowId: String(windowId),
-            threadId: String(thread.id),
-            simulatorId: String(grantDestinationId),
-          });
-        }
-      }
-      return {
-        authority: scope.authority,
-        threadId: thread.id,
-        checkoutId: checkout.id,
-        checkoutRoot: resolvedRoot.rootPath,
-        artifactRoot: appleRuntimeStore.artifactRoot,
-        sourceRevision: checkout.head.oid,
-        executionPolicy: effectiveThread.executionPolicy,
-        approvalValid,
-        ...(inputGranted ? { inputGranted } : {}),
-      };
-    };
-    const appleToolchainRoutes = createAppleToolchainRouteHandler({
-      windowAuthorityStore,
-      service: appleToolchainService,
-      resolveContext: resolveAppleContext,
-      afterAction: (windowId, request, evidence, context) => {
-        simulatorInputGrants.settle(String(windowId), request, evidence, context);
-        if ("simulatorId" in request && request.simulatorId !== undefined) {
-          simulatorOrientation?.afterInput(String(request.simulatorId), request, evidence.outcome);
-        }
-      },
-      inputGrants: (windowId, threadId) =>
-        simulatorInputGrants.list(String(windowId), String(threadId)),
-      ...(simulatorDevice === undefined
-        ? {}
-        : {
-            // A pane is a few hundred points tall; 30 frames a second of a
-            // screen scaled to 1100 pixels is sharp there and about 1 MB/s.
-            watchSimulator: async (simulatorId: string, signal: AbortSignal) => {
-              const watch = await simulatorDevice.watch(
-                { udid: simulatorId, maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
-                signal,
-              );
-              if (watch.kind === "watching" && watch.orientation !== undefined) {
-                appleToolchainService.noteOrientation(
-                  simulatorId as AppleSimulatorId,
-                  watch.orientation,
-                );
-              }
-              if (watch.kind === "watching")
-                simulatorOrientation?.whileWatching(simulatorId, signal);
-              return watch;
-            },
-          }),
-      recordEvidence: recordAppleEvidence,
-      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-    });
     const androidRuntimeStore = new AndroidRuntimeStore(
       join(providerDataDirectory, "android-runtime"),
     );
@@ -355,118 +227,270 @@ export function wireDevices(deps: DevicesDependencies) {
       now: () => new Date().toISOString(),
       newId: randomUUID,
     });
-    const androidRootProbe = decodeCodeRelativePath("package.json");
-    const resolveAndroidContext = async (
-      windowId: WindowId,
-      scope: {
-        readonly authority: import("@octant/contracts").ToolActionAuthority;
-        readonly threadId: import("@octant/contracts").CodeThreadId;
-        readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
-      },
-      envelope: AndroidRpcEnvelope,
-    ): Promise<AndroidExecutionContext | undefined> => {
-      const thread = persistence.readCodeThread(scope.threadId);
-      const checkout = persistence.readCodeCheckout(scope.checkoutId);
-      if (
-        thread === undefined ||
-        checkout === undefined ||
-        thread.checkoutId !== checkout.id ||
-        thread.repositoryId !== checkout.repositoryId ||
-        thread.lifecycle !== "active" ||
-        checkout.availability !== "available" ||
-        scope.authority.hostId !== LOCAL_TOOL_HOST_ID ||
-        scope.authority.mode !== "code" ||
-        scope.authority.projectId !== thread.projectId ||
-        scope.authority.providerInstanceId !== thread.providerInstanceId ||
-        scope.authority.extension.kind !== "core"
-      ) {
-        return undefined;
-      }
-      const projects = await projectService.bootstrap(windowId);
-      if (
-        !projects.active.some(
-          (project) => project.id === thread.projectId && project.type === "code",
-        )
-      ) {
-        return undefined;
-      }
-      const resolvedRoot = await roots.resolve(windowId, thread, checkout, androidRootProbe);
-      if (resolvedRoot === undefined) return undefined;
-      if (
-        scope.authority.worktreeId !== undefined &&
-        String(scope.authority.worktreeId) !== String(checkout.id)
-      ) {
-        return undefined;
-      }
-      const effectiveThread = codeSessionAuthority.effectiveThread(windowId, thread);
-      const action = envelope.kind === "android-action-request" ? envelope.request : undefined;
-      const inputEmulatorId =
-        action !== undefined && isAndroidEmulatorInputKind(action.kind)
-          ? action.emulatorId
-          : undefined;
-      const grantDestinationId =
-        action !== undefined && androidActionOpensInputGrant(action.kind)
-          ? action.emulatorId
-          : undefined;
-      let approvalValid: boolean;
-      let inputGranted = false;
-      if (action === undefined || effectiveThread.executionPolicy === "full-access") {
-        approvalValid = true;
-      } else if (!decidesCodeEffectsByApproval(effectiveThread.executionPolicy)) {
-        approvalValid = false;
-      } else if (
-        inputEmulatorId !== undefined &&
-        androidInputGrants.isOpen({
-          windowId: String(windowId),
-          threadId: String(thread.id),
-          simulatorId: String(inputEmulatorId),
-        })
-      ) {
-        approvalValid = true;
-        inputGranted = true;
-      } else {
-        approvalValid =
-          (await late.codeOperationRuntime.current?.validateAndroidApproval(windowId, action)) ??
-          false;
-        if (approvalValid && grantDestinationId !== undefined) {
-          androidInputGrants.open({
+    // A device action the person allowed carries a one-use approval only the
+    // Code runtime can check, and the runtime runs device actions through these
+    // same resolvers, so the runtime's area calls this with its own check.
+    const bindDeviceApprovals = (approvals: DeviceApprovalChecks) => {
+      const appleRootProbe = decodeCodeRelativePath("package.json");
+      const resolveAppleContext = async (
+        windowId: WindowId,
+        scope: {
+          readonly authority: import("@octant/contracts").ToolActionAuthority;
+          readonly threadId: import("@octant/contracts").CodeThreadId;
+          readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
+        },
+        envelope: AppleRpcEnvelope,
+      ): Promise<AppleExecutionContext | undefined> => {
+        const thread = persistence.readCodeThread(scope.threadId);
+        const checkout = persistence.readCodeCheckout(scope.checkoutId);
+        if (
+          thread === undefined ||
+          checkout === undefined ||
+          thread.checkoutId !== checkout.id ||
+          thread.repositoryId !== checkout.repositoryId ||
+          thread.lifecycle !== "active" ||
+          checkout.availability !== "available" ||
+          // Apple evidence is pinned to a source revision; a plain folder has none.
+          checkout.head.kind === "none" ||
+          scope.authority.hostId !== LOCAL_TOOL_HOST_ID ||
+          scope.authority.mode !== "code" ||
+          scope.authority.projectId !== thread.projectId ||
+          scope.authority.providerInstanceId !== thread.providerInstanceId ||
+          scope.authority.extension.kind !== "core"
+        ) {
+          return undefined;
+        }
+        const projects = await projectService.bootstrap(windowId);
+        if (
+          !projects.active.some(
+            (project) => project.id === thread.projectId && project.type === "code",
+          )
+        ) {
+          return undefined;
+        }
+        const resolvedRoot = await roots.resolve(windowId, thread, checkout, appleRootProbe);
+        if (resolvedRoot === undefined) return undefined;
+        if (
+          scope.authority.worktreeId !== undefined &&
+          String(scope.authority.worktreeId) !== String(checkout.id)
+        ) {
+          return undefined;
+        }
+        if (
+          scope.authority.rootId !== undefined &&
+          String(scope.authority.rootId) !== stableAppleRootId(resolvedRoot.rootPath)
+        ) {
+          return undefined;
+        }
+        const effectiveThread = codeSessionAuthority.effectiveThread(windowId, thread);
+        const action = envelope.kind === "apple-action-request" ? envelope.request : undefined;
+        const inputSimulatorId =
+          action !== undefined && isAppleSimulatorInputKind(action.kind) && "simulatorId" in action
+            ? action.simulatorId
+            : undefined;
+        const grantDestinationId =
+          action !== undefined && appleActionOpensInputGrant(action.kind) && "simulatorId" in action
+            ? action.simulatorId
+            : undefined;
+        let approvalValid: boolean;
+        let inputGranted = false;
+        if (action === undefined || effectiveThread.executionPolicy === "full-access") {
+          approvalValid = true;
+        } else if (!decidesCodeEffectsByApproval(effectiveThread.executionPolicy)) {
+          approvalValid = false;
+        } else if (
+          inputSimulatorId !== undefined &&
+          simulatorInputGrants.isOpen({
             windowId: String(windowId),
             threadId: String(thread.id),
-            simulatorId: String(grantDestinationId),
-          });
+            simulatorId: String(inputSimulatorId),
+          })
+        ) {
+          // One Allow input opened this Simulator to this window on this thread;
+          // clicks then ride the grant. The grant is the window's, like the
+          // approval it came from, so another client on the thread does not ride
+          // it. Allow input itself never skips its confirmation this way.
+          approvalValid = true;
+          inputGranted = true;
+        } else {
+          approvalValid = (await approvals.validateAppleApproval(windowId, action)) ?? false;
+          if (approvalValid && grantDestinationId !== undefined) {
+            simulatorInputGrants.open({
+              windowId: String(windowId),
+              threadId: String(thread.id),
+              simulatorId: String(grantDestinationId),
+            });
+          }
         }
-      }
+        return {
+          authority: scope.authority,
+          threadId: thread.id,
+          checkoutId: checkout.id,
+          checkoutRoot: resolvedRoot.rootPath,
+          artifactRoot: appleRuntimeStore.artifactRoot,
+          sourceRevision: checkout.head.oid,
+          executionPolicy: effectiveThread.executionPolicy,
+          approvalValid,
+          ...(inputGranted ? { inputGranted } : {}),
+        };
+      };
+      const appleToolchainRoutes = createAppleToolchainRouteHandler({
+        windowAuthorityStore,
+        service: appleToolchainService,
+        resolveContext: resolveAppleContext,
+        afterAction: (windowId, request, evidence, context) => {
+          simulatorInputGrants.settle(String(windowId), request, evidence, context);
+          if ("simulatorId" in request && request.simulatorId !== undefined) {
+            simulatorOrientation?.afterInput(
+              String(request.simulatorId),
+              request,
+              evidence.outcome,
+            );
+          }
+        },
+        inputGrants: (windowId, threadId) =>
+          simulatorInputGrants.list(String(windowId), String(threadId)),
+        ...(simulatorDevice === undefined
+          ? {}
+          : {
+              // A pane is a few hundred points tall; 30 frames a second of a
+              // screen scaled to 1100 pixels is sharp there and about 1 MB/s.
+              watchSimulator: async (simulatorId: string, signal: AbortSignal) => {
+                const watch = await simulatorDevice.watch(
+                  { udid: simulatorId, maxHeight: 1_100, quality: 0.7, framesPerSecond: 30 },
+                  signal,
+                );
+                if (watch.kind === "watching" && watch.orientation !== undefined) {
+                  appleToolchainService.noteOrientation(
+                    simulatorId as AppleSimulatorId,
+                    watch.orientation,
+                  );
+                }
+                if (watch.kind === "watching")
+                  simulatorOrientation?.whileWatching(simulatorId, signal);
+                return watch;
+              },
+            }),
+        recordEvidence: recordAppleEvidence,
+        maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+      });
+      const androidRootProbe = decodeCodeRelativePath("package.json");
+      const resolveAndroidContext = async (
+        windowId: WindowId,
+        scope: {
+          readonly authority: import("@octant/contracts").ToolActionAuthority;
+          readonly threadId: import("@octant/contracts").CodeThreadId;
+          readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
+        },
+        envelope: AndroidRpcEnvelope,
+      ): Promise<AndroidExecutionContext | undefined> => {
+        const thread = persistence.readCodeThread(scope.threadId);
+        const checkout = persistence.readCodeCheckout(scope.checkoutId);
+        if (
+          thread === undefined ||
+          checkout === undefined ||
+          thread.checkoutId !== checkout.id ||
+          thread.repositoryId !== checkout.repositoryId ||
+          thread.lifecycle !== "active" ||
+          checkout.availability !== "available" ||
+          scope.authority.hostId !== LOCAL_TOOL_HOST_ID ||
+          scope.authority.mode !== "code" ||
+          scope.authority.projectId !== thread.projectId ||
+          scope.authority.providerInstanceId !== thread.providerInstanceId ||
+          scope.authority.extension.kind !== "core"
+        ) {
+          return undefined;
+        }
+        const projects = await projectService.bootstrap(windowId);
+        if (
+          !projects.active.some(
+            (project) => project.id === thread.projectId && project.type === "code",
+          )
+        ) {
+          return undefined;
+        }
+        const resolvedRoot = await roots.resolve(windowId, thread, checkout, androidRootProbe);
+        if (resolvedRoot === undefined) return undefined;
+        if (
+          scope.authority.worktreeId !== undefined &&
+          String(scope.authority.worktreeId) !== String(checkout.id)
+        ) {
+          return undefined;
+        }
+        const effectiveThread = codeSessionAuthority.effectiveThread(windowId, thread);
+        const action = envelope.kind === "android-action-request" ? envelope.request : undefined;
+        const inputEmulatorId =
+          action !== undefined && isAndroidEmulatorInputKind(action.kind)
+            ? action.emulatorId
+            : undefined;
+        const grantDestinationId =
+          action !== undefined && androidActionOpensInputGrant(action.kind)
+            ? action.emulatorId
+            : undefined;
+        let approvalValid: boolean;
+        let inputGranted = false;
+        if (action === undefined || effectiveThread.executionPolicy === "full-access") {
+          approvalValid = true;
+        } else if (!decidesCodeEffectsByApproval(effectiveThread.executionPolicy)) {
+          approvalValid = false;
+        } else if (
+          inputEmulatorId !== undefined &&
+          androidInputGrants.isOpen({
+            windowId: String(windowId),
+            threadId: String(thread.id),
+            simulatorId: String(inputEmulatorId),
+          })
+        ) {
+          approvalValid = true;
+          inputGranted = true;
+        } else {
+          approvalValid = (await approvals.validateAndroidApproval(windowId, action)) ?? false;
+          if (approvalValid && grantDestinationId !== undefined) {
+            androidInputGrants.open({
+              windowId: String(windowId),
+              threadId: String(thread.id),
+              simulatorId: String(grantDestinationId),
+            });
+          }
+        }
+        return {
+          authority: scope.authority,
+          threadId: thread.id,
+          checkoutId: checkout.id,
+          checkoutRoot: resolvedRoot.rootPath,
+          artifactRoot: androidRuntimeStore.artifactRoot,
+          executionPolicy: effectiveThread.executionPolicy,
+          approvalValid,
+          ...(inputGranted ? { inputGranted } : {}),
+        };
+      };
+      const androidToolchainRoutes = createAndroidToolchainRouteHandler({
+        windowAuthorityStore,
+        service: androidToolchainService,
+        resolveContext: resolveAndroidContext,
+        afterAction: (windowId, request, evidence, context) => {
+          if (isReplayedAndroidEvidence(evidence)) return;
+          androidInputGrants.settle(
+            String(windowId),
+            { kind: request.kind, simulatorId: request.emulatorId },
+            evidence,
+            context,
+          );
+        },
+        inputGrants: (windowId, threadId) =>
+          androidInputGrants.list(String(windowId), String(threadId)).map((grant) => ({
+            emulatorId: grant.simulatorId,
+            expiresAt: grant.expiresAt,
+          })),
+        maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+      });
       return {
-        authority: scope.authority,
-        threadId: thread.id,
-        checkoutId: checkout.id,
-        checkoutRoot: resolvedRoot.rootPath,
-        artifactRoot: androidRuntimeStore.artifactRoot,
-        executionPolicy: effectiveThread.executionPolicy,
-        approvalValid,
-        ...(inputGranted ? { inputGranted } : {}),
+        androidToolchainRoutes,
+        appleToolchainRoutes,
+        resolveAndroidContext,
+        resolveAppleContext,
       };
     };
-    const androidToolchainRoutes = createAndroidToolchainRouteHandler({
-      windowAuthorityStore,
-      service: androidToolchainService,
-      resolveContext: resolveAndroidContext,
-      afterAction: (windowId, request, evidence, context) => {
-        if (isReplayedAndroidEvidence(evidence)) return;
-        androidInputGrants.settle(
-          String(windowId),
-          { kind: request.kind, simulatorId: request.emulatorId },
-          evidence,
-          context,
-        );
-      },
-      inputGrants: (windowId, threadId) =>
-        androidInputGrants.list(String(windowId), String(threadId)).map((grant) => ({
-          emulatorId: grant.simulatorId,
-          expiresAt: grant.expiresAt,
-        })),
-      maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
-    });
     yield* Effect.promise(async () => {
       const receipts = await appleRuntimeStore.loadReceipts();
       for (const receipt of receipts) {
@@ -479,13 +503,10 @@ export function wireDevices(deps: DevicesDependencies) {
       await appleRuntimeStore.persistReceipts([]);
     });
     return {
-      androidToolchainRoutes,
       androidToolchainService,
-      appleToolchainRoutes,
       appleToolchainService,
+      bindDeviceApprovals,
       recordAppleEvidence,
-      resolveAndroidContext,
-      resolveAppleContext,
     };
   });
 }

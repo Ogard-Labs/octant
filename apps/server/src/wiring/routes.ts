@@ -15,7 +15,7 @@ import type { WorkspaceWiring } from "./workspace";
 import type { CodeWiring } from "./code";
 import type { ProvidersWiring } from "./providers";
 import type { BrowserWiring } from "./browser";
-import type { DevicesWiring } from "./devices";
+import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { CodeToolingWiring } from "./codeTooling";
 import type { HarnessWiring } from "./harness";
 import type { ChatWiring } from "./chat";
@@ -63,7 +63,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
     | "providerUsageLimitsRoutes"
   > &
   Pick<BrowserWiring, "productFeedbackRoutes"> &
-  Pick<DevicesWiring, "androidToolchainRoutes" | "appleToolchainRoutes"> &
+  Pick<CodeRuntimeWiring, "androidToolchainRoutes" | "appleToolchainRoutes"> &
   Pick<
     CodeToolingWiring,
     | "codeCheckoutOpenRoutes"
