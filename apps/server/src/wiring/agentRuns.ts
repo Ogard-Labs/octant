@@ -61,7 +61,10 @@ import {
 import { AgentRunWorkspaceReceiptStore } from "../agentRun/agentRunWorkspaceReceiptStore";
 import { AgentRunWorkspaceService } from "../agentRun/agentRunWorkspaceService";
 import { AgentRunSettingsStore } from "../agentRun/agentRunSettingsStore";
-import { currentParentAuthorityForWaiter } from "../agentRun/agentRunWaiterAuthority";
+import {
+  currentParentAuthorityForWaiter,
+  type AgentRunParentThreadFacts,
+} from "../agentRun/agentRunWaiterAuthority";
 import { createAgentRunSettingsRouteHandler } from "../agentRun/agentRunSettingsRoutes";
 import {
   createAgentRunSessionRuntime,
@@ -100,24 +103,24 @@ import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { HarnessStateWiring } from "./harnessState";
 
-/** Whether the thread a child belongs to is still open, in whichever mode started it. */
-function agentRunParentThreadIsActive(
+/** The thread a child belongs to as it stands now, in whichever mode started it. */
+function readAgentRunParentThread(
   persistence: PersistenceService,
   workThreadProjection: WorkThreadProjection,
   run: AgentRun,
-): boolean {
+): AgentRunParentThreadFacts | undefined {
   try {
     const threadId = String(run.parentThreadId);
     switch (run.routingReceipt.mode) {
       case "chat":
-        return persistence.readChatThread(decodeChatThreadId(threadId))?.lifecycle === "active";
+        return persistence.readChatThread(decodeChatThreadId(threadId));
       case "work":
-        return workThreadProjection.read(run.parentThreadId as never)?.lifecycle === "active";
+        return workThreadProjection.read(run.parentThreadId as never);
       case "code":
-        return persistence.readCodeThread(decodeCodeThreadId(threadId))?.lifecycle === "active";
+        return persistence.readCodeThread(decodeCodeThreadId(threadId));
     }
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -687,11 +690,19 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     ambiguousReservationTtlMs: 60_000,
   });
   const spendCeilingHolder: { service?: SpendCeilingService } = {};
+  // Read per call: the service is built after this wiring, before any child runs.
+  const spendService = (): SpendCeilingService => {
+    const service = spendCeilingHolder.service;
+    if (service === undefined) throw new Error("The spend ceiling service is not wired yet.");
+    return service;
+  };
   const spendCeiling = {
     admit: ((request: Parameters<SpendCeilingService["admit"]>[0]) =>
-      spendCeilingHolder.service!.admit(request)) as SpendCeilingService["admit"],
+      spendService().admit(request)) as SpendCeilingService["admit"],
     settle: ((input: Parameters<SpendCeilingService["settle"]>[0]) =>
-      spendCeilingHolder.service!.settle(input)) as SpendCeilingService["settle"],
+      spendService().settle(input)) as SpendCeilingService["settle"],
+    abandon: ((input: Parameters<SpendCeilingService["abandon"]>[0]) =>
+      spendService().abandon(input)) as SpendCeilingService["abandon"],
   };
   const agentRunSessionStore = new AgentRunSessionStore({
     connection: persistence.connection,
@@ -999,8 +1010,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
           isTainted: (waiter) =>
             readThreadExternalContentTaint(persistence.connection, String(waiter.parentThreadId))
               .externalContentIngested,
-          isParentActive: (waiter) =>
-            agentRunParentThreadIsActive(persistence, workThreadProjection, waiter),
+          parentThread: (waiter) =>
+            readAgentRunParentThread(persistence, workThreadProjection, waiter),
           parentLiveAuthority: agentRunParentAuthority,
         }),
     },

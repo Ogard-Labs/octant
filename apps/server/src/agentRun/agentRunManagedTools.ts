@@ -7,7 +7,6 @@ import {
   type AgentRunRole,
   type OctantMode,
 } from "@octant/contracts";
-import { agentRunWaitsForProviderSlot } from "@octant/domain";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { AgentRunControlAdmissionDependencies } from "./agentRunControlAdmission";
 import {
@@ -28,7 +27,7 @@ export type { AgentsToolTarget } from "./agentRunDelegation";
 export interface AgentsManagedToolsOptions {
   readonly admission: AgentRunControlAdmissionDependencies;
   readonly orchestration: Pick<AgentRunOrchestrationService, "start" | "cancelLeafFirst"> &
-    Partial<Pick<AgentRunOrchestrationService, "resume">>;
+    Partial<Pick<AgentRunOrchestrationService, "resume" | "waitsForProviderSlot">>;
   readonly persistence: Pick<
     AgentRunPersistenceService,
     "parentSummary" | "getById" | "resultText"
@@ -321,7 +320,9 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
                 run === undefined
                   ? undefined
                   : (agentRunStopReason(run) ??
-                    (agentRunWaitsForProviderSlot(run) ? run.recoveryReason : undefined));
+                    (options.orchestration.waitsForProviderSlot?.(run) === true
+                      ? run.recoveryReason
+                      : undefined));
               return {
                 runId: String(entry.runId),
                 role: entry.role,
@@ -420,7 +421,7 @@ export function createAgentsManagedTools(options: AgentsManagedToolsOptions): Ap
           // turn runs. Blocking here until the deadline would pin that slot and
           // keep the child from ever starting, so the parent is told at once and
           // can end its turn; the child's result is delivered when it completes.
-          if (agentRunWaitsForProviderSlot(run)) {
+          if (options.orchestration.waitsForProviderSlot?.(run) === true) {
             return answer({
               status: "waiting",
               lifecycleStatus: run.lifecycleStatus,

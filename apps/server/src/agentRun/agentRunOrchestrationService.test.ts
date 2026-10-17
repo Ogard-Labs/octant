@@ -18,6 +18,8 @@ import {
   AgentRunStatusChanged,
   MAX_AGENT_RUN_RESULT_CHARACTERS,
   decodeAgentRunId,
+  decodeAggregateVersion,
+  SPEND_CEILING_EVENT_NAMES,
   decodeAgentRunParentThreadId,
   decodeAgentRunRequestId,
   decodeCapacityReservationId,
@@ -53,6 +55,7 @@ import {
   AgentRunOrchestrationError,
   AgentRunOrchestrationService,
   type AgentRunParentAuthorityPort,
+  type AgentRunWorkBindingPort,
   type AgentRunParentSessionPort,
   type AgentRunProcessSupervisorPort,
   createInMemoryCapacityPort,
@@ -61,7 +64,10 @@ import { AgentRunProcessSupervisor } from "./agentRunProcessSupervisor";
 import { AgentRunDependencyScheduler } from "./agentRunDependencyScheduler";
 import { AgentRunProviderSlotScheduler } from "./agentRunProviderSlotScheduler";
 import { createAgentsManagedTools } from "./agentRunManagedTools";
-import { currentParentAuthorityForWaiter } from "./agentRunWaiterAuthority";
+import {
+  currentParentAuthorityForWaiter,
+  type AgentRunParentThreadFacts,
+} from "./agentRunWaiterAuthority";
 import { AgentRunSessionError, type AgentRunSessionOutcome } from "./agentRunSessionPort";
 import { AgentRunSessionSupervisor } from "./agentRunSessionSupervisor";
 import { createAgentRunSessionRuntime } from "./agentRunSessionRuntime";
@@ -70,6 +76,8 @@ import {
   makeUnobservedProviderCapacityFacts,
 } from "../context/contextRuntime";
 import { unavailableProviderServiceLimits } from "@octant/provider-sdk/context-facts";
+import { SpendCeilingService } from "../spendCeilingService";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 
 const directories: string[] = [];
 const now = "2026-08-01T14:00:00.000Z";
@@ -105,6 +113,17 @@ const authority: AgentRunAuthority = {
   subagents: true,
   executionPolicy: "plan",
   permissionPersistence: "current-session",
+};
+
+const everythingTheParentMayGrant: AgentRunAuthority = {
+  filesystem: true,
+  shell: true,
+  git: true,
+  network: true,
+  tools: true,
+  subagents: true,
+  executionPolicy: "full-access",
+  permissionPersistence: "project-default",
 };
 
 const routing: AgentRunRoutingReceipt = {
@@ -260,6 +279,7 @@ function createHarness(
   processOverride?: AgentRunProcessSupervisorPort,
   parentSessions?: AgentRunParentSessionPort,
   parentAuthority?: AgentRunParentAuthorityPort,
+  workBinding?: AgentRunWorkBindingPort,
 ) {
   const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-orch-"));
   directories.push(directory);
@@ -313,7 +333,10 @@ function createHarness(
     approvals,
     ...(processes === undefined ? {} : { processes }),
     ...(parentSessions === undefined ? {} : { parentSessions }),
-    ...(parentAuthority === undefined ? {} : { parentAuthority }),
+    ...(workBinding === undefined ? {} : { workBinding }),
+    // Most tests are not about the parent's grant, so by default it covers
+    // whatever the child was admitted with.
+    parentAuthority: parentAuthority ?? { current: () => everythingTheParentMayGrant },
   });
   return { orchestration, persistence, capacity, approvals, store, connection, journal };
 }
@@ -1284,6 +1307,7 @@ describe("AgentRun dependency graphs", () => {
         approvals: { isCurrent: () => true },
         processes,
         parentSessions,
+        parentAuthority: { current: () => everythingTheParentMayGrant },
       });
       const restarted = new AgentRunDependencyScheduler({
         agentRuns: harness.persistence,
@@ -1511,8 +1535,17 @@ describe("managed child waiting for a provider slot", () => {
       readonly parentSessions?: AgentRunParentSessionPort;
       /** A scheduler that hears nothing when a slot frees, so only its timer can start a helper. */
       readonly deaf?: boolean;
+      /** How long a freed slot is left to a person's turn before a helper may take it. */
+      readonly graceMs?: number;
+      /** The harness a provider-run child belongs to. */
+      readonly driverKind?: "codex" | "claude";
+      /** A real spend service, so the tries a waiting helper makes are measured against it. */
+      readonly spend?: SpendCeilingService;
+      /** How many children one thread may run at once; the default leaves it open. */
+      readonly perThread?: number;
     } = {},
   ) {
+    const startedAt = Date.now();
     const holderThreads = options.holderThreads ?? [
       "cccccccc-cccc-4ccc-8ccc-aaaaaaaaaaaa",
       "cccccccc-cccc-4ccc-8ccc-bbbbbbbbbbbb",
@@ -1552,7 +1585,11 @@ describe("managed child waiting for a provider slot", () => {
     const acquire = vi.fn(() => Effect.never);
     const runtime = createAgentRunSessionRuntime({
       capacityScheduler: scheduler,
-      resolveDriver: () => ({ kind: "codex", probe: () => Effect.never, acquire }),
+      resolveDriver: () => ({
+        kind: options.driverKind ?? "codex",
+        probe: () => Effect.never,
+        acquire,
+      }),
       sessionStore: { read: () => undefined, write: () => true },
       context: { resolve: () => [] },
       scratchRoot: () => "/scratch",
@@ -1561,17 +1598,30 @@ describe("managed child waiting for a provider slot", () => {
         scheduler,
         now: () => now as never,
       }),
+      ...(options.spend === undefined
+        ? {}
+        : {
+            spendCeiling: {
+              admit: (request) => options.spend!.admit(request),
+              settle: (input) => options.spend!.settle(input),
+              abandon: (input) => options.spend!.abandon(input),
+            },
+          }),
     });
     const supervisor = new AgentRunSessionSupervisor({ port: runtime });
     // What the parent allows now, which a test changes while the helper waits.
     const parent = {
       startsHelpers: true,
       tainted: false,
-      active: true,
+      thread: { lifecycle: "active", projectId: undefined } as
+        | AgentRunParentThreadFacts
+        | undefined,
       grant: authority as AgentRunAuthority | undefined,
     };
     const harness = createHarness(
-      createInMemoryCapacityPort(),
+      options.perThread === undefined
+        ? createInMemoryCapacityPort()
+        : createInMemoryCapacityPort(() => ({ perThread: options.perThread!, onHost: 8 })),
       true,
       supervisor,
       options.parentSessions,
@@ -1581,7 +1631,7 @@ describe("managed child waiting for a provider slot", () => {
             run,
             startsHelpers: () => parent.startsHelpers,
             isTainted: () => parent.tainted,
-            isParentActive: () => parent.active,
+            parentThread: () => parent.thread,
             parentLiveAuthority: () => parent.grant,
           }),
       },
@@ -1590,8 +1640,10 @@ describe("managed child waiting for a provider slot", () => {
       orchestration: harness.orchestration,
       onCapacityFreed: (listener) =>
         options.deaf === true ? () => undefined : scheduler.onCapacityFreed(listener),
-      now: () => Date.parse(now),
+      // The journal's clock is fixed, so time runs on from that moment.
+      now: () => Date.parse(now) + (Date.now() - startedAt),
       pollMs: 10,
+      graceMs: options.graceMs ?? 20,
     });
     slots.start();
     harness.journal.subscribeCommitted((append) => slots.onCommittedAppend(append));
@@ -1600,6 +1652,7 @@ describe("managed child waiting for a provider slot", () => {
       requestId = ids.request,
       parentThreadId = ids.thread,
       executionPolicy: AgentRunAuthority["executionPolicy"] = "plan",
+      dependsOn?: ReadonlyArray<AgentRunId>,
     ) => {
       const admitted = harness.orchestration.admit({
         command: {
@@ -1607,6 +1660,7 @@ describe("managed child waiting for a provider slot", () => {
             ...routing,
             executionResolution: { ...routing.executionResolution, executionPolicy },
           }),
+          ...(dependsOn === undefined ? {} : { dependsOn: [...dependsOn] }),
           parentThreadId,
           requestedAuthority: { ...authority, network: false, subagents: false, executionPolicy },
         },
@@ -1614,6 +1668,8 @@ describe("managed child waiting for a provider slot", () => {
         confirmed: true,
         liveAuthority: { ...authority, executionPolicy },
       });
+      // A child that waits on its siblings or on a run slot is parked, not started.
+      if (admitted.kind === "run-updated") return admitted.run;
       if (admitted.kind !== "run-accepted") throw new Error("Expected an admitted child");
       const started = harness.orchestration.start(admitted.run.id, admitted.run.version, {
         ...authority,
@@ -1632,6 +1688,8 @@ describe("managed child waiting for a provider slot", () => {
     };
     return {
       ...harness,
+      scheduler,
+      providerInstanceId,
       parent,
       acquire,
       supervisor,
@@ -1812,7 +1870,13 @@ describe("managed child waiting for a provider slot", () => {
       {
         name: "the parent thread was archived",
         change: (parent) => {
-          parent.active = false;
+          parent.thread = { lifecycle: "archived" };
+        },
+      },
+      {
+        name: "the parent thread was moved to another Project",
+        change: (parent) => {
+          parent.thread = { lifecycle: "active", projectId: ids.project };
         },
       },
       {
@@ -1903,6 +1967,283 @@ describe("managed child waiting for a provider slot", () => {
       expect(provider.status(helper.id)).toBe("interrupted");
     });
   });
+
+  describe("the tries a waiting helper makes", () => {
+    function realSpendService() {
+      const directory = mkdtempSync(join(tmpdir(), "octant-agentrun-spend-"));
+      directories.push(directory);
+      const connection = openSqlite(join(directory, "spend.sqlite3")) as SqliteConnection;
+      applyMigrations(connection, MIGRATIONS, () => now);
+      const registries = createPhase1RuntimeRegistries();
+      const journal = new Journal({
+        connection,
+        registry: registries.events,
+        projections: registries.projections,
+        clock: () => now,
+      });
+      const service = new SpendCeilingService({
+        connection,
+        journal,
+        clock: () => now,
+        uuid: () => randomUUID(),
+        threadExists: () => true,
+        projectExists: () => true,
+      });
+      expect(
+        service.execute("local-window", {
+          kind: "set-spend-ceiling",
+          scope: { kind: "thread", threadType: "chat-thread", threadId: String(ids.thread) },
+          expectedVersion: decodeAggregateVersion(0),
+          policy: { turnBudget: 3 },
+          window: { kind: "lifetime" },
+        }).kind,
+      ).toBe("set");
+      const recordedTurns = () =>
+        (
+          connection
+            .prepare("SELECT COUNT(*) AS n FROM event_journal WHERE event_name = ?")
+            .get(SPEND_CEILING_EVENT_NAMES.turnRecorded) as { n: number }
+        ).n;
+      return { service, recordedTurns };
+    }
+
+    it("count no turn against the parent's budget while the provider is full, and one turn once it runs", async () => {
+      const { service, recordedTurns } = realSpendService();
+      const provider = fullProvider({ spend: service });
+      const helper = provider.delegate();
+      expect(helper.lifecycleStatus).toBe("waiting");
+
+      for (let attempt = 0; attempt < 5; attempt++) provider.slots.retryNow();
+
+      expect(recordedTurns()).toBe(0);
+      provider.finish(0);
+      await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledOnce());
+      expect(recordedTurns()).toBe(0);
+      await provider.supervisor.stop(helper.id);
+      await vi.waitFor(() => expect(recordedTurns()).toBe(1));
+    });
+
+    it("leave a person's next turn the slot a turn just freed, and take it only after the grace", async () => {
+      const provider = fullProvider({ graceMs: 250 });
+      const helper = provider.delegate();
+      provider.finish(0);
+      // A person's message a moment after the other turn ended: long enough
+      // for a helper that asks at once to have won the slot already.
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      const personsTurn = decodeCapacityReservationId("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+
+      const submission = provider.scheduler.submit({
+        reservationId: personsTurn,
+        subject: decodeContextSubjectRef({
+          aggregateType: "chat-thread",
+          aggregateId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        }),
+        providerInstanceId: provider.providerInstanceId,
+        modelId: decodeProviderModelId("gpt-4o"),
+        estimatedTokens: 10,
+        requests: 1,
+        origin: "thread",
+      });
+
+      expect(submission.status).toBe("dispatched");
+      provider.scheduler.markRunning(personsTurn);
+      expect(provider.status(helper.id)).toBe("waiting");
+      provider.scheduler.recordTerminal({ reservationId: personsTurn, outcome: "completed" });
+      await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledOnce(), { timeout: 3_000 });
+      await provider.supervisor.stop(helper.id);
+    });
+
+    it("do not spin when the journal keeps refusing the start", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      cleanups.push(() => error.mockRestore());
+      const provider = fullProvider();
+      const helper = provider.delegate();
+      const rounds = vi.spyOn(provider.orchestration, "retryProviderSlotWaiters");
+      vi.spyOn(provider.persistence, "applyCommand").mockImplementation(() => {
+        throw new Error("journal unavailable");
+      });
+
+      provider.finish(0);
+      // A start that fails gives its slot back, which used to tell the waiter a
+      // slot had freed, which started it again, on the same stack.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(rounds.mock.calls.length).toBeLessThan(60);
+      expect(provider.acquire).not.toHaveBeenCalled();
+      expect(provider.persistence.getById(helper.id)?.lifecycleStatus).toBe("waiting");
+    });
+
+    it("end with the workspace reason when the child's workspace is refused during the wait", async () => {
+      let bound = true;
+      const prepareStart = vi.fn(() => {
+        throw new AgentRunSessionError("capacity-unavailable", "Full.", {
+          waitsForCapacity: true,
+        });
+      });
+      const harness = createHarness(
+        createInMemoryCapacityPort(),
+        true,
+        { prepareStart, start: vi.fn(), stop: async () => undefined },
+        undefined,
+        undefined,
+        { isCurrent: () => bound },
+      );
+      const workRoot: AgentRunWorkspaceReceipt = {
+        kind: "work-root",
+        mode: "work",
+        projectId: ids.project as never,
+        bindingRevisionId: "99999999-9999-4999-8999-999999999999" as never,
+        canonicalRoot: "/work/project",
+      };
+      const admitted = harness.orchestration.admit({
+        command: requestCommand(ids.request, workRoot, undefined, { ...routing, mode: "work" }),
+        parentAuthority: authority,
+        confirmed: true,
+        liveAuthority: authority,
+      });
+      if (admitted.kind !== "run-accepted") throw new Error("Expected an admitted child");
+      const waiting = harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
+      expect(waiting).toMatchObject({ run: { lifecycleStatus: "waiting" } });
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      cleanups.push(() => error.mockRestore());
+
+      bound = false;
+      harness.orchestration.retryProviderSlotWaiters(Date.parse(now));
+
+      expect(harness.persistence.getById(admitted.run.id)).toMatchObject({
+        lifecycleStatus: "interrupted",
+        recoveryReason: expect.stringMatching(/^workspace-denied: /),
+      });
+      expect(error).not.toHaveBeenCalled();
+    });
+
+    it("do not treat a provider's own waiting message that reads like the slot wait as one", async () => {
+      const provider = fullProvider({ holderThreads: [] });
+      const helper = provider.delegate();
+      expect(helper.lifecycleStatus).toBe("starting");
+      provider.orchestration.onSessionSettled({
+        runId: helper.id,
+        outcome: { kind: "waiting", reason: AGENT_RUN_PROVIDER_SLOT_WAITING_REASON },
+      });
+      const parked = provider.persistence.getById(helper.id);
+      if (parked === undefined) throw new Error("The helper is gone.");
+      expect(parked.lifecycleStatus).toBe("waiting");
+
+      provider.orchestration.retryProviderSlotWaiters(
+        Date.parse(parked.updatedAt) + AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS * 2,
+      );
+
+      expect(provider.orchestration.waitsForProviderSlot(parked)).toBe(false);
+      expect(provider.persistence.getById(helper.id)).toEqual(parked);
+      await provider.supervisor.stop(helper.id);
+    });
+  });
+
+  describe.each(["claude", "codex"] as const)(
+    "a %s child that waits for a sibling or a run slot",
+    (driverKind) => {
+      it("starts once its dependency completed while the parent still allows it", async () => {
+        const provider = fullProvider({ holderThreads: [], driverKind });
+        const dependencies = new AgentRunDependencyScheduler({
+          agentRuns: provider.persistence,
+          orchestration: provider.orchestration,
+        });
+        provider.journal.subscribeCommitted((append) => dependencies.onCommittedAppend(append));
+        const first = provider.delegate(ids.request);
+        const dependent = provider.delegate(ids.requestChild, ids.thread, "plan", [first.id]);
+        expect(dependent.recoveryReason).toBe(AGENT_RUN_DEPENDENCY_WAITING_REASON);
+
+        provider.orchestration.onSessionSettled({
+          runId: first.id,
+          outcome: { kind: "completed", responseText: "first finding" },
+        });
+
+        await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledTimes(2));
+        expect(provider.status(dependent.id)).toBe("starting");
+        await provider.supervisor.stop(dependent.id);
+        await provider.supervisor.stop(first.id);
+      });
+
+      it.each([
+        [
+          "was narrowed",
+          (parent: ReturnType<typeof fullProvider>["parent"]) => {
+            parent.grant = { ...authority, tools: false };
+          },
+        ],
+        [
+          "read untrusted content",
+          (parent: ReturnType<typeof fullProvider>["parent"]) => {
+            parent.tainted = true;
+          },
+        ],
+        [
+          "can no longer start helpers",
+          (parent: ReturnType<typeof fullProvider>["parent"]) => {
+            parent.startsHelpers = false;
+          },
+        ],
+        [
+          "was archived",
+          (parent: ReturnType<typeof fullProvider>["parent"]) => {
+            parent.thread = { lifecycle: "archived" };
+          },
+        ],
+        [
+          "was moved to another Project",
+          (parent: ReturnType<typeof fullProvider>["parent"]) => {
+            parent.thread = { lifecycle: "active", projectId: ids.project };
+          },
+        ],
+      ])("ends a dependent without starting it when the parent %s", async (_name, change) => {
+        const provider = fullProvider({ holderThreads: [], driverKind });
+        const dependencies = new AgentRunDependencyScheduler({
+          agentRuns: provider.persistence,
+          orchestration: provider.orchestration,
+        });
+        provider.journal.subscribeCommitted((append) => dependencies.onCommittedAppend(append));
+        const first = provider.delegate(ids.request);
+        const dependent = provider.delegate(ids.requestChild, ids.thread, "plan", [first.id]);
+        change(provider.parent);
+
+        provider.orchestration.onSessionSettled({
+          runId: first.id,
+          outcome: { kind: "completed", responseText: "first finding" },
+        });
+
+        await vi.waitFor(() => expect(provider.status(dependent.id)).toBe("interrupted"));
+        expect(provider.persistence.getById(dependent.id)?.recoveryReason).toMatch(
+          /^authority-drift: /,
+        );
+        expect(provider.acquire).toHaveBeenCalledOnce();
+        await provider.supervisor.stop(first.id);
+      });
+
+      it("ends a child queued for a run slot without starting it when the parent was narrowed", async () => {
+        const provider = fullProvider({ holderThreads: [], driverKind, perThread: 1 });
+        const first = provider.delegate(ids.request);
+        const queued = provider.delegate(ids.requestChild);
+        expect(queued).toMatchObject({
+          lifecycleStatus: "waiting",
+          recoveryReason: "provider-capacity-saturated",
+        });
+        provider.parent.grant = { ...authority, tools: false };
+
+        provider.orchestration.onSessionSettled({
+          runId: first.id,
+          outcome: { kind: "completed", responseText: "first finding" },
+        });
+
+        expect(provider.status(queued.id)).toBe("interrupted");
+        expect(provider.persistence.getById(queued.id)?.recoveryReason).toMatch(
+          /^authority-drift: /,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(provider.acquire).toHaveBeenCalledOnce();
+        await provider.supervisor.stop(first.id);
+      });
+    },
+  );
 
   it("asks again on a timer, so a limit that frees by the clock starts the helper without any turn ending", async () => {
     const provider = fullProvider({ deaf: true });

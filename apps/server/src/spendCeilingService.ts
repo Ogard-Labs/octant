@@ -305,6 +305,17 @@ export class SpendCeilingService {
     this.#reservations.delete(String(input.reservationId));
   }
 
+  /**
+   * Drops a reservation whose work never started. Settling would record the
+   * admitted turn, which counts against turn and run-time ceilings, so a turn
+   * that was refused before it began (a provider with no free slot, tried again
+   * every few seconds) would use up the budget without running.
+   */
+  abandon(input: { readonly reservationId: SpendCeilingReservationId }): void {
+    this.#turns.delete(String(input.reservationId));
+    this.#reservations.delete(String(input.reservationId));
+  }
+
   release(reservationId: SpendCeilingReservationId): void {
     this.settle({ reservationId });
   }

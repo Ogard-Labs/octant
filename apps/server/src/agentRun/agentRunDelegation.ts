@@ -19,7 +19,6 @@ import {
 } from "@octant/contracts";
 import {
   AgentRunPolicyRejected,
-  agentRunWaitsForProviderSlot,
   clampAgentRunAuthority,
   effectiveAgentRunExecutionTarget,
   allowedAgentRunRolesForMode,
@@ -72,7 +71,7 @@ export interface AgentRunDelegationRouting {
 export interface AgentRunDelegationOptions {
   readonly admission: AgentRunControlAdmissionDependencies;
   readonly orchestration: Pick<AgentRunOrchestrationService, "start"> &
-    Partial<Pick<AgentRunOrchestrationService, "resume">>;
+    Partial<Pick<AgentRunOrchestrationService, "resume" | "waitsForProviderSlot">>;
   readonly persistence: Pick<AgentRunPersistenceService, "getById">;
   readonly mode: OctantMode;
   readonly parentThreadId: string;
@@ -308,7 +307,8 @@ export async function startAgentRunDelegation(
     status: "accepted",
     runId: String(run.id),
     lifecycleStatus: run.lifecycleStatus,
-    ...(agentRunWaitsForProviderSlot(run) && run.recoveryReason !== undefined
+    ...(options.orchestration.waitsForProviderSlot?.(run) === true &&
+    run.recoveryReason !== undefined
       ? { reason: run.recoveryReason }
       : {}),
     target: {

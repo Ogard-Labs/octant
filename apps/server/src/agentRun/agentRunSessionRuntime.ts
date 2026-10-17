@@ -236,6 +236,7 @@ export interface AgentRunSessionRuntimeOptions {
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
     readonly settle: SpendCeilingService["settle"];
+    readonly abandon: SpendCeilingService["abandon"];
   };
   /**
    * Records one child turn in the usage ledger under the run's own subject.
@@ -588,9 +589,10 @@ export function createAgentRunSessionRuntime(
           estimatedTokens,
         });
       } catch (error) {
-        // Capacity refusal happens before the managed session owns cleanup.
+        // Capacity refusal happens before the managed session owns cleanup, and
+        // the child never ran, so its admitted turn is dropped and not recorded.
         if (spendReservationId !== undefined) {
-          options.spendCeiling?.settle({ reservationId: spendReservationId });
+          options.spendCeiling?.abandon({ reservationId: spendReservationId });
         }
         throw error;
       }
@@ -637,7 +639,7 @@ export function createAgentRunSessionRuntime(
     } catch {
       options.capacityScheduler.releaseUnstarted(reservationId);
       if (spendReservationId !== undefined)
-        options.spendCeiling?.settle({ reservationId: spendReservationId });
+        options.spendCeiling?.abandon({ reservationId: spendReservationId });
       throw new AgentRunSessionError(
         "resume-unavailable",
         "The child session cannot be persisted under its parent thread.",
@@ -670,7 +672,7 @@ export function createAgentRunSessionRuntime(
         owned = true;
         options.capacityScheduler.releaseUnstarted(reservationId);
         if (spendReservationId !== undefined)
-          options.spendCeiling?.settle({ reservationId: spendReservationId });
+          options.spendCeiling?.abandon({ reservationId: spendReservationId });
       },
     };
   };

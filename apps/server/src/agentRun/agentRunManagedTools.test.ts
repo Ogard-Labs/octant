@@ -129,6 +129,11 @@ function tool(
             run: queuedRun({ lifecycleStatus: "running" }),
           } as never;
         },
+        // The host records which children wait for a slot; the stub reads the reason.
+        waitsForProviderSlot: (run) =>
+          run.lifecycleStatus === "waiting" &&
+          (runs.find((known) => String(known.id) === String(run.id))?.recoveryReason ??
+            (run as AgentRun).recoveryReason) === AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
         cancelLeafFirst: async () => {
           calls.push("cancel");
           return [
