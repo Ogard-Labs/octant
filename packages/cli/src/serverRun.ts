@@ -189,13 +189,17 @@ function defaultServerStartCommand(): ServerStartCommand {
   if (artifactRoot !== undefined) {
     return installedArtifactServerStartCommand(artifactRoot, process.execPath);
   }
+  // Run the server entry file, not the package's `start` script: a script is
+  // launched through a shell that looks `bun` up on PATH, and a per-user
+  // service has no PATH entry for a runtime installed under the home directory
+  // (the child exited 127, "bun: command not found").
   return {
     command: process.execPath,
     args: [
       "run",
       "--cwd",
       fileURLToPath(new URL("../../../apps/server", import.meta.url)),
-      "start",
+      "src/main.ts",
     ],
   };
 }

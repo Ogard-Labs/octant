@@ -158,6 +158,26 @@ describe("per-user service managers", () => {
     });
   });
 
+  it("refuses to install a unit whose runtime is not an absolute path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "octant-relative-runtime-"));
+    roots.push(root);
+    const runner: ServiceCommandRunner = {
+      run: vi.fn(async () => ({ stdout: "", stderr: "" })),
+    };
+    expect(() =>
+      createSystemdUserServiceManager({
+        paths: paths(root),
+        uid: process.getuid?.() ?? 0,
+        home: join(root, "home"),
+        executable: "bun",
+        cliEntryPoint: join(root, "bin.ts"),
+        runtimeEnvironment: {},
+        runner,
+      }),
+    ).toThrow(expect.objectContaining({ name: "ServiceManagerError", code: "unsafe-descriptor" }));
+    expect(runner.run).not.toHaveBeenCalled();
+  });
+
   it("reports a systemd unit that is not installed yet as stopped, not as an unavailable manager", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-systemd-missing-unit-"));
     roots.push(root);
