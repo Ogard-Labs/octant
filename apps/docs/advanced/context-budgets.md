@@ -65,7 +65,9 @@ window, except that a learned limit below the reported one wins:
    than the learned window raises it again. A learned limit below the reported
    one wins, since the endpoint itself refused above it.
 4. **Profile.** A small catalogue of well-known model families that ships with
-   Octant and is never downloaded. Names are matched loosely
+   Octant, is updated with each Octant release, and is never downloaded while
+   you work. A model that is not in it yet is learned from its first refusal
+   instead. Names are matched loosely
    (`DeepSeek-V4.1-Flash`, `deepseek_v4.1_flash`, and
    `deepseek-ai/DeepSeek-V4.1-Flash` are one model). A deployment you gave a
    name of its own, such as an Azure AI Foundry deployment, is matched by the
@@ -73,6 +75,9 @@ window, except that a learned limit below the reported one wins:
    reply. A host that opts in to Octant's reviewed model manifest
    (`OCTANT_REVIEWED_MODEL_MANIFEST=1`) also labels a window from that
    downloaded manifest as Profile, for a model the built-in catalogue lacks.
+   The same match gives the model's longest reply: a model in the catalogue is
+   planned for its family's maximum output, however its window was found, and
+   only a model nothing names is planned with a small default maximum.
 5. **Estimate.** When nothing above names the window, the meter shows the
    fill alone (see below).
 

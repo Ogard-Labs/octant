@@ -8,7 +8,7 @@ import { decodeModelContextLimits, UtcTimestamp } from "@octant/contracts";
 import { Schema } from "effect";
 import { resolveEffectiveModelLimits } from "@octant/domain/context-policy";
 import { resolveModelContextWindow } from "@octant/domain/model-context-window";
-import { modelWindowConfidence } from "../providers/providerContextFacts";
+import { modelWindowConfidence, withProfileMaxOutput } from "../providers/providerContextFacts";
 import { deriveCatalogEpoch } from "../context/capabilityCatalog";
 import type {
   ContextInspectorSnapshot,
@@ -126,7 +126,7 @@ export async function observeWorkContext(input: {
   if (input.signal.aborted) return undefined;
   const modelLimitObservations = evidence.flatMap((item) => {
     try {
-      const observed = normalizeModelLimitEvidence(item);
+      const observed = normalizeModelLimitEvidence(withProfileMaxOutput(item, input.model));
       return observed.status === "available" ? [observed.limits] : [];
     } catch {
       return [];

@@ -153,6 +153,64 @@ describe("ContextHarnessService integration", () => {
     }
   });
 
+  it("plans Work for the profile's maximum output when the driver reports a window without one", async () => {
+    const fixture = createFixture();
+    let n = 0;
+    const plan = planWorkTurnContext({
+      threadId: decodeWorkThreadId("81000000-0000-4000-8000-000000000010"),
+      providerInstanceId,
+      modelId: "model-a",
+      createdAt: now,
+      uuid: () => `81000000-0000-4000-8000-${String(++n + 100).padStart(12, "0")}`,
+      contributions: [],
+    });
+    if (plan.kind !== "ok") throw new Error("The Work instructions fit");
+    try {
+      const published = await observeWorkContext({
+        service: fixture.service,
+        plan,
+        model: {
+          id: "model-a" as never,
+          displayName: "Model A",
+          source: "manual" as const,
+          verification: "unverified" as const,
+          reasoning: "unsupported" as const,
+          inputModalities: ["text" as const],
+          options: [],
+          servedModelId: "gpt-4.1",
+        },
+        driver: {
+          kind: "openai-compatible",
+          probe: () => Effect.die("Unused"),
+          acquire: () => Effect.die("Unused"),
+          contextFacts: {
+            observeModelLimits: () =>
+              Effect.succeed([
+                {
+                  providerInstanceId,
+                  modelId: "model-a" as never,
+                  contextWindow: 64_000,
+                  source: "runtime-reported" as const,
+                  confidence: "high" as const,
+                  observedAt: now as never,
+                },
+              ]),
+            observeServiceLimits: () => Effect.succeed(serviceLimits()),
+          },
+        },
+        displayLabel: "Work task",
+        signal: new AbortController().signal,
+      });
+      expect(published?.snapshot.modelLimits).toMatchObject({
+        contextWindow: 64_000,
+        maxOutput: 32_768,
+        source: "runtime-reported",
+      });
+    } finally {
+      fixture.connection.close();
+    }
+  });
+
   it("publishes an explicit Work estimate when the provider has no pre-turn context facts", async () => {
     const fixture = createFixture();
     let n = 0;

@@ -10,6 +10,7 @@ import {
   modelEvidenceFromObservedState,
   serviceLimitsFromFailure,
   usageFromRuntimeEvent,
+  withProfileMaxOutput,
 } from "./providerContextFacts";
 
 const instanceId = decodeProviderInstanceId("00000000-0000-4000-8000-000000000001");
@@ -70,6 +71,40 @@ describe("provider context fact adapter", () => {
     ]);
 
     expect(modelEvidenceFromObservedState({ ...state, models: [] })).toEqual([]);
+  });
+
+  it("adds the profile's maximum output to a driver's window that came without one", () => {
+    const evidence = {
+      providerInstanceId: instanceId,
+      modelId: "team-chat-prod" as never,
+      contextWindow: 64_000,
+      source: "runtime-reported" as const,
+      confidence: "high" as const,
+      observedAt: observedAt as never,
+    };
+    const served = {
+      id: "team-chat-prod" as never,
+      displayName: "Team chat",
+      reasoning: "unsupported" as const,
+      inputModalities: ["text" as const],
+      options: [],
+      source: "manual" as const,
+      verification: "unverified" as const,
+      servedModelId: "gpt-4.1",
+    };
+    expect(withProfileMaxOutput(evidence, served)).toEqual({ ...evidence, maxOutput: 32_768 });
+    // The figure the model's own listing reported beats the profile's.
+    expect(withProfileMaxOutput(evidence, { ...served, maxOutputTokens: 4_096 })).toEqual({
+      ...evidence,
+      maxOutput: 4_096,
+    });
+    // Nothing names the deployment yet, so the evidence stays as the driver gave it.
+    expect(withProfileMaxOutput(evidence, undefined)).toBe(evidence);
+    // A maximum the driver stated is its own, and one past the window is no maximum.
+    const stated = { ...evidence, maxOutput: 2_048 };
+    expect(withProfileMaxOutput(stated, served)).toBe(stated);
+    const small = { ...evidence, contextWindow: 16_000 };
+    expect(withProfileMaxOutput(small, served)).toBe(small);
   });
 
   it("extracts provider-reported usage only from strict usage events", () => {
