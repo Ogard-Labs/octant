@@ -906,6 +906,109 @@ describe("code client", () => {
     });
   });
 
+  it("follows a terminal's output live and resumes from the offset it was given", async () => {
+    const liveFrame = (text: string, characters: number, replace = false) => ({
+      terminalId: ids.terminal,
+      text,
+      replace,
+      characters,
+      state: "running",
+    });
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(
+          `${JSON.stringify(liveFrame("hello\n", 6, true))}\n${JSON.stringify(liveFrame("more", 10))}\n`,
+          { headers: { "content-type": "application/x-ndjson" } },
+        ),
+      );
+    const client = createCodeClient({ baseUrl, fetch, windowCapability: capability });
+    const received: string[] = [];
+
+    for await (const frame of client.watchTerminal?.(
+      {
+        threadId: ids.thread,
+        checkoutId: ids.checkout,
+        terminalId: ids.terminal,
+        afterCharacters: 3,
+      } as never,
+      new AbortController().signal,
+    ) ?? []) {
+      received.push(frame.text);
+    }
+
+    expect(received).toEqual(["hello\n", "more"]);
+    expect(fetch).toHaveBeenCalledWith(
+      `${baseUrl}/api/code/terminals/live?threadId=${ids.thread}&checkoutId=${ids.checkout}&terminalId=${ids.terminal}&afterCharacters=3`,
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({ "x-octant-window-capability": capability }),
+      }),
+    );
+  });
+
+  it("throws before any frame when the host refuses or lacks the live terminal stream", async () => {
+    const request = {
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      terminalId: ids.terminal,
+    } as never;
+    const refused = createCodeClient({
+      baseUrl,
+      fetch: vi
+        .fn()
+        .mockResolvedValue(
+          Response.json(
+            { category: "unauthorized", message: "Terminal output is unauthorized." },
+            { status: 401 },
+          ),
+        ),
+      windowCapability: capability,
+    });
+    await expect(
+      refused.watchTerminal?.(request, new AbortController().signal)[Symbol.asyncIterator]().next(),
+    ).rejects.toMatchObject({ category: "unauthorized" });
+
+    // An older host answers a route it does not have with a body that is no failure.
+    const older = createCodeClient({
+      baseUrl,
+      fetch: vi.fn().mockResolvedValue(new Response("not found", { status: 404 })),
+      windowCapability: capability,
+    });
+    await expect(
+      older.watchTerminal?.(request, new AbortController().signal)[Symbol.asyncIterator]().next(),
+    ).rejects.toMatchObject({ category: "unavailable" });
+  });
+
+  it("ends the stream rather than applying a frame for another shell", async () => {
+    const foreign = {
+      terminalId: "80000000-0000-4000-8000-000000000002",
+      text: "not yours",
+      replace: false,
+      characters: 9,
+      state: "running",
+    };
+    const client = createCodeClient({
+      baseUrl,
+      fetch: vi.fn().mockResolvedValue(
+        new Response(`${JSON.stringify(foreign)}\n`, {
+          headers: { "content-type": "application/x-ndjson" },
+        }),
+      ),
+      windowCapability: capability,
+    });
+
+    await expect(
+      client
+        .watchTerminal?.(
+          { threadId: ids.thread, checkoutId: ids.checkout, terminalId: ids.terminal } as never,
+          new AbortController().signal,
+        )
+        [Symbol.asyncIterator]()
+        .next(),
+    ).rejects.toMatchObject({ category: "unavailable" });
+  });
+
   it("puts prompt evidence for a Code thread", async () => {
     const fetch = vi.fn().mockResolvedValue(
       new Response(

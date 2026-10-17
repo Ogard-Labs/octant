@@ -139,6 +139,40 @@ export const CodeTerminalInspection = Schema.Struct({
 }).annotations(strict);
 export type CodeTerminalInspection = typeof CodeTerminalInspection.Type;
 
+/** The most characters one live terminal frame carries; a longer run arrives as a replace. */
+export const MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS = 64 * 1024;
+
+/**
+ * What a window asks to follow a terminal's output live. `afterCharacters` is
+ * the absolute offset of the last character the window holds, as the previous
+ * frame's `characters` reported it; absent, the host answers with the terminal's
+ * current output as a replace.
+ */
+export const CodeTerminalLiveRequest = Schema.Struct({
+  threadId: CodeThreadId,
+  checkoutId: CodeCheckoutId,
+  terminalId: CodeTerminalId,
+  afterCharacters: Schema.optional(Schema.Int.pipe(Schema.greaterThanOrEqualTo(0))),
+}).annotations(strict);
+export type CodeTerminalLiveRequest = typeof CodeTerminalLiveRequest.Type;
+
+/**
+ * One publish of a terminal's output on the live path. The journal is not
+ * involved: `characters` is the terminal's own absolute offset, so a window
+ * that lost the stream resumes from it, and `replace` says the text stands in
+ * for everything the window held (the host's answer when it cannot continue
+ * from the offset it was given).
+ */
+export const CodeTerminalLiveFrame = Schema.Struct({
+  terminalId: CodeTerminalId,
+  text: Schema.String.pipe(Schema.maxLength(MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS)),
+  replace: Schema.Boolean,
+  characters: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
+  state: Schema.Literal("running", "exited", "interrupted"),
+  exitCode: Schema.optional(Schema.NullOr(Schema.Int)),
+}).annotations(strict);
+export type CodeTerminalLiveFrame = typeof CodeTerminalLiveFrame.Type;
+
 const TerminalGeometry = {
   columns: Schema.Int.pipe(Schema.between(1, 500)),
   rows: Schema.Int.pipe(Schema.between(1, 500)),
@@ -2387,6 +2421,8 @@ export const decodeCodeTerminalInspectionRequest = Schema.decodeUnknownSync(
   CodeTerminalInspectionRequest,
 );
 export const decodeCodeTerminalInspection = Schema.decodeUnknownSync(CodeTerminalInspection);
+export const decodeCodeTerminalLiveFrame = Schema.decodeUnknownSync(CodeTerminalLiveFrame);
+export const decodeCodeTerminalLiveRequest = Schema.decodeUnknownSync(CodeTerminalLiveRequest);
 export const decodeCodeApprovalId = Schema.decodeUnknownSync(CodeApprovalId);
 export const decodeCodeEvidenceReference = Schema.decodeUnknownSync(CodeEvidenceReference);
 export const decodeCodeFileOpenResultEnvelope = Schema.decodeUnknownSync(

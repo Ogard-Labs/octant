@@ -31,7 +31,10 @@ import {
   decodeCodeThreadFollowUpView,
   decodeCodeTerminalInspection,
   decodeCodeTerminalInspectionRequest,
+  decodeCodeTerminalLiveFrame,
+  decodeCodeTerminalLiveRequest,
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
+  MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS,
 } from "./codeOperations";
 import { MAX_THREAD_MENTIONS_PER_TURN } from "./threadMentionIdentity";
 
@@ -104,6 +107,35 @@ describe("Code operation contracts", () => {
     ).toThrow();
     expect(() =>
       decodeCodeTerminalInspection({ terminalId: ids.terminal, state: "missing" }),
+    ).toThrow();
+  });
+
+  it("strictly decodes a live terminal request and frame, and refuses an unbounded frame", () => {
+    const request = {
+      threadId: ids.thread,
+      checkoutId: ids.checkout,
+      terminalId: ids.terminal,
+      afterCharacters: 12,
+    } as const;
+    expect(decodeCodeTerminalLiveRequest(request)).toEqual(request);
+    expect(() => decodeCodeTerminalLiveRequest({ ...request, afterCharacters: -1 })).toThrow();
+    expect(() => decodeCodeTerminalLiveRequest({ ...request, windowId: ids.operation })).toThrow();
+
+    const frame = {
+      terminalId: ids.terminal,
+      text: "ok\n",
+      replace: false,
+      characters: 15,
+      state: "exited",
+      exitCode: 0,
+    } as const;
+    expect(decodeCodeTerminalLiveFrame(frame)).toEqual(frame);
+    expect(() => decodeCodeTerminalLiveFrame({ ...frame, state: "missing" })).toThrow();
+    expect(() =>
+      decodeCodeTerminalLiveFrame({
+        ...frame,
+        text: "x".repeat(MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS + 1),
+      }),
     ).toThrow();
   });
 

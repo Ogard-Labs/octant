@@ -367,6 +367,63 @@ describe("Code routes", () => {
     expect(executeOperation).not.toHaveBeenCalled();
   });
 
+  it("streams a terminal's output as lines under the authenticated window, without the journal", async () => {
+    const terminalId = "00000000-0000-4000-8000-000000000911";
+    const watchTerminal = vi.fn(async (..._args: unknown[]) =>
+      (async function* () {
+        yield { terminalId, text: "hello\n", replace: true, characters: 6, state: "running" };
+        yield { terminalId, text: "", replace: false, characters: 6, state: "exited", exitCode: 0 };
+      })(),
+    );
+    const executeOperation = vi.fn();
+    const route = routeFixture({ watchTerminal, executeOperation });
+
+    const response = await route(
+      request(
+        `/api/code/terminals/live?threadId=${threadId}&checkoutId=${checkoutId}&terminalId=${terminalId}&afterCharacters=3`,
+      ),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(response?.headers.get("content-type")).toBe("application/x-ndjson");
+    const lines = (await response!.text()).trim().split("\n");
+    expect(lines.map((line) => JSON.parse(line))).toEqual([
+      { terminalId, text: "hello\n", replace: true, characters: 6, state: "running" },
+      { terminalId, text: "", replace: false, characters: 6, state: "exited", exitCode: 0 },
+    ]);
+    expect(watchTerminal).toHaveBeenCalledWith(
+      windowId,
+      expect.objectContaining({ threadId, checkoutId, terminalId, afterCharacters: 3 }),
+    );
+    expect(executeOperation).not.toHaveBeenCalled();
+  });
+
+  it("answers a refused terminal stream with a status, never an empty stream", async () => {
+    const terminalId = "00000000-0000-4000-8000-000000000911";
+    const unauthorized = Object.assign(new Error("refused"), {
+      failure: { category: "unauthorized", message: "Terminal output is unauthorized." },
+    });
+    const refused = routeFixture({
+      watchTerminal: vi.fn(async () => {
+        throw unauthorized;
+      }),
+    });
+    const query = `threadId=${threadId}&checkoutId=${checkoutId}&terminalId=${terminalId}`;
+
+    expect((await refused(request(`/api/code/terminals/live?${query}`)))?.status).toBe(401);
+    // A host without the stream says so, so the window reads the journal instead.
+    expect((await routeFixture()(request(`/api/code/terminals/live?${query}`)))?.status).toBe(503);
+    // Window identity comes from the capability, never from the query.
+    const forged = await routeFixture({ watchTerminal: vi.fn() })(
+      request(`/api/code/terminals/live?${query}&windowId=${windowId}`),
+    );
+    expect(forged?.status).toBe(400);
+    const missing = await routeFixture({ watchTerminal: vi.fn() })(
+      request(`/api/code/terminals/live?threadId=${threadId}&checkoutId=${checkoutId}`),
+    );
+    expect(missing?.status).toBe(400);
+  });
+
   it("rejects a crossed Code operation response identity", async () => {
     const route = routeFixture({
       executeOperation: vi.fn(async () => ({

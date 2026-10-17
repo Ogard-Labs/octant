@@ -92,6 +92,7 @@ function withCodeOperationRuntime(
     execute: (windowId, command) => service.execute(windowId, command),
     executeOperation: (windowId, command, options) => runtime.execute(windowId, command, options),
     inspectTerminal: (windowId, input) => runtime.inspectTerminal(windowId, input),
+    watchTerminal: (windowId, input) => runtime.watchTerminal(windowId, input),
     subscribe: (windowId, threadId, afterSequence, signal) =>
       service.subscribe(windowId, threadId, afterSequence, signal),
     subscribeOperation: async function* (windowId, threadId, operationId, afterCursor) {
@@ -174,6 +175,9 @@ function withCodeBoard(
     ...(service.inspectTerminal === undefined
       ? {}
       : { inspectTerminal: service.inspectTerminal.bind(service) }),
+    ...(service.watchTerminal === undefined
+      ? {}
+      : { watchTerminal: service.watchTerminal.bind(service) }),
     ...(service.subscribeOperation === undefined
       ? {}
       : { subscribeOperation: service.subscribeOperation.bind(service) }),

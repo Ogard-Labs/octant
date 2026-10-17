@@ -138,7 +138,7 @@ class FakeTerminals {
     this.#status = "exited";
     this.#exitCode = exitCode;
     for (const listener of this.#listeners) {
-      listener({ text: "", replace: false, snapshot: this.#snapshot(terminalId) });
+      listener({ text: "", replace: false, characters: 0, snapshot: this.#snapshot(terminalId) });
     }
   }
   #snapshot(terminalId: string): TerminalSnapshot {

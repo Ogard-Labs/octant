@@ -264,6 +264,72 @@ describe("TerminalService", () => {
     }
   });
 
+  it("gives each observer its own window, so frame-rate readers do not change how often the record is written", async () => {
+    vi.useFakeTimers();
+    try {
+      const process = fakeProcess();
+      const service = new TerminalService({
+        port: { start: () => process },
+        inheritedEnvironment: {},
+        credentials: { resolve: async () => "private-token" },
+      });
+      await service.launch({
+        terminalId: "terminal-1",
+        shell: "/bin/zsh",
+        cwd: "/repo",
+        stateScope: "repo_test",
+        columns: 80,
+        rows: 24,
+        credentialReferences: [],
+      });
+      const record = vi.fn();
+      const live = vi.fn();
+      service.observe("terminal-1", record);
+      service.observe("terminal-1", live, { windowMs: 16 });
+
+      for (let ms = 0; ms < 1000; ms += 1) {
+        process.emitData("x");
+        await vi.advanceTimersByTimeAsync(1);
+      }
+
+      await vi.advanceTimersByTimeAsync(100);
+      expect(record.mock.calls.length).toBeLessThanOrEqual(22);
+      expect(live.mock.calls.length).toBeGreaterThan(55);
+      // Different cadences, the same bytes.
+      const text = (calls: ReadonlyArray<ReadonlyArray<{ text: string }>>) =>
+        calls.map((call) => call[0]!.text).join("");
+      expect(text(live.mock.calls)).toBe(text(record.mock.calls));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sends a bounded reader the live window rather than a chunk past its limit", async () => {
+    const process = fakeProcess();
+    const service = new TerminalService({
+      port: { start: () => process },
+      inheritedEnvironment: {},
+      credentials: { resolve: async () => "private-token" },
+    });
+    await service.launch({
+      terminalId: "terminal-1",
+      shell: "/bin/zsh",
+      cwd: "/repo",
+      stateScope: "repo_test",
+      columns: 80,
+      rows: 24,
+      credentialReferences: [],
+    });
+    const bounded = vi.fn();
+    service.observe("terminal-1", bounded, { maxDeltaCharacters: 1_000 });
+
+    process.emitData("y".repeat(5_000));
+
+    expect(bounded).toHaveBeenCalledOnce();
+    expect(bounded.mock.calls[0]?.[0]).toMatchObject({ replace: true, characters: 5_000 });
+    expect(bounded.mock.calls[0]?.[0].text.length).toBe(5_000);
+  });
+
   it("publishes debounced redacted snapshots to terminal output observers", async () => {
     vi.useFakeTimers();
     try {

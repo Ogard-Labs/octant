@@ -5,11 +5,12 @@ export const MAX_TERMINAL_OUTPUT_CHUNK_BYTES = 64 * 1024;
 
 const TRUNCATION_MARKER = "[Octant terminal output truncated]\n";
 const MAX_LIVE_TERMINAL_TRANSCRIPT_CHARACTERS = 64 * 1024;
-// Every emission is written synchronously to the evidence store and the
-// journal, and the store holds at most 100,000 entries before it refuses a
-// write and the live shell is closed. At 50 ms a flooding terminal reaches that
-// ceiling in about 83 minutes; at one frame (16 ms) in about 27. The renderer
-// does not depend on the window, so it stays at 50 ms.
+// Every emission the record path (the journal observer) receives is written
+// synchronously to the evidence store and the journal, and the store holds at
+// most 100,000 entries before it refuses a write and the live shell is closed.
+// At 50 ms a flooding terminal reaches that ceiling in about 83 minutes. That
+// window belongs to the record path alone: a window reading live output asks
+// for its own, shorter one, so latency never moves the write rate.
 const OUTPUT_PUBLISH_DELAY_MS = 50;
 const INHERITED_ENVIRONMENT_ALLOWLIST = new Set([
   "HOME",
@@ -83,7 +84,27 @@ export interface TerminalSnapshot {
 export interface TerminalOutputEmission {
   readonly text: string;
   readonly replace: boolean;
+  /**
+   * Absolute offset one past the last character this emission accounts for. It
+   * stops short of a credential prefix still being withheld, so a reader that
+   * resumes from it is sent that tail once it can be redacted.
+   */
+  readonly characters: number;
   readonly snapshot: TerminalSnapshot;
+}
+
+/**
+ * How one observer wants to follow a terminal.
+ *
+ * `windowMs` is that observer's own coalescing window; the default is the
+ * record path's. `maxDeltaCharacters` bounds one emission for a reader that
+ * cannot take an unbounded chunk: past it the observer is sent the live window
+ * as a replace, the same answer a reader that fell behind gets.
+ */
+export interface TerminalObserveOptions {
+  readonly afterCharacters?: number;
+  readonly windowMs?: number;
+  readonly maxDeltaCharacters?: number;
 }
 
 interface TerminalProcessStarter {
@@ -106,7 +127,33 @@ interface TerminalRecord {
   readonly transcript: TranscriptBuffer;
   readonly process?: TerminalProcessHandle;
   readonly secrets: readonly string[];
-  readonly outputListeners: Set<(emission: TerminalOutputEmission) => void>;
+  readonly observers: Set<OutputObserver>;
+  /**
+   * Where an observer that names no position starts, and the state it is
+   * assumed to have already been told: what the launch (or the restore) had
+   * already reported.
+   */
+  readonly baseline: {
+    characters: number;
+    status: TerminalSnapshot["status"];
+    exitCode: number | undefined;
+  };
+  status: TerminalSnapshot["status"];
+  exitCode?: number;
+  pendingResize: { columns: number; rows: number } | undefined;
+  resizeScheduled: boolean;
+}
+
+/**
+ * One reader of a terminal's output, with its own position and window.
+ *
+ * The journal and a window reading live output follow the same shell at
+ * different cadences, so each keeps its own place and its own timer.
+ */
+interface OutputObserver {
+  readonly listener: (emission: TerminalOutputEmission) => void;
+  readonly windowMs: number;
+  readonly maxDeltaCharacters: number | undefined;
   /**
    * How far into this terminal's output the observer has been caught up, as an
    * absolute character offset in the stream the PTY has produced. A string
@@ -117,13 +164,9 @@ interface TerminalRecord {
   publishedCharacters: number;
   publishedStatus: TerminalSnapshot["status"];
   publishedExitCode: number | undefined;
-  status: TerminalSnapshot["status"];
-  exitCode?: number;
-  pendingResize: { columns: number; rows: number } | undefined;
-  resizeScheduled: boolean;
-  outputTimer: ReturnType<typeof setTimeout> | undefined;
+  timer: ReturnType<typeof setTimeout> | undefined;
   /**
-   * When this terminal last published, so a quiet terminal can publish the
+   * When this observer last published, so a quiet terminal can publish the
    * next chunk at once instead of holding it for the coalescing window.
    */
   lastPublishedAt: number;
@@ -142,16 +185,12 @@ export class TerminalService {
         terminalId: restored.terminalId,
         transcript,
         secrets: [],
-        outputListeners: new Set(),
-        publishedCharacters: 0,
-        publishedStatus: "interrupted",
-        publishedExitCode: restored.exitCode,
+        observers: new Set(),
+        baseline: { characters: 0, status: "interrupted", exitCode: restored.exitCode },
         status: "interrupted",
         ...(restored.exitCode === undefined ? {} : { exitCode: restored.exitCode }),
         pendingResize: undefined,
         resizeScheduled: false,
-        outputTimer: undefined,
-        lastPublishedAt: 0,
       });
     }
   }
@@ -202,17 +241,13 @@ export class TerminalService {
       transcript: new TranscriptBuffer(),
       process,
       secrets,
-      outputListeners: new Set(),
-      publishedCharacters: 0,
-      publishedStatus: "running",
-      publishedExitCode: undefined,
+      observers: new Set(),
+      baseline: { characters: 0, status: "running", exitCode: undefined },
       status: "running",
       pendingResize: undefined,
       resizeScheduled: false,
-      outputTimer: undefined,
-      lastPublishedAt: 0,
     };
-    if (previous?.outputTimer !== undefined) clearTimeout(previous.outputTimer);
+    for (const observer of previous?.observers ?? []) clearObserverTimer(observer);
     this.#terminals.set(request.terminalId, record);
     process.onData((data) => {
       process.pause();
@@ -238,9 +273,9 @@ export class TerminalService {
       throw error;
     }
     const snapshot = this.#snapshot(record);
-    record.publishedCharacters = publishableEnd(record);
-    record.publishedStatus = record.status;
-    record.publishedExitCode = record.exitCode;
+    record.baseline.characters = publishableEnd(record);
+    record.baseline.status = record.status;
+    record.baseline.exitCode = record.exitCode;
     return snapshot;
   }
 
@@ -277,16 +312,33 @@ export class TerminalService {
     };
   }
 
+  /**
+   * Follow a terminal's output. Each observer keeps its own position and its
+   * own coalescing window, so a reader that wants frame-rate output does not
+   * change how often the journal's observer is called.
+   */
   observe(
     terminalId: string,
     listener: (emission: TerminalOutputEmission) => void,
-    options?: { readonly afterCharacters: number },
+    options?: TerminalObserveOptions,
   ): () => void {
     const record = this.#require(terminalId);
-    if (options !== undefined) record.publishedCharacters = options.afterCharacters;
-    record.outputListeners.add(listener);
-    this.#publishOutput(record);
-    return () => record.outputListeners.delete(listener);
+    const observer: OutputObserver = {
+      listener,
+      windowMs: options?.windowMs ?? OUTPUT_PUBLISH_DELAY_MS,
+      maxDeltaCharacters: options?.maxDeltaCharacters,
+      publishedCharacters: options?.afterCharacters ?? record.baseline.characters,
+      publishedStatus: record.baseline.status,
+      publishedExitCode: record.baseline.exitCode,
+      timer: undefined,
+      lastPublishedAt: 0,
+    };
+    record.observers.add(observer);
+    this.#publishObserver(record, observer);
+    return () => {
+      clearObserverTimer(observer);
+      record.observers.delete(observer);
+    };
   }
 
   write(terminalId: string, data: string): void {
@@ -363,9 +415,9 @@ export class TerminalService {
    * Coalescing only pays for itself while a terminal is actually flooding. Held
    * on the trailing edge, every publish waited the full window — including the
    * echo of a single keypress on an idle terminal, which is the one case where
-   * the delay is the whole perceived latency of typing. A terminal that has
-   * been quiet for a window publishes at once, and one still inside its window
-   * batches until the window closes.
+   * the delay is the whole perceived latency of typing. An observer whose
+   * terminal has been quiet for a window is told at once, and one still inside
+   * its window batches until the window closes.
    *
    * `settled` marks the shell's own exit rather than something it printed.
    * That emission is what tells a listener nothing is journaling this terminal
@@ -374,52 +426,71 @@ export class TerminalService {
    * Perceived speed is about printed output; the exit costs the reader nothing.
    */
   #scheduleOutput(record: TerminalRecord, settled = false): void {
-    if (record.outputTimer !== undefined) return;
-    const sinceLastPublish = Date.now() - record.lastPublishedAt;
-    if (!settled && sinceLastPublish >= OUTPUT_PUBLISH_DELAY_MS) {
-      this.#publishOutput(record);
-      return;
+    for (const observer of Array.from(record.observers)) {
+      if (observer.timer !== undefined) continue;
+      const sinceLastPublish = Date.now() - observer.lastPublishedAt;
+      if (!settled && sinceLastPublish >= observer.windowMs) {
+        this.#publishObserver(record, observer);
+        continue;
+      }
+      observer.timer = setTimeout(
+        () => {
+          observer.timer = undefined;
+          this.#publishObserver(record, observer);
+        },
+        settled ? observer.windowMs : observer.windowMs - sinceLastPublish,
+      );
     }
-    record.outputTimer = setTimeout(
-      () => {
-        record.outputTimer = undefined;
-        this.#publishOutput(record);
-      },
-      settled ? OUTPUT_PUBLISH_DELAY_MS : OUTPUT_PUBLISH_DELAY_MS - sinceLastPublish,
-    );
   }
 
+  /** Tell every observer now, as a stop or a terminate must. */
   #publishOutput(record: TerminalRecord): void {
-    if (record.outputTimer !== undefined) {
-      clearTimeout(record.outputTimer);
-      record.outputTimer = undefined;
-    }
-    if (record.outputListeners.size === 0) return;
+    for (const observer of Array.from(record.observers)) this.#publishObserver(record, observer);
+  }
+
+  #publishObserver(record: TerminalRecord, observer: OutputObserver): void {
+    clearObserverTimer(observer);
+    // An earlier observer's listener may have ended this one.
+    if (!record.observers.has(observer)) return;
     const snapshot = this.#snapshot(record);
     const end = publishableEnd(record);
     // A reader is only sent the whole window when its position is no longer in
     // the transcript: either the ceiling discarded it, or redaction rewrote the
     // stream behind it. Otherwise the delta costs what the terminal printed,
     // not what it has ever printed.
-    const replace =
-      record.publishedCharacters < record.transcript.retainedFrom() ||
-      record.publishedCharacters > end;
-    const text = replace
+    let replace =
+      observer.publishedCharacters < record.transcript.retainedFrom() ||
+      observer.publishedCharacters > end;
+    let text = replace
       ? liveWindow(record, end)
-      : record.transcript.textBetween(record.publishedCharacters, end);
+      : record.transcript.textBetween(observer.publishedCharacters, end);
+    if (
+      !replace &&
+      observer.maxDeltaCharacters !== undefined &&
+      text.length > observer.maxDeltaCharacters
+    ) {
+      replace = true;
+      text = liveWindow(record, end);
+    }
     const stateChanged =
-      record.publishedStatus !== snapshot.status || record.publishedExitCode !== snapshot.exitCode;
-    record.publishedCharacters = end;
-    record.publishedStatus = snapshot.status;
-    record.publishedExitCode = snapshot.exitCode;
+      observer.publishedStatus !== snapshot.status ||
+      observer.publishedExitCode !== snapshot.exitCode;
+    observer.publishedCharacters = end;
+    observer.publishedStatus = snapshot.status;
+    observer.publishedExitCode = snapshot.exitCode;
     if (text.length === 0 && !stateChanged) return;
     // Only a publish that actually sent something opens a coalescing window.
     // Stamped on entry, the empty publish a new observer triggers would make
     // that observer's first real chunk wait the full window.
-    record.lastPublishedAt = Date.now();
-    const emission = { text, replace, snapshot } as const;
-    for (const listener of record.outputListeners) listener(emission);
+    observer.lastPublishedAt = Date.now();
+    observer.listener({ text, replace, characters: end, snapshot });
   }
+}
+
+function clearObserverTimer(observer: OutputObserver): void {
+  if (observer.timer === undefined) return;
+  clearTimeout(observer.timer);
+  observer.timer = undefined;
 }
 
 /**

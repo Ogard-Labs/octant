@@ -41,6 +41,8 @@ import {
   decodeCodeOperationResult,
   decodeCodeTerminalInspection,
   decodeCodeTerminalInspectionRequest,
+  decodeCodeTerminalLiveFrame,
+  decodeCodeTerminalLiveRequest,
   decodeProjectTerminalCommand,
   decodeProjectTerminalResult,
   decodeCodeConversationPage,
@@ -99,6 +101,8 @@ import {
   type CodeOperationResult,
   type CodeTerminalInspection,
   type CodeTerminalInspectionRequest,
+  type CodeTerminalLiveFrame,
+  type CodeTerminalLiveRequest,
   type ProjectTerminalCommand,
   type CodeConversationPage,
   type CodeConversationWindow,
@@ -384,6 +388,15 @@ export interface CodeRouteService {
     input: CodeFileWatchInput,
   ) => AsyncIterable<CodeFileChangeNotice> | Promise<AsyncIterable<CodeFileChangeNotice>>;
   /**
+   * A terminal's output as it is printed, outside the journal. Authorized
+   * before the stream exists, so a refusal is a status; optional so a host
+   * without it answers `unavailable` and the window reads the journal instead.
+   */
+  readonly watchTerminal?: (
+    authenticatedWindowId: WindowId,
+    input: CodeTerminalLiveRequest & { readonly signal?: AbortSignal | undefined },
+  ) => Promise<AsyncIterable<CodeTerminalLiveFrame>>;
+  /**
    * The repository tests the thread's checkout offers. Optional for the same
    * reason as `listFiles`: a host with no discovery answers `unavailable`
    * rather than 404, so "this host cannot discover tests" stays distinct from
@@ -640,6 +653,26 @@ export function createCodeRouteHandler(dependencies: CodeRouteDependencies) {
             200,
             origin,
           );
+        }
+        case "terminal-live": {
+          if (request.method !== "GET") {
+            throw new CodeRouteRejected("Code request is invalid.", 400);
+          }
+          if (dependencies.service.watchTerminal === undefined) {
+            return failureResponse(
+              { category: "unavailable", message: "Live terminal output is unavailable." },
+              503,
+              origin,
+            );
+          }
+          // Awaited here, not inside the stream, for the same reason as a file
+          // watch: a refusal has to reach the caller while it can still be a
+          // status, or the window reads a closed stream as a dropped one.
+          const frames = await dependencies.service.watchTerminal(authenticatedWindowId, {
+            ...decodeTerminalLiveQuery(url),
+            signal: request.signal,
+          });
+          return terminalLiveResponse(frames, request.signal, origin);
         }
         case "events": {
           if (request.method !== "GET") {
@@ -1492,6 +1525,7 @@ type MatchedRoute =
         | "navigation"
         | "commands"
         | "terminal-inspection"
+        | "terminal-live"
         | "project-terminals"
         | "file-save"
         | "file-open"
@@ -1623,6 +1657,7 @@ function matchRoute(pathname: string): MatchedRoute | undefined {
   if (pathname === "/api/code/navigation") return { kind: "navigation" };
   if (pathname === "/api/code/commands") return { kind: "commands" };
   if (pathname === "/api/code/terminals/inspect") return { kind: "terminal-inspection" };
+  if (pathname === "/api/code/terminals/live") return { kind: "terminal-live" };
   if (pathname === "/api/code/project-terminals") return { kind: "project-terminals" };
   if (pathname === "/api/code/board") return { kind: "board" };
   if (pathname === "/api/code/planner/commands") return { kind: "planner-commands" };
@@ -1902,6 +1937,25 @@ function decodeFileWatchQuery(url: URL): Omit<CodeFileWatchInput, "signal"> {
   }
 }
 
+/** Decode a live terminal query: the terminal's scope and, to resume, how far the window has read. */
+function decodeTerminalLiveQuery(url: URL): CodeTerminalLiveRequest {
+  const afterCharacters = url.searchParams.get("afterCharacters");
+  const allowed = afterCharacters === null ? 3 : 4;
+  if (url.searchParams.size !== allowed) {
+    throw new CodeRouteRejected("Code terminal live query is invalid.", 400);
+  }
+  try {
+    return decodeCodeTerminalLiveRequest({
+      threadId: url.searchParams.get("threadId"),
+      checkoutId: url.searchParams.get("checkoutId"),
+      terminalId: url.searchParams.get("terminalId"),
+      ...(afterCharacters === null ? {} : { afterCharacters: Number(afterCharacters) }),
+    });
+  } catch {
+    throw new CodeRouteRejected("Code terminal live query is invalid.", 400);
+  }
+}
+
 /**
  * Decode an open query. The path is required and, exactly like the listing's
  * directory, must survive the strict relative-path contract: the path the
@@ -2103,6 +2157,56 @@ function serializeNoticeLine(notice: CodeFileChangeNotice): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Stream a terminal's output as NDJSON for as long as the shell runs and the
+ * client stays. A frame that cannot be encoded ends the stream rather than
+ * being skipped: the client reconnects from the offset of the last frame it
+ * got, and a frame skipped here would leave a hole it could not see.
+ */
+function terminalLiveResponse(
+  frames: AsyncIterable<CodeTerminalLiveFrame>,
+  signal: AbortSignal,
+  origin: string | null,
+): Response {
+  const encoder = new TextEncoder();
+  const iterator = frames[Symbol.asyncIterator]();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        if (signal.aborted) {
+          controller.close();
+          return;
+        }
+        const next = await iterator.next();
+        if (next.done === true) {
+          controller.close();
+          return;
+        }
+        const line = `${JSON.stringify(decodeCodeTerminalLiveFrame(next.value))}\n`;
+        if (Buffer.byteLength(line, "utf8") > MAX_CODE_NDJSON_LINE_BYTES) {
+          controller.close();
+          await iterator.return?.(undefined);
+          return;
+        }
+        controller.enqueue(encoder.encode(line));
+      } catch {
+        controller.close();
+      }
+    },
+    async cancel() {
+      await iterator.return?.(undefined);
+    },
+  });
+  return new Response(body, {
+    status: 200,
+    headers: {
+      ...Object.fromEntries(corsHeaders(origin).entries()),
+      "content-type": "application/x-ndjson",
+      "cache-control": "no-store",
+    },
+  });
 }
 
 function serializeNdjsonFrame(frame: CodeEventFrame | CodeOperationStreamFrame): string {

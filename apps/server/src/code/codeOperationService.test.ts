@@ -15,6 +15,7 @@ import {
   type CodeReviewFinding,
   type CodeReviewFindingId,
   type CodeFileId,
+  type CodeTerminalLiveFrame,
   type WindowId,
 } from "@octant/contracts";
 import { turnBlocksInPlaceRestore } from "@octant/domain/code-policy";
@@ -26,6 +27,7 @@ import {
   type CodeOperationServiceOptions,
 } from "./codeOperationService";
 import { ReviewFindingServiceError } from "./reviewFindingService";
+import { TerminalService } from "./terminalService";
 
 const ids = {
   window: "11111111-1111-4111-8111-111111111111" as WindowId,
@@ -3648,5 +3650,307 @@ describe("CodeOperationService terminal Browser grant", () => {
       browserGrant: revoked,
     });
     expect(JSON.stringify(result)).not.toContain('"granted"');
+  });
+});
+
+describe("CodeOperationService live terminal output", () => {
+  const scope = { threadId: ids.thread, checkoutId: ids.checkout, terminalId: ids.terminal };
+  const otherWindow = "99999999-9999-4999-8999-aaaaaaaaaaaa" as WindowId;
+
+  function fakeShell() {
+    let data: (value: string) => void = () => undefined;
+    let exit: (event: { exitCode: number }) => void = () => undefined;
+    return {
+      write: vi.fn(),
+      resize: vi.fn(),
+      close: vi.fn(async () => undefined),
+      onData: vi.fn((listener: (value: string) => void) => {
+        data = listener;
+        return () => undefined;
+      }),
+      onExit: vi.fn((listener: (event: { exitCode: number }) => void) => {
+        exit = listener;
+        return () => undefined;
+      }),
+      pause: vi.fn(),
+      resume: vi.fn(),
+      receiptReady: Promise.resolve(),
+      print: (value: string) => data(value),
+      exit: (exitCode: number) => exit({ exitCode }),
+    };
+  }
+
+  async function fixture(options: { readonly canAccessProject?: () => boolean } = {}) {
+    const shell = fakeShell();
+    const terminals = new TerminalService({
+      port: { start: () => shell },
+      inheritedEnvironment: {},
+      credentials: { resolve: async () => "" },
+    });
+    let puts = 0;
+    const service = new CodeOperationService({
+      authority: {
+        readThread: vi.fn(() => thread()),
+        readCheckout: vi.fn(() =>
+          decodeCodeCheckoutIdentity({
+            id: ids.checkout,
+            repositoryId: `repo_${"8".repeat(64)}`,
+            kind: "existing-worktree",
+            availability: "available",
+            head: { kind: "branch", name: "feature/exact", oid: "b".repeat(40) },
+            observedAt: "2026-07-21T10:00:00.000Z",
+          }),
+        ),
+        canAccessProject: vi.fn(async () => options.canAccessProject?.() ?? true),
+        approvalContextDigest: vi.fn(async () => "a".repeat(64)),
+        resolveCheckoutRoot: vi.fn(async () => ({
+          checkoutRoot: "/private/exact-checkout",
+          workingDirectory: "/private/exact-checkout",
+          shell: "/bin/zsh",
+          credentialReferences: [],
+          environment: {},
+        })),
+      } as never,
+      approvals: { validate: vi.fn(async () => true) } as never,
+      terminals: terminals as never,
+      repositoryTests: {} as never,
+      git: {} as never,
+      pullRequests: {} as never,
+      reviewFindings: {} as never,
+      turns: {} as never,
+      evidence: {
+        put: vi.fn((content: string) => {
+          puts += 1;
+          return decodeCodeEvidenceReference({
+            contentId: `00000000-0000-4000-8000-${String(puts).padStart(12, "0")}`,
+            digest: "a".repeat(64),
+            byteLength: Buffer.byteLength(content),
+          });
+        }),
+        read: vi.fn(async () => ""),
+      } as never,
+      events: {
+        replay: vi.fn(() => ({ status: "ok" as const, frames: [], nextCursor: 0 })),
+        append: vi.fn(),
+        historyForThread: vi.fn(() => ({ status: "ok" as const, frames: [] })),
+      } as never,
+    } as CodeOperationServiceOptions);
+    await service.execute(ids.window, {
+      kind: "start-terminal",
+      operationId: ids.operation,
+      ...scope,
+      columns: 80,
+      rows: 24,
+      credentialRefs: [],
+    });
+    return { service, shell, evidencePuts: () => puts };
+  }
+
+  /** Collects frames in the background, the way the route's stream does. */
+  function follow(frames: AsyncIterable<CodeTerminalLiveFrame>) {
+    const received: CodeTerminalLiveFrame[] = [];
+    const finished = (async () => {
+      for await (const frame of frames) received.push(frame);
+    })();
+    return { received, finished };
+  }
+
+  /** What a window holds after applying frames the way the terminal pane does. */
+  function applied(frames: ReadonlyArray<CodeTerminalLiveFrame>): string {
+    return frames.reduce((held, frame) => (frame.replace ? frame.text : held + frame.text), "");
+  }
+
+  it("refuses a window, a thread, or a terminal that is not the one the shell was started for", async () => {
+    const { service } = await fixture();
+
+    await expect(service.watchTerminal(otherWindow, scope)).rejects.toMatchObject({
+      category: "unauthorized",
+    });
+    await expect(
+      service.watchTerminal(ids.window, {
+        ...scope,
+        threadId: decodeCodeThreadId("22222222-2222-4222-8222-222222222223"),
+      }),
+    ).rejects.toMatchObject({ category: "invalid" });
+    await expect(
+      service.watchTerminal(ids.window, {
+        ...scope,
+        terminalId: "55555555-5555-4555-8555-555555555556" as CodeTerminalId,
+      }),
+    ).rejects.toMatchObject({ category: "unavailable" });
+  });
+
+  it("delivers output at frame rate while the store is written no faster than before", async () => {
+    vi.useFakeTimers();
+    try {
+      const flood = async (watched: boolean) => {
+        const { service, shell, evidencePuts } = await fixture();
+        const live = watched
+          ? follow(await service.watchTerminal(ids.window, scope))
+          : { received: [], finished: Promise.resolve() };
+        for (let ms = 0; ms < 1000; ms += 1) {
+          shell.print("x");
+          await vi.advanceTimersByTimeAsync(1);
+        }
+        const received = live.received.length;
+        shell.exit(0);
+        await vi.advanceTimersByTimeAsync(100);
+        await live.finished;
+        return { received, puts: evidencePuts() };
+      };
+
+      const unwatched = await flood(false);
+      const watched = await flood(true);
+
+      // One leading-edge write, then one per 50 ms window, with or without a
+      // window reading live: a flooding shell reaches the evidence store's
+      // 100,000-entry ceiling no sooner for being watched.
+      expect(unwatched.puts).toBeLessThanOrEqual(23);
+      expect(watched.puts).toBe(unwatched.puts);
+      // Live frames arrive at the 16 ms window, so about three for each write.
+      expect(watched.received).toBeGreaterThan(50);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("starts a window with no offset from where the shell is, and resumes one that has an offset from there", async () => {
+    vi.useFakeTimers();
+    try {
+      const { service, shell } = await fixture();
+      shell.print("one\n");
+      await vi.advanceTimersByTimeAsync(100);
+
+      const first = new AbortController();
+      const live = follow(
+        await service.watchTerminal(ids.window, { ...scope, signal: first.signal }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(live.received).toMatchObject([{ text: "one\n", replace: true, state: "running" }]);
+      const held = live.received[0]!.characters;
+
+      shell.print("two\n");
+      await vi.advanceTimersByTimeAsync(20);
+      expect(applied(live.received)).toBe("one\ntwo\n");
+
+      // The stream drops; the shell keeps printing.
+      first.abort();
+      await live.finished;
+      const resumedFrom = live.received.at(-1)!.characters;
+      shell.print("three\n");
+      await vi.advanceTimersByTimeAsync(100);
+
+      const second = new AbortController();
+      const resumed = follow(
+        await service.watchTerminal(ids.window, {
+          ...scope,
+          afterCharacters: resumedFrom,
+          signal: second.signal,
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      // Only what the window missed, appended, so it holds the same bytes the
+      // journal holds.
+      expect(resumed.received).toMatchObject([{ text: "three\n", replace: false }]);
+      expect(held).toBeLessThan(resumedFrom);
+      second.abort();
+      await resumed.finished;
+
+      // An offset the host does not hold is answered with the current output.
+      const stale = new AbortController();
+      const behind = follow(
+        await service.watchTerminal(ids.window, {
+          ...scope,
+          afterCharacters: 10_000_000,
+          signal: stale.signal,
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(behind.received).toMatchObject([{ text: "one\ntwo\nthree\n", replace: true }]);
+      stale.abort();
+      await behind.finished;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("sends a reader that falls behind where the shell is now instead of every step it missed", async () => {
+    vi.useFakeTimers();
+    try {
+      const { service, shell } = await fixture();
+      const frames = (await service.watchTerminal(ids.window, scope))[Symbol.asyncIterator]();
+      const initial = await frames.next();
+      expect(initial.value).toMatchObject({ replace: true });
+
+      let printed = "";
+      for (let step = 0; step < 20; step += 1) {
+        const line = `line ${step}\n`;
+        printed += line;
+        shell.print(line);
+        await vi.advanceTimersByTimeAsync(20);
+      }
+      shell.print("last\n");
+      printed += "last\n";
+      await vi.advanceTimersByTimeAsync(20);
+
+      const received: CodeTerminalLiveFrame[] = [initial.value as CodeTerminalLiveFrame];
+      for (;;) {
+        const next = await frames.next();
+        if (next.done === true) break;
+        received.push(next.value);
+        if (applied(received) === printed) break;
+      }
+      await frames.return?.(undefined);
+
+      expect(applied(received)).toBe(printed);
+      expect(received.length).toBeLessThan(12);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ends the stream with the shell's exit and with the window's revocation", async () => {
+    vi.useFakeTimers();
+    try {
+      const ended = await fixture();
+      const exited = follow(await ended.service.watchTerminal(ids.window, scope));
+      await vi.advanceTimersByTimeAsync(0);
+      ended.shell.exit(3);
+      await vi.advanceTimersByTimeAsync(100);
+      await exited.finished;
+      expect(exited.received.at(-1)).toMatchObject({ state: "exited", exitCode: 3 });
+
+      const revoked = await fixture();
+      const open = follow(await revoked.service.watchTerminal(ids.window, scope));
+      await vi.advanceTimersByTimeAsync(0);
+      revoked.service.revokeTerminalStreams(ids.window);
+      await vi.advanceTimersByTimeAsync(0);
+      await open.finished;
+      expect(open.received.at(-1)).toMatchObject({ state: "running" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ends the stream once the window can no longer open the thread's Project", async () => {
+    vi.useFakeTimers();
+    try {
+      let allowed = true;
+      const { service, shell } = await fixture({ canAccessProject: () => allowed });
+      const live = follow(await service.watchTerminal(ids.window, scope));
+      await vi.advanceTimersByTimeAsync(1_100);
+      shell.print("while allowed\n");
+      await vi.advanceTimersByTimeAsync(20);
+      expect(applied(live.received)).toBe("while allowed\n");
+
+      allowed = false;
+      await vi.advanceTimersByTimeAsync(1_100);
+      await live.finished;
+      shell.print("after revocation\n");
+      await vi.advanceTimersByTimeAsync(100);
+      expect(applied(live.received)).toBe("while allowed\n");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

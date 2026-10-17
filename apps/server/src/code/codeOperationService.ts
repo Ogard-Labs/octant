@@ -27,6 +27,9 @@ import {
   type CodeOperationId,
   type CodeOperationResult,
   type CodeTerminalId,
+  type CodeTerminalLiveFrame,
+  type CodeTerminalLiveRequest,
+  MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS,
   type TerminalBrowserGrantOutcome,
   type CodeRepositoryTestDefinition,
   type CodeRepositoryTestRun,
@@ -68,7 +71,7 @@ import {
 } from "@octant/domain";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
-import type { TerminalLauncher } from "./terminalService";
+import type { TerminalLauncher, TerminalObserveOptions } from "./terminalService";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
 import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoveryService";
@@ -207,8 +210,22 @@ export interface CodeOperationTerminalPort {
   readonly observe?: (
     terminalId: string,
     listener: (emission: TerminalOutputEmission) => void,
-    options?: { readonly afterCharacters: number },
+    options?: TerminalObserveOptions,
   ) => () => void;
+  /**
+   * What the terminal printed after an absolute offset, without disturbing any
+   * observer. The live path starts from it, so catching a window up and
+   * observing from where that answer ended are one step with nothing between.
+   */
+  readonly readSince?: (
+    terminalId: string,
+    afterCharacters: number,
+  ) => {
+    readonly text: string;
+    readonly replace: boolean;
+    readonly characters: number;
+    readonly snapshot: CodeOperationTerminalSnapshot;
+  };
   readonly write: (terminalId: string, data: string) => void;
   readonly resize: (terminalId: string, columns: number, rows: number) => void;
   readonly terminate: (terminalId: string) => Promise<CodeOperationTerminalSnapshot>;
@@ -228,6 +245,8 @@ export interface CodeOperationTerminalSnapshot {
 interface TerminalOutputEmission {
   readonly text: string;
   readonly replace: boolean;
+  /** Absolute offset one past the last character this emission accounts for. */
+  readonly characters: number;
   readonly snapshot: CodeOperationTerminalSnapshot;
 }
 
@@ -259,6 +278,19 @@ interface TerminalOutputReader {
  * instead of accumulating for as long as the shell lives.
  */
 const MAX_TERMINAL_READERS = 4;
+
+/**
+ * One frame, the interval the live path coalesces over. The record path keeps
+ * its own, slower window (see the terminal service), so this number sets how
+ * late a window sees output and has no effect on what is written to the store.
+ */
+const LIVE_TERMINAL_WINDOW_MS = 16;
+
+/** Frames a slow reader may fall behind before it is resynchronised instead. */
+const MAX_LIVE_TERMINAL_FRAMES_QUEUED = 8;
+
+/** How often an open live stream proves its window may still read the terminal. */
+const LIVE_TERMINAL_RECHECK_MS = 1_000;
 
 interface TerminalOwner {
   readonly windowId: string;
@@ -919,6 +951,8 @@ interface StartingTurn {
 export class CodeOperationService {
   readonly #options: CodeOperationServiceOptions;
   readonly #terminalOwners = new Map<string, TerminalOwner>();
+  /** Live output streams each window holds open, so revoking the window ends them. */
+  readonly #liveTerminalStreams = new Map<string, Set<AbortController>>();
   readonly #pendingTests = new Map<
     string,
     {
@@ -1547,6 +1581,156 @@ export class CodeOperationService {
     this.#deactivateTerminalOutput(input.terminalId);
     this.#terminalOwners.delete(input.terminalId);
     return snapshot;
+  }
+
+  /**
+   * Follow a terminal's output live, without the journal.
+   *
+   * Authority is the same as reading the terminal's snapshot: the window that
+   * owns the shell, for the thread and checkout it was started in. It is
+   * proven before the stream exists, so a refusal can still become a status,
+   * and proven again every second the stream stays open. The frames are the
+   * host's own transcript, redacted and held back at a credential prefix the
+   * way the journal's are, so nothing reaches a window here that the journal
+   * would not also hand it.
+   */
+  async watchTerminal(
+    windowId: WindowId,
+    input: CodeTerminalLiveRequest & { readonly signal?: AbortSignal | undefined },
+  ): Promise<AsyncIterable<CodeTerminalLiveFrame>> {
+    const terminals = this.#options.terminals;
+    if (terminals.observe === undefined || terminals.readSince === undefined) {
+      throw new CodeOperationServiceError("unavailable");
+    }
+    await this.#requireOwnedTerminal(windowId, input, true);
+    return this.#liveTerminalFrames(windowId, input);
+  }
+
+  /** End every live output stream a window holds, because its capability was revoked. */
+  revokeTerminalStreams(windowId: WindowId): void {
+    const open = this.#liveTerminalStreams.get(String(windowId));
+    if (open === undefined) return;
+    this.#liveTerminalStreams.delete(String(windowId));
+    for (const controller of open) controller.abort();
+  }
+
+  async *#liveTerminalFrames(
+    windowId: WindowId,
+    input: CodeTerminalLiveRequest & { readonly signal?: AbortSignal | undefined },
+  ): AsyncGenerator<CodeTerminalLiveFrame> {
+    const terminals = this.#options.terminals;
+    // Bound, because the port keeps its own state.
+    const observe = terminals.observe?.bind(terminals);
+    const readSince = terminals.readSince?.bind(terminals);
+    if (observe === undefined || readSince === undefined) return;
+    const terminalId = String(input.terminalId);
+    const owner = this.#terminalOwners.get(terminalId);
+    if (owner === undefined) return;
+    const revocation = new AbortController();
+    const abort = () => revocation.abort();
+    input.signal?.addEventListener("abort", abort, { once: true });
+    if (input.signal?.aborted === true) revocation.abort();
+    const windowKey = String(windowId);
+    const open = this.#liveTerminalStreams.get(windowKey) ?? new Set();
+    open.add(revocation);
+    this.#liveTerminalStreams.set(windowKey, open);
+
+    const queue: CodeTerminalLiveFrame[] = [];
+    let wake: (() => void) | undefined;
+    let resynchronise = false;
+    let stopObserving: (() => void) | undefined;
+    const frameOf = (emission: {
+      readonly text: string;
+      readonly replace: boolean;
+      readonly characters: number;
+      readonly snapshot: CodeOperationTerminalSnapshot;
+    }): CodeTerminalLiveFrame => ({
+      terminalId: input.terminalId,
+      text: emission.text,
+      replace: emission.replace,
+      characters: emission.characters,
+      state: emission.snapshot.status,
+      ...(emission.snapshot.status === "exited"
+        ? { exitCode: emission.snapshot.exitCode ?? null }
+        : {}),
+    });
+    const follow = (afterCharacters: number) => {
+      stopObserving?.();
+      stopObserving = observe(
+        terminalId,
+        (emission) => {
+          if (resynchronise) return;
+          if (queue.length >= MAX_LIVE_TERMINAL_FRAMES_QUEUED) {
+            // A reader this far behind is sent where the terminal is now, not
+            // every step it missed; continuing from its queue would hand it
+            // output the replacement already carries.
+            queue.length = 0;
+            resynchronise = true;
+          } else {
+            queue.push(frameOf(emission));
+          }
+          wake?.();
+        },
+        {
+          afterCharacters,
+          windowMs: LIVE_TERMINAL_WINDOW_MS,
+          maxDeltaCharacters: MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS,
+        },
+      );
+    };
+    const stillAuthorized = async (): Promise<boolean> => {
+      if (this.#terminalOwners.get(terminalId) !== owner) return false;
+      try {
+        await this.#requireOwnedTerminal(windowId, input, true);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    const wakeOnRevocation = () => wake?.();
+    revocation.signal.addEventListener("abort", wakeOnRevocation, { once: true });
+    try {
+      let checkedAt = 0;
+      // Catching the window up and observing from where that answer ended is one
+      // synchronous step, so no output falls between the two.
+      const first = readSince(terminalId, input.afterCharacters ?? Number.MAX_SAFE_INTEGER);
+      queue.push(frameOf(first));
+      follow(first.characters);
+      for (;;) {
+        if (revocation.signal.aborted) return;
+        if (Date.now() - checkedAt >= LIVE_TERMINAL_RECHECK_MS) {
+          if (!(await stillAuthorized()) || revocation.signal.aborted) return;
+          checkedAt = Date.now();
+        }
+        if (resynchronise) {
+          const current = readSince(terminalId, Number.MAX_SAFE_INTEGER);
+          resynchronise = false;
+          queue.push(frameOf(current));
+          follow(current.characters);
+        }
+        const next = queue.shift();
+        if (next !== undefined) {
+          yield next;
+          if (next.state !== "running") return;
+          continue;
+        }
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, LIVE_TERMINAL_RECHECK_MS);
+          wake = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+        });
+        wake = undefined;
+      }
+    } finally {
+      stopObserving?.();
+      revocation.signal.removeEventListener("abort", wakeOnRevocation);
+      input.signal?.removeEventListener("abort", abort);
+      const remaining = this.#liveTerminalStreams.get(windowKey);
+      remaining?.delete(revocation);
+      if (remaining?.size === 0) this.#liveTerminalStreams.delete(windowKey);
+    }
   }
 
   async #requireOwnedTerminal(

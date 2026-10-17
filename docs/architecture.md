@@ -5953,6 +5953,45 @@ mechanisms are:
   `PATH` and may read that folder and the app runtime it starts with, nothing
   more. Detail is in
   [Terminal Browser grant](design/terminal-browser-grant.md).
+- **Terminal output paths.** A Code thread terminal's output reaches a window by
+  two paths with different jobs, so latency and durability do not share one
+  setting. The _record path_ writes what the shell printed to the evidence store
+  and the thread's operation journal, coalesced to at most one write per 50 ms
+  per terminal (the first output after a quiet window is written at once), under
+  the unchanged bounds of 64 KiB per chunk and 8 MiB per transcript. That cadence
+  is what keeps a flooding shell away from the evidence store's global
+  100,000-entry ceiling, past which the write is refused and the shell is closed:
+  about 83 minutes of unbroken flood. It is a property of the record path alone;
+  no reader can move it. The _live path_ is a held, read-only
+  `GET /api/code/terminals/live` stream of newline-delimited frames
+  (`threadId`, `checkoutId`, `terminalId`, and an optional `afterCharacters`),
+  fed from the host's in-memory transcript at one frame (16 ms, first output
+  after a quiet window sent at once) and never written to the journal or the
+  store. A frame carries the text, whether it `replace`s what the window holds,
+  the terminal's absolute character offset (`characters`), and the shell's state.
+  A frame is at most 64 KiB; a longer run, or a reader that fell more than eight
+  frames behind, is sent the bounded tail of the transcript as a replace, not
+  every step it missed.
+  The journal stays authoritative: reload, export, and a window whose live
+  stream is refused or absent (a host without the route, a restarted host) read
+  it exactly as before, and a window that attaches reads its replay from it
+  first. Live frames and journal entries are cut from the same transcript, with
+  the same redaction and the same hold-back of a credential prefix still
+  arriving, so a window sees the same bytes by either path. A window with no
+  offset starts from the transcript's current tail as a replace; a window that
+  lost the stream resumes from the `characters` of its last frame and is sent
+  only what it missed, or the tail as a replace when the host no longer holds
+  that offset. Authority is the terminal's own: opening the stream passes the
+  check that reading the terminal's state passes (the window that started the
+  shell, for the thread and checkout it belongs to, an active thread, a Project
+  the window can open, an available checkout), before the stream exists so a
+  refusal is a status. The host proves it again every second the stream stays
+  open and ends the stream when it fails, when the window's capability is
+  revoked, when the shell is stopped or exits (the last frame carries the
+  state), or when the client leaves. The route is a read, so a paired device
+  reaches it under the read authority of its window and sees only a terminal
+  that window owns. Project terminals are unchanged: their output is never
+  journaled and a window reads it from the host's transcript by offset.
 - **Terminal shell configuration.** On macOS a thread or Project terminal is
   the person's login shell (`-l`), and its read roots add, read-only and only
   where they exist, the shell's rc and login files, the framework trees they

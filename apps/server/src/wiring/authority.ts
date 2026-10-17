@@ -45,6 +45,7 @@ export type AuthorityDependencies = Pick<ServerStart, "persistence"> & {
     | "activeComputerUseTools"
     | "browserAutomationService"
     | "browserToolApprovalService"
+    | "codeOperationRuntime"
     | "projectBrowserService"
     | "revokeQueuedMessages"
     | "revokeShellWindow"
@@ -206,6 +207,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
           agentRunExecutionWindows.delete(requestId);
       }
       late.activeCodeService.current?.revokeWindow?.(windowId);
+      late.codeOperationRuntime.current?.revokeTerminalStreams(windowId);
       void late.browserAutomationService.current?.revokeWindow(windowId);
       void late.projectBrowserService.current?.revokeWindow(windowId);
       void late.activeComputerUseRuntime.current?.revokeWindow(windowId);

@@ -16,11 +16,19 @@ import { ShellState } from "../shell/ShellState";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantConfirmDialog } from "../ui/base/OctantConfirmDialog";
+import { waitForReconnect } from "../lib/waitForReconnect";
 
 type TerminalResult = Extract<CodeOperationResult, { readonly kind: "terminal-state" }>;
 
 export interface CodeTerminalPaneProps {
-  readonly client: Pick<CodeClient, "executeOperation" | "operationContent" | "subscribeOperation">;
+  /**
+   * `watchTerminal` is the live path. A client without it reads the journal,
+   * which is also what a host that refuses or lacks the stream falls back to.
+   */
+  readonly client: Pick<
+    CodeClient,
+    "executeOperation" | "operationContent" | "subscribeOperation" | "watchTerminal"
+  >;
   readonly createOperationId: () => CodeOperationId;
   readonly executionPolicy: ProviderExecutionPolicy;
   readonly loadRuntime?: () => Promise<XtermAdapterRuntime>;
@@ -72,6 +80,8 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   const queuedWrites = useRef(0);
   const coalesceScheduled = useRef(false);
   const wakeReplay = useRef<(() => void) | undefined>(undefined);
+  /** The transcript the journal handed this pane, which the journal path resumes from. */
+  const replayText = useRef("");
   const interactive = props.executionPolicy !== "plan" && result.state === "running";
   const replayReady = loadedReplayKey === replayKey;
   // Read from the host's last answer about this shell, never from having asked:
@@ -89,6 +99,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
   useEffect(() => {
     let active = true;
     setOutput("");
+    replayText.current = "";
     if (replayContentId === undefined) {
       setLoadedReplayKey(replayKey);
       return () => void (active = false);
@@ -98,7 +109,9 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
       .operationContent(props.scope.threadId, result.operationId, replayContentId)
       .then((bytes) => {
         if (!active) return;
-        setOutput(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+        const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+        replayText.current = text;
+        setOutput(text);
         setLoadedReplayKey(replayKey);
       })
       .catch(() => {
@@ -114,7 +127,78 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     if (!replayReady || result.state !== "running") return;
     const controller = new AbortController();
     let cursor = 0;
+    const watchTerminal = props.client.watchTerminal?.bind(props.client);
+    /**
+     * Output as the shell prints it, from the host's live stream. It resumes a
+     * dropped stream from the offset of the last frame, so nothing is skipped
+     * or shown twice. Returns "settled" when the shell ended and "unavailable"
+     * when the host will not stream, which sends the pane to the journal.
+     */
+    const followLive = async (
+      watch: NonNullable<typeof watchTerminal>,
+    ): Promise<"settled" | "unavailable"> => {
+      let offset: number | undefined;
+      let reconnecting = false;
+      let barren = 0;
+      while (!controller.signal.aborted) {
+        let received = 0;
+        try {
+          for await (const frame of watch(
+            {
+              threadId: props.scope.threadId,
+              checkoutId: props.scope.checkoutId,
+              terminalId: result.terminalId,
+              ...(offset === undefined ? {} : { afterCharacters: offset }),
+            },
+            controller.signal,
+          )) {
+            received += 1;
+            offset = frame.characters;
+            setOutput((current) => (frame.replace ? frame.text : `${current}${frame.text}`));
+            if (reconnecting) {
+              reconnecting = false;
+              setFailure(undefined);
+            }
+            if (frame.state !== "running") {
+              setResult((current) =>
+                frame.state === "exited"
+                  ? { ...current, state: "exited", exitCode: frame.exitCode ?? null }
+                  : { ...current, state: frame.state },
+              );
+              return "settled";
+            }
+          }
+        } catch (error) {
+          if (controller.signal.aborted) return "settled";
+          // A refusal asked again is the same refusal; the journal still holds
+          // the output, so that is where the pane goes.
+          if (
+            received === 0 &&
+            error instanceof CodeClientFailure &&
+            error.category !== "disconnected"
+          ) {
+            return "unavailable";
+          }
+        }
+        barren = received === 0 ? barren + 1 : 0;
+        if (barren >= 3) return "unavailable";
+        if (!controller.signal.aborted && received === 0) {
+          reconnecting = true;
+          setFailure("Live terminal output is temporarily unavailable. Reconnecting…");
+        }
+        await waitForReconnect(controller.signal, received === 0 ? 500 * barren : 50);
+      }
+      return "settled";
+    };
     void (async () => {
+      if (watchTerminal !== undefined) {
+        if ((await followLive(watchTerminal)) === "settled") return;
+        if (controller.signal.aborted) return;
+        // Whatever the stream delivered is rebuilt from the journal's own
+        // record, so the two paths never both contribute the same bytes.
+        setOutput(replayText.current);
+        setFailure(undefined);
+      }
       let idleDelayMs = 150;
       while (!controller.signal.aborted) {
         let received = 0;
@@ -183,6 +267,7 @@ export function CodeTerminalPane(props: CodeTerminalPaneProps) {
     return () => controller.abort();
   }, [
     props.client,
+    props.scope.checkoutId,
     props.scope.threadId,
     replayReady,
     result.operationId,
