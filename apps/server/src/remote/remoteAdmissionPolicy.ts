@@ -456,6 +456,10 @@ const PAIRING_STATUS_BODY_MAX_BYTES = 4_096;
 // body must not hold the connection: past this it is charged like an unknown
 // ticket and the handler's own bounded read takes over.
 const PAIRING_STATUS_BODY_READ_MS = 1_000;
+// The read also happens before any budget is charged, so the number of reads
+// one source may have open at once is capped: a window polls one at a time, and
+// a source that opens more has the surplus refused without a body read started.
+const PAIRING_STATUS_READS_IN_FLIGHT_PER_SOURCE = 4;
 
 /**
  * Read the ticket a pairing-status request names, from a clone so the handler
@@ -531,6 +535,7 @@ export function createRemoteBoundaryFetch(
   options: RemoteBoundaryFetchOptions,
 ): (request: Request, facts?: RequestTransportFacts) => Promise<Response> {
   const resolveDeviceKey = options.deviceKeyResolver ?? (() => undefined);
+  const statusReadsInFlight = new Map<string, number>();
   return async (request, facts) => {
     if (facts === undefined) {
       return remoteBoundaryRejection(403);
@@ -549,7 +554,20 @@ export function createRemoteBoundaryFetch(
     const deviceKey = resolveDeviceKey(request, facts);
     let pairingTicketKey: string | undefined;
     if (pathSurface === "pairing-status" && options.pairingTicketIsPending !== undefined) {
-      const ticket = await readPairingStatusTicket(request);
+      const open = statusReadsInFlight.get(facts.sourceKey) ?? 0;
+      if (open >= PAIRING_STATUS_READS_IN_FLIGHT_PER_SOURCE) {
+        // Reads end within a second, so a second is how long to wait.
+        return remoteBoundaryRejection(429, { "retry-after": "1" });
+      }
+      statusReadsInFlight.set(facts.sourceKey, open + 1);
+      let ticket: Awaited<ReturnType<typeof readPairingStatusTicket>>;
+      try {
+        ticket = await readPairingStatusTicket(request);
+      } finally {
+        const remaining = (statusReadsInFlight.get(facts.sourceKey) ?? 1) - 1;
+        if (remaining <= 0) statusReadsInFlight.delete(facts.sourceKey);
+        else statusReadsInFlight.set(facts.sourceKey, remaining);
+      }
       try {
         if (ticket !== undefined && options.pairingTicketIsPending(ticket)) {
           pairingTicketKey = ticket.ticketId;

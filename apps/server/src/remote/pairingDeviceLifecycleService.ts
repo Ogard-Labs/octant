@@ -84,6 +84,13 @@ interface TicketRecord {
   claim?: RetainedClaimFacts;
   decision?: PairingDecisionV1;
   deviceId?: DeviceId;
+  /**
+   * Set at approval: an approved ticket stays readable until the window's
+   * key-step deadline, so a person who approves in the last poll interval
+   * still lets the window learn of it. Pending and denied tickets end at
+   * `expiresAt`.
+   */
+  approvedUntil?: number;
 }
 
 export interface PairingDeviceLifecycleServiceOptions {
@@ -398,7 +405,7 @@ export class PairingDeviceLifecycleService {
       state: record.state,
       attempts: record.failedAttempts,
       now,
-      expiresAt: record.expiresAt,
+      expiresAt: record.approvedUntil ?? record.expiresAt,
       proofMatches: proofMatches(record.proofDigest, input.ticketProof),
     });
     if (decision.kind === "pending") return { status: "pending" };
@@ -506,10 +513,9 @@ export class PairingDeviceLifecycleService {
     record.state = "approved";
     record.decision = decision;
     record.deviceId = device.deviceId;
-    this.#awaitingKeyStep.set(device.deviceId, {
-      deviceId: device.deviceId,
-      deadline: Math.max(record.expiresAt, now + APPROVAL_KEY_STEP_GRACE_MS),
-    });
+    const deadline = Math.max(record.expiresAt, now + APPROVAL_KEY_STEP_GRACE_MS);
+    record.approvedUntil = deadline;
+    this.#awaitingKeyStep.set(device.deviceId, { deviceId: device.deviceId, deadline });
     // The comparison code is no longer derivable after a decision; the claim
     // is cleared so deriveComparisonCode returns undefined. Same-decision
     // idempotency survives from decision/deviceId, not the retained claim.
@@ -723,7 +729,7 @@ export class PairingDeviceLifecycleService {
 
   #purgeExpired(now: number): void {
     for (const [ticketId, record] of this.#tickets) {
-      if (now >= record.expiresAt) {
+      if (now >= (record.approvedUntil ?? record.expiresAt)) {
         if (record.state === "pending") {
           record.state = "expired";
         }

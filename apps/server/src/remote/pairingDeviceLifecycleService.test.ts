@@ -638,6 +638,39 @@ describe("PairingDeviceLifecycleService", () => {
       expect(remove).toHaveBeenCalledExactlyOnceWith(device.deviceId);
     });
 
+    it("lets the window learn of an approval made in the ticket's last poll interval", () => {
+      const setup = createService();
+      const ticket = setup.service.createTicket({ sourceClass: "lan-private" });
+      setup.service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
+      const poll = { ticketId: ticket.ticketId, ticketProof: ticket.ticketProof };
+      setup.clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS - 200;
+      const device = setup.service.approveTicket({ ticketId: ticket.ticketId }).device;
+
+      setup.clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS + 500;
+      expect(setup.service.ticketStatus(poll)).toEqual({
+        status: "approved",
+        deviceId: device.deviceId,
+        credentialGeneration: 1,
+      });
+
+      // No sign-in by the grace deadline: the status ends and the device goes.
+      const remove = vi.fn();
+      setup.clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS - 200 + 30_000;
+      setup.service.removeApprovalsWithoutKeyStep(remove);
+      expect(remove).toHaveBeenCalledExactlyOnceWith(device.deviceId);
+      expect(setup.service.ticketStatus(poll)).toEqual({ status: "failed" });
+    });
+
+    it("still ends a pending ticket at its expiry", () => {
+      const setup = createService();
+      const ticket = setup.service.createTicket({ sourceClass: "lan-private" });
+      setup.service.claimTicket(claimInput(ticket.ticketId, ticket.ticketProof));
+      setup.clock.nowMs = nowMs + PAIRING_TICKET_TTL_MS + 1;
+      expect(
+        setup.service.ticketStatus({ ticketId: ticket.ticketId, ticketProof: ticket.ticketProof }),
+      ).toEqual({ status: "failed" });
+    });
+
     it("is never removed once it has signed in, however late the sweep runs", () => {
       const setup = createService();
       const device = approveOne(setup);

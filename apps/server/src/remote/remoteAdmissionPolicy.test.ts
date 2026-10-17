@@ -741,6 +741,48 @@ describe("createRemoteBoundaryFetch pairing status", () => {
     expect(statuses.slice(-2)).toEqual([429, 429]);
   });
 
+  it("refuses a source's surplus status requests at once instead of waiting on their bodies", async () => {
+    vi.useFakeTimers();
+    try {
+      const inner = vi.fn(() => Response.json({ status: "failed" }));
+      const ticketCheck = vi.fn(() => false);
+      const boundary = createRemoteBoundaryFetch({
+        fetch: inner,
+        admission: createRemoteAdmissionPolicy(),
+        pairingTicketIsPending: ticketCheck,
+      });
+      const stalled = () =>
+        new Request("https://h:9443/api/remote/pairing/status", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: new ReadableStream<Uint8Array>({ start() {} }),
+          duplex: "half",
+        } as RequestInit);
+      const settled: number[] = [];
+      const pending = Array.from({ length: 8 }, () =>
+        boundary(stalled(), lanFacts()).then((response) => {
+          settled.push(response.status);
+          return response;
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      // Four reads are open; the other four were refused before any read began.
+      expect(settled).toEqual([429, 429, 429, 429]);
+      expect(ticketCheck).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await Promise.all(pending);
+      expect(settled.slice(4)).toEqual([200, 200, 200, 200]);
+
+      // The slots are free again once the reads end.
+      const next = boundary(statusRequest(), lanFacts());
+      await vi.advanceTimersByTimeAsync(0);
+      expect((await next).status).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("charges every status read to the per-source budget when the host cannot vouch for tickets", async () => {
     const boundary = createRemoteBoundaryFetch({
       fetch: () => Response.json({ status: "pending" }),
