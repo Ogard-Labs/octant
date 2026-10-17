@@ -592,7 +592,14 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
             case "screenshot":
               break;
             case "observe-diagnostics":
-              break;
+              // Handed over and cleared before any renderer work: a page that
+              // never committed has no document to evaluate, and that is when
+              // the failed request is the whole answer. The next read answers
+              // what happened since this one.
+              return {
+                consoleErrors: owned.consoleErrors.splice(0),
+                failedRequests: owned.failedRequests.splice(0),
+              };
             case "close-tab":
               await contents.loadURL("about:blank");
               break;
@@ -621,17 +628,7 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           const screenshotDataUrl = sensitiveDocument
             ? undefined
             : await captureScreenshot(contentsView(owned));
-          // Handed over and cleared together: the next read answers what
-          // happened since this one, and one failure is not reported forever.
-          const diagnostics =
-            request.kind === "observe-diagnostics"
-              ? {
-                  consoleErrors: owned.consoleErrors.splice(0),
-                  failedRequests: owned.failedRequests.splice(0),
-                }
-              : undefined;
           return {
-            ...(diagnostics ?? {}),
             ...(contents.getURL() === ""
               ? {}
               : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),

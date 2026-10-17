@@ -783,6 +783,36 @@ describe("BrowserSurfaceHost", () => {
     expect(navigated.failedRequests).toBeUndefined();
   });
 
+  it("reports a failed first navigation's request even though no document committed", async () => {
+    const created = view();
+    vi.mocked(created.webContents.getURL).mockReturnValue("");
+    vi.mocked(created.webContents.executeJavaScriptInIsolatedWorld).mockRejectedValue(
+      new Error("No document."),
+    );
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    const onFailed = vi.mocked(created.webContents.session.webRequest!.onErrorOccurred).mock
+      .calls[0]?.[0];
+    onFailed!({ url: "https://example.com/", method: "GET", error: "net::ERR_CONNECTION_REFUSED" });
+
+    const read = await host.act(contextId, { kind: "observe-diagnostics" });
+
+    expect(read.failedRequests).toEqual([
+      { url: "https://example.com/", method: "GET", failure: "net::ERR_CONNECTION_REFUSED" },
+    ]);
+    expect(read.consoleErrors).toEqual([]);
+  });
+
   it("keeps the newest diagnostics when a page reports more than the bound", async () => {
     const created = view();
     const host = createBrowserSurfaceHost({ createView: () => created });
