@@ -80,7 +80,7 @@ Press Enter to activate a result and land on the setting it points to.
 
 ## Keyboard shortcuts
 
-**Settings → Keyboard shortcuts** remaps the chords that reach Octant's
+**Settings → Keybindings** remaps the chords that reach Octant's
 global surfaces. Press a row to record a new chord, or edit the JSON to
 move a set between machines. The list always shows what is in effect.
 
