@@ -2,6 +2,7 @@ import {
   decodeProviderServiceLimits,
   type ProviderFailure,
   type ProviderInstanceId,
+  type ProviderModel,
   type ProviderObservedState,
   type ProviderRuntimeEvent,
   type ProviderServiceLimits,
@@ -9,6 +10,7 @@ import {
 } from "@octant/contracts";
 import {
   resolveModelContextWindow,
+  resolveModelMaxOutput,
   type ModelContextWindowSource,
 } from "@octant/domain/model-context-window";
 import {
@@ -51,6 +53,31 @@ export function modelEvidenceFromObservedState(
       observedAt: state.observedAt,
     };
   });
+}
+
+/**
+ * A driver's own evidence for a model, with the built-in profile's maximum
+ * output added when the driver gave a window but no maximum. The window and
+ * its source stay the driver's; only the missing maximum is filled, from the
+ * same profile match the window resolution uses, so a profiled model is never
+ * planned without one just because its window came from somewhere else.
+ */
+export function withProfileMaxOutput(
+  evidence: ProviderModelLimitEvidence,
+  model: ProviderModel | undefined,
+): ProviderModelLimitEvidence {
+  if (evidence.maxOutput !== undefined || evidence.contextWindow === undefined) return evidence;
+  const maxOutput = resolveModelMaxOutput(
+    {
+      id: String(evidence.modelId),
+      servedModelId:
+        model !== undefined && String(model.id) === String(evidence.modelId)
+          ? model.servedModelId
+          : undefined,
+    },
+    evidence.contextWindow,
+  );
+  return maxOutput === undefined ? evidence : { ...evidence, maxOutput };
 }
 
 /**

@@ -6901,6 +6901,125 @@ describe("ChatService", () => {
     );
   });
 
+  it.each([
+    {
+      name: "a deployment with a name of its own whose endpoint said which model it served",
+      model: { id: "team-chat-prod", servedModelId: "gpt-4o" },
+      limits: { contextWindow: 128_000, maxOutput: 16_384, source: "reviewed-catalog" },
+    },
+    {
+      name: "a model its id alone names",
+      model: { id: "gpt-4o" },
+      limits: { contextWindow: 128_000, maxOutput: 16_384, source: "reviewed-catalog" },
+    },
+    {
+      name: "a deployment nothing names",
+      model: { id: "team-chat-prod" },
+      limits: { contextWindow: 256_000, maxOutput: 1_024, source: "conservative-fallback" },
+    },
+  ])(
+    "plans $name against its profile's maximum output, or the fallback when none matches",
+    async ({ model: named, limits }) => {
+      const [model] = probeFixture().models;
+      if (model === undefined) throw new Error("Expected a fixture model.");
+      const { contextLimit: _contextLimit, ...unsized } = model;
+      const probe = probeFixture({ models: [{ ...unsized, ...named, id: named.id as never }] });
+      const sent: Array<SentTurn> = [];
+      const fixture = openFixture({
+        probe,
+        driver: compactionDriver(sent),
+        settings: { ...settings(), defaultModelId: named.id } as ChatSettings,
+      });
+      const { service, contextHarness } = fixture;
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Named by profile",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      const accepted = await service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: created.thread.version,
+        prompt: "Hello",
+      });
+      if (accepted.kind !== "turn-created") throw new Error("Expected turn-created result.");
+      await until(
+        () =>
+          service
+            .read(created.thread.id)
+            .turns.at(-1)
+            ?.attempts.some((attempt) => attempt.outcome === "completed") === true,
+      );
+      const snapshot = contextHarness.inspect(
+        decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: created.thread.id }),
+      );
+      expect(snapshot.modelLimits).toMatchObject(limits);
+    },
+  );
+
+  it("plans a model whose driver reported a window but no maximum output for its profile's maximum", async () => {
+    const [model] = probeFixture().models;
+    if (model === undefined) throw new Error("Expected a fixture model.");
+    const { contextLimit: _contextLimit, ...unsized } = model;
+    const probe = probeFixture({
+      models: [{ ...unsized, id: "team-chat-prod" as never, servedModelId: "gpt-4.1" }],
+    });
+    const reported = compactionContextFacts(probe);
+    const sent: Array<SentTurn> = [];
+    const fixture = openFixture({
+      probe,
+      driver: {
+        ...compactionDriver(sent),
+        contextFacts: {
+          ...reported,
+          observeModelLimits: () =>
+            Effect.succeed([
+              {
+                providerInstanceId: probe.instanceId,
+                modelId: probe.models[0]!.id,
+                contextWindow: 64_000,
+                reasoning: "included",
+                source: "runtime-reported",
+                confidence: "high",
+                observedAt: probe.observedAt,
+              },
+            ]),
+        },
+      } as unknown as ProviderDriver,
+      settings: { ...settings(), defaultModelId: "team-chat-prod" } as ChatSettings,
+    });
+    const { service, contextHarness } = fixture;
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Reported without a maximum",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const accepted = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    if (accepted.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () =>
+        service
+          .read(created.thread.id)
+          .turns.at(-1)
+          ?.attempts.some((attempt) => attempt.outcome === "completed") === true,
+    );
+    const snapshot = contextHarness.inspect(
+      decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: created.thread.id }),
+    );
+    expect(snapshot.modelLimits).toMatchObject({
+      contextWindow: 64_000,
+      maxOutput: 32_768,
+      source: "runtime-reported",
+    });
+  });
+
   it("keeps the whole conversation when no one named the model's window", async () => {
     const [model] = probeFixture().models;
     if (model === undefined) throw new Error("Expected a fixture model.");
