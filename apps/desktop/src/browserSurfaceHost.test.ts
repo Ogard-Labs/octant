@@ -48,6 +48,7 @@ function view(): BrowserSurfaceViewPort {
         setDisplayMediaRequestHandler: vi.fn(),
         setPermissionCheckHandler: vi.fn(),
         setPermissionRequestHandler: vi.fn(),
+        webRequest: { onErrorOccurred: vi.fn() },
       },
       setWindowOpenHandler: vi.fn(),
       stop: vi.fn(),
@@ -737,5 +738,76 @@ describe("BrowserSurfaceHost", () => {
     await expect(
       host.tabCommand(contextId, { windowId: "window-b", threadId }, { kind: "open" }),
     ).rejects.toThrow("does not own");
+  });
+
+  it("reports console errors and failed requests since the last read, then clears them", async () => {
+    const created = view();
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    await host.act(contextId, { kind: "navigate", target: "https://example.com/" });
+    const onConsole = vi
+      .mocked(created.webContents.on)
+      .mock.calls.find(([event]) => event === "console-message")?.[1];
+    const onFailed = vi.mocked(created.webContents.session.webRequest!.onErrorOccurred).mock
+      .calls[0]?.[0];
+    expect(onConsole).toBeDefined();
+    expect(onFailed).toBeDefined();
+
+    onConsole!({ level: "info", message: "ready" });
+    onConsole!({ level: "warning", message: "careful" });
+    onConsole!({ level: "error", message: "  boom  " });
+    onFailed!({ url: "https://example.com/missing.js", method: "GET", error: "net::ERR_FAILED" });
+
+    const first = await host.act(contextId, { kind: "observe-diagnostics" });
+    expect(first.consoleErrors).toEqual([{ text: "boom", url: "https://example.com/" }]);
+    expect(first.failedRequests).toEqual([
+      { url: "https://example.com/missing.js", method: "GET", failure: "net::ERR_FAILED" },
+    ]);
+
+    const second = await host.act(contextId, { kind: "observe-diagnostics" });
+    expect(second.consoleErrors).toEqual([]);
+    expect(second.failedRequests).toEqual([]);
+
+    const navigated = await host.act(contextId, { kind: "screenshot" });
+    expect(navigated.consoleErrors).toBeUndefined();
+    expect(navigated.failedRequests).toBeUndefined();
+  });
+
+  it("keeps the newest diagnostics when a page reports more than the bound", async () => {
+    const created = view();
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+    await host.act(contextId, { kind: "navigate", target: "https://example.com/" });
+    const onConsole = vi
+      .mocked(created.webContents.on)
+      .mock.calls.find(([event]) => event === "console-message")?.[1];
+    for (let index = 0; index < 40; index += 1) {
+      onConsole!({ level: "error", message: `error ${String(index)}` });
+    }
+
+    const read = await host.act(contextId, { kind: "observe-diagnostics" });
+    expect(read.consoleErrors).toHaveLength(32);
+    expect(read.consoleErrors?.[0]?.text).toBe("error 8");
+    expect(read.consoleErrors?.at(-1)?.text).toBe("error 39");
   });
 });

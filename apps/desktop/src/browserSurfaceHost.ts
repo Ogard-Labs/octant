@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { originAllowed as sameSiteOriginAllowed } from "@octant/domain";
-import type {
-  BrowserActionRequest,
-  BrowserContextId,
-  BrowserContextPolicy,
-  BrowserThreadId,
+import {
+  MAX_BROWSER_DIAGNOSTIC_ENTRIES,
+  MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
+  type BrowserActionRequest,
+  type BrowserContextId,
+  type BrowserContextPolicy,
+  type BrowserThreadId,
 } from "@octant/contracts";
 
 export interface BrowserSurfaceBounds {
@@ -79,6 +81,21 @@ interface BrowserSurfaceSessionPort {
       callback: (allowed: boolean) => void,
     ) => void,
   ): void;
+  /**
+   * Where Electron reports a request that did not complete. One listener per
+   * session, which is why a context installs the same one for every tab.
+   */
+  readonly webRequest?: {
+    onErrorOccurred(
+      listener:
+        | ((details: {
+            readonly url: string;
+            readonly method?: string;
+            readonly error?: string;
+          }) => void)
+        | null,
+    ): void;
+  };
 }
 
 export interface BrowserSurfaceViewPort {
@@ -174,6 +191,13 @@ interface OwnedSurface {
   shellWindow: BrowserSurfaceShellWindowPort | undefined;
   /** Last top-level navigation the allowlist guard cancelled during the current action. */
   blockedNavigationUrl: string | undefined;
+  /**
+   * What the context's pages reported since the last diagnostics read. Bounded
+   * on write, oldest first out, so a page that logs in a loop cannot grow this
+   * while the agent looks elsewhere.
+   */
+  consoleErrors: Array<{ text: string; url?: string }>;
+  failedRequests: Array<{ url: string; method?: string; failure: string }>;
 }
 
 /**
@@ -197,6 +221,13 @@ export interface BrowserSurfaceRuntimeObservation {
   readonly extractedText?: string;
   readonly screenshotDataUrl?: string;
   readonly viewport?: { readonly width: number; readonly height: number };
+  /** Only an observe-diagnostics read fills these; each read clears what it returns. */
+  readonly consoleErrors?: ReadonlyArray<{ readonly text: string; readonly url?: string }>;
+  readonly failedRequests?: ReadonlyArray<{
+    readonly url: string;
+    readonly method?: string;
+    readonly failure: string;
+  }>;
 }
 
 const ISOLATED_WORLD_ID = 1_001;
@@ -368,6 +399,12 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         callback?.();
       },
     );
+    view.webContents.on("console-message", (...args: readonly unknown[]) => {
+      recordConsoleError(owned, view.webContents.getURL(), args);
+    });
+    view.webContents.session.webRequest?.onErrorOccurred((details) =>
+      recordFailedRequest(owned, details),
+    );
     view.webContents.on("focus", () => {
       owned.control = "user";
       publish(contextId, owned);
@@ -420,6 +457,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
         control: "idle",
         shellWindow: undefined,
         blockedNavigationUrl: undefined,
+        consoleErrors: [],
+        failedRequests: [],
       };
       openTabView(input.contextId, owned, firstTabId);
       surfaces.set(input.contextId, owned);
@@ -552,6 +591,8 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
               break;
             case "screenshot":
               break;
+            case "observe-diagnostics":
+              break;
             case "close-tab":
               await contents.loadURL("about:blank");
               break;
@@ -580,7 +621,17 @@ export function createBrowserSurfaceHost(options: BrowserSurfaceHostOptions) {
           const screenshotDataUrl = sensitiveDocument
             ? undefined
             : await captureScreenshot(contentsView(owned));
+          // Handed over and cleared together: the next read answers what
+          // happened since this one, and one failure is not reported forever.
+          const diagnostics =
+            request.kind === "observe-diagnostics"
+              ? {
+                  consoleErrors: owned.consoleErrors.splice(0),
+                  failedRequests: owned.failedRequests.splice(0),
+                }
+              : undefined;
           return {
+            ...(diagnostics ?? {}),
             ...(contents.getURL() === ""
               ? {}
               : { url: redactedObservationUrl(contents.getURL()).slice(0, 4_096) }),
@@ -1110,6 +1161,52 @@ async function hasSensitiveDocument(
     // fail closed instead of risking credential disclosure.
     return true;
   }
+}
+
+function boundedText(value: string, limit: number): string {
+  return value.trim().slice(0, limit);
+}
+
+/**
+ * Keep one console error. Electron 43 reports the message as fields of the
+ * event; an older shape passes level and message positionally, so both are read
+ * and a malformed report is dropped rather than recorded as an empty error.
+ */
+function recordConsoleError(owned: OwnedSurface, pageUrl: string, args: readonly unknown[]): void {
+  const [first, level, message] = args;
+  const fromEvent =
+    typeof first === "object" && first !== null
+      ? (first as { level?: unknown; message?: unknown })
+      : {};
+  const severity = fromEvent.level ?? level;
+  const rawText = fromEvent.message ?? message;
+  if (severity !== "error" && severity !== 3) return;
+  if (typeof rawText !== "string") return;
+  const text = boundedText(rawText, MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS);
+  if (text === "") return;
+  const url =
+    pageUrl === "" || pageUrl === "about:blank" ? undefined : redactedObservationUrl(pageUrl);
+  if (owned.consoleErrors.length >= MAX_BROWSER_DIAGNOSTIC_ENTRIES) owned.consoleErrors.shift();
+  owned.consoleErrors.push({ text, ...(url === undefined ? {} : { url: url.slice(0, 4_096) }) });
+}
+
+function recordFailedRequest(
+  owned: OwnedSurface,
+  details: { readonly url: string; readonly method?: string; readonly error?: string },
+): void {
+  const url = boundedText(redactedObservationUrl(details.url), 4_096);
+  if (url === "" || url === "about:blank") return;
+  const method = boundedText(details.method ?? "", 16);
+  const failure = boundedText(
+    details.error ?? "The request did not complete.",
+    MAX_BROWSER_DIAGNOSTIC_TEXT_CHARACTERS,
+  );
+  if (owned.failedRequests.length >= MAX_BROWSER_DIAGNOSTIC_ENTRIES) owned.failedRequests.shift();
+  owned.failedRequests.push({
+    url,
+    ...(method === "" ? {} : { method }),
+    failure: failure === "" ? "The request did not complete." : failure,
+  });
 }
 
 function redactedObservationUrl(value: string): string {

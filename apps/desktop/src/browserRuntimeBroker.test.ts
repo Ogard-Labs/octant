@@ -54,6 +54,21 @@ describe("BrowserRuntimeBroker", () => {
     }
   });
 
+  it("accepts the diagnostics read as a bounded action", async () => {
+    const surface = host();
+    const broker = await startBrowserRuntimeBroker(surface as never);
+    try {
+      const response = await broker.fetchForTest(
+        request(broker.url, broker.token, { contextId, request: { kind: "observe-diagnostics" } }),
+      );
+
+      expect(response.status).toBe(200);
+      expect(surface.act).toHaveBeenCalledWith(contextId, { kind: "observe-diagnostics" });
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("returns a picture of the page on peek without treating it as an action", async () => {
     const surface = host();
     const broker = await startBrowserRuntimeBroker(surface as never);
