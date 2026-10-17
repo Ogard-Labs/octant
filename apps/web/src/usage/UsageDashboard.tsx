@@ -611,7 +611,6 @@ function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
           placeholder="provider instance id"
           type="search"
           value={filter.providerInstanceId ?? ""}
-          unstyled
         />
       </label>
       <label className="usage-dashboard__field">
@@ -630,7 +629,6 @@ function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
           placeholder="model id"
           type="search"
           value={filter.modelId ?? ""}
-          unstyled
         />
       </label>
       <label className="usage-dashboard__field">
@@ -649,7 +647,6 @@ function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
           placeholder="host id"
           type="search"
           value={filter.hostId ?? ""}
-          unstyled
         />
       </label>
       <label className="usage-dashboard__field">
@@ -683,7 +680,6 @@ function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
           placeholder="project id"
           type="search"
           value={filter.projectId ?? ""}
-          unstyled
         />
       </label>
       <label className="usage-dashboard__field">
@@ -706,7 +702,6 @@ function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
           placeholder="thread id"
           type="search"
           value={filter.subjectAggregateId ?? ""}
-          unstyled
         />
       </label>
       <label className="usage-dashboard__field">
@@ -725,7 +720,6 @@ function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
           placeholder="request shape"
           type="search"
           value={filter.requestShape ?? ""}
-          unstyled
         />
       </label>
       <label className="usage-dashboard__field">
@@ -769,7 +763,6 @@ function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
           onChange={(event) => updateDate("from", event.currentTarget.value)}
           type="date"
           value={dateInputValue(filter.from)}
-          unstyled
         />
       </label>
       <label className="usage-dashboard__field">
@@ -780,7 +773,6 @@ function UsageFilters({ filter, onChange, open }: UsageFiltersProps) {
           onChange={(event) => updateDate("to", event.currentTarget.value)}
           type="date"
           value={dateInputValue(filter.to)}
-          unstyled
         />
       </label>
       {rangeError !== undefined ? (

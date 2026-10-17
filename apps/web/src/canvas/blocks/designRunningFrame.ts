@@ -18,8 +18,9 @@ import {
  * sandbox: `allow-scripts` and no other token, so the page's origin is opaque
  * and it cannot reach Octant's page, storage, or cookies, navigate the app,
  * open a window, submit a form, or raise a dialog. In the desktop app it is
- * drawn in a surface of its own with no route out instead (see the desktop's
- * prototype surface), because a page policy does not cover WebRTC. The page
+ * drawn from a process of its own with no route out and no resolver instead
+ * (see the desktop's prototype host), because a page policy does not cover
+ * WebRTC or name lookups. The page
  * talks back only through a bridge the host wrote first in it; every message is
  * a claim the page could forge, so each is checked and bounded here and none of
  * them can do anything but resize the frame, report an error, or keep it alive.
@@ -52,10 +53,10 @@ export const RUNNING_DESIGN_MAX_MESSAGES_PER_SECOND = 250;
  * the agent's preview browser are contained.
  *
  * `drawnIn` is how the page is drawn, which is not the same question. The
- * desktop app draws it on its own surface (`desktop-surface`), a webview its
- * main process makes and holds to the host's page; the preview browser and a
- * web browser draw a frame (`frame`), because only the desktop app has that
- * surface. A runtime that draws on the desktop surface is never run before the
+ * desktop app draws it on its own surface (`desktop-surface`), painted from the
+ * prototype host, a process of its own its main process starts and holds to the
+ * host's page; the preview browser and a web browser draw a frame (`frame`),
+ * because only the desktop app has that surface. A runtime that draws on the desktop surface is never run before the
  * desktop has prepared it, whoever built the runtime.
  *
  * `runsOnOpen` lets the sidebar start a prototype as soon as it is shown; the

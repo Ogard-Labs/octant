@@ -183,6 +183,7 @@ export const PACKAGED_RUNTIME_IMPORTS = [
 
 /** Staged app payload shared by every desktop packaging target. */
 export const REQUIRED_STAGED_PACKAGED_FILES = [
+  "apps/desktop/dist/entry.mjs",
   "apps/desktop/dist/main.mjs",
   `apps/desktop/dist/${DESKTOP_PRELOAD_FILENAME}`,
   `apps/desktop/dist/${CODE_APPROVAL_PRELOAD_FILENAME}`,
@@ -792,7 +793,7 @@ export function createDesktopRuntimeManifest(version: string) {
     type: "module",
     version,
     productName: DESKTOP_PACKAGE_IDENTITY.productName,
-    main: "apps/desktop/dist/main.mjs",
+    main: "apps/desktop/dist/entry.mjs",
   };
 }
 

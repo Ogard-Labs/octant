@@ -240,7 +240,7 @@ export function CreateFromIssuePicker(props: CreateFromIssuePickerProps) {
                           })
                         }
                         type="button"
-                        variant="ghost"
+                        variant="bare"
                       >
                         <span className="github-picker__option-name">
                           #{row.number} {row.title}

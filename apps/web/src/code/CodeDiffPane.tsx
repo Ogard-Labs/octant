@@ -323,6 +323,7 @@ function AvailableDiff(
                     className="code-diff-pane__file"
                     onClick={() => setSelectedId(file.id)}
                     type="button"
+                    variant="bare"
                   >
                     <span className="code-diff-pane__file-path">{file.path}</span>
                     <span className="code-diff-pane__file-change">

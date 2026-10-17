@@ -312,11 +312,17 @@ describe("CanvasSharePanel", () => {
 
     it("prepares the prototype surface before it takes a ticket, and draws the snapshot's prototype on it", async () => {
       const order: Array<string> = [];
+      const opened: Array<string> = [];
       desktopBridge({
         prepareCanvasPrototypeSurface: async () => {
           order.push("surface");
           return { status: "ready" };
         },
+        openCanvasPrototype: async (request: { readonly src: string }) => {
+          opened.push(request.src);
+          return { status: "open" };
+        },
+        subscribeCanvasPrototypeEvents: () => () => undefined,
       });
       const { page, shared, onOpen } = cartSnapshot();
       onOpen.mockImplementation(async (request) => {
@@ -337,10 +343,10 @@ describe("CanvasSharePanel", () => {
       const view = await screen.findByTestId("canvas-share-snapshot-view");
       fireEvent.click(within(view).getByRole("button", { name: "Run" }));
       const running = await within(view).findByTitle("Cart, running prototype");
-      expect(running.tagName).toBe("WEBVIEW");
+      expect(running.tagName).toBe("CANVAS");
       // The address is the one the main process accepts: this host's origin,
       // the design-page path, and one 43-character ticket.
-      expect(running.getAttribute("src")).toBe(`http://127.0.0.1:3773${page}`);
+      expect(opened).toEqual([`http://127.0.0.1:3773${page}`]);
       expect(order).toEqual(["surface", "ticket"]);
     });
 

@@ -295,7 +295,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
                   key={`directory:${entry.path}`}
                   onClick={() => toggle(label)}
                   type="button"
-                  variant="ghost"
+                  variant="bare"
                 >
                   <ChevronRight
                     aria-hidden="true"
@@ -339,7 +339,7 @@ export function CodeFileExplorer(props: CodeFileExplorerProps) {
                 onClick={() => props.onOpenFile(entry)}
                 title={title}
                 type="button"
-                variant="ghost"
+                variant="bare"
               >
                 <File aria-hidden="true" size={14} strokeWidth={1.7} />
                 <FileName name={name} />

@@ -15,6 +15,8 @@ describe("OctantInput", () => {
     const field = screen.getByRole("textbox", { name: "Search" });
     expect(field.className).not.toContain("border-input");
     expect(field.className).not.toContain("rounded-lg");
+    expect(field.className).not.toContain("hover:border");
+    expect(field.className).not.toContain("focus-visible:bg");
     expect(field.className).toContain("placeholder:text-muted-foreground");
     expect(field.className).toContain("selection:bg-primary");
   });

@@ -180,6 +180,12 @@ that is quiet until hovered); a one-off kind beside its recurring siblings takes
 the badge's `dashed` variant; and a field whose frame a feature draws (a search
 box inside a toolbar, a stepper's middle segment) passes `unstyled` to the input
 recipe, as the composer prompt does for the textarea.
+Single-line inputs, text areas, and selects share one field paint, defined once
+in `apps/web/src/ui/shadcn/field-paint.ts`: the strong border and no fill at
+rest, the muted-text border on hover, and the control hover fill on keyboard
+focus; an invalid field keeps its danger border in every state. A feature's
+stylesheet lays a field out (width, height, type size) and never repaints it,
+so the three react alike in light and dark.
 
 The window frame is the one place cards carry the layout. The sidebar and the
 gutters around the workspace are a single back surface painted in the sidebar's
