@@ -76,7 +76,7 @@ counts them as **newest 50 turns**.
 
 ## Export
 
-**Export thread** downloads a portable JSON cut of this Code thread: the
+**Export…** downloads a portable JSON cut of this Code thread: the
 conversation the host holds, Canvas artifacts it originated, and provenance
 (provider, model, checkout identity, fork origin). The file says when it was
 cut. Checkout paths, credentials, and raw provider payloads never appear.
