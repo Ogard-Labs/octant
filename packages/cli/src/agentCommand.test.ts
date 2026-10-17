@@ -550,6 +550,160 @@ describe("octant agent command line", () => {
   );
 });
 
+describe("octant agent helper agents", () => {
+  const threadId = "00000000-0000-4000-8000-000000000301";
+  const runId = "72000000-0000-4000-8000-000000000001";
+  const now = "2026-10-16T09:00:00.000Z";
+  const row = {
+    runId,
+    requestId: "71000000-0000-4000-8000-000000000001",
+    parentThreadId: threadId,
+    parentThreadTitle: "Plan the parser",
+    mode: "chat",
+    role: "research",
+    task: "Find where the lexer handles escapes",
+    lifecycleStatus: "running",
+    executionKind: "octant-managed",
+    authority: {
+      filesystem: false,
+      shell: false,
+      git: false,
+      network: false,
+      tools: true,
+      subagents: false,
+      executionPolicy: "approval-gated",
+      permissionPersistence: "current-session",
+    },
+    workspaceKind: "chat-virtual",
+    usageQuality: "unavailable",
+    route: {
+      requestedProviderInstanceId: "50000000-0000-4000-8000-000000000001",
+      requestedModelId: "loopback-model",
+      executionProviderInstanceId: "50000000-0000-4000-8000-000000000001",
+      executionModelId: "loopback-model",
+      poolDerived: false,
+    },
+    resultAcknowledgement: { required: false, acknowledged: false },
+    version: 3,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  function hostSession(posted: LocalControlRequest[] = []) {
+    return session((request) => {
+      const opened = chatThreadOpening(threadId, request);
+      if (opened !== undefined) return opened;
+      if (request.path.startsWith("/api/agent-runs/center")) {
+        return { status: 200, body: { items: [row] } };
+      }
+      if (request.path.startsWith("/api/agent-runs/results")) {
+        return { status: 200, body: { runId, packets: [], truncated: false } };
+      }
+      if (request.path.startsWith("/api/agent-runs/conversation")) {
+        return {
+          status: 200,
+          body: {
+            runId,
+            parentThreadId: threadId,
+            executionKind: "octant-managed",
+            modelId: "loopback-model",
+            lifecycleStatus: "running",
+            status: "live",
+            entries: [
+              { sequence: 1, kind: "assistant", text: "Reading the lexer.", occurredAt: now },
+            ],
+            truncated: false,
+          },
+        };
+      }
+      if (request.path === "/api/agent-runs/steer") {
+        posted.push(request);
+        return { status: 200, body: { kind: "run-updated" } };
+      }
+      if (request.path.startsWith("/api/native-harness/sessions/")) {
+        return { status: 200, body: { view: null } };
+      }
+      return { status: 404, body: {} };
+    });
+  }
+
+  async function harness(
+    command: { readonly child?: string; readonly json: boolean },
+    posted: LocalControlRequest[] = [],
+  ) {
+    const stdout = sink();
+    const stderr = sink();
+    const code = await runAgentCliCommand({
+      command: { action: "harness-agents", threadId, ...command },
+      session: hostSession(posted),
+      stdin: Readable.from([]),
+      stdout,
+      stderr,
+    });
+    return { code, stdout: stdout.text(), stderr: stderr.text() };
+  }
+
+  it("parses the harness agents form with an optional helper", () => {
+    expect(resolveAgentCliCommand("harness", ["agents", threadId], {})).toEqual({
+      action: "harness-agents",
+      threadId,
+      json: false,
+    });
+    expect(resolveAgentCliCommand("harness", ["agents", threadId, "1"], { json: true })).toEqual({
+      action: "harness-agents",
+      threadId,
+      child: "1",
+      json: true,
+    });
+    expect(resolveAgentCliCommand("harness", ["agents"], {})).toBeUndefined();
+  });
+
+  it("lists the thread's helpers, and as JSON the host's own rows", async () => {
+    const plain = await harness({ json: false });
+    expect(plain.code).toBe(0);
+    expect(plain.stdout).toContain("1. [72000000] working · research · loopback-model");
+    expect(plain.stdout).toContain("Find where the lexer handles escapes");
+    const json = await harness({ json: true });
+    expect(JSON.parse(json.stdout.trim())).toMatchObject({ children: [{ runId, task: row.task }] });
+  });
+
+  it("shows one helper's brief, live text and how to reply", async () => {
+    const result = await harness({ child: "1", json: false });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Brief: Find where the lexer handles escapes");
+    expect(result.stdout).toContain("Reading the lexer.");
+    expect(result.stdout).toContain("Steer it with: /agent <n> <message>");
+    expect((await harness({ child: "7", json: false })).code).toBe(1);
+  });
+
+  it("lists, shows and steers helpers from the prompt loop", async () => {
+    const posted: LocalControlRequest[] = [];
+    const stdout = sink();
+    const code = await runAgentCliCommand({
+      command: {
+        action: "agent",
+        threadId,
+        json: false,
+        plain: true,
+        last: false,
+        quiet: false,
+        mode: "chat",
+      },
+      session: hostSession(posted),
+      stdin: Readable.from(["/agents\n", "/agent 1\n", "/agent 1 use sqlite\n", "/quit\n"]),
+      stdout,
+      stderr: sink(),
+    });
+    expect(code).toBe(0);
+    expect(stdout.text()).toContain("1. [72000000] working");
+    expect(stdout.text()).toContain("Reading the lexer.");
+    expect(stdout.text()).toContain("Sent to the helper; it reads it at its next step.");
+    expect(posted[0]).toMatchObject({
+      body: { runId, expectedVersion: 3, message: "use sqlite" },
+    });
+  });
+});
+
 describe("octant agent Chat lead question", () => {
   const threadId = "00000000-0000-4000-8000-000000000201";
   const turnId = "61000000-0000-4000-8000-000000000001";

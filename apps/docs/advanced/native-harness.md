@@ -420,7 +420,13 @@ It draws with the app's own theme tokens — `--theme system|light|dark|octant`
 picks the preset, and the terminal's light or dark mode picks the palette.
 Enter sends, Shift+Enter adds a line, `/next N`, `/pause`, and `/resume` work
 as in the app, and a pending question is answered by typing its number or an
-answer. The folder you run it in decides the mode, the way a coding CLI does: inside
+answer. `/agents` lists the thread's helper agents with their state,
+role, model, and age; `/agent N` shows one — its brief, what it has said or
+reported, and anything blocking it — and `/agent N <message>` replies: it
+steers a working helper, follows up on a finished one, or answers a question
+the helper asked. The host decides what a helper accepts, as in the app, and
+a refusal is printed. `octant harness agents <thread-id> [N] [--json]` reads
+the same list or one helper without starting a turn. The folder you run it in decides the mode, the way a coding CLI does: inside
 a folder you have added as a Code Project, `octant agent` starts a Code
 thread there — in the current checkout, approval-gated, so its edits and
 commands ask you first, right there in the terminal. A Project that remembers

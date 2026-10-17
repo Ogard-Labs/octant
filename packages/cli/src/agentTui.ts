@@ -4,6 +4,17 @@ import type {
   OctantMode,
 } from "@octant/contracts";
 import {
+  childDetailLines,
+  childListLines,
+  childrenAfterRead,
+  childQuestion,
+  listAgentChildren,
+  pickAgentChild,
+  readAgentChild,
+  replyToAgentChild,
+  type AgentChild,
+} from "./agentChildren";
+import {
   agentThreadPort,
   attachAgentThread,
   isAgentSnapshotRunning,
@@ -96,6 +107,9 @@ const HINT =
   "Enter sends · Enter while working queues a note · Esc stops · Ctrl+E details · Ctrl+R reasoning · PgUp/PgDn scroll · ? help";
 const REASONING_FENCE = /```(?:reasoning|thinking)\n([\s\S]*?)```|<think>([\s\S]*?)<\/think>/g;
 const QUIT_WINDOW_MS = 1_500;
+/** Which list or panel the screen shows in place of the hint, if any. */
+type TuiListing = "threads" | "models" | "agents" | "agent" | "goal" | undefined;
+
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const SHOWN_TOOL_LINES = 4;
 const SHOWN_TASKS = 6;
@@ -175,7 +189,10 @@ class AgentScreen {
   readonly #wake = new AgentWake();
   /** Ends the live feed of the thread on screen; a switch starts a new one. */
   #feed = new AbortController();
-  #listing: "threads" | "models" | "goal" | undefined;
+  #listing: TuiListing;
+  /** The helper agents `/agents` last listed, and the lines of the one `/agent N` opened. */
+  #children: ReadonlyArray<AgentChild> = [];
+  #childLines: ReadonlyArray<string> = [];
   /** The goal ledger the Goal panel shows, read when /goal opened it. */
   #goalLines: ReadonlyArray<string> = [];
   #suggestions:
@@ -479,6 +496,8 @@ class AgentScreen {
     this.#follow(mode);
     this.#drawn = "";
     this.#listing = undefined;
+    this.#children = [];
+    this.#childLines = [];
     this.#pendingFollowUp = undefined;
     for (const child of this.#transcript.getChildren()) child.destroyRecursively();
     await this.refresh();
@@ -655,6 +674,15 @@ class AgentScreen {
       });
       this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No threads yet." : lines.join("\n"))}\n${dim(fg(p.muted)("/open N switches to one."))}`;
       this.#panel.visible = true;
+    } else if (this.#listing === "agents" || this.#listing === "agent") {
+      const listed = this.#listing === "agents";
+      this.#panel.title = listed ? " Helper agents " : " Helper agent ";
+      this.#panel.borderColor = p.border;
+      const lines = listed
+        ? childListLines(this.#children, Date.now(), this.#childrenAsking(this.#session))
+        : this.#childLines;
+      this.#panelText.content = t`${fg(p.textSecondary)(lines.join("\n"))}\n${dim(fg(p.muted)(listed ? "/agent N shows one; /agent N <message> replies." : "/agents lists them again."))}`;
+      this.#panel.visible = true;
     } else if (this.#listing === "models") {
       this.#panel.title = " Models ";
       this.#panel.borderColor = p.border;
@@ -686,6 +714,7 @@ class AgentScreen {
           "/side text   ask Side Chat, which only reads  /back  return to the thread",
           "/steer text  note for the lead's next step    /goal · /goal revise text",
           "/fork        fork at the last reply           /checkpoint · /checkpoints · /restore N",
+          "/agents      list the helper agents           /agent N shows one · /agent N text replies",
           "drag + Ctrl+C  copy selected text           /copy   copy the last reply",
           "y · a · n    answer an approval            1..9 or text  answer a question",
         ].join("\n"),
@@ -1065,6 +1094,20 @@ class AgentScreen {
       this.#draw();
       return;
     }
+    if (text === "/agents") {
+      if (!(await this.#loadChildren())) {
+        this.#listing = undefined;
+        this.#draw();
+        return;
+      }
+      this.#listing = this.#listing === "agents" ? undefined : "agents";
+      this.#draw();
+      return;
+    }
+    if (text === "/agent" || text.startsWith("/agent ")) {
+      await this.#agent(text.slice("/agent".length).trim());
+      return;
+    }
     if (text.startsWith("/open")) {
       const index = Number(text.slice("/open".length).trim()) - 1;
       const target = this.#threads[index];
@@ -1405,11 +1448,74 @@ class AgentScreen {
     );
   }
 
+  /** Reads the thread's helpers; a refusal clears the list so another thread's are never offered. */
+  async #loadChildren(): Promise<boolean> {
+    const read = childrenAfterRead(await listAgentChildren(this.#input.session, this.#threadId));
+    this.#children = read.children;
+    if (read.refusal === undefined) return true;
+    this.#childLines = [];
+    this.#note = read.refusal;
+    return false;
+  }
+
+  /** The helpers whose question is waiting on the person, by run id. */
+  #childrenAsking(session: NativeHarnessSessionView | null | undefined): ReadonlySet<string> {
+    return new Set(
+      this.#children
+        .filter((child) => childQuestion(session, child) !== undefined)
+        .map((child) => String(child.runId)),
+    );
+  }
+
+  /** `/agent N` opens one helper; `/agent N <message>` steers, follows up on, or answers it. */
+  async #agent(argument: string): Promise<void> {
+    if (this.#home !== undefined) {
+      this.#note = "Side Chat only reads; /back to work with the thread's helpers.";
+      this.#draw();
+      return;
+    }
+    const [reference = ""] = argument.split(/\s+/);
+    const message = argument.slice(reference.length).trim();
+    if (!(await this.#loadChildren())) {
+      this.#draw();
+      return;
+    }
+    const child = pickAgentChild(this.#children, reference);
+    if (child === undefined) {
+      this.#note = "Pick a helper by number from /agents: /agent 1";
+      this.#draw();
+      return;
+    }
+    const session = this.#session ?? null;
+    if (message.length > 0) {
+      const replied = await replyToAgentChild(
+        this.#input.session,
+        this.#threadId,
+        child,
+        message,
+        childQuestion(session, child),
+      );
+      this.#note =
+        replied.kind === "refused"
+          ? replied.message
+          : replied.how === "answered"
+            ? "Answered."
+            : "Sent to the helper.";
+      await this.refresh();
+    }
+    const read = await readAgentChild(this.#input.session, child);
+    this.#childLines = childDetailLines(
+      child,
+      read,
+      childQuestion(this.#session ?? null, child),
+      Date.now(),
+    );
+    this.#listing = "agent";
+    this.#draw();
+  }
+
   /** Shows the goal, or revises its objective against the version just read. */
-  async #goal(
-    argument: string,
-    listingBefore: "threads" | "models" | "goal" | undefined,
-  ): Promise<void> {
+  async #goal(argument: string, listingBefore: TuiListing): Promise<void> {
     if (this.#home !== undefined) {
       this.#note = "Side Chat only reads; /back to change the goal.";
       this.#draw();

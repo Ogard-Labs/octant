@@ -4199,7 +4199,16 @@ native harness in `apps/server/src/harness`:
   closes the prompt with a note when the app answers first; the terminal UI
   shows it in its question panel. Work and Code questions still come from the
   harness session. A terminal whose stdin has ended denies the
-  ask instead of leaving the turn waiting.
+  ask instead of leaving the turn waiting. The thread's helper agents are read through the
+  Agents Center list filtered to the thread (`/api/agent-runs/center`) and a
+  child's retained result and bounded conversation, and answered or steered
+  through the routes the Agents tab uses (`/api/agent-runs/steer` for a working
+  child, `/api/agent-runs/resume` as a follow-up on a finished one, and the
+  session question route for a question the child asked). `agentChildren.ts`
+  holds those reads and replies; line mode (`/agents`, `/agent N`,
+  `/agent N text`), the terminal UI panel, and `octant harness agents` share
+  it, and the host authorizes each call against the window that opened the
+  thread.
 - **Surfaces.** `/api/native-harness/routing` and
   `/api/native-harness/sessions/:threadId` serve the web, desktop, phone, and
   `octant agent` / `octant harness` from one `NativeHarnessSessionView`.
