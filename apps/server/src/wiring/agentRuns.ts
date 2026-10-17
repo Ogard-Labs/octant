@@ -61,6 +61,7 @@ import {
 import { AgentRunWorkspaceReceiptStore } from "../agentRun/agentRunWorkspaceReceiptStore";
 import { AgentRunWorkspaceService } from "../agentRun/agentRunWorkspaceService";
 import { AgentRunSettingsStore } from "../agentRun/agentRunSettingsStore";
+import { currentParentAuthorityForWaiter } from "../agentRun/agentRunWaiterAuthority";
 import { createAgentRunSettingsRouteHandler } from "../agentRun/agentRunSettingsRoutes";
 import {
   createAgentRunSessionRuntime,
@@ -98,6 +99,27 @@ import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { HarnessStateWiring } from "./harnessState";
+
+/** Whether the thread a child belongs to is still open, in whichever mode started it. */
+function agentRunParentThreadIsActive(
+  persistence: PersistenceService,
+  workThreadProjection: WorkThreadProjection,
+  run: AgentRun,
+): boolean {
+  try {
+    const threadId = String(run.parentThreadId);
+    switch (run.routingReceipt.mode) {
+      case "chat":
+        return persistence.readChatThread(decodeChatThreadId(threadId))?.lifecycle === "active";
+      case "work":
+        return workThreadProjection.read(run.parentThreadId as never)?.lifecycle === "active";
+      case "code":
+        return persistence.readCodeThread(decodeCodeThreadId(threadId))?.lifecycle === "active";
+    }
+  } catch {
+    return false;
+  }
+}
 
 function authorizeAgentRunCancellation(input: {
   readonly persistence: PersistenceService;
@@ -480,6 +502,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
   >;
 } & Pick<
     AuthorityWiring,
+    | "agentRunParentAuthority"
     | "agentRunPersistence"
     | "codeSessionAuthority"
     | "onAgentRunExecutionAccepted"
@@ -512,6 +535,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     late,
     agentRunInteractions,
     agentRunPersistence,
+    agentRunParentAuthority,
     chatService,
     codeBoardEventStore,
     codeSessionAuthority,
@@ -967,6 +991,19 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     },
     approvals: { isCurrent: () => true },
     processes: agentRunProcessSupervisor,
+    parentAuthority: {
+      current: (run) =>
+        currentParentAuthorityForWaiter({
+          run,
+          startsHelpers: () => agentRunSettingsStore.current().creationPosture === "automatic",
+          isTainted: (waiter) =>
+            readThreadExternalContentTaint(persistence.connection, String(waiter.parentThreadId))
+              .externalContentIngested,
+          isParentActive: (waiter) =>
+            agentRunParentThreadIsActive(persistence, workThreadProjection, waiter),
+          parentLiveAuthority: agentRunParentAuthority,
+        }),
+    },
     parentSessions: {
       // The same rule `delegate` refuses by: a paused session, or one a
       // restart left needing a check, starts no child until it is resumed.

@@ -118,6 +118,15 @@ export interface AgentRunParentSessionPort {
   readonly isHeld: (parentThreadId: AgentRunParentThreadId) => boolean;
 }
 
+export interface AgentRunParentAuthorityPort {
+  /**
+   * The parent's grant as it stands now, or `undefined` when the parent no
+   * longer lets a child start (tainted, archived, helpers off, no grant). Read
+   * for a child that starts by itself, with no request to carry a grant.
+   */
+  readonly current: (run: AgentRun) => AgentRunAuthority | undefined;
+}
+
 export interface AgentRunOrchestrationServiceOptions {
   readonly persistence: AgentRunPersistenceService;
   readonly capacity: AgentRunCapacityPort;
@@ -126,6 +135,8 @@ export interface AgentRunOrchestrationServiceOptions {
   readonly approvals: AgentRunApprovalPort;
   readonly processes?: AgentRunProcessSupervisorPort;
   readonly parentSessions?: AgentRunParentSessionPort;
+  /** Without it a child waiting for a provider slot is ended, never started on a stale grant. */
+  readonly parentAuthority?: AgentRunParentAuthorityPort;
 }
 
 export interface AdmitAgentRunInput {
@@ -150,6 +161,7 @@ export class AgentRunOrchestrationService {
   readonly #approvals: AgentRunApprovalPort;
   readonly #processes: AgentRunProcessSupervisorPort | undefined;
   readonly #parentSessions: AgentRunParentSessionPort | undefined;
+  readonly #parentAuthority: AgentRunParentAuthorityPort | undefined;
   readonly #reservations = new Map<AgentRunId, string>();
   /**
    * Runs already parked on their dependencies when this service was built,
@@ -185,6 +197,7 @@ export class AgentRunOrchestrationService {
     this.#approvals = options.approvals;
     this.#processes = options.processes;
     this.#parentSessions = options.parentSessions;
+    this.#parentAuthority = options.parentAuthority;
     for (const run of this.#persistence.snapshot().values()) {
       if (
         run.lifecycleStatus === "waiting" &&
@@ -599,17 +612,50 @@ export class AgentRunOrchestrationService {
         this.#endProviderSlotWait(run);
         continue;
       }
+      // The parent's grant is read now: a wait is long enough for the parent to
+      // be tainted, archived, or narrowed, and the child's own persisted grant
+      // is no evidence of what the parent still allows.
+      const live = this.#parentAuthority?.current(run);
+      if (!this.#withinParentAuthority(run, live)) {
+        this.#endRevokedProviderSlotWait(run);
+        continue;
+      }
       if (
         !this.#approvals.isCurrent({ runId: run.id, authority: run.authority }) ||
         this.#parentSessions?.isHeld(run.parentThreadId) === true
       ) {
         continue;
       }
-      this.#startAfterProviderSlotWait(run);
+      this.#startAfterProviderSlotWait(run, live);
     }
   }
 
-  #startAfterProviderSlotWait(run: AgentRun): void {
+  #withinParentAuthority(
+    run: AgentRun,
+    live: AgentRunAuthority | undefined,
+  ): live is AgentRunAuthority {
+    if (live === undefined || !live.subagents) return false;
+    try {
+      this.#assertAuthorityWithinLiveAuthority(run.authority, live);
+      return true;
+    } catch (error) {
+      if (error instanceof AgentRunOrchestrationError) return false;
+      throw error;
+    }
+  }
+
+  #endRevokedProviderSlotWait(run: AgentRun): void {
+    this.#providerSlotRefusals.delete(run.id);
+    this.#persistence.applyCommand({
+      kind: "interrupt-agent-run",
+      runId: run.id,
+      expectedVersion: run.version as never,
+      recoveryReason:
+        "authority-drift: The parent thread no longer lets this helper start. Delegate it again from the parent.",
+    });
+  }
+
+  #startAfterProviderSlotWait(run: AgentRun, liveAuthority: AgentRunAuthority): void {
     const reservation = this.#capacity.tryReserve({
       runId: run.id,
       parentThreadId: run.parentThreadId,
@@ -622,7 +668,7 @@ export class AgentRunOrchestrationService {
     if (reservation.status === "queued") return;
     this.#reservations.set(run.id, reservation.reservationId);
     try {
-      const started = this.start(run.id, run.version, run.authority);
+      const started = this.start(run.id, run.version, liveAuthority);
       if (started.kind === "run-command-failed") this.#releaseReservation(run.id);
     } catch (error) {
       this.#releaseReservation(run.id);
@@ -741,7 +787,7 @@ export class AgentRunOrchestrationService {
     if (waitingOnSlot) {
       // A person asking for the child now is asking for one more try; it keeps
       // waiting if the provider is still full.
-      this.#startAfterProviderSlotWait(current);
+      this.#startAfterProviderSlotWait(current, authority);
       return { kind: "run-updated", run: this.#persistence.getById(runId) ?? current };
     }
     return this.#start(runId, expectedVersion, authority, input ?? {});

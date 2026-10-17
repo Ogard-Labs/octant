@@ -2748,7 +2748,11 @@ waits, because a rate limit frees by the clock. An attempt that still finds the
 provider full journals nothing, since the slot is asked for before the child is
 marked Starting. A person can cancel a waiting helper like any other. A helper
 whose parent session is paused or needs a check after a restart keeps waiting
-until the person lets it go. Five minutes, the idle bound of a Chat turn, is
+until the person lets it go. The parent's authority is read again each time the
+helper would start, with no request to carry it: if the parent thread was
+tainted, archived, switched off from starting helpers, or has a grant that no
+longer covers the helper's, the helper ends Interrupted
+(`authority-drift`) and never starts under the grant it was admitted with. Five minutes, the idle bound of a Chat turn, is
 the longest a helper waits; past it the helper ends Interrupted with
 `capacity-unavailable` and the sentence that names what is full, and Retry
 starts it again once a slot frees. A longer wait would mean a person's
