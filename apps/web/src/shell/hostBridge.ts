@@ -399,12 +399,28 @@ export interface PairedComputersBridge {
   readonly requestPairedComputer: (request: PairedComputerRequest) => Promise<PairedComputerAnswer>;
 }
 
-/** The paired-computers bridge when the desktop app exposes every part of it, else nothing. */
+const pairedComputersByBridge = new WeakMap<OctantHostBridge, PairedComputersBridge>();
+
+/**
+ * The paired-computers bridge when the desktop app exposes every part of it,
+ * else nothing. The same host bridge always yields the same object: a pairing
+ * in progress keys its client and its device-key cleanup on this identity, so a
+ * fresh object per render would delete the key it just claimed with.
+ */
 export function pairedComputersOf(
   bridge: OctantHostBridge | undefined,
 ): PairedComputersBridge | undefined {
+  if (bridge === undefined) return undefined;
+  const known = pairedComputersByBridge.get(bridge);
+  if (known !== undefined) return known;
+  const made = pairedComputersFrom(bridge);
+  if (made !== undefined) pairedComputersByBridge.set(bridge, made);
+  return made;
+}
+
+function pairedComputersFrom(bridge: OctantHostBridge): PairedComputersBridge | undefined {
   if (
-    bridge?.pairWithPairingCode === undefined ||
+    bridge.pairWithPairingCode === undefined ||
     bridge.listPairedComputers === undefined ||
     bridge.forgetPairedComputer === undefined ||
     bridge.settlePairedComputer === undefined ||
