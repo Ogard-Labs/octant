@@ -779,6 +779,13 @@ export class ImageJobService {
       actualOutputTokens: outputTokens,
       varianceTokens: 0,
       observedAt,
+      // A provider that returns an image and no token counts has not measured
+      // zero tokens: the row stays so the image is countable, classified
+      // unavailable like every other request that completed without usage.
+      ...(adapterResult?.usage?.inputTokens === undefined &&
+      adapterResult?.usage?.outputTokens === undefined
+        ? { providerReported: false }
+        : {}),
       imageUnits: {
         count: artifacts.length,
         quality: "exact" as const,
