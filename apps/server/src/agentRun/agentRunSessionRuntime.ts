@@ -1056,6 +1056,13 @@ export function createAgentRunSessionRuntime(
         };
       }
     },
+    prepareStart: (run) => {
+      const prepared = prepareSession(run);
+      return {
+        start: (started) => startSession(started, undefined, prepared),
+        release: prepared.release,
+      };
+    },
     prepareResume: (run, input) => {
       const prepared = prepareSession(run, input ?? {});
       return {
@@ -1220,6 +1227,7 @@ function reserveCapacity(input: {
           ...(submission.notBeforeMs === undefined ? {} : { notBeforeMs: submission.notBeforeMs }),
           nowMs: Date.now(),
         }),
+        { waitsForCapacity: submission.reason !== "quota-exhausted" },
       );
     }
     return reservationId;

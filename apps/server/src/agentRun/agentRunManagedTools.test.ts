@@ -9,7 +9,7 @@ import {
   type AgentRunAuthority,
   type AgentRunCommand,
 } from "@octant/contracts";
-import { evaluateAgentRunCommand } from "@octant/domain";
+import { AGENT_RUN_PROVIDER_SLOT_WAITING_REASON, evaluateAgentRunCommand } from "@octant/domain";
 import type { AgentRunNativeCapabilityEvidence } from "@octant/domain/agent-run-control-policy";
 import { boundedToolResultJson } from "../providers/toolResultJson";
 import { createAgentsManagedTools, type AgentsToolTarget } from "./agentRunManagedTools";
@@ -334,6 +334,29 @@ describe("agents managed tools", () => {
     expect(outcome.result).toMatchObject({ status: "refused", reason: "limit-reached" });
   });
 
+  it("tells the parent a delegated helper is waiting for a provider slot instead of reporting only its status", async () => {
+    const { set } = tool({
+      admitted: {
+        start: () =>
+          ({
+            kind: "run-updated",
+            run: queuedRun({
+              lifecycleStatus: "waiting",
+              recoveryReason: AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
+            }),
+          }) as never,
+      },
+    });
+
+    const outcome = await call(set, { operation: "delegate", task: "Look" });
+
+    expect(outcome.result).toMatchObject({
+      status: "accepted",
+      lifecycleStatus: "waiting",
+      reason: AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
+    });
+  });
+
   it("lists only this thread's children on status", async () => {
     const { set } = tool({
       runs: [queuedRun({ lifecycleStatus: "completed", generation: 2 })],
@@ -432,6 +455,44 @@ describe("agents managed tools", () => {
       status: "completed",
       runId: ids.run,
       text: "child reply",
+    });
+  });
+
+  it("answers at once for a child waiting for a provider slot, so the parent can end its turn and free the slot the child needs", async () => {
+    const waiting = queuedRun({
+      lifecycleStatus: "waiting",
+      recoveryReason: AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
+    });
+    const { set } = tool({
+      runs: [waiting],
+      summary: [
+        {
+          runId: waiting.id,
+          parentThreadId: waiting.parentThreadId,
+          role: "research",
+          task: "Look",
+          lifecycleStatus: "waiting",
+          executionKind: "octant-managed",
+          route: {},
+          resultAcknowledgement: { required: false, acknowledged: false },
+          version: waiting.version,
+          updatedAt: "2026-10-17T10:00:00.000Z",
+        } as never,
+      ],
+    });
+
+    const waited = await call(set, { operation: "wait", runId: ids.run, timeoutMs: 120_000 });
+    const listed = await call(set, { operation: "status" });
+
+    expect(waited.result).toMatchObject({
+      status: "waiting",
+      lifecycleStatus: "waiting",
+      runId: ids.run,
+      reason: AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
+      message: expect.stringContaining("result is delivered to you"),
+    });
+    expect(listed.result).toMatchObject({
+      children: [{ lifecycleStatus: "waiting", reason: AGENT_RUN_PROVIDER_SLOT_WAITING_REASON }],
     });
   });
 

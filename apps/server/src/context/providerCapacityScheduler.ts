@@ -309,6 +309,7 @@ export class ProviderCapacityScheduler {
   readonly #options: ProviderCapacitySchedulerOptions;
   readonly #providers = new Map<ProviderInstanceId, ProviderState>();
   readonly #reservations = new Map<CapacityReservationId, ReservationRecord>();
+  readonly #capacityFreedListeners = new Set<() => void>();
   #nextSequence = 1;
 
   constructor(options: ProviderCapacitySchedulerOptions) {
@@ -327,6 +328,19 @@ export class ProviderCapacityScheduler {
     }
     this.#options = Object.freeze({ ...options });
     this.#now();
+  }
+
+  /**
+   * Tells the listener each time work that held a slot ends, so work that
+   * waits outside this queue can try again at once instead of on a timer. A
+   * listener runs inside the ending work's own terminal signal and must not
+   * throw or call back into the scheduler: it schedules its retry and returns.
+   */
+  onCapacityFreed(listener: () => void): () => void {
+    this.#capacityFreedListeners.add(listener);
+    return () => {
+      this.#capacityFreedListeners.delete(listener);
+    };
   }
 
   updateProviderFacts(facts: SchedulerProviderFacts): void {
@@ -584,10 +598,9 @@ export class ProviderCapacityScheduler {
     record.countsCapacity = false;
     record.dispatched = false;
     record.terminalSignature = "cancelled:";
-    return {
-      reservation: record.reservation,
-      dispatched: this.drain(record.request.providerInstanceId).dispatched,
-    };
+    const dispatched = this.drain(record.request.providerInstanceId).dispatched;
+    this.#notifyCapacityFreed();
+    return { reservation: record.reservation, dispatched };
   }
 
   recordTerminal(signal: CapacityTerminalSignal): {
@@ -647,10 +660,9 @@ export class ProviderCapacityScheduler {
       record.reservation = reservation;
     }
     record.terminalSignature = signature;
-    return {
-      reservation: record.reservation,
-      dispatched: this.drain(record.request.providerInstanceId).dispatched,
-    };
+    const dispatched = this.drain(record.request.providerInstanceId).dispatched;
+    this.#notifyCapacityFreed();
+    return { reservation: record.reservation, dispatched };
   }
 
   reconcile(
@@ -686,10 +698,9 @@ export class ProviderCapacityScheduler {
     record.concurrent = false;
     delete record.ambiguousSinceMs;
     record.reservation = reservation;
-    return {
-      reservation: record.reservation,
-      dispatched: this.drain(record.request.providerInstanceId).dispatched,
-    };
+    const dispatched = this.drain(record.request.providerInstanceId).dispatched;
+    this.#notifyCapacityFreed();
+    return { reservation: record.reservation, dispatched };
   }
 
   restore(reservations: ReadonlyArray<CapacityReservation>): void {
@@ -1041,6 +1052,10 @@ export class ProviderCapacityScheduler {
       return reject("invalid-configuration", "Admitted capacity cannot include wait metadata.");
     }
     return value as SchedulerCapacityAdmission;
+  }
+
+  #notifyCapacityFreed(): void {
+    for (const listener of [...this.#capacityFreedListeners]) listener();
   }
 
   #removeQueued(record: ReservationRecord): void {

@@ -158,7 +158,11 @@ keeps them off where the provider allows it. The server enforces hard clamps:
   waiting ones included, so a runaway agent cannot pile up work.
 - At most **2 levels of hierarchy depth**.
 
-A child with no free slot waits visibly and starts when one frees up; past the
+A child with no free slot waits visibly and starts when one frees up. A Chat
+helper whose model provider is busy with other requests shows **Waiting for a
+free request slot** in Agents and starts by itself when the provider has room;
+you can cancel it while it waits. After five minutes it stops waiting and
+shows as Interrupted with the reason, and Retry starts it again. Past the
 unfinished cap, the start is refused with a structured limit result. Authority is
 an immutable ceiling set at start — a child can narrow it, never widen it.
 

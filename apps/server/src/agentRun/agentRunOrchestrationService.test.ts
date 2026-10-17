@@ -5,7 +5,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AGENT_RUN_DEPENDENCY_WAITING_REASON } from "@octant/domain";
+import {
+  AGENT_RUN_DEPENDENCY_WAITING_REASON,
+  AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS,
+  AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
+} from "@octant/domain";
 import { Effect, Schema } from "effect";
 import {
   AgentRunRequested,
@@ -23,6 +27,7 @@ import {
   decodeNativeHarnessSlotCandidate,
   type AgentRunAuthority,
   type AgentRunCommand,
+  type AgentRunId,
   type AgentRunRoutingReceipt,
   type AgentRunWorkspaceReceipt,
 } from "@octant/contracts";
@@ -53,6 +58,8 @@ import {
 } from "./agentRunOrchestrationService";
 import { AgentRunProcessSupervisor } from "./agentRunProcessSupervisor";
 import { AgentRunDependencyScheduler } from "./agentRunDependencyScheduler";
+import { AgentRunProviderSlotScheduler } from "./agentRunProviderSlotScheduler";
+import { createAgentsManagedTools } from "./agentRunManagedTools";
 import { AgentRunSessionError, type AgentRunSessionOutcome } from "./agentRunSessionPort";
 import { AgentRunSessionSupervisor } from "./agentRunSessionSupervisor";
 import { createAgentRunSessionRuntime } from "./agentRunSessionRuntime";
@@ -1481,8 +1488,31 @@ describe("AgentRun run slots", () => {
   });
 });
 
-describe("managed child start refusal", () => {
-  it("ends a Chat child the provider has no free slot for as Interrupted with that reason, then starts it on Retry once a slot frees", async () => {
+describe("managed child waiting for a provider slot", () => {
+  const cleanups: Array<() => void> = [];
+  afterEach(() => {
+    while (cleanups.length) cleanups.pop()?.();
+  });
+
+  /**
+   * A provider that takes two requests at once, both held by Chat turns of
+   * other threads (or by the leads of the helpers under test), as an
+   * unanswered question in a turn can hold one for a long time. Everything the
+   * wait depends on is real: the capacity scheduler, the session runtime and
+   * supervisor, the orchestration service, and the slot scheduler.
+   */
+  function fullProvider(
+    options: {
+      readonly holderThreads?: ReadonlyArray<string>;
+      readonly parentSessions?: AgentRunParentSessionPort;
+      /** A scheduler that hears nothing when a slot frees, so only its timer can start a helper. */
+      readonly deaf?: boolean;
+    } = {},
+  ) {
+    const holderThreads = options.holderThreads ?? [
+      "cccccccc-cccc-4ccc-8ccc-aaaaaaaaaaaa",
+      "cccccccc-cccc-4ccc-8ccc-bbbbbbbbbbbb",
+    ];
     const scheduler = makeProviderCapacityScheduler({
       now: () => Date.parse(now),
       random: () => 0,
@@ -1498,18 +1528,13 @@ describe("managed child start refusal", () => {
       ),
       enforcement: { kind: "observable-api", maxObservableConcurrency: 2 },
     });
-    // Two Chat turns of other threads already use every request the provider
-    // takes at once, as an unanswered question in one of them can for a long time.
-    const otherTurns = ["a", "b"].map((suffix) => {
+    const holders = holderThreads.map((threadId, index) => {
       const reservationId = decodeCapacityReservationId(
-        `bbbbbbbb-bbbb-4bbb-8bbb-${suffix.repeat(12)}`,
+        `bbbbbbbb-bbbb-4bbb-8bbb-${String(index).repeat(12)}`,
       );
       const submission = scheduler.submit({
         reservationId,
-        subject: decodeContextSubjectRef({
-          aggregateType: "chat-thread",
-          aggregateId: `cccccccc-cccc-4ccc-8ccc-${suffix.repeat(12)}`,
-        }),
+        subject: decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: threadId }),
         providerInstanceId,
         modelId: decodeProviderModelId("gpt-4o"),
         estimatedTokens: 10,
@@ -1534,40 +1559,237 @@ describe("managed child start refusal", () => {
       }),
     });
     const supervisor = new AgentRunSessionSupervisor({ port: runtime });
-    const { orchestration, persistence } = createHarness(
+    const harness = createHarness(
       createInMemoryCapacityPort(),
       true,
       supervisor,
+      options.parentSessions,
     );
-    const admitted = orchestration.admit({
-      command: {
-        ...requestCommand(),
-        requestedAuthority: { ...authority, network: false, subagents: false },
-      },
-      parentAuthority: authority,
-      confirmed: true,
-      liveAuthority: authority,
+    const slots = new AgentRunProviderSlotScheduler({
+      orchestration: harness.orchestration,
+      onCapacityFreed: (listener) =>
+        options.deaf === true ? () => undefined : scheduler.onCapacityFreed(listener),
+      now: () => Date.parse(now),
+      pollMs: 10,
     });
-    if (admitted.kind !== "run-accepted") throw new Error("Expected an admitted child");
+    slots.start();
+    harness.journal.subscribeCommitted((append) => slots.onCommittedAppend(append));
+    cleanups.push(() => slots.stop());
+    const delegate = (requestId = ids.request, parentThreadId = ids.thread) => {
+      const admitted = harness.orchestration.admit({
+        command: {
+          ...requestCommand(requestId),
+          parentThreadId,
+          requestedAuthority: { ...authority, network: false, subagents: false },
+        },
+        parentAuthority: authority,
+        confirmed: true,
+        liveAuthority: authority,
+      });
+      if (admitted.kind !== "run-accepted") throw new Error("Expected an admitted child");
+      const started = harness.orchestration.start(admitted.run.id, admitted.run.version, authority);
+      if (started.kind !== "run-updated") throw new Error("Expected the child to be recorded");
+      return started.run;
+    };
+    const journaledChanges = () =>
+      harness.connection.prepare("SELECT * FROM event_journal ORDER BY global_sequence").all()
+        .length;
+    const finish = (holder: number) => {
+      const reservationId = holders[holder];
+      if (reservationId === undefined) throw new Error("No such holder");
+      scheduler.recordTerminal({ reservationId, outcome: "completed" });
+    };
+    return {
+      ...harness,
+      acquire,
+      supervisor,
+      slots,
+      delegate,
+      finish,
+      journaledChanges,
+      status: (runId: AgentRunId) => harness.persistence.getById(runId)?.lifecycleStatus,
+    };
+  }
 
-    const started = orchestration.start(admitted.run.id, admitted.run.version, authority);
+  it("makes a Chat helper wait while the provider is full and starts it by itself once a turn ends", async () => {
+    const provider = fullProvider();
 
-    expect(started).toMatchObject({
-      kind: "run-updated",
-      run: { lifecycleStatus: "interrupted" },
+    const helper = provider.delegate();
+
+    expect(helper).toMatchObject({
+      lifecycleStatus: "waiting",
+      recoveryReason: AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
     });
-    const refused = persistence.getById(admitted.run.id);
-    expect(refused?.recoveryReason).toMatch(/^capacity-unavailable: .*every request/);
-    expect(refused?.recoveryReason).not.toBe("provider-process-death");
-    expect(acquire).not.toHaveBeenCalled();
-    expect(supervisor.activeRunIds()).toEqual([]);
+    expect(provider.acquire).not.toHaveBeenCalled();
+    expect(provider.supervisor.activeRunIds()).toEqual([]);
+    // Asking again while the provider is still full journals nothing: each
+    // try would otherwise show the helper as Starting and Waiting again.
+    const journaled = provider.journaledChanges();
+    provider.slots.retryNow();
+    expect(provider.journaledChanges()).toBe(journaled);
 
-    scheduler.recordTerminal({ reservationId: otherTurns[0]!, outcome: "completed" });
-    const retried = orchestration.retry(admitted.run.id, refused!.version, authority);
+    provider.finish(0);
 
+    await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledOnce());
+    expect(provider.status(helper.id)).toBe("starting");
+    expect(provider.persistence.getById(helper.id)).not.toHaveProperty("recoveryReason");
+    await provider.supervisor.stop(helper.id);
+  });
+
+  it("starts waiting helpers one slot at a time, in the order they began waiting", async () => {
+    const provider = fullProvider();
+    const first = provider.delegate(ids.request);
+    const second = provider.delegate(ids.requestChild);
+
+    provider.finish(0);
+    await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledOnce());
+    expect(provider.status(first.id)).toBe("starting");
+    expect(provider.status(second.id)).toBe("waiting");
+
+    provider.finish(1);
+    await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledTimes(2));
+    expect(provider.status(second.id)).toBe("starting");
+    await provider.supervisor.stop(first.id);
+    await provider.supervisor.stop(second.id);
+  });
+
+  it("lets a person cancel a helper that is waiting, and never starts it afterwards", async () => {
+    const provider = fullProvider();
+    const helper = provider.delegate();
+
+    const cancelled = await provider.orchestration.cancelLeafFirst({
+      runId: helper.id,
+      scope: "self",
+    });
+
+    expect(cancelled).toEqual([
+      expect.objectContaining({ kind: "run-updated", run: expect.objectContaining({}) }),
+    ]);
+    expect(provider.status(helper.id)).toBe("cancelled");
+    provider.finish(0);
+    provider.finish(1);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    provider.slots.retryNow();
+    expect(provider.acquire).not.toHaveBeenCalled();
+    expect(provider.status(helper.id)).toBe("cancelled");
+  });
+
+  it("ends a helper that waited its whole limit as Interrupted with the capacity reason, and Retry starts it once a slot is free", async () => {
+    const provider = fullProvider();
+    const helper = provider.delegate();
+    const parkedAt = Date.parse(helper.updatedAt);
+
+    provider.orchestration.retryProviderSlotWaiters(
+      parkedAt + AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS - 1,
+    );
+    expect(provider.status(helper.id)).toBe("waiting");
+
+    provider.orchestration.retryProviderSlotWaiters(
+      parkedAt + AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS,
+    );
+
+    const ended = provider.persistence.getById(helper.id);
+    expect(ended?.lifecycleStatus).toBe("interrupted");
+    expect(ended?.recoveryReason).toMatch(
+      /^capacity-unavailable: Waited 5 minutes for a free request slot\. Other turns are using every request/,
+    );
+    expect(provider.acquire).not.toHaveBeenCalled();
+
+    provider.finish(0);
+    const retried = provider.orchestration.retry(helper.id, ended!.version, authority);
     expect(retried).toMatchObject({ kind: "run-updated", run: { lifecycleStatus: "starting" } });
-    await vi.waitFor(() => expect(acquire).toHaveBeenCalledOnce());
-    await supervisor.stop(admitted.run.id);
+    await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledOnce());
+    await provider.supervisor.stop(helper.id);
+  });
+
+  it("does not let a lead that waits for its helper keep the helper from ever starting", async () => {
+    // Both slots belong to two Chat leads, and each lead has a helper that
+    // waits for a slot. If a lead blocked on its helper, neither lead could end
+    // its turn, so neither slot would free and neither helper would start.
+    const provider = fullProvider({ holderThreads: [String(ids.thread), String(otherThread)] });
+    const helperOfFirst = provider.delegate(ids.request, ids.thread);
+    const helperOfSecond = provider.delegate(ids.requestChild, otherThread);
+    expect(helperOfFirst.lifecycleStatus).toBe("waiting");
+    expect(helperOfSecond.lifecycleStatus).toBe("waiting");
+    const toolsOf = (parentThreadId: string) =>
+      createAgentsManagedTools({
+        persistence: provider.persistence,
+        orchestration: provider.orchestration,
+        parentThreadId,
+        // A wait that blocked would sleep through its whole timeout.
+        sleep: () => new Promise<void>(() => undefined),
+      } as never);
+    const waitFor = (parentThreadId: string, runId: AgentRunId) =>
+      Promise.race([
+        toolsOf(parentThreadId).execute({
+          name: "octant_agents",
+          inputJson: JSON.stringify({ operation: "wait", runId, timeoutMs: 120_000 }),
+        }),
+        new Promise((resolve) => setTimeout(() => resolve("blocked"), 1_000)),
+      ]);
+
+    const answers = await Promise.all([
+      waitFor(String(ids.thread), helperOfFirst.id),
+      waitFor(String(otherThread), helperOfSecond.id),
+    ]);
+
+    for (const answer of answers) {
+      expect(answer).toMatchObject({
+        result: { status: "waiting", reason: AGENT_RUN_PROVIDER_SLOT_WAITING_REASON },
+      });
+    }
+    // Free of the wait, the leads end their turns and release their slots.
+    provider.finish(0);
+    provider.finish(1);
+    await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledTimes(2));
+    expect(provider.status(helperOfFirst.id)).toBe("starting");
+    expect(provider.status(helperOfSecond.id)).toBe("starting");
+    await provider.supervisor.stop(helperOfFirst.id);
+    await provider.supervisor.stop(helperOfSecond.id);
+  });
+
+  it("asks again on a timer, so a limit that frees by the clock starts the helper without any turn ending", async () => {
+    const provider = fullProvider({ deaf: true });
+    const helper = provider.delegate();
+    provider.finish(0);
+    expect(provider.status(helper.id)).toBe("waiting");
+
+    await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledOnce());
+
+    expect(provider.status(helper.id)).toBe("starting");
+    await provider.supervisor.stop(helper.id);
+  });
+
+  it("keeps a helper waiting while its parent session is paused and starts it once the person resumes", async () => {
+    let held = true;
+    const provider = fullProvider({ parentSessions: { isHeld: () => held } });
+    const helper = provider.delegate();
+
+    provider.finish(0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(provider.acquire).not.toHaveBeenCalled();
+    expect(provider.status(helper.id)).toBe("waiting");
+
+    held = false;
+    provider.slots.retryNow();
+
+    await vi.waitFor(() => expect(provider.acquire).toHaveBeenCalledOnce());
+    await provider.supervisor.stop(helper.id);
+  });
+
+  it("interrupts a helper that was waiting when the host restarted instead of starting it on its own", async () => {
+    const provider = fullProvider();
+    const helper = provider.delegate();
+
+    provider.persistence.reconcileAfterRestart();
+
+    expect(provider.persistence.getById(helper.id)).toMatchObject({
+      lifecycleStatus: "interrupted",
+      recoveryReason: "restart-without-resumable-execution",
+    });
+    provider.finish(0);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(provider.acquire).not.toHaveBeenCalled();
   });
 });
 
@@ -1599,7 +1821,12 @@ describe("managed child continuation", () => {
         runId: run.id,
         onSettled: () => undefined,
       }));
-      const supervisor = new AgentRunSessionSupervisor({ port: { ...runtime, start } });
+      // This test counts fresh starts through `start`, so the port offers no
+      // prepared start that would bypass it.
+      const { prepareStart: _prepareStart, ...runtimeWithoutPreparedStart } = runtime;
+      const supervisor = new AgentRunSessionSupervisor({
+        port: { ...runtimeWithoutPreparedStart, start },
+      });
       const harness = createHarness(capacity, true, supervisor);
       const scheduler = new AgentRunDependencyScheduler({
         agentRuns: harness.persistence,

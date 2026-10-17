@@ -16,6 +16,10 @@ import {
   effectiveAgentRunExecutionTarget,
   isAgentRunTerminalStatus,
   AGENT_RUN_DEPENDENCY_WAITING_REASON,
+  AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS,
+  AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
+  agentRunProviderSlotWaitExpired,
+  agentRunWaitsForProviderSlot,
   decideAgentRunDependencies,
 } from "@octant/domain";
 import type { AgentRunPersistenceService } from "./agentRunPersistenceService";
@@ -91,6 +95,8 @@ export interface AgentRunProcessSupervisorPort {
     run: AgentRun,
     input?: { readonly message?: string },
   ) => AgentRunPreparedResume | undefined;
+  /** Reserves what a fresh child needs without starting it; absent means start reserves it. */
+  readonly prepareStart?: (run: AgentRun) => AgentRunPreparedResume | undefined;
   readonly start: (run: AgentRun) => unknown;
   /** Continues a saved provider conversation; absent means only explicit fresh retry is available. */
   readonly resume?: (run: AgentRun, input?: { readonly message?: string }) => unknown;
@@ -163,6 +169,13 @@ export class AgentRunOrchestrationService {
   readonly #settledSessions = new Set<AgentRunId>();
   /** Runs currently being stopped by {@link cancelLeafFirst}. */
   readonly #cancelling = new Map<AgentRunId, AgentRunResultEvidence | undefined>();
+  /**
+   * What the provider last said was full for each child waiting on a slot. The
+   * wait ends with it as the reason if no slot frees in time. Only the latest
+   * sentence is worth keeping, and a restart interrupts the waiter, so it needs
+   * no journal of its own.
+   */
+  readonly #providerSlotRefusals = new Map<AgentRunId, string>();
 
   constructor(options: AgentRunOrchestrationServiceOptions) {
     this.#persistence = options.persistence;
@@ -380,12 +393,17 @@ export class AgentRunOrchestrationService {
     }
     let prepared: AgentRunPreparedResume | undefined;
     try {
-      if (continuation !== undefined)
-        prepared = this.#processes?.prepareResume?.(
-          current,
-          continuation.message === undefined ? {} : { message: continuation.message },
-        );
+      prepared =
+        continuation === undefined
+          ? this.#processes?.prepareStart?.(current)
+          : this.#processes?.prepareResume?.(
+              current,
+              continuation.message === undefined ? {} : { message: continuation.message },
+            );
     } catch (error) {
+      if (continuation === undefined && error instanceof AgentRunSessionError) {
+        return this.#refuseFreshStart(current, expectedVersion, error);
+      }
       if (error instanceof AgentRunSessionError)
         return {
           kind: "run-command-failed",
@@ -452,8 +470,11 @@ export class AgentRunOrchestrationService {
         // A run that waited after an earlier settlement is live again, so that
         // settlement must no longer suppress this incarnation's death report.
         this.#settledSessions.delete(started.run.id);
-        if (continuation === undefined) this.#processes.start(started.run);
-        else {
+        this.#providerSlotRefusals.delete(started.run.id);
+        if (continuation === undefined) {
+          if (prepared !== undefined) prepared.start(started.run);
+          else this.#processes.start(started.run);
+        } else {
           if (prepared !== undefined) prepared.start(started.run);
           else
             this.#processes.resume?.(
@@ -498,6 +519,135 @@ export class AgentRunOrchestrationService {
     }
   }
 
+  /**
+   * A fresh child the session port refused before it started. A provider that
+   * is full only for now parks the child to start by itself when a slot frees
+   * ({@link retryProviderSlotWaiters}). Every other typed refusal ends it
+   * Interrupted under its own reason: the child never reached its provider, so
+   * no process died, and recording one would hide what is missing from the
+   * person and from the parent that started the child.
+   */
+  #refuseFreshStart(
+    run: AgentRun,
+    expectedVersion: number,
+    error: AgentRunSessionError,
+  ): AgentRunCommandResult {
+    this.#releaseReservation(run.id);
+    if (error.waitsForCapacity && !this.#cancelling.has(run.id)) {
+      this.#providerSlotRefusals.set(run.id, error.message);
+      // A child already waiting stays as it is: a second wait command would
+      // journal a change that moved nothing and restart its wait.
+      if (agentRunWaitsForProviderSlot(run)) return { kind: "run-updated", run };
+      return this.#persistence.applyCommand({
+        kind: "wait-agent-run",
+        runId: run.id,
+        expectedVersion: expectedVersion as never,
+        recoveryReason: AGENT_RUN_PROVIDER_SLOT_WAITING_REASON,
+      });
+    }
+    this.#providerSlotRefusals.delete(run.id);
+    return this.#persistence.applyCommand({
+      kind: "interrupt-agent-run",
+      runId: run.id,
+      expectedVersion: expectedVersion as never,
+      recoveryReason:
+        error.reason === "tools-unsupported"
+          ? error.reason
+          : boundedRecoveryReason(`${error.reason}: ${error.message}`),
+    });
+  }
+
+  /** Whether any child waits for a provider slot, so an owner knows to keep trying. */
+  hasProviderSlotWaiters(): boolean {
+    for (const runId of this.#providerSlotRefusals.keys()) {
+      const run = this.#persistence.getById(runId);
+      if (run === undefined || !agentRunWaitsForProviderSlot(run)) {
+        this.#providerSlotRefusals.delete(runId);
+      }
+    }
+    return this.#providerSlotRefusals.size > 0;
+  }
+
+  /**
+   * Starts, in the order they began waiting, every child waiting for a provider
+   * slot whose provider can now take it, and ends each one that has waited as
+   * long as it may. Called when a slot may have freed and on a timer, because
+   * a rate limit frees by the clock.
+   *
+   * A child still refused stays Waiting without a journal entry: asking for its
+   * slot first, as a resume does, is what keeps every try from journaling a
+   * start and a wait. A child does not queue inside the capacity scheduler. A
+   * queued child would stand ahead of every later turn on its provider and
+   * refuse them all as "earlier work is still waiting", so a helper nobody is
+   * watching would hold up the person's own chat. A freed slot therefore goes
+   * to whoever asks first, and a child that keeps losing it ends at its limit.
+   * A child whose parent session is paused or needs a check after a restart
+   * waits on, as every new child does, until the person lets it go or its time
+   * runs out.
+   */
+  retryProviderSlotWaiters(nowMs: number): void {
+    const waiters = [...this.#persistence.snapshot().values()]
+      .filter(agentRunWaitsForProviderSlot)
+      .sort(
+        (left, right) =>
+          Date.parse(left.updatedAt) - Date.parse(right.updatedAt) ||
+          String(left.id).localeCompare(String(right.id)),
+      );
+    for (const run of waiters) {
+      if (this.#cancelling.has(run.id)) continue;
+      if (agentRunProviderSlotWaitExpired(run, nowMs)) {
+        this.#endProviderSlotWait(run);
+        continue;
+      }
+      if (
+        !this.#approvals.isCurrent({ runId: run.id, authority: run.authority }) ||
+        this.#parentSessions?.isHeld(run.parentThreadId) === true
+      ) {
+        continue;
+      }
+      this.#startAfterProviderSlotWait(run);
+    }
+  }
+
+  #startAfterProviderSlotWait(run: AgentRun): void {
+    const reservation = this.#capacity.tryReserve({
+      runId: run.id,
+      parentThreadId: run.parentThreadId,
+      providerInstanceId: String(
+        effectiveAgentRunExecutionTarget(run.routingReceipt).providerInstanceId,
+      ),
+    });
+    // The run slots of the app or of this thread are full: the child holds
+    // none while it waits, and the next freed run slot starts it.
+    if (reservation.status === "queued") return;
+    this.#reservations.set(run.id, reservation.reservationId);
+    try {
+      const started = this.start(run.id, run.version, run.authority);
+      if (started.kind === "run-command-failed") this.#releaseReservation(run.id);
+    } catch (error) {
+      this.#releaseReservation(run.id);
+      console.error(
+        `AgentRun ${String(run.id)} could not start after waiting for a request slot:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  #endProviderSlotWait(run: AgentRun): void {
+    const refusal =
+      this.#providerSlotRefusals.get(run.id) ?? "Other work was still using the provider.";
+    this.#providerSlotRefusals.delete(run.id);
+    const minutes = Math.round(AGENT_RUN_PROVIDER_SLOT_WAIT_LIMIT_MS / 60_000);
+    this.#persistence.applyCommand({
+      kind: "interrupt-agent-run",
+      runId: run.id,
+      expectedVersion: run.version as never,
+      recoveryReason: boundedRecoveryReason(
+        `capacity-unavailable: Waited ${minutes} ${minutes === 1 ? "minute" : "minutes"} for a free request slot. ${refusal}`,
+      ),
+    });
+  }
+
   retry(
     runId: AgentRunId,
     expectedVersion: number,
@@ -538,9 +688,13 @@ export class AgentRunOrchestrationService {
     const waitingOnDependencies =
       current.lifecycleStatus === "waiting" &&
       current.recoveryReason === AGENT_RUN_DEPENDENCY_WAITING_REASON;
-    const readiness = waitingOnDependencies
-      ? undefined
-      : await this.#processes?.checkResume?.(current);
+    // A child waiting for a provider slot has not opened a session either, so
+    // there is no saved conversation to check.
+    const waitingOnSlot = agentRunWaitsForProviderSlot(current);
+    const readiness =
+      waitingOnDependencies || waitingOnSlot
+        ? undefined
+        : await this.#processes?.checkResume?.(current);
     // Resume cannot release a dependency hold while its parent is paused,
     // including a pause that arrived during the asynchronous preflight.
     if (
@@ -582,6 +736,12 @@ export class AgentRunOrchestrationService {
       // A dependency-parked child has never opened a provider session. Keep
       // dependency and capacity admission rather than requiring a saved cursor.
       this.releaseDependencyWait(runId);
+      return { kind: "run-updated", run: this.#persistence.getById(runId) ?? current };
+    }
+    if (waitingOnSlot) {
+      // A person asking for the child now is asking for one more try; it keeps
+      // waiting if the provider is still full.
+      this.#startAfterProviderSlotWait(current);
       return { kind: "run-updated", run: this.#persistence.getById(runId) ?? current };
     }
     return this.#start(runId, expectedVersion, authority, input ?? {});
@@ -675,6 +835,7 @@ export class AgentRunOrchestrationService {
         }
       }
       this.#releaseReservation(id);
+      this.#providerSlotRefusals.delete(id);
       results.push(
         this.#persistence.applyCommand(
           {

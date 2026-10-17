@@ -5,6 +5,7 @@ import { createChatAgentResultDeliveryPort } from "../chat/chatAgentResultDelive
 import { UsageResumeService } from "../usage/usageResumeService";
 import { createUsageResumePorts } from "../usage/usageResumePorts";
 import { AgentRunDependencyScheduler } from "../agentRun/agentRunDependencyScheduler";
+import { AgentRunProviderSlotScheduler } from "../agentRun/agentRunProviderSlotScheduler";
 import { AgentResultDeliveryService } from "../agentRun/agentResultDeliveryService";
 import {
   createCodeAgentResultDeliveryPort,
@@ -22,7 +23,10 @@ import type { WorkWiring } from "./work";
 
 export type ContinuationDependencies = Pick<ServerStart, "persistence"> &
   Pick<AuthorityWiring, "agentRunParentAuthority" | "agentRunPersistence"> &
-  Pick<AgentRunsWiring, "agentRunOrchestration" | "externalContentIngestionStore"> &
+  Pick<
+    AgentRunsWiring,
+    "agentRunOrchestration" | "capacityScheduler" | "externalContentIngestionStore"
+  > &
   Pick<WorkspaceWiring, "contextHarness"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &
@@ -34,6 +38,7 @@ export function wireContinuation(deps: ContinuationDependencies) {
     agentRunOrchestration,
     agentRunParentAuthority,
     agentRunPersistence,
+    capacityScheduler,
     chatService,
     contextHarness,
     externalContentIngestionStore,
@@ -209,5 +214,22 @@ export function wireContinuation(deps: ContinuationDependencies) {
     );
     yield* Effect.addFinalizer(() => Effect.sync(() => unsubscribeAgentRunDependencies()));
     agentRunDependencyScheduler.start();
+    // A helper the provider had no free slot for waits and starts when one
+    // frees, so it is asked again whenever a turn ends and while it waits.
+    const agentRunProviderSlotScheduler = new AgentRunProviderSlotScheduler({
+      orchestration: agentRunOrchestration,
+      onCapacityFreed: (listener) => capacityScheduler.onCapacityFreed(listener),
+      onError: (message, error) => console.error(`[agent-run-provider-slots] ${message}`, error),
+    });
+    const unsubscribeAgentRunProviderSlots = persistence.journal.subscribeCommitted((append) =>
+      agentRunProviderSlotScheduler.onCommittedAppend(append),
+    );
+    yield* Effect.addFinalizer(() =>
+      Effect.sync(() => {
+        unsubscribeAgentRunProviderSlots();
+        agentRunProviderSlotScheduler.stop();
+      }),
+    );
+    agentRunProviderSlotScheduler.start();
   });
 }

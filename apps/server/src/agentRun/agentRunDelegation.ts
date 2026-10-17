@@ -19,6 +19,7 @@ import {
 } from "@octant/contracts";
 import {
   AgentRunPolicyRejected,
+  agentRunWaitsForProviderSlot,
   clampAgentRunAuthority,
   effectiveAgentRunExecutionTarget,
   allowedAgentRunRolesForMode,
@@ -88,6 +89,8 @@ export type AgentRunDelegationResult =
       readonly status: "accepted";
       readonly runId: string;
       readonly lifecycleStatus: string;
+      /** Why a helper that has not started is waiting: a full provider. */
+      readonly reason?: string;
       readonly target: {
         readonly providerInstanceId: string;
         readonly modelId: string;
@@ -305,6 +308,9 @@ export async function startAgentRunDelegation(
     status: "accepted",
     runId: String(run.id),
     lifecycleStatus: run.lifecycleStatus,
+    ...(agentRunWaitsForProviderSlot(run) && run.recoveryReason !== undefined
+      ? { reason: run.recoveryReason }
+      : {}),
     target: {
       providerInstanceId: String(selected.providerInstanceId),
       modelId: String(selected.modelId),

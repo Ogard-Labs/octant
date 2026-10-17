@@ -797,6 +797,7 @@ export function startOctantServer(
       agentRunOrchestration,
       agentRunParentAuthority,
       agentRunPersistence,
+      capacityScheduler,
       chatService,
       contextHarness,
       externalContentIngestionStore,
