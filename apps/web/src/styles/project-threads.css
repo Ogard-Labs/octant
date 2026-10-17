@@ -824,10 +824,14 @@
 
 .project-overview__toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   min-width: 0;
-  gap: var(--oct-space-4);
+  /* In a half-width pane the actions drop below the name instead of squeezing
+     it: the name field keeps a fixed width, so a squeezed row let the field run
+     over the kind chip beside it. */
+  gap: var(--oct-space-2) var(--oct-space-4);
   padding: 0 0 var(--oct-space-2);
 }
 
@@ -868,6 +872,7 @@
 .project-overview__name {
   width: min(48vw, 520px);
   min-width: 160px;
+  max-width: 100%;
   height: auto;
   min-height: 0;
   padding: 2px var(--oct-space-2);
