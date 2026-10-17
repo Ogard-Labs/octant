@@ -2062,7 +2062,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                       className="chip-x window-no-drag"
                       onClick={() => extensionDraft.remove(receipt.reference)}
                       type="button"
-                      variant="ghost"
+                      variant="bare"
                     >
                       ×
                     </OctantButton>
