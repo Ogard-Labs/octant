@@ -95,7 +95,11 @@ import {
   CodeOperationEventStore,
   MAX_CODE_OPERATION_REPLAY_LIMIT,
 } from "./codeOperationEventStore";
-import { createCodeOperationRuntime } from "./codeOperationRuntime";
+import {
+  type CodeActiveTurns,
+  createCodeOperationRuntime,
+  threadWithActiveTurnPosture,
+} from "./codeOperationRuntime";
 import { CODE_RUNTIME_WORK_UPDATED } from "./codeRuntimeWorkRecorder";
 import { boardRuntimeActivityFromWorks } from "./codeThreadBoardService";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
@@ -2448,6 +2452,43 @@ describe("CodeOperationRuntime", () => {
       requestId: "provider-approval-narrowed",
       approved: true,
     });
+    fixture.close();
+  });
+
+  it("keeps a running turn where the host reads its posture, and lets it go when the turn is cancelled", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const activeTurns: CodeActiveTurns = new Map();
+    const fixture = runtimeFixture({
+      provider: providerDriver(connection),
+      approvalValidator: false,
+      activeTurns,
+    });
+    const startOperation = operationId(905);
+    await expect(
+      fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      }),
+    ).resolves.toMatchObject({ kind: "provider-turn-state", state: "running" });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    expect(activeTurns.has(String(threadId))).toBe(true);
+    // The host's read and the runtime's own answer agree on a running turn.
+    const plan = decodeCodeThread({ ...thread(), executionPolicy: "plan" });
+    expect(threadWithActiveTurnPosture(plan, activeTurns)).toEqual(
+      fixture.runtime.threadWithActiveTurnPosture?.(plan),
+    );
+    await fixture.runtime.execute(windowId, {
+      kind: "cancel-provider-turn",
+      operationId: operationId(906),
+      threadId,
+      checkoutId,
+    });
+    await vi.waitFor(() => expect(activeTurns.has(String(threadId))).toBe(false));
     fixture.close();
   });
 
@@ -5853,6 +5894,8 @@ function runtimeFixture(options: {
     binary: boolean;
   }>;
   approvalValidator?: boolean | (() => boolean);
+  /** Where the runtime keeps its running turns, as the host passes it. */
+  activeTurns?: CodeActiveTurns;
   /** Whether a window may access a Project; a function answers per Project. */
   projectAccess?: boolean | ((projectId: string) => boolean);
   /**
@@ -6069,6 +6112,7 @@ function runtimeFixture(options: {
       readEvidence: (reference) => evidenceValues.get(reference.contentId),
     });
   const runtime = createCodeOperationRuntime({
+    ...(options.activeTurns === undefined ? {} : { activeTurns: options.activeTurns }),
     persistence: {
       journal,
       readCodeRuntimeWorkAggregateVersion: (id) =>

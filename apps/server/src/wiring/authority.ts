@@ -16,6 +16,7 @@ import { decodeBrowserThreadId } from "@octant/contracts/browser-automation";
 import { LiveTurnRegistry } from "../liveTurn/liveTurnRegistry";
 import { CodeOperationApprovalStore } from "../code/codeOperationApprovalStore";
 import { CodeSessionAuthorityStore } from "../code/codeSessionAuthorityStore";
+import { type CodeActiveTurns, threadWithActiveTurnPosture } from "../code/codeOperationRuntime";
 import { ProcessAuthorityClock } from "../processAuthorityClock";
 import { readDeviceRegistration } from "../persistence/remoteAccessProjection";
 import { AgentRunEventStore } from "../agentRun/agentRunEventStore";
@@ -35,16 +36,12 @@ import { BrowserCaptureStore } from "../browser/browserCaptureStore";
 import { SimulatorInputGrants } from "../apple/simulatorInputGrants";
 import type { ServerStart } from "./serverShape";
 import type { FoundationsWiring } from "./foundations";
-import type { LateBindings } from "./lateBindings";
 
 export type AuthorityDependencies = Pick<ServerStart, "persistence"> &
-  Pick<FoundationsWiring, "browserAuthority"> & {
-    /** Cells settled by a later wiring call; read per use, never at construction. */
-    readonly late: Pick<LateBindings, "codeOperationRuntime">;
-  };
+  Pick<FoundationsWiring, "browserAuthority">;
 
 export function wireAuthority(deps: AuthorityDependencies) {
-  const { browserAuthority, late, persistence } = deps;
+  const { browserAuthority, persistence } = deps;
 
   const bindingReceiptStore = new DurableBindingReceiptStore(persistence.connection);
   const processAuthorityClock = new ProcessAuthorityClock();
@@ -145,9 +142,12 @@ export function wireAuthority(deps: AuthorityDependencies) {
     });
   };
   // A child is admitted under the posture its parent's running turn holds, so
-  // a turn narrowed to Plan cannot hand a child the thread's wider grant.
+  // a turn narrowed to Plan cannot hand a child the thread's wider grant. The
+  // Code runtime, built much later, keeps its running turns here; this area
+  // only reads a turn's posture from them.
+  const codeActiveTurns: CodeActiveTurns = new Map();
   const codeParentActiveTurn: CodeParentActiveTurn = (thread) =>
-    late.codeOperationRuntime.current?.threadWithActiveTurnPosture?.(thread) ?? thread;
+    threadWithActiveTurnPosture(thread, codeActiveTurns);
   const agentRunParentAuthority = (run: AgentRun) =>
     boundAgentRunLiveAuthority({
       persistence,
@@ -213,6 +213,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     browserCaptureStore,
     browserCaptures,
     browserModelBindings,
+    codeActiveTurns,
     codeApprovalStore,
     codeParentActiveTurn,
     codeSessionAuthority,

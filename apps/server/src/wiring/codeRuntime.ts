@@ -209,11 +209,12 @@ function withCodeBoard(
 
 export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "codeOperationRuntime" | "nativeHarnessComposition">;
+  readonly late: Pick<LateBindings, "nativeHarnessComposition">;
 } & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
     | "androidInputGrants"
+    | "codeActiveTurns"
     | "codeApprovalStore"
     | "codeSessionAuthority"
     | "liveTurns"
@@ -249,16 +250,15 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     DevicesWiring,
     | "androidToolchainService"
     | "appleToolchainService"
+    | "bindDeviceApprovals"
     | "recordAppleEvidence"
-    | "resolveAndroidContext"
-    | "resolveAppleContext"
   > &
   Pick<
     CodeWiring,
+    | "buildCodeService"
     | "canAccessCodeProject"
     | "codeAttachments"
     | "codeProjectAccess"
-    | "codeService"
     | "codeTestDiscovery"
     | "isCodeProviderModelAllowed"
     | "onPullRequestSnapshotRefreshed"
@@ -307,18 +307,20 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     androidInputGrants,
     androidToolchainService,
     appleToolchainService,
+    bindDeviceApprovals,
     browserAuthority,
     browserAutomationService,
     browserToolApprovalService,
+    buildCodeService,
     canAccessCodeProject,
     canvasAgentToolPort,
+    codeActiveTurns,
     codeApprovalStore,
     codeAttachments,
     codeBoardEventStore,
     codeBoardPlanProgressSource,
     codeEvidence,
     codeProjectAccess,
-    codeService,
     codeSessionAuthority,
     codeTestDiscovery,
     codeThreadDrivers,
@@ -354,8 +356,6 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     providerDataDirectory,
     providerRuntimeRegistry,
     recordAppleEvidence,
-    resolveAndroidContext,
-    resolveAppleContext,
     resolveSelectedExtensions,
     roots,
     runtimeOutsideContentMarks,
@@ -369,8 +369,21 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     workRequestRuntime,
   } = deps;
   return Effect.gen(function* () {
+    // A host started with its own runtime uses it; otherwise it is built below.
+    let codeOperationRuntime: CodeOperationRuntime | undefined = options.codeOperationRuntime;
+    const {
+      androidToolchainRoutes,
+      appleToolchainRoutes,
+      resolveAndroidContext,
+      resolveAppleContext,
+    } = bindDeviceApprovals({
+      validateAppleApproval: (windowId, request) =>
+        codeOperationRuntime?.validateAppleApproval(windowId, request),
+      validateAndroidApproval: (windowId, request) =>
+        codeOperationRuntime?.validateAndroidApproval(windowId, request),
+    });
     let terminalProcessPort: TerminalProcessPort | undefined;
-    if (late.codeOperationRuntime.current === undefined && options.codeService === undefined) {
+    if (codeOperationRuntime === undefined && options.codeService === undefined) {
       terminalProcessPort = new TerminalProcessPort({
         receiptDirectory: join(providerDataDirectory, "code", "terminal-receipts"),
         shellStateDirectory: join(providerDataDirectory, "code", "terminal-shell"),
@@ -414,10 +427,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         canAccessProject: canAccessCodeProject,
         terminalIsRunning: (terminalId) => {
           try {
-            return (
-              late.codeOperationRuntime.current?.terminals?.attach(String(terminalId)).status ===
-              "running"
-            );
+            return codeOperationRuntime?.terminals?.attach(String(terminalId)).status === "running";
           } catch {
             return false;
           }
@@ -442,9 +452,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         clock: () => new Date().toISOString(),
       });
       onWindowRevoked((windowId) => grants.revokeWindow(windowId));
-      onWindowRevoked((windowId) =>
-        late.codeOperationRuntime.current?.revokeTerminalStreams(windowId),
-      );
+      onWindowRevoked((windowId) => codeOperationRuntime?.revokeTerminalStreams(windowId));
       const unsubscribeTerminalBrowserGrants = persistence.journal.subscribeCommitted((append) => {
         for (const event of append.events) {
           if (
@@ -476,8 +484,9 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
           await grants.close();
         }),
       );
-      late.codeOperationRuntime.current = createCodeOperationRuntime({
+      codeOperationRuntime = createCodeOperationRuntime({
         liveTurns,
+        activeTurns: codeActiveTurns,
         terminalBrowserGrants: grants,
         onPendingRequestWithdrawn: () => machineChangeFeed.publish(["code-navigation"]),
         gitMutationPort,
@@ -910,8 +919,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
                 thread: (threadId) => persistence.readCodeThread(threadId),
                 runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
                 turnAwaitsPerson: (threadId) =>
-                  late.codeOperationRuntime.current?.turnAwaitsPerson?.(String(threadId)) ===
-                    true || threadAwaitsHarnessApproval(String(threadId)),
+                  codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true ||
+                  threadAwaitsHarnessApproval(String(threadId)),
                 decisionPending: (candidate) =>
                   codeTurnDecisions.forThread(candidate) !== undefined,
                 mentions: {
@@ -1032,14 +1041,13 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         ...(options.ghExecutable === undefined ? {} : { ghExecutable: options.ghExecutable }),
       });
     }
-    yield* Effect.promise(
-      () => late.codeOperationRuntime.current?.reconcile?.() ?? Promise.resolve(),
-    );
+    const { codeCompletedThreadSource, codeService } = buildCodeService(codeOperationRuntime);
+    yield* Effect.promise(() => codeOperationRuntime?.reconcile?.() ?? Promise.resolve());
     // Code threads already have an inline question surface; the same question
     // shows there so the answer can come from the thread itself.
     onHarnessQuestionAsked(({ threadId, mode, question }) => {
       if (mode !== "code" || question.source !== undefined) return;
-      late.codeOperationRuntime.current?.raiseHarnessQuestion?.({
+      codeOperationRuntime?.raiseHarnessQuestion?.({
         threadId,
         questionId: String(question.id),
         prompt: question.prompt,
@@ -1048,19 +1056,17 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     });
     // Settled anywhere (another surface, expiry, cancellation): the inline
     // copy goes too, so Code never lists or accepts an answer to it.
-    onHarnessQuestionSettled((input) =>
-      late.codeOperationRuntime.current?.withdrawHarnessQuestion?.(input),
-    );
+    onHarnessQuestionSettled((input) => codeOperationRuntime?.withdrawHarnessQuestion?.(input));
     const baseRouteCodeService: CodeRouteService =
-      late.codeOperationRuntime.current === undefined
+      codeOperationRuntime === undefined
         ? codeService
-        : withCodeOperationRuntime(codeService, late.codeOperationRuntime.current);
+        : withCodeOperationRuntime(codeService, codeOperationRuntime);
     // A finished Code turn that closed with an ask, read back from the journal
     // so the board and every attention surface agree after a restart.
     const codeTurnDecisions = new CodeTurnDecisions({
       threads: async (windowId) => (await baseRouteCodeService.navigation(windowId)).threads,
       admitsTurn: async (windowId, thread) =>
-        (await late.codeOperationRuntime.current?.admitsTurn?.(windowId, thread)) === true,
+        (await codeOperationRuntime?.admitsTurn?.(windowId, thread)) === true,
       runtimeWorks: (threadId) => persistence.readCodeRuntimeWorks(threadId),
       replay: (input) => {
         try {
@@ -1172,8 +1178,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               return {
                 ...boardRuntimeActivityFromWorks(persistence.readCodeRuntimeWorks(threadId), {
                   turnParkedOnPerson:
-                    late.codeOperationRuntime.current?.turnAwaitsPerson?.(String(threadId)) ===
-                      true || threadAwaitsHarnessApproval(String(threadId)),
+                    codeOperationRuntime?.turnAwaitsPerson?.(String(threadId)) === true ||
+                    threadAwaitsHarnessApproval(String(threadId)),
                 }),
                 decisionPending:
                   thread !== undefined && codeTurnDecisions.forThread(thread) !== undefined,
@@ -1232,8 +1238,12 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       },
     };
     return {
+      androidToolchainRoutes,
+      appleToolchainRoutes,
       baseRouteCodeService,
-      codeOperationRuntime: late.codeOperationRuntime.current,
+      codeCompletedThreadSource,
+      codeOperationRuntime,
+      codeService,
       codeTurnDecisions,
       routeCodeService,
       terminalProcessPort,

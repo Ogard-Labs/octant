@@ -162,7 +162,6 @@ export function startOctantServer(
       nativeHarnessComposition: { current: undefined },
       nativeHarnessObserver: { current: undefined },
       nativeHarnessLeadFallback: { current: undefined },
-      codeOperationRuntime: { current: options.codeOperationRuntime },
     };
 
     const {
@@ -184,6 +183,7 @@ export function startOctantServer(
       browserCaptureStore,
       browserCaptures,
       browserModelBindings,
+      codeActiveTurns,
       codeApprovalStore,
       codeParentActiveTurn,
       codeSessionAuthority,
@@ -199,7 +199,6 @@ export function startOctantServer(
       windowAuthorityStore,
     } = wireAuthority({
       browserAuthority,
-      late,
       persistence,
     });
     const {
@@ -427,11 +426,10 @@ export function startOctantServer(
     });
     const {
       agentProfileRoutes,
+      buildCodeService,
       canAccessCodeProject,
       codeAttachments,
-      codeCompletedThreadSource,
       codeProjectAccess,
-      codeService,
       codeTestDiscovery,
       codeWorkingDirectoryProbePath,
       environmentService,
@@ -457,7 +455,6 @@ export function startOctantServer(
       onGithubPullRequestsUnreadable,
       onWindowRevoked,
       threadAwaitsHarnessApproval,
-      late,
       bindingReceiptStore,
       cacheStats,
       codeApprovalStore,
@@ -528,16 +525,12 @@ export function startOctantServer(
       windowAuthorityStore,
     });
     const {
-      androidToolchainRoutes,
       androidToolchainService,
-      appleToolchainRoutes,
       appleToolchainService,
+      bindDeviceApprovals,
       recordAppleEvidence,
-      resolveAndroidContext,
-      resolveAppleContext,
     } = yield* wireDevices({
       androidInputGrants,
-      late,
       codeSessionAuthority,
       persistence,
       projectService,
@@ -547,8 +540,12 @@ export function startOctantServer(
       windowAuthorityStore,
     });
     const {
+      androidToolchainRoutes,
+      appleToolchainRoutes,
       baseRouteCodeService,
+      codeCompletedThreadSource,
       codeOperationRuntime,
+      codeService,
       codeTurnDecisions,
       routeCodeService,
       terminalProcessPort,
@@ -565,17 +562,19 @@ export function startOctantServer(
       agentsManagedToolsFor,
       androidInputGrants,
       androidToolchainService,
+      bindDeviceApprovals,
+      buildCodeService,
       appleToolchainService,
       browserAuthority,
       canAccessCodeProject,
       canvasAgentToolPort,
+      codeActiveTurns,
       codeApprovalStore,
       codeAttachments,
       codeBoardEventStore,
       codeBoardPlanProgressSource,
       codeEvidence,
       codeProjectAccess,
-      codeService,
       codeSessionAuthority,
       codeTestDiscovery,
       codeThreadDrivers,
@@ -610,8 +609,6 @@ export function startOctantServer(
       recordAppleEvidence,
       browserAutomationService,
       browserToolApprovalService,
-      resolveAndroidContext,
-      resolveAppleContext,
       resolveSelectedExtensions,
       roots,
       runtimeOutsideContentMarks,
