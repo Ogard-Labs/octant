@@ -365,7 +365,7 @@ function ApplicationMention({
             <OctantButton
               className="chip-x window-no-drag"
               type="button"
-              variant="ghost"
+              variant="bare"
               aria-label={`Remove ${label}`}
               onClick={controller.clear}
             >
