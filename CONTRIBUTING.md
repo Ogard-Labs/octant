@@ -191,10 +191,37 @@ version while the feed offers another makes every install compare the wrong
 pair. After the release, bump the constant to the next version you are working
 toward; previews are prereleases of it.
 
-Credentials — the Developer ID certificate, the notary key, the Ed25519 feed
-signing key, and the deploy key that publishes the feed — are environment
-secrets, never repository secrets, so a workflow on a side branch cannot read
-them. Linux matrix rows may dry-run the feed path without that key; darwin-arm64
+### Publishing the feed
+
+The workflows publish signed feed files to GitHub, not to a server of ours.
+Each ring has one fixed mailbox release, tagged `feed-preview`,
+`feed-candidate` or `feed-stable`: a prerelease that holds only that ring's
+feed JSON files and never a build. `scripts/publish-update-feed.sh` creates it
+on first use and uploads with the job's own `GITHUB_TOKEN` (`contents: write`).
+A file is never replaced in place: the new bytes go up under a temporary name,
+are checked for size, and only then does the old asset give way and the
+temporary one take its name, so a failed upload leaves the live file serving
+and a rerun is safe. Each matrix job writes distinct file names, so a swap never
+touches another job's. The `feed-*` tags do not start
+with `v`, so neither the stable-tag trigger nor a protection rule on `v*` tags
+applies to them.
+
+The app still asks `https://octant.sh/updates/<ring>/<file>`. One redirect on
+octant.sh sends that on to the mailbox:
+
+```
+/updates/<ring>/<file>  ->  https://github.com/Ogard-Labs/octant/releases/download/feed-<ring>/<file>   (302)
+```
+
+The app follows redirects across hosts and trusts the signature inside the
+file, never the host that served it, so GitHub being in the path lowers no bar.
+Replacing a file takes it offline for a moment, which a check reports as
+unreachable and retries on its next schedule. The public feed is therefore as
+available as the repository is.
+
+Credentials — the Developer ID certificate, the notary key, and the Ed25519
+feed signing keys — are environment secrets, never repository secrets, so a
+workflow on a side branch cannot read them. Linux matrix rows may dry-run the feed path without that key; darwin-arm64
 still requires it. `scripts/setup-release-credentials.sh` walks a maintainer
 through creating and installing all of them; run it once, and again when a key
 is rotated.

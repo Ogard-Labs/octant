@@ -128,8 +128,9 @@ version, platform, and architecture, and uses the user agent `Octant` with
 no version. It sends no account, install identifier, Project, thread,
 configuration, counter, or cookie.
 
-Whoever serves the feed — under `https://octant.sh/updates` by default, or an
-HTTPS base you set with `OCTANT_UPDATE_FEED_BASE_URL` — can infer that someone
+Whoever serves the feed — under `https://octant.sh/updates` by default, which
+forwards the request to the feed files on GitHub, or an HTTPS base you set
+with `OCTANT_UPDATE_FEED_BASE_URL` — can infer that someone
 at that IP address runs Octant, which version, on which release ring, and
 roughly how often it is open. The ring is part of the address rather than a
 parameter, so the path itself says whether you follow stable or preview. That

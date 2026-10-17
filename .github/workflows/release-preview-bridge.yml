@@ -57,6 +57,9 @@ jobs:
             asset_suffix: "-linux-x64.AppImage"
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    # Writes the feed files to the ring's mailbox release.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -130,21 +133,7 @@ jobs:
 
       - name: Publish the bridge feed
         env:
-          SSH_KEY: ${{ secrets.OCTANT_FEED_SSH_KEY }}
-          SSH_HOST: ${{ vars.OCTANT_FEED_SSH_HOST }}
-          SSH_USER: ${{ vars.OCTANT_FEED_SSH_USER }}
-          SSH_KNOWN_HOSTS: ${{ vars.OCTANT_FEED_SSH_KNOWN_HOSTS }}
-          REMOTE_PATH: ${{ vars.OCTANT_FEED_REMOTE_PATH }}
+          GH_TOKEN: ${{ github.token }}
           RING: ${{ steps.tag.outputs.ring }}
-        run: |
-          set -euo pipefail
-          umask 077
-          mkdir -p ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/octant_feed
-          # Pinned rather than accepted on first use, as in the release workflows.
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/octant_feed ~/.ssh/known_hosts
-          rsync --archive --compress \
-            --rsh "ssh -i ~/.ssh/octant_feed -o IdentitiesOnly=yes" \
-            "${RUNNER_TEMP}/feed/${RING}" \
-            "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}/"
+          TARGET: ${{ matrix.target }}
+        run: scripts/publish-update-feed.sh "$RING" "${RUNNER_TEMP}/feed/${RING}/${TARGET}.json"

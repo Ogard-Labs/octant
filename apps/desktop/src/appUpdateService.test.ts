@@ -1,11 +1,13 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import type { AppReleaseRing, AppUpdateRelease, AppVersion } from "@octant/contracts/app-updates";
 import {
   OCTANT_UPDATE_CHECK_DISCLOSURE,
   OCTANT_UPDATE_CHECK_INFERENCE,
 } from "@octant/contracts/app-updates";
 import { canonicalReleaseBytes } from "@octant/domain";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFeedVerifier,
   DEFAULT_OCTANT_UPDATE_FEED_BASE_URL,
@@ -296,6 +298,63 @@ describe("update verification", () => {
       status: "refused",
       refusal: "untrusted-signature",
     });
+  });
+});
+
+describe("a feed behind a cross-host redirect", () => {
+  const servers: Server[] = [];
+  async function listen(handler: Parameters<typeof createServer>[1]): Promise<number> {
+    const server = createServer(handler);
+    servers.push(server);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    return (server.address() as AddressInfo).port;
+  }
+  afterEach(async () => {
+    await Promise.all(
+      servers.splice(0).map((server) => new Promise<void>((done) => server.close(() => done()))),
+    );
+  });
+
+  it("follows the 302 to a file served from another host and still verifies it", async () => {
+    // The public address answers 302 and the file comes from a different origin
+    // (release assets on GitHub). Real sockets, so the redirect is followed by
+    // the real fetch with the exact options the updater sends.
+    let seenPath = "";
+    const target = await listen((request, response) => {
+      seenPath = request.url ?? "";
+      response.writeHead(200, { "content-type": "application/octet-stream" });
+      response.end(JSON.stringify(signedFeed()));
+    });
+    const front = await listen((request, response) => {
+      const file = new URL(request.url ?? "/", "http://front.test").pathname.split("/").pop();
+      response.writeHead(302, { location: `http://127.0.0.1:${target}/feed-stable/${file}` });
+      response.end();
+    });
+    // The updater requires https for the compiled endpoint; only the transport
+    // is swapped here, the request options are passed through untouched.
+    const viaLoopback = ((input: string, init?: RequestInit) =>
+      globalThis.fetch(
+        input.replace("https://updates.example.test", `http://127.0.0.1:${front}`),
+        init,
+      )) as typeof globalThis.fetch;
+
+    const fetched = await fetchUpdateFeed(
+      FEED_URL,
+      { version: "0.2.0", platform: "darwin", arch: "arm64" },
+      viaLoopback,
+    );
+
+    expect(fetched.kind).toBe("fetched");
+    expect(seenPath).toBe("/feed-stable/darwin-arm64.json");
+    const document = (fetched as { document: { release: AppUpdateRelease; signature: string } })
+      .document;
+    expect(
+      createFeedVerifier(onEveryRing(publicKeyBase64)).verify(
+        canonicalReleaseBytes(document.release),
+        document.signature,
+        "stable",
+      ),
+    ).toBe(true);
   });
 });
 
