@@ -63,7 +63,7 @@ import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import type { ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
+import type { HarnessWiring } from "./harness";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
@@ -207,10 +207,8 @@ function withCodeBoard(
   };
 }
 
-export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "nativeHarnessComposition">;
-} & Pick<
+export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<
     AuthorityWiring,
     | "agentRunPersistence"
     | "androidInputGrants"
@@ -226,7 +224,6 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     AgentRunsWiring,
     | "agentsManagedToolsFor"
     | "externalContentIngestionStore"
-    | "nativeHarnessHooks"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
     | "spendCeiling"
@@ -281,7 +278,11 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     BrowserWiring,
     "browserAutomationService" | "browserToolApprovalService" | "productFeedbackService"
   > &
-  Pick<CanvasWiring, "canvasAgentToolPort"> & {
+  Pick<CanvasWiring, "canvasAgentToolPort"> &
+  Pick<
+    HarnessWiring,
+    "nativeHarnessComposition" | "nativeHarnessHooks" | "onHarnessRecoveryLifted"
+  > & {
     /** Wired by wireChat; read only after startup. */
     readonly codeThreadMentionDirectory: () => ReturnType<typeof createCodeThreadMentionDirectory>;
     /** Wired by wireWork; read only after startup. */
@@ -299,7 +300,6 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
 
 export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
   const {
-    late,
     threadAwaitsHarnessApproval,
     agentMessageService,
     agentRunPersistence,
@@ -339,9 +339,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     isCodeProviderModelAllowed,
     liveTurns,
     machineChangeFeed,
+    nativeHarnessComposition,
     nativeHarnessHooks,
     onHarnessQuestionAsked,
     onHarnessQuestionSettled,
+    onHarnessRecoveryLifted,
     onPullRequestSnapshotRefreshed,
     onWindowRevoked,
     nativeHarnessTranscripts,
@@ -595,7 +597,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             mode: "code",
             projectId: input.thread.projectId,
           }),
-        nativeHarnessTools: (input) => late.nativeHarnessComposition.current?.forCode(input),
+        nativeHarnessTools: (input) => nativeHarnessComposition.forCode(input),
         nativeHarness: nativeHarnessHooks,
         onProviderTurnRequested: (threadId) => {
           if (codeService instanceof CodeService) codeService.noteProviderTurnRequested(threadId);
@@ -1056,6 +1058,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     });
     // Settled anywhere (another surface, expiry, cancellation): the inline
     // copy goes too, so Code never lists or accepts an answer to it.
+    // Lifting a harness session out of recovery settles the turns it cut off.
+    onHarnessRecoveryLifted(({ threadId, mode }) => {
+      if (mode === "code") codeOperationRuntime?.settleCutOffTurns?.(threadId);
+    });
     onHarnessQuestionSettled((input) => codeOperationRuntime?.withdrawHarnessQuestion?.(input));
     const baseRouteCodeService: CodeRouteService =
       codeOperationRuntime === undefined

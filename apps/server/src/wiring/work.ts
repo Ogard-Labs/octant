@@ -101,7 +101,6 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "agentsManagedToolsFor"
     | "externalContentIngestionStore"
     | "managedWorktreeReceipts"
-    | "nativeHarnessHooks"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
     | "spendCeiling"
@@ -152,6 +151,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     HarnessWiring,
     | "followUpCreation"
     | "nativeHarnessComposition"
+    | "nativeHarnessHooks"
     | "onHarnessPausedByPerson"
     | "sideTaskFirstMessage"
   > &

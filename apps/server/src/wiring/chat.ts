@@ -113,7 +113,6 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
     | "agentsManagedToolsFor"
     | "capacityScheduler"
     | "externalContentIngestionStore"
-    | "nativeHarnessHooks"
     | "runtimeOutsideContentMarks"
     | "sideTasks"
     | "spendCeiling"
@@ -146,7 +145,10 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
   > &
   Pick<CodeRuntimeWiring, "codeService" | "routeCodeService"> &
   Pick<CanvasWiring, "canvasAgentToolPort"> &
-  Pick<HarnessWiring, "nativeHarnessComposition" | "researchRouter" | "threadWork"> & {
+  Pick<
+    HarnessWiring,
+    "nativeHarnessComposition" | "nativeHarnessHooks" | "researchRouter" | "threadWork"
+  > & {
     /** Wired by wireWorkFiles; read only after startup. */
     readonly workFileListingService: () => WorkFileListingService;
     /** Wired by wireWork; read only after startup. */

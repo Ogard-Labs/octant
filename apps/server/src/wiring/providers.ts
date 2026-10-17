@@ -94,6 +94,7 @@ import { ProviderAccountPlanUsageStore } from "../providers/providerAccountPlanU
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { GeneratedImageStore } from "../image/generatedImageStore";
 import { ImageJobService } from "../image/imageJobService";
 import { createLocalUsageHistoryRouteHandler } from "../localUsageHistoryRoutes";
@@ -149,7 +150,7 @@ import {
 } from "@octant/domain";
 import { ChatAttachmentStore } from "../chat/chatAttachmentStore";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart, ServerStartupFailed } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
+import type { HarnessStateWiring } from "./harnessState";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
@@ -335,10 +336,8 @@ function isPathWithin(root: string, candidate: string): boolean {
 export type ProvidersDependencies = Pick<
   ServerStart,
   "latencyStats" | "options" | "persistence" | "version"
-> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "nativeHarnessLeadFallback">;
-} & Pick<
+> &
+  Pick<
     AuthorityWiring,
     | "extensionToolApprovalService"
     | "isPairedDeviceScope"
@@ -352,7 +351,9 @@ export type ProvidersDependencies = Pick<
     | "agentRunSessionStore"
     | "externalContentIngestionStore"
     | "managedWorktreeReceipts"
+    | "nativeHarnessRouter"
   > &
+  Pick<HarnessStateWiring, "nativeHarnessSessions"> &
   Pick<IntegrationsWiring, "githubExtensionSnapshot"> &
   Pick<ComputerUseWiring, "computerUseProcess"> &
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
@@ -360,7 +361,6 @@ export type ProvidersDependencies = Pick<
 
 export function wireProviders(deps: ProvidersDependencies) {
   const {
-    late,
     agentRunChildWorktree,
     agentRunProcessSupervisor,
     agentRunSessionStore,
@@ -370,6 +370,8 @@ export function wireProviders(deps: ProvidersDependencies) {
     githubExtensionSnapshot,
     isPairedDeviceScope,
     managedWorktreeReceipts,
+    nativeHarnessRouter,
+    nativeHarnessSessions,
     options,
     persistence,
     processAuthorityNow,
@@ -778,8 +780,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
     // A harness driver registers its endpoint here as it is built, and its lead
-    // asks the fallback (bound once the router and sessions exist) where to go
-    // when its own model stays down.
+    // asks the fallback (built below, from the options these hooks are part
+    // of) where to go when its own model stays down.
     const nativeHarnessEndpoints = new NativeHarnessEndpointRegistry();
     const nativeHarnessEndpointHooks: NativeHarnessEndpointHooks = {
       endpoints: nativeHarnessEndpoints,
@@ -790,11 +792,7 @@ export function wireProviders(deps: ProvidersDependencies) {
           providerService.rememberModelContextWindow(instanceId, modelId, lesson),
       },
       leadFallback: {
-        next: async (input) =>
-          (await late.nativeHarnessLeadFallback.current?.next(input)) ?? {
-            status: "none",
-            reason: "not-routed",
-          },
+        next: (input) => nativeHarnessLeadFallback.next(input),
       },
     };
     const isProjectConfinedPath = options.isProjectConfinedPath ?? pathIsProjectConfined;
@@ -1045,6 +1043,26 @@ export function wireProviders(deps: ProvidersDependencies) {
         return persistence.readProviderInstances();
       },
     };
+    // Where a harness lead goes when its own model stays down. It builds
+    // drivers from the options above, whose lead hook asks it in turn; both
+    // only run once a turn is under way.
+    const nativeHarnessLeadFallback = new NativeHarnessLeadFallbackService({
+      router: nativeHarnessRouter,
+      sessions: nativeHarnessSessions,
+      hostId: String(LOCAL_HOST_ID),
+      // Building the driver is what registers its endpoint, so a fallback onto an
+      // instance no turn has used yet since boot still finds it.
+      endpointFor: (providerInstanceId) => {
+        const instance = persistence.readProviderInstance(providerInstanceId as never);
+        if (instance === undefined || !instance.enabled) return undefined;
+        try {
+          makeConfiguredProviderDriver(instance, configuredDriverOptions);
+        } catch {
+          return undefined;
+        }
+        return nativeHarnessEndpoints.get(instance.id);
+      },
+    });
     const localUsageHistoryRoutes = createLocalUsageHistoryRouteHandler({
       windowAuthorityStore,
       ...(options.allowedRendererHttpOrigin === undefined
@@ -1216,6 +1234,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       managedWorktreeRefsList,
       managedWorktreeSourcePreview,
       nativeHarnessEndpoints,
+      nativeHarnessLeadFallback,
       nativeHarnessTranscripts,
       probeProviderForThreads,
       providerDataDirectory,

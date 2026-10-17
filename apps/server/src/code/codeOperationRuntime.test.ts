@@ -52,6 +52,7 @@ import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite } from "../persistence/sqlitePort";
 import { CodeSessionAuthorityStore } from "./codeSessionAuthorityStore";
 import { codeTurnExecutionPolicyReader } from "./codeTurnExecutionPolicy";
+import { codeParentActiveTurnFrom } from "../wiring/authority";
 import { ProductFeedbackService } from "../browser/productFeedbackService";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
 import {
@@ -1709,15 +1710,38 @@ describe("CodeOperationRuntime", () => {
     async (threadPolicy, turnPolicy) => {
       const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
       const provider = providerConnection(queue);
-      const fixture = runtimeFixture({ provider: providerDriver(provider) });
+      const activeTurns: CodeActiveTurns = new Map();
+      const fixture = runtimeFixture({ provider: providerDriver(provider), activeTurns });
       const stored = decodeCodeThread({ ...thread(), executionPolicy: threadPolicy });
       fixture.setThread(stored);
       const sessions = new CodeSessionAuthorityStore();
-      const readPosture = codeTurnExecutionPolicyReader({
-        readCodeThread: () => stored,
-        codeSessionAuthority: sessions,
-        codeOperationRuntime: fixture.runtime,
-      });
+      const readerFor = (
+        codeOperationRuntime: Parameters<
+          typeof codeTurnExecutionPolicyReader
+        >[0]["codeOperationRuntime"],
+      ) =>
+        codeTurnExecutionPolicyReader({
+          readCodeThread: () => stored,
+          codeSessionAuthority: sessions,
+          codeOperationRuntime,
+        });
+      // The harness reads the posture the way the host's authority does: from
+      // the registry a host-built runtime keeps its turns in, or from a runtime
+      // the host was started with. Every reader answers alike.
+      const readers = [
+        readerFor(fixture.runtime),
+        readerFor({
+          threadWithActiveTurnPosture: codeParentActiveTurnFrom(undefined, activeTurns),
+        }),
+        readerFor({
+          threadWithActiveTurnPosture: codeParentActiveTurnFrom(fixture.runtime, new Map()),
+        }),
+      ];
+      const readPosture = (id: typeof threadId, window: typeof windowId) => {
+        const answers = readers.map((read) => read(id, window));
+        expect(new Set(answers).size).toBe(1);
+        return answers[0];
+      };
       try {
         expect(readPosture(threadId, windowId)).toBe(threadPolicy);
         await fixture.runtime.execute(windowId, {

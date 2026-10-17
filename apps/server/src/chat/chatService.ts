@@ -758,6 +758,57 @@ export class ChatServiceError extends Error {
   }
 }
 
+/**
+ * A Chat thread as {@link ChatService.read} answers it: refused while it is
+ * missing, deleting, or deleted, and carrying its journal head as its
+ * version. It reads only persistence, so an area built before the service
+ * (an agent run reading its Chat parent) reads a thread the same way.
+ */
+export function readChatThreadView(
+  persistence: Pick<PersistenceService, "connection" | "readChatThread" | "readChatThreadView">,
+  threadId: ChatThreadId,
+): ChatThreadView {
+  assertReadableChatThread(persistence, threadId);
+  const view = persistence.readChatThreadView(threadId);
+  if (view === undefined) {
+    throw new ChatServiceError({
+      category: "invalid",
+      message: "Chat thread was not found.",
+    });
+  }
+  return {
+    ...view,
+    thread: withChatThreadHeadVersion(persistence, view.thread),
+  };
+}
+
+function assertReadableChatThread(
+  persistence: Pick<PersistenceService, "readChatThread">,
+  threadId: ChatThreadId,
+): void {
+  const thread = persistence.readChatThread(threadId);
+  if (thread === undefined || thread.lifecycle === "deleted") {
+    throw new ChatServiceError({
+      category: "invalid",
+      message: "Chat thread was not found.",
+    });
+  }
+  if (thread.lifecycle === "deleting") {
+    throw new ChatServiceError({
+      category: "invalid",
+      message: "Chat thread is being deleted.",
+    });
+  }
+}
+
+function withChatThreadHeadVersion(
+  persistence: Pick<PersistenceService, "connection">,
+  thread: ChatThread,
+): ChatThread {
+  const version = readAggregateVersion(persistence.connection, "chat-thread", thread.id);
+  return { ...thread, version };
+}
+
 const CHAT_COMPLETE_REFUSALS = {
   archived: "An archived thread cannot be put away.",
   executing: "Wait for the running answer to finish before putting this thread away.",
@@ -1211,18 +1262,7 @@ export class ChatService {
   }
 
   read(threadId: ChatThreadId): ChatThreadView {
-    this.#assertReadableThread(threadId);
-    const view = this.#persistence.readChatThreadView(threadId);
-    if (view === undefined) {
-      throw new ChatServiceError({
-        category: "invalid",
-        message: "Chat thread was not found.",
-      });
-    }
-    return {
-      ...view,
-      thread: this.#withAggregateHeadVersion(view.thread),
-    };
+    return readChatThreadView(this.#persistence, threadId);
   }
 
   /**
@@ -6006,8 +6046,7 @@ export class ChatService {
   }
 
   #withAggregateHeadVersion(thread: ChatThread): ChatThread {
-    const version = readAggregateVersion(this.#persistence.connection, "chat-thread", thread.id);
-    return { ...thread, version };
+    return withChatThreadHeadVersion(this.#persistence, thread);
   }
 
   /**
@@ -6103,19 +6142,7 @@ export class ChatService {
   }
 
   #assertReadableThread(threadId: ChatThreadId): void {
-    const thread = this.#persistence.readChatThread(threadId);
-    if (thread === undefined || thread.lifecycle === "deleted") {
-      throw new ChatServiceError({
-        category: "invalid",
-        message: "Chat thread was not found.",
-      });
-    }
-    if (thread.lifecycle === "deleting") {
-      throw new ChatServiceError({
-        category: "invalid",
-        message: "Chat thread is being deleted.",
-      });
-    }
+    assertReadableChatThread(this.#persistence, threadId);
   }
 
   #assertReady(): void {
