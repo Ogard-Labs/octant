@@ -320,7 +320,13 @@ describe("a reply a gateway held back and then released in one burst", () => {
       ],
     });
 
-    expect(metrics).toMatchObject({ decodeOutputTokens: 200, decodeMs: 2_000, modelCalls: 1 });
+    expect(metrics).toMatchObject({
+      decodeOutputTokens: 200,
+      decodeMs: 2_000,
+      modelCalls: 1,
+      // The turn's first delta, not the later request that was timed.
+      timeToFirstTokenMs: 4_067,
+    });
     expect(tokensPerSecond(metrics)).toBe(100);
   });
 

@@ -233,8 +233,11 @@ function measureRequests(
       call.outputTokens > 0 &&
       call.endMs - call.firstDeltaMs >= MIN_DECODE_WINDOW_MS,
   );
-  const first = timed[0];
-  if (first?.firstDeltaMs === undefined) return undefined;
+  if (timed[0] === undefined) return undefined;
+  // The wait for a first token ends at the turn's first delta, even when that
+  // request was too short to be timed for speed.
+  const firstDeltaMs = state.calls.find((call) => call.firstDeltaMs !== undefined)?.firstDeltaMs;
+  if (firstDeltaMs === undefined) return undefined;
   let decodeMs = 0;
   let decodeOutputTokens = 0;
   for (const call of timed) {
@@ -249,7 +252,7 @@ function measureRequests(
   return {
     precision: "exact",
     wallMs,
-    timeToFirstTokenMs: Math.max(0, Math.round(first.firstDeltaMs - state.startedAtMs)),
+    timeToFirstTokenMs: Math.max(0, Math.round(firstDeltaMs - state.startedAtMs)),
     decodeOutputTokens,
     decodeMs: Math.round(decodeMs),
     toolMs: Math.round(toolMs),
