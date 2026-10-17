@@ -712,7 +712,11 @@ class AgentScreen {
     } else if (pending !== undefined) {
       this.#panel.title = " Question ";
       this.#panel.borderColor = p.accent;
-      const options = pending.options.map((option, index) => `  ${index + 1}. ${option}`);
+      const meanings = "descriptions" in pending ? pending.descriptions : undefined;
+      const options = pending.options.map((option, index) => {
+        const meaning = meanings?.[index];
+        return `  ${index + 1}. ${option}${meaning === undefined ? "" : ` — ${meaning}`}`;
+      });
       this.#panelText.content = t`${fg(p.text)(pending.prompt)}${options.length === 0 ? "" : "\n"}${fg(p.textSecondary)(options.join("\n"))}\n${dim(fg(p.muted)("Type a number or an answer, then Enter."))}`;
       this.#panel.visible = true;
     } else if (this.#pendingFollowUp !== undefined) {

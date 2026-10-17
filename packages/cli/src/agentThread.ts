@@ -66,6 +66,8 @@ export interface AgentPendingQuestion {
   readonly id: string;
   readonly prompt: string;
   readonly options: ReadonlyArray<string>;
+  /** What choosing each option means, by index; present only when the provider gave any. */
+  readonly descriptions?: ReadonlyArray<string | undefined>;
 }
 
 export interface AgentThreadSnapshot {
@@ -122,13 +124,14 @@ export function isAgentSnapshotRunning(snapshot: AgentThreadSnapshot | undefined
 export function pendingQuestionOf(view: ChatThreadView): AgentPendingQuestion | undefined {
   const attempt = view.turns.at(-1)?.attempts.at(-1);
   const question = attempt?.outcome === "waiting" ? attempt.pendingQuestion : undefined;
-  return question === undefined
-    ? undefined
-    : {
-        id: String(question.requestId),
-        prompt: question.prompt,
-        options: question.options.map((option) => option.label),
-      };
+  if (question === undefined) return undefined;
+  const hasMeanings = question.options.some((option) => option.description !== undefined);
+  return {
+    id: String(question.requestId),
+    prompt: question.prompt,
+    options: question.options.map((option) => option.label),
+    ...(hasMeanings ? { descriptions: question.options.map((option) => option.description) } : {}),
+  };
 }
 
 export function snapshotFromChat(view: ChatThreadView): AgentThreadSnapshot {

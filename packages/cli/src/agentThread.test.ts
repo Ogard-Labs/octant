@@ -363,6 +363,25 @@ describe("a Chat lead's question in the terminal", () => {
     });
   });
 
+  it("carries what each option means when the provider gave it", async () => {
+    const parked = chatViewParkedOnQuestion();
+    const attempt = parked.turns[0]!.attempts[0] as unknown as {
+      pendingQuestion: { options: Array<{ label: string; description?: string }> };
+    };
+    attempt.pendingQuestion.options = [
+      { label: "A", description: "keep the schema" },
+      { label: "B" },
+    ];
+    const host = questionHost(() => parked);
+    const snapshot = await agentThreadPort(host.session, "chat", chatThread.id).read();
+    expect(snapshot?.pendingQuestion).toEqual({
+      id: "call_1",
+      prompt: "Which database?",
+      options: ["A", "B"],
+      descriptions: ["keep the schema", undefined],
+    });
+  });
+
   it("is not offered once the attempt has moved on", async () => {
     const host = questionHost(() => chatViewParkedOnQuestion(8, "completed"));
     const snapshot = await agentThreadPort(host.session, "chat", chatThread.id).read();

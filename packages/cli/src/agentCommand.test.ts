@@ -508,7 +508,10 @@ describe("octant agent Chat lead question", () => {
                     pendingQuestion: {
                       requestId: "call_1",
                       prompt: "Which database?",
-                      options: [{ label: "sqlite" }, { label: "postgres" }],
+                      options: [
+                        { label: "sqlite", description: "one file, no server" },
+                        { label: "postgres" },
+                      ],
                     },
                   }
                 : {}),
@@ -562,7 +565,9 @@ describe("octant agent Chat lead question", () => {
         if (request.path === "/api/chat/commands") {
           const body = request.body as { kind?: string };
           posted.push(body);
-          if (body.kind === "answer-chat-turn-question") answered = true;
+          if (body.kind === "answer-chat-turn-question" || body.kind === "interrupt-chat-turn") {
+            answered = true;
+          }
           return { status: 200, body: {} };
         }
         if (request.path.startsWith("/api/native-harness/sessions/")) {
@@ -581,7 +586,7 @@ describe("octant agent Chat lead question", () => {
   it("shows the question with numbered options and sends the picked option as the answer", async () => {
     const result = await run({ json: false, typed: "2\n" });
     expect(result.stdout).toContain("? Which database?");
-    expect(result.stdout).toContain("  1. sqlite");
+    expect(result.stdout).toContain("  1. sqlite — one file, no server");
     expect(result.stdout).toContain("  2. postgres");
     expect(result.posted.filter((body) => body.kind === "answer-chat-turn-question")).toEqual([
       {
@@ -595,6 +600,21 @@ describe("octant agent Chat lead question", () => {
       },
     ]);
     expect(result.code).toBe(0);
+  });
+
+  it("stops the parked turn when stdin ends before an answer, instead of waiting forever", async () => {
+    const result = await run({ json: false, typed: "" });
+    expect(result.stderr).toContain("Input ended before the question was answered");
+    expect(result.posted.map((body) => body.kind)).toContain("interrupt-chat-turn");
+    expect(result.posted.map((body) => body.kind)).not.toContain("answer-chat-turn-question");
+  });
+
+  it("asks again after a blank line rather than leaving the turn parked", async () => {
+    const result = await run({ json: false, typed: "\n2\n" });
+    expect(result.stdout.match(/\? Which database\?/g)).toHaveLength(2);
+    expect(result.posted.filter((body) => body.kind === "answer-chat-turn-question")).toMatchObject(
+      [{ answer: "postgres" }],
+    );
   });
 
   it("emits the question as a JSON line and reads the answer from stdin", async () => {

@@ -691,10 +691,15 @@ function watchApprovalSettled(
  * the answer itself. In JSON mode the question is emitted as a line and the
  * answer is read the same way, so a script can answer too.
  *
- * Resolves with the answer, `"elsewhere"` when `settled` aborted the wait
- * (the question was answered on another surface, so the next typed line is
- * not swallowed), or undefined when stdin ended or the line was empty.
+ * Resolves with the answer, or says why there is none: `elsewhere` when
+ * `settled` aborted the wait (the question was answered on another surface, so
+ * the next typed line is not swallowed), `eof` when stdin ended, `empty` for a
+ * blank line.
  */
+type QuestionReading =
+  | { readonly kind: "answer"; readonly text: string }
+  | { readonly kind: "elsewhere" | "eof" | "empty" };
+
 async function readQuestionAnswer(
   input: Pick<RunAgentCliCommandInput, "stdout"> & {
     readonly command: { readonly json: boolean };
@@ -703,21 +708,27 @@ async function readQuestionAnswer(
     readonly id: string;
     readonly prompt: string;
     readonly options: ReadonlyArray<string>;
+    readonly descriptions?: ReadonlyArray<string | undefined>;
   },
   shown: unknown,
   lines: Pick<LineSource, "next">,
   settled?: AbortSignal,
-): Promise<string | "elsewhere" | undefined> {
+): Promise<QuestionReading> {
   if (input.command.json) {
     input.stdout.write(`${JSON.stringify({ kind: "question", question: shown })}\n`);
   } else {
     input.stdout.write(`\n? ${question.prompt}\n`);
-    question.options.forEach((option, index) => input.stdout.write(`  ${index + 1}. ${option}\n`));
+    question.options.forEach((option, index) => {
+      const meaning = question.descriptions?.[index];
+      input.stdout.write(
+        `  ${index + 1}. ${option}${meaning === undefined ? "" : ` — ${meaning}`}\n`,
+      );
+    });
     input.stdout.write("> ");
   }
   const line = await lines.next(settled);
   if (line === undefined) {
-    if (settled?.aborted !== true) return undefined;
+    if (settled?.aborted !== true) return { kind: "eof" };
     if (input.command.json) {
       input.stdout.write(
         `${JSON.stringify({ kind: "question-settled", questionId: question.id })}\n`,
@@ -725,12 +736,12 @@ async function readQuestionAnswer(
     } else {
       input.stdout.write("\n(answered elsewhere)\n");
     }
-    return "elsewhere";
+    return { kind: "elsewhere" };
   }
   const trimmed = line.trim();
   const picked = /^\d+$/.test(trimmed) ? question.options[Number(trimmed) - 1] : undefined;
   const answer = picked ?? trimmed;
-  return answer.length === 0 ? undefined : answer;
+  return answer.length === 0 ? { kind: "empty" } : { kind: "answer", text: answer };
 }
 
 async function answerPendingQuestion(
@@ -745,11 +756,11 @@ async function answerPendingQuestion(
     question,
     lines,
   );
-  if (answer === undefined || answer === "elsewhere") return;
+  if (answer.kind !== "answer") return;
   await input.session.send({
     path: `/api/native-harness/sessions/${encodeURIComponent(threadId)}/questions`,
     method: "POST",
-    body: { questionId: String(question.id), answer },
+    body: { questionId: String(question.id), answer: answer.text },
   });
 }
 
@@ -763,7 +774,7 @@ async function answerThreadQuestion(
   port: AgentThreadPort,
   question: AgentPendingQuestion,
   lines: LineSource,
-): Promise<void> {
+): Promise<"settled" | "ask-again"> {
   const answeredElsewhere = new AbortController();
   const interval = input.pollIntervalMs ?? 1_000;
   let stopped = false;
@@ -781,15 +792,32 @@ async function answerThreadQuestion(
   const answer = await readQuestionAnswer(
     input,
     question,
-    { id: question.id, prompt: question.prompt, options: question.options, status: "pending" },
+    {
+      id: question.id,
+      prompt: question.prompt,
+      options: question.options,
+      ...(question.descriptions === undefined ? {} : { descriptions: question.descriptions }),
+      status: "pending",
+    },
     lines,
     answeredElsewhere.signal,
   );
   stopped = true;
   if (timer !== undefined) clearTimeout(timer);
-  if (answer === undefined || answer === "elsewhere") return;
-  const result = await port.answerQuestion?.(question, answer);
+  if (answer.kind !== "answer") {
+    // A blank line answers nothing; ask again rather than leave it parked.
+    if (answer.kind === "empty") return "ask-again";
+    if (answer.kind === "eof") {
+      // Nobody can answer from here any more, and the turn is parked on it, so
+      // stop the turn rather than leave it waiting for an answer that cannot come.
+      input.stderr.write("Input ended before the question was answered; stopping the turn.\n");
+      await port.interrupt().catch(() => undefined);
+    }
+    return "settled";
+  }
+  const result = await port.answerQuestion?.(question, answer.text);
   if (result?.kind === "refused") input.stderr.write(`${result.message}\n`);
+  return "settled";
 }
 
 async function readSession(
@@ -1010,7 +1038,9 @@ async function followTurn(
     const asked = current.pendingQuestion;
     if (asked !== undefined && port.answerQuestion !== undefined && !answered.has(asked.id)) {
       answered.add(asked.id);
-      await answerThreadQuestion(input, port, asked, lines);
+      if ((await answerThreadQuestion(input, port, asked, lines)) === "ask-again") {
+        answered.delete(asked.id);
+      }
       current = (await port.read()) ?? current;
     }
     const turn = current.turns.at(-1);
