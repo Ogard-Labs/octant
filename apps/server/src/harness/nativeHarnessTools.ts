@@ -234,6 +234,13 @@ export interface CreateNativeHarnessToolsOptions {
    * use; the authority service still refuses a call that arrives anyway.
    */
   readonly executionPolicy?: ProviderExecutionPolicy;
+  /**
+   * The posture the running turn holds at the moment of a call, when it can
+   * be narrower than the thread's stored one (a turn narrowed to Plan). The
+   * authority check uses the narrower of the two on every call, so the offered
+   * set above is never what keeps a Plan turn read-only.
+   */
+  readonly resolveTurnExecutionPolicy?: () => ProviderExecutionPolicy | undefined;
   /** The single server choke point every proposal passes before a port runs. */
   readonly authority: Pick<ToolCallAuthorityService, "authorize">;
   /** The authority the thread holds right now; absent means the thread speaks for nothing. */
@@ -360,10 +367,12 @@ export function createNativeHarnessTools(
     } catch {
       return refused("tool-authority-stale", STALE_AUTHORITY_MESSAGE);
     }
+    const turnExecutionPolicy = options.resolveTurnExecutionPolicy?.();
     const decision = options.authority.authorize({
       threadId: options.threadId,
       request,
       arguments: args,
+      ...(turnExecutionPolicy === undefined ? {} : { turnExecutionPolicy }),
     });
     if (decision.kind === "deny") {
       return refused(

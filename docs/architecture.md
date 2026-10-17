@@ -4246,9 +4246,15 @@ native harness in `apps/server/src/harness`:
      set above, with no `edit`, `write`, `bash`, or `goal-check`. Plan does
      not refuse `web-fetch` (a tainted thread still confirms it afresh), so
      it stays. A thread stored as Plan, or a turn narrowed to Plan, composes
-     that set; a posture moved to Plan after the tools were composed still
-     has its write or command refused as `plan-mode-denied`, the server-side
-     backstop. A managed child admitted in Plan is offered the same reduced
+     that set. The offered set is not the boundary: every call is judged by
+     the narrower of the thread's stored posture and the posture the running
+     turn holds when the call arrives, so a turn narrowed to Plan on a thread
+     stored as approval-gated, auto-accept-edits, or Full access has its
+     write, edit, command, or check refused as `plan-mode-denied`, including
+     a call from tools composed before the narrowing. A turn's posture only
+     narrows the thread's, never widens it. Work and Chat have no Plan
+     posture (a Work turn is ask-first or auto-accept-edits; Chat is
+     approval-gated), so no narrowed turn reaches them. A managed child admitted in Plan is offered the same reduced
      set. `nativeHarnessComposition.test.ts` pins the full
      set per mode with every port supplied, the Code set under each access
      posture, the Side Chat set, the reduced set without them, and that the

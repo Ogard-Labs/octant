@@ -8,6 +8,7 @@ import type {
 } from "@octant/contracts";
 import {
   authorizeToolAction,
+  clampTurnAccessPosture,
   resolveNetworkEgressPolicy,
   resolveToolCall,
   type ToolCallDecisionReceipt,
@@ -45,6 +46,14 @@ export type ToolCallAuthorityAuthorizeInput = {
   readonly threadId: string;
   readonly request: ToolActionRequest;
   readonly arguments: unknown;
+  /**
+   * The access posture the calling turn holds right now, when it may differ
+   * from the thread's stored one (a single turn narrowed to Plan). It can only
+   * narrow: the decision uses the narrower of the two, so a turn never gains
+   * what the thread does not hold and a narrowing is honoured the moment it
+   * happens, including for a call composed before it.
+   */
+  readonly turnExecutionPolicy?: ProviderExecutionPolicy;
 };
 
 export type ToolCallAuthorityDecision =
@@ -85,6 +94,24 @@ export type ToolCallAuthorityServiceOptions = {
   readonly clock?: () => string;
 };
 
+function narrowedToTurn(
+  live: ToolCallLiveFacts,
+  turn: ProviderExecutionPolicy | undefined,
+): ToolCallLiveFacts {
+  const executionPolicy = clampTurnAccessPosture({
+    ...(turn === undefined ? {} : { requested: turn }),
+    thread: live.executionPolicy,
+  });
+  if (executionPolicy === live.executionPolicy) return live;
+  // Full-access is the only posture that answers an approval by itself, so a
+  // narrower posture cannot keep an approval the wider one satisfied.
+  return {
+    ...live,
+    executionPolicy,
+    approvalSatisfied: live.approvalSatisfied && executionPolicy === "full-access",
+  };
+}
+
 /**
  * Single server choke point for tool calls: compute granted `ToolActionAuthority`
  * from live thread state, run domain `resolveToolCall`, and emit a decision
@@ -105,11 +132,14 @@ export class ToolCallAuthorityService {
 
   authorize(input: ToolCallAuthorityAuthorizeInput): ToolCallAuthorityDecision {
     const mode = input.request.authority.mode;
-    const live = this.#resolveLiveFacts({
-      threadId: input.threadId,
-      mode,
-      request: input.request,
-    });
+    const live = narrowedToTurn(
+      this.#resolveLiveFacts({
+        threadId: input.threadId,
+        mode,
+        request: input.request,
+      }),
+      input.turnExecutionPolicy,
+    );
 
     const granted = this.#resolveGrantedAuthority(input.threadId, mode);
     if (granted === undefined) {

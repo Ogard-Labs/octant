@@ -1,7 +1,13 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import type { ChatThread, CodeThread, ToolActionAuthority, WorkThread } from "@octant/contracts";
+import type {
+  ChatThread,
+  CodeThread,
+  ProviderExecutionPolicy,
+  ToolActionAuthority,
+  WorkThread,
+} from "@octant/contracts";
 import { childAgentTools } from "../chat/sideChatDelegation";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
@@ -727,6 +733,124 @@ describe("native harness composition", () => {
         }),
       ).toMatchObject({ isError: true, result: { error: "second-opinion-tainted" } });
       expect(asked).toEqual([]);
+    });
+  });
+
+  describe("a Code turn narrowed to Plan on a thread stored with wider access", () => {
+    const providerInstanceId = "00000000-0000-4000-8000-0000000000e3";
+    const projectId = "00000000-0000-4000-8000-0000000000b4";
+    const revisionId = "00000000-0000-4000-8000-0000000000c4";
+    const storedThread = (executionPolicy: ProviderExecutionPolicy) =>
+      ({
+        id: "00000000-0000-4000-8000-000000000041",
+        lifecycle: "active",
+        projectId,
+        providerInstanceId,
+        modelId: "harness-model",
+        bindingRevisionId: revisionId,
+        checkoutId: "00000000-0000-4000-8000-0000000000d4",
+        executionPolicy,
+      }) as unknown as CodeThread;
+    // The real authority reads the stored thread, as the host does; `turn` is the posture the
+    // running turn holds, which the host reads separately and may have moved since the tools
+    // were composed.
+    const harness = (
+      stored: ProviderExecutionPolicy,
+      turn: { current?: ProviderExecutionPolicy },
+      composedAs: ProviderExecutionPolicy = stored,
+    ) => {
+      const composition = createNativeHarnessComposition({
+        isChildAuthorityCurrent: () => true,
+        authority: createNativeHarnessAuthority({
+          hostId: "00000000-0000-4000-8000-0000000000aa" as never,
+          persistence: {
+            readChatThread: () => undefined,
+            readProject: () =>
+              ({
+                type: "code",
+                lifecycle: "active",
+                bindingHistory: [{ revisionId }],
+              }) as never,
+            readCodeThread: () => storedThread(stored) as never,
+            readProviderInstance: () => ({ enabled: true }) as never,
+          },
+          workThreads: { read: () => undefined },
+          readThreadTaint: () => ({ externalContentIngested: false }) as never,
+        }),
+        isHarnessProvider: () => true,
+        shell: { run: async () => ({ status: "ran", exitCode: 0, output: "", truncated: false }) },
+        readCodeExecutionPolicy: () => turn.current,
+        hostId: "00000000-0000-4000-8000-0000000000aa" as never,
+        readThreadTaint: () => false,
+        recordExternalContentIngestion: () => ({ kind: "ignored", reason: "not-tainting" }),
+        uuid: () => "00000000-0000-4000-8000-000000000099",
+        clock: () => "2026-10-17T00:00:00.000Z",
+      });
+      return composition.forCode({
+        thread: storedThread(composedAs),
+        checkoutRoot: "/nonexistent",
+        windowId: "window-1",
+      })!;
+    };
+    const writes = [
+      ["write", { path: "a.ts", content: "x" }],
+      ["edit", { path: "a.ts", oldText: "a", newText: "b" }],
+      ["bash", { command: "echo hi" }],
+    ] as const;
+    const run = (tools: ReturnType<typeof harness>, name: string, input: unknown) =>
+      tools.execute({
+        name,
+        inputJson: JSON.stringify(input),
+        signal: new AbortController().signal,
+      });
+
+    it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
+      "offers no write, edit or command to a turn that starts in Plan on a %s thread, and refuses a call anyway",
+      async (stored) => {
+        const tools = harness(stored, { current: "plan" });
+        expect(tools.definitions.map((definition) => definition.name)).toEqual([
+          "read",
+          "grep",
+          "glob",
+        ]);
+        for (const [name, input] of writes) {
+          expect(await run(tools, name, input)).toMatchObject({ isError: true });
+        }
+      },
+    );
+
+    it.each(["approval-gated", "auto-accept-edits", "full-access"] as const)(
+      "refuses a write, an edit and a command by policy when the turn narrows to Plan after the tools were composed on a %s thread",
+      async (stored) => {
+        const turn: { current?: ProviderExecutionPolicy } = {};
+        const tools = harness(stored, turn);
+        for (const [name] of writes) {
+          expect(tools.definitions.map((definition) => definition.name)).toContain(name);
+        }
+        turn.current = "plan";
+        for (const [name, input] of writes) {
+          expect(await run(tools, name, input)).toMatchObject({
+            isError: true,
+            result: { error: "plan-mode-denied" },
+          });
+        }
+      },
+    );
+
+    it("refuses by policy when the stored posture moved to Plan after the tools were composed, whatever the turn reads", async () => {
+      const tools = harness("plan", { current: "full-access" }, "approval-gated");
+      expect(await run(tools, "write", { path: "a.ts", content: "x" })).toMatchObject({
+        isError: true,
+        result: { error: "plan-mode-denied" },
+      });
+    });
+
+    it("leaves a turn that is not narrowed to the thread's own posture", async () => {
+      const tools = harness("approval-gated", {});
+      expect(await run(tools, "write", { path: "a.ts", content: "x" })).toMatchObject({
+        isError: true,
+        result: { error: "approval-required" },
+      });
     });
   });
 });

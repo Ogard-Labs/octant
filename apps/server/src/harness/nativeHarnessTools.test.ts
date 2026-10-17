@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_PROVIDER_TOOL_RESULT_BYTES,
   decodeNativeHarnessContextRemaining,
+  type ProviderExecutionPolicy,
   type ToolActionAuthority,
 } from "@octant/contracts";
 import { boundedToolResultJson } from "../providers/toolResultJson";
@@ -53,6 +54,7 @@ async function fixture(
   facts: Partial<ToolCallLiveFacts> = {},
   ports: Partial<NativeHarnessToolPorts> = {},
   mode: "chat" | "work" | "code" = "code",
+  turnExecutionPolicy?: () => ProviderExecutionPolicy | undefined,
 ) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "octant-harness-tools-")));
   await writeFile(join(root, "a.ts"), "hello\n");
@@ -60,6 +62,9 @@ async function fixture(
   const tools = createNativeHarnessTools({
     threadId: "thread-1",
     mode,
+    ...(turnExecutionPolicy === undefined
+      ? {}
+      : { resolveTurnExecutionPolicy: turnExecutionPolicy }),
     authority: service(facts),
     resolveAuthority: () =>
       (mode === "chat"
@@ -236,6 +241,83 @@ describe("native harness tools", () => {
     expect((await call(tools, "read", { path: "a.ts" })).isError).toBe(false);
   });
 
+  describe("a turn narrower than its thread", () => {
+    const shell = {
+      run: async () => ({ status: "ran" as const, exitCode: 0, output: "", truncated: false }),
+    };
+    const writes = [
+      ["write", { path: "b.ts", content: "x" }],
+      ["edit", { path: "a.ts", oldText: "hello", newText: "bye" }],
+      ["bash", { command: "echo hi" }],
+    ] as const;
+
+    it.each([
+      ["approval-gated", false],
+      ["auto-accept-edits", false],
+      ["full-access", true],
+    ] as const)(
+      "refuses edits, writes, and the shell to a turn narrowed to Plan on a %s thread",
+      async (executionPolicy, approvalSatisfied) => {
+        const { tools } = await fixture(
+          { executionPolicy, approvalSatisfied },
+          { shell },
+          "code",
+          () => "plan",
+        );
+        for (const [name, input] of writes) {
+          const outcome = await call(tools, name, input);
+          expect(outcome.isError).toBe(true);
+          expect((outcome.result as { error: string }).error).toBe("plan-mode-denied");
+        }
+        expect((await call(tools, "read", { path: "a.ts" })).isError).toBe(false);
+      },
+    );
+
+    it("refuses a write composed before the turn narrowed to Plan", async () => {
+      let turn: ProviderExecutionPolicy | undefined;
+      const { tools } = await fixture({}, { shell }, "code", () => turn);
+      expect(tools.definitions.map((definition) => definition.name)).toContain("write");
+      expect((await call(tools, "write", { path: "b.ts", content: "x" })).isError).toBe(false);
+      turn = "plan";
+      const refused = await call(tools, "write", { path: "c.ts", content: "x" });
+      expect(refused.isError).toBe(true);
+      expect((refused.result as { error: string }).error).toBe("plan-mode-denied");
+    });
+
+    it("never lets a turn's wider posture lift the thread's own", async () => {
+      const { tools } = await fixture(
+        { executionPolicy: "approval-gated", approvalSatisfied: false },
+        {},
+        "code",
+        () => "full-access",
+      );
+      const write = await call(tools, "write", { path: "b.ts", content: "x" });
+      expect((write.result as { error: string }).error).toBe("approval-required");
+    });
+
+    it("asks before a write when a turn narrows a full-access thread to approval-gated", async () => {
+      const { tools } = await fixture(
+        { executionPolicy: "full-access", approvalSatisfied: true },
+        {},
+        "code",
+        () => "approval-gated",
+      );
+      const write = await call(tools, "write", { path: "b.ts", content: "x" });
+      expect((write.result as { error: string }).error).toBe("approval-required");
+    });
+
+    it("keeps the thread's own posture for a turn that holds no narrower one", async () => {
+      const { tools } = await fixture(
+        { executionPolicy: "approval-gated", approvalSatisfied: false },
+        {},
+        "code",
+        () => undefined,
+      );
+      const write = await call(tools, "write", { path: "b.ts", content: "x" });
+      expect((write.result as { error: string }).error).toBe("approval-required");
+    });
+  });
+
   it("asks for a fresh confirmation before a write on a tainted thread, even with full access", async () => {
     const { tools } = await fixture({ externalContentIngested: true });
     const write = await call(tools, "write", { path: "b.ts", content: "x" });
@@ -401,6 +483,7 @@ describe("native harness tools", () => {
       readonly criteria?: ReadonlyArray<{ readonly text: string; readonly check?: string }>;
       readonly exitCodes: Record<string, number>;
       readonly facts?: Partial<ToolCallLiveFacts>;
+      readonly turnExecutionPolicy?: () => ProviderExecutionPolicy | undefined;
       readonly approvals?: NativeHarnessToolPorts["approvals"];
       readonly callEnded?: NativeHarnessToolPorts["callEnded"];
       /** Runs while the check command runs, as a concurrent change would. */
@@ -418,23 +501,28 @@ describe("native harness tools", () => {
         ...(input.criteria === undefined ? {} : { criteria: input.criteria }),
       });
       const commands: string[] = [];
-      const { tools } = await fixture(input.facts ?? {}, {
-        goal: createNativeHarnessGoalPort({ goals, threadId, uuid }),
-        shell: {
-          run: async ({ command }) => {
-            commands.push(command);
-            await input.duringRun?.(goals);
-            return {
-              status: "ran",
-              exitCode: input.exitCodes[command] ?? 1,
-              output: "ok",
-              truncated: false,
-            };
+      const { tools } = await fixture(
+        input.facts ?? {},
+        {
+          goal: createNativeHarnessGoalPort({ goals, threadId, uuid }),
+          shell: {
+            run: async ({ command }) => {
+              commands.push(command);
+              await input.duringRun?.(goals);
+              return {
+                status: "ran",
+                exitCode: input.exitCodes[command] ?? 1,
+                output: "ok",
+                truncated: false,
+              };
+            },
           },
+          ...(input.approvals === undefined ? {} : { approvals: input.approvals }),
+          ...(input.callEnded === undefined ? {} : { callEnded: input.callEnded }),
         },
-        ...(input.approvals === undefined ? {} : { approvals: input.approvals }),
-        ...(input.callEnded === undefined ? {} : { callEnded: input.callEnded }),
-      });
+        "code",
+        input.turnExecutionPolicy,
+      );
       return { goals, tools, commands };
     }
 
@@ -458,6 +546,18 @@ describe("native harness tools", () => {
         "test",
         "test",
       ]);
+    });
+
+    it("refuses a check to a turn narrowed to Plan and runs no command", async () => {
+      const { tools, commands } = await goalFixture({
+        criteria: [{ text: "Parser tests pass", check: "bun run test parser" }],
+        exitCodes: { "bun run test parser": 0 },
+        turnExecutionPolicy: () => "plan",
+      });
+      const checked = await call(tools, "goal-check", { criterionId: "c1" });
+      expect(checked.isError).toBe(true);
+      expect(checked.result).toMatchObject({ error: "plan-mode-denied" });
+      expect(commands).toEqual([]);
     });
 
     it("records a failing check as unmet evidence and leaves the goal open", async () => {

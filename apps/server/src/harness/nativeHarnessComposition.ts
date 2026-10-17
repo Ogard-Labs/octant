@@ -290,12 +290,16 @@ export function createNativeHarnessComposition(
     readonly mode: "chat" | "work" | "code";
     readonly ports: NativeHarnessToolPorts;
     readonly executionPolicy?: ProviderExecutionPolicy;
+    readonly turnExecutionPolicy?: () => ProviderExecutionPolicy | undefined;
   }): AppManagedToolSet =>
     taintAppManagedToolResults({
       tools: createNativeHarnessTools({
         threadId: input.threadId,
         mode: input.mode,
         ...(input.executionPolicy === undefined ? {} : { executionPolicy: input.executionPolicy }),
+        ...(input.turnExecutionPolicy === undefined
+          ? {}
+          : { resolveTurnExecutionPolicy: input.turnExecutionPolicy }),
         authority: options.authority.service,
         resolveAuthority: () => options.authority.resolve(input.threadId, input.mode),
         ports: input.ports,
@@ -530,6 +534,9 @@ export function createNativeHarnessComposition(
         threadId,
         mode: "code",
         ...(planned ? { executionPolicy: "plan" as const } : {}),
+        // Read on every call, not once here: a turn can be narrowed after its
+        // tools were composed, and the stored posture alone would not know.
+        turnExecutionPolicy: () => options.readCodeExecutionPolicy?.(threadId, windowId),
         ports: {
           ...shared(threadId),
           ...delegateFor({
