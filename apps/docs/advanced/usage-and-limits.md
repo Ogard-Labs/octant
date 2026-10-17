@@ -79,7 +79,9 @@ active pane shows the line, so a pane never shows another thread's figures:
   generating, with tool time taken out. It is a whole number from 10 up and has
   one decimal below that. A leading `~` means the provider reported one figure
   for a turn that also ran tools, so some tool time may be inside it; hover for
-  the explanation.
+  the explanation. A turn whose reply arrived in under a second of streaming
+  has no speed: a gateway that holds a reply and sends it all at once would
+  otherwise read as thousands of tokens per second.
 - **first token** is the wait from sending the prompt to the first streamed
   word, averaged over the turns that were measured.
 - **cost** says **est.** because Octant prices tokens at the standard API rates

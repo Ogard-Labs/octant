@@ -2977,8 +2977,14 @@ every figure and is never inferred by a surface:
   event) are taken out of the window. A span it did not stream stays in, which
   is why the figure is labelled approximate.
 - `unavailable`: no output tokens, no streamed text or reasoning to time them
-  against, or a window that tool time leaves empty. Every timing figure is then
-  absent and a surface hides it. Octant never shows a zero it did not measure.
+  against, a window that tool time leaves empty, or a window under one second
+  (`MIN_DECODE_WINDOW_MS`). A gateway that holds a reply and releases it in one
+  burst puts every token within milliseconds of the first, and that window
+  states a rate no model produces. Every timing figure is then absent and a
+  surface hides it. Octant never shows a zero it did not measure, nor a rate it
+  could not. A request under the floor is dropped from a multi-request turn the
+  same way, and a turn recorded before the floor existed is left out of session
+  and thread totals when it is read.
 
 A turn that made several requests reports its tokens once: the request-scoped
 reports are summed and the restated turn total is ignored; a provider that

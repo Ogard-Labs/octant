@@ -24,7 +24,20 @@ import type {
  *   are taken out of the window, and any it did not stream stay in.
  * - No output tokens, or nothing streamed to time them against, leaves the
  *   figure unavailable.
+ * - A window shorter than `MIN_DECODE_WINDOW_MS` is not a speed. A gateway that
+ *   holds the reply and then releases it in one burst makes every token
+ *   arrive within a few milliseconds of the first, and dividing by that
+ *   window reports a rate no model produces. The figure is left unavailable
+ *   instead.
  */
+
+/**
+ * The shortest first-delta-to-completion window a speed is stated over. Below
+ * it, network chunking and gateway buffering decide the number rather than
+ * the model: a reply held for seconds and then delivered in tens of
+ * milliseconds would read as thousands of tokens per second.
+ */
+export const MIN_DECODE_WINDOW_MS = 1_000;
 
 export interface TurnMetricsState {
   readonly startedAtMs: number;
@@ -216,7 +229,9 @@ function measureRequests(
 ): TurnMetrics | undefined {
   const timed = state.calls.filter(
     (call) =>
-      call.firstDeltaMs !== undefined && call.outputTokens > 0 && call.endMs > call.firstDeltaMs,
+      call.firstDeltaMs !== undefined &&
+      call.outputTokens > 0 &&
+      call.endMs - call.firstDeltaMs >= MIN_DECODE_WINDOW_MS,
   );
   const first = timed[0];
   if (first?.firstDeltaMs === undefined) return undefined;
@@ -265,7 +280,7 @@ function measureTurn(
   ];
   const toolMs = mergedLength(still, windowStart, windowEnd);
   const decodeMs = windowEnd - windowStart - toolMs;
-  if (decodeMs <= 0) return undefined;
+  if (decodeMs < MIN_DECODE_WINDOW_MS) return undefined;
   return {
     precision: state.sawToolTime ? "approximate" : "exact",
     wallMs,
@@ -328,7 +343,9 @@ export function addTurnToSessionMetrics(
   if (
     turn.precision === "unavailable" ||
     turn.decodeOutputTokens === undefined ||
-    turn.decodeMs === undefined
+    turn.decodeMs === undefined ||
+    // A turn recorded before the floor existed can still hold a burst window.
+    turn.decodeMs < MIN_DECODE_WINDOW_MS
   ) {
     return { ...base, turns: base.turns + 1 };
   }
@@ -346,7 +363,10 @@ export function addTurnToSessionMetrics(
   };
 }
 
-/** Output tokens per second over decode time; hidden when nothing was timed. */
+/**
+ * Output tokens per second over decode time; hidden when nothing was timed or
+ * the window is too short to say (see `MIN_DECODE_WINDOW_MS`).
+ */
 export function tokensPerSecond(
   metrics:
     | {
@@ -356,7 +376,7 @@ export function tokensPerSecond(
     | undefined,
 ): number | undefined {
   if (metrics?.decodeOutputTokens === undefined || metrics.decodeMs === undefined) return undefined;
-  if (metrics.decodeMs <= 0 || metrics.decodeOutputTokens <= 0) return undefined;
+  if (metrics.decodeMs < MIN_DECODE_WINDOW_MS || metrics.decodeOutputTokens <= 0) return undefined;
   return metrics.decodeOutputTokens / (metrics.decodeMs / 1000);
 }
 

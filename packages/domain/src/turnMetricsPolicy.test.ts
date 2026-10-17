@@ -6,6 +6,7 @@ import {
   addTurnUsage,
   cacheHitRate,
   deriveTurnMetrics,
+  MIN_DECODE_WINDOW_MS,
   tokensPerSecond,
 } from "./turnMetricsPolicy";
 
@@ -276,6 +277,95 @@ describe("a provider that reports nothing it can be timed against", () => {
     });
 
     expect(metrics).toMatchObject({ precision: "exact", decodeMs: 4_000 });
+  });
+});
+
+describe("a reply a gateway held back and then released in one burst", () => {
+  // Sent at 0s, silent for 4.07s, then 133 tokens arrive within 75 ms.
+  const burst = [
+    text(4.067),
+    text(4.1),
+    usage(4.142, { outputTokens: 133, requestStartedAt: at(0) }),
+    completed(4.15),
+  ];
+
+  it("states no speed for a request whose window is a burst", () => {
+    const { metrics } = deriveTurnMetrics({ startedAt: at(0), endedAt: at(4.15), events: burst });
+
+    expect(metrics.precision).toBe("unavailable");
+    expect(tokensPerSecond(metrics)).toBeUndefined();
+  });
+
+  it("states no speed for a whole-turn report that arrived in a burst", () => {
+    const { metrics } = deriveTurnMetrics({
+      startedAt: at(0),
+      endedAt: at(4.15),
+      events: [text(4.067), usage(4.142, { outputTokens: 133 }), completed(4.15)],
+    });
+
+    expect(metrics.precision).toBe("unavailable");
+  });
+
+  it("drops the burst request from a turn that also made a request worth timing", () => {
+    const { metrics } = deriveTurnMetrics({
+      startedAt: at(0),
+      endedAt: at(20),
+      events: [
+        text(4.067),
+        usage(4.142, { outputTokens: 133, requestStartedAt: at(0) }),
+        event("tool-request", 4.2, { requestId: "call-1", toolName: "read", inputJson: "{}" }),
+        text(12),
+        usage(14, { outputTokens: 200, requestStartedAt: at(5) }),
+        completed(14),
+      ],
+    });
+
+    expect(metrics).toMatchObject({ decodeOutputTokens: 200, decodeMs: 2_000, modelCalls: 1 });
+    expect(tokensPerSecond(metrics)).toBe(100);
+  });
+
+  it("keeps a window exactly at the floor", () => {
+    const { metrics } = deriveTurnMetrics({
+      startedAt: at(0),
+      endedAt: at(3),
+      events: [
+        text(2),
+        usage(2 + MIN_DECODE_WINDOW_MS / 1000, { outputTokens: 100, requestStartedAt: at(0) }),
+        completed(3),
+      ],
+    });
+
+    expect(metrics).toMatchObject({ precision: "exact", decodeMs: MIN_DECODE_WINDOW_MS });
+  });
+
+  it("leaves a burst turn recorded earlier out of a session's speed and first-token average", () => {
+    const recorded: TurnMetrics = {
+      precision: "exact",
+      wallMs: 4_149,
+      timeToFirstTokenMs: 4_067,
+      decodeOutputTokens: 133,
+      decodeMs: 75,
+      toolMs: 0,
+      modelCalls: 1,
+    };
+    const steady: TurnMetrics = {
+      precision: "exact",
+      wallMs: 12_000,
+      timeToFirstTokenMs: 2_000,
+      decodeOutputTokens: 500,
+      decodeMs: 5_000,
+      toolMs: 0,
+      modelCalls: 1,
+    };
+
+    const total = [recorded, steady].reduce<ReturnType<typeof addTurnToSessionMetrics> | undefined>(
+      (sum, turn) => addTurnToSessionMetrics(sum, turn),
+      undefined,
+    );
+
+    expect(total).toMatchObject({ turns: 2, measuredTurns: 1, timeToFirstTokenTotalMs: 2_000 });
+    expect(tokensPerSecond(total)).toBe(100);
+    expect(tokensPerSecond(recorded)).toBeUndefined();
   });
 });
 
