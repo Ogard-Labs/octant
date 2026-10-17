@@ -41,6 +41,11 @@ describe("packaged renderer policy", () => {
     expect(directives.get("connect-src")).toBe(
       "'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*",
     );
+    // A computer paired through Other computers is reached through the desktop's
+    // main process, never by widening this policy to a remote origin.
+    expect(directives.get("connect-src")).not.toMatch(
+      /https?:\/\/(?!127\.0\.0\.1|localhost)|wss:|\*\./,
+    );
     // The app frames one page of its own: a running Canvas prototype, served
     // by the loopback host to the packaged and Vite renderers, and by the same
     // origin to a remote client, whose response policy narrows 'self' to that

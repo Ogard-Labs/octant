@@ -19,7 +19,7 @@ import {
 import type { HostHelloV1 } from "@octant/contracts/remote-access";
 import { createBrowserHostRegistryStorage } from "../host/browserHostRegistryStorage";
 
-const REMOTE_WEB_BUILD_VERSION = "0.1.0";
+export const REMOTE_WEB_BUILD_VERSION = "0.1.0";
 const POLL_INTERVAL_MS = 1_000;
 
 type FailedCategory =
@@ -57,6 +57,12 @@ export interface UseRemotePairingOptions {
   readonly deviceKeyStore?: ReturnType<typeof createDefaultDeviceKeyStore>;
   /** Defaults to the shared browser federation registry storage. */
   readonly hostRegistry?: ClientHostRegistry;
+  /**
+   * Runs once the host approved and the paired host is recorded, in place of
+   * connecting this hook's own session. A window whose federation lifecycle
+   * owns that host's connection reads the registry and connects it there.
+   */
+  readonly onApproved?: (approval: RemotePairingApproval) => void;
   readonly replaceFragment?: ((href: string) => void) | undefined;
 }
 
@@ -103,6 +109,8 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
   const ticketRef = useRef<RemotePairingTicket | undefined>(options.ticket);
   const pollingRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
   const lastClaimRef = useRef<RemotePairingClaim | undefined>(undefined);
+  const onApprovedRef = useRef(options.onApproved);
+  onApprovedRef.current = options.onApproved;
   const isMountedRef = useRef(true);
   const fragmentHandledRef = useRef(false);
   const resumeStartedRef = useRef(false);
@@ -245,7 +253,8 @@ export function useRemotePairing(options: UseRemotePairingOptions): UseRemotePai
           await recordApprovedHost(status.approval, claim);
           if (!isMountedRef.current) return;
           setScreen({ kind: "approved", approval: status.approval });
-          sessionClient.connect(status.approval);
+          if (onApprovedRef.current === undefined) sessionClient.connect(status.approval);
+          else onApprovedRef.current(status.approval);
           return;
         }
         stopPolling();

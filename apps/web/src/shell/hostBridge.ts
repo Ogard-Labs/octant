@@ -339,23 +339,50 @@ export interface PairedComputer {
 }
 
 export type ForgetPairedComputerOutcome =
-  | { readonly status: "forgotten" }
+  | { readonly status: "forgotten"; readonly warning?: string }
   | { readonly status: "refused"; readonly message: string };
 
 export type PairedComputerOutcome =
-  | { readonly status: "opened"; readonly computer: PairedComputer }
+  | {
+      readonly status: "verified";
+      readonly computer: PairedComputer;
+      /** The single-use ticket the code carried; this window claims it with its own device key. */
+      readonly ticket: { readonly ticketId: string; readonly ticketProof: string };
+      /** The certificate pin the code carried; public, and recorded with the device. */
+      readonly pin: string;
+    }
   | { readonly status: "refused"; readonly message: string };
+
+/** One request to a listed paired computer; main checks it against a short allow list. */
+export interface PairedComputerRequest {
+  readonly origin: string;
+  readonly method: string;
+  readonly path: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string | Uint8Array;
+}
+
+export type PairedComputerAnswer =
+  | {
+      readonly status: "answered";
+      readonly httpStatus: number;
+      readonly headers: ReadonlyArray<readonly [string, string]>;
+      readonly body: Uint8Array;
+    }
+  | { readonly status: "refused"; readonly message: string }
+  | { readonly status: "unreachable"; readonly message: string };
 
 /**
  * Pairing this desktop app with another computer from its pasted app pairing
- * code. Present only in the desktop app, whose main process checks that
- * computer's key against the code's pin; a browser cannot.
+ * code, and reaching it afterwards. Present only in the desktop app, whose
+ * main process checks that computer's key against the code's pin and sends
+ * this window's requests over a connection held to it; a browser cannot.
  */
 export interface PairedComputersBridge {
   readonly pairWithPairingCode: (code: string) => Promise<PairedComputerOutcome>;
   readonly listPairedComputers: () => Promise<ReadonlyArray<PairedComputer>>;
-  readonly openPairedComputer: (origin: string) => Promise<PairedComputerOutcome>;
   readonly forgetPairedComputer: (origin: string) => Promise<ForgetPairedComputerOutcome>;
+  readonly requestPairedComputer: (request: PairedComputerRequest) => Promise<PairedComputerAnswer>;
 }
 
 /** The paired-computers bridge when the desktop app exposes every part of it, else nothing. */
@@ -365,16 +392,16 @@ export function pairedComputersOf(
   if (
     bridge?.pairWithPairingCode === undefined ||
     bridge.listPairedComputers === undefined ||
-    bridge.openPairedComputer === undefined ||
-    bridge.forgetPairedComputer === undefined
+    bridge.forgetPairedComputer === undefined ||
+    bridge.requestPairedComputer === undefined
   ) {
     return undefined;
   }
   return {
     pairWithPairingCode: bridge.pairWithPairingCode,
     listPairedComputers: bridge.listPairedComputers,
-    openPairedComputer: bridge.openPairedComputer,
     forgetPairedComputer: bridge.forgetPairedComputer,
+    requestPairedComputer: bridge.requestPairedComputer,
   };
 }
 

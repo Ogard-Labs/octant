@@ -196,20 +196,27 @@ certificate, so there is no browser link for it.
 3. Octant checks the code, checks that the address is on your private network
    or Tailscale, connects, and compares the computer's certificate key with
    the pin before it sends anything. It then checks the computer's signed
-   hello and opens that computer's pairing page in a window.
-4. Confirm there, then approve on the other computer when its comparison code
-   matches the one the window shows.
+   hello and asks you to confirm the computer's name and key fingerprint.
+4. Choose the button that asks the computer to approve. This window makes its
+   own key for that computer
+   and shows a comparison code. Approve on the other computer only when its
+   comparison code matches the one shown here.
 
-The window for a paired computer trusts only the key the code pinned. If that
-computer's key changes, Octant refuses with "This isn't the computer you
-paired with: its security key has changed." and sends nothing; if the key was
-replaced on purpose, pair again with a new code. A changed, damaged, or
-non-private code is refused before Octant contacts anything. Paired computers
-are listed under **Other computers** with an **Open** action, which checks the
-key again before the window loads, and a **Forget** action. Forget asks first,
-then closes that computer's windows, removes its saved key, and clears the
-sign-in and data its page stored in Octant. The other computer keeps listing
-this device until you revoke it there; to pair again, make a new code.
+Once approved, the computer joins the **Environments** filter and the
+start screen like any other, and its Running services can be opened here. The
+Octant window never connects to the computer itself: it asks the desktop app,
+which sends each request over a connection held to the pinned key and only to
+a computer listed under **Other computers**. If that computer's key changes,
+Octant refuses with "This isn't the computer you paired with: its security key
+has changed." and sends nothing; if the key was replaced on purpose, pair again
+with a new code. A changed, damaged, or non-private code is refused before
+Octant contacts anything. Leaving before the other computer approves keeps
+nothing. **Forget** asks first, then removes this app's saved key for the
+computer, closes the pages of its servers opened here, and stops all
+requests to it. The other computer keeps listing this device until you revoke
+it there; to pair again, make a new code. A computer paired with an earlier
+version of Octant, which opened a window of its own, shows "Not connected in
+this window": forget it and pair again.
 
 ## Pairing the phone app with a computer
 

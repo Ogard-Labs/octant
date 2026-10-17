@@ -113,11 +113,12 @@ export interface HostFederationLifecycleOptions {
   /**
    * Runs after a remote host's local record is gone, so whatever else this
    * device keeps for that host (such as pages of its servers opened in the
-   * desktop) goes with it. A failure never undoes the removal: its message
-   * comes back as the result's warning, since the host can no longer be
-   * removed again to retry.
+   * desktop) goes with it. `origin` is the host's registered origin, which the
+   * record no longer holds by then. A failure never undoes the removal: its
+   * message comes back as the result's warning, since the host can no longer
+   * be removed again to retry.
    */
-  readonly onHostCleared?: (hostId: string) => Promise<void>;
+  readonly onHostCleared?: (hostId: string, origin: string | undefined) => Promise<void>;
 }
 
 export interface HostFederationRevokeOptions {
@@ -419,7 +420,7 @@ export function createHostFederationLifecycle(
     rebuildFromTransports();
     let warning: string | undefined;
     try {
-      await options.onHostCleared?.(hostId);
+      await options.onHostCleared?.(hostId, removed?.origin ?? registration?.origin);
     } catch (error) {
       warning =
         error instanceof Error ? error.message : "Octant couldn't clear everything this host left.";

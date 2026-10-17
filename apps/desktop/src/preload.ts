@@ -95,8 +95,8 @@ export const IPC_CHANNELS = {
   remoteHostIdentityRecover: "octant:remote-host-identity:recover",
   pairedComputerPair: "octant:paired-computers:pair",
   pairedComputerList: "octant:paired-computers:list",
-  pairedComputerOpen: "octant:paired-computers:open",
   pairedComputerForget: "octant:paired-computers:forget",
+  pairedComputerRequest: "octant:paired-computers:request",
   remoteServerPageOpen: "octant:remote-server-page:open",
   remoteServerPageSign: "octant:remote-server-page:sign",
   remoteServerPageSigned: "octant:remote-server-page:signed",
@@ -328,11 +328,35 @@ export interface PairedComputer {
 }
 
 export type PairedComputerOutcome =
-  | { readonly status: "opened"; readonly computer: PairedComputer }
+  | {
+      readonly status: "verified";
+      readonly computer: PairedComputer;
+      readonly ticket: { readonly ticketId: string; readonly ticketProof: string };
+      readonly pin: string;
+    }
   | { readonly status: "refused"; readonly message: string };
 
+/** One request to a listed paired computer; main checks the origin, method, path, and headers. */
+export interface PairedComputerRequest {
+  readonly origin: string;
+  readonly method: string;
+  readonly path: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string | Uint8Array;
+}
+
+export type PairedComputerAnswer =
+  | {
+      readonly status: "answered";
+      readonly httpStatus: number;
+      readonly headers: ReadonlyArray<readonly [string, string]>;
+      readonly body: Uint8Array;
+    }
+  | { readonly status: "refused"; readonly message: string }
+  | { readonly status: "unreachable"; readonly message: string };
+
 export type ForgetPairedComputerOutcome =
-  | { readonly status: "forgotten" }
+  | { readonly status: "forgotten"; readonly warning?: string }
   | { readonly status: "refused"; readonly message: string };
 
 export interface RemoteHostIdentityRotationResult {
@@ -586,13 +610,19 @@ export interface OctantHostBridge {
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
   /**
    * Pairs with another computer from its pasted app pairing code. Main reads
-   * the code and checks the computer's key against its pin; the window it
-   * opens is the other computer's own pairing page.
+   * the code, checks the computer's key against its pin, records the pin, and
+   * hands back the ticket for this window to claim with its own device key.
    */
   readonly pairWithPairingCode: (code: string) => Promise<PairedComputerOutcome>;
   readonly listPairedComputers: () => Promise<ReadonlyArray<PairedComputer>>;
-  readonly openPairedComputer: (origin: string) => Promise<PairedComputerOutcome>;
   readonly forgetPairedComputer: (origin: string) => Promise<ForgetPairedComputerOutcome>;
+  /**
+   * Sends one request to a listed paired computer over the transport main
+   * holds to that computer's pin. The window signs its own requests; main
+   * refuses an unlisted origin, a method or path off the short list, and any
+   * header a signed request does not carry, and strips cookies from the reply.
+   */
+  readonly requestPairedComputer: (request: PairedComputerRequest) => Promise<PairedComputerAnswer>;
   /**
    * Shows a server of another paired computer, which that computer granted,
    * in Octant's browser or the default browser. The main process checks the
@@ -1283,11 +1313,13 @@ export function createHostBridge(
     },
     listPairedComputers: async () =>
       decodePairedComputers(await ipc.invoke(IPC_CHANNELS.pairedComputerList)),
-    openPairedComputer: async (origin: string) =>
-      decodePairedComputerOutcome(await ipc.invoke(IPC_CHANNELS.pairedComputerOpen, origin)),
     forgetPairedComputer: async (origin: string) =>
       decodeForgetPairedComputerOutcome(
         await ipc.invoke(IPC_CHANNELS.pairedComputerForget, origin),
+      ),
+    requestPairedComputer: async (request: PairedComputerRequest) =>
+      decodePairedComputerAnswer(
+        await ipc.invoke(IPC_CHANNELS.pairedComputerRequest, pairedComputerRequestOf(request)),
       ),
   });
 }
@@ -1311,7 +1343,12 @@ function decodePairedComputers(value: unknown): ReadonlyArray<PairedComputer> {
 function decodeForgetPairedComputerOutcome(value: unknown): ForgetPairedComputerOutcome {
   if (typeof value === "object" && value !== null) {
     const outcome = value as Record<string, unknown>;
-    if (outcome.status === "forgotten") return Object.freeze({ status: "forgotten" });
+    if (outcome.status === "forgotten") {
+      if (typeof outcome.warning === "string") {
+        return Object.freeze({ status: "forgotten", warning: outcome.warning });
+      }
+      return Object.freeze({ status: "forgotten" });
+    }
     if (outcome.status === "refused" && typeof outcome.message === "string") {
       return Object.freeze({ status: "refused", message: outcome.message });
     }
@@ -1322,11 +1359,79 @@ function decodeForgetPairedComputerOutcome(value: unknown): ForgetPairedComputer
 function decodePairedComputerOutcome(value: unknown): PairedComputerOutcome {
   if (typeof value === "object" && value !== null) {
     const outcome = value as Record<string, unknown>;
-    if (outcome.status === "opened") {
-      return Object.freeze({ status: "opened", computer: decodePairedComputer(outcome.computer) });
+    if (outcome.status === "verified") {
+      const { ticket, pin } = outcome;
+      if (typeof ticket === "object" && ticket !== null && typeof pin === "string") {
+        const { ticketId, ticketProof } = ticket as Record<string, unknown>;
+        if (typeof ticketId === "string" && typeof ticketProof === "string") {
+          return Object.freeze({
+            status: "verified",
+            computer: decodePairedComputer(outcome.computer),
+            ticket: Object.freeze({ ticketId, ticketProof }),
+            pin,
+          });
+        }
+      }
     }
     if (outcome.status === "refused" && typeof outcome.message === "string") {
       return Object.freeze({ status: "refused", message: outcome.message });
+    }
+  }
+  throw new Error("Octant returned an invalid paired-computer answer.");
+}
+
+/** Only the named fields cross, so a caller cannot smuggle an extra property to main. */
+function pairedComputerRequestOf(request: PairedComputerRequest): PairedComputerRequest {
+  if (typeof request !== "object" || request === null) {
+    throw new Error("Octant refused that paired-computer request.");
+  }
+  const { origin, method, path, headers, body } = request;
+  return {
+    origin,
+    method,
+    path,
+    ...(headers === undefined ? {} : { headers: { ...headers } }),
+    ...(body === undefined ? {} : { body }),
+  };
+}
+
+function decodePairedComputerAnswer(value: unknown): PairedComputerAnswer {
+  if (typeof value === "object" && value !== null) {
+    const answer = value as Record<string, unknown>;
+    if (
+      (answer.status === "refused" || answer.status === "unreachable") &&
+      typeof answer.message === "string"
+    ) {
+      return Object.freeze({ status: answer.status, message: answer.message });
+    }
+    if (
+      answer.status === "answered" &&
+      typeof answer.httpStatus === "number" &&
+      Number.isInteger(answer.httpStatus) &&
+      answer.httpStatus >= 200 &&
+      answer.httpStatus <= 599 &&
+      Array.isArray(answer.headers) &&
+      answer.body instanceof Uint8Array
+    ) {
+      const headers: Array<readonly [string, string]> = [];
+      for (const entry of answer.headers) {
+        if (
+          Array.isArray(entry) &&
+          entry.length === 2 &&
+          typeof entry[0] === "string" &&
+          typeof entry[1] === "string"
+        ) {
+          headers.push(Object.freeze([entry[0], entry[1]] as const));
+        } else {
+          throw new Error("Octant returned an invalid paired-computer answer.");
+        }
+      }
+      return Object.freeze({
+        status: "answered",
+        httpStatus: answer.httpStatus,
+        headers: Object.freeze(headers),
+        body: answer.body,
+      });
     }
   }
   throw new Error("Octant returned an invalid paired-computer answer.");

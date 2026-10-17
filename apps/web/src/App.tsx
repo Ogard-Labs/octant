@@ -412,7 +412,10 @@ import {
   type WorkingNowThread,
 } from "./home/workingNow";
 import { ComputerUseActivitySurface } from "./computerUse/ComputerUseActivitySurface";
-import { useHostFederationLifecycle } from "./host/useHostFederationLifecycle";
+import {
+  HostFederationStackContext,
+  useHostFederationLifecycle,
+} from "./host/useHostFederationLifecycle";
 import { FederatedHostsLifecycleStrip } from "./host/FederatedHostsLifecyclePanel";
 import { NeedsYouProvider, OctantCommandProvider } from "./palette/CommandRegistry";
 import {
@@ -6778,7 +6781,9 @@ function LaunchedShell(
                             <ModelToolVerificationContext.Provider
                               value={providerController.verifyModelTools}
                             >
-                              {shell}
+                              <HostFederationStackContext.Provider value={federation}>
+                                {shell}
+                              </HostFederationStackContext.Provider>
                             </ModelToolVerificationContext.Provider>
                           </WorkKindChoiceContext.Provider>
                         </MarkdownLinkActionsContext.Provider>

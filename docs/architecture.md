@@ -6581,25 +6581,58 @@ mechanisms are:
       Main runs the flow above over the Node transport, then records the
       origin's pin in an owner-only file under the app's data
       (`paired-computer-pins.json`, written whole and renamed into place) and
-      opens the other computer's own pairing page with the code's ticket in a
-      window. Main pins only an origin the listener address classifier calls
-      private LAN or Tailscale, and a pin file it cannot read holds no pins.
-      That window gets no preload, stays on that origin, opens no other
-      window, grants no permission, and uses a session partition only paired
-      computers use, whose certificate verification hook accepts a name only
-      when the served key matches a pin recorded for it and refuses every
-      other name, a certificate a public authority issued included. Chromium
-      reports only the name to that hook, so a name is held to every pin
-      recorded for it, whatever the port. Opening a paired computer again
-      first resolves and judges its address and checks its key over the Node
-      transport; Chromium then resolves the name itself, so the pin, not the
-      address, is what that window relies on. Settings → Remote access lists
-      paired computers with Open and Forget actions. Forget asks first, then
-      main closes that origin's windows, drops its pin (so nothing trusts that
-      key), and clears the origin's page storage and the session's HTTP and
-      authentication caches through one helper, `clearRemotePageStorage`, that
-      every unpair path calls. It ends only this app's side: the other
-      computer keeps listing the device until it is revoked there.
+      hands the code's ticket and the pin back to the window that pasted it.
+      Main pins only an origin the listener address classifier calls private
+      LAN or Tailscale, and a pin file it cannot read holds no pins. The
+      window claims the ticket itself, through the client runtime's pairing
+      client, with its device key made and kept in that window's own storage
+      (non-extractable, as for any browser). It shows the comparison code, and
+      on approval records the computer in its own host registry with the pinned
+      trust. The federation lifecycle then connects it like any other host, so
+      it appears in the Environments filter and the start screen, and its
+      Running services card offers Open (below). There is no per-computer
+      window and no session partition for one: an earlier version opened the
+      other computer's own pairing page in a window of its own, which left the
+      key where no other window could use it.
+      The main window's page policy stays loopback-only (`connect-src` names no
+      remote origin), so it never connects to a paired computer itself. Every
+      request goes through one main-process channel,
+      `octant:paired-computers:request`, which sends it over the Node
+      transport held to the recorded pin and returns the answer as data. Main
+      signs nothing and returns no key material; the window signs its own
+      requests. Main refuses a request unless the origin is exactly a listed
+      paired computer (an unlisted, forgotten, or re-paired origin is refused,
+      and an answer that arrives after the computer was forgotten is dropped),
+      the method is `GET` or `POST`, and the path and query are already in
+      canonical form (no scheme, authority, second slash, dot segment,
+      backslash, control character, or fragment) and are `/api/remote/…`
+      (hello, negotiate, pairing, and the session routes),
+      `/api/server-proxy/grants`, `/api/host/resources`, or
+      `/api/code/local-servers/…`. Anything else, including the relay under
+      `/api/server-proxy/<grant>/`, which the desktop's forwarder drives with
+      its own signing, is refused. A request carries only the headers a signed
+      request has (`accept`, `content-type`, `cookie` naming only the
+      computer's Octant session cookies, `origin` equal to the computer's
+      origin, `sec-fetch-site: same-origin`, `x-octant-device-proof`,
+      `x-octant-csrf`, `x-octant-command-id`); any other header refuses the
+      request. A body is text or bytes, at most 8 MiB, and not on `GET`. A
+      redirect is returned and never followed. A reply's cookies and any header
+      whose name reads as a credential (`authorization`, `credential`,
+      `secret`, `token`, `key`) are removed, a reply over 16 MiB or slower than
+      30 seconds fails, and replies arrive whole, so the channel carries
+      requests and short reads, not streams. Settings → Remote access lists
+      paired computers with a Forget action and says which are not connected in
+      this window (a pin with no record here, as after an interrupted pairing
+      or from the earlier version, which must be forgotten and paired again).
+      Forget asks first, then removes the window's host record and device key
+      through the federation lifecycle, whose clearing step asks main to drop
+      the pin (so nothing can reach that computer) and to close the pages of its
+      servers Octant's browser opened; removing the host anywhere else in the
+      lifecycle does the same. Leaving the pairing before the other computer
+      approves also drops the pin. Forget ends only this app's side: the other
+      computer keeps listing the device until it is revoked there. The shared
+      helper `clearRemotePageStorage` stays the one way a remote page's data is
+      cleared.
     - **Phone.** The pairing screen reads a code from the app's own QR
       scanner or its paste field; typing the origin and ticket stays for a
       listener with a pasted certificate. The scanner takes only text that
@@ -6881,7 +6914,10 @@ mechanisms are:
   connected to; All Hosts federation does not carry these rows, with one
   exception: a desktop window whose Environments filter is narrowed to one
   connected paired computer reads that computer's Running services over its
-  paired session, as that device, and opens its servers only live (below),
+  paired session, as that device (for a computer paired through Other
+  computers the request travels through the desktop's main process, which
+  holds it to the pinned key, since the window's page policy reaches loopback
+  only; see Desktop pairing above), and opens its servers only live (below),
   never as one of its own Browser tabs; while that computer is not connected
   the card reads nothing and says so, never this computer's rows.
 - **Proxy sessions and server grants.** A paired device asks for a grant to
