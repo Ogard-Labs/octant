@@ -37,6 +37,7 @@ import {
 import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import { Cause, Deferred, Effect, Exit, Fiber, Option, Scope, Stream } from "effect";
 import {
+  capacityWaitSentence,
   ProviderCapacitySchedulerRejected,
   type ProviderCapacityScheduler,
   type SchedulerCapacityEnforcement,
@@ -1214,7 +1215,11 @@ function reserveCapacity(input: {
       });
       throw new AgentRunSessionError(
         "capacity-unavailable",
-        `Provider capacity is unavailable for this AgentRun: ${submission.reason}.`,
+        capacityWaitSentence({
+          reason: submission.reason,
+          ...(submission.notBeforeMs === undefined ? {} : { notBeforeMs: submission.notBeforeMs }),
+          nowMs: Date.now(),
+        }),
       );
     }
     return reservationId;
