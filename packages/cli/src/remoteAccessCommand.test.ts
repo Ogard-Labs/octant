@@ -246,7 +246,8 @@ describe("runRemoteAccessCliCommand", () => {
     expect(out).not.toContain("\u001b[");
     expect(out).toContain(`Ticket ${TICKET}`);
     expect(out).toContain("no browser link");
-    expect(out).toContain("can't read pairing codes yet");
+    expect(out).toContain("Paste the code into Octant's desktop app");
+    expect(out).not.toContain("can't read pairing codes");
     expect(out).not.toMatch(/PRIVATE KEY|BEGIN/);
   });
 

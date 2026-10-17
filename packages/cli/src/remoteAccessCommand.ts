@@ -498,7 +498,7 @@ async function printPairingCode(
           ]
         : []),
       "A browser can't check this computer's own certificate, so there is no browser link.",
-      "Octant's phone and desktop apps can't read pairing codes yet.",
+      "Paste the code into Octant's desktop app (Settings, Remote access, Other computers), or scan the QR code with the phone app.",
       "",
     ].join("\n"),
   );
