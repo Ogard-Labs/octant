@@ -196,6 +196,7 @@ async function main(): Promise<number> {
           wireVersion: "1",
         },
         dataDirectory: paths.dataDirectory,
+        stateDirectory: paths.stateDirectory,
         ports: createHostHeadlessUpgradePorts(paths),
         stdout: process.stdout,
         stderr: process.stderr,

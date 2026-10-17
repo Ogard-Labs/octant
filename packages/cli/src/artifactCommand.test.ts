@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readlinkSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -183,6 +193,84 @@ describe("runHeadlessArtifactCliCommand", () => {
     expect(code).toBe(0);
     expect(stdout.text()).toContain("1.0.0");
     expect(readlinkSync(join(installRoot, "current"))).toBe(join(installRoot, "versions", "1.0.0"));
+  });
+
+  it("leaves the state directory private when the install root is created inside it", async () => {
+    const stateDirectory = join(
+      temporaryRoot("octant-cmd-fresh-home-"),
+      ".local",
+      "state",
+      "octant",
+    );
+    const installRoot = join(stateDirectory, "install");
+    const code = await runHeadlessArtifactCliCommand({
+      command: {
+        action: "install",
+        artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
+        installRoot,
+      },
+      runtime,
+      dataDirectory: join(stateDirectory, "..", "data"),
+      stateDirectory,
+      ports: fixturePorts(),
+      stdout: collector(),
+      stderr: collector(),
+    });
+    expect(code).toBe(0);
+    // The host refuses a state directory any other user can read.
+    expect(statSync(stateDirectory).mode & 0o777).toBe(0o700);
+  });
+
+  it("makes a state directory an earlier install left open private again", async () => {
+    const stateDirectory = join(
+      temporaryRoot("octant-cmd-reinstall-home-"),
+      ".local",
+      "state",
+      "octant",
+    );
+    mkdirSync(stateDirectory, { recursive: true });
+    chmodSync(stateDirectory, 0o755);
+    const installRoot = join(stateDirectory, "install");
+    const code = await runHeadlessArtifactCliCommand({
+      command: {
+        action: "install",
+        artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
+        installRoot,
+      },
+      runtime,
+      dataDirectory: join(stateDirectory, "..", "data"),
+      stateDirectory,
+      ports: fixturePorts(),
+      stdout: collector(),
+      stderr: collector(),
+    });
+    expect(code).toBe(0);
+    expect(statSync(stateDirectory).mode & 0o777).toBe(0o700);
+  });
+
+  it("refuses a state directory that is a link instead of installing into it", async () => {
+    const home = temporaryRoot("octant-cmd-linked-home-");
+    const target = join(home, "elsewhere");
+    mkdirSync(target, { recursive: true });
+    const stateDirectory = join(home, "state-octant");
+    symlinkSync(target, stateDirectory);
+    const stderr = collector();
+    const code = await runHeadlessArtifactCliCommand({
+      command: {
+        action: "install",
+        artifactRoot: writeArtifact({ version: "1.0.0", storeVersion: 1 }),
+        installRoot: join(stateDirectory, "install"),
+      },
+      runtime,
+      dataDirectory: join(home, "data"),
+      stateDirectory,
+      ports: fixturePorts(),
+      stdout: collector(),
+      stderr,
+    });
+    expect(code).toBe(1);
+    expect(stderr.text()).toContain("is not a plain directory");
+    expect(existsSync(join(target, "install"))).toBe(false);
   });
 
   it("maps a rejected artifact to a non-zero exit and stderr guidance", async () => {

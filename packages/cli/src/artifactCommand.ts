@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { chmod, lstat, mkdir } from "node:fs/promises";
+import { sep } from "node:path";
 import {
   acquireHostRuntimeOwner,
   deriveHostRuntimeHostId,
@@ -98,9 +100,39 @@ export interface RunHeadlessArtifactCliCommandOptions {
   readonly command: HeadlessArtifactCliCommand;
   readonly runtime: HeadlessArtifactRuntimeFacts;
   readonly dataDirectory: string;
+  /**
+   * The host's state directory. The default install root sits inside it, and
+   * creating it there with the default mode would leave it open to other users,
+   * which the host then refuses to start in. An install inside it makes it
+   * private first.
+   */
+  readonly stateDirectory?: string;
   readonly ports: HeadlessUpgradePorts;
   readonly stdout: OutputWriter;
   readonly stderr: OutputWriter;
+}
+
+/**
+ * A recursive mkdir never changes the mode of a directory that already
+ * exists, and an install from before this check left the state directory at
+ * 0755, which the host then refuses to start in. So an existing directory is
+ * tightened when it is this user's own, and refused when it is a link or
+ * belongs to someone else, rather than reported as installed.
+ */
+async function makeStateDirectoryPrivate(stateDirectory: string): Promise<string | undefined> {
+  await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  const entry = await lstat(stateDirectory);
+  if (entry.isSymbolicLink() || !entry.isDirectory()) {
+    return `The state directory ${stateDirectory} is not a plain directory. Remove it or point the install elsewhere, then run the install again.`;
+  }
+  const uid = process.getuid?.();
+  if (uid !== undefined && entry.uid !== uid) {
+    return `The state directory ${stateDirectory} belongs to another user. Give it to this user with mode 0700, then run the install again.`;
+  }
+  if ((entry.mode & 0o077) !== 0) {
+    await chmod(stateDirectory, 0o700);
+  }
+  return undefined;
 }
 
 export async function runHeadlessArtifactCliCommand(
@@ -109,6 +141,18 @@ export async function runHeadlessArtifactCliCommand(
   const { command, stdout, stderr } = options;
   try {
     if (command.action === "install") {
+      const { stateDirectory } = options;
+      if (
+        stateDirectory !== undefined &&
+        (command.installRoot === stateDirectory ||
+          command.installRoot.startsWith(stateDirectory + sep))
+      ) {
+        const refusal = await makeStateDirectoryPrivate(stateDirectory);
+        if (refusal !== undefined) {
+          stderr.write(`${refusal}\n`);
+          return 1;
+        }
+      }
       const report = await installHeadlessArtifact({
         artifactRoot: command.artifactRoot,
         installRoot: command.installRoot,
