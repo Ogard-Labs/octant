@@ -678,9 +678,10 @@ function shebangCommandRefusal(serverName: string): string {
 
 function launcherCommandRefusal(serverName: string, command: string): string {
   return (
-    `MCP server ${serverName} starts ${basename(command)}, a launcher script that the sandbox cannot run. ` +
-    'Install the server\'s package and set "command" to "node" (or the script\'s real interpreter) ' +
-    'with the absolute path to the package\'s script in "args".'
+    `MCP server ${serverName} starts ${basename(command)}, a launcher script that the sandbox cannot run, ` +
+    "and it reads only the plugin's own folder. Put the server's package inside the plugin, for example " +
+    '`npm install --prefix "${PLUGIN_ROOT}" <package>` when building it, then set "command" to "node" ' +
+    'and "args" to ["${PLUGIN_ROOT}/node_modules/<package>/<entry>.js"].'
   );
 }
 

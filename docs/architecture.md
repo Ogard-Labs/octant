@@ -5198,8 +5198,9 @@ same. This holds in Chat, Work, and Code.
   inside the plugin is refused on any host. On macOS a launcher found on the
   host path or outside the plugin (`npx` and `npm` measured, which fail at exec
   under the profile) is refused as well, with the form to declare instead:
-  `node` as the command and the installed script's absolute path as an
-  argument. Extension processes have no Linux confinement, so no other host
+  `node` as the command and a script from a package installed inside the
+  plugin's own folder (`${PLUGIN_ROOT}/node_modules/...`) as an argument; the
+  profile reads that folder and not a global install. Extension processes have no Linux confinement, so no other host
   starts one in the first place.
 
 - **Remembered MCP tool approvals.** A person may answer a tool's prompt with

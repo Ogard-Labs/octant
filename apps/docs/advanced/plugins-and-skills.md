@@ -183,8 +183,11 @@ argument, with the script's absolute path or `${PLUGIN_ROOT}`:
 
 A `command` that is itself a script, either one shipped in the plugin or a
 launcher such as `npx` or `npm`, is refused before it starts, with this fix in
-the message, and the server is never shown as ready. Install the server's
-package first, then point `node` at its script.
+the message, and the server is never shown as ready. The server reads only the
+plugin's own folder, so a package installed globally on the Mac is out of reach.
+Put the package inside the plugin when you build it, for example
+`npm install --prefix "${PLUGIN_ROOT}" <package>`, and point `node` at
+`${PLUGIN_ROOT}/node_modules/<package>/<entry>.js`.
 
 ### Structured references
 

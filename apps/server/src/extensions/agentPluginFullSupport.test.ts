@@ -2058,10 +2058,11 @@ describe("Agent Plugin MCP session manager", () => {
           expect.objectContaining({
             componentId: "mcp-local",
             reason: expect.stringMatching(
-              /local starts npx, a launcher script.*"command" to "node".*absolute path/,
+              /local starts npx, a launcher script.*inside the plugin.*npm install --prefix "\$\{PLUGIN_ROOT\}".*"command" to "node".*\$\{PLUGIN_ROOT\}\/node_modules\//,
             ),
           }),
         ]);
+        expect(harness.manager.failedComponents()[0]?.reason).not.toMatch(/\/opt\/homebrew|global/);
       } finally {
         await harness.cleanup();
       }
