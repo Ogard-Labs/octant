@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   AggregateId,
   decodeCodeThreadId,
+  decodeNativeHarnessTurnId,
   LOCAL_HOST_ID,
   type OctantMode,
   ToolEgressLaunchId,
@@ -25,7 +26,6 @@ import {
 import { createNativeHarnessSecondOpinionPort } from "../harness/nativeHarnessSecondOpinion";
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
 import { createNativeHarnessDelegatePort } from "../harness/nativeHarnessDelegatePort";
-import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
 import {
   createFollowUp,
@@ -39,6 +39,10 @@ import { createSideTaskRouteHandler } from "../sideTasks/sideTaskRoutes";
 import { createNativeHarnessSessionRouteHandler } from "../harness/nativeHarnessSessionRoutes";
 import { createNativeHarnessEgressRouteHandler } from "../harness/nativeHarnessEgressRoutes";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
+import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
+import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
+import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
+import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
 import { fetchPublicUrl, PublicFetchRefused } from "../harness/nativeHarnessWebFetch";
 import { searxngHarnessWebSearch } from "../harness/nativeHarnessWebSearch";
 import { deriveToolHostId } from "../browser/browserAuthorityResolver";
@@ -46,25 +50,19 @@ import { isNativeHarnessDriverKind } from "@octant/domain";
 import { type AgentRunsWiring, authorizeAgentRunParentThread } from "./agentRuns";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import type { ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
-import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessStateWiring } from "./harnessState";
 import type { WorkRequestStateWiring } from "./workRequestState";
 
-export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<
-    LateBindings,
-    "nativeHarnessComposition" | "nativeHarnessLeadFallback" | "nativeHarnessObserver"
-  >;
-} & Pick<
+export type HarnessDependencies = Pick<ServerStart, "persistence"> &
+  Pick<
     AuthorityWiring,
     | "agentRunParentAuthority"
     | "agentRunPersistence"
+    | "codeParentActiveTurn"
     | "codeSessionAuthority"
     | "windowAuthorityStore"
   > &
@@ -75,17 +73,18 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
     | "nativeHarnessRoutingStore"
     | "agentRunEligibleTargets"
     | "agentRunOrchestration"
+    | "contributeChildTools"
     | "externalContentIngestionStore"
     | "sideTasks"
     | "threadFollowUpSuggestions"
+    | "turnMetrics"
   > &
   Pick<IntegrationsWiring, "toolEgressRules"> &
   Pick<WorkspaceWiring, "contextHarness" | "goalService"> &
   Pick<
     ProvidersWiring,
-    "configuredDriverOptions" | "nativeHarnessEndpoints" | "providerDataDirectory"
+    "configuredDriverOptions" | "nativeHarnessLeadFallback" | "providerDataDirectory"
   > &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime"> &
   Pick<
     HarnessStateWiring,
     | "agentRunInteractions"
@@ -98,20 +97,20 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
 
 export function wireHarness(deps: HarnessDependencies) {
   const {
-    late,
     agentRunAdmission,
     agentRunEligibleTargets,
     agentRunInteractions,
     agentRunOrchestration,
     agentRunPersistence,
-    codeOperationRuntime,
+    codeParentActiveTurn,
     codeSessionAuthority,
     configuredDriverOptions,
     contextHarness,
+    contributeChildTools,
     externalContentIngestionStore,
     goalService,
     nativeHarnessApprovals,
-    nativeHarnessEndpoints,
+    nativeHarnessLeadFallback,
     nativeHarnessQuestions,
     nativeHarnessRouter,
     nativeHarnessRoutingStore,
@@ -122,6 +121,7 @@ export function wireHarness(deps: HarnessDependencies) {
     sideTasks,
     threadFollowUpSuggestions,
     toolEgressRules,
+    turnMetrics,
     windowAuthorityStore,
     workThreadProjection,
   } = deps;
@@ -278,6 +278,16 @@ export function wireHarness(deps: HarnessDependencies) {
   ): void => {
     pausedByPersonListeners.push(listener);
   };
+  // Lifting a session out of recovery lets the area that cut the thread's
+  // turns off settle them (the Code runtime), which subscribes here.
+  const recoveryLiftedListeners: Array<
+    (input: { readonly threadId: string; readonly mode: OctantMode }) => void
+  > = [];
+  const onHarnessRecoveryLifted = (
+    listener: (input: { readonly threadId: string; readonly mode: OctantMode }) => void,
+  ): void => {
+    recoveryLiftedListeners.push(listener);
+  };
   const nativeHarnessSessionRoutes = createNativeHarnessSessionRouteHandler({
     windowAuthorityStore,
     store: {
@@ -301,8 +311,8 @@ export function wireHarness(deps: HarnessDependencies) {
     onPaused: (input) => {
       for (const listener of pausedByPersonListeners) listener(input);
     },
-    onRecoveryLifted: ({ threadId, mode }) => {
-      if (mode === "code") codeOperationRuntime?.settleCutOffTurns?.(threadId);
+    onRecoveryLifted: (input) => {
+      for (const listener of recoveryLiftedListeners) listener(input);
     },
     recoveryBlockers: async ({ threadId }) => {
       const view = nativeHarnessSessions.read(threadId);
@@ -376,25 +386,66 @@ export function wireHarness(deps: HarnessDependencies) {
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
   });
-  late.nativeHarnessObserver.current = nativeHarnessObserver;
-  const nativeHarnessLeadFallback = new NativeHarnessLeadFallbackService({
-    router: nativeHarnessRouter,
-    sessions: nativeHarnessSessions,
-    hostId: String(LOCAL_HOST_ID),
-    // Building the driver is what registers its endpoint, so a fallback onto an
-    // instance no turn has used yet since boot still finds it.
-    endpointFor: (providerInstanceId) => {
-      const instance = persistence.readProviderInstance(providerInstanceId as never);
-      if (instance === undefined || !instance.enabled) return undefined;
-      try {
-        makeConfiguredProviderDriver(instance, configuredDriverOptions);
-      } catch {
-        return undefined;
-      }
-      return nativeHarnessEndpoints.get(instance.id);
+  // Every provider's turn passes through these hooks; a harness turn also
+  // reaches the observer and the lead fallback.
+  const nativeHarnessHooks = {
+    answerQuestion: (threadId: string, questionId: string, answer: string) => {
+      nativeHarnessQuestions.answer(threadId, questionId, answer);
     },
-  });
-  late.nativeHarnessLeadFallback.current = nativeHarnessLeadFallback;
+    contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) => [
+      ...nativeHarnessObserver.contextFor(scope),
+      ...turnDecisionInstructions(scope.mode),
+      FOLLOW_UP_SUGGESTION_INSTRUCTIONS,
+    ],
+    admitTurn: (scope: Parameters<NativeHarnessTurnObserver["admitTurn"]>[0]) =>
+      nativeHarnessObserver.admitTurn(scope),
+    turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) => {
+      nativeHarnessObserver.turnStarted(scope);
+      nativeHarnessLeadFallback.turnStarted(scope);
+    },
+    // The session view carries the retry notice the terminal footer and the
+    // phone panel read; the transcript has its own copy from the turn stream.
+    noteRetry: (
+      scope: Parameters<NativeHarnessTurnObserver["noteRetry"]>[0],
+      notice: Parameters<NativeHarnessTurnObserver["noteRetry"]>[1],
+    ) => {
+      nativeHarnessObserver.noteRetry(scope, notice);
+    },
+    clearRetry: (scope: Parameters<NativeHarnessTurnObserver["clearRetry"]>[0]) => {
+      nativeHarnessObserver.clearRetry(scope);
+    },
+    turnEnded: (
+      scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0],
+      turn?: TurnEndSummary,
+    ) => {
+      nativeHarnessObserver.turnEnded(scope, turn);
+      nativeHarnessLeadFallback.turnEnded(scope);
+      if (turn === undefined) return;
+      try {
+        turnMetrics.record(toTurnMetricsRecord(scope, turn));
+      } catch {
+        // A turn whose figures the journal refused still ended for the user.
+      }
+    },
+    turnCompleted: async (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) => {
+      try {
+        threadFollowUpSuggestions.recordReply({
+          threadId: input.threadId,
+          mode: input.mode,
+          projectId: input.projectId,
+          suggestedBy: { providerInstanceId: input.providerInstanceId, modelId: input.modelId },
+          followUps: parseFollowUpSuggestions({
+            text: input.text,
+            turnId: decodeNativeHarnessTurnId(randomUUID()),
+            uuid: randomUUID,
+          }),
+        });
+      } catch {
+        // A set the journal refused leaves the reply itself untouched.
+      }
+      await nativeHarnessObserver.turnCompleted(input);
+    },
+  };
   const nativeHarnessComposition = createNativeHarnessComposition({
     goals: goalService,
     questions: nativeHarnessQuestions,
@@ -470,7 +521,7 @@ export function wireHarness(deps: HarnessDependencies) {
     readCodeExecutionPolicy: codeTurnExecutionPolicyReader({
       readCodeThread: (threadId) => persistence.readCodeThread(threadId),
       codeSessionAuthority,
-      codeOperationRuntime,
+      codeOperationRuntime: { threadWithActiveTurnPosture: codeParentActiveTurn },
     }),
     resolveWebSearch: () =>
       searxngHarnessWebSearch({
@@ -492,15 +543,19 @@ export function wireHarness(deps: HarnessDependencies) {
     uuid: randomUUID,
     clock: () => new Date().toISOString(),
   });
-  late.nativeHarnessComposition.current = nativeHarnessComposition;
+  // A managed child's harness tools come first in its tool set, ahead of
+  // what later areas add.
+  contributeChildTools((input) => nativeHarnessComposition.forAgentRun(input));
   return {
     followUpCreation,
     followUpSuggestionRoutes,
     nativeHarnessComposition,
     nativeHarnessEgressRoutes,
     nativeHarnessRoutingRoutes,
+    nativeHarnessHooks,
     nativeHarnessSessionRoutes,
     onHarnessPausedByPerson,
+    onHarnessRecoveryLifted,
     researchRouter,
     sideTaskFirstMessage,
     sideTaskRoutes,

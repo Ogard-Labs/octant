@@ -7386,16 +7386,24 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   a managed child's Canvas tools through the agent-run area's tool
   contributions, and the agent-run routes are built where they are
   dispatched, with the Canvas snapshot. Thread hand-off, which writes a
-  Canvas from a thread export, is built with thread export in Work.
-- Two forward references remain, and `bun run wiring:check` pins their
-  number so one can be removed but not added: `LateBindings` cells, which a
-  module assigns after another has captured them, and dependency getters
-  marked "Wired by wireX; read only after startup", which read a value a
-  later module creates per use. Each marks a cycle between areas that needs a
-  seam of its own to remove (the native harness against agent runs,
-  providers, and the Code runtime; Chat and the Code runtime against Work and
-  Chat's mention services; agent runs against Chat and the provider driver
-  options); lower the ceiling in
+  Canvas from a thread export, is built with thread export in Work. The
+  native harness is built right after the providers area and before Code:
+  its lead fallback lives in the providers area, beside the driver options it
+  builds drivers from and whose lead hook asks it; the harness owns the
+  per-turn hooks every mode's turns pass through; it adds a managed child's
+  harness tools through the agent-run tool contributions, ahead of Canvas;
+  it reads a running Code turn's posture the way the authority does; and the
+  Code runtime subscribes to a session leaving recovery. An agent run reads
+  its Chat parent through the same persistence-only read `ChatService.read`
+  uses.
+- No module assigns a value after another has captured it (the composition
+  root has no late cells). One forward reference remains, and
+  `bun run wiring:check` pins its number so one can be removed but not added:
+  dependency getters marked "Wired by wireX; read only after startup", which
+  read a value a later module creates per use. Each marks a cycle between
+  areas that needs a seam of its own to remove (Chat and the Code runtime
+  against Work and Chat's thread-mention and Side Chat reads, and agent runs
+  against the provider driver options); lower the ceiling in
   `scripts/check-module-wiring.ts` in the change that removes one.
 - A headless Linux station: `octant server run`, then `octant web` (or
   `octant web --dev` for Vite), run as the OS user that started the host so

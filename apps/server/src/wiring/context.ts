@@ -27,10 +27,12 @@ import type { BrowserWiring } from "./browser";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
+import type { HarnessWiring } from "./harness";
 
 export type ContextDependencies = Pick<ServerStart, "persistence"> &
   Pick<AuthorityWiring, "browserCaptures" | "windowAuthorityStore"> &
-  Pick<AgentRunsWiring, "capacityScheduler" | "nativeHarnessHooks"> &
+  Pick<AgentRunsWiring, "capacityScheduler"> &
+  Pick<HarnessWiring, "nativeHarnessHooks"> &
   Pick<IntegrationsWiring, "agentMessageProjection"> &
   Pick<WorkspaceWiring, "contextHarness" | "projectService" | "spendCeilingService"> &
   Pick<CodeWiring, "canAccessCodeProject"> &

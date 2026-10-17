@@ -10,7 +10,6 @@ import {
   decodeChatThreadId,
   decodeCodeThreadId,
   decodeMultiModelRoutingVendorId,
-  decodeNativeHarnessTurnId,
   decodeProjectId,
   decodeWorkThreadId,
   effectiveAgentRunConcurrency,
@@ -29,7 +28,7 @@ import {
   authorizeAgentRunCreation,
   layoutContainsAgentRunThread,
 } from "../agentRun/authorizeAgentRunCreation";
-import { ChatService } from "../chat/chatService";
+import { readChatThreadView } from "../chat/chatService";
 import { WorkThreadProjection } from "../work/workThreadProjection";
 import { awaitsLeadApproval } from "../harness/leadApprovalAttention";
 import { ManagedWorktreeReceiptStore } from "../code/managedWorktreeReceiptStore";
@@ -73,7 +72,6 @@ import { AgentRunSessionStore } from "../agentRun/agentRunSessionStore";
 import { createAgentRunClaudeResumeIdentityPort } from "../agentRun/agentRunClaudeResumeIdentity";
 import { AgentRunLiveConversationStore } from "../agentRun/agentRunLiveConversationStore";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
-import { toTurnMetricsRecord, type TurnEndSummary } from "../metrics/turnEnd";
 import { TurnMetricsStore } from "../metrics/turnMetricsStore";
 import { SpendCeilingService } from "../spendCeilingService";
 import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
@@ -81,19 +79,14 @@ import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
 import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
-import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
-import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
-import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
 import { ThreadFollowUpSuggestionStore } from "../followUps/threadFollowUpSuggestionStore";
 import { SideTaskStore } from "../sideTasks/sideTaskStore";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
-import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
 import type { MultiModelCandidateRuntimeFacts } from "@octant/domain/multi-model-pool-policy";
 import { activeChatTurns, chatTurnAnsweredAttempt } from "@octant/domain";
 import { type AppManagedToolSet, combineAppManagedToolSets } from "../providers/appManagedToolSet";
 import { type ConfiguredProviderDriverOptions, makeConfiguredProviderDriver } from "./providers";
 import type { ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { HarnessStateWiring } from "./harnessState";
@@ -493,13 +486,8 @@ export type AgentRunChildToolsInput = Parameters<
   NonNullable<AgentRunSessionRuntimeOptions["appManagedTools"]>
 >[0];
 
-export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<
-    LateBindings,
-    "nativeHarnessComposition" | "nativeHarnessLeadFallback" | "nativeHarnessObserver"
-  >;
-} & Pick<
+export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<
     AuthorityWiring,
     | "agentRunParentAuthority"
     | "agentRunPersistence"
@@ -510,10 +498,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
   > &
   Pick<
     HarnessStateWiring,
-    | "agentRunInteractions"
-    | "nativeHarnessApprovals"
-    | "nativeHarnessQuestions"
-    | "nativeHarnessSessions"
+    "agentRunInteractions" | "nativeHarnessApprovals" | "nativeHarnessSessions"
   > &
   Pick<
     FoundationsWiring,
@@ -524,26 +509,21 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     | "workThreadProjection"
     | "workTurnProjection"
   > & {
-    /** Wired by wireChat; read only after startup. */
-    readonly chatService: () => ChatService;
     /** Wired by wireProviders; read only after startup. */
     readonly configuredDriverOptions: () => ConfiguredProviderDriverOptions;
   };
 
 export function wireAgentRuns(deps: AgentRunsDependencies) {
   const {
-    late,
     agentRunInteractions,
     agentRunPersistence,
     agentRunParentAuthority,
-    chatService,
     codeBoardEventStore,
     codeParentActiveTurn,
     codeSessionAuthority,
     configuredDriverOptions,
     isProjectPolicyTargetAllowed,
     nativeHarnessApprovals,
-    nativeHarnessQuestions,
     nativeHarnessSessions,
     onAgentRunExecutionAccepted,
     options,
@@ -588,64 +568,6 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     clock: () => new Date().toISOString(),
   });
-  const nativeHarnessHooks = {
-    answerQuestion: (threadId: string, questionId: string, answer: string) => {
-      nativeHarnessQuestions.answer(threadId, questionId, answer);
-    },
-    contextFor: (scope: Parameters<NativeHarnessTurnObserver["contextFor"]>[0]) => [
-      ...(late.nativeHarnessObserver.current?.contextFor(scope) ?? []),
-      ...turnDecisionInstructions(scope.mode),
-      FOLLOW_UP_SUGGESTION_INSTRUCTIONS,
-    ],
-    admitTurn: (scope: Parameters<NativeHarnessTurnObserver["admitTurn"]>[0]) =>
-      late.nativeHarnessObserver.current?.admitTurn(scope) ?? { kind: "admitted" as const },
-    turnStarted: (scope: Parameters<NativeHarnessTurnObserver["turnStarted"]>[0]) => {
-      late.nativeHarnessObserver.current?.turnStarted(scope);
-      late.nativeHarnessLeadFallback.current?.turnStarted(scope);
-    },
-    // The session view carries the retry notice the terminal footer and the
-    // phone panel read; the transcript has its own copy from the turn stream.
-    noteRetry: (
-      scope: Parameters<NativeHarnessTurnObserver["noteRetry"]>[0],
-      notice: Parameters<NativeHarnessTurnObserver["noteRetry"]>[1],
-    ) => {
-      late.nativeHarnessObserver.current?.noteRetry(scope, notice);
-    },
-    clearRetry: (scope: Parameters<NativeHarnessTurnObserver["clearRetry"]>[0]) => {
-      late.nativeHarnessObserver.current?.clearRetry(scope);
-    },
-    turnEnded: (
-      scope: Parameters<NativeHarnessTurnObserver["turnEnded"]>[0],
-      turn?: TurnEndSummary,
-    ) => {
-      late.nativeHarnessObserver.current?.turnEnded(scope, turn);
-      late.nativeHarnessLeadFallback.current?.turnEnded(scope);
-      if (turn === undefined) return;
-      try {
-        turnMetrics.record(toTurnMetricsRecord(scope, turn));
-      } catch {
-        // A turn whose figures the journal refused still ended for the user.
-      }
-    },
-    turnCompleted: async (input: Parameters<NativeHarnessTurnObserver["turnCompleted"]>[0]) => {
-      try {
-        threadFollowUpSuggestions.recordReply({
-          threadId: input.threadId,
-          mode: input.mode,
-          projectId: input.projectId,
-          suggestedBy: { providerInstanceId: input.providerInstanceId, modelId: input.modelId },
-          followUps: parseFollowUpSuggestions({
-            text: input.text,
-            turnId: decodeNativeHarnessTurnId(randomUUID()),
-            uuid: randomUUID,
-          }),
-        });
-      } catch {
-        // A set the journal refused leaves the reply itself untouched.
-      }
-      await late.nativeHarnessObserver.current?.turnCompleted(input);
-    },
-  };
   const agentRunSettingsStore = new AgentRunSettingsStore({
     journal: persistence.journal,
     uuid: randomUUID,
@@ -719,9 +641,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
   const runtimeOutsideContentMarks = new RuntimeOutsideContentMarks((input) =>
     externalContentIngestionStore.record(input),
   );
-  // Areas built after this one add tools to a managed child's session (Canvas
-  // does), the way they add tools to a Chat thread, so agent runs never hold
-  // the service behind them.
+  // Areas built after this one add tools to a managed child's session (the
+  // native harness, then Canvas), the way they add tools to a Chat thread, so
+  // agent runs never hold the service behind them.
   const childToolContributors: Array<
     (input: AgentRunChildToolsInput) => AppManagedToolSet | undefined
   > = [];
@@ -815,12 +737,9 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         providerRuntimeRegistry.observedState(providerInstanceId)?.capabilities.resume ===
         "supported",
       appManagedTools: (input) => {
-        const native = late.nativeHarnessComposition.current?.forAgentRun(input);
         const contributed = childToolContributors.map((contribute) => contribute(input));
-        if (native === undefined && contributed.every((set) => set === undefined)) {
-          return undefined;
-        }
-        return combineAppManagedToolSets(native, ...contributed);
+        if (contributed.every((set) => set === undefined)) return undefined;
+        return combineAppManagedToolSets(...contributed);
       },
       appManagedToolTransport: ({ providerInstanceId, modelId }) => {
         const observed = providerRuntimeRegistry.observedState(providerInstanceId);
@@ -1072,7 +991,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
         try {
           if (mode === "chat")
             return admittedParentChatContext(
-              chatService().read(decodeChatThreadId(String(parentThreadId))),
+              readChatThreadView(persistence, decodeChatThreadId(String(parentThreadId))),
             );
           const externalContentIngested = readThreadExternalContentTaint(
             persistence.connection,
@@ -1342,7 +1261,6 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     contributeChildTools,
     externalContentIngestionStore,
     managedWorktreeReceipts,
-    nativeHarnessHooks,
     nativeHarnessRouter,
     nativeHarnessRoutingStore,
     runtimeOutsideContentMarks,

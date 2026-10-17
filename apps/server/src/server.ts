@@ -4,7 +4,6 @@ import {
   withStartupFailureReason,
 } from "./startupFailureReason";
 import { Effect, Scope } from "effect";
-import { ChatService } from "./chat/chatService";
 import { WorkFileListingService } from "./work/workFileListingService";
 import { WorkThreadService } from "./work/workThreadService";
 import { WorkTurnService } from "./work/workTurnService";
@@ -36,7 +35,6 @@ import {
   ServerStartupFailed,
   type StartOctantServerOptions,
 } from "./wiring/serverShape";
-import type { LateBindings } from "./wiring/lateBindings";
 import { wireAuthority } from "./wiring/authority";
 import { wireAgentRuns } from "./wiring/agentRuns";
 import { wireIntegrations } from "./wiring/integrations";
@@ -158,11 +156,6 @@ export function startOctantServer(
     }
     const version = options.version ?? "0.0.0-dev";
     const startedAt = Date.now();
-    const late: LateBindings = {
-      nativeHarnessComposition: { current: undefined },
-      nativeHarnessObserver: { current: undefined },
-      nativeHarnessLeadFallback: { current: undefined },
-    };
 
     const {
       browserAuthority,
@@ -230,7 +223,6 @@ export function startOctantServer(
       contributeChildTools,
       externalContentIngestionStore,
       managedWorktreeReceipts,
-      nativeHarnessHooks,
       nativeHarnessRouter,
       nativeHarnessRoutingStore,
       runtimeOutsideContentMarks,
@@ -241,10 +233,8 @@ export function startOctantServer(
       threadFollowUpSuggestions,
       turnMetrics,
     } = wireAgentRuns({
-      late,
       agentRunParentAuthority,
       agentRunPersistence,
-      chatService: (): ChatService => chatService,
       codeBoardEventStore,
       codeParentActiveTurn,
       codeSessionAuthority,
@@ -252,7 +242,6 @@ export function startOctantServer(
       isProjectPolicyTargetAllowed,
       nativeHarnessSessions,
       nativeHarnessApprovals,
-      nativeHarnessQuestions,
       agentRunInteractions,
       onAgentRunExecutionAccepted,
       options,
@@ -391,7 +380,7 @@ export function startOctantServer(
       managedCodeThreadCreation,
       managedWorktreeRefsList,
       managedWorktreeSourcePreview,
-      nativeHarnessEndpoints,
+      nativeHarnessLeadFallback,
       nativeHarnessTranscripts,
       probeProviderForThreads,
       providerDataDirectory,
@@ -407,7 +396,6 @@ export function startOctantServer(
     } = yield* wireProviders({
       providerRuntimeRegistry,
       workRequestRuntime,
-      late,
       agentRunChildWorktree,
       agentRunProcessSupervisor,
       agentRunSessionStore,
@@ -418,10 +406,56 @@ export function startOctantServer(
       isPairedDeviceScope,
       latencyStats,
       managedWorktreeReceipts,
+      nativeHarnessRouter,
+      nativeHarnessSessions,
       options,
       persistence,
       processAuthorityNow,
       version,
+      windowAuthorityStore,
+      workThreadProjection,
+    });
+    const {
+      followUpCreation,
+      followUpSuggestionRoutes,
+      nativeHarnessComposition,
+      nativeHarnessEgressRoutes,
+      nativeHarnessHooks,
+      nativeHarnessRoutingRoutes,
+      nativeHarnessSessionRoutes,
+      onHarnessPausedByPerson,
+      onHarnessRecoveryLifted,
+      researchRouter,
+      sideTaskFirstMessage,
+      sideTaskRoutes,
+      threadWork,
+    } = wireHarness({
+      agentRunInteractions,
+      nativeHarnessApprovals,
+      nativeHarnessQuestions,
+      nativeHarnessSessions,
+      agentRunAdmission,
+      agentRunEligibleTargets,
+      agentRunOrchestration,
+      agentRunParentAuthority,
+      nativeHarnessRouter,
+      nativeHarnessRoutingStore,
+      agentRunPersistence,
+      codeParentActiveTurn,
+      codeSessionAuthority,
+      configuredDriverOptions,
+      contextHarness,
+      contributeChildTools,
+      externalContentIngestionStore,
+      goalService,
+      nativeHarnessLeadFallback,
+      persistence,
+      providerDataDirectory,
+      runningWorkTurnAccess,
+      sideTasks,
+      threadFollowUpSuggestions,
+      toolEgressRules,
+      turnMetrics,
       windowAuthorityStore,
       workThreadProjection,
     });
@@ -553,11 +587,11 @@ export function startOctantServer(
     } = yield* wireCodeRuntime({
       onHarnessQuestionAsked,
       onHarnessQuestionSettled,
+      onHarnessRecoveryLifted,
       workRequestRuntime,
       onPullRequestSnapshotRefreshed,
       onWindowRevoked,
       threadAwaitsHarnessApproval,
-      late,
       agentMessageService,
       agentRunPersistence,
       agentsManagedToolsFor,
@@ -595,6 +629,7 @@ export function startOctantServer(
       isCodeProviderModelAllowed,
       liveTurns,
       machineChangeFeed,
+      nativeHarnessComposition,
       nativeHarnessHooks,
       nativeHarnessTranscripts,
       options,
@@ -643,47 +678,6 @@ export function startOctantServer(
       routeCodeService,
       terminalProcessPort,
       windowAuthorityStore,
-    });
-    const {
-      followUpCreation,
-      followUpSuggestionRoutes,
-      nativeHarnessComposition,
-      nativeHarnessEgressRoutes,
-      nativeHarnessRoutingRoutes,
-      nativeHarnessSessionRoutes,
-      onHarnessPausedByPerson,
-      researchRouter,
-      sideTaskFirstMessage,
-      sideTaskRoutes,
-      threadWork,
-    } = wireHarness({
-      late,
-      agentRunInteractions,
-      nativeHarnessApprovals,
-      nativeHarnessQuestions,
-      nativeHarnessSessions,
-      agentRunAdmission,
-      agentRunEligibleTargets,
-      agentRunOrchestration,
-      agentRunParentAuthority,
-      nativeHarnessRouter,
-      nativeHarnessRoutingStore,
-      agentRunPersistence,
-      codeOperationRuntime,
-      codeSessionAuthority,
-      configuredDriverOptions,
-      contextHarness,
-      externalContentIngestionStore,
-      goalService,
-      nativeHarnessEndpoints,
-      persistence,
-      providerDataDirectory,
-      runningWorkTurnAccess,
-      sideTasks,
-      threadFollowUpSuggestions,
-      toolEgressRules,
-      windowAuthorityStore,
-      workThreadProjection,
     });
     const {
       chatRoutes,
