@@ -208,8 +208,9 @@ Octant window never connects to the computer itself: it asks the desktop app,
 which sends each request over a connection held to the pinned key and only to
 a computer listed under **Other computers**. If that computer's key changes,
 Octant refuses with "This isn't the computer you paired with: its security key
-has changed." and sends nothing; if the key was replaced on purpose, pair again
-with a new code. A changed, damaged, or non-private code is refused before
+has changed." and sends nothing; if the key was replaced on purpose, forget the
+computer and pair again with a new code (a code with a different key is refused
+while the old pairing stands). A changed, damaged, or non-private code is refused before
 Octant contacts anything. Leaving before the other computer approves keeps
 nothing. **Forget** asks first, then removes this app's saved key for the
 computer, closes the pages of its servers opened here, and stops all

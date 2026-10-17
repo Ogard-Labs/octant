@@ -216,9 +216,8 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
   const randomId = ports.randomId ?? (() => globalThis.crypto.randomUUID());
   const sendToHost = ports.sendToHost ?? sendThroughListener;
   const upgradeToHost = ports.upgradeToHost ?? upgradeThroughListener;
-  // Which window holds each grant, and the listener each host is served from.
+  // Which window holds each grant.
   const signerByGrant = new Map<string, number>();
-  const listenerByHost = new Map<string, string>();
   const pending = new Map<
     string,
     {
@@ -252,7 +251,6 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
       for (const record of doomed) ports.closePageWindow(record.name);
       for (const hostId of new Set([...hostIds, ...doomed.map((record) => record.hostId)])) {
         forwarder?.closeHost(hostId);
-        listenerByHost.delete(hostId);
       }
       let failed = 0;
       for (const record of doomed) {
@@ -345,7 +343,6 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
       const active = forwarder;
       if (active === undefined)
         return { kind: "refused", message: "Octant could not open this server." };
-      listenerByHost.set(request.hostId, request.listenerOrigin);
       signerByGrant.set(String(request.grant.grantId), windowId);
       const page = active.open({
         hostId: request.hostId,
@@ -405,14 +402,13 @@ export function createRemoteServerPages(ports: RemoteServerPagesPorts): RemoteSe
       }
     },
     forgetHost: (hostId) => forgetPages((record) => record.hostId === hostId, [hostId]),
-    // Hosts served from the listener close with it even when they have no page
+    // Every page served from the listener stops with it, even one with no page
     // record (a page opened in the default browser keeps none), so no open page
-    // outlives the pin.
-    forgetListener: (listenerOrigin) =>
-      forgetPages(
-        (record) => record.listenerOrigin === listenerOrigin,
-        [...listenerByHost].filter(([, origin]) => origin === listenerOrigin).map(([id]) => id),
-      ),
+    // or WebSocket outlives the pin.
+    forgetListener: (listenerOrigin) => {
+      forwarder?.closeListener(listenerOrigin);
+      return forgetPages((record) => record.listenerOrigin === listenerOrigin);
+    },
     stop: async () => {
       for (const waiting of pending.values()) clearTimeout(waiting.timer);
       pending.clear();

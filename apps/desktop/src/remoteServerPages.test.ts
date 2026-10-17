@@ -434,6 +434,42 @@ describe("which listeners the forwarder will reach", () => {
   });
 });
 
+describe("forgetting one of two listeners a host was opened from", () => {
+  it("stops the forgotten listener's page and leaves the other's up, whichever opened last", async () => {
+    const h = await harness();
+    const OTHER = "https://192.168.1.21:9443";
+    await h.pages.open(
+      7,
+      validateRemoteServerPageOpenRequest({ ...OPEN, mode: "default-browser" }),
+    );
+    await h.pages.open(
+      7,
+      validateRemoteServerPageOpenRequest({
+        ...OPEN,
+        mode: "default-browser",
+        listenerOrigin: OTHER,
+        grant: { ...OPEN.grant, port: 3000 },
+      }),
+    );
+    const [first, second] = h.external.map((url) => new URL(url).origin);
+    const served = async (origin: string) => {
+      const reply = pageRequest(origin, h.pages.accessFor(origin) ?? "");
+      const question = await waitFor(() => h.asked.find((entry) => !answered.has(entry.requestId)));
+      answered.add(question.requestId);
+      h.pages.answer(7, question.requestId, { status: "signed", headers: { cookie: "c=1" } });
+      return (await reply).status;
+    };
+    const answered = new Set<string>();
+    h.pairedOrigins.delete(LISTENER);
+
+    await h.pages.forgetListener(LISTENER);
+
+    expect((await pageRequest(first ?? "", "x")).status).not.toBe(200);
+    expect(h.pages.accessFor(first ?? "")).toBeUndefined();
+    expect(await served(second ?? "")).toBe(200);
+  });
+});
+
 describe("signing a page's requests", () => {
   it("asks the window that opened the page, and relays with its headers", async () => {
     const { pages, shown, asked, sent } = await harness();

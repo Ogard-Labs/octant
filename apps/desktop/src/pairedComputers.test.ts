@@ -287,28 +287,48 @@ describe("settling a pairing", () => {
     const pins = new PairedComputerPins(path);
     pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
 
-    await pairing(pins, otherCert);
-    // While the second pairing is open, only its own routes use the new pin.
-    expect(pins.reachPinFor(ORIGIN, true)).toBe(pinOf(otherCert));
-    expect(pins.reachPinFor(ORIGIN, false)).toBe(pinOf(listenerCert));
+    await expect(pairing(pins, listenerCert)).resolves.toMatchObject({ status: "verified" });
     settlePairedComputer({ origin: ORIGIN, outcome: "abandoned", pins });
 
     expect(pins.pinFor(ORIGIN)).toBe(pinOf(listenerCert));
-    expect(pins.reachPinFor(ORIGIN, true)).toBe(pinOf(listenerCert));
     expect(new PairedComputerPins(path).pinFor(ORIGIN)).toBe(pinOf(listenerCert));
     await expect(forgetPairedComputer({ origin: ORIGIN, pins })).resolves.toEqual({
       status: "forgotten",
     });
   });
 
-  it("replaces the recorded pin when the fresh code is approved", async () => {
+  it("refuses a code whose key differs from the one recorded, and changes nothing", async () => {
     const pins = freshPins();
     pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
 
-    await pairing(pins, otherCert);
+    const outcome = await pairing(pins, otherCert);
+
+    expect(outcome.status).toBe("refused");
+    expect(pins.reachPinFor(ORIGIN, true)).toBe(pinOf(listenerCert));
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins }).status).toBe(
+      "refused",
+    );
+    expect(pins.pinFor(ORIGIN)).toBe(pinOf(listenerCert));
+  });
+
+  it("keeps a computer already recorded on its recorded pin, so a live session's hello is never redirected", () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: "sha256-recorded" });
+    pins.stage({ origin: ORIGIN, displayName: "Studio Mac", pin: "sha256-staged" });
+
+    for (const pairingRoute of [true, false]) {
+      expect(pins.reachPinFor(ORIGIN, pairingRoute)).toBe("sha256-recorded");
+    }
+  });
+
+  it("refreshes the recorded name when a fresh code for the same key is approved", async () => {
+    const pins = freshPins();
+    pins.record({ origin: ORIGIN, displayName: "Old name", pin: pinOf(listenerCert) });
+
+    await pairing(pins, listenerCert);
     settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins });
 
-    expect(pins.pinFor(ORIGIN)).toBe(pinOf(otherCert));
+    expect(pins.list()).toEqual([{ origin: ORIGIN, displayName: "Studio Mac" }]);
   });
 
   it("lets a pairing that was never settled lapse, and refuses to approve one that lapsed", async () => {
@@ -338,13 +358,31 @@ describe("settling a pairing", () => {
     expect(settlePairedComputer({ origin: 42, outcome: "approved", pins }).status).toBe("refused");
   });
 
-  it("forgetting a computer also drops a pairing open for it", async () => {
+  it("forgetting a computer also drops a pairing open for it, so a later approval records nothing", async () => {
     const pins = freshPins();
     pins.record({ origin: ORIGIN, displayName: "Studio Mac", pin: pinOf(listenerCert) });
-    await pairing(pins, otherCert);
+    await pairing(pins, listenerCert);
 
     await forgetPairedComputer({ origin: ORIGIN, pins });
 
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins }).status).toBe(
+      "refused",
+    );
+    expect(pins.pinFor(ORIGIN)).toBeUndefined();
+  });
+
+  it("forgets a pairing that was never recorded, so it cannot be approved afterwards", async () => {
+    const pins = freshPins();
+    await pairing(pins, listenerCert);
+
+    await expect(forgetPairedComputer({ origin: ORIGIN, pins })).resolves.toEqual({
+      status: "forgotten",
+    });
+
+    expect(settlePairedComputer({ origin: ORIGIN, outcome: "approved", pins }).status).toBe(
+      "refused",
+    );
+    expect(pins.pinFor(ORIGIN)).toBeUndefined();
     expect(pins.reachPinFor(ORIGIN, true)).toBeUndefined();
   });
 });

@@ -6617,9 +6617,12 @@ mechanisms are:
       renamed into place) only when the window reports the other computer
       approved, through `octant:paired-computers:settle`. A staged pin is
       reachable only on the three pairing routes (hello, pairing, pairing
-      status), and every other request to a computer already paired stays on its
-      recorded pin; abandoning the pairing, or letting it lapse, drops what was
-      staged and never touches a computer already paired.
+      status) of a computer not yet recorded. A computer already recorded stays
+      on its recorded pin for every request, since its hello is a live session's
+      first call as much as a pairing's, and a code carrying a different key for
+      it is refused until the computer is forgotten. Abandoning the pairing,
+      forgetting the computer, or letting it lapse drops what was staged and never
+      touches a computer already paired.
       Main pins only an origin the listener address classifier calls private
       LAN or Tailscale, and a pin file it cannot read holds no pins. The
       window claims the ticket itself, through the client runtime's pairing
@@ -6671,7 +6674,8 @@ mechanisms are:
       only the listener origin, which must be a recorded paired computer, and
       every relayed request and upgrade is held to the pin read from the pin file
       at that moment, so forgetting the computer stops its open pages at once
-      (their forwarder hosts close with it, in either browser).
+      (every page served from its listener, and its WebSockets, ends with it, in
+      either browser).
       Forget asks first, then removes the window's host record and device key
       through the federation lifecycle, whose clearing step asks main to drop
       the pin (so nothing can reach that computer) and to close the pages of its

@@ -334,25 +334,20 @@ describe("a pairing that is open for a computer", () => {
     }
   });
 
-  it("keeps a computer already paired on its recorded pin for every route but its pairing's own", async () => {
+  it("keeps a computer already paired on its recorded pin for every route, hello included", async () => {
     const pins = pinsWith([OTHER_ORIGIN]);
     pins.stage({ origin: OTHER_ORIGIN, displayName: "Laptop", pin: "sha256-staged" });
 
-    const session = await ask(
-      { origin: OTHER_ORIGIN, method: "POST", path: "/api/remote/auth/session", body: "{}" },
-      { pins },
-    );
-    const claim = await ask(
-      { origin: OTHER_ORIGIN, method: "POST", path: "/api/remote/pairing", body: "{}" },
-      { pins },
-    );
-
-    expect(session.fetchFor).toHaveBeenCalledWith(OTHER_ORIGIN, {
-      current: { kind: "pinned", pin: PIN },
-    });
-    expect(claim.fetchFor).toHaveBeenCalledWith(OTHER_ORIGIN, {
-      current: { kind: "pinned", pin: "sha256-staged" },
-    });
+    for (const request of [
+      { method: "GET", path: "/api/remote/hello?clientNonce=abc" },
+      { method: "POST", path: "/api/remote/pairing", body: "{}" },
+      { method: "POST", path: "/api/remote/auth/session", body: "{}" },
+    ]) {
+      const { fetchFor } = await ask({ origin: OTHER_ORIGIN, ...request }, { pins });
+      expect(fetchFor, request.path).toHaveBeenCalledWith(OTHER_ORIGIN, {
+        current: { kind: "pinned", pin: PIN },
+      });
+    }
   });
 });
 

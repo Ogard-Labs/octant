@@ -79,18 +79,23 @@ export class PairedComputerPins {
   }
 
   /**
-   * The pin a request to this origin is held to. A request that belongs to a
-   * pairing (`pairing`) is held to the staged pin while one is open, so the
-   * ticket can be claimed; every other request is held to the recorded pin
-   * alone, so a code pasted for a computer already paired never redirects the
-   * session that computer already has.
+   * The pin a request to this origin is held to. A computer already recorded
+   * is always held to its recorded pin, so a code pasted for it never
+   * redirects the session it already has (its hello is a live session's first
+   * call as much as a pairing's). A pairing request (`pairing`) to a computer
+   * not yet recorded is held to the staged pin while one is open, so the
+   * ticket can be claimed.
    */
   reachPinFor(origin: string, pairing: boolean): string | undefined {
+    const recorded = this.pinFor(origin);
+    if (recorded !== undefined || !pairing) return recorded;
     const staged = this.#staged.get(origin);
-    if (pairing && staged !== undefined && staged.expiresAt > this.#now()) {
-      return staged.record.pin;
-    }
-    return this.pinFor(origin);
+    return staged !== undefined && staged.expiresAt > this.#now() ? staged.record.pin : undefined;
+  }
+
+  /** Drops a staged pairing without touching what is recorded. Returns whether one was open. */
+  unstage(origin: string): boolean {
+    return this.#staged.delete(origin);
   }
 
   /** Holds a pairing code's pin for the claim, without recording it. */
@@ -140,7 +145,6 @@ export class PairedComputerPins {
 
   /** Drops an origin's pin. Returns whether there was one. */
   forget(origin: string): boolean {
-    this.#staged.delete(origin);
     const next = this.#records.filter((record) => record.origin !== origin);
     if (next.length === this.#records.length) return false;
     writePinRecords(this.#path, next);
@@ -203,8 +207,13 @@ export async function forgetPairedComputer(input: {
   };
 }): Promise<ForgetOutcome> {
   const origin = typeof input.origin === "string" ? input.origin : "";
+  // A pairing still open for this origin goes first, so a later approval
+  // cannot record what was forgotten.
+  const pairing = input.pins.unstage(origin);
   if (input.pins.pinFor(origin) === undefined) {
-    return { status: "refused", message: "Octant isn't paired with that computer." };
+    return pairing
+      ? { status: "forgotten" }
+      : { status: "refused", message: "Octant isn't paired with that computer." };
   }
   input.pins.forget(origin);
   let pages: { readonly status: "forgotten" | "incomplete" } | undefined;
@@ -251,6 +260,16 @@ export async function pairFromPairingCode(input: {
     return { status: "refused", message: "This pairing code carries no certificate pin." };
   }
   const computer = { origin: opened.origin, displayName: opened.hostHello.displayName };
+  const recorded = input.pins.pinFor(opened.origin);
+  if (recorded !== undefined && recorded !== opened.listenerTrust.pin) {
+    // Its recorded pin keeps holding every request, so a different key could
+    // not be claimed through it; the person starts over from Forget.
+    return {
+      status: "refused",
+      message:
+        "That computer's security key is different from the one Octant has. Forget the computer first, then pair again with the new code.",
+    };
+  }
   try {
     input.pins.stage({ ...computer, pin: opened.listenerTrust.pin });
   } catch {
