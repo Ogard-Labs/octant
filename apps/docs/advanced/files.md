@@ -460,6 +460,14 @@ Image generation uses a separate configured image profile. The agent's image
 tool returns a job id and status; queued or running work is not a finished
 image. Completed artifacts appear in the task for opening or attachment.
 
+You can also start an image yourself. In an open Chat, Work, or Code thread, the
+**Create image** button beside the attach button opens the same sheet: choose an
+image profile and model, describe the image, and generate. The image appears in
+that thread, where you can attach it, revise it, or download it. In Work and Code
+it can also be saved to the Project (Work saves when you click Save; Code asks
+you to confirm). With no image profile ready, the button opens **Settings →
+Image generation** instead.
+
 ## Next steps
 
 - [Editor and terminals](/advanced/editor-and-terminals) for editing and command surfaces

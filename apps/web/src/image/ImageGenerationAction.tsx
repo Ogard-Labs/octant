@@ -21,6 +21,13 @@ export interface ImageGenerationActionProps {
   readonly scopeId?: ImageGenerationScopeId;
   readonly parentArtifactRef?: ImageArtifactRef;
   readonly disabled?: boolean;
+  /**
+   * A composer row shows the action as an icon beside attach and dictate; the
+   * Image generator surface has room for the labelled button. The icon form
+   * keeps the accessible name and, with no way to reach Settings, offers
+   * nothing rather than a disabled dead end.
+   */
+  readonly presentation?: "labelled" | "icon";
 }
 
 export function ImageGenerationAction(props: ImageGenerationActionProps) {
@@ -42,6 +49,7 @@ export function ImageGenerationContent(
   const threadAvailable = props.scopeId !== undefined;
   const mountedRef = useRef(true);
   const pollGenerationRef = useRef(0);
+  const iconOnly = props.presentation === "icon";
 
   useEffect(() => {
     mountedRef.current = true;
@@ -137,25 +145,35 @@ export function ImageGenerationContent(
             setJob(undefined);
             setErrorMessage(undefined);
           }}
-          size="sm"
+          size={iconOnly ? "icon" : "sm"}
+          {...(iconOnly ? { title: "Create image…" } : {})}
           type="button"
           variant="ghost"
         >
-          <ImageIcon aria-hidden="true" size={14} strokeWidth={1.7} />
-          <span>Create image…</span>
+          <ImageIcon
+            aria-hidden="true"
+            size={iconOnly ? 16 : 14}
+            strokeWidth={iconOnly ? 1.8 : 1.7}
+          />
+          {iconOnly ? null : <span>Create image…</span>}
         </OctantButton>
-      ) : (
+      ) : iconOnly && props.onOpenSettings === undefined ? null : (
         <OctantButton
           aria-label="Create image unavailable. Open Settings to add an image profile."
+          {...(iconOnly ? { className: "image-generation-action--unavailable" } : {})}
           disabled={props.onOpenSettings === undefined}
           onClick={props.onOpenSettings}
-          size="sm"
+          size={iconOnly ? "icon" : "sm"}
           title="Open Settings to add an image profile."
           type="button"
           variant="ghost"
         >
-          <ImageIcon aria-hidden="true" size={14} strokeWidth={1.7} />
-          <span>Create image…</span>
+          <ImageIcon
+            aria-hidden="true"
+            size={iconOnly ? 16 : 14}
+            strokeWidth={iconOnly ? 1.8 : 1.7}
+          />
+          {iconOnly ? null : <span>Create image…</span>}
         </OctantButton>
       )}
       <ImageGenerationSheet

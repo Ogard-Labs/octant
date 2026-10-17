@@ -2491,8 +2491,16 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and an app-managed `octant_create_image` tool invoke that job service
   through `/api/image/` when an enabled image profile exists (a dedicated
   image provider, or a custom image source named in Settings › Image
-  generation, which every renderer surface lists alongside them); the composers
-  carry no generation action. A custom source is a provider plus a model, so
+  generation, which every renderer surface lists alongside them). The
+  composer of an open Chat, Work, or Code thread also carries a **Create
+  image…** icon beside attach and dictate. It opens the same generation sheet,
+  scoped to that thread, so the result lands there as a thread artifact; it is
+  a person-driven action only, because the agent's image tool stays in Chat.
+  With no image profile ready the icon opens Settings › Image generation
+  instead, and it is absent where the host serves no image generation. Work and
+  Code keep their existing saves of a result: a Save click is the consent in
+  Work, and Code confirms. The start-screen and draft composers have no
+  thread to scope a job to and carry no such action. A custom source is a provider plus a model, so
   several sources on one provider share one profile: the profile view names the
   provider when it holds more than one source, and carries each source's own
   label by model, which names the source a generated image ran on.

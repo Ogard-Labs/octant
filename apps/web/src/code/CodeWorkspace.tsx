@@ -155,6 +155,7 @@ export interface CodeWorkspaceProps {
   readonly imageGenerationProfiles?: ReadonlyArray<ImageGenerationProfileView>;
   readonly browserAutomationClient?: BrowserAutomationClient;
   readonly onOpenSettings?: () => void;
+  readonly onOpenImageSettings?: () => void;
   readonly hostId?: HostId;
   readonly onOpenCanvas?: (card: CanvasThreadReferenceCard) => void;
   /** The Canvas cards the host lists for this thread, each time they are read. */
@@ -223,6 +224,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
           ? {}
           : { browserAutomationClient: props.browserAutomationClient })}
         {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+        {...(props.onOpenImageSettings === undefined
+          ? {}
+          : { onOpenImageSettings: props.onOpenImageSettings })}
         {...(props.onOpenSurface === undefined
           ? {}
           : { onCreatePullRequest: () => props.onOpenSurface?.("code-pr") })}

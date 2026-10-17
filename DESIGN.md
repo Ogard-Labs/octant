@@ -946,8 +946,8 @@ a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch.
 Every composer's control row is two groups with the row's free space between
 them, in one order on a new task and in the thread it becomes: what the person
-adds on the left (attach, dictation, a surface's own extras such as Web or Task
-actions), then how the turn runs on the right (model, access, the context
+adds on the left (attach, Create image in an open thread, dictation, a
+surface's own extras such as Web or Task actions), then how the turn runs on the right (model, access, the context
 meter, send). A control never changes sides between the two composers.
 All six composers use `ComposerAttachButton` for their file chooser. The visible
 button is the only tab stop; an unsupported model keeps the button reachable
@@ -957,8 +957,9 @@ one type scale. Access labels read "Plan · read-only"
 and "Ask for approvals" in both new and existing threads.
 The Code start screen's agent home (suggested prompts, Up next, Start something
 new, and Continue) is laid out in
-[Start screen: Code agent home](docs/design/start-screen.md#code-agent-home). The start screen has no image-generation control: generation lives on
-its own surface. Attaching an image is a composer affordance and is available here.
+[Start screen: Code agent home](docs/design/start-screen.md#code-agent-home). The start screen has no image-generation control: a job needs a thread to
+land in, and the Image generator surface serves everything else. Attaching an
+image is a composer affordance and is available here.
 The prompt itself is frameless:
 `OctantTextarea` drops the shadcn field recipe when it wears `.composer-input`.
 Composer-row selects drop the same field chrome. Feature CSS must not

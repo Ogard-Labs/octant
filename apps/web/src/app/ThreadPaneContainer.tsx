@@ -838,6 +838,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 })
               }
               onOpenProviderSettings={() => void openSettings({ section: "providers" })}
+              onOpenImageSettings={() => void openSettings({ section: "image-generation" })}
               onOpenSettings={() => void openSettings()}
             />
           </ComposerContextMeterProvider>
