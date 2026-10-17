@@ -2881,6 +2881,14 @@ describe("Claude driver probe", () => {
           supportedEffortLevels: ["low", "high"],
         },
         {
+          id: "default-current",
+          resolvedId: "claude-opus-5-5",
+          displayName: "Default (recommended)",
+          description: "Use the default model (currently Opus 5.5) · Most capable",
+          supportsEffort: true,
+          supportedEffortLevels: ["low", "high"],
+        },
+        {
           id: "sonnet",
           resolvedId: "claude-sonnet-5",
           displayName: "Sonnet",
@@ -2911,6 +2919,7 @@ describe("Claude driver probe", () => {
 
     expect(result.models.map((model) => [String(model.id), model.displayName])).toEqual([
       ["default", "Default (Sonnet 5)"],
+      ["default-current", "Default (Opus 5.5)"],
       ["sonnet", "Sonnet 5"],
       ["claude-fable-5-1[1m]", "Fable 5.1"],
       ["haiku", "Haiku"],
