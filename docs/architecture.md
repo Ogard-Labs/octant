@@ -6974,14 +6974,24 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   `bun run --cwd apps/desktop build`.
 - The server is composed by a root in `apps/server/src/server.ts` that calls
   the per-area wiring modules under `apps/server/src/wiring/` in a fixed
-  order. Each module declares the reach it has as a `Pick` of the upstream
-  modules' wiring types. A dependency a later module creates is passed as a
-  getter and read per use. A value one module assigns after another has
-  captured it, or writes at runtime (the remote gateway and its listener),
-  lives in a `late` cell the root creates, written at the original point and
-  read per call. This keeps the startup side-effect order identical to the
-  single closure it replaced, and each cell marks a dependency cycle still to
-  be removed.
+  order, and every module declares the reach it has as a `Pick` of the
+  upstream modules' wiring types. The order is the dependency order: a value
+  that depends on persistence and options alone is built first
+  (`foundations`, `harnessState`, `workRequestState`), an area that holds
+  per-window state registers its revocation with the authority, and an area
+  that reacts to another's change subscribes to it (GitHub sign-in, pull
+  request refreshes, harness questions, Chat's attachment purge and tools)
+  instead of holding it. The gateway and listener the remote area rebuilds at
+  runtime live in that area behind `remoteHost`.
+- Two forward references remain, and `bun run wiring:check` pins their
+  number so one can be removed but not added: `LateBindings` cells, which a
+  module assigns after another has captured them, and dependency getters
+  marked "Wired by wireX; read only after startup", which read a value a
+  later module creates per use. Each marks a cycle between areas that needs a
+  seam of its own to remove (the native harness against agent runs and
+  providers, Chat against Work, Canvas against Chat and Work, and the Code
+  runtime against the Code service); lower the ceiling in
+  `scripts/check-module-wiring.ts` in the change that removes one.
 - A headless Linux station: `octant server run`, then `octant web` (or
   `octant web --dev` for Vite), run as the OS user that started the host so
   it can read the bridge secret and mint the browser's launch link. Linux requires `bubblewrap` and Git 2.36 or

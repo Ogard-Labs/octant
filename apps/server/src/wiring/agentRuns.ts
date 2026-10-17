@@ -79,6 +79,7 @@ import { ExternalContentIngestionStore } from "../context/externalContentIngesti
 import { RuntimeOutsideContentMarks } from "../context/runtimeOutsideContentMark";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
+import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
 import { FOLLOW_UP_SUGGESTION_INSTRUCTIONS } from "../followUps/followUpSuggestionInstructions";
 import { turnDecisionInstructions } from "../turnDecisions/turnDecisionInstructions";
 import { parseFollowUpSuggestions } from "../followUps/followUpSuggestionParsing";
@@ -504,8 +505,6 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
     readonly chatService: () => ChatService;
     /** Wired by wireProviders; read only after startup. */
     readonly configuredDriverOptions: () => ConfiguredProviderDriverOptions;
-    /** Wired by wireHarness; read only after startup. */
-    readonly nativeHarnessRouterLive: () => NativeHarnessRouter;
   };
 
 export function wireAgentRuns(deps: AgentRunsDependencies) {
@@ -520,7 +519,6 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     isProjectPolicyTargetAllowed,
     nativeHarnessApprovals,
     nativeHarnessQuestions,
-    nativeHarnessRouterLive,
     nativeHarnessSessions,
     onAgentRunExecutionAccepted,
     options,
@@ -1110,6 +1108,20 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       isTargetAllowed: (project, instanceId, modelId) =>
         isProjectPolicyTargetAllowed(project, instanceId, modelId),
     });
+  const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
+    journal: persistence.journal,
+    uuid: randomUUID,
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    clock: () => new Date().toISOString(),
+  });
+  const nativeHarnessRouter = new NativeHarnessRouter({
+    store: nativeHarnessRoutingStore,
+    isReady: (candidate) =>
+      agentRunAdmission.providerReadiness.isReady({
+        providerInstanceId: String(candidate.providerInstanceId),
+        modelId: String(candidate.modelId),
+      }),
+  });
   // Every turn's `octant_agents` tool set binds to the calling thread: the
   // delegation and the cancellation authority it petitions are the same ones
   // the Agents dock uses, so a tool call and a click are the same request.
@@ -1128,7 +1140,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
       parentThreadId: input.parentThreadId,
       listTargets: () => agentRunEligibleTargets(input.projectId),
       routing: {
-        router: { resolve: (request) => nativeHarnessRouterLive().resolve(request) },
+        router: { resolve: (request) => nativeHarnessRouter.resolve(request) },
         recordDecision: (parent, decision) => {
           nativeHarnessSessions.ensure({
             threadId: input.parentThreadId,
@@ -1332,6 +1344,8 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     externalContentIngestionStore,
     managedWorktreeReceipts,
     nativeHarnessHooks,
+    nativeHarnessRouter,
+    nativeHarnessRoutingStore,
     runtimeOutsideContentMarks,
     sideTasks,
     spendCeiling,

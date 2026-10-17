@@ -2,7 +2,6 @@ import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { lstat } from "node:fs/promises";
 import {
-  type ChatThreadId,
   decodeAgentRunParentThreadId,
   decodeChatThreadId,
   decodeCodeOperationId,
@@ -85,10 +84,7 @@ import type { WorkRequestStateWiring } from "./workRequestState";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<
-    LateBindings,
-    "canvasAgentToolPort" | "purgeQueuedChatMessages" | "runningWorkTurnAccess"
-  >;
+  readonly late: Pick<LateBindings, "canvasAgentToolPort" | "runningWorkTurnAccess">;
 } & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
@@ -152,7 +148,10 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   > &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<HarnessWiring, "followUpCreation" | "nativeHarnessComposition" | "sideTaskFirstMessage"> &
-  Pick<ChatWiring, "chatService" | "imageJobService" | "threadMentionService"> &
+  Pick<
+    ChatWiring,
+    "chatService" | "guardChatAttachmentPurge" | "imageJobService" | "threadMentionService"
+  > &
   Pick<
     FoundationsWiring,
     "browserAuthority" | "providerRuntimeRegistry" | "workThreadProjection" | "workTurnProjection"
@@ -172,6 +171,7 @@ export function wireWork(deps: WorkDependencies) {
     canAccessCodeProject,
     chatAttachmentStore,
     chatService,
+    guardChatAttachmentPurge,
     codeAttachments,
     codeService,
     codeSessionAuthority,
@@ -970,16 +970,13 @@ export function wireWork(deps: WorkDependencies) {
         .revokeWindow(windowId)
         .catch(() => console.error("Queued message authority could not be revoked."));
     });
-    const purgeQueuedChatMessages: ((threadId: ChatThreadId) => Promise<void>) | undefined = async (
-      threadId,
-    ) => {
+    guardChatAttachmentPurge(async (threadId) => {
       const result = await threadMessageQueue.purgeThread(
         decodeThreadMessageQueueScope({ mode: "chat", threadId }),
       );
       if (result.status !== "released")
         throw new Error("Queued attachments could not be released.");
-    };
-    late.purgeQueuedChatMessages.current = purgeQueuedChatMessages;
+    });
     yield* Effect.promise(() => chatService.recoverPendingDeletions());
     // Accepted queue items retain images before draft recovery removes uploads
     // whose composer disappeared during the previous host process.

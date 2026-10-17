@@ -3,7 +3,6 @@ import {
   UNCLASSIFIED_STARTUP_FAILURE,
   withStartupFailureReason,
 } from "./startupFailureReason";
-import type { AndroidRpcEnvelope, AppleRpcEnvelope, WindowId } from "@octant/contracts";
 import { Effect, Scope } from "effect";
 import { ChatService } from "./chat/chatService";
 import { WorkFileListingService } from "./work/workFileListingService";
@@ -29,18 +28,9 @@ import {
   ThreadMentionService,
 } from "./chat/threadMentionService";
 import { FileMentionService } from "./fileMentionService";
-import { NativeHarnessRouter } from "./harness/nativeHarnessRouter";
-import { type AppleExecutionContext, AppleToolchainService } from "./apple/appleToolchainService";
-import {
-  type AndroidExecutionContext,
-  AndroidToolchainService,
-} from "./android/androidToolchainService";
 import { listHosts } from "@octant/domain";
 import { localHostDisplayName } from "./localHostDisplayName";
 import { isPrivateListenerFailureCode, type PrivateListenerFailureCode } from "./privateListener";
-import { createReplicaSyncStatusRouteHandler } from "./replica/replicaMembershipRoutes";
-import { createSyncedArtifactRouteHandler } from "./replica/syncedArtifactRoutes";
-import { createHostResourceRouteHandler } from "./hostResourceRoutes";
 import { type ConfiguredProviderDriverOptions, wireProviders } from "./wiring/providers";
 import {
   type OctantServer,
@@ -74,6 +64,7 @@ import { wireAutomation } from "./wiring/automation";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
+import { wireReplica } from "./wiring/replica";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
 
@@ -180,9 +171,7 @@ export function startOctantServer(
       },
       codeOperationRuntime: { current: options.codeOperationRuntime },
       runningWorkTurnAccess: { current: undefined },
-      zenAssistantTools: { current: undefined },
       canvasAgentToolPort: { current: undefined },
-      purgeQueuedChatMessages: { current: undefined },
     };
 
     const {
@@ -247,6 +236,8 @@ export function startOctantServer(
       externalContentIngestionStore,
       managedWorktreeReceipts,
       nativeHarnessHooks,
+      nativeHarnessRouter,
+      nativeHarnessRoutingStore,
       runtimeOutsideContentMarks,
       sideTasks,
       spendCeiling,
@@ -262,7 +253,6 @@ export function startOctantServer(
       codeSessionAuthority,
       configuredDriverOptions: (): ConfiguredProviderDriverOptions => configuredDriverOptions,
       isProjectPolicyTargetAllowed,
-      nativeHarnessRouterLive: (): NativeHarnessRouter => nativeHarnessRouterLive,
       nativeHarnessSessions,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
@@ -508,6 +498,25 @@ export function startOctantServer(
       windowAuthorityStore,
     });
     const {
+      androidToolchainRoutes,
+      androidToolchainService,
+      appleToolchainRoutes,
+      appleToolchainService,
+      recordAppleEvidence,
+      resolveAndroidContext,
+      resolveAppleContext,
+    } = yield* wireDevices({
+      androidInputGrants,
+      late,
+      codeSessionAuthority,
+      persistence,
+      projectService,
+      providerDataDirectory,
+      roots,
+      simulatorInputGrants,
+      windowAuthorityStore,
+    });
+    const {
       baseRouteCodeService,
       codeOperationRuntime,
       codeTurnDecisions,
@@ -525,8 +534,8 @@ export function startOctantServer(
       agentRunPersistence,
       agentsManagedToolsFor,
       androidInputGrants,
-      androidToolchainService: (): AndroidToolchainService => androidToolchainService,
-      appleToolchainService: (): AppleToolchainService => appleToolchainService,
+      androidToolchainService,
+      appleToolchainService,
       browserAuthority,
       canAccessCodeProject,
       codeApprovalStore,
@@ -567,30 +576,11 @@ export function startOctantServer(
       projectService,
       providerDataDirectory,
       providerRuntimeRegistry,
-      recordAppleEvidence: (): ((
-        evidence: import("@octant/contracts").AppleBuildEvidence,
-        startedAt: string,
-      ) => void) => recordAppleEvidence,
+      recordAppleEvidence,
       browserAutomationService,
       browserToolApprovalService,
-      resolveAndroidContext: (): ((
-        windowId: WindowId,
-        scope: {
-          readonly authority: import("@octant/contracts").ToolActionAuthority;
-          readonly threadId: import("@octant/contracts").CodeThreadId;
-          readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
-        },
-        envelope: AndroidRpcEnvelope,
-      ) => Promise<AndroidExecutionContext | undefined>) => resolveAndroidContext,
-      resolveAppleContext: (): ((
-        windowId: WindowId,
-        scope: {
-          readonly authority: import("@octant/contracts").ToolActionAuthority;
-          readonly threadId: import("@octant/contracts").CodeThreadId;
-          readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
-        },
-        envelope: AppleRpcEnvelope,
-      ) => Promise<AppleExecutionContext | undefined>) => resolveAppleContext,
+      resolveAndroidContext,
+      resolveAppleContext,
       resolveSelectedExtensions,
       roots,
       runtimeOutsideContentMarks,
@@ -601,25 +591,6 @@ export function startOctantServer(
       spendCeiling,
       threadMentionService: (): ThreadMentionService => threadMentionService,
       threadOutsideContentMarks,
-    });
-    const {
-      androidToolchainRoutes,
-      androidToolchainService,
-      appleToolchainRoutes,
-      appleToolchainService,
-      recordAppleEvidence,
-      resolveAndroidContext,
-      resolveAppleContext,
-    } = yield* wireDevices({
-      androidInputGrants,
-      codeOperationRuntime,
-      codeSessionAuthority,
-      persistence,
-      projectService,
-      providerDataDirectory,
-      roots,
-      simulatorInputGrants,
-      windowAuthorityStore,
     });
     const {
       codeCheckoutOpenRoutes,
@@ -649,7 +620,6 @@ export function startOctantServer(
       followUpSuggestionRoutes,
       nativeHarnessComposition,
       nativeHarnessEgressRoutes,
-      nativeHarnessRouterLive,
       nativeHarnessRoutingRoutes,
       nativeHarnessSessionRoutes,
       researchRouter,
@@ -666,6 +636,8 @@ export function startOctantServer(
       agentRunEligibleTargets,
       agentRunOrchestration,
       agentRunParentAuthority,
+      nativeHarnessRouter,
+      nativeHarnessRoutingStore,
       agentRunPersistence,
       codeOperationRuntime,
       codeSessionAuthority,
@@ -687,7 +659,9 @@ export function startOctantServer(
       chatRoutes,
       chatService,
       codeThreadMentionDirectory,
+      contributeChatTools,
       generatedImageStore,
+      guardChatAttachmentPurge,
       imageJobService,
       linkedThreadRoutes,
       navigatorAssistantBindings,
@@ -760,6 +734,7 @@ export function startOctantServer(
       workTurnService,
       workflowService,
     } = yield* wireWork({
+      guardChatAttachmentPurge,
       workTurnProjection,
       threadAwaitsHarnessApproval,
       workRequestRuntime,
@@ -833,7 +808,7 @@ export function startOctantServer(
     });
     const { navigatorAssistantRoutes, workTurnRoutes, zenBackgroundRoutes, zenRoutes, zenService } =
       wireZen({
-        late,
+        contributeChatTools,
         chatService,
         codeOperationRuntime,
         navigatorAssistantBindings,
@@ -984,6 +959,26 @@ export function startOctantServer(
       workThreadServiceWithWorkflows,
       workTurnProjection,
     });
+    const {
+      artifactSyncService,
+      replicaMembershipRoutes,
+      replicaMembershipService,
+      replicaStoreSettingsRoutes,
+      replicaSyncStatusRoutes,
+      syncedArtifactRoutes,
+    } = wireReplica({
+      artifactLibraryService,
+      canvasCommentService,
+      canvasService,
+      externalContentIngestionStore,
+      folderBrowseService,
+      options,
+      persistence,
+      replicaArtifactSync,
+      resolveCanvasWorkspace,
+      windowAuthorityStore,
+      workThreadProjection,
+    });
     const { authenticatedProductDispatch, dispatchMeasuredProductRoutes } = wireRoutes({
       agentMessageRoutes,
       agentProfileRoutes,
@@ -1016,8 +1011,6 @@ export function startOctantServer(
       githubRoutes,
       goalLoopRoutes,
       goalRoutes,
-      hostResourceRoutes: (): ReturnType<typeof createHostResourceRouteHandler> =>
-        hostResourceRoutes,
       imageRoutes,
       integrationRoutes,
       latencyStats,
@@ -1041,8 +1034,7 @@ export function startOctantServer(
       providerRoutes,
       providerUsageLimitsRoutes,
       remoteServerGrantLocalRoutes,
-      replicaSyncStatusRoutes: (): ReturnType<typeof createReplicaSyncStatusRouteHandler> =>
-        replicaSyncStatusRoutes,
+      replicaSyncStatusRoutes,
       scaffoldRoutes,
       shellRoutes,
       shipRoutes,
@@ -1050,8 +1042,9 @@ export function startOctantServer(
       sideTaskRoutes,
       speechRoutes,
       spendCeilingRoutes,
-      syncedArtifactRoutes: (): ReturnType<typeof createSyncedArtifactRouteHandler> =>
-        syncedArtifactRoutes,
+      syncedArtifactRoutes,
+      persistence,
+      windowAuthorityStore,
       themeRoutes,
       threadCheckpointRoutes,
       threadExportRoutes,
@@ -1074,37 +1067,27 @@ export function startOctantServer(
       zenRoutes,
     });
     const {
-      artifactSyncService,
       composeHostDiagnostics,
       externalContentRoutes,
       hostControlRoutes,
-      hostResourceRoutes,
       localDeviceAdministrationRoutes,
       privateListenerAdministrationRoutes,
       privateListenerController,
       privateListenerSetting,
       providerCredentialRoutes,
       remoteHost,
-      replicaMembershipRoutes,
-      replicaMembershipService,
-      replicaStoreSettingsRoutes,
-      replicaSyncStatusRoutes,
-      syncedArtifactRoutes,
     } = wireRemote({
+      threadExportService,
       agentMessageService,
-      artifactLibraryService,
       authenticatedProductDispatch,
       browserCaptureStore,
-      canvasCommentService,
       canvasRoutes,
-      canvasService,
       chatAttachmentStore,
       codeAttachments,
       codeProjectAccess,
       credentialBroker,
       credentialResolver,
       externalContentIngestionStore,
-      folderBrowseService,
       generatedImageStore,
       options,
       persistence,
@@ -1113,11 +1096,8 @@ export function startOctantServer(
       providerService,
       pushNotificationTokenStore,
       remoteServerGrants,
-      replicaArtifactSync,
-      resolveCanvasWorkspace,
       serve,
       startedAt,
-      threadExportService,
       threadMessageQueue,
       toolEgressRules,
       version,

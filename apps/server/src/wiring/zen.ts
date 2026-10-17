@@ -15,7 +15,6 @@ import { ZenThreadCatalog } from "../zen/zenThreadCatalog";
 import { localHostDisplayName } from "../localHostDisplayName";
 import { ZenAssistantTools } from "../zen/zenAssistantTools";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { UsageWiring } from "./usage";
@@ -27,25 +26,23 @@ import type { CodeToolingWiring } from "./codeTooling";
 import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 
-export type ZenDependencies = Pick<ServerStart, "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "zenAssistantTools">;
-} & Pick<AuthorityWiring, "windowAuthorityStore"> &
+export type ZenDependencies = Pick<ServerStart, "persistence"> &
+  Pick<AuthorityWiring, "windowAuthorityStore"> &
   Pick<UsageWiring, "zenEventStore"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<ProvidersWiring, "providerDataDirectory"> &
   Pick<BrowserWiring, "windowHoldsProject"> &
   Pick<CodeRuntimeWiring, "codeOperationRuntime"> &
   Pick<CodeToolingWiring, "projectTerminals"> &
-  Pick<ChatWiring, "chatService" | "navigatorAssistantBindings"> &
+  Pick<ChatWiring, "chatService" | "contributeChatTools" | "navigatorAssistantBindings"> &
   Pick<WorkWiring, "workTurnService"> &
   Pick<FoundationsWiring, "providerRuntimeRegistry" | "workThreadProjection">;
 
 export function wireZen(deps: ZenDependencies) {
   const {
-    late,
     chatService,
     codeOperationRuntime,
+    contributeChatTools,
     navigatorAssistantBindings,
     persistence,
     projectService,
@@ -189,7 +186,7 @@ export function wireZen(deps: ZenDependencies) {
     },
   });
   const zenAssistantTools = new ZenAssistantTools({ zenService });
-  late.zenAssistantTools.current = zenAssistantTools;
+  contributeChatTools((windowId, thread) => zenAssistantTools.forThread(windowId, thread));
   const zenRoutes = createZenRouteHandler({ zenService, windowAuthorityStore });
   // Navigator is the production consumer of the `navigatorAssistant`
   // settings section: the conversation runs on the configured default model

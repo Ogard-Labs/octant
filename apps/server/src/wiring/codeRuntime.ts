@@ -2,8 +2,6 @@ import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
-  type AndroidRpcEnvelope,
-  type AppleRpcEnvelope,
   decodeCodeEvidenceContentId,
   decodeCodeFailure,
   decodeCodeRelativePath,
@@ -12,7 +10,6 @@ import {
   decodeThreadWorkingDirectory,
   LOCAL_TOOL_HOST_ID,
   THREAD_RETENTION_EVENT_NAMES,
-  type WindowId,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import { createProductFeedbackTurnPort } from "../browser/productFeedbackTurnPort";
@@ -60,12 +57,7 @@ import { createSiblingThreadTools } from "../siblingThreads/siblingThreadTools";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { CodeTurnDecisions } from "../turnDecisions/codeTurnDecisions";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
-import { type AppleExecutionContext, AppleToolchainService } from "../apple/appleToolchainService";
-import {
-  type AndroidExecutionContext,
-  AndroidToolchainService,
-  isReplayedAndroidEvidence,
-} from "../android/androidToolchainService";
+import { isReplayedAndroidEvidence } from "../android/androidToolchainService";
 import { isNativeHarnessDriverKind } from "@octant/domain";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { type CodeWiring, stableCodeFileId } from "./code";
@@ -80,6 +72,7 @@ import type { ComputerUseWiring } from "./computerUse";
 import type { WorkspaceWiring } from "./workspace";
 import type { WorkRequestStateWiring } from "./workRequestState";
 import type { HarnessStateWiring } from "./harnessState";
+import type { DevicesWiring } from "./devices";
 import type { BrowserWiring } from "./browser";
 
 function withCodeOperationRuntime(
@@ -251,6 +244,14 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<WorkRequestStateWiring, "workRequestRuntime"> &
   Pick<HarnessStateWiring, "onHarnessQuestionAsked" | "onHarnessQuestionSettled"> &
   Pick<
+    DevicesWiring,
+    | "androidToolchainService"
+    | "appleToolchainService"
+    | "recordAppleEvidence"
+    | "resolveAndroidContext"
+    | "resolveAppleContext"
+  > &
+  Pick<
     CodeWiring,
     | "canAccessCodeProject"
     | "codeAttachments"
@@ -278,39 +279,10 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     BrowserWiring,
     "browserAutomationService" | "browserToolApprovalService" | "productFeedbackService"
   > & {
-    /** Wired by wireDevices; read only after startup. */
-    readonly androidToolchainService: () => AndroidToolchainService;
-    /** Wired by wireDevices; read only after startup. */
-    readonly appleToolchainService: () => AppleToolchainService;
     /** Wired by wireChat; read only after startup. */
     readonly codeThreadMentionDirectory: () => ReturnType<typeof createCodeThreadMentionDirectory>;
     /** Wired by wireWork; read only after startup. */
     readonly fileMentionService: () => FileMentionService;
-    /** Wired by wireDevices; read only after startup. */
-    readonly recordAppleEvidence: () => (
-      evidence: import("@octant/contracts").AppleBuildEvidence,
-      startedAt: string,
-    ) => void;
-    /** Wired by wireDevices; read only after startup. */
-    readonly resolveAndroidContext: () => (
-      windowId: WindowId,
-      scope: {
-        readonly authority: import("@octant/contracts").ToolActionAuthority;
-        readonly threadId: import("@octant/contracts").CodeThreadId;
-        readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
-      },
-      envelope: AndroidRpcEnvelope,
-    ) => Promise<AndroidExecutionContext | undefined>;
-    /** Wired by wireDevices; read only after startup. */
-    readonly resolveAppleContext: () => (
-      windowId: WindowId,
-      scope: {
-        readonly authority: import("@octant/contracts").ToolActionAuthority;
-        readonly threadId: import("@octant/contracts").CodeThreadId;
-        readonly checkoutId: import("@octant/contracts").CodeCheckoutId;
-      },
-      envelope: AppleRpcEnvelope,
-    ) => Promise<AppleExecutionContext | undefined>;
     /** Wired by wireChat; read only after startup. */
     readonly threadMentionService: () => ThreadMentionService;
   } & Pick<
@@ -696,7 +668,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             extension: { kind: "core" as const },
           }),
           discover: async (windowId, request) => {
-            const context = await resolveAppleContext()(
+            const context = await resolveAppleContext(
               windowId,
               {
                 authority: request.authority,
@@ -706,11 +678,11 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               { kind: "apple-discovery-request", request },
             );
             if (context === undefined) return undefined;
-            return await appleToolchainService().discover(request, context);
+            return await appleToolchainService.discover(request, context);
           },
           execute: async (windowId, request) => {
             const startedAt = new Date().toISOString();
-            const context = await resolveAppleContext()(
+            const context = await resolveAppleContext(
               windowId,
               {
                 authority: request.authority,
@@ -720,45 +692,42 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               { kind: "apple-action-request", request },
             );
             if (context === undefined) return undefined;
-            const evidence = await appleToolchainService().execute(request, context);
+            const evidence = await appleToolchainService.execute(request, context);
             // An agent's shutdown closes a Simulator to every thread, and its
             // input keeps a live grant open, the same as the pane's.
             simulatorInputGrants.settle(String(windowId), request, evidence, context);
-            await recordAppleEvidence()(evidence, startedAt);
+            await recordAppleEvidence(evidence, startedAt);
             return evidence;
           },
           readScreenshot: async (windowId, scope, reference) => {
-            const context = await resolveAppleContext()(windowId, scope, {
+            const context = await resolveAppleContext(windowId, scope, {
               kind: "apple-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
             if (context === undefined) return undefined;
-            const artifact = await appleToolchainService().readScreenshotArtifact(
-              reference,
-              context,
-            );
+            const artifact = await appleToolchainService.readScreenshotArtifact(reference, context);
             return artifact.kind === "found" ? artifact.bytes : undefined;
           },
           snapshot: async (windowId, scope) => {
-            const context = await resolveAppleContext()(windowId, scope, {
+            const context = await resolveAppleContext(windowId, scope, {
               kind: "apple-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
-            return context === undefined ? undefined : appleToolchainService().snapshot(context);
+            return context === undefined ? undefined : appleToolchainService.snapshot(context);
           },
           requestPaneOpen: async (windowId, scope, simulatorId) => {
-            const context = await resolveAppleContext()(windowId, scope, {
+            const context = await resolveAppleContext(windowId, scope, {
               kind: "apple-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
             if (context === undefined) return undefined;
-            return appleToolchainService().requestPaneOpen(context, simulatorId);
+            return appleToolchainService.requestPaneOpen(context, simulatorId);
           },
           inputGrantIsOpen: (windowId, threadId, simulatorId) =>
             simulatorInputGrants.isOpen({
@@ -776,7 +745,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             extension: { kind: "core" as const },
           }),
           discover: async (windowId, request) => {
-            const context = await resolveAndroidContext()(
+            const context = await resolveAndroidContext(
               windowId,
               {
                 authority: request.authority,
@@ -786,10 +755,10 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               { kind: "android-discovery-request", request },
             );
             if (context === undefined) return undefined;
-            return await androidToolchainService().discover(request, context);
+            return await androidToolchainService.discover(request, context);
           },
           execute: async (windowId, request) => {
-            const context = await resolveAndroidContext()(
+            const context = await resolveAndroidContext(
               windowId,
               {
                 authority: request.authority,
@@ -799,7 +768,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
               { kind: "android-action-request", request },
             );
             if (context === undefined) return undefined;
-            const evidence = await androidToolchainService().execute(request, context);
+            const evidence = await androidToolchainService.execute(request, context);
             if (!isReplayedAndroidEvidence(evidence)) {
               androidInputGrants.settle(
                 String(windowId),
@@ -811,37 +780,37 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
             return evidence;
           },
           readScreenshot: async (windowId, scope, reference) => {
-            const context = await resolveAndroidContext()(windowId, scope, {
+            const context = await resolveAndroidContext(windowId, scope, {
               kind: "android-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
             if (context === undefined) return undefined;
-            const artifact = await androidToolchainService().readScreenshotArtifact(
+            const artifact = await androidToolchainService.readScreenshotArtifact(
               reference,
               context,
             );
             return artifact.kind === "found" ? artifact.bytes : undefined;
           },
           snapshot: async (windowId, scope) => {
-            const context = await resolveAndroidContext()(windowId, scope, {
+            const context = await resolveAndroidContext(windowId, scope, {
               kind: "android-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
-            return context === undefined ? undefined : androidToolchainService().snapshot(context);
+            return context === undefined ? undefined : androidToolchainService.snapshot(context);
           },
           requestPaneOpen: async (windowId, scope, emulatorId) => {
-            const context = await resolveAndroidContext()(windowId, scope, {
+            const context = await resolveAndroidContext(windowId, scope, {
               kind: "android-snapshot-request",
               authority: scope.authority,
               threadId: scope.threadId,
               checkoutId: scope.checkoutId,
             });
             if (context === undefined) return undefined;
-            return androidToolchainService().requestPaneOpen(context, emulatorId);
+            return androidToolchainService.requestPaneOpen(context, emulatorId);
           },
           inputGrantIsOpen: (windowId, threadId, emulatorId) =>
             androidInputGrants.isOpen({

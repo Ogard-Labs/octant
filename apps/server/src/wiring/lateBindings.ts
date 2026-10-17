@@ -1,41 +1,46 @@
-import type { ChatThreadId, WorkAccess } from "@octant/contracts";
+import type { WorkAccess } from "@octant/contracts";
 import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
 import type { AgentRunRouteDependencies } from "../agentRun/agentRunRoutes";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
-import { ZenAssistantTools } from "../zen/zenAssistantTools";
 import type { CanvasAgentToolPort } from "../canvas/canvasAgentTools";
 
 /**
  * Values one wiring module assigns after another module has already captured
  * them in a closure. Each is a cell the composition root creates before any
- * wiring runs; the code that used to assign the `let` writes `current` at the
- * same point, during startup or later at runtime, and every reader
- * dereferences it per call, as the captured `let` was read before.
+ * wiring runs; the owning module writes `current` when it builds the value
+ * and every reader dereferences it per call.
+ *
+ * Every cell here is a dependency cycle between two areas that has no cheap
+ * seam yet. `scripts/check-module-wiring.ts` pins their number, so one can be
+ * removed but not added. A value that only needs building earlier, or an area
+ * that only reacts to another's change, does not belong here: build it first
+ * (`foundations`, `harnessState`, `workRequestState`) or subscribe to it.
  */
 export interface LateBindings {
-  // The native harness is composed once the research router and plan
-  // service exist; every consumer here reads these per turn or per request,
-  // long after boot, never at construction.
+  // Agent runs, providers, and Code read the native harness through hooks the
+  // agent-run area owns, while the harness is composed from that area's
+  // admission and orchestration and from the provider driver options, which
+  // call back into the lead fallback.
   readonly nativeHarnessComposition: { current: NativeHarnessComposition | undefined };
   readonly nativeHarnessObserver: { current: NativeHarnessTurnObserver | undefined };
   readonly nativeHarnessLeadFallback: { current: NativeHarnessLeadFallbackService | undefined };
+  // Agent-run routes snapshot a parent forest as a Canvas, and Canvas is built
+  // from Chat and Work services that follow the agent-run area.
   readonly snapshotCanvasImpl: {
     current: NonNullable<AgentRunRouteDependencies["snapshotCanvas"]>;
   };
+  // The Code service and the device workbench ask the Code runtime for fork
+  // points and approval checks, and the runtime needs the Code service to
+  // note the provider turns it launches.
   readonly codeOperationRuntime: { current: CodeOperationRuntime | undefined };
-  // The Chat, Work, and Code services a follow-up creates through are
-  // composed after these routes; the creator is bound once they exist.
-  // The Work turn service is built further down; the harness asks it for a
-  // running turn's access only once turns run.
+  // The harness asks the Work turn service for a running turn's access, and
+  // the Work turn service takes the harness composition.
   readonly runningWorkTurnAccess: {
     current: ((threadId: string) => WorkAccess | undefined) | undefined;
   };
-  readonly zenAssistantTools: { current: ZenAssistantTools | undefined };
-  // Composed after the Canvas service exists, the same way Zen's tools are.
+  // Chat, Work, Code, and agent runs build Canvas tools from a port the Canvas
+  // service backs, and Canvas is built from Chat and Work services.
   readonly canvasAgentToolPort: { current: CanvasAgentToolPort | undefined };
-  readonly purgeQueuedChatMessages: {
-    current: ((threadId: ChatThreadId) => Promise<void>) | undefined;
-  };
 }

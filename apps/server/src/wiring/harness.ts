@@ -17,7 +17,6 @@ import { ThreadWorkService } from "../chat/threadWorkService";
 import { GoalLoopService } from "../goal/goalLoopService";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { nativeHarnessRecoveryBlockers } from "../harness/nativeHarnessRecovery";
-import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "../harness/nativeHarnessAuthority";
 import {
@@ -28,8 +27,6 @@ import { createNativeHarnessSecondOpinionPort } from "../harness/nativeHarnessSe
 import { createNativeHarnessShell } from "../harness/nativeHarnessShell";
 import { createNativeHarnessDelegatePort } from "../harness/nativeHarnessDelegatePort";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
-import { NativeHarnessRouter } from "../harness/nativeHarnessRouter";
-import { NativeHarnessRoutingStore } from "../harness/nativeHarnessRoutingStore";
 import { createNativeHarnessRoutingRouteHandler } from "../harness/nativeHarnessRoutingRoutes";
 import {
   createFollowUp,
@@ -77,6 +74,8 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> & {
   Pick<
     AgentRunsWiring,
     | "agentRunAdmission"
+    | "nativeHarnessRouter"
+    | "nativeHarnessRoutingStore"
     | "agentRunEligibleTargets"
     | "agentRunOrchestration"
     | "externalContentIngestionStore"
@@ -119,6 +118,8 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessApprovals,
     nativeHarnessEndpoints,
     nativeHarnessQuestions,
+    nativeHarnessRouter,
+    nativeHarnessRoutingStore,
     nativeHarnessSessions,
     persistence,
     providerDataDirectory,
@@ -213,21 +214,6 @@ export function wireHarness(deps: HarnessDependencies) {
               launchId: () => decodeEgressLaunchId(randomUUID()),
             },
           });
-  const nativeHarnessRoutingStore = new NativeHarnessRoutingStore({
-    journal: persistence.journal,
-    uuid: randomUUID,
-    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-    clock: () => new Date().toISOString(),
-  });
-  const nativeHarnessRouter = new NativeHarnessRouter({
-    store: nativeHarnessRoutingStore,
-    isReady: (candidate) =>
-      agentRunAdmission.providerReadiness.isReady({
-        providerInstanceId: String(candidate.providerInstanceId),
-        modelId: String(candidate.modelId),
-      }),
-  });
-  const nativeHarnessRouterLive = nativeHarnessRouter;
   const nativeHarnessRoutingRoutes = createNativeHarnessRoutingRouteHandler({
     windowAuthorityStore,
     store: nativeHarnessRoutingStore,
@@ -371,7 +357,7 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   const nativeHarnessObserver = new NativeHarnessTurnObserver({
     sessions: nativeHarnessSessions,
-    router: nativeHarnessRouterLive,
+    router: nativeHarnessRouter,
     isHarnessProvider: (providerInstanceId) => {
       const instance = persistence.readProviderInstance(providerInstanceId);
       return instance !== undefined && isNativeHarnessDriverKind(instance.driverKind);
@@ -394,7 +380,7 @@ export function wireHarness(deps: HarnessDependencies) {
   });
   late.nativeHarnessObserver.current = nativeHarnessObserver;
   const nativeHarnessLeadFallback = new NativeHarnessLeadFallbackService({
-    router: nativeHarnessRouterLive,
+    router: nativeHarnessRouter,
     sessions: nativeHarnessSessions,
     hostId: String(LOCAL_HOST_ID),
     // Building the driver is what registers its endpoint, so a fallback onto an
@@ -421,7 +407,7 @@ export function wireHarness(deps: HarnessDependencies) {
     secondOpinion: (scope) =>
       createNativeHarnessSecondOpinionPort(
         {
-          router: nativeHarnessRouterLive,
+          router: nativeHarnessRouter,
           sessions: nativeHarnessSessions,
           resolveDriver: (providerInstanceId) => {
             const instance = persistence.readProviderInstance(providerInstanceId);
@@ -447,7 +433,7 @@ export function wireHarness(deps: HarnessDependencies) {
           isTainted: () =>
             readThreadExternalContentTaint(persistence.connection, scope.parentThreadId)
               .externalContentIngested,
-          router: nativeHarnessRouterLive,
+          router: nativeHarnessRouter,
           sessions: nativeHarnessSessions,
           uuid: randomUUID,
         },
@@ -523,7 +509,6 @@ export function wireHarness(deps: HarnessDependencies) {
     followUpSuggestionRoutes,
     nativeHarnessComposition,
     nativeHarnessEgressRoutes,
-    nativeHarnessRouterLive,
     nativeHarnessRoutingRoutes,
     nativeHarnessSessionRoutes,
     researchRouter,
