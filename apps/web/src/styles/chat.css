@@ -175,6 +175,14 @@
   line-height: 1.45;
 }
 
+/* What a provider switch or a branch handed to the new session, under the
+   divider that marks it. */
+.chat-transcript__handoff {
+  margin: 0 0 var(--oct-space-2);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
 /* The row under a detached range: Load later beside Jump to latest. One
    height in every state, like the Load earlier row, since a row that changed
    size under the reader would move what they were reading. */

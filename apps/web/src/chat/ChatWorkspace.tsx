@@ -38,6 +38,7 @@ import { useThreadMessageQueue } from "../messageQueue/useThreadMessageQueue";
 import { ThreadMessageQueue } from "../messageQueue/ThreadMessageQueue";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { ComposerPoolControl } from "../providers/ComposerPoolControl";
+import { pendingThreadHandoffNotice } from "../providers/conversationHandoff";
 import {
   ChatComposer,
   type ChatComposerAttachmentCapability,
@@ -202,6 +203,22 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           );
         }).length;
   const chatStarted = view !== undefined && view.turns.some((turn) => turn.attempts.length > 0);
+  // The next message starts a new session with the conversation handed over as
+  // text when the selected provider keeps its own session and the conversation
+  // so far is not in one of its sessions; the person hears that before sending.
+  const latestTurn = view?.turns.at(-1);
+  const handoffNotice =
+    view === undefined || props.providerGroups === undefined
+      ? undefined
+      : pendingThreadHandoffNotice({
+          groups: props.providerGroups,
+          selected: view.thread,
+          latest: latestTurn?.attempts.at(-1),
+          branchWithoutSession:
+            view.thread.branchedFrom !== undefined &&
+            latestTurn !== undefined &&
+            latestTurn.sequence <= view.thread.branchedFrom.carriedTurnCount,
+        });
   const [canvasPanelOpen, setCanvasPanelOpen] = useState(false);
   const [browserApprovals, setBrowserApprovals] = useState<ReadonlyArray<BrowserToolApproval>>([]);
   const [toolApprovalBusy, setToolApprovalBusy] = useState(false);
@@ -1394,8 +1411,8 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
           {...(props.providerGroups === undefined
             ? {}
             : {
-                // Any earlier attempt ties the thread to its provider kind: the
-                // host checks the latest attempt whatever its outcome. See
+                // Any earlier attempt ties the thread to its provider's
+                // session, if the provider keeps one. See
                 // startedConversationPickerGroups for which moves stay open.
                 providerGroups: chatStarted
                   ? startedConversationPickerGroups(props.providerGroups, {
@@ -1625,11 +1642,13 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                         attachmentStatus.kind === "failed" ? attachmentStatus.message : sendNotice,
                         props.controller.draftStagedDropped,
                         props.controller.draftPersistError,
+                        handoffNotice,
                       ),
                     }
                   : composerNoticeProps(
                       props.controller.draftStagedDropped,
                       props.controller.draftPersistError,
+                      handoffNotice,
                     )
             : { sendDisabledReason: "Choose an available provider and model before sending." })}
         />
@@ -1649,10 +1668,12 @@ function composeComposerNotice(
   message: string | undefined,
   stagedDropped: boolean | undefined,
   persistError: string | undefined,
+  handoffNotice?: string,
 ): string {
   const parts: string[] = [];
   if (stagedDropped === true) parts.push(COMPOSER_STAGED_DROPPED_NOTE);
   if (persistError !== undefined) parts.push(persistError);
+  if (handoffNotice !== undefined) parts.push(handoffNotice);
   if (message !== undefined && message.trim() !== "") parts.push(message);
   return parts.join(" ");
 }
@@ -1660,8 +1681,14 @@ function composeComposerNotice(
 function composerNoticeProps(
   stagedDropped: boolean | undefined,
   persistError: string | undefined,
+  handoffNotice?: string,
 ): { readonly statusMessage?: string } {
-  const statusMessage = composeComposerNotice(undefined, stagedDropped, persistError);
+  const statusMessage = composeComposerNotice(
+    undefined,
+    stagedDropped,
+    persistError,
+    handoffNotice,
+  );
   return statusMessage.length === 0 ? {} : { statusMessage };
 }
 
