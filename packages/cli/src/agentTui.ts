@@ -4,6 +4,16 @@ import type {
   OctantMode,
 } from "@octant/contracts";
 import {
+  childDetailLines,
+  childListLines,
+  childQuestion,
+  listAgentChildren,
+  pickAgentChild,
+  readAgentChild,
+  replyToAgentChild,
+  type AgentChild,
+} from "./agentChildren";
+import {
   agentThreadPort,
   attachAgentThread,
   isAgentSnapshotRunning,
@@ -172,7 +182,10 @@ class AgentScreen {
   readonly #wake = new AgentWake();
   /** Ends the live feed of the thread on screen; a switch starts a new one. */
   #feed = new AbortController();
-  #listing: "threads" | "models" | undefined;
+  #listing: "threads" | "models" | "agents" | "agent" | undefined;
+  /** The helper agents `/agents` last listed, and the lines of the one `/agent N` opened. */
+  #children: ReadonlyArray<AgentChild> = [];
+  #childLines: ReadonlyArray<string> = [];
   #suggestions:
     | { readonly kind: "file" | "thread"; readonly items: ReadonlyArray<string> }
     | undefined;
@@ -647,6 +660,15 @@ class AgentScreen {
       });
       this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No threads yet." : lines.join("\n"))}\n${dim(fg(p.muted)("/open N switches to one."))}`;
       this.#panel.visible = true;
+    } else if (this.#listing === "agents" || this.#listing === "agent") {
+      const listed = this.#listing === "agents";
+      this.#panel.title = listed ? " Helper agents " : " Helper agent ";
+      this.#panel.borderColor = p.border;
+      const lines = listed
+        ? childListLines(this.#children, Date.now(), this.#childrenAsking(this.#session))
+        : this.#childLines;
+      this.#panelText.content = t`${fg(p.textSecondary)(lines.join("\n"))}\n${dim(fg(p.muted)(listed ? "/agent N shows one; /agent N <message> replies." : "/agents lists them again."))}`;
+      this.#panel.visible = true;
     } else if (this.#listing === "models") {
       this.#panel.title = " Models ";
       this.#panel.borderColor = p.border;
@@ -673,6 +695,7 @@ class AgentScreen {
           "/side text   ask Side Chat, which only reads  /back  return to the thread",
           "/steer text  note for the lead's next step    /goal · /goal revise text",
           "/fork        fork at the last reply           /checkpoint · /checkpoints · /restore N",
+          "/agents      list the helper agents           /agent N shows one · /agent N text replies",
           "drag + Ctrl+C  copy selected text           /copy   copy the last reply",
           "y · a · n    answer an approval            1..9 or text  answer a question",
         ].join("\n"),
@@ -1048,6 +1071,16 @@ class AgentScreen {
       this.#draw();
       return;
     }
+    if (text === "/agents") {
+      await this.#loadChildren();
+      this.#listing = this.#listing === "agents" ? undefined : "agents";
+      this.#draw();
+      return;
+    }
+    if (text === "/agent" || text.startsWith("/agent ")) {
+      await this.#agent(text.slice("/agent".length).trim());
+      return;
+    }
     if (text.startsWith("/open")) {
       const index = Number(text.slice("/open".length).trim()) - 1;
       const target = this.#threads[index];
@@ -1376,6 +1409,65 @@ class AgentScreen {
       ),
       "restored thread",
     );
+  }
+
+  async #loadChildren(): Promise<void> {
+    const listed = await listAgentChildren(this.#input.session, this.#threadId);
+    if (listed.kind === "refused") this.#note = listed.message;
+    else this.#children = listed.children;
+  }
+
+  /** The helpers whose question is waiting on the person, by run id. */
+  #childrenAsking(session: NativeHarnessSessionView | null | undefined): ReadonlySet<string> {
+    return new Set(
+      this.#children
+        .filter((child) => childQuestion(session, child) !== undefined)
+        .map((child) => String(child.runId)),
+    );
+  }
+
+  /** `/agent N` opens one helper; `/agent N <message>` steers, follows up on, or answers it. */
+  async #agent(argument: string): Promise<void> {
+    if (this.#home !== undefined) {
+      this.#note = "Side Chat only reads; /back to work with the thread's helpers.";
+      this.#draw();
+      return;
+    }
+    const [reference = ""] = argument.split(/\s+/);
+    const message = argument.slice(reference.length).trim();
+    await this.#loadChildren();
+    const child = pickAgentChild(this.#children, reference);
+    if (child === undefined) {
+      this.#note = "Pick a helper by number from /agents: /agent 1";
+      this.#draw();
+      return;
+    }
+    const session = this.#session ?? null;
+    if (message.length > 0) {
+      const replied = await replyToAgentChild(
+        this.#input.session,
+        this.#threadId,
+        child,
+        message,
+        childQuestion(session, child),
+      );
+      this.#note =
+        replied.kind === "refused"
+          ? replied.message
+          : replied.how === "answered"
+            ? "Answered."
+            : "Sent to the helper.";
+      await this.refresh();
+    }
+    const read = await readAgentChild(this.#input.session, child);
+    this.#childLines = childDetailLines(
+      child,
+      read,
+      childQuestion(this.#session ?? null, child),
+      Date.now(),
+    );
+    this.#listing = "agent";
+    this.#draw();
   }
 
   /** Shows the goal, or revises its objective against the version just read. */
