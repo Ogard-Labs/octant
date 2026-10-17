@@ -1167,7 +1167,8 @@ start: `createInMemoryCapacityPort` counts reservations per thread and per
 host, reads the limits on every reservation, and reports which limit is full;
 the capacity queue skips a waiter whose own thread is full so another thread's
 waiter can take a freed slot. A run waiting on dependencies or a slot holds no
-slot. Admission separately caps unfinished children (any active status,
+slot, and neither does one waiting for the provider to take another request
+([Provider capacity](#context-and-usage-accounting)). Admission separately caps unfinished children (any active status,
 waiting included) at 16 per parent and 32 per host as the runaway guard.
 
 Threads form one real hierarchy (Project → thread → linked or child thread).
@@ -2748,15 +2749,69 @@ capacity answers: the turn fails or parks with its own cause and the next turn
 runs. A turn the scheduler refuses ends Interrupted with `capacity-unavailable`
 and a sentence that names what is full and, when known, how long until it frees
 ("The provider rate-limited this endpoint. Try this turn again in 15 seconds.").
-A managed child the scheduler refuses ends the same way: Interrupted, with the
-`capacity-unavailable` reason and that sentence, never as a provider process
-death, and Retry starts it again once a slot frees. Only a Chat lead holds a
-slot while it works, so a Chat helper counts against the two-request limit
-together with its lead and any other Chat turn, such as one waiting for a
-person's answer; a Work or Code lead holds none. Every typed start refusal of a
-child (capacity, spend ceiling, workspace, provider, context) is recorded as
-Interrupted under its own reason for the same cause: a process death is
-recorded only for a failure nothing typed.
+A managed child the scheduler refuses for a limit that frees, whether slots in
+use, a request or token allowance, or a rate limit, waits instead of ending. It
+is recorded as Waiting under "Waiting for a free request slot", which the Agents
+tab, the terminal and the lead's `delegate`, `status` and `wait` results show,
+and it holds no run slot, no provider slot and no session while it waits. The
+host recognises a waiting helper by its own record of the wait, never by that
+text, so a provider's own `waiting` message that reads the same is not one.
+
+A helper does not queue inside the scheduler: a queued helper would stand ahead
+of every later turn on its provider and refuse them all as waiting on earlier
+work, so a helper nobody is watching would hold up the person's own chat.
+Person-started turns keep a head start instead, not strict precedence. A Chat
+turn is refused at once when the provider is full and never waits, so a helper
+does not take a freed slot straight away: after any turn, helper or compaction
+frees one on a provider, that provider's helpers leave it alone for two
+seconds, which protects a follow-up or a quick reply, and only ask after that if
+nobody took it. A person who replies later can still find every slot taken by
+a helper and get `capacity-unavailable`. Another provider's helpers are not held
+back by it. They also ask every five seconds while any helper waits, because a
+rate limit frees by the clock, oldest first, and the five-minute limit is
+checked on that round whatever has freed meanwhile. A helper's own failed try gives its
+slot back without counting as a freed one, so a start that keeps failing is
+retried on that five-second round and never in a loop. The slot is asked for before the child is marked
+Starting, so a try that still finds the provider full journals nothing. The spend reservation that try
+makes first is dropped without recording a turn
+(`SpendCeilingService.abandon`, which every child that never starts uses), so
+tries never use up the parent's or Project's turn budget. A person can cancel
+a waiting helper like any other. A helper whose parent session is paused or
+needs a check after a restart keeps waiting until the person lets it go.
+
+Nothing the helper was admitted under is trusted when its slot frees. The
+host reads the parent again, with no request to carry it: if the helper-agent
+setting is off, the parent thread has read untrusted content, is archived or
+moved to another Project than the helper was routed under, or its live grant
+no longer allows starting helpers or covers the helper's, the helper ends
+Interrupted (`authority-drift`) and never starts. The same read gates every
+other child that starts by itself: one that waited on its siblings (`after`)
+and one queued for a run slot. Such a child that then
+finds the provider full takes the slot wait, under its reason and its own clock,
+and hands the run slot it was about to use to the next waiter. A start refused for the child's own workspace
+or authority ends the wait with that reason (`workspace-denied`,
+`authority-drift`) and does not retry. Five minutes, the idle bound of a Chat
+turn, is the longest a helper waits; past it the helper ends Interrupted with
+`capacity-unavailable` and the sentence that names what is full, and Retry
+starts it again once a slot frees. A longer wait would mean a person's
+unanswered question is holding the slot, and the helper should say so rather
+than look busy. A restart interrupts a waiting helper like any other
+unfinished child (`restart-without-resumable-execution`), because the lead's
+turn did not survive it either. A spent quota never frees by waiting, and
+the other typed start refusals (spend ceiling, workspace, provider, context)
+are not capacity: those end the child Interrupted at once under their own
+reason, and a process death is recorded only for a failure nothing typed.
+
+Only a Chat lead holds a slot while it works, so a Chat helper counts against
+the two-request limit together with its lead and any other Chat turn, such as
+one waiting for a person's answer; a Work or Code lead holds none. A lead that
+blocked on a helper waiting for its slot would keep the slot the helper needs:
+two Chat leads holding both slots, each waiting on its own helper, would wait
+for each other. The `wait` operation of the agents tool therefore answers at
+once for a helper that waits for a request slot, with the reason and the
+instruction to end the turn or continue other work, and the helper's result is
+delivered to the lead when it completes. The host does not take a slot back
+from a lead that waits for a person's answer.
 
 **What fills a provider-run window.** A usage report may carry
 `contextBreakdown` (`ProviderContextBreakdown` in `@octant/contracts`): a closed

@@ -75,7 +75,6 @@
     "apps/server/src/usageDashboardModel.ts": 2,
     "apps/server/src/usageRoutes.ts": 2,
     "apps/server/src/validation/validationEvidenceProjection.ts": 1,
-    "apps/server/src/wiring/agentRuns.ts": 2,
     "apps/server/src/wiring/usage.ts": 2,
     "apps/server/src/work/workImageAdapter.ts": 1,
     "apps/server/src/work/workPdfAdapter.ts": 1,

@@ -249,6 +249,7 @@ export function startOctantServer(
       turnMetrics,
     } = wireAgentRuns({
       late,
+      agentRunParentAuthority,
       agentRunPersistence,
       chatService: (): ChatService => chatService,
       codeBoardEventStore,
@@ -800,6 +801,7 @@ export function startOctantServer(
       agentRunOrchestration,
       agentRunParentAuthority,
       agentRunPersistence,
+      capacityScheduler,
       chatService,
       contextHarness,
       externalContentIngestionStore,

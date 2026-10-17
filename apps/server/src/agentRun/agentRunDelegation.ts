@@ -71,7 +71,7 @@ export interface AgentRunDelegationRouting {
 export interface AgentRunDelegationOptions {
   readonly admission: AgentRunControlAdmissionDependencies;
   readonly orchestration: Pick<AgentRunOrchestrationService, "start"> &
-    Partial<Pick<AgentRunOrchestrationService, "resume">>;
+    Partial<Pick<AgentRunOrchestrationService, "resume" | "waitsForProviderSlot">>;
   readonly persistence: Pick<AgentRunPersistenceService, "getById">;
   readonly mode: OctantMode;
   readonly parentThreadId: string;
@@ -88,6 +88,8 @@ export type AgentRunDelegationResult =
       readonly status: "accepted";
       readonly runId: string;
       readonly lifecycleStatus: string;
+      /** Why a helper that has not started is waiting: a full provider. */
+      readonly reason?: string;
       readonly target: {
         readonly providerInstanceId: string;
         readonly modelId: string;
@@ -305,6 +307,10 @@ export async function startAgentRunDelegation(
     status: "accepted",
     runId: String(run.id),
     lifecycleStatus: run.lifecycleStatus,
+    ...(options.orchestration.waitsForProviderSlot?.(run) === true &&
+    run.recoveryReason !== undefined
+      ? { reason: run.recoveryReason }
+      : {}),
     target: {
       providerInstanceId: String(selected.providerInstanceId),
       modelId: String(selected.modelId),

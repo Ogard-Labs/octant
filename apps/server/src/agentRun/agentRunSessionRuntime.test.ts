@@ -1453,8 +1453,9 @@ describe("createAgentRunSessionRuntime", () => {
     ).toThrowError(expect.objectContaining({ reason: "workspace-unavailable" }));
   });
 
-  it("releases reserved spend when provider capacity prevents a child from starting", () => {
+  it("drops reserved spend without recording a turn when provider capacity prevents a child from starting", () => {
     const settle = vi.fn();
+    const abandon = vi.fn();
     const admit = vi.fn().mockReturnValue({
       status: "admitted",
       reservedTokens: 100,
@@ -1463,7 +1464,7 @@ describe("createAgentRunSessionRuntime", () => {
     const runtime = createAgentRunSessionRuntime(
       runtimeOptions(fakeProvider(), {
         serviceLimits: () => undefined,
-        spendCeiling: { admit, settle },
+        spendCeiling: { admit, settle, abandon },
       }),
     );
 
@@ -1471,9 +1472,10 @@ describe("createAgentRunSessionRuntime", () => {
       expect.objectContaining({ reason: "capacity-unavailable" }),
     );
     expect(admit).toHaveBeenCalledOnce();
-    expect(settle).toHaveBeenCalledExactlyOnceWith({
+    expect(abandon).toHaveBeenCalledExactlyOnceWith({
       reservationId: admit.mock.calls[0]?.[0].reservationId,
     });
+    expect(settle).not.toHaveBeenCalled();
   });
 
   it("records every request of a child turn in the usage ledger once, with its cost", async () => {
@@ -1574,7 +1576,9 @@ describe("createAgentRunSessionRuntime", () => {
       refusal: { kind: "exhausted", message: "The Project ceiling is used up." },
     });
     const runtime = createAgentRunSessionRuntime(
-      runtimeOptions(fakeProvider(), { spendCeiling: { admit, settle: vi.fn() } }),
+      runtimeOptions(fakeProvider(), {
+        spendCeiling: { admit, settle: vi.fn(), abandon: vi.fn() },
+      }),
     );
     const run = agentRun();
     const inProject = {

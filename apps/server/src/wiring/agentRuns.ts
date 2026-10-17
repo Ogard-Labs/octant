@@ -61,6 +61,10 @@ import {
 import { AgentRunWorkspaceReceiptStore } from "../agentRun/agentRunWorkspaceReceiptStore";
 import { AgentRunWorkspaceService } from "../agentRun/agentRunWorkspaceService";
 import { AgentRunSettingsStore } from "../agentRun/agentRunSettingsStore";
+import {
+  currentParentAuthorityForWaiter,
+  type AgentRunParentThreadFacts,
+} from "../agentRun/agentRunWaiterAuthority";
 import { createAgentRunSettingsRouteHandler } from "../agentRun/agentRunSettingsRoutes";
 import {
   createAgentRunSessionRuntime,
@@ -98,6 +102,27 @@ import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { HarnessStateWiring } from "./harnessState";
+
+/** The thread a child belongs to as it stands now, in whichever mode started it. */
+function readAgentRunParentThread(
+  persistence: PersistenceService,
+  workThreadProjection: WorkThreadProjection,
+  run: AgentRun,
+): AgentRunParentThreadFacts | undefined {
+  try {
+    const threadId = String(run.parentThreadId);
+    switch (run.routingReceipt.mode) {
+      case "chat":
+        return persistence.readChatThread(decodeChatThreadId(threadId));
+      case "work":
+        return workThreadProjection.read(run.parentThreadId as never);
+      case "code":
+        return persistence.readCodeThread(decodeCodeThreadId(threadId));
+    }
+  } catch {
+    return undefined;
+  }
+}
 
 function authorizeAgentRunCancellation(input: {
   readonly persistence: PersistenceService;
@@ -480,6 +505,7 @@ export type AgentRunsDependencies = Pick<ServerStart, "options" | "persistence">
   >;
 } & Pick<
     AuthorityWiring,
+    | "agentRunParentAuthority"
     | "agentRunPersistence"
     | "codeParentActiveTurn"
     | "codeSessionAuthority"
@@ -513,6 +539,7 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     late,
     agentRunInteractions,
     agentRunPersistence,
+    agentRunParentAuthority,
     chatService,
     codeBoardEventStore,
     codeParentActiveTurn,
@@ -665,11 +692,19 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     ambiguousReservationTtlMs: 60_000,
   });
   const spendCeilingHolder: { service?: SpendCeilingService } = {};
+  // Read per call: the service is built after this wiring, before any child runs.
+  const spendService = (): SpendCeilingService => {
+    const service = spendCeilingHolder.service;
+    if (service === undefined) throw new Error("The spend ceiling service is not wired yet.");
+    return service;
+  };
   const spendCeiling = {
     admit: ((request: Parameters<SpendCeilingService["admit"]>[0]) =>
-      spendCeilingHolder.service!.admit(request)) as SpendCeilingService["admit"],
+      spendService().admit(request)) as SpendCeilingService["admit"],
     settle: ((input: Parameters<SpendCeilingService["settle"]>[0]) =>
-      spendCeilingHolder.service!.settle(input)) as SpendCeilingService["settle"],
+      spendService().settle(input)) as SpendCeilingService["settle"],
+    abandon: ((input: Parameters<SpendCeilingService["abandon"]>[0]) =>
+      spendService().abandon(input)) as SpendCeilingService["abandon"],
   };
   const agentRunSessionStore = new AgentRunSessionStore({
     connection: persistence.connection,
@@ -969,6 +1004,19 @@ export function wireAgentRuns(deps: AgentRunsDependencies) {
     },
     approvals: { isCurrent: () => true },
     processes: agentRunProcessSupervisor,
+    parentAuthority: {
+      current: (run) =>
+        currentParentAuthorityForWaiter({
+          run,
+          startsHelpers: () => agentRunSettingsStore.current().creationPosture === "automatic",
+          isTainted: (waiter) =>
+            readThreadExternalContentTaint(persistence.connection, String(waiter.parentThreadId))
+              .externalContentIngested,
+          parentThread: (waiter) =>
+            readAgentRunParentThread(persistence, workThreadProjection, waiter),
+          parentLiveAuthority: agentRunParentAuthority,
+        }),
+    },
     parentSessions: {
       // The same rule `delegate` refuses by: a paused session, or one a
       // restart left needing a check, starts no child until it is resumed.

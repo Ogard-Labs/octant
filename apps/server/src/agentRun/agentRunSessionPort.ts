@@ -26,10 +26,22 @@ export type AgentRunSessionFailureReason =
 export class AgentRunSessionError extends Error {
   override readonly name = "AgentRunSessionError";
   readonly reason: AgentRunSessionFailureReason;
+  /**
+   * Set when the provider is full only for now: slots in use, or an allowance
+   * or rate limit that resets. A fresh child with this refusal waits for a
+   * slot instead of ending. A spent quota never frees by waiting, so it is
+   * not set.
+   */
+  readonly waitsForCapacity: boolean;
 
-  constructor(reason: AgentRunSessionFailureReason, message: string) {
+  constructor(
+    reason: AgentRunSessionFailureReason,
+    message: string,
+    options?: { readonly waitsForCapacity?: boolean },
+  ) {
     super(message);
     this.reason = reason;
+    this.waitsForCapacity = options?.waitsForCapacity === true;
   }
 }
 
@@ -94,6 +106,13 @@ export interface AgentRunSessionPort {
   readonly checkResume?: (
     run: AgentRun,
   ) => AgentRunResumeReadiness | Promise<AgentRunResumeReadiness>;
+  /**
+   * Resolves the same prerequisites for a fresh child and reserves its
+   * resources without launching. A refusal leaves the child's lifecycle
+   * untouched, which is what lets a child wait for a provider slot and ask
+   * again without journaling a start each time.
+   */
+  readonly prepareStart?: (run: AgentRun) => AgentRunPreparedResume;
   /** Resolves synchronous execution prerequisites and reserves resources without launching. */
   readonly prepareResume?: (
     run: AgentRun,
