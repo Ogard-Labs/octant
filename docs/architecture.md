@@ -6973,6 +6973,18 @@ mechanisms are:
   follows. The feed's publish credential is not part of this trust: a writer
   that can replace a feed file can withhold a ring's updates, never install
   something no trusted key signed.
+- **The feed is uploaded over the tailnet, as a feed-only account.** The host
+  that serves `https://octant.sh/updates` does not expose SSH to the internet.
+  A release job that publishes a feed first joins the maintainer's tailnet as
+  an ephemeral node carrying one tag (`.github/actions/join-feed-tailnet`,
+  `tailscale/github-action` pinned to a full commit, OAuth client limited to
+  that tag), which the tailnet policy lets reach SSH on that host and nothing
+  else. It then rsyncs the signed ring directory as an account whose key is
+  restricted to writing the feed directory, with the host key pinned in
+  `OCTANT_FEED_SSH_KNOWN_HOSTS` rather than accepted on first use. A job that
+  lacks the tailnet credential fails before any upload and names what is
+  missing; it never falls back to a public address. The feed URLs and the
+  signing are unchanged.
 
 **Proposed, not accepted: Claude sign-in inside Anthropic's terms.** Octant
 would not mint, store, or inject a Claude setup or OAuth token. Claude

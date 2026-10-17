@@ -83,8 +83,8 @@ jobs:
     if: needs.decide.outputs.build == 'true'
     # Holds the Developer ID, the notary profile, the preview feed signing key
     # (never the stable one: unreviewed main runs here and could read it), and the
-    # SSH key that publishes the feed. Scoping them to an environment keeps them
-    # off every other workflow in the repository.
+    # SSH key and tailnet credential that publish the feed. Scoping them to an
+    # environment keeps them off every other workflow in the repository.
     environment: preview
     strategy:
       fail-fast: false
@@ -244,6 +244,14 @@ jobs:
           fi
           bun scripts/sign-update-feed.ts "${args[@]}"
           echo "signed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Join the tailnet that reaches the feed host
+        if: steps.feed.outputs.signed == 'true'
+        uses: ./.github/actions/join-feed-tailnet
+        with:
+          oauth-client-id: ${{ vars.OCTANT_FEED_TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.OCTANT_FEED_TAILSCALE_OAUTH_SECRET }}
+          feed-host: ${{ vars.OCTANT_FEED_SSH_HOST }}
 
       - name: Publish the feed
         if: steps.feed.outputs.signed == 'true'

@@ -192,12 +192,43 @@ pair. After the release, bump the constant to the next version you are working
 toward; previews are prereleases of it.
 
 Credentials — the Developer ID certificate, the notary key, the Ed25519 feed
-signing key, and the deploy key that publishes the feed — are environment
-secrets, never repository secrets, so a workflow on a side branch cannot read
-them. Linux matrix rows may dry-run the feed path without that key; darwin-arm64
+signing key, the deploy key that publishes the feed, and the Tailscale OAuth
+secret that lets a job reach the feed host — are environment secrets, never
+repository secrets, so a workflow on a side branch cannot read them. Linux matrix rows may dry-run the feed path without that key; darwin-arm64
 still requires it. `scripts/setup-release-credentials.sh` walks a maintainer
 through creating and installing all of them; run it once, and again when a key
 is rotated.
+
+### Publishing the feed
+
+The host that serves `https://octant.sh/updates` accepts SSH only over the
+tailnet. Each job that publishes a feed (the two release workflows and the
+bridge) first runs `.github/actions/join-feed-tailnet`, which joins the tailnet
+as an ephemeral node tagged `tag:octant-feed-ci`, then rsyncs the signed ring
+directory over SSH. The job fails before any upload, naming what is missing,
+when the Tailscale credential is not set.
+
+What has to exist, none of it in this repository:
+
+- A Tailscale OAuth client with only the writable `auth_keys` scope, limited to
+  the tag `tag:octant-feed-ci`. The client ID is the variable
+  `OCTANT_FEED_TAILSCALE_OAUTH_CLIENT_ID`; its secret is the environment secret
+  `OCTANT_FEED_TAILSCALE_OAUTH_SECRET` in `preview` and `stable`.
+- A tailnet policy that lets that tag reach the feed host on `tcp:22` and
+  nothing else.
+- On the feed host, an account that can only write the feed directory: its key
+  in `authorized_keys` behind `restrict,command="rrsync -wo <feed directory>"`.
+  Its private key is the environment secret `OCTANT_FEED_SSH_KEY`.
+- The feed directory served by the website at `/updates/`, so that
+  `<ring>/<platform>-<arch>.json` and `<ring>/<platform>-<arch>.preview-key.json`
+  resolve under `https://octant.sh/updates`.
+- Variables `OCTANT_FEED_SSH_HOST` (the host's tailnet name),
+  `OCTANT_FEED_SSH_USER`, `OCTANT_FEED_REMOTE_PATH` (`.` when `rrsync` fixes the
+  directory), and `OCTANT_FEED_SSH_KNOWN_HOSTS` (the host key line for exactly
+  that name; the workflows never accept a host on first use).
+
+A leaked upload credential can withhold updates or overwrite a feed file, but
+installs refuse any feed the pinned signing keys did not sign.
 
 ## AI-assisted contributions
 

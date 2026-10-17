@@ -128,6 +128,13 @@ jobs:
             --released-at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
             --out "${RUNNER_TEMP}/feed/${RING}/${TARGET}.json"
 
+      - name: Join the tailnet that reaches the feed host
+        uses: ./.github/actions/join-feed-tailnet
+        with:
+          oauth-client-id: ${{ vars.OCTANT_FEED_TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.OCTANT_FEED_TAILSCALE_OAUTH_SECRET }}
+          feed-host: ${{ vars.OCTANT_FEED_SSH_HOST }}
+
       - name: Publish the bridge feed
         env:
           SSH_KEY: ${{ secrets.OCTANT_FEED_SSH_KEY }}

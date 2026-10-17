@@ -1,0 +1,62 @@
+# Joins the tailnet that can reach the update-feed host.
+#
+# The host that serves the feed does not expose SSH to the internet, so a
+# release job reaches it as a short-lived node on the maintainer's tailnet. The
+# node is ephemeral and carries only the tag below; the tailnet policy decides
+# what that tag may reach, and it should allow SSH to the feed host and nothing
+# else. The credential is an OAuth client limited to that tag.
+#
+# Used by every workflow that publishes a feed, immediately before its
+# "Publish the feed" step. It refuses, with the reason, when the credential is
+# missing: without it the job could only time out against an address that is
+# closed to the internet, and the signed feed would not be published.
+name: Join the tailnet to publish the feed
+description: Joins the tailnet as an ephemeral, tagged node so a release job can reach the feed host over SSH.
+
+inputs:
+  oauth-client-id:
+    description: Tailscale OAuth client ID (OCTANT_FEED_TAILSCALE_OAUTH_CLIENT_ID).
+    required: false
+    default: ""
+  oauth-secret:
+    description: Tailscale OAuth client secret (OCTANT_FEED_TAILSCALE_OAUTH_SECRET).
+    required: false
+    default: ""
+  feed-host:
+    description: The feed host's tailnet name or address, waited on before the job goes on.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Refuse to publish the feed without the tailnet credential
+      shell: bash
+      env:
+        OAUTH_CLIENT_ID: ${{ inputs.oauth-client-id }}
+        OAUTH_SECRET: ${{ inputs.oauth-secret }}
+        FEED_HOST: ${{ inputs.feed-host }}
+      run: |
+        set -euo pipefail
+        missing=()
+        [ -n "$OAUTH_CLIENT_ID" ] || missing+=("variable OCTANT_FEED_TAILSCALE_OAUTH_CLIENT_ID")
+        [ -n "$OAUTH_SECRET" ] || missing+=("secret OCTANT_FEED_TAILSCALE_OAUTH_SECRET")
+        [ -n "$FEED_HOST" ] || missing+=("variable OCTANT_FEED_SSH_HOST")
+        if [ "${#missing[@]}" -gt 0 ]; then
+          echo "::error title=The feed cannot be published::The feed host is reachable only over the tailnet, and this job has no way to join it. Missing: ${missing[*]}. The signed feed was not uploaded. Set them for this environment and run the job again (see CONTRIBUTING.md, Releases)."
+          exit 1
+        fi
+
+    # Pinned to a full commit: this step receives the OAuth secret and then
+    # runs with a route to the feed host, so a moved tag would be a moved
+    # credential. v4.2.0, 2026-09-22.
+    - name: Join the tailnet
+      uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd
+      with:
+        oauth-client-id: ${{ inputs.oauth-client-id }}
+        oauth-secret: ${{ inputs.oauth-secret }}
+        tags: tag:octant-feed-ci
+        # A new node reaches its peers a moment after it is up. Waiting for
+        # the feed host here turns "not visible yet" into a clear failure at
+        # this step instead of a timeout inside rsync.
+        ping: ${{ inputs.feed-host }}

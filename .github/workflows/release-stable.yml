@@ -204,6 +204,14 @@ jobs:
           bun scripts/sign-update-feed.ts "${args[@]}"
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
+      - name: Join the tailnet that reaches the feed host
+        if: steps.feed.outputs.signed == 'true'
+        uses: ./.github/actions/join-feed-tailnet
+        with:
+          oauth-client-id: ${{ vars.OCTANT_FEED_TAILSCALE_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.OCTANT_FEED_TAILSCALE_OAUTH_SECRET }}
+          feed-host: ${{ vars.OCTANT_FEED_SSH_HOST }}
+
       - name: Publish the feed
         if: steps.feed.outputs.signed == 'true'
         env:
