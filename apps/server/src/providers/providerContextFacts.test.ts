@@ -93,6 +93,11 @@ describe("provider context fact adapter", () => {
       servedModelId: "gpt-4.1",
     };
     expect(withProfileMaxOutput(evidence, served)).toEqual({ ...evidence, maxOutput: 32_768 });
+    // The figure the model's own listing reported beats the profile's.
+    expect(withProfileMaxOutput(evidence, { ...served, maxOutputTokens: 4_096 })).toEqual({
+      ...evidence,
+      maxOutput: 4_096,
+    });
     // Nothing names the deployment yet, so the evidence stays as the driver gave it.
     expect(withProfileMaxOutput(evidence, undefined)).toBe(evidence);
     // A maximum the driver stated is its own, and one past the window is no maximum.

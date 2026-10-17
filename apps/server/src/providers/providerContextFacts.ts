@@ -59,21 +59,21 @@ export function modelEvidenceFromObservedState(
  * A driver's own evidence for a model, with the built-in profile's maximum
  * output added when the driver gave a window but no maximum. The window and
  * its source stay the driver's; only the missing maximum is filled, from the
- * same profile match the window resolution uses, so a profiled model is never
- * planned without one just because its window came from somewhere else.
+ * model's own reported figure and then the same profile match the window
+ * resolution uses, so a profiled model is never planned without one just
+ * because its window came from somewhere else.
  */
 export function withProfileMaxOutput(
   evidence: ProviderModelLimitEvidence,
   model: ProviderModel | undefined,
 ): ProviderModelLimitEvidence {
   if (evidence.maxOutput !== undefined || evidence.contextWindow === undefined) return evidence;
+  const same = model !== undefined && String(model.id) === String(evidence.modelId);
   const maxOutput = resolveModelMaxOutput(
     {
       id: String(evidence.modelId),
-      servedModelId:
-        model !== undefined && String(model.id) === String(evidence.modelId)
-          ? model.servedModelId
-          : undefined,
+      servedModelId: same ? model.servedModelId : undefined,
+      maxOutputTokens: same ? model.maxOutputTokens : undefined,
     },
     evidence.contextWindow,
   );
