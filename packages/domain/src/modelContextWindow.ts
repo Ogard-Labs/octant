@@ -37,8 +37,9 @@ export interface ResolvedModelContextWindow {
 
 /**
  * One family in the built-in profile catalogue. The catalogue ships with the
- * app and is never fetched: a profile only fills a window nothing more direct
- * named, and each entry cites the published page its figures were read from.
+ * app, changes only with a release, and is never fetched: a profile only
+ * fills a window or maximum output nothing more direct named, and each entry
+ * cites the published page its figures were read from.
  */
 export interface ModelContextProfile {
   /** Normalized names (see `normalizeModelName`) this profile describes. */
@@ -182,6 +183,38 @@ export function findModelContextProfile(name: string): ModelContextProfile | und
   return profilesByName.get(normalizeModelName(name));
 }
 
+/** The profile of a model's id or, for a deployment with a name of its own, of the model it served. */
+function profileOf(model: {
+  readonly id: string;
+  readonly servedModelId?: string | undefined;
+}): ModelContextProfile | undefined {
+  return (
+    findModelContextProfile(model.id) ??
+    (model.servedModelId === undefined ? undefined : findModelContextProfile(model.servedModelId))
+  );
+}
+
+/**
+ * The longest reply a model may be planned for, given the window settled
+ * for it: the maximum its provider reported, else the one its built-in
+ * profile lists, matched on the model's id and its served model as the
+ * window is. Whichever source fixed the window, the profile still supplies a
+ * maximum the window's source did not state. A figure larger than the window
+ * cannot be right and is dropped. Undefined means nothing named one, and the
+ * caller plans without a maximum or with its own labelled fallback.
+ */
+export function resolveModelMaxOutput(
+  model: {
+    readonly id: string;
+    readonly servedModelId?: string | undefined;
+    readonly maxOutputTokens?: number | undefined;
+  },
+  contextWindow: number,
+): number | undefined {
+  const maxOutput = model.maxOutputTokens ?? profileOf(model)?.maxOutput;
+  return maxOutput !== undefined && maxOutput <= contextWindow ? maxOutput : undefined;
+}
+
 /**
  * The model's window from the most direct source that names one: what a
  * person set, then what the provider reported, then what its refusals taught,
@@ -194,15 +227,15 @@ export function findModelContextProfile(name: string): ModelContextProfile | und
 export function resolveModelContextWindow(
   model: ModelContextWindowFacts,
 ): ResolvedModelContextWindow | undefined {
-  const profile =
-    findModelContextProfile(model.id) ??
-    (model.servedModelId === undefined ? undefined : findModelContextProfile(model.servedModelId));
-  const maxOutput = model.maxOutputTokens ?? profile?.maxOutput;
-  const resolved = (contextWindow: number, source: ModelContextWindowSource) => ({
-    contextWindow,
-    ...(maxOutput !== undefined && maxOutput <= contextWindow ? { maxOutput } : {}),
-    source,
-  });
+  const profile = profileOf(model);
+  const resolved = (contextWindow: number, source: ModelContextWindowSource) => {
+    const maxOutput = resolveModelMaxOutput(model, contextWindow);
+    return {
+      contextWindow,
+      ...(maxOutput === undefined ? {} : { maxOutput }),
+      source,
+    };
+  };
   if (model.contextWindowOverride !== undefined) {
     return resolved(model.contextWindowOverride, "user-supplied");
   }
@@ -294,9 +327,7 @@ export function resolveModelInputModalities(model: {
       imageInput: inputModalities.includes("image") ? "supported" : "unsupported",
     };
   }
-  const profile =
-    findModelContextProfile(model.id) ??
-    (model.servedModelId === undefined ? undefined : findModelContextProfile(model.servedModelId));
+  const profile = profileOf(model);
   return profile?.acceptsImages === true
     ? { inputModalities: ["text", "image"], imageInput: "supported" }
     : { inputModalities: ["text"] };

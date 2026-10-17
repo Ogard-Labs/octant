@@ -2672,9 +2672,18 @@ reported figure because the endpoint refused above it; and the built-in model
 profile catalogue (`reviewed-catalog`, "Profile"). Nothing naming one leaves the
 labelled estimate above ("Estimate"). The labels appear only as the inspector's
 limit source and as the placeholder of the optional override; nothing prompts
-for a window. The profile catalogue ships with the app, is never fetched, and
-lists only families whose windows their providers publish, each with its
-reference. The opt-in reviewed model manifest (`OCTANT_REVIEWED_MODEL_MANIFEST=1`)
+for a window. The profile catalogue ships with the app and is updated with each
+release; it is never fetched at runtime, and the preview has no signed or
+scheduled remote profile list. It lists only families whose windows their
+providers publish, each with its reference. A model's maximum output follows
+the same match (`resolveModelMaxOutput`): the figure its provider reported,
+else the family's `maxOutput` from the profile, found on the model's id or the
+model its endpoint served, and applied whichever source fixed the window,
+including a window a driver reported without a maximum. A figure larger than
+the window is dropped. Only a model nothing matches is planned with the
+Chat fallback's 1,024-token maximum, labelled `conservative-fallback`, and a
+profile that lists no maximum (as the DeepSeek-V4.1-Flash entry) leaves it
+unstated rather than guessed. The opt-in reviewed model manifest (`OCTANT_REVIEWED_MODEL_MANIFEST=1`)
 keeps its existing role as Chat's last fallback before the estimate and shares
 the `reviewed-catalog` source, so it is also labelled "Profile". Profiles match on a normalized name (case, separators, a routing
 prefix, a `:` tag, a release date, and `-latest` are ignored; a version is

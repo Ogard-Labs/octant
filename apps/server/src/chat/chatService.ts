@@ -226,6 +226,7 @@ import { carryModelContextWindowFacts } from "../providers/modelContextWindowFac
 import {
   modelEvidenceFromObservedState,
   modelWindowConfidence,
+  withProfileMaxOutput,
 } from "../providers/providerContextFacts";
 import { resolveModelContextWindow } from "@octant/domain/model-context-window";
 import type { ReviewedModelManifest } from "../providers/reviewedModelManifest";
@@ -4496,6 +4497,8 @@ export class ChatService {
     if (modelEvidence.length === 0 && fromProbe !== undefined) {
       modelEvidence = [fromProbe];
     }
+    const probeModel = probe.models.find((candidate) => String(candidate.id) === String(modelId));
+    modelEvidence = modelEvidence.map((evidence) => withProfileMaxOutput(evidence, probeModel));
     const modelLimitObservations = modelEvidence
       .map((evidence) => normalizeModelLimitEvidence(evidence))
       .flatMap((observation) => (observation.status === "available" ? [observation.limits] : []));

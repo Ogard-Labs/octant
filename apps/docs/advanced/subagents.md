@@ -42,7 +42,7 @@ removes private paths and secrets from it before the parent's agent sees it.
 
 A Chat subagent runs read-only. Claude Code subscription accounts sign in
 with the unmodified `claude auth login` command for that account. Sign in
-from **Settings → Providers** before a confined Plan or Chat-child turn;
+from **Settings → Providers & Models** before a confined Plan or Chat-child turn;
 until you do, the child stops and its parent is told to sign in. See
 [Providers](/advanced/providers). Claude Code with an Anthropic API key, and
 the other providers, need no extra step.
@@ -126,7 +126,7 @@ right-dock tool, not a generic Thread-tab accordion.
 
 Every child is one **AgentRun** with an execution kind of `provider-native`
 or `octant-managed`, and a role of **Research**, **Implementation**,
-**Review**, or **Custom**. Research uses **Research and tasks**, implementation
+**Review**, or **Custom**. Research uses **Research and lookups**, implementation
 and custom work use **Main model**, and review uses **Careful review** in Model
 slots. An unconfigured route can use the parent's eligible model. A configured
 route that is unavailable reports that problem rather than silently choosing a

@@ -189,6 +189,26 @@ describe("the public-block visual language", () => {
     expect(rule).not.toMatch(/overflow-x:\s*auto/);
   });
 
+  it("wraps a composer notice so a narrow pane still shows the whole instruction", () => {
+    const css = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const notice = /\.composer-status__notice\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const strip =
+      /\.thread-composer__feedback > \.composer-status:has\(> \.composer-status__notice\)\s*\{([^}]*)\}/.exec(
+        css,
+      )?.[1] ?? "";
+    expect(notice).toMatch(/white-space:\s*normal/);
+    expect(strip).toMatch(/flex:\s*1 1 auto/);
+    expect(strip).toMatch(/min-width:\s*0/);
+  });
+
+  it("lets a Project overview's actions drop below the name so a half-width pane never draws the name field over its kind chip", () => {
+    const css = readFileSync(join(webRoot, "styles/project-threads.css"), "utf8");
+    const toolbar = /\.project-overview__toolbar\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    const name = /\.project-overview__name\s*\{([^}]*min-width:[^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(toolbar).toMatch(/flex-wrap:\s*wrap/);
+    expect(name).toMatch(/max-width:\s*100%/);
+  });
+
   it("keeps focused buttons free of a drawn outline", () => {
     const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
 

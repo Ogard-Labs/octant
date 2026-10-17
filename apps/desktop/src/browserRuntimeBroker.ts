@@ -245,7 +245,8 @@ function isBrowserAction(value: unknown): value is {
     | "screenshot"
     | "extract-text"
     | "wait"
-    | "close-tab";
+    | "close-tab"
+    | "observe-diagnostics";
   target?: string;
   value?: string;
   point?: { readonly x: number; readonly y: number };
@@ -266,6 +267,7 @@ function isBrowserAction(value: unknown): value is {
       "extract-text",
       "wait",
       "close-tab",
+      "observe-diagnostics",
     ].includes(String(value.kind))
   ) {
     return false;

@@ -80,7 +80,7 @@ receives an explicit normalized path set.
 - **Commit** requires an explicit staged summary and message.
   A commit needs an author. The checkout's own Git config is read inside the
   confined command; when it names no author or email, the host's recorded
-  profile (Settings → Your profile) fills only the missing fields, and a
+  profile (Settings → Profile) fills only the missing fields, and a
   checkout that names its own author keeps it. When neither source names an
   identity, the commit is refused with a reason that says so, rather than
   attributing your work to an address invented from the OS account. Merges and
