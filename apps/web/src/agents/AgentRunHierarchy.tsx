@@ -50,7 +50,13 @@ export function AgentRunHierarchy(props: {
   const observations = currentRead?.observations ?? [];
   const [status, setStatus] = useState<"loading" | "ready" | "refreshing" | "error">("loading");
   const [errorMessage, setErrorMessage] = useState<string>();
-  const [steeredRunId, setSteeredRunId] = useState<string>();
+  // The host answers a steering note only once the child has taken it at its
+  // next step, which can be most of a long response away, so the page says so
+  // while it waits and again when the note has landed.
+  const [steer, setSteer] = useState<{
+    readonly runId: string;
+    readonly phase: "sending" | "delivered";
+  }>();
   const [summaryReconnecting, setSummaryReconnecting] = useState(false);
   const [posture, setPosture] = useState<AgentRunCreationPosture | undefined>(
     props.creationPosture,
@@ -69,7 +75,7 @@ export function AgentRunHierarchy(props: {
   }, [props.requestedView]);
   const leaveSelectedRun = () => {
     setSelectedRunId(undefined);
-    setSteeredRunId(undefined);
+    setSteer(undefined);
     if (props.requestedView !== undefined) onRequestedViewHandled.current?.();
   };
   // Only an identity resolved from the managed list may open a conversation.
@@ -296,14 +302,21 @@ export function AgentRunHierarchy(props: {
           onAcknowledge={(input) => void acknowledge(input)}
           onCancel={(input) => void cancel(input)}
           onSteer={(input) => {
-            setSteeredRunId(undefined);
+            setSteer({ runId: input.runId, phase: "sending" });
             void controls.steer(input).then((message) => {
               setErrorMessage(message);
-              if (message === undefined) setSteeredRunId(input.runId);
+              setSteer(
+                message === undefined ? { runId: input.runId, phase: "delivered" } : undefined,
+              );
             });
           }}
-          {...(steeredRunId === selectedRow.runId
-            ? { steerNotice: "Steering note sent. The subagent picks it up at its next step." }
+          {...(steer?.runId === selectedRow.runId
+            ? {
+                steerNotice:
+                  steer.phase === "sending"
+                    ? "Sending the steering note. The subagent takes it at its next step."
+                    : "Steering note delivered.",
+              }
             : {})}
           onRetry={(input) => void controls.retry(input).then(setErrorMessage)}
           onResume={(input) => void controls.resume(input).then(setErrorMessage)}

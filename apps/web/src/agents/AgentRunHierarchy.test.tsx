@@ -666,7 +666,13 @@ describe("AgentRunHierarchy", () => {
 
   it("steers a running subagent from its page at the version the host reported", async () => {
     const user = userEvent.setup();
-    const steer = vi.fn(async () => ({ kind: "run-updated" as const, run: {} as never }));
+    let deliver: (() => void) | undefined;
+    const steer = vi.fn(
+      () =>
+        new Promise<{ readonly kind: "run-updated"; readonly run: never }>((resolve) => {
+          deliver = () => resolve({ kind: "run-updated", run: {} as never });
+        }),
+    );
     const client = emptyClient({
       steer,
       parentSummary: vi.fn(async () => ({
@@ -704,10 +710,13 @@ describe("AgentRunHierarchy", () => {
       expectedVersion: 3,
       message: "Stay on the failing test.",
     });
-    // The form closes on send, so the page itself says the note was accepted.
+    // The host answers only once the child has taken the note at its next step.
+    // The form closes on send, so the page says the note is on its way, then that it landed.
     expect(
-      await screen.findByText("Steering note sent. The subagent picks it up at its next step."),
+      await screen.findByText("Sending the steering note. The subagent takes it at its next step."),
     ).toBeVisible();
+    act(() => deliver?.());
+    expect(await screen.findByText("Steering note delivered.")).toBeVisible();
   });
 
   it("says why a steering note was refused and does not claim it was sent", async () => {
@@ -750,7 +759,7 @@ describe("AgentRunHierarchy", () => {
     await user.type(screen.getByLabelText("Steering instruction"), "Stay on the failing test.");
     await user.click(screen.getByRole("button", { name: "Send steering" }));
     expect(await screen.findByText("This provider cannot take a steering note.")).toBeVisible();
-    expect(screen.queryByText(/Steering note sent/)).toBeNull();
+    expect(screen.queryByText(/Steering note delivered/)).toBeNull();
   });
 
   it("fetches the server-authoritative posture from an injected settings client", async () => {
