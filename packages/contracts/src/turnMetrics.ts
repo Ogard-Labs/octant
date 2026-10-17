@@ -34,8 +34,9 @@ export type TurnUsage = typeof TurnUsage.Type;
  * - `approximate`: one report for a turn whose window also held tool calls or
  *   waits. Tool spans the provider streamed are taken out; any it did not
  *   stream stay in.
- * - `unavailable`: the provider reported no output tokens, or streamed no
- *   text or reasoning to time them against. The figures are absent.
+ * - `unavailable`: the provider reported no output tokens, streamed no text or
+ *   reasoning to time them against, or delivered the reply in a burst too short
+ *   to carry a rate (see `MIN_DECODE_WINDOW_MS`). The figures are absent.
  */
 export const TurnMetricsPrecision = Schema.Literal("exact", "approximate", "unavailable");
 export type TurnMetricsPrecision = typeof TurnMetricsPrecision.Type;

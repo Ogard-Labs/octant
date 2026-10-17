@@ -4,6 +4,7 @@ import {
   type TurnMetricsSummary,
 } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
+import { addTurnToSessionMetrics, addTurnUsage } from "./turnMetricsPolicy";
 import {
   costOfTurns,
   formatCacheHit,
@@ -553,5 +554,80 @@ describe("usage thread rows", () => {
   it("states nothing when the reading has no turns", () => {
     expect(usageThreadReading(undefined).rows).toEqual([]);
     expect(usageThreadColumns([])).toEqual([]);
+  });
+});
+
+describe("the line for an endpoint that holds a reply and sends it in one burst", () => {
+  // Two chat turns as a hosted endpoint recorded them: the whole answer
+  // arrived a few hundred milliseconds after the first token.
+  const burstTurn = (
+    inputTokens: number,
+    outputTokens: number,
+    firstTokenMs: number,
+    decodeMs: number,
+    cache: object,
+  ) =>
+    record({
+      mode: "chat",
+      modelId: "frontier-large" as never,
+      usage: { inputTokens, outputTokens, ...cache },
+      metrics: {
+        precision: "exact",
+        wallMs: firstTokenMs + decodeMs,
+        timeToFirstTokenMs: firstTokenMs,
+        decodeOutputTokens: outputTokens,
+        decodeMs,
+        toolMs: 0,
+        modelCalls: 1,
+      },
+    });
+
+  const summaryOf = (turns: ReadonlyArray<TurnMetricsRecord>): TurnMetricsSummary => {
+    const usage = turns
+      .map((turn) => turn.usage!)
+      .reduce<NonNullable<TurnMetricsSummary["usage"]> | undefined>(addTurnUsage, undefined);
+    const metrics = turns.reduce<ReturnType<typeof addTurnToSessionMetrics> | undefined>(
+      (sum, turn) => addTurnToSessionMetrics(sum, turn.metrics),
+      undefined,
+    )!;
+    return { turns: [...turns], turnCount: turns.length, ...(usage ? { usage } : {}), metrics };
+  };
+
+  it("states no speed or first token and no longer reads thousands of tokens a second", () => {
+    const line = threadStatsLine(
+      threadStatsInputOf(
+        summaryOf([
+          burstTurn(649, 456, 3_213, 202, { cacheReadInputTokens: 0 }),
+          burstTurn(1_260, 634, 6_981, 289, { cacheReadInputTokens: 0 }),
+        ]),
+      ),
+    );
+
+    expect(line).not.toContain("tok/s");
+    expect(line).not.toContain("first token");
+    expect(line).toBe("↑ 1.9k in · ↓ 1.1k out · cache 0%");
+  });
+
+  it("states the cache share only when the endpoint reported a cache figure", () => {
+    const unreported = threadStatsLine(
+      threadStatsInputOf(summaryOf([burstTurn(649, 456, 3_213, 202, {})])),
+    );
+    const reported = threadStatsLine(
+      threadStatsInputOf(summaryOf([burstTurn(649, 456, 3_213, 202, { cacheReadInputTokens: 0 })])),
+    );
+
+    expect(unreported).toBe("↑ 649 in · ↓ 456 out");
+    expect(reported).toBe("↑ 649 in · ↓ 456 out · cache 0%");
+  });
+
+  it("keeps the speed of a steady stream beside a burst turn", () => {
+    const line = threadStatsLine(
+      threadStatsInputOf(
+        summaryOf([burstTurn(649, 456, 3_213, 202, {}), burstTurn(1_260, 500, 2_000, 5_000, {})]),
+      ),
+    );
+
+    expect(line).toContain("100 tok/s");
+    expect(line).toContain("2.0 s first token");
   });
 });
