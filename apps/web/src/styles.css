@@ -5422,17 +5422,6 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   font-size: var(--oct-text-detail);
 }
 
-.composer-model-picker__settings {
-  color: var(--octant-text-primary);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--oct-text-detail);
-  font-weight: var(--oct-weight-display);
-  text-decoration: underline;
-}
-
 @media (max-width: 640px) {
   .composer-model-picker__menu {
     width: min(360px, calc(100vw - 32px));

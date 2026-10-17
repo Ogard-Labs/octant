@@ -43,6 +43,19 @@ describe("the public-block visual language", () => {
     expect(leftovers).toEqual([]);
   });
 
+  it("never underlines the model picker's settings group", () => {
+    // The group holds labels and a slider, not a link. A leftover link recipe
+    // on the same class underlined Effort, Default, Faster and Smarter.
+    const rules = cssFiles(webRoot).flatMap((path) =>
+      [
+        ...readFileSync(path, "utf8").matchAll(/\.composer-model-picker__settings\s*\{([^}]*)\}/g),
+      ].map((match) => match[1] ?? ""),
+    );
+
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) expect(rule).not.toMatch(/text-decoration/);
+  });
+
   it("rounds every corner from a radius token", () => {
     // One role, one number: a corner is a token, square, a circle, or the 1–4px
     // of a mark. Rem literals rounded seven panels at seven sizes, and a rem

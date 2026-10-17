@@ -582,7 +582,12 @@ function versionedClaudeModelName(displayName: string, description: string): str
   const versioned = description.split("·")[0]?.trim() ?? "";
   if (versioned.length === 0) return displayName;
   if (versioned.toLowerCase().startsWith(displayName.toLowerCase())) return versioned;
-  if (displayName.toLowerCase().startsWith("default")) return `Default (${versioned})`;
+  if (displayName.toLowerCase().startsWith("default")) {
+    // Newer runtimes describe the default as "Use the default model
+    // (currently Opus 5.5)", so the model is the part after "currently".
+    const resolved = /\(currently ([^)]+)\)/i.exec(versioned)?.[1]?.trim();
+    return `Default (${resolved ?? versioned})`;
+  }
   return displayName;
 }
 
