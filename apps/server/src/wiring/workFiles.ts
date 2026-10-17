@@ -42,19 +42,17 @@ import type { FoundationsWiring } from "./foundations";
 import type { WorkspaceWiring } from "./workspace";
 import type { ProvidersWiring } from "./providers";
 import type { CodeRuntimeWiring } from "./codeRuntime";
-import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 import type { ContextWiring } from "./context";
 
 export type WorkFilesDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<AuthorityWiring, "windowAuthorityStore"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
-  Pick<ProvidersWiring, "credentialResolver" | "providerDataDirectory"> &
+  Pick<ProvidersWiring, "credentialResolver" | "imageJobService" | "providerDataDirectory"> &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
-  Pick<ChatWiring, "imageJobService"> &
-  Pick<WorkWiring, "workArtifactProjection" | "workThreadService"> &
+  Pick<WorkWiring, "workThreadService"> &
   Pick<ContextWiring, "windowCanOpenThread"> &
-  Pick<FoundationsWiring, "workTurnProjection">;
+  Pick<FoundationsWiring, "workArtifactProjection" | "workTurnProjection">;
 
 export function wireWorkFiles(deps: WorkFilesDependencies) {
   const {

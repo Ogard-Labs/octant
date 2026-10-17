@@ -39,8 +39,6 @@ import { WorkTurnService } from "../work/workTurnService";
 import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
 import { JournalNavigatorAssistantBindingStore } from "../navigatorAssistant/navigatorAssistantBindingStore";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "../chat/chatAttachmentStore";
-import { GeneratedImageStore } from "../image/generatedImageStore";
-import { ImageJobService } from "../image/imageJobService";
 import { createImageAgentTools } from "../image/imageAgentTools";
 import { createLinkedThreadRouteHandler } from "../linkedThread/linkedThreadRoutes";
 import { createLinkedThreadRuntime } from "../linkedThread/linkedThreadRuntime";
@@ -82,7 +80,6 @@ import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import { requireJournalHydration } from "../persistence/journalHydration";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
@@ -93,6 +90,7 @@ import type { WorkRequestStateWiring } from "./workRequestState";
 import type { CodeWiring } from "./code";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessWiring } from "./harness";
+import type { CanvasWiring } from "./canvas";
 
 /**
  * Largest Work file a Side Chat will read. The tool returns at most a few
@@ -101,10 +99,8 @@ import type { HarnessWiring } from "./harness";
  */
 const SIDE_CHAT_WORK_READ_MAX_BYTES = 2 * 1024 * 1024;
 
-export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "canvasAgentToolPort">;
-} & Pick<
+export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<
     AuthorityWiring,
     | "agentRunPersistence"
     | "browserCaptures"
@@ -141,14 +137,15 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
     | "chatAttachmentStore"
     | "chatDataDirectory"
     | "configuredDriverOptions"
-    | "credentialResolver"
     | "extensionActivationService"
     | "extensionApiService"
     | "extensionPackageStore"
+    | "imageJobService"
     | "reviewedModelManifest"
     | "skillDiscoveryService"
   > &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
+  Pick<CanvasWiring, "canvasAgentToolPort"> &
   Pick<HarnessWiring, "nativeHarnessComposition" | "researchRouter" | "threadWork"> & {
     /** Wired by wireWorkFiles; read only after startup. */
     readonly workFileListingService: () => WorkFileListingService;
@@ -160,7 +157,6 @@ export type ChatDependencies = Pick<ServerStart, "options" | "persistence"> & {
 
 export function wireChat(deps: ChatDependencies) {
   const {
-    late,
     threadAwaitsHarnessApproval,
     agentMessageProjection,
     agentMessageService,
@@ -168,6 +164,7 @@ export function wireChat(deps: ChatDependencies) {
     agentRunPersistence,
     agentsManagedToolsFor,
     browserCaptures,
+    canvasAgentToolPort,
     capacityScheduler,
     chatAttachmentStore,
     chatDataDirectory,
@@ -176,13 +173,13 @@ export function wireChat(deps: ChatDependencies) {
     computerUseTools,
     configuredDriverOptions,
     contextHarness,
-    credentialResolver,
     environmentService,
     extensionActivationService,
     extensionApiService,
     extensionPackageStore,
     externalContentIngestionStore,
     githubIssueContextService,
+    imageJobService,
     linearIssueContextService,
     liveTurns,
     machineChangeFeed,
@@ -371,7 +368,6 @@ export function wireChat(deps: ChatDependencies) {
     ): void => {
       chatToolContributors.push(contributor);
     };
-    let imageJobService!: ImageJobService;
     const chatService = new ChatService({
       liveTurns,
       awaitsHarnessApproval: threadAwaitsHarnessApproval,
@@ -521,13 +517,11 @@ export function wireChat(deps: ChatDependencies) {
           // read or preview returns content from a Canvas that carries a mark,
           // the rule Work and Code follow, so describe and a clean read leave
           // the thread unmarked.
-          late.canvasAgentToolPort.current === undefined
-            ? undefined
-            : createCanvasAgentTools({
-                windowId,
-                thread,
-                port: late.canvasAgentToolPort.current,
-              }),
+          createCanvasAgentTools({
+            windowId,
+            thread,
+            port: canvasAgentToolPort,
+          }),
           // Host-internal: its results are Octant's own answers, not external
           // content, and `delegate` itself refuses while the thread is tainted.
           childAgentTools({
@@ -638,33 +632,7 @@ export function wireChat(deps: ChatDependencies) {
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
     });
     yield* Effect.promise(() => chatService.reapStaleProviderSessions({ staleAfterMs: 0 }));
-    const generatedImageStore = new GeneratedImageStore(persistence.dataDirectory);
-    yield* Effect.promise(() =>
-      generatedImageStore.recover({
-        isFinalizedAttachmentReferenced: (scopeId, attachmentId) =>
-          persistence.imageJobProjection.isFinalizedAttachmentReferenced(scopeId, attachmentId),
-      }),
-    );
     yield* Effect.promise(() => browserCaptures.recover());
-    imageJobService = new ImageJobService({
-      journal: persistence.journal,
-      projection: persistence.imageJobProjection,
-      attachments: generatedImageStore,
-      readProviderInstance: (id) => persistence.readProviderInstance(id),
-      readImageGenerationCustomSources: () =>
-        (persistence.readShellSettings()?.settings ?? defaultShellSettings()).imageGeneration
-          .customSources,
-      credentialResolver:
-        credentialResolver ??
-        ({
-          has: async () => false,
-          resolve: async () => "",
-        } as const),
-      uuid: randomUUID,
-      clock: () => new Date().toISOString(),
-      actor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
-    });
-    yield* Effect.promise(() => imageJobService.reconcileInterruptedJobs());
     const linkedThreadService = createLinkedThreadRuntime({
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
       chat: chatService,
@@ -814,9 +782,7 @@ export function wireChat(deps: ChatDependencies) {
       chatService,
       codeThreadMentionDirectory,
       contributeChatTools,
-      generatedImageStore,
       guardChatAttachmentPurge,
-      imageJobService,
       linkedThreadRoutes,
       navigatorAssistantBindings,
       scaffoldRoutes,

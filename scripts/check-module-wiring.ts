@@ -707,7 +707,7 @@ export function findUncalledEndpoints(
  * Each is a cycle between areas. The ceiling only goes down: removing a
  * reference without lowering it fails Rule G, so the debt cannot creep back.
  */
-export const WIRING_CYCLE_CEILING = { lateCells: 7, forwardGetters: 9 } as const;
+export const WIRING_CYCLE_CEILING = { lateCells: 5, forwardGetters: 9 } as const;
 
 const LATE_BINDINGS_PATH = "apps/server/src/wiring/lateBindings.ts";
 const LATE_CELL_PATTERN = /^ {2}readonly \w+:/gm;

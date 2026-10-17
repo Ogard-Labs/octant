@@ -51,7 +51,6 @@ import type { ComputerUseWiring } from "./computerUse";
 import type { CodeWiring } from "./code";
 import type { ProvidersWiring } from "./providers";
 import type { CodeToolingWiring } from "./codeTooling";
-import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 import type { CanvasWiring } from "./canvas";
 import type { AutomationWiring } from "./automation";
@@ -71,11 +70,11 @@ export type RemoteDependencies = Pick<
     | "chatAttachmentStore"
     | "credentialBroker"
     | "credentialResolver"
+    | "generatedImageStore"
     | "providerDataDirectory"
     | "providerService"
   > &
   Pick<CodeToolingWiring, "remoteServerGrants"> &
-  Pick<ChatWiring, "generatedImageStore"> &
   Pick<WorkWiring, "threadExportService" | "threadMessageQueue"> &
   Pick<CanvasWiring, "canvasRoutes"> &
   Pick<AutomationWiring, "pushNotificationTokenStore"> &

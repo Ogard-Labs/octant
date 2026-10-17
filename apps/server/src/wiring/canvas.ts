@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,8 +6,10 @@ import {
   type CanvasRefreshRequest,
   type CanvasRefreshSkill,
   decodeCanvasDefinition,
+  decodeAgentRunId,
   decodeCanvasId,
   decodeChatThreadId,
+  decodeCodeThreadId,
   decodeProjectId,
   LOCAL_HOST_ID,
   type OctantMode,
@@ -60,9 +61,6 @@ import {
 } from "../canvas/canvasSkillContributionLoader";
 import { resolveConfinedPath } from "../preview/previewTargetRegistry";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
-import { createThreadHandOffRouteHandler } from "../threadExportRoutes";
-import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
-import { ThreadHandOffService } from "../threadHandOffService";
 import { ArtifactMirrorEventStore } from "../canvas/artifactMirrorEventStore";
 import {
   createArtifactMirrorFilePort,
@@ -77,7 +75,9 @@ import {
   type CanvasExportTargetRegistration,
 } from "../canvas/canvasExportTargets";
 import { authorizeCanvasInventoryAccess, defaultShellSettings } from "@octant/domain";
-import type { CanvasAgentToolPort } from "../canvas/canvasAgentTools";
+import { type CanvasAgentToolPort, createChildCanvasAgentTools } from "../canvas/canvasAgentTools";
+import { loadChildCanvasWorkspace } from "../canvas/childCanvasWorkspace";
+import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
 import { createCanvasPreviewService } from "../canvas/canvasPreviewService";
 import { createPlaywrightCanvasPreviewRenderer } from "../canvas/canvasPreviewRenderer";
 import {
@@ -86,17 +86,14 @@ import {
 } from "../replica/replicaArtifactSyncService";
 import { localArtifactSyncFacts } from "../replica/syncedArtifactService";
 import { resolveWebAssetsPath } from "./computerUse";
-import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
+import type { ProvidersWiring } from "./providers";
 import type { ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
 import type { CodeWiring } from "./code";
-import type { ChatWiring } from "./chat";
-import type { WorkWiring } from "./work";
 
 /**
  * Does a Canvas's refresh request stand in the scope of this skill record?
@@ -131,25 +128,23 @@ export function sameCanvasSkillScope(
   );
 }
 
-export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "canvasAgentToolPort" | "snapshotCanvasImpl">;
-} & Pick<AuthorityWiring, "windowAuthorityStore"> &
-  Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
+export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<AuthorityWiring, "agentRunPersistence" | "windowAuthorityStore"> &
+  Pick<AgentRunsWiring, "contributeChildTools" | "managedWorktreeReceipts"> &
   Pick<IntegrationsWiring, "gistConnection" | "threadOutsideContentMarks"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<CodeWiring, "folderBrowseService"> &
-  Pick<ProvidersWiring, "chatDataDirectory" | "configuredDriverOptions" | "extensionApiService"> &
-  Pick<ChatWiring, "imageJobService"> &
-  Pick<WorkWiring, "threadExportService" | "workArtifactProjection"> &
-  Pick<FoundationsWiring, "workThreadProjection"> &
-  Pick<FoundationsWiring, "providerRuntimeRegistry">;
+  Pick<ProvidersWiring, "chatDataDirectory" | "extensionApiService" | "imageJobService"> &
+  Pick<
+    FoundationsWiring,
+    "providerRuntimeRegistry" | "workArtifactProjection" | "workThreadProjection"
+  >;
 
 export function wireCanvas(deps: CanvasDependencies) {
   const {
-    late,
+    agentRunPersistence,
     chatDataDirectory,
-    configuredDriverOptions,
+    contributeChildTools,
     extensionApiService,
     folderBrowseService,
     gistConnection,
@@ -160,7 +155,6 @@ export function wireCanvas(deps: CanvasDependencies) {
     projectService,
     providerRuntimeRegistry,
     shellService,
-    threadExportService,
     threadOutsideContentMarks,
     windowAuthorityStore,
     workArtifactProjection,
@@ -835,7 +829,69 @@ export function wireCanvas(deps: CanvasDependencies) {
     documentRecipes: () =>
       offeredCanvasDocumentRecipes(extensionApiService.snapshot().skills ?? []),
   };
-  late.canvasAgentToolPort.current = canvasAgentToolPort;
+  // A managed child writes into a Canvas through the same port, inside the
+  // workspace its own run recorded rather than one a window shows.
+  contributeChildTools((input) => {
+    const target = effectiveAgentRunExecutionTarget(input.run.routingReceipt);
+    return createChildCanvasAgentTools({
+      port: {
+        ...canvasAgentToolPort,
+        resolveChildWorkspace: (query) =>
+          loadChildCanvasWorkspace(
+            {
+              readRun: (runId) => {
+                try {
+                  return agentRunPersistence.getById(decodeAgentRunId(runId));
+                } catch {
+                  return undefined;
+                }
+              },
+              readProject: (projectId) => {
+                try {
+                  const project = persistence.readProject(decodeProjectId(projectId));
+                  if (project === undefined) return undefined;
+                  if (project.type === "chat") {
+                    return {
+                      id: String(project.id),
+                      type: project.type,
+                      lifecycle: project.lifecycle,
+                    };
+                  }
+                  return {
+                    id: String(project.id),
+                    type: project.type,
+                    lifecycle: project.lifecycle,
+                    binding: project.binding,
+                    bindingHistory: project.bindingHistory,
+                  };
+                } catch {
+                  return undefined;
+                }
+              },
+              readCodeThread: (threadId) => {
+                try {
+                  return persistence.readCodeThread(decodeCodeThreadId(threadId));
+                } catch {
+                  return undefined;
+                }
+              },
+              findManagedWorktreeReceipt: (lookup) => managedWorktreeReceipts.findActive(lookup),
+            },
+            query.runId,
+          ),
+      },
+      run: {
+        id: String(input.run.id),
+        parentThreadId: String(input.run.parentThreadId),
+        mode: input.run.routingReceipt.mode,
+        ...("projectId" in input.run.workspaceReceipt
+          ? { projectId: String(input.run.workspaceReceipt.projectId) }
+          : {}),
+        providerInstanceId: target.providerInstanceId,
+        modelId: target.modelId,
+      },
+    });
+  });
   // Canvas sharing is local-only: a snapshot is served over the loopback
   // Canvas API to a principal this host authenticates, never uploaded or
   // linked. Lifecycle is journaled, so revocation survives restart and the
@@ -956,100 +1012,6 @@ export function wireCanvas(deps: CanvasDependencies) {
     mirror: artifactMirrorService,
     windowAuthorityStore,
   });
-  // Hand-off starts from the export cut and keeps its document as a Canvas
-  // of the thread, resolved from the thread the way an authoring agent's
-  // Canvas is — never from whichever Project the window happens to show.
-  const threadHandOffService = new ThreadHandOffService({
-    exports: threadExportService,
-    provider: {
-      readiness: (providerInstanceId) => {
-        const instance = persistence.readProviderInstance(providerInstanceId);
-        if (instance === undefined || !instance.enabled) return undefined;
-        return providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
-      },
-      complete: makeThreadHandOffCompletion({
-        resolveDriver: (providerInstanceId) => {
-          const instance = persistence.readProviderInstance(providerInstanceId);
-          if (instance === undefined || !instance.enabled) return undefined;
-          try {
-            return makeConfiguredProviderDriver(instance, configuredDriverOptions);
-          } catch {
-            return undefined;
-          }
-        },
-        scratchRoot: (threadId) => {
-          const root = join(persistence.dataDirectory, "hand-off-scratch", threadId);
-          mkdirSync(root, { recursive: true, mode: 0o700 });
-          return root;
-        },
-        uuid: randomUUID,
-      }),
-    },
-    documents: {
-      save: async ({ windowId, mode, threadId, projectId, title, blocks }) => {
-        const bootstrap = await projectService.bootstrap(windowId);
-        const project = bootstrap.active.find(
-          (candidate) => String(candidate.id) === String(projectId),
-        );
-        if (project === undefined || project.lifecycle !== "active" || project.type !== mode) {
-          return { kind: "refused", message: "The thread's Project is unavailable." };
-        }
-        // The scope is derived by the resolver the Canvas surfaces already
-        // use, not built alongside it. A hand-built scope disagreed with the
-        // resolver on all three modes, and `validateCanvasRefreshRequest`
-        // compares the two, so a handed-off Canvas could refuse its own
-        // refresh as a scope mismatch.
-        //
-        // It also answers with `undefined` rather than throwing: the provider
-        // call before this is bounded at 180 seconds, and the thread can be
-        // archived or its checkout can go away while that runs.
-        const workspace = resolveCanvasWorkspace({ mode, threadId });
-        if (workspace === undefined) {
-          return { kind: "refused", message: "The thread's workspace is unavailable." };
-        }
-        const created = canvasService.create(
-          {
-            schemaVersion: 1,
-            kind: "canvas-create",
-            requestId: randomUUID(),
-            intent: "blank",
-            hostId: LOCAL_HOST_ID,
-            mode,
-            workspace,
-            originThreadId: threadId,
-            title,
-            sourceManifest: [],
-            // A hand-off is a document: it reads nothing and runs nothing.
-            requestedAuthority: {
-              filesystem: false,
-              shell: false,
-              git: false,
-              network: false,
-              tools: false,
-              subagents: false,
-              executionPolicy: "plan",
-              permissionPersistence: "current-session",
-            },
-          },
-          { mode, projectId: String(projectId) },
-          { id: String(project.id), type: mode, lifecycle: "active" },
-          blocks,
-        );
-        if (created.kind !== "accepted") {
-          return { kind: "refused", message: created.message };
-        }
-        return {
-          kind: "saved",
-          canvasId: String(created.card.canvasId),
-          versionId: String(created.card.versionId),
-        };
-      },
-    },
-  });
-  const threadHandOffRoutes = createThreadHandOffRouteHandler({
-    service: threadHandOffService,
-    windowAuthorityStore,
-  });
   // Comments are journaled facts of the Canvas, authored as the local user
   // with the originating device recorded beside the author; the service
   // rebuilds them from the journal and refuses reads a workspace may not make.
@@ -1067,7 +1029,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     },
     { authorize: authorizeCanvas },
   );
-  const snapshotCanvasImpl: NonNullable<AgentRunRouteDependencies["snapshotCanvas"]> = (input) =>
+  const snapshotCanvas: NonNullable<AgentRunRouteDependencies["snapshotCanvas"]> = (input) =>
     createAgentRunForestCanvasSnapshot({
       mode: input.mode,
       parentThreadId: String(input.parentThreadId),
@@ -1095,7 +1057,6 @@ export function wireCanvas(deps: CanvasDependencies) {
       createCanvas: (request, context, project, blocks) =>
         canvasService.create(request, context, project, blocks),
     });
-  late.snapshotCanvasImpl.current = snapshotCanvasImpl;
   const canvasRoutes = createCanvasRouteHandler({
     canvasProjection: persistence.canvasProjection,
     canvasService,
@@ -1121,12 +1082,13 @@ export function wireCanvas(deps: CanvasDependencies) {
     artifactLibraryRoutes,
     artifactLibraryService,
     artifactMirrorRoutes,
+    canvasAgentToolPort,
     canvasCommentService,
     canvasRoutes,
     canvasService,
     replicaArtifactSync,
     resolveCanvasWorkspace,
-    threadHandOffRoutes,
+    snapshotCanvas,
   };
 }
 

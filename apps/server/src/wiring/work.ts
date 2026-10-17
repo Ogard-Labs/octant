@@ -1,6 +1,8 @@
 import { decodeComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
+import { mkdirSync } from "node:fs";
 import { lstat } from "node:fs/promises";
+import { join } from "node:path";
 import {
   decodeAgentRunParentThreadId,
   decodeChatThreadId,
@@ -15,12 +17,11 @@ import {
   decodeWorkTurnRequestId,
   LOCAL_HOST_ID,
   type ProjectId,
-  ReplayCursor,
   type WorkAccess,
   type WorkThreadId,
   type WorkStatusDatedItem,
 } from "@octant/contracts";
-import { Effect, Schema } from "effect";
+import { Effect } from "effect";
 import { ThreadMessageQueueService } from "../messageQueue/threadMessageQueueService";
 import { createThreadMessageQueuePort } from "../messageQueue/threadMessageQueuePorts";
 import { createThreadMessageQueueAttachments } from "../messageQueue/threadMessageQueueAttachments";
@@ -28,7 +29,6 @@ import { createThreadMessageQueueRouteHandler } from "../messageQueue/threadMess
 import { startEventLoopLagDetector } from "../eventLoopLag";
 import { admittedParentWorkContext } from "../agentRun/agentRunParentContext";
 import { WorkTurnFileObserver } from "../work/workTurnFileObserver";
-import { WorkArtifactProjection } from "../work/workArtifactProjection";
 import { WorkThreadService } from "../work/workThreadService";
 import { WorkTurnService } from "../work/workTurnService";
 import { withWorkflowLifecycle } from "../work/workThreadWorkflowHook";
@@ -36,7 +36,6 @@ import { WorkflowEventStore } from "../work/workflowEventStore";
 import { WorkflowProjection } from "../work/workflowProjection";
 import { WorkflowService } from "../work/workflowService";
 import { resolveThreadWorkingDirectory } from "../threadWorkingDirectoryAuthority";
-import { hydrateWorkArtifactProjectionFromJournal } from "../work/workPromotionProjectPort";
 import { attachWorkRequestRuntime } from "../work/workRequestRuntime";
 import { createGoalLoopRouteHandler } from "../goal/goalLoopRoutes";
 import { GoalLoopEventStore } from "../goal/goalLoopEventStore";
@@ -49,8 +48,13 @@ import { threadMentionContextResolver } from "../chat/threadMentionService";
 import { createFileMentionRouteHandler } from "../fileMentionRoutes";
 import { pinFileMentionRoot } from "../fileMentionIo";
 import { fileMentionContextBlocks, FileMentionService } from "../fileMentionService";
-import { createThreadExportRouteHandler } from "../threadExportRoutes";
+import {
+  createThreadExportRouteHandler,
+  createThreadHandOffRouteHandler,
+} from "../threadExportRoutes";
 import { ThreadExportService } from "../threadExportService";
+import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
+import { ThreadHandOffService } from "../threadHandOffService";
 import { createBrowserAppManagedTools } from "../browser/browserAppManagedTools";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { createSideTaskTools } from "../sideTasks/sideTaskTools";
@@ -66,7 +70,6 @@ import {
 } from "../work/workThreadBoardService";
 import { createCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
-import { requireJournalHydration } from "../persistence/journalHydration";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { LateBindings } from "./lateBindings";
@@ -81,11 +84,12 @@ import type { BrowserWiring } from "./browser";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 import type { HarnessWiring } from "./harness";
 import type { ChatWiring } from "./chat";
+import type { CanvasWiring } from "./canvas";
 import type { WorkRequestStateWiring } from "./workRequestState";
 
 export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<LateBindings, "canvasAgentToolPort" | "runningWorkTurnAccess">;
+  readonly late: Pick<LateBindings, "runningWorkTurnAccess">;
 } & Pick<
     AuthorityWiring,
     | "agentRunPersistence"
@@ -139,6 +143,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
     ProvidersWiring,
     | "chatAttachmentStore"
     | "configuredDriverOptions"
+    | "imageJobService"
     | "probeProviderForThreads"
     | "refreshStandaloneSkills"
     | "resolveSelectedExtensions"
@@ -149,13 +154,15 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> & {
   > &
   Pick<CodeRuntimeWiring, "routeCodeService"> &
   Pick<HarnessWiring, "followUpCreation" | "nativeHarnessComposition" | "sideTaskFirstMessage"> &
-  Pick<
-    ChatWiring,
-    "chatService" | "guardChatAttachmentPurge" | "imageJobService" | "threadMentionService"
-  > &
+  Pick<ChatWiring, "chatService" | "guardChatAttachmentPurge" | "threadMentionService"> &
+  Pick<CanvasWiring, "canvasAgentToolPort" | "canvasService" | "resolveCanvasWorkspace"> &
   Pick<
     FoundationsWiring,
-    "browserAuthority" | "providerRuntimeRegistry" | "workThreadProjection" | "workTurnProjection"
+    | "browserAuthority"
+    | "providerRuntimeRegistry"
+    | "workArtifactProjection"
+    | "workThreadProjection"
+    | "workTurnProjection"
   >;
 
 export function wireWork(deps: WorkDependencies) {
@@ -170,6 +177,8 @@ export function wireWork(deps: WorkDependencies) {
     browserModelBindings,
     browserToolApprovalService,
     canAccessCodeProject,
+    canvasAgentToolPort,
+    canvasService,
     chatAttachmentStore,
     chatService,
     guardChatAttachmentPurge,
@@ -199,6 +208,7 @@ export function wireWork(deps: WorkDependencies) {
     projectService,
     providerRuntimeRegistry,
     refreshStandaloneSkills,
+    resolveCanvasWorkspace,
     resolveSelectedExtensions,
     roots,
     routeCodeService,
@@ -211,6 +221,7 @@ export function wireWork(deps: WorkDependencies) {
     threadOutsideContentMarks,
     windowAuthorityStore,
     windowHoldsProject,
+    workArtifactProjection,
     workAttachments,
     workProjectStatusFiles,
     workProjectStatusReader,
@@ -220,21 +231,6 @@ export function wireWork(deps: WorkDependencies) {
     workTurnProjection,
   } = deps;
   return Effect.gen(function* () {
-    const workArtifactProjection = new WorkArtifactProjection();
-    requireJournalHydration(
-      hydrateWorkArtifactProjectionFromJournal({
-        replay: (cursor) =>
-          persistence.journal.replayAggregateType({
-            ...Schema.decodeUnknownSync(ReplayCursor)({
-              afterSequence: cursor.afterSequence,
-              limit: cursor.limit,
-            }),
-            aggregateType: cursor.aggregateType ?? "work-artifact",
-          }),
-        projection: workArtifactProjection,
-      }),
-      "Work artifact",
-    );
     const workTurnUsageStore = new WorkTurnUsageStore();
     // The navigation poll runs about once a second while a date in STATUS.md
     // moves at day granularity, so each Project's file is re-read at most this
@@ -373,20 +369,19 @@ export function wireWork(deps: WorkDependencies) {
               mode: "work",
               projectId: input.thread.projectId,
             });
-        const canvasTools =
-          !browserSupported || late.canvasAgentToolPort.current === undefined
-            ? undefined
-            : createCanvasAgentTools({
-                windowId: input.windowId,
-                mode: "work",
-                thread: {
-                  id: String(input.thread.id),
-                  projectId: String(input.thread.projectId),
-                  providerInstanceId: input.thread.providerInstanceId,
-                  modelId: input.thread.modelId,
-                },
-                port: late.canvasAgentToolPort.current,
-              });
+        const canvasTools = !browserSupported
+          ? undefined
+          : createCanvasAgentTools({
+              windowId: input.windowId,
+              mode: "work",
+              thread: {
+                id: String(input.thread.id),
+                projectId: String(input.thread.projectId),
+                providerInstanceId: input.thread.providerInstanceId,
+                modelId: input.thread.modelId,
+              },
+              port: canvasAgentToolPort,
+            });
         const computerOwner = decodeComputerUseOwner({
           windowId: input.windowId,
           threadId: input.thread.id,
@@ -647,6 +642,100 @@ export function wireWork(deps: WorkDependencies) {
     });
     const threadExportRoutes = createThreadExportRouteHandler({
       service: threadExportService,
+      windowAuthorityStore,
+    });
+    // Hand-off starts from the export cut and keeps its document as a Canvas
+    // of the thread, resolved from the thread the way an authoring agent's
+    // Canvas is — never from whichever Project the window happens to show.
+    const threadHandOffService = new ThreadHandOffService({
+      exports: threadExportService,
+      provider: {
+        readiness: (providerInstanceId) => {
+          const instance = persistence.readProviderInstance(providerInstanceId);
+          if (instance === undefined || !instance.enabled) return undefined;
+          return providerRuntimeRegistry.observedState(providerInstanceId)?.readiness;
+        },
+        complete: makeThreadHandOffCompletion({
+          resolveDriver: (providerInstanceId) => {
+            const instance = persistence.readProviderInstance(providerInstanceId);
+            if (instance === undefined || !instance.enabled) return undefined;
+            try {
+              return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+            } catch {
+              return undefined;
+            }
+          },
+          scratchRoot: (threadId) => {
+            const root = join(persistence.dataDirectory, "hand-off-scratch", threadId);
+            mkdirSync(root, { recursive: true, mode: 0o700 });
+            return root;
+          },
+          uuid: randomUUID,
+        }),
+      },
+      documents: {
+        save: async ({ windowId, mode, threadId, projectId, title, blocks }) => {
+          const bootstrap = await projectService.bootstrap(windowId);
+          const project = bootstrap.active.find(
+            (candidate) => String(candidate.id) === String(projectId),
+          );
+          if (project === undefined || project.lifecycle !== "active" || project.type !== mode) {
+            return { kind: "refused", message: "The thread's Project is unavailable." };
+          }
+          // The scope is derived by the resolver the Canvas surfaces already
+          // use, not built alongside it. A hand-built scope disagreed with the
+          // resolver on all three modes, and `validateCanvasRefreshRequest`
+          // compares the two, so a handed-off Canvas could refuse its own
+          // refresh as a scope mismatch.
+          //
+          // It also answers with `undefined` rather than throwing: the provider
+          // call before this is bounded at 180 seconds, and the thread can be
+          // archived or its checkout can go away while that runs.
+          const workspace = resolveCanvasWorkspace({ mode, threadId });
+          if (workspace === undefined) {
+            return { kind: "refused", message: "The thread's workspace is unavailable." };
+          }
+          const created = canvasService.create(
+            {
+              schemaVersion: 1,
+              kind: "canvas-create",
+              requestId: randomUUID(),
+              intent: "blank",
+              hostId: LOCAL_HOST_ID,
+              mode,
+              workspace,
+              originThreadId: threadId,
+              title,
+              sourceManifest: [],
+              // A hand-off is a document: it reads nothing and runs nothing.
+              requestedAuthority: {
+                filesystem: false,
+                shell: false,
+                git: false,
+                network: false,
+                tools: false,
+                subagents: false,
+                executionPolicy: "plan",
+                permissionPersistence: "current-session",
+              },
+            },
+            { mode, projectId: String(projectId) },
+            { id: String(project.id), type: mode, lifecycle: "active" },
+            blocks,
+          );
+          if (created.kind !== "accepted") {
+            return { kind: "refused", message: created.message };
+          }
+          return {
+            kind: "saved",
+            canvasId: String(created.card.canvasId),
+            versionId: String(created.card.versionId),
+          };
+        },
+      },
+    });
+    const threadHandOffRoutes = createThreadHandOffRouteHandler({
+      service: threadHandOffService,
       windowAuthorityStore,
     });
     // Work workflow projection: a downstream side channel driven by
@@ -1027,6 +1116,7 @@ export function wireWork(deps: WorkDependencies) {
       goalLoopService,
       threadExportRoutes,
       threadExportService,
+      threadHandOffRoutes,
       threadMessageQueue,
       threadMessageQueueRoutes,
       workArtifactProjection,

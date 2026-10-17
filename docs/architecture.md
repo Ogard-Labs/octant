@@ -7345,15 +7345,22 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   that reacts to another's change subscribes to it (GitHub sign-in, pull
   request refreshes, harness questions, Chat's attachment purge and tools)
   instead of holding it. The gateway and listener the remote area rebuilds at
-  runtime live in that area behind `remoteHost`.
+  runtime live in that area behind `remoteHost`. Canvas is built right after
+  the Code area, from the Work artifact projection (a foundation) and the
+  image jobs the providers area owns, so Chat, Work, and the Code runtime
+  take its agent tool port as a value. Agent runs come before it: Canvas adds
+  a managed child's Canvas tools through the agent-run area's tool
+  contributions, and the agent-run routes are built where they are
+  dispatched, with the Canvas snapshot. Thread hand-off, which writes a
+  Canvas from a thread export, is built with thread export in Work.
 - Two forward references remain, and `bun run wiring:check` pins their
   number so one can be removed but not added: `LateBindings` cells, which a
   module assigns after another has captured them, and dependency getters
   marked "Wired by wireX; read only after startup", which read a value a
   later module creates per use. Each marks a cycle between areas that needs a
   seam of its own to remove (the native harness against agent runs and
-  providers, Chat against Work, Canvas against Chat and Work, and the Code
-  runtime against the Code service); lower the ceiling in
+  providers, Chat against Work, and the Code runtime against the Code
+  service); lower the ceiling in
   `scripts/check-module-wiring.ts` in the change that removes one.
 - A headless Linux station: `octant server run`, then `octant web` (or
   `octant web --dev` for Vite), run as the OS user that started the host so

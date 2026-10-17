@@ -3,6 +3,7 @@ import { createAuthenticatedProductDispatch } from "../authenticatedProductRoute
 import { compareRemoteForwardListToClassifier } from "../remoteForwardListClassifierGate";
 import { readHostIdentity } from "../persistence/remoteAccessProjection";
 import { createHostResourceRouteHandler } from "../hostResourceRoutes";
+import { createAgentRunRouteHandler } from "../agentRun/agentRunRoutes";
 import type { ServerStart } from "./serverShape";
 import type { ReplicaWiring } from "./replica";
 import type { AuthorityWiring } from "./authority";
@@ -27,7 +28,7 @@ import type { AutomationWiring } from "./automation";
 import type { WorkRequestsWiring } from "./workRequests";
 
 export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence"> &
-  Pick<AgentRunsWiring, "agentRunRoutes" | "agentRunSettingsRoutes"> &
+  Pick<AgentRunsWiring, "agentRunRouteDependencies" | "agentRunSettingsRoutes"> &
   Pick<IntegrationsWiring, "githubRoutes" | "integrationRoutes"> &
   Pick<
     UsageWiring,
@@ -91,7 +92,11 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
   > &
   Pick<
     WorkWiring,
-    "fileMentionRoutes" | "goalLoopRoutes" | "threadExportRoutes" | "threadMessageQueueRoutes"
+    | "fileMentionRoutes"
+    | "goalLoopRoutes"
+    | "threadExportRoutes"
+    | "threadHandOffRoutes"
+    | "threadMessageQueueRoutes"
   > &
   Pick<
     ZenWiring,
@@ -110,7 +115,7 @@ export type RoutesDependencies = Pick<ServerStart, "latencyStats" | "persistence
   > &
   Pick<
     CanvasWiring,
-    "artifactLibraryRoutes" | "artifactMirrorRoutes" | "canvasRoutes" | "threadHandOffRoutes"
+    "artifactLibraryRoutes" | "artifactMirrorRoutes" | "canvasRoutes" | "snapshotCanvas"
   > &
   Pick<AutomationWiring, "automationNotificationRoutes" | "automationRoutes"> &
   Pick<
@@ -130,7 +135,7 @@ export function wireRoutes(deps: RoutesDependencies) {
   const {
     agentMessageRoutes,
     agentProfileRoutes,
-    agentRunRoutes,
+    agentRunRouteDependencies,
     agentRunSettingsRoutes,
     androidToolchainRoutes,
     appleToolchainRoutes,
@@ -212,8 +217,13 @@ export function wireRoutes(deps: RoutesDependencies) {
     zenBackgroundRoutes,
     zenRoutes,
     persistence,
+    snapshotCanvas,
     windowAuthorityStore,
   } = deps;
+  const agentRunRoutes = createAgentRunRouteHandler({
+    ...agentRunRouteDependencies,
+    snapshotCanvas,
+  });
   const hostResourceRoutes = createHostResourceRouteHandler({
     windowAuthorityStore,
     dataDirectory: persistence.dataDirectory,

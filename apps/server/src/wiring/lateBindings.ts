@@ -1,10 +1,8 @@
 import type { WorkAccess } from "@octant/contracts";
 import type { CodeOperationRuntime } from "../code/codeOperationRuntime";
-import type { AgentRunRouteDependencies } from "../agentRun/agentRunRoutes";
 import type { NativeHarnessComposition } from "../harness/nativeHarnessComposition";
 import { NativeHarnessLeadFallbackService } from "../harness/nativeHarnessLeadFallback";
 import { NativeHarnessTurnObserver } from "../harness/nativeHarnessTurnObserver";
-import type { CanvasAgentToolPort } from "../canvas/canvasAgentTools";
 
 /**
  * Values one wiring module assigns after another module has already captured
@@ -26,11 +24,6 @@ export interface LateBindings {
   readonly nativeHarnessComposition: { current: NativeHarnessComposition | undefined };
   readonly nativeHarnessObserver: { current: NativeHarnessTurnObserver | undefined };
   readonly nativeHarnessLeadFallback: { current: NativeHarnessLeadFallbackService | undefined };
-  // Agent-run routes snapshot a parent forest as a Canvas, and Canvas is built
-  // from Chat and Work services that follow the agent-run area.
-  readonly snapshotCanvasImpl: {
-    current: NonNullable<AgentRunRouteDependencies["snapshotCanvas"]>;
-  };
   // The Code service and the device workbench ask the Code runtime for fork
   // points and approval checks, and the runtime needs the Code service to
   // note the provider turns it launches.
@@ -40,7 +33,4 @@ export interface LateBindings {
   readonly runningWorkTurnAccess: {
     current: ((threadId: string) => WorkAccess | undefined) | undefined;
   };
-  // Chat, Work, Code, and agent runs build Canvas tools from a port the Canvas
-  // service backs, and Canvas is built from Chat and Work services.
-  readonly canvasAgentToolPort: { current: CanvasAgentToolPort | undefined };
 }
