@@ -166,6 +166,12 @@ shows as Interrupted with the reason, and Retry starts it again. Past the
 unfinished cap, the start is refused with a structured limit result. Authority is
 an immutable ceiling set at start — a child can narrow it, never widen it.
 
+A finished child's reply is outside content for its parent, so a thread that
+took one in cannot start more helpers: the agent's next `delegate` is refused
+with a message that says so. A person can review what the thread read and clear
+that from the notice above the composer, or the work can continue in a new
+thread. See [Privacy and security](/advanced/privacy-and-security).
+
 ## Isolation by mode
 
 - **Chat** children are research-only: no implicit filesystem or shell access.

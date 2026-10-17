@@ -669,8 +669,16 @@ describe("delegation parity", () => {
       const pair = delegationPair({ tainted: true });
       expect(await pair.start(transport, { role: "research", task: "Look" })).toMatchObject(
         transport === "native"
-          ? { status: "refused", reason: "delegate-tainted" }
-          : { status: "error", error: "delegate-tainted" },
+          ? {
+              status: "refused",
+              reason: "delegate-tainted",
+              message: expect.stringContaining("a helper's reply counts"),
+            }
+          : {
+              status: "error",
+              error: "delegate-tainted",
+              message: expect.stringContaining("a helper's reply counts"),
+            },
       );
       expect(pair.commands).toEqual([]);
     });
