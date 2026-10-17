@@ -85,6 +85,62 @@ async function openEnvironment(): Promise<void> {
   );
 }
 
+const goalCriteria = [
+  {
+    id: "c1",
+    text: "The parser tests pass",
+    check: "bun run test --filter parser",
+    status: "met",
+    evidence: {
+      kind: "test",
+      referenceId: "goal-check:c1",
+      summary: "Exited 0 after 41 passing tests",
+      observedAt: "2026-08-01T10:00:00.000Z",
+    },
+  },
+  {
+    id: "c2",
+    text: "The changelog names the change",
+    status: "unmet",
+  },
+  {
+    id: "c3",
+    text: "The build is clean",
+    check: "bun run build",
+    status: "unmet",
+    evidence: {
+      kind: "test",
+      referenceId: "goal-check:c3",
+      summary: "Exited 1: type error in lexer.ts",
+      observedAt: "2026-08-01T10:05:00.000Z",
+    },
+  },
+];
+
+function goalClientFor(goal: unknown) {
+  return {
+    read: vi.fn(async () => ({ goal, history: [] })),
+    execute: vi.fn(),
+  };
+}
+
+function codeGoal(criteria: unknown) {
+  return {
+    id: "00000000-0000-4000-8000-000000000206",
+    threadId: codeThreadId,
+    revisionId: "00000000-0000-4000-8000-000000000207",
+    objective: "Ship the parser",
+    status: "active",
+    budget: {},
+    usage: { tokensUsed: 0, elapsedMs: 0, turnsUsed: 0 },
+    evidence: [],
+    criteria,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+    version: 2,
+  };
+}
+
 describe("CodeThreadEnvironment", () => {
   it("defers Git observation until the transcript is display-ready", async () => {
     const client = projectClient(readyObservation());
@@ -200,6 +256,84 @@ describe("CodeThreadEnvironment", () => {
 
     expect(screen.getByLabelText("Checkout")).toHaveTextContent("+12−4");
     expect(client.environmentForThread).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows the thread's goal with each criterion's check and evidence, without controls to change it", async () => {
+    const goalClient = goalClientFor(codeGoal(goalCriteria));
+    render(
+      <CodeThreadEnvironment
+        environmentOpen
+        goalClient={goalClient as never}
+        observe
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+
+    const ledger = await screen.findByRole("region", { name: "Acceptance criteria" });
+    expect(goalClient.read).toHaveBeenCalledWith(String(codeThreadId), expect.any(AbortSignal));
+    expect(screen.getByRole("button", { name: "Goal 1 of 3 met" })).toBeVisible();
+    expect(screen.getByTestId("goal-objective")).toHaveTextContent("Ship the parser");
+    expect(within(ledger).getAllByRole("listitem")).toHaveLength(3);
+    expect(ledger).toHaveTextContent("bun run test --filter parser");
+    expect(ledger).toHaveTextContent("Exited 0 after 41 passing tests");
+    expect(screen.queryByRole("button", { name: "Complete" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Revise" })).not.toBeInTheDocument();
+    expect(goalClient.execute).not.toHaveBeenCalled();
+  });
+
+  it("leaves the Goal row out of a thread that has no goal", async () => {
+    const goalClient = goalClientFor(null);
+    render(
+      <CodeThreadEnvironment
+        environmentOpen
+        goalClient={goalClient as never}
+        observe
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>,
+    );
+    await openEnvironment();
+    await waitFor(() => expect(goalClient.read).toHaveBeenCalled());
+
+    expect(screen.queryByRole("button", { name: /^Goal/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("goal-objective")).not.toBeInTheDocument();
+  });
+
+  it("reads the goal again when a turn settles, so criteria the lead just checked show as met", async () => {
+    const goalClient = goalClientFor(codeGoal(goalCriteria));
+    const view = (turn: string) => (
+      <CodeThreadEnvironment
+        environmentOpen
+        goalClient={goalClient as never}
+        latestSettledTurn={decodeCodeOperationId(turn)}
+        observe
+        project={codeProject()}
+        projectClient={projectClient(readyObservation())}
+        tab={codeTab()}
+      >
+        <div />
+      </CodeThreadEnvironment>
+    );
+    const { rerender } = render(view("00000000-0000-4000-8000-000000000a01"));
+    expect(await screen.findByTestId("goal-criteria-summary")).toHaveTextContent("1 of 3 met");
+
+    goalClient.read.mockResolvedValue({
+      goal: codeGoal(goalCriteria.map((criterion) => ({ ...criterion, status: "met" }))),
+      history: [],
+    });
+    rerender(view("00000000-0000-4000-8000-000000000a02"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("goal-criteria-summary")).toHaveTextContent("3 of 3 met"),
+    );
+    expect(goalClient.read).toHaveBeenCalledTimes(2);
   });
 
   it("names the thread's identity and facts in the Environment header", async () => {

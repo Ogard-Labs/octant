@@ -47,6 +47,7 @@ import { runAgentTui } from "./agentTui";
 import {
   defaultCheckpointLabel,
   describeAgentGoal,
+  describeAgentGoalLedger,
   isTuiThemeId,
   type TuiThemeId,
 } from "./agentTuiModel";
@@ -438,7 +439,7 @@ async function goalCommand(
   if (revise === null) {
     if (argument.length > 0)
       input.stderr.write("Revise the objective with: /goal revise <new objective>\n");
-    else input.stdout.write(`${describeAgentGoal(read.goal)}\n`);
+    else input.stdout.write(`${describeAgentGoalLedger(read.goal).join("\n")}\n`);
     return;
   }
   const revised = await reviseAgentGoal(input.session, read.goal, (revise[1] ?? "").trim());
