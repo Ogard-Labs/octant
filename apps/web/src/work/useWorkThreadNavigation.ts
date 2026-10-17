@@ -104,6 +104,21 @@ export function useWorkThreadNavigation(
     };
   }, [refresh]);
 
+  // A host restart replaces the window's credential and the shell rebuilds its
+  // clients with it. The first read may already have been refused with the old
+  // one, which left the list on "unauthorized" until a person pressed Retry, so
+  // the replacement client reads again by itself.
+  // Compared by its read, not by the object: callers may hand in a fresh
+  // wrapper on every render. Once a read has succeeded the timer below reads
+  // through the new client on its own, so only a list that never loaded needs
+  // the nudge.
+  const readWith = useRef(client.bootstrap);
+  useEffect(() => {
+    if (readWith.current === client.bootstrap) return;
+    readWith.current = client.bootstrap;
+    if (!bootstrapped.current) void refresh();
+  }, [client.bootstrap, refresh]);
+
   // Only the thread in view streams, so the list is re-read from projections
   // on a timer to keep titles, lifecycle, and executing state current for
   // threads nobody is watching. Full bootstrap validates Project roots and

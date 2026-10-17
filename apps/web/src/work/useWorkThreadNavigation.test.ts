@@ -164,6 +164,27 @@ describe("useWorkThreadNavigation", () => {
     });
   });
 
+  it("reads the thread list again when a replacement client arrives after a refused first read", async () => {
+    const refused = vi.fn(async () => {
+      throw new Error("Work thread request is unauthorized.");
+    });
+    const accepted = vi.fn(async () => decodeWorkThreadBootstrap({ threads: [workThread()] }));
+    const navigation = vi.fn(async () => ({ threads: [workThread()], runtime: [] }));
+    const { result, rerender } = renderHook(
+      ({ bootstrap }) => useWorkThreadNavigation({ bootstrap, navigation }),
+      { initialProps: { bootstrap: refused } },
+    );
+    await waitFor(() => expect(result.current.status).toBe("unavailable"));
+    expect(result.current.errorMessage).toBe("Work thread request is unauthorized.");
+
+    rerender({ bootstrap: accepted });
+
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    expect(result.current.navigation).toHaveLength(1);
+    expect(refused).toHaveBeenCalledTimes(1);
+    expect(accepted).toHaveBeenCalledTimes(1);
+  });
+
   it("does not re-bootstrap or start navigation polling before the interval elapses", async () => {
     vi.useFakeTimers();
     const bootstrap = vi.fn(async () => decodeWorkThreadBootstrap({ threads: [workThread()] }));
