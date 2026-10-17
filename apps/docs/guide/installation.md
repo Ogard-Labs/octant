@@ -22,7 +22,7 @@ relay is included in this preview.
 
 - x64 Linux host (Ubuntu is the dogfood target)
 - Bun 1.3.14 (required for development and local iteration)
-- Bubblewrap for Work and Code, and a live Secret Service session to store provider credentials ([Linux Host](./linux-host))
+- Bubblewrap for Work and Code, `lsof` so Running services can find local servers, and a live Secret Service session to store provider credentials ([Linux Host](./linux-host))
 - Node 26 only when running the Node SQLite portability smoke
 
 ## Install from source
@@ -129,7 +129,7 @@ bun --cwd packages/cli src/bin.ts server run
 bun --cwd packages/cli src/bin.ts web
 ```
 
-`install-linux-host-deps.sh` installs `bubblewrap`, `libsecret-tools`, `gnome-keyring`, `dbus-x11`, and `dbus-user-session` when missing, ensures Git 2.36 or newer (installed from the git-core PPA when the distro's is older), and wires a shell hook that loads the live session bus address from `~/.config/octant-host/session.env`. `start-secret-service-session.sh` must run on every host boot: it probes a live D-Bus (and rejects a snapshotted socket path), starts `gnome-keyring-daemon` for the secrets component when needed, points the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a GUI prompt, writes `session.env`, and proves a store/lookup round-trip. Running the start script as a subprocess cannot export into the parent shell, so source `session.env` before `server run` in the same shell (or open a new login shell after install has wired bashrc).
+`install-linux-host-deps.sh` installs `bubblewrap`, `lsof`, `libsecret-tools`, `gnome-keyring`, `dbus-x11`, and `dbus-user-session` when missing, ensures Git 2.36 or newer (installed from the git-core PPA when the distro's is older), and wires a shell hook that loads the live session bus address from `~/.config/octant-host/session.env`. `start-secret-service-session.sh` must run on every host boot: it probes a live D-Bus (and rejects a snapshotted socket path), starts `gnome-keyring-daemon` for the secrets component when needed, points the Secret Service `default` alias at the unlocked session collection so `secret-tool` does not block on a GUI prompt, writes `session.env`, and proves a store/lookup round-trip. Running the start script as a subprocess cannot export into the parent shell, so source `session.env` before `server run` in the same shell (or open a new login shell after install has wired bashrc).
 
 The start script is the intended Cloud Agent environment `start` boot hook. Until a Saved environment persists and executes `start` on each agent boot, run `scripts/ade/start-secret-service-session.sh` manually after install (then source `session.env` as above). When configuring a Saved environment that does run `start`, keep install and start separate:
 
@@ -148,7 +148,7 @@ If that Saved environment runs `start` in a separate process from `server run`, 
 
 ### Install a headless artifact
 
-A headless artifact runs the host without a repository checkout. It contains the CLI, the server, the web app, and every runtime dependency, including the native `node-pty` and `better-sqlite3` modules. Bun 1.3.14 or later must be on `PATH`; nothing else is needed. Build the artifact on the platform and architecture it is for, because the native modules come from that machine's install:
+A headless artifact runs the host without a repository checkout. It contains the CLI, the server, the web app, and every runtime dependency, including the native `node-pty` and `better-sqlite3` modules. Bun 1.3.14 or later must be on `PATH`. On Linux the host also needs `bubblewrap` and `lsof`, which a stock Ubuntu install lacks: `sudo apt-get install -y bubblewrap lsof`. Without Bubblewrap, Work and Code terminals fail to start; without `lsof`, Running services cannot check for local servers. `octant server install`, `start`, `restart`, and `enable` print what is missing on Linux but never install it. Build the artifact on the platform and architecture it is for, because the native modules come from that machine's install:
 
 ```sh
 bun install --frozen-lockfile

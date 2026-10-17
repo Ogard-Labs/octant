@@ -5,6 +5,7 @@ import { resolveServerRunOptions, runServerRunCommand } from "./serverRun";
 import { resolveHostRuntimePaths, ServicePolicyStore } from "@octant/host-runtime";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { createInterface } from "node:readline/promises";
+import { formatMissingLinuxHostTools, missingLinuxHostTools } from "./linuxHostTools";
 import { runServerLifecycleCommand, type ServerLifecycleAction } from "./serverLifecycle";
 import {
   createHostHeadlessUpgradePorts,
@@ -120,6 +121,8 @@ async function main(): Promise<number> {
       printUsage();
       return 1;
     }
+    if (action === "start" || action === "restart" || action === "enable")
+      warnAboutLinuxHostTools();
     try {
       const paths = resolveCliHostRuntimePaths();
       const followAbortController = logs?.follow === true ? new AbortController() : undefined;
@@ -178,6 +181,7 @@ async function main(): Promise<number> {
       printUsage();
       return 1;
     }
+    if (args.positional[0] !== "uninstall") warnAboutLinuxHostTools();
     try {
       const paths = resolveCliHostRuntimePaths();
       const artifactCommand = resolveHeadlessArtifactCliCommand(args.positional, split.rest, {
@@ -305,6 +309,12 @@ async function main(): Promise<number> {
   }
   printUsage();
   return 1;
+}
+
+/** Missing host programs are told once, up front, and never installed or fatal. */
+function warnAboutLinuxHostTools(): void {
+  const notice = formatMissingLinuxHostTools(missingLinuxHostTools());
+  if (notice !== undefined) process.stderr.write(notice);
 }
 
 function isNotRunning(reason: string): boolean {
