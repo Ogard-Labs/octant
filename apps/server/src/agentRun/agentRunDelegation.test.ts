@@ -98,6 +98,9 @@ const targetsFor = (
     observedState: (instanceId) => ({
       readiness: "ready",
       models: modelsByProvider.get(String(instanceId)) ?? [],
+      verifiedToolModelIds: (modelsByProvider.get(String(instanceId)) ?? []).map(
+        (candidate) => candidate.id,
+      ),
     }),
     isTargetAllowed,
   }).map((target) => ({ provider: target.displayName, models: target.modelIds }));
@@ -143,5 +146,46 @@ describe("agentRunEligibleTargets", () => {
       providerPolicy: { mode: "whitelist", providerInstanceIds: [other.id] },
     });
     expect(targetsFor(project)).toEqual([{ provider: "Other", models: ["other-plain"] }]);
+  });
+
+  describe("direct endpoint models", () => {
+    const foundry = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000012",
+      displayName: "Foundry",
+      driverKind: "azure-foundry",
+      configuration: {
+        kind: "azure-foundry-openai-http",
+        baseUrl: "https://example.services.ai.azure.com/openai/v1/",
+        authentication: "api-key",
+        protocol: "auto",
+        manualModelIds: ["deepseek-flash", "other-deployment"],
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    });
+    const targetsOf = (readiness: "ready" | "degraded", verified: ReadonlyArray<string>) =>
+      agentRunEligibleTargets({
+        project: undefined,
+        instances: [foundry],
+        observedState: () => ({
+          readiness,
+          models: [model("deepseek-flash"), model("other-deployment")],
+          verifiedToolModelIds: verified.map((id) => model(id).id),
+        }),
+        isTargetAllowed: () => true,
+      }).map((target) => target.modelIds);
+
+    it("offers a tool-verified endpoint model even when its models route listed no deployment", () => {
+      expect(targetsOf("degraded", ["deepseek-flash"])).toEqual([["deepseek-flash"]]);
+      expect(targetsOf("ready", ["deepseek-flash"])).toEqual([["deepseek-flash"]]);
+    });
+
+    it("withholds an endpoint model whose tools were never verified", () => {
+      expect(targetsOf("degraded", [])).toEqual([]);
+      expect(targetsOf("ready", [])).toEqual([]);
+    });
   });
 });

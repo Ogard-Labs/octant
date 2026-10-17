@@ -649,6 +649,28 @@ export function modelCarriesAppManagedTools(
 }
 
 /**
+ * Can a delegated child run on `model`? The provider must be able to answer
+ * (`providerCanServeModel`: a Foundry deployment that `/models` does not list
+ * is `degraded` yet serves its manual deployments), and a direct endpoint runs
+ * a child through Octant's own tools, so its model must carry them: the
+ * provider supplies them for every model, or a person verified this one.
+ * Agent runtimes bring their own tools and need no such proof.
+ */
+export function modelCanTakeDelegatedWork(
+  driverKind: ProviderDriverKind,
+  observed: Pick<ProviderObservedState, "readiness" | "models"> &
+    Partial<Pick<ProviderObservedState, "capabilities" | "verifiedToolModelIds">>,
+  modelId: ProviderModelId,
+): boolean {
+  if (!providerCanServeModel(observed, modelId)) return false;
+  if (!isNativeHarnessDriverKind(driverKind)) return true;
+  return (
+    observed.capabilities?.appManagedTools === "supported" ||
+    (observed.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false)
+  );
+}
+
+/**
  * The choices a started Code thread can actually take. Its conversation lives
  * in the provider session it opened, so the host refuses a turn on another
  * provider, and on another model unless the provider can carry the session

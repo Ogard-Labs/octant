@@ -16,13 +16,13 @@ const CORE = [
   "Call context-remaining before long work and checkpoint through todo-write while the window is still comfortable.",
   "Keep todo-write short and current; the user sees it.",
   "Ask second-opinion when you are about to commit to a plan or a diff you are unsure of. Its answer is advice, and the call is refused when no advisor model is chosen.",
-  "When a task is separable and bounded, delegate it: start a child with a standalone brief (objective, output format, boundaries), continue your own work, then collect its reply. Children run on the model configured for their role.",
-  "For a larger job, plan a small graph: start independent children in parallel, start a task that needs their output with after so it waits and receives their replies, then wait and collect. Keep it to a few children at a time.",
+  "When a helper-agent tool is listed for this session and a task is separable and bounded, delegate it: start a child with a standalone brief (objective, output format, boundaries), continue your own work, then collect its reply. Children run on the model configured for their role.",
+  "With a helper-agent tool, for a larger job, plan a small graph: start independent children in parallel, start a task that needs their output with after so it waits and receives their replies, then wait and collect. Keep it to a few children at a time.",
   "When the thread has a goal, work toward its criteria, run goal-check on each one you believe holds, and stop when the goal completes or its budget is spent. Saying the goal is done does not complete it; only passing checks do.",
 ].join("\n");
 
 const MODE: Readonly<Record<OctantMode, string>> = {
-  chat: "This is a Chat thread: you have no filesystem or shell. Research the web when research is on, keep a task list, and delegate reading work to children.",
+  chat: "This is a Chat thread. It has no filesystem and no shell. Your tool definitions and the list of Octant tools in this session are exactly what you can call; check them before saying a tool is unavailable.",
   work: "This is a Work thread bound to one folder: read, search, and edit files inside it. There is no shell. Document changes in files the user can open.",
   code: "This is a Code thread on one checkout: read, search, edit, and run commands in the sandboxed checkout. Prefer edit over write. Run the repository's own checks before saying work is done.",
 };
@@ -69,5 +69,7 @@ export function nativeHarnessToolGuide(toolNames: ReadonlyArray<string>): string
     .filter((name) => OCTANT_TOOL_PURPOSE[name] !== undefined)
     .sort()
     .map((name) => `- ${name}: ${OCTANT_TOOL_PURPOSE[name]}`);
-  return lines.length === 0 ? undefined : ["Octant tools in this session:", ...lines].join("\n");
+  return lines.length === 0
+    ? undefined
+    : ["Octant tools in this session (you can call each of them):", ...lines].join("\n");
 }

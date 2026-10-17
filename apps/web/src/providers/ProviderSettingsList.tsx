@@ -15,6 +15,7 @@ import {
   claudeAccountUsesAssignedDirectory,
   codexAccountUsesAssignedDirectory,
   isImageProfileDriverKind,
+  modelCanTakeDelegatedWork,
   supportsProviderCliUpdate,
 } from "@octant/domain";
 import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
@@ -454,8 +455,9 @@ function AgentEligibleModelsControls(props: {
     for (const instance of props.instances) {
       if (!instance.enabled || isImageProfileDriverKind(instance.driverKind)) continue;
       const observed = props.observedByInstance.get(instance.id);
-      if (observed === undefined || observed.readiness !== "ready") continue;
+      if (observed === undefined) continue;
       for (const model of observed.models) {
+        if (!modelCanTakeDelegatedWork(instance.driverKind, observed, model.id)) continue;
         rows.push({
           providerInstanceId: instance.id,
           providerName: instance.displayName,

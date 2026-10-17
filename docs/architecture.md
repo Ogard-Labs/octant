@@ -1066,7 +1066,9 @@ that the running child received it.
 
 Delegation resolves explicit provider/model selections against the parent's
 current eligible catalog, including Project policy and supported reasoning
-values. With no explicit target, both harnesses use the same role-to-slot
+values. A provider that can answer counts even when its catalog is
+degraded (a Foundry deployment its models route does not list); a direct
+endpoint model is a target only once its tools are verified. With no explicit target, both harnesses use the same role-to-slot
 mapping and host/Project model slots (Settings names them model roles). An unconfigured route can inherit the
 authorized parent target; a configured but unavailable or disallowed route does
 not bypass its settings. The selected target and routing decisions remain
