@@ -64,6 +64,9 @@ import { notifyDesktop } from "./agentNotify";
 import {
   defaultCheckpointLabel,
   describeAgentGoal,
+  describeAgentGoalLedger,
+  goalPanelPageSize,
+  goalPanelRequest,
   approvalPanelHosts,
   paletteFor,
   readTuiApprovalAnswer,
@@ -103,6 +106,9 @@ const HINT =
   "Enter sends · Enter while working queues a note · Esc stops · Ctrl+E details · Ctrl+R reasoning · PgUp/PgDn scroll · ? help";
 const REASONING_FENCE = /```(?:reasoning|thinking)\n([\s\S]*?)```|<think>([\s\S]*?)<\/think>/g;
 const QUIT_WINDOW_MS = 1_500;
+/** Which list or panel the screen shows in place of the hint, if any. */
+type TuiListing = "threads" | "models" | "agents" | "agent" | "goal" | undefined;
+
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
 const SHOWN_TOOL_LINES = 4;
 const SHOWN_TASKS = 6;
@@ -182,10 +188,12 @@ class AgentScreen {
   readonly #wake = new AgentWake();
   /** Ends the live feed of the thread on screen; a switch starts a new one. */
   #feed = new AbortController();
-  #listing: "threads" | "models" | "agents" | "agent" | undefined;
+  #listing: TuiListing;
   /** The helper agents `/agents` last listed, and the lines of the one `/agent N` opened. */
   #children: ReadonlyArray<AgentChild> = [];
   #childLines: ReadonlyArray<string> = [];
+  /** The goal ledger the Goal panel shows, read when /goal opened it. */
+  #goalLines: ReadonlyArray<string> = [];
   #suggestions:
     | { readonly kind: "file" | "thread"; readonly items: ReadonlyArray<string> }
     | undefined;
@@ -681,6 +689,11 @@ class AgentScreen {
       });
       this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No harness endpoint offers a model yet. Add one in Settings → Providers." : lines.join("\n"))}\n${dim(fg(p.muted)("/model N switches the thread's model."))}`;
       this.#panel.visible = true;
+    } else if (this.#listing === "goal") {
+      this.#panel.title = " Goal ";
+      this.#panel.borderColor = p.border;
+      this.#panelText.content = t`${fg(p.textSecondary)(this.#goalLines.join("\n"))}\n${dim(fg(p.muted)("/goal revise text changes the objective. /goal closes this; /goal 2 shows another page."))}`;
+      this.#panel.visible = true;
     } else if (this.#showHelp) {
       this.#panel.title = " Keys ";
       this.#panel.borderColor = p.border;
@@ -1128,6 +1141,8 @@ class AgentScreen {
       await this.refresh();
       return;
     }
+    // /goal toggles its own panel, so it needs the listing this command found.
+    const listingBefore = this.#listing;
     this.#listing = undefined;
     if (this.#pendingFollowUp !== undefined) {
       const pending = this.#pendingFollowUp;
@@ -1156,7 +1171,7 @@ class AgentScreen {
       return;
     }
     if (text === "/goal" || text.startsWith("/goal ")) {
-      await this.#goal(text.slice("/goal".length).trim());
+      await this.#goal(text.slice("/goal".length).trim(), listingBefore);
       return;
     }
     if (
@@ -1471,7 +1486,7 @@ class AgentScreen {
   }
 
   /** Shows the goal, or revises its objective against the version just read. */
-  async #goal(argument: string): Promise<void> {
+  async #goal(argument: string, listingBefore: TuiListing): Promise<void> {
     if (this.#home !== undefined) {
       this.#note = "Side Chat only reads; /back to change the goal.";
       this.#draw();
@@ -1484,13 +1499,20 @@ class AgentScreen {
       return;
     }
     const revise = /^revise\s+(.+)$/s.exec(argument);
-    if (argument.length > 0 && revise === null) {
+    const request = goalPanelRequest(argument, listingBefore === "goal");
+    if (revise === null && request === undefined) {
       this.#note = "Revise the objective with: /goal revise <new objective>";
       this.#draw();
       return;
     }
     if (revise === null) {
-      this.#note = describeAgentGoal(read.goal);
+      if (request?.kind === "page") {
+        this.#goalLines = describeAgentGoalLedger(read.goal, {
+          size: goalPanelPageSize(this.#renderer.terminalHeight),
+          number: request.number,
+        });
+        this.#listing = "goal";
+      }
       this.#draw();
       return;
     }

@@ -844,7 +844,7 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                             className="chip-x window-no-drag"
                             onClick={() => extensionDraft.remove(receipt.reference)}
                             type="button"
-                            variant="ghost"
+                            variant="bare"
                           >
                             ×
                           </OctantButton>

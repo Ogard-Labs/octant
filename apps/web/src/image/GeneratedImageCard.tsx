@@ -33,19 +33,17 @@ export function GeneratedImageCard(props: GeneratedImageCardProps) {
       : `${sourceLabel ?? profile.displayName} · ${String(props.job.modelId)}`;
 
   useEffect(() => {
-    let cancelled = false;
+    const reading = new AbortController();
     void props.client
       .artifact(props.job.id, props.artifact.attachmentId)
       .then(async (blob) => {
-        const dataUrl = await blobToDataUrl(blob);
-        if (!cancelled) setPreview(dataUrl);
+        const dataUrl = await blobToDataUrl(blob, reading.signal);
+        if (!reading.signal.aborted) setPreview(dataUrl);
       })
       .catch(() => {
-        if (!cancelled) setMessage("Image is unavailable.");
+        if (!reading.signal.aborted) setMessage("Image is unavailable.");
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => reading.abort();
   }, [props.artifact.attachmentId, props.client, props.job.id]);
 
   const viewer = selectPreviewViewer("image");
@@ -114,14 +112,30 @@ export function GeneratedImageCard(props: GeneratedImageCardProps) {
   );
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
+// A card that unmounts stops its read instead of leaving it to finish
+// unobserved. A read that outlives its test file's jsdom environment fails
+// there with an uncaught "Expected an Uint8Array" and fails the whole run.
+function blobToDataUrl(blob: Blob, signal: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
+    const unavailable = () => reject(new Error("Image preview is unavailable."));
+    if (signal.aborted) {
+      unavailable();
+      return;
+    }
     const reader = new FileReader();
+    signal.addEventListener(
+      "abort",
+      () => {
+        reader.abort();
+        unavailable();
+      },
+      { once: true },
+    );
     reader.onload = () => {
       if (typeof reader.result === "string") resolve(reader.result);
-      else reject(new Error("Image preview is unavailable."));
+      else unavailable();
     };
-    reader.onerror = () => reject(new Error("Image preview is unavailable."));
+    reader.onerror = unavailable;
     reader.readAsDataURL(blob);
   });
 }

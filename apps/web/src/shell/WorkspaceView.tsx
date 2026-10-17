@@ -1240,6 +1240,7 @@ function renderCodeTab(
             {...(props.agentRunClient === undefined
               ? {}
               : { agentRunClient: props.agentRunClient })}
+            {...(props.goalClient === undefined ? {} : { goalClient: props.goalClient })}
             {...(codeController.activeView?.thread.deliveryTarget.outcomeKind === undefined
               ? {}
               : { deliveryOutcome: codeController.activeView.thread.deliveryTarget.outcomeKind })}
