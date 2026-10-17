@@ -1939,6 +1939,143 @@ describe("Agent Plugin MCP session manager", () => {
       await rm(pluginDataRoot, { recursive: true, force: true });
     }
   });
+
+  describe("a stdio server declared as a script", () => {
+    async function connectWith(
+      command: string,
+      args: ReadonlyArray<string>,
+      options: { readonly launcher?: string } = {},
+    ) {
+      const contentRoot = await realpath(await mkdtemp(join(tmpdir(), "octant-mcp-script-")));
+      const pluginDataRoot = await mkdtemp(join(tmpdir(), "octant-mcp-script-data-"));
+      await writeFile(join(contentRoot, "server.mjs"), "#!/usr/bin/env node\nconsole.log('x');\n");
+      await chmod(join(contentRoot, "server.mjs"), 0o755);
+      const launcherRoot = await realpath(await mkdtemp(join(tmpdir(), "octant-mcp-launcher-")));
+      if (options.launcher !== undefined) {
+        await writeFile(join(launcherRoot, options.launcher), "#!/usr/bin/env node\n");
+        await chmod(join(launcherRoot, options.launcher), 0o755);
+      }
+      let starts = 0;
+      let launched: ReadonlyArray<string> = [];
+      const manager = new AgentPluginMcpSessionManager({
+        baseEnv: { HOME: tmpdir(), PATH: [launcherRoot, dirname(process.execPath)].join(":") },
+        store: {
+          contentRoot: () => contentRoot,
+          pluginDataRoot: () => pluginDataRoot,
+          readVerifiedConfiguration: async () =>
+            JSON.stringify({
+              $schema: AGENT_PLUGINS_MCP_SCHEMA,
+              mcpServers: { local: { type: "stdio", command, args } },
+            }),
+        },
+        stdioSupervisor: {
+          startInteractive: async (input) => {
+            starts += 1;
+            launched = [input.command, ...input.args];
+            const stdin = new PassThrough();
+            const stdout = new PassThrough();
+            let pending = "";
+            stdin.setEncoding("utf8");
+            stdin.on("data", (chunk) => {
+              pending += String(chunk);
+              for (let end = pending.indexOf("\n"); end >= 0; end = pending.indexOf("\n")) {
+                const message = JSON.parse(pending.slice(0, end)) as {
+                  id?: number;
+                  method?: string;
+                };
+                pending = pending.slice(end + 1);
+                if (message.id === undefined) continue;
+                stdout.write(
+                  `${JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: message.id,
+                    result: message.method === "tools/list" ? { tools: [] } : { ok: true },
+                  })}\n`,
+                );
+              }
+            });
+            return {
+              receipt: { state: "ready" },
+              process: {
+                pid: 3000,
+                ready: Promise.resolve(),
+                wait: new Promise(() => undefined),
+                stop: async () => undefined,
+                cancel: async () => undefined,
+                stdin,
+                stdout,
+                once: () => undefined,
+              },
+            } as never;
+          },
+        },
+      });
+      await manager.reconcile(effectiveMcpSnapshot("mcp-local", "local"));
+      const result = {
+        manager,
+        starts: () => starts,
+        launched: () => launched,
+        contentRoot,
+        launcherRoot,
+        cleanup: async () => {
+          await manager.drainAll();
+          await rm(launcherRoot, { recursive: true, force: true });
+          await rm(contentRoot, { recursive: true, force: true });
+          await rm(pluginDataRoot, { recursive: true, force: true });
+        },
+      };
+      return result;
+    }
+
+    it("is refused before it starts, with the interpreter to declare instead", async () => {
+      const harness = await connectWith("./server.mjs", []);
+      try {
+        expect(harness.starts()).toBe(0);
+        expect(harness.manager.sessions()).toHaveLength(0);
+        expect(harness.manager.failedComponents()).toEqual([
+          expect.objectContaining({
+            componentId: "mcp-local",
+            reason: expect.stringMatching(
+              /local runs a script from the plugin that starts with a #! line.*"command": "node".*"args": \["\$\{PLUGIN_ROOT\}\/server\.mjs"\]/,
+            ),
+          }),
+        ]);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    it("leaves a shebang launcher found on the host path to start as before", async () => {
+      const harness = await connectWith("npx", ["-y", "some-server"], { launcher: "npx" });
+      try {
+        expect(harness.starts()).toBe(1);
+        expect(harness.launched()).toEqual([
+          join(harness.launcherRoot, "npx"),
+          "-y",
+          "some-server",
+        ]);
+        expect(harness.manager.sessions()).toHaveLength(1);
+        expect(harness.manager.failedComponents()).toEqual([]);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    it("still starts when the interpreter is declared with the script as an argument", async () => {
+      const harness = await connectWith("node", ["${PLUGIN_ROOT}/server.mjs"]);
+      try {
+        expect(harness.starts()).toBe(1);
+        expect(harness.launched()).toEqual([
+          process.execPath,
+          join(harness.contentRoot, "server.mjs"),
+        ]);
+        expect(harness.manager.sessions()).toHaveLength(1);
+        expect(harness.manager.failedComponents()).toEqual([]);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+  });
 });
 
 function effectiveMcpSnapshot(
