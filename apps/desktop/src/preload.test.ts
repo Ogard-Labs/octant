@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL } from "./canvasPrototypeSurface";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("electron", () => ({ contextBridge: {}, ipcRenderer: {} }));
@@ -174,6 +173,7 @@ describe("desktop preload bridge", () => {
     const [key, bridge] = exposeInMainWorld.mock.calls[0] as [string, Record<string, unknown>];
     expect(key).toBe(HOST_BRIDGE_KEY);
     expect(Object.keys(bridge).sort()).toEqual([
+      "acknowledgeCanvasPrototypeFrame",
       "acknowledgeWhatsNew",
       "addProviderApiKey",
       "approveRemotePairingRequest",
@@ -184,6 +184,7 @@ describe("desktop preload bridge", () => {
       "checkManagedToolUpdates",
       "clearProviderCredential",
       "close",
+      "closeCanvasPrototype",
       "commandBrowserSurface",
       "denyRemotePairingRequest",
       "detachBrowserSurface",
@@ -210,6 +211,7 @@ describe("desktop preload bridge", () => {
       "moveProviderApiKey",
       "notifyAttention",
       "openBrowserExternal",
+      "openCanvasPrototype",
       "openCodeCheckoutInApplication",
       "openCodeExternalEditor",
       "openComputerUsePermissionSettings",
@@ -232,6 +234,7 @@ describe("desktop preload bridge", () => {
       "requestCodeOperationApproval",
       "requestComputerUsePermissions",
       "resetBounds",
+      "resizeCanvasPrototype",
       "restartPrivateListener",
       "revokeAllRemoteDevices",
       "revokeRemoteDevice",
@@ -239,6 +242,7 @@ describe("desktop preload bridge", () => {
       "selectLocalPluginFolder",
       "selectProjectRoot",
       "selectRuntimeBinary",
+      "sendCanvasPrototypeInput",
       "setActiveProviderApiKey",
       "setAppUpdateRing",
       "setApprovalSurfacePalette",
@@ -251,7 +255,7 @@ describe("desktop preload bridge", () => {
       "setSidebarVibrancyMode",
       "subscribeAppUpdateState",
       "subscribeBrowserSurfaceState",
-      "subscribeCanvasFrameFocusEscape",
+      "subscribeCanvasPrototypeEvents",
       "subscribeCodeDeepLinks",
       "subscribeMenuBarTask",
       "subscribeOpenSettings",
@@ -722,8 +726,8 @@ describe("desktop preload bridge", () => {
     );
   });
 
-  it("relays the reserved Canvas frame shortcut on the channel the main process sends it on", () => {
-    let registered: ((event: unknown) => void) | undefined;
+  it("relays what the window's prototypes report on the channel the main process sends it on", () => {
+    let registered: ((event: unknown, value: unknown) => void) | undefined;
     const ipc: IpcRendererPort = {
       invoke: vi.fn(),
       on: vi.fn((_channel, listener) => {
@@ -735,13 +739,29 @@ describe("desktop preload bridge", () => {
     const unsubscribe = createHostBridge(
       ipc,
       projectWindowCapability,
-    ).subscribeCanvasFrameFocusEscape(listener);
-    expect(IPC_CHANNELS.canvasFrameFocusEscape).toBe(CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL);
-    expect(ipc.on).toHaveBeenCalledWith(CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL, registered);
-    registered?.({});
-    expect(listener).toHaveBeenCalledWith();
+    ).subscribeCanvasPrototypeEvents(listener);
+    expect(ipc.on).toHaveBeenCalledWith(IPC_CHANNELS.canvasPrototypeEvent, registered);
+    registered?.({}, { kind: "gone", surfaceId: "s" });
+    expect(listener).toHaveBeenCalledWith({ kind: "gone", surfaceId: "s" });
     unsubscribe();
-    expect(ipc.removeListener).toHaveBeenCalledWith(CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL, registered);
+    expect(ipc.removeListener).toHaveBeenCalledWith(IPC_CHANNELS.canvasPrototypeEvent, registered);
+  });
+
+  it("reports a malformed answer to opening a prototype as a refusal", async () => {
+    const invoke = vi.fn(async () => ({ status: "open" }));
+    const bridge = createHostBridge(
+      { invoke, on: vi.fn(), removeListener: vi.fn() },
+      projectWindowCapability,
+    );
+    const request = { surfaceId: "s", src: "x", width: 1, height: 1, scaleFactor: 1 };
+    await expect(bridge.openCanvasPrototype(request)).resolves.toEqual({ status: "open" });
+    expect(invoke).toHaveBeenCalledWith(IPC_CHANNELS.canvasPrototypeOpen, request);
+    for (const malformed of [undefined, "open", { status: "opened" }]) {
+      invoke.mockResolvedValueOnce(malformed as never);
+      await expect(bridge.openCanvasPrototype(request)).resolves.toMatchObject({
+        status: "refused",
+      });
+    }
   });
 
   it("asks the main process to prepare the prototype surface and reports a malformed answer as unavailable", async () => {

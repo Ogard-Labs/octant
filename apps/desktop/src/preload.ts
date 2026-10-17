@@ -21,6 +21,12 @@ export const IPC_CHANNELS = {
   browserSurfaceState: "octant:browser-surface:state",
   browserSurfaceTab: "octant:browser-surface:tab",
   canvasPrototypeSurface: "octant:canvas:prototype-surface:prepare",
+  canvasPrototypeOpen: "octant:canvas:prototype:open",
+  canvasPrototypeInput: "octant:canvas:prototype:input",
+  canvasPrototypeResize: "octant:canvas:prototype:resize",
+  canvasPrototypeClose: "octant:canvas:prototype:close",
+  canvasPrototypeDrawn: "octant:canvas:prototype:drawn",
+  canvasPrototypeEvent: "octant:canvas:prototype:event",
   appUpdateState: "octant:app-update:state",
   appUpdateCheck: "octant:app-update:check",
   appUpdateDownload: "octant:app-update:download",
@@ -69,7 +75,6 @@ export const IPC_CHANNELS = {
   hostCapabilities: "octant:window:host-capabilities",
   resolvedMaterial: "octant:window:resolved-material",
   resolvedSidebarVibrancy: "octant:window:resolved-sidebar-vibrancy",
-  canvasFrameFocusEscape: "octant:canvas:frame-focus-escape",
   sidebarMaterialPreference: "octant:window:sidebar-material-preference",
   sidebarVibrancyMode: "octant:window:sidebar-vibrancy-mode",
   privateListenerStatus: "octant:private-listener:status",
@@ -455,6 +460,29 @@ export interface OctantHostBridge {
    * never drawn anywhere else.
    */
   readonly prepareCanvasPrototypeSurface: () => Promise<CanvasPrototypeSurfacePreparation>;
+  /**
+   * Opens a running Canvas prototype in the prototype host, under an id the
+   * window chose. Only a ticketed design page on this host opens.
+   */
+  readonly openCanvasPrototype: (
+    request: CanvasPrototypeOpenRequest,
+  ) => Promise<CanvasPrototypeOpenResult>;
+  /** Forwards a person's pointer, wheel, keys, focus, or an edit command to an open prototype. */
+  readonly sendCanvasPrototypeInput: (surfaceId: string, input: unknown) => Promise<void>;
+  readonly resizeCanvasPrototype: (
+    surfaceId: string,
+    width: number,
+    height: number,
+  ) => Promise<void>;
+  readonly closeCanvasPrototype: (surfaceId: string) => Promise<void>;
+  /** Says the window drew a prototype's last frame, so the host sends the next. */
+  readonly acknowledgeCanvasPrototypeFrame: (surfaceId: string) => Promise<void>;
+  /**
+   * What the prototypes this window opened report: painted pixels, bridge
+   * messages, cursor, and a page that went away. Each is a claim the renderer
+   * checks.
+   */
+  readonly subscribeCanvasPrototypeEvents: (listener: (event: unknown) => void) => () => void;
   readonly attachBrowserSurface: (request: BrowserSurfaceRequest) => Promise<BrowserSurfaceState>;
   readonly updateBrowserSurfaceBounds: (request: BrowserSurfaceRequest) => Promise<void>;
   readonly detachBrowserSurface: (request: Omit<BrowserSurfaceRequest, "bounds">) => Promise<void>;
@@ -554,11 +582,6 @@ export interface OctantHostBridge {
     listener: (vibrancy: "sidebar" | null) => void,
   ) => () => void;
   readonly subscribeCodeDeepLinks: (listener: (target: unknown) => void) => () => void;
-  /**
-   * The reserved shortcut for leaving a running Canvas prototype, read by the
-   * main process before the frame sees the key. It carries nothing.
-   */
-  readonly subscribeCanvasFrameFocusEscape: (listener: () => void) => () => void;
   readonly subscribeOpenSettings: (listener: () => void) => () => void;
   readonly subscribeStartNewAgent: (listener: () => void) => () => void;
   /**
@@ -705,6 +728,20 @@ export function createHostBridge(
       decodeCanvasPrototypeSurfacePreparation(
         await ipc.invoke(IPC_CHANNELS.canvasPrototypeSurface),
       ),
+    openCanvasPrototype: async (request: CanvasPrototypeOpenRequest) =>
+      decodeCanvasPrototypeOpenResult(await ipc.invoke(IPC_CHANNELS.canvasPrototypeOpen, request)),
+    sendCanvasPrototypeInput: async (surfaceId: string, input: unknown) => {
+      await ipc.invoke(IPC_CHANNELS.canvasPrototypeInput, surfaceId, input);
+    },
+    resizeCanvasPrototype: async (surfaceId: string, width: number, height: number) => {
+      await ipc.invoke(IPC_CHANNELS.canvasPrototypeResize, surfaceId, width, height);
+    },
+    closeCanvasPrototype: async (surfaceId: string) => {
+      await ipc.invoke(IPC_CHANNELS.canvasPrototypeClose, surfaceId);
+    },
+    acknowledgeCanvasPrototypeFrame: async (surfaceId: string) => {
+      await ipc.invoke(IPC_CHANNELS.canvasPrototypeDrawn, surfaceId);
+    },
     attachBrowserSurface: async (request: BrowserSurfaceRequest) => {
       validateBrowserSurfaceRequest(request);
       return decodeBrowserSurfaceState(
@@ -1089,10 +1126,10 @@ export function createHostBridge(
       ipc.on(IPC_CHANNELS.codeDeepLink, receive);
       return () => ipc.removeListener(IPC_CHANNELS.codeDeepLink, receive);
     },
-    subscribeCanvasFrameFocusEscape: (listener: () => void) => {
-      const receive = () => listener();
-      ipc.on(IPC_CHANNELS.canvasFrameFocusEscape, receive);
-      return () => ipc.removeListener(IPC_CHANNELS.canvasFrameFocusEscape, receive);
+    subscribeCanvasPrototypeEvents: (listener: (event: unknown) => void) => {
+      const receive: MaterialListener = (_event, value) => listener(value);
+      ipc.on(IPC_CHANNELS.canvasPrototypeEvent, receive);
+      return () => ipc.removeListener(IPC_CHANNELS.canvasPrototypeEvent, receive);
     },
     subscribeOpenSettings: (listener: () => void) => {
       const receive: SettingsOpenListener = () => listener();
@@ -1943,6 +1980,29 @@ function validateExternalBrowserUrl(value: string): void {
 export type CanvasPrototypeSurfacePreparation =
   | { readonly status: "ready" }
   | { readonly status: "unavailable"; readonly reason: string };
+
+export interface CanvasPrototypeOpenRequest {
+  readonly surfaceId: string;
+  readonly src: string;
+  readonly width: number;
+  readonly height: number;
+  readonly scaleFactor: number;
+}
+
+export type CanvasPrototypeOpenResult =
+  | { readonly status: "open" }
+  | { readonly status: "refused"; readonly reason: string };
+
+function decodeCanvasPrototypeOpenResult(value: unknown): CanvasPrototypeOpenResult {
+  if (isRecord(value) && value.status === "open") return { status: "open" };
+  return {
+    status: "refused",
+    reason:
+      isRecord(value) && typeof value.reason === "string" && value.reason.length <= 280
+        ? value.reason
+        : "Octant could not open the prototype.",
+  };
+}
 
 function decodeCanvasPrototypeSurfacePreparation(
   value: unknown,

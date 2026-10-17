@@ -196,6 +196,7 @@ describe("desktop packaging boundary", () => {
       format: "cjs",
     });
     expect(REQUIRED_STAGED_PACKAGED_FILES).toEqual([
+      "apps/desktop/dist/entry.mjs",
       "apps/desktop/dist/main.mjs",
       "apps/desktop/dist/preload.cjs",
       "apps/desktop/dist/codeOperationApprovalViewPreload.cjs",
@@ -768,7 +769,7 @@ describe("desktop packaging boundary", () => {
       "apps/server/node_modules/node-pty/build/Release/spawn-helper",
     ].map((path) => ({ path, content: "Octant" }));
     expect(() => validatePackagedPayload(required.slice(1))).toThrow(
-      "missing apps/desktop/dist/main.mjs",
+      "missing apps/desktop/dist/entry.mjs",
     );
     expect(() =>
       validatePackagedPayload([...required, { path: ".env", content: "TOKEN=secret" }]),

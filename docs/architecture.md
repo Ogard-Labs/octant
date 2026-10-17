@@ -129,6 +129,9 @@ opaque reference), the browser runtime broker, and on macOS the Simulator
 device broker, behind which one native device helper per Simulator delivers
 workbench input (see
 [decisions/0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md](decisions/0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md)).
+It starts the prototype host, a second process of its own executable with no
+network route and no resolver, where running Canvas prototypes are drawn
+(see [Canvas documents, designs, and prototypes](#canvas-documents-designs-and-prototypes)).
 Every app window confines top-level navigation, redirects, and opened windows to
 the exact packaged renderer asset or configured Vite development origin. Native
 IPC also requires that trusted renderer URL, and the packaged renderer ships a
@@ -491,15 +494,18 @@ document as a future version. Frames follow the
   `allow-forms`. A host-written bridge reports size, script errors, and a
   heartbeat, grants no tool, journal, or file capability, and a frame that
   stops answering or loads a second page is removed. Desktop does not draw a
-  running design in a frame: a page policy does not cover WebRTC, so the
-  prototype is a `<webview>` in a session of its own whose every connection,
-  loopback included, goes to a proxy that is never a proxy. The main process
-  attaches that surface only for a ticketed design page it was named, serves the
-  page itself under a private scheme, refuses new windows, navigation,
-  permissions, and downloads, and reserves a shortcut page script cannot
-  intercept to return focus to host chrome. If the surface cannot be made the
-  prototype does not run. A name lookup the page asks the resolver for can still
-  leave the app, and the notice under the prototype says so. A remote browser cannot
+  running design in a frame: a page policy does not cover WebRTC or name
+  lookups, so the prototype runs in the prototype host, a process of its own
+  that `apps/desktop` starts from its own executable with the agent's preview
+  browser's no-route switches: every connection, loopback included, goes to a
+  proxy that is never a proxy, and a resolver rule answers every name with
+  not-found. The host draws the page offscreen; the window paints its pixels
+  and forwards the person's pointer and keys. The main process opens a page
+  there only for a ticketed design page it was named and fetches that page
+  itself; the host refuses new windows, navigation, permissions, and downloads,
+  and the reserved shortcut that returns focus to host chrome is never
+  forwarded to the page. If the host cannot read back that its network and
+  resolver are closed, the prototype does not run. A remote browser cannot
   cancel a frame's own navigation or contain its peer connections, so there a
   running frame is not network-contained; that exposure is accepted, bounded
   by what the frame holds, and the Run control there says so. This tier has
@@ -7118,7 +7124,7 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   route names.
 - `bun run dev` starts Vite for `apps/web` and launches Electron against it.
   Renderer edits hot-reload; server edits apply on the next relaunch. On
-  startup the dev script rebuilds `apps/desktop/dist/main.mjs` whenever
+  startup the dev script rebuilds `apps/desktop/dist/entry.mjs` whenever
   `apps/desktop/src` is newer, so `apps/desktop/src` edits need only a
   restart of `bun run dev` rather than a manual
   `bun run --cwd apps/desktop build`.
