@@ -323,11 +323,11 @@ dock, so there the frame holds **Open Canvas**, and the frame and a row open
 the Canvas as a content tab beside the thread. Editing, comments, and sharing stay there.
 A design that runs script is a prototype. Wherever it is drawn, a note under its
 header says what it can still send out: on desktop that it runs with no network
-connection and can still make Octant look up host names, and in a browser that
-its script can still connect to another computer. Its header
+connection, and in a browser that its script can still connect to another
+computer. Its header
 shows a **Running** label and **Stop** while it runs, and **Run again** with
-the reason once it stops (stopped responding, loaded another page, kept
-taking the keyboard back, or, on desktop, could not be started in its contained
+the reason once it stops (stopped responding, loaded another page, or, on
+desktop, could not be started in its contained
 surface). In the thread it starts only when the person
 presses **Run**; the sidebar runs it when it is shown. Octant never moves focus into a running
 prototype, however it started; it is in the tab order, so the person reaches it

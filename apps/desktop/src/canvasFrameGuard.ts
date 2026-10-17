@@ -4,8 +4,8 @@ import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
  * What the desktop holds the app window's frames to, now that a running Canvas
  * prototype is not drawn in one.
  *
- * A running prototype lives in a surface of its own with no route out (see
- * `canvasPrototypeSurface.ts`). The app window therefore never has a reason to
+ * A running prototype lives in the prototype host, a process of its own with
+ * no route out and no resolver (see `canvasPrototypeHost.ts`). The app window therefore never has a reason to
  * load the host's design page into a frame, and none may: a frame there would
  * run agent script with the window's own network. Every frame navigation to
  * that page is cancelled, so a renderer that fell back to a frame, or was made

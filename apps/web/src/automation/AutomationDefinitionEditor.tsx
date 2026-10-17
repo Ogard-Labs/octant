@@ -400,7 +400,6 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
           ref={nameRef}
           type="text"
           value={displayName}
-          unstyled
         />
       </div>
 
@@ -574,7 +573,6 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
             }
             type="datetime-local"
             value={trigger.onceLocal}
-            unstyled
           />
         </div>
       ) : null}
@@ -591,7 +589,6 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
               }
               type="datetime-local"
               value={trigger.anchorLocal}
-              unstyled
             />
           </div>
           <div className="automation-editor__field">
@@ -606,7 +603,6 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
               }
               type="number"
               value={trigger.intervalMinutes}
-              unstyled
             />
           </div>
         </>
@@ -643,7 +639,6 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
               }
               type="time"
               value={trigger.localTime}
-              unstyled
             />
           </div>
           <div className="automation-editor__field">
@@ -658,7 +653,6 @@ export function AutomationDefinitionEditor(props: AutomationDefinitionEditorProp
               placeholder="Europe/Oslo"
               type="text"
               value={trigger.timeZone}
-              unstyled
             />
             <datalist id={ids.timeZoneList}>
               {supportedTimeZones().map((zone) => (

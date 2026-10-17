@@ -1,8 +1,8 @@
 # Provider runtimes
 
 This topic specification owns runtime-specific wire behaviour that the provider
-boundary normalizes: OpenCode's version-selected routes, the local-server
-adapter, and the vendor sign-in dialects of the host OAuth runner. Architecture
+boundary normalizes: OpenCode's version-selected routes, the Pi release
+gate, the local-server adapter, and the vendor sign-in dialects of the host OAuth runner. Architecture
 owns the driver interface, honest capability, credentials, and confinement
 ([Architecture: providers](../architecture.md#providers) and
 [security and authority](../architecture.md#security-and-authority)).
@@ -29,8 +29,10 @@ turns Code Mode off for the bridge, so each tool is offered by name as
 tools join a session only once connected; any other status fails the
 registration closed. 2.0.22 names the calling session in the call's
 `ai.opencode/sessionID` metadata, and the bridge refuses a call that names
-another session. App-managed tools are reported only for 2.0.22 exactly,
-the 2.x release the hostile-configuration check was repeated against, and
+another session. App-managed tools are reported only for 2.0.22 and 2.0.27 exactly,
+the 2.x releases the hostile-configuration check was repeated against (2.0.27
+passed the same check and the same app-tool round trip through a real launch
+as 2.0.22, with no change to routes or events), and
 only on macOS, where the probe registers an empty bridge and OpenCode lists
 its tools. Project resolution
 starts Git, which the Chat, Plan, and Work jail refuses; on macOS those
@@ -87,6 +89,22 @@ failed delete leaves one empty session and does not change the result. A
 runtime that cannot answer (observed with 2.0.22 on macOS as HTTP 500
 without the stand-in) reports `incompatible` with its models listed and
 every capability unsupported, and no turn is offered.
+
+## Pi
+
+Octant launches Pi in RPC mode with `--no-extensions`, which since Pi 0.99
+also turns off its built-in extensions (the MCP client, codemode, and tool
+search), and loads only Octant's own extension by path. A user-level or
+project-level `mcp.json` therefore starts no server and no inherited command
+is registered. App-managed tools are reported only for the releases whose
+tool attestation, approval bridge, and confinement Octant verified: 0.85.1 and
+1.1.0, exactly; any other release lists its models and reports app tools
+unsupported, and a session that offers tools on it is refused. Only 0.85.1 is
+verified for warm reuse of a settled process; other releases close it and
+cold-resume the native history. Pi 1.1.0 adds `aborted` to `agent_settled`:
+an aborted run is reported as interrupted, never as completed. Pi 1.0.3
+renamed the Azure provider from `azure-openai-responses` to `azure` and kept
+its `AZURE_OPENAI_*` variables, so a thread holds them under either name.
 
 ## Local-server provider adapter
 
@@ -169,6 +187,9 @@ failing the check with their typed states.
   `openCodeClient.test.ts`, `openCodeEventMapper.test.ts`,
   `openCodeProcess.test.ts`, `openCodeConformance.test.ts`, and the
   `openCode2AppToolsSmoke.integration.test.ts` real-runtime smoke.
+- Pi: `apps/server/src/providers/piDriver.test.ts`, `piProcess.test.ts`,
+  `piConformance.test.ts`, and the `piSmoke.integration.test.ts` real-runtime
+  probe (verified release attestation and the hostile MCP configuration).
 - Sign-in dialects: `apps/server/src/providers/directEndpointSubscriptionOAuth.test.ts`,
   `chatGptPlanProfile.test.ts`, `packages/domain/src/subscriptionOAuthCatalog.test.ts`,
   and `packages/provider-sdk/src/subscriptionOAuthConformance.test.ts`.

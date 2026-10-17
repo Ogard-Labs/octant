@@ -34,10 +34,12 @@ import {
   type NativeHarnessWebSearchArguments,
   type NativeHarnessWriteArguments,
   type OctantMode,
+  type ProviderExecutionPolicy,
   type ProviderToolDefinition,
   type ToolActionAuthority,
   type ToolActionRequest,
 } from "@octant/contracts";
+import { planRefusesApprovalClass } from "@octant/domain/tool-call-policy";
 import { Schema } from "effect";
 import { decodeToolActionRequest } from "@octant/contracts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
@@ -226,6 +228,12 @@ export interface NativeHarnessToolPorts {
 export interface CreateNativeHarnessToolsOptions {
   readonly threadId: string;
   readonly mode: OctantMode;
+  /**
+   * The access posture the tools are composed for. Under Plan the set leaves
+   * out every tool Plan refuses, so the model is never offered one it cannot
+   * use; the authority service still refuses a call that arrives anyway.
+   */
+  readonly executionPolicy?: ProviderExecutionPolicy;
   /** The single server choke point every proposal passes before a port runs. */
   readonly authority: Pick<ToolCallAuthorityService, "authorize">;
   /** The authority the thread holds right now; absent means the thread speaks for nothing. */
@@ -437,6 +445,9 @@ function isOffered(
     version: 1,
   });
   if (entry === undefined || !entry.modes.includes(options.mode)) return false;
+  if (options.executionPolicy === "plan" && planRefusesApprovalClass(entry.approvalClass)) {
+    return false;
+  }
   const ports = options.ports;
   switch (name) {
     case "read":

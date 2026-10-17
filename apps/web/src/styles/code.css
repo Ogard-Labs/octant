@@ -372,6 +372,7 @@
       var(--oct-tree-indent)
   );
   overflow: hidden;
+  border-radius: var(--oct-radius-sm);
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
   text-align: left;
@@ -396,13 +397,6 @@
 .code-file-explorer__entry > svg {
   flex: 0 0 auto;
   color: var(--oct-meta);
-}
-
-/* An open folder is a state the chevron and its children already say; the
-   ghost recipe's aria-expanded fill would make every expanded folder look
-   selected. */
-.code-file-explorer__entry--directory[aria-expanded="true"] {
-  background: transparent;
 }
 
 .code-file-explorer__entry:hover,
@@ -717,8 +711,8 @@
   align-items: baseline;
   gap: var(--oct-space-2);
   padding: var(--oct-space-1) var(--oct-space-2);
-  background: transparent;
   border: 0;
+  border-radius: var(--oct-radius-sm);
   cursor: pointer;
   font-size: var(--oct-text-xs);
   text-align: left;
@@ -900,6 +894,11 @@ html[data-octant-increased-contrast="true"] .code-diff-pane__warning {
   padding: var(--oct-space-1) var(--oct-space-2);
   border-radius: var(--oct-radius-sm);
   cursor: pointer;
+}
+
+/* The bare variant draws nothing, so the option takes the ghost focus fill itself. */
+.github-picker__option:focus-visible {
+  background-color: var(--muted);
 }
 
 .github-picker__option--active,
@@ -1140,6 +1139,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   height: auto;
   min-height: 40px;
   padding-inline: 0;
+  border-radius: var(--oct-radius-sm);
 }
 
 .work-files-panel__row--openable:hover,
@@ -1226,10 +1226,15 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-views__inline-button {
   width: 28px;
   min-height: 28px;
+  border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
   transition:
     background var(--oct-motion-fast) ease,
     color var(--oct-motion-fast) ease;
+}
+
+.code-project-views__inline-button:focus-visible {
+  background-color: var(--muted);
 }
 
 .code-project-views__inline-button:hover {
@@ -1264,7 +1269,16 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-views__new {
   width: 27px;
   min-height: 27px;
+  border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
+}
+
+/* The bare variant draws nothing, so these take the ghost hover and focus fill themselves. */
+.code-project-views__new:hover,
+.code-project-views__new:focus-visible,
+.code-project-views__swatch:hover,
+.code-project-views__swatch:focus-visible {
+  background-color: var(--muted);
 }
 
 .code-project-views__fieldset {
@@ -1290,6 +1304,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 .code-project-views__swatch {
   width: 28px;
   min-height: 28px;
+  border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
 }
 
@@ -1496,7 +1511,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   width: auto;
   min-width: 0;
   padding: 0;
-  color: var(--octant-text-primary);
   font-size: var(--oct-text-xl);
   font-weight: var(--oct-weight-display);
   letter-spacing: -0.035em;
@@ -2414,9 +2428,6 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   padding: var(--oct-space-3) var(--oct-space-2);
   border: 0;
   border-bottom: 1px solid var(--oct-border-soft);
-  border-radius: 0;
-  background: transparent;
-  color: inherit;
   text-align: left;
   cursor: pointer;
 }

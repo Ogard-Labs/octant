@@ -289,7 +289,7 @@ export function headlessMigrationsMetadata(
 // produces its own platform and architecture.
 
 /** Third-party packages the CLI bundle leaves external. */
-export const HEADLESS_CLI_RUNTIME_PACKAGES = ["@opentui/core", "effect"] as const;
+export const HEADLESS_CLI_RUNTIME_PACKAGES = ["@opentui/core", "effect", "lean-qr"] as const;
 
 const NATIVE_RUNTIME_FILE = /(?:\.node|\.so|\.dylib)$|(?:^|\/)spawn-helper$/;
 

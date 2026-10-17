@@ -432,7 +432,8 @@ describe("RemoteAccessSettingsSection", () => {
     expect(drawn).toEqual(dark);
     expect(qr.getAttribute("viewBox")).toBe(`0 0 ${symbol.size + 8} ${symbol.size + 8}`);
     expect(screen.queryByLabelText("Pairing link")).not.toBeInTheDocument();
-    expect(screen.getByText(/can't read pairing codes yet/)).toBeInTheDocument();
+    expect(screen.getByText(/scan the QR code with the phone app/)).toBeInTheDocument();
+    expect(screen.queryByText(/can't read pairing codes/)).not.toBeInTheDocument();
   });
 
   it("drops a pairing code from the page when its ticket expires", async () => {

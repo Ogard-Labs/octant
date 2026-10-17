@@ -1,134 +1,141 @@
-import { readFileSync } from "node:fs";
-import type { WebPreferences } from "electron";
-import {
-  CANVAS_DESIGN_BRIDGE_CHANNEL,
-  CANVAS_DESIGN_PAGE_PATH,
-  CANVAS_DESIGN_SURFACE_BRIDGE_EVENT,
-} from "@octant/contracts/canvas";
+import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
 import { describe, expect, it, vi } from "vitest";
+import type { CanvasPrototypeHostCommand, CanvasPrototypeHostEvent } from "./canvasPrototypeHost";
 import {
-  CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL,
-  CANVAS_PROTOTYPE_PARTITION,
-  CANVAS_PROTOTYPE_SCHEME,
+  closeCanvasPrototypesWith,
   createCanvasPrototypeSurface,
+  decodeCanvasPrototypeInput,
+  spawnCanvasPrototypeHost,
   designPageTicket,
-  type CanvasPrototypeGuestPort,
-  type CanvasPrototypeHostPort,
-  type CanvasPrototypeKeyInput,
-  type CanvasPrototypeSessionPort,
+  type CanvasPrototypeHostConnection,
+  type CanvasPrototypeOwner,
+  type CanvasPrototypeOwnerContentsPort,
+  type CanvasPrototypeSurfaceEvent,
 } from "./canvasPrototypeSurface";
 
 const server = "http://127.0.0.1:3773";
 const ticket = "a".repeat(43);
 const page = `${server}${CANVAS_DESIGN_PAGE_PATH}?ticket=${ticket}`;
-const surfaceAddress = `${CANVAS_PROTOTYPE_SCHEME}://page/?ticket=${ticket}`;
-const NO_ROUTE = "SOCKS5 127.0.0.1:1";
+const surfaceId = "11111111-1111-4111-8111-111111111111";
+const other = "22222222-2222-4222-8222-222222222222";
 
-function fakeSession(routes: Record<string, string> = {}) {
-  let serve: ((request: Request) => Promise<Response>) | undefined;
-  const session = {
-    setProxy: vi.fn<CanvasPrototypeSessionPort["setProxy"]>(async () => undefined),
-    resolveProxy: vi.fn<CanvasPrototypeSessionPort["resolveProxy"]>(
-      async (url) => routes[url] ?? NO_ROUTE,
-    ),
-    refuseEverythingAsked: vi.fn(),
-    serve: vi.fn((handler: (request: Request) => Promise<Response>) => {
-      serve = handler;
-    }),
-  } satisfies CanvasPrototypeSessionPort;
-  return { session, answer: (request: Request) => serve?.(request) };
+function fakeHost() {
+  const sent: Array<CanvasPrototypeHostCommand> = [];
+  let emit: ((event: CanvasPrototypeHostEvent) => void) | undefined;
+  let exit: (() => void) | undefined;
+  const stop = vi.fn();
+  const connection: CanvasPrototypeHostConnection = {
+    send: (command) => sent.push(command),
+    onEvent: (listener) => {
+      emit = listener;
+    },
+    onExit: (listener) => {
+      exit = listener;
+    },
+    stop,
+  };
+  return {
+    connection,
+    sent,
+    stop,
+    emit: (event: CanvasPrototypeHostEvent) => emit?.(event),
+    exit: () => exit?.(),
+  };
+}
+
+function owner(id = 1) {
+  const heard: Array<CanvasPrototypeSurfaceEvent> = [];
+  const port: CanvasPrototypeOwner = { id, send: (event) => heard.push(event) };
+  return { port, heard };
 }
 
 function surface(
   input: {
-    readonly session?: ReturnType<typeof fakeSession>["session"];
-    readonly serverUrl?: string | undefined;
     readonly fetch?: typeof fetch;
+    readonly serverUrl?: string | undefined;
     readonly platform?: NodeJS.Platform;
   } = {},
 ) {
-  const made = fakeSession();
-  const session = input.session ?? made.session;
-  const created = createCanvasPrototypeSurface({
-    session,
+  const hosts: Array<ReturnType<typeof fakeHost>> = [];
+  const made = createCanvasPrototypeSurface({
+    launchHost: () => {
+      const host = fakeHost();
+      hosts.push(host);
+      return host.connection;
+    },
     serverUrl: () => ("serverUrl" in input ? input.serverUrl : server),
     fetch: input.fetch ?? vi.fn<typeof fetch>(async () => new Response("page")),
-    preloadPath: "/app/canvasPrototypePreload.cjs",
     platform: input.platform ?? "darwin",
+    readyTimeoutMs: 50,
   });
-  return { surface: created, session };
+  return { surface: made, hosts };
 }
 
-function host() {
-  let attach:
-    | ((
-        event: { readonly preventDefault: () => void },
-        webPreferences: WebPreferences,
-        params: Record<string, string>,
-      ) => void)
-    | undefined;
-  const port: CanvasPrototypeHostPort = {
-    onWillAttachWebview: (listener) => {
-      attach = listener;
-    },
-  };
-  const tryAttach = (params: Record<string, string>, webPreferences: WebPreferences = {}) => {
-    let cancelled = false;
-    attach?.({ preventDefault: () => (cancelled = true) }, webPreferences, params);
-    return { cancelled, params, webPreferences };
-  };
-  return { port, tryAttach };
+/** The window that prepared the host, which stays open unless a test closes it. */
+const preparer = owner(99).port;
+
+async function readySurface(input: Parameters<typeof surface>[0] = {}) {
+  const made = surface(input);
+  const preparing = made.surface.prepare(preparer);
+  made.hosts[0]?.emit({ kind: "ready" });
+  await expect(preparing).resolves.toEqual({ status: "ready" });
+  const host = made.hosts[0];
+  if (host === undefined) throw new Error("No host was started.");
+  return { ...made, host };
 }
 
-describe("the prototype surface's network", () => {
-  it("sends every connection, loopback included, to a proxy that is never one, and reads that back before it is ready", async () => {
-    const { surface: made, session } = surface();
-    await expect(made.prepare()).resolves.toEqual({ status: "ready" });
-    expect(session.setProxy).toHaveBeenCalledWith({
-      proxyRules: "socks5://127.0.0.1:1",
-      proxyBypassRules: "<-loopback>",
+const request = (fields: Record<string, unknown> = {}) => ({
+  surfaceId,
+  src: page,
+  width: 390,
+  height: 844,
+  scaleFactor: 2,
+  ...fields,
+});
+
+describe("starting the prototype host", () => {
+  it("is ready only once the host reads back that its network and resolver are closed", async () => {
+    const { surface: made, hosts } = surface();
+    const preparing = made.prepare(preparer);
+    expect(hosts).toHaveLength(1);
+    // Asked again while it starts, it starts no second host.
+    void made.prepare(preparer);
+    expect(hosts).toHaveLength(1);
+    hosts[0]?.emit({ kind: "ready" });
+    await expect(preparing).resolves.toEqual({ status: "ready" });
+  });
+
+  it("reports the host's refusal, stops it, and starts over on the next try", async () => {
+    const { surface: made, hosts } = surface();
+    const preparing = made.prepare(preparer);
+    hosts[0]?.emit({ kind: "unavailable", reason: "Names still resolve." });
+    await expect(preparing).resolves.toEqual({
+      status: "unavailable",
+      reason: "Names still resolve.",
     });
-    expect(session.resolveProxy).toHaveBeenCalledWith("https://example.com/");
-    expect(session.resolveProxy).toHaveBeenCalledWith("http://127.0.0.1:9/");
-    expect(session.refuseEverythingAsked).toHaveBeenCalledOnce();
-    expect(session.serve).toHaveBeenCalledOnce();
-    // Asked again, it does not serve or refuse twice.
-    await made.prepare();
-    expect(session.serve).toHaveBeenCalledOnce();
+    expect(hosts[0]?.stop).toHaveBeenCalledOnce();
+    const again = made.prepare(preparer);
+    expect(hosts).toHaveLength(2);
+    hosts[1]?.emit({ kind: "ready" });
+    await expect(again).resolves.toEqual({ status: "ready" });
   });
 
-  it("does not become ready, and serves nothing, when the session would still reach a public or a loopback address", async () => {
-    for (const route of ["DIRECT", "SOCKS5 127.0.0.1:1; DIRECT", "PROXY 127.0.0.1:8080", ""]) {
-      for (const target of ["https://example.com/", "http://127.0.0.1:9/"]) {
-        const made = fakeSession({ [target]: route });
-        const { surface: unprepared } = surface({ session: made.session });
-        const result = await unprepared.prepare();
-        expect(result.status).toBe("unavailable");
-        expect(made.session.serve).not.toHaveBeenCalled();
-      }
-    }
-  });
+  it("is unavailable when the host says nothing in time or exits before it is ready", async () => {
+    const silent = surface();
+    await expect(silent.surface.prepare(preparer)).resolves.toMatchObject({
+      status: "unavailable",
+    });
+    expect(silent.hosts[0]?.stop).toHaveBeenCalledOnce();
 
-  it("reports a failure to close the network as a value, and starts over on the next try", async () => {
-    const made = fakeSession();
-    made.session.setProxy.mockRejectedValueOnce(new Error("no proxy service"));
-    const { surface: unprepared } = surface({ session: made.session });
-    await expect(unprepared.prepare()).resolves.toMatchObject({ status: "unavailable" });
-    expect(made.session.serve).not.toHaveBeenCalled();
-    await expect(unprepared.prepare()).resolves.toEqual({ status: "ready" });
-    expect(made.session.serve).toHaveBeenCalledOnce();
+    const exiting = surface();
+    const preparing = exiting.surface.prepare(preparer);
+    exiting.hosts[0]?.exit();
+    await expect(preparing).resolves.toMatchObject({ status: "unavailable" });
   });
 });
 
-describe("the page the surface serves", () => {
-  async function ready(fetchPage: typeof fetch) {
-    const made = fakeSession();
-    const { surface: created } = surface({ session: made.session, fetch: fetchPage });
-    await created.prepare();
-    return made.answer;
-  }
-
-  it("asks the host for the ticketed design page only, keeping the page's own policy", async () => {
+describe("opening a prototype", () => {
+  it("fetches the ticketed design page itself and hands the host the page and its own policy", async () => {
     const fetchPage = vi.fn<typeof fetch>(
       async () =>
         new Response("<p>design</p>", {
@@ -140,143 +147,366 @@ describe("the page the surface serves", () => {
           },
         }),
     );
-    const answer = await ready(fetchPage);
-    const response = await answer(new Request(surfaceAddress));
+    const { surface: made, host } = await readySurface({ fetch: fetchPage });
+    await expect(made.open(owner().port, request())).resolves.toEqual({ status: "open" });
     expect(String(fetchPage.mock.calls[0]?.[0])).toBe(page);
     expect(fetchPage.mock.calls[0]?.[1]).toMatchObject({ redirect: "error" });
-    expect(response?.status).toBe(200);
-    expect(await response?.text()).toBe("<p>design</p>");
-    expect(response?.headers.get("content-security-policy")).toBe(
-      "sandbox allow-scripts; default-src 'none'",
-    );
-    expect(response?.headers.get("set-cookie")).toBeNull();
-    expect(response?.headers.get("x-other")).toBeNull();
+    const opened = host.sent[0];
+    if (opened?.kind !== "open") throw new Error("The host was not asked to open the page.");
+    expect(opened).toMatchObject({ surfaceId, width: 390, height: 844, scaleFactor: 2 });
+    expect(new TextDecoder().decode(opened.page.body)).toBe("<p>design</p>");
+    expect(opened.page.headers).toEqual({
+      "content-type": "text/html; charset=utf-8",
+      "content-security-policy": "sandbox allow-scripts; default-src 'none'",
+    });
   });
 
-  it("answers nothing else: another path, host, query, or method never reaches the host", async () => {
+  it("refuses any address but a ticketed design page on this host, without asking the host", async () => {
     const fetchPage = vi.fn<typeof fetch>(async () => new Response("page"));
-    const answer = await ready(fetchPage);
-    for (const address of [
-      `${CANVAS_PROTOTYPE_SCHEME}://page/other?ticket=${ticket}`,
-      `${CANVAS_PROTOTYPE_SCHEME}://elsewhere/?ticket=${ticket}`,
-      `${CANVAS_PROTOTYPE_SCHEME}://page/?ticket=${ticket}&path=/api/secret`,
-      `${CANVAS_PROTOTYPE_SCHEME}://page/?ticket=short`,
-      `${CANVAS_PROTOTYPE_SCHEME}://page/`,
-      `${CANVAS_PROTOTYPE_SCHEME}://page/?ticket=${ticket}#x`,
-      `${CANVAS_PROTOTYPE_SCHEME}://page/favicon.ico`,
+    const { surface: made, host } = await readySurface({ fetch: fetchPage });
+    for (const src of [
+      "https://example.com/",
+      `${server}/api/not-the-design-page?ticket=${ticket}`,
+      `http://127.0.0.1:9999${CANVAS_DESIGN_PAGE_PATH}?ticket=${ticket}`,
+      `${page}&path=/api/secret`,
+      `${server}${CANVAS_DESIGN_PAGE_PATH}?ticket=short`,
     ]) {
-      expect((await answer(new Request(address)))?.status).toBe(404);
+      await expect(made.open(owner().port, request({ src }))).resolves.toMatchObject({
+        status: "refused",
+      });
     }
-    expect((await answer(new Request(surfaceAddress, { method: "POST", body: "x" })))?.status).toBe(
-      405,
-    );
+    for (const malformed of [
+      request({ surfaceId: "not-an-id" }),
+      request({ width: 0 }),
+      request({ height: 100_000 }),
+      request({ scaleFactor: 8 }),
+      undefined,
+    ]) {
+      await expect(made.open(owner().port, malformed)).resolves.toMatchObject({
+        status: "refused",
+      });
+    }
     expect(fetchPage).not.toHaveBeenCalled();
+    expect(host.sent).toEqual([]);
   });
 
-  it("reports an unreachable host as a refusal, not as a page", async () => {
-    const answer = await ready(
-      vi.fn<typeof fetch>(async () => {
+  it("opens nothing before the host is ready, or when the host cannot be reached", async () => {
+    const unprepared = surface();
+    await expect(unprepared.surface.open(owner().port, request())).resolves.toMatchObject({
+      status: "refused",
+    });
+    const unreachable = await readySurface({
+      fetch: vi.fn<typeof fetch>(async () => {
         throw new Error("connection refused");
       }),
-    );
-    expect((await answer(new Request(surfaceAddress)))?.status).toBe(502);
-
-    const made = fakeSession();
-    const { surface: noHost } = surface({ session: made.session, serverUrl: undefined });
-    await noHost.prepare();
-    expect((await made.answer(new Request(surfaceAddress)))?.status).toBe(503);
+    });
+    await expect(unreachable.surface.open(owner().port, request())).resolves.toMatchObject({
+      status: "refused",
+    });
+    expect(unreachable.host.sent).toEqual([]);
   });
 });
 
-describe("what the renderer may attach", () => {
-  it("attaches only a ticketed design page on this host, in the surface's own partition and preferences", async () => {
-    const { surface: made } = surface();
-    const window = host();
-    made.admitWebview(window.port);
-    await made.prepare();
+describe("a prototype's window", () => {
+  it("alone hears its prototype's pixels, bridge messages, and cursor", async () => {
+    const { surface: made, host } = await readySurface();
+    const first = owner(1);
+    const second = owner(2);
+    await made.open(first.port, request());
+    await made.open(second.port, request({ surfaceId: other }));
+    host.emit({
+      kind: "frame",
+      surfaceId,
+      frameWidth: 1,
+      frameHeight: 1,
+      x: 0,
+      y: 0,
+      width: 1,
+      height: 1,
+      pixels: new Uint8Array(4),
+    });
+    host.emit({ kind: "bridge", surfaceId, payload: { type: "heartbeat" } });
+    host.emit({ kind: "cursor", surfaceId: other, cursor: "pointer" });
+    expect(first.heard.map((event) => event.kind)).toEqual(["frame", "bridge"]);
+    expect(second.heard).toEqual([{ kind: "cursor", surfaceId: other, cursor: "pointer" }]);
+  });
 
-    // Everything the element asked for, including a partition, a preload, and
-    // preferences that would give the page a way out.
-    const attached = window.tryAttach(
+  it("forwards its own input, size, and close, and nothing for a prototype another window opened", async () => {
+    const { surface: made, host } = await readySurface();
+    const first = owner(1);
+    const second = owner(2);
+    await made.open(first.port, request());
+    host.sent.length = 0;
+    const click = { type: "mouseDown", x: 10.4, y: 20, button: "left", clickCount: 1 };
+    made.input(second.port, surfaceId, click);
+    made.resize(second.port, surfaceId, 100, 100);
+    made.drawn(second.port, surfaceId);
+    made.close(second.port, surfaceId);
+    expect(host.sent).toEqual([]);
+
+    made.input(first.port, surfaceId, click);
+    made.resize(first.port, surfaceId, 390, 900);
+    made.drawn(first.port, surfaceId);
+    made.close(first.port, surfaceId);
+    expect(host.sent).toEqual([
       {
-        instanceId: "7",
-        src: page,
-        partition: "persist:chosen-by-the-renderer",
-        preload: "file:///tmp/evil.js",
-        webpreferences: "nodeIntegration=yes",
-        allowpopups: "true",
-        nodeintegration: "true",
-        disablewebsecurity: "true",
-        useragent: "x",
+        kind: "input",
+        surfaceId,
+        input: { type: "mouseDown", x: 10, y: 20, button: "left", clickCount: 1, modifiers: [] },
       },
-      {
-        nodeIntegration: true,
-        nodeIntegrationInSubFrames: true,
-        contextIsolation: false,
-        sandbox: false,
-        webSecurity: false,
-        plugins: true,
-        partition: "persist:chosen-by-the-renderer",
-        preload: "/tmp/evil.js",
-        additionalArguments: ["--x"],
-        zoomFactor: 2,
-      },
+      { kind: "resize", surfaceId, width: 390, height: 900 },
+      { kind: "drawn", surfaceId },
+      { kind: "close", surfaceId },
+    ]);
+  });
+
+  it("loses its prototypes when the window goes, and hears they are gone when the host exits", async () => {
+    const { surface: made, host } = await readySurface();
+    const first = owner(1);
+    await made.open(first.port, request());
+    await made.open(owner(2).port, request({ surfaceId: other }));
+    made.closeOwnedBy(2);
+    expect(host.sent.at(-1)).toEqual({ kind: "close", surfaceId: other });
+    host.exit();
+    expect(first.heard).toEqual([{ kind: "gone", surfaceId }]);
+    await expect(made.open(first.port, request())).resolves.toMatchObject({ status: "refused" });
+  });
+});
+
+function contents(id: number) {
+  let navigate: ((navigation: { isMainFrame: boolean; isInPlace: boolean }) => void) | undefined;
+  let rendererGone: (() => void) | undefined;
+  let destroyed: (() => void) | undefined;
+  const port: CanvasPrototypeOwnerContentsPort = {
+    id,
+    onNavigation: (listener) => {
+      navigate = listener;
+    },
+    onRendererGone: (listener) => {
+      rendererGone = listener;
+    },
+    onDestroyed: (listener) => {
+      destroyed = listener;
+    },
+  };
+  return {
+    port,
+    navigate: (navigation: { isMainFrame: boolean; isInPlace: boolean }) => navigate?.(navigation),
+    rendererGone: () => rendererGone?.(),
+    destroyed: () => destroyed?.(),
+  };
+}
+
+function pendingPages() {
+  const asked: Array<{ deliver: (response: Response) => void; signal: AbortSignal | undefined }> =
+    [];
+  const fetchPage = vi.fn<typeof fetch>(
+    (_url, init) =>
+      new Promise<Response>((resolve, reject) => {
+        const signal = init?.signal ?? undefined;
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+        asked.push({ deliver: resolve, signal });
+      }),
+  );
+  return { fetchPage, asked };
+}
+
+describe("a prototype whose window goes while it opens", () => {
+  it("is cancelled, and the host stops when no other window uses it", async () => {
+    const { fetchPage, asked } = pendingPages();
+    const { surface: made, hosts } = surface({ fetch: fetchPage });
+    const window = owner(1);
+    const preparing = made.prepare(window.port);
+    hosts[0]?.emit({ kind: "ready" });
+    await expect(preparing).resolves.toEqual({ status: "ready" });
+    const opening = made.open(window.port, request());
+    await vi.waitFor(() => expect(asked).toHaveLength(1));
+    made.closeOwnedBy(1);
+    expect(asked[0]?.signal?.aborted).toBe(true);
+    await expect(opening).resolves.toEqual({
+      status: "refused",
+      reason: "The window that asked for the prototype is gone.",
+    });
+    expect(hosts[0]?.sent).toEqual([]);
+    expect(hosts[0]?.stop).toHaveBeenCalledOnce();
+  });
+
+  it("is not opened once the page arrives, while the host keeps running for another window", async () => {
+    let deliver: ((response: Response) => void) | undefined;
+    const fetchPage = vi.fn<typeof fetch>(
+      () =>
+        new Promise<Response>((resolve) => {
+          deliver = resolve;
+        }),
     );
-    expect(attached.cancelled).toBe(false);
-    expect(attached.params).toMatchObject({
-      instanceId: "7",
-      src: surfaceAddress,
-      partition: CANVAS_PROTOTYPE_PARTITION,
-      preload: "",
-      webpreferences: "",
-      allowpopups: "false",
-      nodeintegration: "false",
-      disablewebsecurity: "false",
-      useragent: "",
-    });
-    expect(attached.webPreferences).toEqual({
-      contextIsolation: true,
-      disableBlinkFeatures: "",
-      disablePopups: true,
-      enableBlinkFeatures: "",
-      nodeIntegration: false,
-      nodeIntegrationInSubFrames: false,
-      partition: CANVAS_PROTOTYPE_PARTITION,
-      plugins: false,
-      preload: "/app/canvasPrototypePreload.cjs",
-      sandbox: true,
-      webSecurity: true,
-      zoomFactor: 2,
-    });
-    expect(CANVAS_PROTOTYPE_PARTITION.startsWith("persist:")).toBe(false);
+    const { surface: made, host } = await readySurface({ fetch: fetchPage });
+    const window = owner(1);
+    const opening = made.open(window.port, request());
+    await vi.waitFor(() => expect(deliver).toBeDefined());
+    made.closeOwnedBy(1);
+    deliver?.(new Response("page"));
+    await expect(opening).resolves.toMatchObject({ status: "refused" });
+    expect(host.sent).toEqual([]);
+    expect(host.stop).not.toHaveBeenCalled();
+
+    // A later open from a new page in the same window still works.
+    const reopened = made.open(window.port, request({ surfaceId: other }));
+    deliver?.(new Response("page"));
+    await expect(reopened).resolves.toEqual({ status: "open" });
   });
 
-  it("cancels every other address, and every attach before the surface is ready", async () => {
-    const { surface: made } = surface();
-    const window = host();
-    made.admitWebview(window.port);
-    expect(window.tryAttach({ src: page }).cancelled).toBe(true);
-    await made.prepare();
-    for (const src of [
-      "https://example.com/",
-      "http://127.0.0.1:9/",
-      `${server}/api/canvas/other?ticket=${ticket}`,
-      `http://127.0.0.1:9999${CANVAS_DESIGN_PAGE_PATH}?ticket=${ticket}`,
-      `${server}${CANVAS_DESIGN_PAGE_PATH}?ticket=${ticket}&extra=1`,
-      `${server}${CANVAS_DESIGN_PAGE_PATH}`,
-      `${server}${CANVAS_DESIGN_PAGE_PATH}?ticket=short`,
-      `${server}${CANVAS_DESIGN_PAGE_PATH}?ticket=${ticket}#x`,
-      `http://user:pass@127.0.0.1:3773${CANVAS_DESIGN_PAGE_PATH}?ticket=${ticket}`,
-      surfaceAddress,
-      "file:///etc/passwd",
-      "",
+  it("stops a host still starting, without taking down the host started after it", async () => {
+    const { surface: made, hosts } = surface();
+    const preparing = made.prepare(owner(1).port);
+    made.closeOwnedBy(1);
+    await expect(preparing).resolves.toMatchObject({ status: "unavailable" });
+    expect(hosts[0]?.stop).toHaveBeenCalledOnce();
+
+    const next = owner(2);
+    const again = made.prepare(next.port);
+    expect(hosts).toHaveLength(2);
+    hosts[1]?.emit({ kind: "ready" });
+    await expect(again).resolves.toEqual({ status: "ready" });
+    // Past the first start's deadline, the new host is still the one in use.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    await expect(made.open(next.port, request())).resolves.toEqual({ status: "open" });
+    expect(hosts[1]?.stop).not.toHaveBeenCalled();
+  });
+});
+
+describe("a window whose renderer exits", () => {
+  it("loses its prototypes, and the host stops when no other window uses it", async () => {
+    const { surface: made, hosts } = surface();
+    const window = owner(1);
+    const page = contents(1);
+    closeCanvasPrototypesWith(page.port, () => made);
+    const preparing = made.prepare(window.port);
+    hosts[0]?.emit({ kind: "ready" });
+    await preparing;
+    await made.open(window.port, request());
+    page.rendererGone();
+    expect(hosts[0]?.sent.at(-1)).toEqual({ kind: "close", surfaceId });
+    expect(hosts[0]?.stop).toHaveBeenCalledOnce();
+    // The window's next page starts a new host.
+    void made.prepare(window.port);
+    expect(hosts).toHaveLength(2);
+  });
+
+  it("leaves another window's prototypes and the host running, and a page that stays is not a new one", async () => {
+    const { surface: made, host } = await readySurface();
+    const first = owner(1);
+    const second = owner(2);
+    const firstPage = contents(1);
+    const secondPage = contents(2);
+    closeCanvasPrototypesWith(firstPage.port, () => made);
+    closeCanvasPrototypesWith(secondPage.port, () => made);
+    await made.open(first.port, request());
+    await made.open(second.port, request({ surfaceId: other }));
+    host.sent.length = 0;
+
+    firstPage.navigate({ isMainFrame: false, isInPlace: false });
+    firstPage.navigate({ isMainFrame: true, isInPlace: true });
+    expect(host.sent).toEqual([]);
+
+    firstPage.rendererGone();
+    expect(host.sent).toEqual([{ kind: "close", surfaceId }]);
+    host.emit({ kind: "cursor", surfaceId: other, cursor: "pointer" });
+    expect(second.heard).toEqual([{ kind: "cursor", surfaceId: other, cursor: "pointer" }]);
+
+    secondPage.destroyed();
+    expect(host.sent.at(-1)).toEqual({ kind: "close", surfaceId: other });
+    expect(host.stop).not.toHaveBeenCalled();
+    made.closeOwnedBy(preparer.id);
+    expect(host.stop).toHaveBeenCalledOnce();
+  });
+});
+
+describe("the prototype host process's lifetime", () => {
+  // A stand-in host that ignores its channel closing and SIGTERM, as a host
+  // held by a page's `beforeunload` once did, and says when it is listening.
+  const stubborn = [
+    "-e",
+    'process.on("SIGTERM", () => {}); process.on("disconnect", () => {}); setInterval(() => {}, 1000); process.send({ kind: "ready" });',
+  ];
+
+  function started(onAppExit?: (listener: () => void) => () => void) {
+    const connection = spawnCanvasPrototypeHost(
+      { executable: process.execPath, args: stubborn },
+      { quitGraceMs: 100, ...(onAppExit === undefined ? {} : { onAppExit }) },
+    );
+    const ready = new Promise<void>((resolve) =>
+      connection.onEvent((event) => {
+        if (event.kind === "ready") resolve();
+      }),
+    );
+    const exited = new Promise<void>((resolve) => connection.onExit(resolve));
+    return { connection, ready, exited };
+  }
+
+  it("ends a host that ignores its channel closing and SIGTERM", async () => {
+    const { connection, ready, exited } = started();
+    await ready;
+    connection.stop();
+    await exited;
+  });
+
+  it("kills a host still running as the app exits", async () => {
+    let appExit: (() => void) | undefined;
+    const forget = vi.fn();
+    const { ready, exited } = started((listener) => {
+      appExit = listener;
+      return forget;
+    });
+    await ready;
+    appExit?.();
+    await exited;
+    // Once the host is gone, its exit listener is dropped.
+    await vi.waitFor(() => expect(forget).toHaveBeenCalledOnce());
+  });
+});
+
+describe("a person's input", () => {
+  it("never hands the page the reserved shortcut: Command-Escape on macOS, Control-Escape elsewhere", () => {
+    const key = (modifiers: ReadonlyArray<string>) => ({
+      type: "keyDown",
+      keyCode: "Escape",
+      modifiers,
+    });
+    expect(decodeCanvasPrototypeInput(key(["meta"]), "darwin")).toBeUndefined();
+    expect(decodeCanvasPrototypeInput(key(["control"]), "linux")).toBeUndefined();
+    expect(decodeCanvasPrototypeInput(key([]), "darwin")).toEqual(key([]));
+    expect(decodeCanvasPrototypeInput(key(["control"]), "darwin")).toEqual(key(["control"]));
+    expect(decodeCanvasPrototypeInput(key(["meta"]), "linux")).toEqual(key(["meta"]));
+  });
+
+  it("takes only the pointer, wheel, key, focus, and edit commands a person can give", () => {
+    for (const refused of [
+      { type: "contextMenu", x: 0, y: 0 },
+      { type: "mouseDown", x: Number.NaN, y: 0 },
+      { type: "mouseDown", x: 0, y: 0, button: "back" },
+      { type: "mouseDown", x: 0, y: 0, clickCount: 9 },
+      { type: "keyDown", keyCode: "" },
+      { type: "keyDown", keyCode: "a", modifiers: ["leftbuttondown"] },
+      { type: "edit", command: "print" },
+      { type: "mouseWheel", x: 0, y: 0, deltaX: 0, deltaY: Number.POSITIVE_INFINITY },
+      "click",
     ]) {
-      expect(window.tryAttach({ src, partition: "persist:x" }).cancelled, src).toBe(true);
+      expect(decodeCanvasPrototypeInput(refused, "darwin")).toBeUndefined();
     }
-    expect(window.tryAttach({}).cancelled).toBe(true);
-    expect(window.tryAttach({ src: page }).cancelled).toBe(false);
+    expect(decodeCanvasPrototypeInput({ type: "edit", command: "paste" }, "darwin")).toEqual({
+      type: "edit",
+      command: "paste",
+    });
+    expect(
+      decodeCanvasPrototypeInput(
+        { type: "mouseWheel", x: 1, y: 2, deltaX: 0, deltaY: 40 },
+        "darwin",
+      ),
+    ).toEqual({ type: "mouseWheel", x: 1, y: 2, deltaX: 0, deltaY: 40, modifiers: [] });
   });
+});
 
+describe("design page addresses", () => {
   it("accepts the address a shared snapshot's prototype is given, built the way the client builds it", () => {
     // The client resolves the host's `/api/canvas/design-page?ticket=` path
     // against its base address, which the desktop gives with a trailing slash.
@@ -288,101 +518,5 @@ describe("what the renderer may attach", () => {
     expect(designPageTicket(page, undefined)).toBeUndefined();
     expect(designPageTicket(page, server)).toBe(ticket);
     expect(designPageTicket("not a url", server)).toBeUndefined();
-  });
-});
-
-describe("what a prototype's surface may do", () => {
-  function guest(input: { readonly inSurface?: boolean } = {}) {
-    let navigate: ((event: { readonly preventDefault: () => void }) => void) | undefined;
-    let key:
-      | ((event: { readonly preventDefault: () => void }, input: CanvasPrototypeKeyInput) => void)
-      | undefined;
-    const sent: Array<string> = [];
-    const port: CanvasPrototypeGuestPort = {
-      inSurfaceSession: () => input.inSurface ?? true,
-      onNavigation: (listener) => {
-        navigate = listener;
-      },
-      onKeyInput: (listener) => {
-        key = listener;
-      },
-      refuseNewWindows: vi.fn(),
-      refuseNonProxiedUdp: vi.fn(),
-      sendToHost: (channel) => sent.push(channel),
-    };
-    const press = (fields: Partial<CanvasPrototypeKeyInput>): "swallowed" | "passed" => {
-      let swallowed = false;
-      key?.(
-        { preventDefault: () => (swallowed = true) },
-        {
-          type: "keyDown",
-          key: "Escape",
-          meta: false,
-          control: false,
-          alt: false,
-          shift: false,
-          ...fields,
-        },
-      );
-      return swallowed ? "swallowed" : "passed";
-    };
-    const moves = (): "cancelled" | "allowed" => {
-      let cancelled = false;
-      navigate?.({ preventDefault: () => (cancelled = true) });
-      return cancelled ? "cancelled" : "allowed";
-    };
-    return { port, press, moves, sent };
-  }
-
-  it("refuses new windows and non-proxied UDP, and cancels every navigation after its first page", () => {
-    const { surface: made } = surface();
-    const held = guest();
-    made.guardGuest(held.port);
-    expect(held.port.refuseNewWindows).toHaveBeenCalledOnce();
-    expect(held.port.refuseNonProxiedUdp).toHaveBeenCalledOnce();
-    expect(held.moves()).toBe("cancelled");
-  });
-
-  it("leaves a guest outside the surface's session alone", () => {
-    const { surface: made } = surface();
-    const other = guest({ inSurface: false });
-    made.guardGuest(other.port);
-    expect(other.port.refuseNewWindows).not.toHaveBeenCalled();
-    expect(other.moves()).toBe("allowed");
-    expect(other.press({ meta: true })).toBe("passed");
-  });
-
-  it("reads Command-Escape on macOS and Control-Escape elsewhere before the page sees it, and tells the window", () => {
-    const mac = surface({ platform: "darwin" });
-    const onMac = guest();
-    mac.surface.guardGuest(onMac.port);
-    expect(onMac.press({ meta: true })).toBe("swallowed");
-    expect(onMac.sent).toEqual([CANVAS_FRAME_FOCUS_ESCAPE_CHANNEL]);
-    for (const fields of [
-      { control: true },
-      { meta: true, control: true },
-      { meta: true, alt: true },
-      { meta: true, shift: true },
-      { meta: true, key: "a" },
-      { meta: true, type: "keyUp" },
-      {},
-    ]) {
-      expect(onMac.press(fields)).toBe("passed");
-    }
-    expect(onMac.sent).toHaveLength(1);
-
-    const other = surface({ platform: "linux" });
-    const onLinux = guest();
-    other.surface.guardGuest(onLinux.port);
-    expect(onLinux.press({ control: true })).toBe("swallowed");
-    expect(onLinux.press({ meta: true })).toBe("passed");
-  });
-});
-
-describe("the surface's preload", () => {
-  it("repeats the bridge's channel and the event the embedder listens for", () => {
-    const source = readFileSync(new URL("./canvasPrototypePreload.ts", import.meta.url), "utf8");
-    expect(source).toContain(`const PAGE_CHANNEL = "${CANVAS_DESIGN_BRIDGE_CHANNEL}";`);
-    expect(source).toContain(`const EMBEDDER_EVENT = "${CANVAS_DESIGN_SURFACE_BRIDGE_EVENT}";`);
   });
 });

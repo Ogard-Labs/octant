@@ -148,10 +148,13 @@ const SAFE_ENVIRONMENT = new Set([
 const PROVIDER_CREDENTIALS: ReadonlyMap<string, ReadonlyArray<string>> = new Map([
   ["airouter", ["AIROUTER_API_KEY"]],
   ["anthropic", ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"]],
+  // Pi 1.0.3 renamed this provider from `azure-openai-responses` to `azure`
+  // and kept the variables, so each release finds its own name here.
   [
     "azure-openai-responses",
     ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_BASE_URL", "AZURE_OPENAI_RESOURCE_NAME"],
   ],
+  ["azure", ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_BASE_URL", "AZURE_OPENAI_RESOURCE_NAME"]],
   ["deepseek", ["DEEPSEEK_API_KEY"]],
   ["google", ["GEMINI_API_KEY", "GOOGLE_API_KEY"]],
   ["groq", ["GROQ_API_KEY"]],

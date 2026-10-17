@@ -117,7 +117,7 @@ Supported app-tool adapters can request an isolated browser session under
 names the origin. Cancelling the task revokes its browser grant, and Plan mode
 refuses browser effects. The native OpenCode CLI adapter offers Octant tools
 only on macOS and only on the OpenCode releases whose isolated configuration
-was verified (1.18.21 and 2.0.22); on any other release it reports app-managed
+was verified (1.18.21, 2.0.22 and 2.0.27); on any other release it reports app-managed
 tools as unsupported, and its text and native-tool support do not imply an
 app-browser bridge. Changing the thread to Full access does not remove the
 isolation requirement.
@@ -357,7 +357,7 @@ not by that name: a 1.x binary keeps the legacy session API, and a 2.x binary
 lists providers and models from its HTTP catalogue and runs turns under the
 thread's approval setting, which Octant writes into OpenCode's private
 configuration: edits and shell commands ask unless the setting allows them,
-and other providers' tools and skills are refused. With OpenCode 2.0.22 on
+and other providers' tools and skills are refused. With OpenCode 2.0.22 or 2.0.27 on
 macOS, Octant's app tools are registered for each session through OpenCode's
 runtime MCP API and stay private to that session; each call goes through
 Octant's own tool handling and approvals, as on every other runtime. Approval

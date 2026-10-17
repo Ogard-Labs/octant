@@ -366,20 +366,18 @@ agent asks for your theme.
   **Running** and **Stop** above it, outside the prototype. A prototype
   cannot reach Octant or your files, and it cannot load a page, an image, or
   data from the internet. In the Octant app a prototype also runs with no
-  network connection at all: it cannot open a connection to another computer,
-  and if Octant cannot set that up, the prototype does not run and says why.
-  One thing is not blocked: its script can still make Octant look up host
-  names, which can carry a small amount of what the prototype itself holds,
-  which is its own screens and any image it shows. Octant says so under every
-  prototype. If it stops responding, or tries to open another page, Octant
-  stops it and offers **Run again**. Script errors appear as text under it.
+  network connection at all: it cannot open a connection to another computer
+  or make Octant look up a host name, and if Octant cannot set that up, the
+  prototype does not run and says why. If it stops responding, or tries to
+  open another page, Octant stops it and offers **Run again**. Script errors appear as text under it.
 - A running prototype is part of the Tab order, right after **Stop**, whether
   it started when you opened it or when you pressed **Run**. Octant does not
   move the keyboard into it by itself; press **Tab** from **Stop** to enter it.
 - If a prototype holds on to the keyboard, press **Command-Escape**
   (**Control-Escape** outside macOS) in the Octant app to move focus to its
-  **Stop** button. A prototype that keeps grabbing the keyboard back is
-  stopped.
+  **Stop** button. The prototype never sees that key, so it cannot keep the
+  keyboard. Typing through an input method's composition (for example,
+  Japanese or Chinese input) does not reach a prototype in the Octant app.
 - In a web browser connected to your Mac, a prototype runs in the browser
   and Octant cannot stop it from opening another page before it removes it,
   or from connecting to another computer, so the **Run** control says it is

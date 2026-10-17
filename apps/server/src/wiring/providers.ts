@@ -6,14 +6,12 @@ import { lstatSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
-  decodeChatThreadId,
   decodeCodeCheckoutId,
   decodeCodeRepositoryId,
   decodeCodeThreadId,
   decodeCodeWorktreeRef,
   decodeCodeWorktreeSourcePreview,
   decodeWindowId,
-  decodeWorkThreadId,
   type DiscoveryCandidate,
   LOCAL_HOST_ID,
   type PermissionPersistence,
@@ -103,10 +101,8 @@ import {
 } from "../providers/providerUsageHistorySources";
 import { createExtensionRouteHandler } from "../extensionRoutes";
 import { ExtensionApiService } from "../extensions/extensionApiService";
-import {
-  createLocalExtensionActivationPolicy,
-  ExtensionActivationService,
-} from "../extensions/extensionActivationService";
+import { ExtensionActivationService } from "../extensions/extensionActivationService";
+import { createPersistedExtensionActivationPolicy } from "../extensions/persistedExtensionActivationPolicy";
 import { ExtensionLifecycleService } from "../extensions/extensionLifecycleService";
 import {
   type ExtensionRuntimeEvidence,
@@ -557,39 +553,11 @@ export function wireProviders(deps: ProvidersDependencies) {
           ? { stdioSupervisor: extensionSupervisor }
           : {}),
       });
-    const persistedExtensionActivationPolicy = createLocalExtensionActivationPolicy({
-      project: (scope) => {
-        if (scope.projectId === null) return { allowed: true, revision: 0 };
-        const project = persistence.readProject(scope.projectId);
-        return {
-          allowed:
-            project !== undefined && project.lifecycle === "active" && project.type === scope.mode,
-          revision: Number(project?.version ?? 0),
-        };
-      },
-      thread: (scope) => {
-        if (scope.threadId === null) return { allowed: true, revision: 0 };
-        if (scope.mode === "chat") {
-          const thread = persistence.readChatThread(decodeChatThreadId(scope.threadId));
-          return {
-            allowed:
-              thread?.lifecycle === "active" && (thread.projectId ?? null) === scope.projectId,
-            revision: Number(thread?.version ?? 0),
-          };
-        }
-        if (scope.mode === "work") {
-          const thread = workThreadProjection.read(decodeWorkThreadId(scope.threadId));
-          return {
-            allowed: thread?.lifecycle === "active" && thread.projectId === scope.projectId,
-            revision: Number(thread?.version ?? 0),
-          };
-        }
-        const thread = persistence.readCodeThread(decodeCodeThreadId(scope.threadId));
-        return {
-          allowed: thread?.lifecycle === "active" && thread.projectId === scope.projectId,
-          revision: Number(thread?.version ?? 0),
-        };
-      },
+    const persistedExtensionActivationPolicy = createPersistedExtensionActivationPolicy({
+      readProject: (projectId) => persistence.readProject(projectId),
+      readChatThread: (threadId) => persistence.readChatThread(threadId),
+      readWorkThread: (threadId) => workThreadProjection.read(threadId),
+      readCodeThread: (threadId) => persistence.readCodeThread(threadId),
     });
     const extensionActivationService = new ExtensionActivationService({
       policy: options.extensionActivationPolicy ?? persistedExtensionActivationPolicy,

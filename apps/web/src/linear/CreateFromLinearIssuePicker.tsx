@@ -197,7 +197,7 @@ export function CreateFromLinearIssuePicker(props: CreateFromLinearIssuePickerPr
                     disabled={props.disabled}
                     onClick={() => onSelect({ id: row.id, identifier: row.identifier })}
                     type="button"
-                    variant="ghost"
+                    variant="bare"
                   >
                     <span className="github-picker__option-name">
                       {row.identifier} {row.title}

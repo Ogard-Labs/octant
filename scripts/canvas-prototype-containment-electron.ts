@@ -8,39 +8,48 @@
 //
 // Modes:
 // - `uncontained-frame`: the page in a sandboxed frame of the app window with
-//   the WebRTC policy the renderer set before prototypes had their own
-//   surface. It is the control: if it reaches nothing, the probe could not
-//   have seen an escape.
-// - `contained`: the page in the desktop app's contained prototype surface.
+//   the WebRTC policy the renderer set before prototypes left the window. It
+//   is the control: if it reaches nothing, the probe could not have seen an
+//   escape.
+// - `contained`: the page in the desktop app's prototype host, started and
+//   driven by the desktop's own surface code, as the app's main process does.
+// - `contained-pointer`: a benign page in the prototype host, clicked through
+//   the surface's input path, with what it drew read back.
 //
 // Not shipped: it runs only under the probe, from a throwaway user data
 // directory.
 
-import { mkdtempSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { app, BrowserWindow, netLog, protocol, session, webContents } from "electron";
+import { app, BrowserWindow, netLog } from "electron";
 import { CANVAS_DESIGN_VIEWPORT } from "../packages/contracts/src/canvas";
+import {
+  createCanvasPrototypeSurface,
+  spawnCanvasPrototypeHost,
+  type CanvasPrototypeOwner,
+  type CanvasPrototypeSurface,
+  type CanvasPrototypeSurfaceEvent,
+} from "../apps/desktop/src/canvasPrototypeSurface";
+import { CANVAS_PROTOTYPE_HOST_SWITCH } from "../apps/desktop/src/canvasPrototypeHost";
 
 const mode = process.env.OCTANT_PROBE_MODE ?? "";
 const contained = mode === "contained" || mode === "contained-pointer";
 const issueUrl = process.env.OCTANT_PROBE_ISSUE_URL ?? "";
 const serverUrl = process.env.OCTANT_PROBE_SERVER_URL ?? "";
 const beaconUrl = process.env.OCTANT_PROBE_BEACON_URL ?? "";
-const preloadPath = process.env.OCTANT_PROBE_PRELOAD ?? "";
+const hostEntry = process.env.OCTANT_PROBE_HOST ?? "";
+const packagedApp = process.env.OCTANT_PROBE_PACKAGED_APP ?? "";
 const watchMs = Number(process.env.OCTANT_PROBE_WATCH_MS ?? "9000");
-const escapes: Array<string> = [];
 
 app.setPath("userData", mkdtempSync(join(tmpdir(), "octant-prototype-probe-")));
-
-const surfaceModule = contained
-  ? await import("../apps/desktop/src/canvasPrototypeSurface")
-  : undefined;
-surfaceModule?.registerCanvasPrototypeScheme(protocol);
+const hostLogPath = join(app.getPath("userData"), "host-net.json");
 
 interface BridgeRecord {
-  readonly channel: string;
-  readonly args: ReadonlyArray<unknown>;
+  readonly type?: string;
+  readonly height?: number;
+  readonly message?: string;
 }
 
 async function ticketUrl(query = ""): Promise<string> {
@@ -53,9 +62,26 @@ function finish(result: Record<string, unknown>): never {
   throw new Error("unreachable");
 }
 
-/** Hostnames the page asked the resolver for, read from the network log. */
-function resolvedCanaries(logPath: string): ReadonlyArray<string> {
-  const log = JSON.parse(readFileSync(logPath, "utf8")) as {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+interface LogReading {
+  /** Whether the log holds the given address at all: the page's own requests were logged. */
+  readonly sawAddress: boolean;
+  /** Page-chosen names a resolver was asked for. */
+  readonly lookups: ReadonlyArray<string>;
+  /** Page-chosen names that appear in any event, looked up or not. */
+  readonly mentioned: ReadonlyArray<string>;
+  readonly events: number;
+}
+
+/** Hostnames asked of a resolver, read from a network log. */
+function resolvedCanaries(logPath: string, address: string): LogReading {
+  if (!existsSync(logPath)) return { sawAddress: false, lookups: [], mentioned: [], events: 0 };
+  let text = readFileSync(logPath, "utf8").trim();
+  const sawAddress = text.includes(address);
+  // A process that was stopped leaves its log without the closing brackets.
+  if (!text.endsWith("}")) text = `${text.replace(/,\s*$/, "")}]}`;
+  const log = JSON.parse(text) as {
     readonly constants: { readonly logEventTypes: Readonly<Record<string, number>> };
     readonly events: ReadonlyArray<{ readonly type: number; readonly params?: unknown }>;
   };
@@ -63,8 +89,13 @@ function resolvedCanaries(logPath: string): ReadonlyArray<string> {
     Object.entries(log.constants.logEventTypes).map(([name, id]) => [id, name]),
   );
   const found = new Set<string>();
+  const mentioned = new Set<string>();
   for (const event of log.events) {
     const type = names.get(event.type) ?? "";
+    for (const match of JSON.stringify(event.params ?? {}).match(/[a-z-]+\.canary\.example/g) ??
+      []) {
+      mentioned.add(match);
+    }
     // A resolver job, not just a request: a request that never became a job
     // was refused before any lookup (an image sent to the proxy, for one).
     if (
@@ -79,225 +110,250 @@ function resolvedCanaries(logPath: string): ReadonlyArray<string> {
       found.add(match);
     }
   }
-  return [...found].sort();
+  return {
+    sawAddress,
+    lookups: [...found].sort(),
+    mentioned: [...mentioned].sort(),
+    events: log.events.length,
+  };
 }
 
 /**
- * A phone-sized prototype scaled down the way the renderer scales a running
- * one (a clipped box the size of the scaled page, the page at its viewport
- * with `transform: scale` from the top left), clicked with real pointer
- * events routed through the window as a person's would be. The page reports
- * which element took each click and where, in its own pixels.
+ * What the window that opened the prototypes hears, and the page it was drawn
+ * as. Like a window, it says when it drew each frame, so the host sends the next.
  */
-async function pointerRun(window: BrowserWindow): Promise<never> {
-  const viewport = CANVAS_DESIGN_VIEWPORT.phone;
-  const column = 195;
-  const scale = Math.min(1, column / viewport.width);
-  const origin = { x: 20, y: 20 };
-  const url = await ticketUrl("?block=pointer");
-  await window.webContents.executeJavaScript(`
-    window.__bridge = [];
-    const box = document.createElement("div");
-    box.style.cssText = "position:absolute;overflow:hidden;left:${String(origin.x)}px;top:${String(origin.y)}px;width:${String(viewport.width * scale)}px;height:${String(viewport.height * scale)}px";
-    const view = document.createElement("webview");
-    view.setAttribute("src", ${JSON.stringify(url)});
-    view.style.cssText = "position:absolute;left:0;top:0;width:${String(viewport.width)}px;height:${String(viewport.height)}px;transform:scale(${String(scale)});transform-origin:0 0;border:0";
-    view.addEventListener("ipc-message", (event) => window.__bridge.push(event.args[0]));
-    box.append(view);
-    document.body.append(box);
-    0`);
-  await new Promise((resolve) => setTimeout(resolve, 4000));
+function recordingOwner(surface: CanvasPrototypeSurface) {
+  const bridge: Array<BridgeRecord> = [];
+  const frames = { count: 0, width: 0, height: 0, pixels: new Uint8Array() };
+  const gone: Array<string> = [];
+  const owner: CanvasPrototypeOwner = {
+    id: 1,
+    send: (event: CanvasPrototypeSurfaceEvent) => {
+      if (event.kind === "bridge") bridge.push(event.payload as BridgeRecord);
+      else if (event.kind === "gone") gone.push(event.surfaceId);
+      else if (event.kind === "frame") {
+        frames.count += 1;
+        if (frames.width !== event.frameWidth || frames.height !== event.frameHeight) {
+          frames.width = event.frameWidth;
+          frames.height = event.frameHeight;
+          frames.pixels = new Uint8Array(event.frameWidth * event.frameHeight * 4);
+        }
+        for (let row = 0; row < event.height; row += 1) {
+          const from = row * event.width * 4;
+          frames.pixels.set(
+            event.pixels.subarray(from, from + event.width * 4),
+            ((event.y + row) * frames.width + event.x) * 4,
+          );
+        }
+        const { surfaceId } = event;
+        setImmediate(() => surface.drawn(owner, surfaceId));
+      }
+    },
+  };
+  /** The colour drawn at a point of the page, in its own pixels. */
+  const colourAt = (x: number, y: number, scale: number) => {
+    const index = (Math.round(y * scale) * frames.width + Math.round(x * scale)) * 4;
+    return [...frames.pixels.subarray(index, index + 3)];
+  };
+  return { owner, bridge, frames, gone, colourAt };
+}
 
-  // Chromium routes these through the embedder to the guest under the
-  // transform; `sendInputEvent` on the embedder does not reach a guest.
-  window.webContents.debugger.attach("1.3");
-  const taken = async (): Promise<ReadonlyArray<string>> =>
-    (
-      (await window.webContents.executeJavaScript("window.__bridge.splice(0)")) as ReadonlyArray<{
-        readonly type?: string;
-        readonly message?: string;
-      }>
-    )
+function surfaceFor() {
+  return createCanvasPrototypeSurface({
+    launchHost: () => {
+      const log = [`--log-net-log=${hostLogPath}`, "--net-log-capture-mode=Everything"];
+      // A packaged app always runs its own entry, as the app starts its host.
+      return spawnCanvasPrototypeHost(
+        packagedApp === ""
+          ? { executable: process.execPath, args: [hostEntry, ...log] }
+          : {
+              executable: join(packagedApp, "Contents/MacOS/Octant"),
+              args: [CANVAS_PROTOTYPE_HOST_SWITCH, ...log],
+            },
+      );
+    },
+    serverUrl: () => serverUrl,
+    fetch: globalThis.fetch,
+    platform: process.platform,
+  });
+}
+
+/**
+ * A phone-sized benign page in the prototype host, clicked through the input
+ * path a person's pointer takes. The page reports which element took each
+ * click, and where, in its own pixels; the frames it painted are read back.
+ */
+async function pointerRun(): Promise<never> {
+  const surface = surfaceFor();
+  const recorded = recordingOwner(surface);
+  const prepared = await surface.prepare(recorded.owner);
+  if (prepared.status !== "ready") finish({ mode, prepared });
+  const surfaceId = randomUUID();
+  const viewport = CANVAS_DESIGN_VIEWPORT.phone;
+  const opened = await surface.open(recorded.owner, {
+    surfaceId,
+    src: await ticketUrl("?block=pointer"),
+    width: viewport.width,
+    height: viewport.height,
+    scaleFactor: 2,
+  });
+  if (opened.status !== "open") finish({ mode, prepared, opened });
+  await sleep(4000);
+  const taken = () =>
+    recorded.bridge
+      .splice(0)
       .filter((message) => message.type === "error")
       .map((message) => message.message ?? "");
-  await taken();
-  const click = async (hostX: number, hostY: number): Promise<ReadonlyArray<string>> => {
-    for (const type of ["mouseMoved", "mousePressed", "mouseReleased"] as const) {
-      await window.webContents.debugger.sendCommand("Input.dispatchMouseEvent", {
+  taken();
+  const click = async (x: number, y: number): Promise<ReadonlyArray<string>> => {
+    for (const type of ["mouseMove", "mouseDown", "mouseUp"] as const) {
+      surface.input(recorded.owner, surfaceId, {
         type,
-        x: hostX,
-        y: hostY,
-        button: type === "mouseMoved" ? "none" : "left",
-        clickCount: type === "mouseMoved" ? 0 : 1,
+        x,
+        y,
+        button: "left",
+        clickCount: type === "mouseMove" ? 0 : 1,
       });
-      await new Promise((resolve) => setTimeout(resolve, 60));
+      await sleep(60);
     }
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    return await taken();
+    await sleep(300);
+    return taken();
   };
-  // A point in the page's own pixels, as the host window sees it once scaled.
-  const at = (pageX: number, pageY: number) => ({
-    x: origin.x + pageX * scale,
-    y: origin.y + pageY * scale,
-  });
-  const scaledBox = {
-    right: origin.x + viewport.width * scale,
-    bottom: origin.y + viewport.height * scale,
-  };
-  const target = at(260, 660);
-  const decoy = at(50, 50);
   const results = {
-    scale,
     viewport,
-    target: await click(target.x, target.y),
-    decoy: await click(decoy.x, decoy.y),
-    // Just past each edge of the scaled box, where the unclipped page would
-    // reach if it were laid out unscaled.
-    pastRightEdge: await click(scaledBox.right + 2, target.y),
-    pastBottomEdge: await click(target.x, scaledBox.bottom + 2),
-    whereUnscaledTargetWouldBe: await click(origin.x + 260, origin.y + 660),
+    target: await click(260, 660),
+    decoy: await click(50, 50),
+    frames: recorded.frames.count,
+    frameSize: [recorded.frames.width, recorded.frames.height],
+    decoyColour: recorded.colourAt(50, 50, recorded.frames.width / viewport.width),
+    targetColour: recorded.colourAt(260, 660, recorded.frames.width / viewport.width),
   };
+  surface.stop();
   finish({ mode, pointer: results });
 }
 
-app.whenReady().then(async () => {
-  const logPath = join(app.getPath("userData"), "net.json");
-  await netLog.startLogging(logPath, { captureMode: "everything" });
+async function containedRun(): Promise<never> {
+  const surface = surfaceFor();
+  const recorded = recordingOwner(surface);
+  const prepared = await surface.prepare(recorded.owner);
+  if (prepared.status !== "ready") finish({ mode, prepared });
+  // The renderer is not trusted to choose what the host shows: anything but
+  // a ticketed design page on this host is refused.
+  const refused: Array<string> = [];
+  for (const src of [
+    `${beaconUrl}/renderer-chosen`,
+    `${serverUrl}/api/not-the-design-page`,
+    "https://example.com/",
+  ]) {
+    const result = await surface.open(recorded.owner, {
+      surfaceId: randomUUID(),
+      src,
+      width: 375,
+      height: 667,
+      scaleFactor: 1,
+    });
+    if (result.status === "refused") refused.push(src);
+  }
+  const surfaceId = randomUUID();
+  const opened = await surface.open(recorded.owner, {
+    surfaceId,
+    src: await ticketUrl(),
+    width: 375,
+    height: 667,
+    scaleFactor: 1,
+  });
+  if (opened.status !== "open") finish({ mode, prepared, opened });
+  await sleep(watchMs);
+  // The reserved shortcut and a plain Escape, sent as a person's keys would
+  // be. The page listens for both and reports what it saw.
+  const reserved = process.platform === "darwin" ? "meta" : "control";
+  surface.input(recorded.owner, surfaceId, { type: "focus" });
+  surface.input(recorded.owner, surfaceId, {
+    type: "keyDown",
+    keyCode: "Escape",
+    modifiers: [reserved],
+  });
+  surface.input(recorded.owner, surfaceId, { type: "keyDown", keyCode: "Escape", modifiers: [] });
+  await sleep(500);
+  // The host leaves when its channel closes, and writes out its network log.
+  surface.stop();
+  await sleep(2000);
+  finish({
+    mode,
+    prepared,
+    refusals: { refusedAddresses: refused.length, opened: opened.status },
+    painted: recorded.frames.count,
+    bridge: {
+      heartbeats: recorded.bridge.filter((message) => message.type === "heartbeat").length,
+      sizes: recorded.bridge
+        .filter((message) => message.type === "size")
+        .map((message) => message.height),
+      attempts: recorded.bridge
+        .filter((message) => message.type === "error")
+        .map((message) => message.message),
+    },
+    ...(() => {
+      const reading = resolvedCanaries(hostLogPath, new URL(beaconUrl).host);
+      return {
+        dnsLookups: reading.lookups,
+        namesInLog: reading.mentioned,
+        logEvents: reading.events,
+        beaconInLog: reading.sawAddress,
+      };
+    })(),
+  });
+}
+
+async function uncontainedRun(): Promise<ReadonlyArray<BridgeRecord>> {
   const window = new BrowserWindow({
     show: false,
     width: 800,
     height: 900,
-    webPreferences: {
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-      webviewTag: contained,
-    },
+    webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
   });
-
-  let refusals: Record<string, unknown> = {};
-  let proxy: unknown;
-  if (contained && surfaceModule !== undefined) {
-    const surfaceSession = session.fromPartition(surfaceModule.CANVAS_PROTOTYPE_PARTITION);
-    const surface = surfaceModule.createCanvasPrototypeSurface({
-      session: surfaceModule.canvasPrototypeSessionPort(surfaceSession),
-      serverUrl: () => serverUrl,
-      fetch: globalThis.fetch,
-      preloadPath,
-      platform: process.platform,
-    });
-    app.on("web-contents-created", (_event, contents) => {
-      if (contents.getType() === "webview") {
-        const port = surfaceModule.canvasPrototypeGuestPort(contents, surfaceSession);
-        surface.guardGuest({
-          ...port,
-          sendToHost: (channel) => {
-            escapes.push(channel);
-            port.sendToHost(channel);
-          },
-        });
-      }
-    });
-    surface.admitWebview(surfaceModule.canvasPrototypeHostPort(window.webContents));
-    const prepared = await surface.prepare();
-    proxy = prepared;
-    if (prepared.status !== "ready") finish({ mode, prepared });
-  } else {
-    // What the renderer set before prototypes had their own surface.
-    window.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
-  }
-
+  // What the renderer set before prototypes left the window.
+  window.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
   await window.loadURL("data:text/html,<!doctype html><title>host</title><body></body>");
-  if (mode === "contained-pointer") {
-    await pointerRun(window);
-    return;
-  }
   const url = await ticketUrl();
   await window.webContents.executeJavaScript(`
     window.__bridge = [];
-    window.__mount = (src) => {
-      ${
-        contained
-          ? `const view = document.createElement("webview");
-             view.setAttribute("src", src);
-             view.style.width = "375px"; view.style.height = "667px";
-             view.addEventListener("ipc-message", (event) => window.__bridge.push({ channel: event.channel, args: event.args }));
-             document.body.append(view);`
-          : `const frame = document.createElement("iframe");
-             frame.setAttribute("sandbox", "allow-scripts");
-             frame.src = src;
-             addEventListener("message", (event) => { if (event.source === frame.contentWindow) window.__bridge.push({ channel: "frame", args: [event.data] }); });
-             document.body.append(frame);`
-      }
-    };
-    window.__mount(${JSON.stringify(url)});
-  `);
-
-  if (contained) {
-    // The renderer is not trusted to choose what the surface shows: a
-    // webview pointed at anything but a ticketed design page is refused, and a
-    // partition it names is ignored.
-    await window.webContents.executeJavaScript(`
-      for (const src of [${JSON.stringify(`${beaconUrl}/renderer-chosen`)}, ${JSON.stringify(`${serverUrl}/api/not-the-design-page`)}, "https://example.com/"]) {
-        const view = document.createElement("webview");
-        view.setAttribute("partition", "persist:chosen-by-renderer");
-        view.setAttribute("src", src);
-        document.body.append(view);
-      }
-    `);
-  }
-
-  await new Promise((resolve) => setTimeout(resolve, watchMs));
-  const guests = webContents
-    .getAllWebContents()
-    .filter((contents) => contents.getType() === "webview");
-  const sessions = guests.map((contents) => ({
-    shared: contents.session === window.webContents.session,
-    partitions: contents.session.storagePath ?? "memory",
-    url: contents.getURL().replace(/ticket=[^&]+/, "ticket=…"),
-  }));
-  // The reserved shortcut and a plain Escape, sent to the page as a person's
-  // keys would be. The page listens for both and reports what it saw.
-  const reserved = process.platform === "darwin" ? "meta" : "control";
-  guests[0]?.sendInputEvent({ type: "keyDown", keyCode: "Escape", modifiers: [reserved] });
-  guests[0]?.sendInputEvent({ type: "keyDown", keyCode: "Escape" });
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  const proxyFor = async (target: string): Promise<string | undefined> =>
-    guests[0]?.session.resolveProxy(target);
-  refusals = {
-    guests: guests.length,
-    publicProxy: await proxyFor("https://example.com/"),
-    loopbackProxy: await proxyFor("http://127.0.0.1:9/"),
-  };
-  const bridge = (await window.webContents.executeJavaScript(
+    const frame = document.createElement("iframe");
+    frame.setAttribute("sandbox", "allow-scripts");
+    frame.src = ${JSON.stringify(url)};
+    addEventListener("message", (event) => { if (event.source === frame.contentWindow) window.__bridge.push(event.data); });
+    document.body.append(frame);
+    0`);
+  await sleep(watchMs);
+  return (await window.webContents.executeJavaScript(
     "window.__bridge",
   )) as ReadonlyArray<BridgeRecord>;
+}
+
+app.whenReady().then(async () => {
+  if (mode === "contained-pointer") await pointerRun();
+  if (contained) await containedRun();
+  // The control runs in this process, so its lookups are in this process's log.
+  const logPath = join(app.getPath("userData"), "net.json");
+  await netLog.startLogging(logPath, { captureMode: "everything" });
+  const bridge = await uncontainedRun();
   await netLog.stopLogging();
   finish({
     mode,
-    prepared: proxy,
-    sessions,
-    refusals,
-    focusEscapes: escapes.length,
     bridge: {
-      heartbeats: bridge.filter((record) =>
-        JSON.stringify(record.args[0] ?? {}).includes('"heartbeat"'),
-      ).length,
-      sizes: bridge
-        .map(
-          (record) =>
-            record.args[0] as { readonly type?: string; readonly height?: number } | undefined,
-        )
-        .filter((message) => message?.type === "size")
-        .map((message) => message?.height),
+      heartbeats: bridge.filter((message) => message.type === "heartbeat").length,
+      sizes: bridge.filter((message) => message.type === "size").map((message) => message.height),
       attempts: bridge
-        .map(
-          (record) =>
-            record.args[0] as { readonly type?: string; readonly message?: string } | undefined,
-        )
-        .filter((message) => message?.type === "error")
-        .map((message) => message?.message),
+        .filter((message) => message.type === "error")
+        .map((message) => message.message),
     },
-    dnsLookups: resolvedCanaries(logPath),
+    ...(() => {
+      const reading = resolvedCanaries(logPath, new URL(beaconUrl).host);
+      return {
+        dnsLookups: reading.lookups,
+        namesInLog: reading.mentioned,
+        logEvents: reading.events,
+        beaconInLog: reading.sawAddress,
+      };
+    })(),
   });
 });

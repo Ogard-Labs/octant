@@ -543,6 +543,8 @@ export type ExtensionActivationScope = typeof ExtensionActivationScope.Type;
 
 export const ExtensionActivationPolicyFacts = Schema.Struct({
   revision: Schema.Int.pipe(Schema.nonNegative()),
+  // Informational: the catalog epoch hashes what the policy allows,
+  // not how many times the Project or thread changed.
   projectRevision: Schema.Int.pipe(Schema.nonNegative()),
   threadRevision: Schema.Int.pipe(Schema.nonNegative()),
   hostAllowed: Schema.Boolean,

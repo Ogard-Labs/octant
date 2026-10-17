@@ -5,6 +5,7 @@ import {
   LOCAL_EXTENSION_ACTIVATION_POLICY,
   createLocalExtensionActivationPolicy,
 } from "./extensionActivationService";
+import { createPersistedExtensionActivationPolicy } from "./persistedExtensionActivationPolicy";
 
 const extensionId = "46000000-0000-4000-8000-000000000001";
 const packageId = "46000000-0000-4000-8000-000000000002";
@@ -178,7 +179,7 @@ describe("authoritative scoped extension activation", () => {
     expect(offline.packages[0]?.components[0]?.effectiveState).toEqual({ kind: "effective" });
   });
 
-  it("includes Project and thread revisions independently in the catalog epoch", () => {
+  it("keeps the catalog epoch when only the Project or thread version moves", () => {
     let projectRevision = 4;
     let threadRevision = 8;
     const service = new ExtensionActivationService({
@@ -188,27 +189,184 @@ describe("authoritative scoped extension activation", () => {
       }),
       catalogStatus: () => "available",
     });
-    const projectBaseline = service.resolve(snapshot(), { scope } as never);
+    const baseline = service.resolve(snapshot(), { scope } as never);
 
     projectRevision = 5;
-    expect(
-      service.resolve(snapshot(), {
-        scope,
-        expectedCatalogEpoch: projectBaseline.catalogEpoch,
-      } as never).stale,
-    ).toBe(true);
+    threadRevision = 9;
+    const afterVersionMoves = service.resolve(snapshot(), {
+      scope,
+      expectedCatalogEpoch: baseline.catalogEpoch,
+    } as never);
 
-    projectRevision = 8;
-    threadRevision = 4;
-    const threadBaseline = service.resolve(snapshot(), { scope } as never);
-    threadRevision = 5;
-    expect(
-      service.resolve(snapshot(), {
-        scope,
-        expectedCatalogEpoch: threadBaseline.catalogEpoch,
-      } as never).stale,
-    ).toBe(true);
+    expect(afterVersionMoves.catalogEpoch).toBe(baseline.catalogEpoch);
+    expect(afterVersionMoves.stale).toBe(false);
+    expect(afterVersionMoves.packages[0]?.components[0]?.effectiveState).toEqual({
+      kind: "effective",
+    });
   });
+
+  describe.each(["chat", "work", "code"] as const)(
+    "with the host's persisted %s records",
+    (mode) => {
+      const modeScope = { ...scope, mode } as const;
+      const modeSnapshot = (): ExtensionSnapshot => {
+        const base = snapshot();
+        const [packageState] = base.packages;
+        return {
+          ...base,
+          packages: [
+            {
+              ...packageState!,
+              compatibility: { ...packageState!.compatibility, modes: [mode] },
+            },
+          ],
+        } as never;
+      };
+      const records = (state: {
+        project: { lifecycle: string; type: string; version: number } | undefined;
+        thread: { lifecycle: string; projectId: string | undefined; version: number } | undefined;
+      }) =>
+        createPersistedExtensionActivationPolicy({
+          readProject: () => state.project as never,
+          readChatThread: () => state.thread as never,
+          readWorkThread: () => state.thread as never,
+          readCodeThread: () => state.thread as never,
+        });
+      const activeState = () => ({
+        project: { lifecycle: "active", type: mode, version: 3 },
+        thread: { lifecycle: "active", projectId: projectId as string | undefined, version: 7 },
+      });
+
+      it("survives any number of thread and Project updates", () => {
+        const state = activeState();
+        const service = new ExtensionActivationService({
+          policy: records(state),
+          catalogStatus: () => "available",
+        });
+        const resolved = service.resolve(modeSnapshot(), { scope: modeScope } as never);
+        expect(resolved.packages[0]?.components[0]?.effectiveState).toEqual({ kind: "effective" });
+
+        state.thread.version += 2;
+        state.project.version += 1;
+        const afterUpdates = service.resolve(modeSnapshot(), {
+          scope: modeScope,
+          expectedCatalogEpoch: resolved.catalogEpoch,
+        } as never);
+
+        expect(afterUpdates.stale).toBe(false);
+        expect(afterUpdates.packages[0]?.components[0]?.effectiveState).toEqual({
+          kind: "effective",
+        });
+      });
+
+      it.each([
+        [
+          "the thread is archived",
+          (state: ReturnType<typeof activeState>) => {
+            state.thread.lifecycle = "archived";
+          },
+        ],
+        [
+          "the thread moves to another Project",
+          (state: ReturnType<typeof activeState>) => {
+            state.thread.projectId = "46000000-0000-4000-8000-0000000000ff";
+          },
+        ],
+        [
+          "the thread is removed",
+          (state: ReturnType<typeof activeState>) => {
+            state.thread = undefined as never;
+          },
+        ],
+        [
+          "the Project is archived",
+          (state: ReturnType<typeof activeState>) => {
+            state.project.lifecycle = "archived";
+          },
+        ],
+        [
+          "the Project is removed",
+          (state: ReturnType<typeof activeState>) => {
+            state.project = undefined as never;
+          },
+        ],
+      ] as const)("blocks a selection resolved before %s", (_change, change) => {
+        const state = activeState();
+        const service = new ExtensionActivationService({
+          policy: records(state),
+          catalogStatus: () => "available",
+        });
+        const resolved = service.resolve(modeSnapshot(), { scope: modeScope } as never);
+
+        change(state);
+        const after = service.resolve(modeSnapshot(), {
+          scope: modeScope,
+          expectedCatalogEpoch: resolved.catalogEpoch,
+        } as never);
+
+        expect(after.stale).toBe(true);
+        expect(after.catalogEpoch).not.toBe(resolved.catalogEpoch);
+        // The scope's own refusal outranks the stale marker in the ladder.
+        expect(after.packages[0]?.components[0]?.effectiveState).toMatchObject({
+          kind: "blocked",
+          reason: expect.stringMatching(/-prohibited$/),
+        });
+      });
+
+      it("blocks a selection resolved in another mode", () => {
+        const state = activeState();
+        const service = new ExtensionActivationService({
+          policy: records(state),
+          catalogStatus: () => "available",
+        });
+        const resolved = service.resolve(modeSnapshot(), { scope: modeScope } as never);
+
+        const inWork = service.resolve(modeSnapshot(), {
+          scope: { ...modeScope, mode: mode === "chat" ? "work" : "chat" },
+          expectedCatalogEpoch: resolved.catalogEpoch,
+        } as never);
+
+        expect(inWork.stale).toBe(true);
+        expect(inWork.packages[0]?.components[0]?.effectiveState.kind).toBe("blocked");
+      });
+
+      it.each([
+        [
+          "the plugin is disabled",
+          (base: ExtensionSnapshot) =>
+            withPackage(base, { activation: { ...activation(false), pluginDesired: false } }),
+        ],
+        [
+          "the component is disabled",
+          (base: ExtensionSnapshot) => withComponentActivation(base, activation(false)),
+        ],
+        [
+          "the plugin is updated",
+          (base: ExtensionSnapshot) =>
+            withPackage(base, {
+              version: "1.0.1",
+              digest: `sha256:${"d".repeat(64)}`,
+              stateVersion: 5,
+            }),
+        ],
+        ["the plugin is uninstalled", (base: ExtensionSnapshot) => ({ ...base, packages: [] })],
+      ] as const)("blocks a selection resolved before %s", (_change, change) => {
+        const service = new ExtensionActivationService({
+          policy: records(activeState()),
+          catalogStatus: () => "available",
+        });
+        const resolved = service.resolve(modeSnapshot(), { scope: modeScope } as never);
+
+        const after = service.resolve(change(modeSnapshot()), {
+          scope: modeScope,
+          expectedCatalogEpoch: resolved.catalogEpoch,
+        } as never);
+
+        expect(after.stale).toBe(true);
+        expect(after.catalogEpoch).not.toBe(resolved.catalogEpoch);
+      });
+    },
+  );
 
   it.each([
     ["chat", "app", ["apps"]],
@@ -332,6 +490,22 @@ describe("authoritative scoped extension activation", () => {
     });
   });
 });
+
+function withPackage(base: ExtensionSnapshot, patch: Record<string, unknown>): ExtensionSnapshot {
+  const [packageState] = base.packages;
+  return { ...base, packages: [{ ...packageState!, ...patch }] } as never;
+}
+
+function withComponentActivation(
+  base: ExtensionSnapshot,
+  componentActivation: ReturnType<typeof activation>,
+): ExtensionSnapshot {
+  const [packageState] = base.packages;
+  const [componentState] = packageState!.components;
+  return withPackage(base, {
+    components: [{ ...componentState!, activation: componentActivation }],
+  });
+}
 
 function allowedPolicy(revision: number) {
   return {
