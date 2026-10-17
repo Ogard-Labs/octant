@@ -182,6 +182,13 @@ shell command does, and the approval shows the whole command (a check command
 is at most 200 characters; put a longer one in a script). A criterion without a
 check command is one you confirm.
 
+Each surface shows the same ledger: every criterion with its check command,
+the last thing that check observed (met or not), and whether it holds. Open
+**Environment** on a Code thread, or **Keep working on this unattended** on a
+Work thread, and the criteria are listed under the objective. A Code thread
+shows its goal there only once it has one, and only to read; `/goal` in the
+terminal lists the same criteria.
+
 The goal completes only when every criterion's check has passed — never
 because the model says it is finished. That is also the model's signal to
 stop. When the budget runs out first, the model is told to summarize where
@@ -357,14 +364,18 @@ mid-turn; a note the lead never reached before the turn ended is sent as the
 next prompt. Notes are saved as you send them, so one typed just before
 Octant restarts still reaches the lead on the next turn. `/steer <note>` queues
 one explicitly. Left-over notes are sent once, even with the thread open in
-more than one terminal. `Esc` stops the
+more than one terminal. The app has the same
+note box beside the composer, shown only while the lead works: a note is queued the same way and
+marked queued, then delivered. A note the lead never reached is marked not
+reached and can be discarded there; only the terminal sends it as the next
+prompt. `Esc` stops the
 running turn; `Ctrl+C` stops it too, and a second press right after quits.
 
 `/side <question>` asks the thread's Side Chat — the same one the app's Side
 Chat panel shows — without stopping or adding to the running turn. Side Chat
 reads the thread and cannot change it; in the terminal UI, `/back` returns to
-the thread. `/goal` shows the thread's goal, and `/goal revise <objective>`
-changes its objective. If another screen changed the goal first, nothing is
+the thread. `/goal` shows the thread's goal with each criterion's check, latest evidence and
+whether it is met, and `/goal revise <objective>` changes its objective. If another screen changed the goal first, nothing is
 overwritten: the terminal says so and shows the newer goal.
 
 `/fork` forks the thread at its last finished reply — a Code fork on its own
@@ -383,7 +394,9 @@ panel, as a numbered prompt in the CLI, and in a Chat thread's own transcript
 as a card on the turn that asked — with any options it offered, each with the
 meaning the lead wrote for it, and a field for an answer no option covers.
 Pick one or type an answer; the turn continues the moment it lands, and the
-same question can be answered from any surface. A question nobody answers
+same question can be answered from any surface. The terminal
+shows a Chat thread's question too, read from the turn that asked, and closes
+its prompt with a note when the app answers first. A question nobody answers
 within ten minutes expires and the lead is told to continue with its best
 judgment; interrupting the turn cancels it. Every question and answer is
 journaled with the session.

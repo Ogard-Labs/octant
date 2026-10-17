@@ -54,6 +54,9 @@ import { notifyDesktop } from "./agentNotify";
 import {
   defaultCheckpointLabel,
   describeAgentGoal,
+  describeAgentGoalLedger,
+  goalPanelPageSize,
+  goalPanelRequest,
   approvalPanelHosts,
   paletteFor,
   readTuiApprovalAnswer,
@@ -172,7 +175,9 @@ class AgentScreen {
   readonly #wake = new AgentWake();
   /** Ends the live feed of the thread on screen; a switch starts a new one. */
   #feed = new AbortController();
-  #listing: "threads" | "models" | undefined;
+  #listing: "threads" | "models" | "goal" | undefined;
+  /** The goal ledger the Goal panel shows, read when /goal opened it. */
+  #goalLines: ReadonlyArray<string> = [];
   #suggestions:
     | { readonly kind: "file" | "thread"; readonly items: ReadonlyArray<string> }
     | undefined;
@@ -606,7 +611,10 @@ class AgentScreen {
     this.#header.content = t`${fg(p.accent)(bold("◆ Octant"))} ${fg(p.muted)("·")} ${fg(p.text)(title)}${dim(fg(p.muted)(mode))}  ${fg(statusColor)(status === "running" ? `${spinner} running` : status)}${dim(fg(percent !== undefined && percent >= 80 ? p.warning : p.muted)(context))}`;
 
     const entries = transcriptFrom(this.#thread, session);
-    const pending = session?.questions.find((question) => question.status === "pending");
+    // Chat keeps its question on the turn, not in the harness session.
+    const pending =
+      session?.questions.find((question) => question.status === "pending") ??
+      this.#thread?.pendingQuestion;
     const digest = JSON.stringify([
       entries,
       pending?.id,
@@ -659,6 +667,11 @@ class AgentScreen {
       });
       this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No harness endpoint offers a model yet. Add one in Settings → Providers." : lines.join("\n"))}\n${dim(fg(p.muted)("/model N switches the thread's model."))}`;
       this.#panel.visible = true;
+    } else if (this.#listing === "goal") {
+      this.#panel.title = " Goal ";
+      this.#panel.borderColor = p.border;
+      this.#panelText.content = t`${fg(p.textSecondary)(this.#goalLines.join("\n"))}\n${dim(fg(p.muted)("/goal revise text changes the objective. /goal closes this; /goal 2 shows another page."))}`;
+      this.#panel.visible = true;
     } else if (this.#showHelp) {
       this.#panel.title = " Keys ";
       this.#panel.borderColor = p.border;
@@ -709,7 +722,11 @@ class AgentScreen {
     } else if (pending !== undefined) {
       this.#panel.title = " Question ";
       this.#panel.borderColor = p.accent;
-      const options = pending.options.map((option, index) => `  ${index + 1}. ${option}`);
+      const meanings = "descriptions" in pending ? pending.descriptions : undefined;
+      const options = pending.options.map((option, index) => {
+        const meaning = meanings?.[index];
+        return `  ${index + 1}. ${option}${meaning === undefined ? "" : ` — ${meaning}`}`;
+      });
       this.#panelText.content = t`${fg(p.text)(pending.prompt)}${options.length === 0 ? "" : "\n"}${fg(p.textSecondary)(options.join("\n"))}\n${dim(fg(p.muted)("Type a number or an answer, then Enter."))}`;
       this.#panel.visible = true;
     } else if (this.#pendingFollowUp !== undefined) {
@@ -1095,6 +1112,8 @@ class AgentScreen {
       await this.refresh();
       return;
     }
+    // /goal toggles its own panel, so it needs the listing this command found.
+    const listingBefore = this.#listing;
     this.#listing = undefined;
     if (this.#pendingFollowUp !== undefined) {
       const pending = this.#pendingFollowUp;
@@ -1123,7 +1142,7 @@ class AgentScreen {
       return;
     }
     if (text === "/goal" || text.startsWith("/goal ")) {
-      await this.#goal(text.slice("/goal".length).trim());
+      await this.#goal(text.slice("/goal".length).trim(), listingBefore);
       return;
     }
     if (
@@ -1210,7 +1229,15 @@ class AgentScreen {
       await this.refresh();
       return;
     }
+    const threadQuestion = this.#thread?.pendingQuestion;
     const question = this.#session?.questions.find((entry) => entry.status === "pending");
+    if (question === undefined && threadQuestion !== undefined && this.#port.answerQuestion) {
+      const picked = /^\d+$/.test(text) ? threadQuestion.options[Number(text) - 1] : undefined;
+      const result = await this.#port.answerQuestion(threadQuestion, picked ?? text);
+      if (result.kind === "refused") this.#note = result.message;
+      await this.refresh();
+      return;
+    }
     if (question !== undefined) {
       const picked = /^\d+$/.test(text) ? question.options[Number(text) - 1] : undefined;
       const result = await answerAgentQuestion(
@@ -1379,7 +1406,10 @@ class AgentScreen {
   }
 
   /** Shows the goal, or revises its objective against the version just read. */
-  async #goal(argument: string): Promise<void> {
+  async #goal(
+    argument: string,
+    listingBefore: "threads" | "models" | "goal" | undefined,
+  ): Promise<void> {
     if (this.#home !== undefined) {
       this.#note = "Side Chat only reads; /back to change the goal.";
       this.#draw();
@@ -1392,13 +1422,20 @@ class AgentScreen {
       return;
     }
     const revise = /^revise\s+(.+)$/s.exec(argument);
-    if (argument.length > 0 && revise === null) {
+    const request = goalPanelRequest(argument, listingBefore === "goal");
+    if (revise === null && request === undefined) {
       this.#note = "Revise the objective with: /goal revise <new objective>";
       this.#draw();
       return;
     }
     if (revise === null) {
-      this.#note = describeAgentGoal(read.goal);
+      if (request?.kind === "page") {
+        this.#goalLines = describeAgentGoalLedger(read.goal, {
+          size: goalPanelPageSize(this.#renderer.terminalHeight),
+          number: request.number,
+        });
+        this.#listing = "goal";
+      }
       this.#draw();
       return;
     }

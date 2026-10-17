@@ -240,6 +240,8 @@ export interface BeginChatTurnInput {
   readonly attemptId: ChatAttempt["id"];
   readonly providerSessionId: ProviderSessionId;
   readonly resumeCursor?: ChatAttempt["resumeCursor"];
+  /** Set when this turn's new provider session starts with the conversation handed over. */
+  readonly handoff?: ChatAttempt["handoff"];
   readonly contextManifestId: ContextManifestId;
   readonly userMessageRef: ChatContentReference;
   readonly attachmentIds?: ReadonlyArray<ChatAttachmentId>;
@@ -271,6 +273,7 @@ export function beginChatTurn(thread: ChatThread, input: BeginChatTurnInput): Ch
     providerInstanceId: thread.providerInstanceId,
     providerSessionId: input.providerSessionId,
     ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
+    ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
     modelId: thread.modelId,
     contextManifestId: input.contextManifestId,
     outcome: "queued",
@@ -388,6 +391,8 @@ export interface RetryChatTurnInput {
   readonly newAttemptId: ChatAttempt["id"];
   readonly newProviderSessionId: ProviderSessionId;
   readonly resumeCursor?: ChatAttempt["resumeCursor"];
+  /** Set when the retried attempt's new provider session starts with the conversation handed over. */
+  readonly handoff?: ChatAttempt["handoff"];
   readonly newContextManifestId: ContextManifestId;
   readonly expectedVersion: AggregateVersion;
   readonly createdAt: UtcTimestamp;
@@ -437,6 +442,7 @@ export function retryChatTurn(
     providerInstanceId: attempt.providerInstanceId,
     providerSessionId: input.newProviderSessionId,
     ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
+    ...(input.handoff === undefined ? {} : { handoff: input.handoff }),
     modelId: attempt.modelId,
     contextManifestId: input.newContextManifestId,
     outcome: "queued",

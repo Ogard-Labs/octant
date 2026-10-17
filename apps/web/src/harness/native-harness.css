@@ -183,6 +183,20 @@
   margin-bottom: var(--oct-space-2);
 }
 
+/* Notes for the lead of a running turn, above the composer beside an approval. */
+.thread-harness-steering {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  min-width: 0;
+  margin-bottom: var(--oct-space-2);
+}
+
+.thread-harness-steering__input {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
 .native-harness-question__detail {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

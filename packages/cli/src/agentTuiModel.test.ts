@@ -3,6 +3,9 @@ import { describe, expect, it } from "vitest";
 import { approvalDecisionBody, chosenCommandHosts, preselectedCommandHosts } from "./agentHost";
 import {
   approvalPanelOutsideContent,
+  describeAgentGoalLedger,
+  goalPanelPageSize,
+  goalPanelRequest,
   approvalPanelHosts,
   APPROVAL_PANEL_HOST_ROWS,
   paletteFor,
@@ -395,5 +398,77 @@ describe("the approval panel's long host list", () => {
       ],
       page: 0,
     });
+  });
+});
+
+describe("goal ledger", () => {
+  const goal = (criteria?: unknown) =>
+    ({
+      id: "00000000-0000-4000-8000-000000000051",
+      threadId,
+      objective: "Ship the parser",
+      status: "paused",
+      criteria,
+    }) as never;
+
+  it("states each criterion's state, check and latest evidence in words", () => {
+    const lines = describeAgentGoalLedger(
+      goal([
+        {
+          id: "c1",
+          text: "Tests pass",
+          check: "bun run test",
+          status: "met",
+          evidence: { kind: "test", summary: "Exited 0", observedAt: "2026-10-02T12:30:00.000Z" },
+        },
+        { id: "c2", text: "Docs updated", status: "unmet" },
+      ]),
+    );
+    expect(lines).toEqual([
+      "Goal (paused): Ship the parser · 1 of 2 criteria met",
+      "  met    c1  Tests pass",
+      "    check: bun run test",
+      "    evidence (test, 2026-10-02T12:30:00.000Z): Exited 0",
+      "  unmet  c2  Docs updated",
+      "    check: confirmed by a person",
+      "    evidence: none yet",
+    ]);
+  });
+
+  it("is only the headline for a goal set without criteria", () => {
+    expect(describeAgentGoalLedger(goal())).toEqual(["Goal (paused): Ship the parser"]);
+  });
+
+  it("shows one page of a long ledger and says how to reach the rest", () => {
+    const criteria = Array.from({ length: 12 }, (_, index) => ({
+      id: `c${String(index + 1)}`,
+      text: `Criterion ${String(index + 1)}`,
+      status: "unmet",
+    }));
+    const first = describeAgentGoalLedger(goal(criteria), { size: 2, number: 1 });
+    // The headline, two criteria of three lines each, and the pointer: it fits a 24-row screen.
+    expect(first).toHaveLength(1 + 2 * 3 + 1);
+    expect(first[1]).toContain("c1");
+    expect(first.at(-1)).toBe("criteria 1-2 of 12 · /goal 2 shows the next page");
+    const last = describeAgentGoalLedger(goal(criteria), { size: 5, number: 3 });
+    expect(last.at(-1)).toBe("criteria 11-12 of 12 · /goal 1 shows the first page");
+    expect(last.filter((line) => line.includes("check:"))).toHaveLength(2);
+    // A page past the end shows the last one.
+    expect(describeAgentGoalLedger(goal(criteria), { size: 5, number: 9 }).at(-1)).toContain(
+      "11-12 of 12",
+    );
+  });
+
+  it("sizes a page to the rows above the composer and never below one criterion", () => {
+    expect(goalPanelPageSize(24)).toBe(2);
+    expect(goalPanelPageSize(50)).toBe(10);
+    expect(goalPanelPageSize(10)).toBe(1);
+  });
+
+  it("closes the panel on a second bare /goal and opens a numbered page without closing", () => {
+    expect(goalPanelRequest("", false)).toEqual({ kind: "page", number: 1 });
+    expect(goalPanelRequest("", true)).toEqual({ kind: "close" });
+    expect(goalPanelRequest("2", true)).toEqual({ kind: "page", number: 2 });
+    expect(goalPanelRequest("later", false)).toBeUndefined();
   });
 });

@@ -1,5 +1,6 @@
 import { personDecides } from "./hostAnswer";
 import { HarnessRetryEventFields } from "./harnessRetry";
+import { ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
@@ -1397,26 +1398,8 @@ const ProviderSessionReadyEvent = Schema.Struct({
   resumeCursor: Schema.optional(ProviderResumeCursor),
 }).annotations(strict);
 
-const nonNegativeCount = Schema.Int.pipe(Schema.nonNegative());
-
-/**
- * What a handoff left out of the conversation it carried, by cause. Every
- * count is explicit so a reader never mistakes a short handoff for a short
- * conversation: purged bodies are `missingBodies`, bodies over the read bound
- * are `oversizedBodies`, and replies a turn never finished are
- * `unfinishedReplies`.
- */
-export const CodeContextHandoffOmissions = Schema.Struct({
-  earlierMessages: nonNegativeCount,
-  unfinishedReplies: nonNegativeCount,
-  missingBodies: nonNegativeCount,
-  oversizedBodies: nonNegativeCount,
-  emptyBodies: nonNegativeCount,
-  attachments: nonNegativeCount,
-  truncatedMessages: nonNegativeCount,
-  truncatedCharacters: nonNegativeCount,
-  sourceTruncatedMessages: nonNegativeCount,
-}).annotations(strict);
+/** The omissions a Code handoff counts; Chat and Work journal the same shape. */
+export const CodeContextHandoffOmissions = ContextHandoffOmissions;
 export type CodeContextHandoffOmissions = typeof CodeContextHandoffOmissions.Type;
 
 const handoffMessages = Schema.Int.pipe(

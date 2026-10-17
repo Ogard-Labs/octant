@@ -440,6 +440,86 @@ same loopback request with `release: true`), which stops the tool and drops its
 session. The next emulator to take the serial then gets a fresh tool, and none
 outlives its emulator.
 
+## Accepted input limits
+
+These limits are accepted, not pending work. They follow from the input channel
+recording one request and one evidence record per input, from the host running
+one device action at a time, and from what the native helper can send. Each
+statement below is what the code shows today; the rationale for the non-goals
+is in [ADR 0137](../decisions/0137-simulator-input-reaches-the-guest-through-a-native-device-helper.md)
+and [ADR 0140](../decisions/0140-the-live-simulator-screen-is-driven-directly.md).
+Anything the code does not settle is marked not verified.
+
+**What works on the iOS Simulator's live screen.** A press and release less
+than 10 px apart is a tap at the point where the press began. A longer drag is
+one straight swipe, sent when the finger lifts, replayed over the drag's
+duration and clamped to 80 ms through 2 s. Keys typed while the screen has
+focus are sent as one text after a 350 ms pause. Return, Delete, Escape, and
+the arrow keys are hardware keys, and Space types a space. Command and Control
+shortcuts, and Tab, stay with the app. Home, Lock, and (where the host reports
+them) Volume up and down are buttons.
+
+**Typed text takes one of two routes on the Simulator.** Text made only of ASCII
+letters A to Z, digits 0 to 9, spaces, and new lines is typed as key positions
+by the native helper. That route needs a QWERTY software keyboard with an
+Automatic hardware layout in the languages listed under
+[Native device helper and typed text](#native-device-helper-and-typed-text), and
+a keyboard it cannot read or does not accept is refused
+(`keyboard-layout-unknown`, `keyboard-layout-unsupported`) rather than typed
+wrong. Any other text, including punctuation, letters such as æ, ø, å, or é,
+and other scripts, is copied to the Simulator's pasteboard with
+`xcrun simctl pbcopy` and pasted with Command-V. The paste route does not check
+the keyboard layout. If the copy fails, the action is refused as unavailable
+and no key is pressed. Whether the paste lands in every field, and how the paste
+key behaves on a non-QWERTY layout, are not verified on a device; the desktop
+tests mock the copy and the keystroke. Characters typed on the focused screen
+go to the device as typed text, so an Option-modified key arrives as the
+character it produces; only Command and Control shortcuts are kept by the app.
+
+**Pinch and multi-touch are non-goals.** The helper's touch operation takes one
+point per call, and there is no second-finger operation, so the channel cannot
+carry two fingers. The pane acts only on the primary pointer: a second finger
+neither starts nor ends a gesture, and a secondary button does nothing on the
+screen. Neither pinch nor a second finger reaches the device
+([ADR 0140](../decisions/0140-the-live-simulator-screen-is-driven-directly.md)
+lists pinch and other multi-touch as non-goals).
+
+**Long press is not sent.** A press that stays within 10 px is a tap on release,
+however long it was held: the duration is not part of a tap. On the managed
+stream the tap is `serve-sim`'s `tap` command, and how long that holds is not
+verified. When input goes to the native helper instead (no stream, or after
+Device Hub took input), the helper holds the tap for 60 ms. The Android path
+sends `input tap` with no hold, and how long `serve-avd` holds its tap is not
+verified. A long press therefore reaches the device as a tap, not as a hold.
+
+**Follow-the-finger drag is not sent.** Nothing reaches the device while the
+finger moves. When it lifts, the whole drag is one swipe from where the press
+began to where it ended, or to the screen edge where it left the screen, drawn
+as a straight line. Its steps are about 16 ms apart over the drag's duration,
+so a drag longer than 2 s is replayed in 2 s, and a curved path arrives as a
+straight one. A slow drag that holds still before it moves is the same swipe.
+The Android pane sends the same straight swipe with `input swipe` (or
+`serve-avd`'s swipe). The reason is the same as for multi-touch: a stream of
+move events would be dozens of journaled actions per drag, or an unjournaled
+side path, which [ADR 0062](../decisions/0062-simulator-frame-input-transport.md)
+rejects, and gestures that depend on the path or on holding still need touch
+phases on the channel, which is a separate decision about what an input session
+records ([ADR 0140](../decisions/0140-the-live-simulator-screen-is-driven-directly.md)).
+
+**The still-image fallback** takes a click as a tap at the same place. It sends
+no swipe and no keys from the picture itself. The toolbar's Type text still
+applies.
+
+**Android typing has no character check in the host.** Text goes through
+`adb shell input text`, with spaces sent as `%s` and the whole word quoted for
+the device shell, or through `serve-avd`'s text action. The Simulator's
+character rule does not apply. What the emulator types for punctuation,
+non-Latin letters, or a new line is not verified.
+
+**Not yet verified on a device.** The packaged run on Xcode 27 that exercises
+these limits end to end, and any Android emulator run, are manual device checks
+still open (see Verification).
+
 ## Verification
 
 - Server: `apps/server/src/apple/appleToolchainService.test.ts`,

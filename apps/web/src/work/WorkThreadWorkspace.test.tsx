@@ -537,6 +537,85 @@ describe("WorkThreadWorkspace", () => {
     ).not.toBeNull();
   });
 
+  it("says what a provider switch handed to the turn that started a new session", async () => {
+    const handedOver = workTurn({
+      handoff: {
+        reason: "provider-switch",
+        previousProviderInstanceId: alternateProviderId,
+        previousModelId: alternateModelId,
+        messages: 4,
+        omissions: {
+          earlierMessages: 0,
+          unfinishedReplies: 0,
+          missingBodies: 0,
+          oversizedBodies: 0,
+          emptyBodies: 0,
+          attachments: 1,
+          truncatedMessages: 0,
+          truncatedCharacters: 0,
+          sourceTruncatedMessages: 0,
+        },
+        externalContentIngested: false,
+        nativeSessionTransferred: false,
+        hiddenReasoningTransferred: false,
+      },
+    });
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns: [handedOver], liveCursor: 0 })),
+    };
+
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent(
+      "Handed over 4 recent messages from Remote Provider — Model Two",
+    );
+    expect(note).toHaveTextContent("Left out: 1 attachment.");
+    expect(note).toHaveTextContent("did not transfer");
+  });
+
+  it("tells the person before sending that a provider that keeps its own session will start fresh", async () => {
+    const threadClient = {
+      bootstrap: vi.fn(async () => ({
+        threads: [
+          workThread({ providerInstanceId: alternateProviderId, modelId: alternateModelId }),
+        ],
+      })),
+      execute: vi.fn(),
+    } as unknown as WorkThreadClient;
+    const turnClient = {
+      transcript: vi.fn(async () => ({ threadId, turns: [workTurn()], liveCursor: 0 })),
+    };
+
+    render(
+      <WorkThreadWorkspace
+        providerGroups={[providerGroup(), alternateProviderGroup()]}
+        threadClient={threadClient}
+        threadId={threadId}
+        title="Draft brief"
+        turnClient={turnClient as never}
+      />,
+    );
+
+    expect(
+      await screen.findByText(
+        /Your next message starts a new session on Remote Provider — Model Two/,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("stops the running turn through the host", async () => {
     const user = userEvent.setup();
     const running = workTurn({ status: "running" });

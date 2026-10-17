@@ -539,10 +539,10 @@ export function SettingsView(props: SettingsViewProps) {
             {props.onBack === undefined ? null : (
               <footer className="settings-view__sidebar-footer">
                 <OctantButton
-                  className="setnav-item window-no-drag settings-view__back justify-start"
+                  className="setnav-item window-no-drag settings-view__back justify-start rounded-lg"
                   onClick={props.onBack}
                   type="button"
-                  variant="ghost"
+                  variant="bare"
                 >
                   <ArrowLeft aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
                   <span>Back to app</span>

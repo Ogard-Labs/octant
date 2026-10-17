@@ -9,6 +9,11 @@ import {
   AgentRunResultDeliveryGenerations,
 } from "./agentRun";
 import { ContextCompactionSettledRecord, ContextManifestId } from "./context";
+import {
+  ContextHandoffMessages,
+  ContextHandoffOmissions,
+  ProviderSwitchConversationHandoff,
+} from "./contextHandoff";
 import { AggregateVersion, GlobalSequence, UtcTimestamp } from "./events";
 import { ThreadRestFields } from "./threadRest";
 import { ThreadLiveTurnFields } from "./threadLiveTurn";
@@ -253,6 +258,34 @@ export const ChatAttemptFailure = Schema.Struct({
 }).annotations(strict);
 export type ChatAttemptFailure = typeof ChatAttemptFailure.Type;
 
+/**
+ * A fresh Chat branch of a conversation whose provider keeps its history in a
+ * session of its own. The branch carries message text only, so the session
+ * that held the source's later turns cannot come with it: the branch's first
+ * turn starts a new session with the carried conversation as bounded,
+ * attributed text.
+ */
+export const ChatBranchConversationHandoff = Schema.Struct({
+  reason: Schema.Literal("branch"),
+  messages: ContextHandoffMessages,
+  omissions: ContextHandoffOmissions,
+  /** Whether the thread had taken in outside content when the handoff was read. */
+  externalContentIngested: Schema.Boolean,
+  nativeSessionTransferred: Schema.Literal(false),
+  hiddenReasoningTransferred: Schema.Literal(false),
+}).annotations(strict);
+export type ChatBranchConversationHandoff = typeof ChatBranchConversationHandoff.Type;
+
+/**
+ * What a Chat attempt started its provider session with that it did not write
+ * itself. Journaled with the attempt, before the provider is sent anything.
+ */
+export const ChatAttemptHandoff = Schema.Union(
+  ProviderSwitchConversationHandoff,
+  ChatBranchConversationHandoff,
+);
+export type ChatAttemptHandoff = typeof ChatAttemptHandoff.Type;
+
 export const ChatAttempt = Schema.Struct({
   id: ChatAttemptId,
   turnId: ChatTurnId,
@@ -267,6 +300,13 @@ export const ChatAttempt = Schema.Struct({
   citationIds: Schema.Array(ChatCitationId),
   usage: Schema.optional(Usage),
   resumeCursor: Schema.optional(ProviderResumeCursor),
+  /**
+   * The conversation text this attempt's new provider session was started
+   * with, when the provider changed or the thread is a branch whose provider
+   * keeps its history in a session. Absent when the attempt continued a
+   * session or the host rebuilt the history itself.
+   */
+  handoff: Schema.optional(ChatAttemptHandoff),
   /**
    * The provider's own task list for this attempt, restated whole as it moves.
    * Absent for providers that report no task progress, which the capability

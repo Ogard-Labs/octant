@@ -112,6 +112,7 @@ import type { PlanClient } from "@octant/client-runtime/plan-client";
 import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { ThreadHarnessApproval } from "../harness/ThreadHarnessApproval";
+import { ThreadHarnessSteering } from "../harness/ThreadHarnessSteering";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { useWorkResearchController } from "../work/useWorkResearchController";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
@@ -927,6 +928,14 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
         waiting={props.waitingThreadIds?.has(threadId) === true}
       />
     );
+  const steering =
+    props.nativeHarnessClient === undefined || !ownHost ? null : (
+      <ThreadHarnessSteering
+        client={props.nativeHarnessClient}
+        running={props.runningThreadIds?.has(threadId) === true}
+        threadId={threadId}
+      />
+    );
   const tray =
     props.agentRunClient === undefined ? null : (
       <ThreadSubagentsTray
@@ -938,10 +947,11 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
         threadId={threadId}
       />
     );
-  if (approval === null && tray === null) return null;
+  if (approval === null && steering === null && tray === null) return null;
   return (
     <>
       {approval}
+      {steering}
       {tray}
     </>
   );
@@ -1240,6 +1250,7 @@ function renderCodeTab(
             {...(props.agentRunClient === undefined
               ? {}
               : { agentRunClient: props.agentRunClient })}
+            {...(props.goalClient === undefined ? {} : { goalClient: props.goalClient })}
             {...(codeController.activeView?.thread.deliveryTarget.outcomeKind === undefined
               ? {}
               : { deliveryOutcome: codeController.activeView.thread.deliveryTarget.outcomeKind })}

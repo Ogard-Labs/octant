@@ -13,11 +13,14 @@ import { SessionCompactionService } from "../context/sessionCompaction";
 import { createContextRouteHandler } from "../contextRoutes";
 import { windowCanOpenProject } from "../projectOpenAuthority";
 import { createBrowserAutomationRouteHandler } from "../browserAutomationRoutes";
+import { createAgentMessageRouteHandler } from "../agentMessage/agentMessageRoutes";
 import { defaultShellSettings, enabledModes, providerKeepsConversation } from "@octant/domain";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
+import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
 import type { CodeWiring } from "./code";
 import type { BrowserWiring } from "./browser";
@@ -26,27 +29,32 @@ import type { ChatWiring } from "./chat";
 import type { WorkWiring } from "./work";
 
 export type ContextDependencies = Pick<ServerStart, "persistence"> &
-  Pick<
-    AuthorityWiring,
-    "browserCaptures" | "requireBrowserToolApprovalService" | "windowAuthorityStore"
-  > &
+  Pick<AuthorityWiring, "browserCaptures" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "capacityScheduler" | "nativeHarnessHooks"> &
-  Pick<
-    WorkspaceWiring,
-    "contextHarness" | "projectService" | "spendCeilingService" | "workThreadProjection"
-  > &
+  Pick<IntegrationsWiring, "agentMessageProjection"> &
+  Pick<WorkspaceWiring, "contextHarness" | "projectService" | "spendCeilingService"> &
   Pick<CodeWiring, "canAccessCodeProject"> &
-  Pick<ProvidersWiring, "configuredDriverOptions" | "providerRuntimeRegistry"> &
-  Pick<BrowserWiring, "browserAuthority" | "browserAutomationService" | "liveProjectBrowsers"> &
+  Pick<ProvidersWiring, "configuredDriverOptions"> &
+  Pick<
+    BrowserWiring,
+    "browserAutomationService" | "browserToolApprovalService" | "liveProjectBrowsers"
+  > &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService"> &
   Pick<ChatWiring, "chatService"> &
-  Pick<WorkWiring, "workThreadService" | "workTurnProjection" | "workTurnService">;
+  Pick<WorkWiring, "workThreadService" | "workTurnService"> &
+  Pick<
+    FoundationsWiring,
+    "providerRuntimeRegistry" | "workThreadProjection" | "workTurnProjection"
+  > &
+  Pick<FoundationsWiring, "browserAuthority">;
 
 export function wireContext(deps: ContextDependencies) {
   const {
+    agentMessageProjection,
     browserAuthority,
     browserAutomationService,
     browserCaptures,
+    browserToolApprovalService,
     canAccessCodeProject,
     capacityScheduler,
     chatService,
@@ -58,7 +66,6 @@ export function wireContext(deps: ContextDependencies) {
     persistence,
     projectService,
     providerRuntimeRegistry,
-    requireBrowserToolApprovalService,
     routeCodeService,
     spendCeilingService,
     windowAuthorityStore,
@@ -455,11 +462,21 @@ export function wireContext(deps: ContextDependencies) {
     windowCanOpenThread: windowCanOpenThreadById,
     projectBrowsers: liveProjectBrowsers,
     authority: browserAuthority,
-    approvals: requireBrowserToolApprovalService(),
+    approvals: browserToolApprovalService,
     windowAuthorityStore,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
-  return { browserAutomationRoutes, contextRoutes, windowCanOpenThread, windowCanOpenThreadById };
+  const agentMessageRoutes = createAgentMessageRouteHandler({
+    windowAuthorityStore,
+    projection: agentMessageProjection,
+    windowCanOpenThread: windowCanOpenThreadById,
+  });
+  return {
+    agentMessageRoutes,
+    browserAutomationRoutes,
+    contextRoutes,
+    windowCanOpenThread,
+  };
 }
 
 export type ContextWiring = ReturnType<typeof wireContext>;

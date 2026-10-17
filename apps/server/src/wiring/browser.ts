@@ -25,55 +25,39 @@ import {
 } from "../browser/browserAutomationService";
 import { BrowserToolApprovalService } from "../browser/browserToolApprovalService";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
-import {
-  deriveToolHostId,
-  ServerBrowserAuthorityResolver,
-} from "../browser/browserAuthorityResolver";
 import { createPlaywrightBrowserRuntime } from "../browser/playwrightBrowserRuntime";
 import { createDesktopBrowserRuntimeFromEnvironment } from "../browser/desktopBrowserRuntime";
 import { RoutingBrowserRuntime } from "../browser/routingBrowserRuntime";
 import { defaultShellSettings, enabledModes } from "@octant/domain";
 import type { ServerStart } from "./serverShape";
-import type { LateBindings } from "./lateBindings";
 import type { AuthorityWiring } from "./authority";
+import type { FoundationsWiring } from "./foundations";
 import type { AgentRunsWiring } from "./agentRuns";
 import type { WorkspaceWiring } from "./workspace";
-import type { CodeWiring } from "./code";
 import type { ProvidersWiring } from "./providers";
 
-export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> & {
-  /** Cells settled by a later wiring call; read per use, never at construction. */
-  readonly late: Pick<
-    LateBindings,
-    "browserAutomationService" | "browserToolApprovalService" | "projectBrowserService"
-  >;
-} & Pick<AuthorityWiring, "browserCaptures" | "windowAuthorityStore"> &
+export type BrowserDependencies = Pick<ServerStart, "options" | "persistence"> &
+  Pick<AuthorityWiring, "browserCaptures" | "onWindowRevoked" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "externalContentIngestionStore"> &
-  Pick<WorkspaceWiring, "projectService" | "shellService" | "workThreadProjection"> &
-  Pick<CodeWiring, "codeEvidence"> &
-  Pick<ProvidersWiring, "providerDataDirectory">;
+  Pick<WorkspaceWiring, "projectService" | "shellService"> &
+  Pick<ProvidersWiring, "providerDataDirectory"> &
+  Pick<FoundationsWiring, "browserAuthority" | "codeEvidence">;
 
 export function wireBrowser(deps: BrowserDependencies) {
   const {
-    late,
+    browserAuthority,
     browserCaptures,
     codeEvidence,
     externalContentIngestionStore,
+    onWindowRevoked,
     options,
     persistence,
     projectService,
     providerDataDirectory,
     shellService,
     windowAuthorityStore,
-    workThreadProjection,
   } = deps;
   return Effect.gen(function* () {
-    const browserAuthority = new ServerBrowserAuthorityResolver({
-      hostId: deriveToolHostId(providerDataDirectory),
-      workspaceHostId: LOCAL_HOST_ID,
-      persistence,
-      workThreads: workThreadProjection,
-    });
     const rememberedBrowserOrigins = () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings())
         .rememberedBrowserOrigins;
@@ -124,7 +108,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       isOriginRemembered: (origin) => rememberedBrowserOrigins().includes(origin),
       isHostScope: isRoutineHostScope,
     });
-    late.browserToolApprovalService.current = browserToolApprovalService;
+    onWindowRevoked((windowId) => browserToolApprovalService.revokeWindow(windowId));
     const headlessBrowserRuntime = createPlaywrightBrowserRuntime({
       receiptDirectory: join(providerDataDirectory, "browser", "runtime-receipts"),
     });
@@ -166,7 +150,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       now: Date.now,
     });
     const projectBrowserService = liveProjectBrowsers;
-    late.projectBrowserService.current = projectBrowserService;
+    onWindowRevoked((windowId) => void projectBrowserService.revokeWindow(windowId));
     // Every change that can take a page away from its window: the Project's
     // lifecycle or binding, the window moving to another Project, or its mode
     // being turned off.
@@ -210,7 +194,7 @@ export function wireBrowser(deps: BrowserDependencies) {
       clock: () => new Date().toISOString(),
       now: Date.now,
     });
-    late.browserAutomationService.current = browserAutomationService;
+    onWindowRevoked((windowId) => void browserAutomationService.revokeWindow(windowId));
     // Notes the user points at the running product. The service owns the
     // authority check and resolves the element itself; the crop lives in the
     // same purgeable evidence store the rest of Code's bulk content uses, and
@@ -266,7 +250,6 @@ export function wireBrowser(deps: BrowserDependencies) {
       windowAuthorityStore,
     });
     return {
-      browserAuthority,
       browserAutomationService,
       browserToolApprovalService,
       liveProjectBrowsers,
