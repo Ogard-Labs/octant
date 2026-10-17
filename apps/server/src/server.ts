@@ -199,6 +199,7 @@ export function startOctantServer(
       windowAuthorityStore,
     } = wireAuthority({
       browserAuthority,
+      options,
       persistence,
     });
     const {
