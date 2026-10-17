@@ -661,8 +661,8 @@ export function RemoteAccessSettingsSection({
               ]}
             />
             <p className="settings-section-line">
-              Octant's phone and desktop apps can't read pairing codes yet. Until they can, pair
-              them with a listener that uses a Tailscale certificate or your own.
+              Paste this code into Octant's desktop app under Settings, Remote access, Other
+              computers, or scan the QR code with the phone app.
             </p>
           </div>
         ) : pairingCodeExpired && browserCannotVerify ? (
