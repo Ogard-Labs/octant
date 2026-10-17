@@ -6,6 +6,7 @@ import type {
   UsageQueryFilter,
 } from "@octant/client-runtime";
 import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
+import type { GoalClient } from "@octant/client-runtime/goal-client";
 import type { CodeClient } from "@octant/client-runtime/code-client";
 import type {
   CodeCheckoutIdentity,
@@ -43,6 +44,7 @@ import { useLocalServersController } from "./useLocalServersController";
 import { ChangeWorkingFolder, workingFolderLabel } from "./WorkingDirectoryControl";
 import { OpenInMenu } from "./OpenInMenu";
 import type { OctantHostBridge } from "../shell/hostBridge";
+import { EnvironmentGoal } from "./EnvironmentGoal";
 import { EnvironmentSubagents } from "./EnvironmentSubagents";
 import { ThreadUsagePanel } from "../usage/ThreadUsagePanel";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -112,6 +114,8 @@ export interface CodeThreadEnvironmentProps {
   readonly hostBridge?: OctantHostBridge;
   readonly openInApplications?: ReadonlyArray<OpenInApplicationId>;
   readonly agentRunClient?: AgentRunClient;
+  /** Reads the thread's goal; absent leaves the Goal row out. */
+  readonly goalClient?: GoalClient;
   /**
    * What this thread has to produce before it may be called Done. Absent when
    * the caller has no thread record to read it from.
@@ -329,6 +333,17 @@ export function CodeThreadEnvironment(props: CodeThreadEnvironmentProps) {
                 {...(props.onSelectPullRequest === undefined
                   ? {}
                   : { onSelectRow: props.onSelectPullRequest })}
+                threadId={String(props.tab.threadId)}
+              />
+            )}
+            {props.goalClient === undefined ? null : (
+              <EnvironmentGoal
+                client={props.goalClient}
+                refreshKey={
+                  props.latestSettledTurn === undefined
+                    ? undefined
+                    : String(props.latestSettledTurn)
+                }
                 threadId={String(props.tab.threadId)}
               />
             )}

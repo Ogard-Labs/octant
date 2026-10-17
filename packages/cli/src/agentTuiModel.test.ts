@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { approvalDecisionBody, chosenCommandHosts, preselectedCommandHosts } from "./agentHost";
 import {
   approvalPanelOutsideContent,
+  describeAgentGoalLedger,
   approvalPanelHosts,
   APPROVAL_PANEL_HOST_ROWS,
   paletteFor,
@@ -395,5 +396,44 @@ describe("the approval panel's long host list", () => {
       ],
       page: 0,
     });
+  });
+});
+
+describe("goal ledger", () => {
+  const goal = (criteria?: unknown) =>
+    ({
+      id: "00000000-0000-4000-8000-000000000051",
+      threadId,
+      objective: "Ship the parser",
+      status: "paused",
+      criteria,
+    }) as never;
+
+  it("states each criterion's state, check and latest evidence in words", () => {
+    const lines = describeAgentGoalLedger(
+      goal([
+        {
+          id: "c1",
+          text: "Tests pass",
+          check: "bun run test",
+          status: "met",
+          evidence: { kind: "test", summary: "Exited 0", observedAt: "2026-10-02T12:30:00.000Z" },
+        },
+        { id: "c2", text: "Docs updated", status: "unmet" },
+      ]),
+    );
+    expect(lines).toEqual([
+      "Goal (paused): Ship the parser · 1 of 2 criteria met",
+      "  met    c1  Tests pass",
+      "    check: bun run test",
+      "    evidence (test, 2026-10-02T12:30:00.000Z): Exited 0",
+      "  unmet  c2  Docs updated",
+      "    check: confirmed by a person",
+      "    evidence: none yet",
+    ]);
+  });
+
+  it("is only the headline for a goal set without criteria", () => {
+    expect(describeAgentGoalLedger(goal())).toEqual(["Goal (paused): Ship the parser"]);
   });
 });

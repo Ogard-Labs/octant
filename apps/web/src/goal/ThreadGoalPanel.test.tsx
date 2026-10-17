@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ThreadGoal } from "@octant/contracts";
@@ -23,6 +23,38 @@ function goalWith(overrides: Partial<ThreadGoal> = {}): ThreadGoal {
     ...overrides,
   } as unknown as ThreadGoal;
 }
+
+const ledgerCriteria = [
+  {
+    id: "c1",
+    text: "The parser tests pass",
+    check: "bun run test --filter parser",
+    status: "met",
+    evidence: {
+      kind: "test",
+      referenceId: "goal-check:c1",
+      summary: "Exited 0 after 41 passing tests",
+      observedAt: "2026-08-01T10:00:00.000Z",
+    },
+  },
+  {
+    id: "c2",
+    text: "The changelog names the change",
+    status: "unmet",
+  },
+  {
+    id: "c3",
+    text: "The build is clean",
+    check: "bun run build",
+    status: "unmet",
+    evidence: {
+      kind: "test",
+      referenceId: "goal-check:c3",
+      summary: "Exited 1: type error in lexer.ts",
+      observedAt: "2026-08-01T10:05:00.000Z",
+    },
+  },
+];
 
 describe("ThreadGoalPanel", () => {
   it("mounts the Goal card for the thread and states host retention honestly", async () => {
@@ -49,6 +81,25 @@ describe("ThreadGoalPanel", () => {
     expect(
       screen.getByText("The host records this Goal in its journal, so it survives a restart."),
     ).toBeVisible();
+  });
+
+  it("lists the criteria the model set, with their checks and evidence, beside the objective", async () => {
+    const client: GoalClient = {
+      read: vi.fn().mockResolvedValue({
+        goal: goalWith({ criteria: ledgerCriteria } as Partial<ThreadGoal>),
+        history: [],
+      }),
+      execute: vi.fn(),
+    };
+
+    render(<ThreadGoalPanel client={client} threadId={threadId} />);
+
+    const ledger = await screen.findByRole("region", { name: "Acceptance criteria" });
+    expect(within(ledger).getAllByRole("listitem")).toHaveLength(3);
+    expect(ledger).toHaveTextContent("bun run build");
+    expect(ledger).toHaveTextContent("Exited 1: type error in lexer.ts");
+    // Reading the ledger changes nothing on the host.
+    expect(client.execute).not.toHaveBeenCalled();
   });
 
   it("offers the next Goal once the current one is complete, keeping its card", async () => {

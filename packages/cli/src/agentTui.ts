@@ -54,6 +54,7 @@ import { notifyDesktop } from "./agentNotify";
 import {
   defaultCheckpointLabel,
   describeAgentGoal,
+  describeAgentGoalLedger,
   approvalPanelHosts,
   paletteFor,
   readTuiApprovalAnswer,
@@ -172,7 +173,9 @@ class AgentScreen {
   readonly #wake = new AgentWake();
   /** Ends the live feed of the thread on screen; a switch starts a new one. */
   #feed = new AbortController();
-  #listing: "threads" | "models" | undefined;
+  #listing: "threads" | "models" | "goal" | undefined;
+  /** The goal ledger the Goal panel shows, read when /goal opened it. */
+  #goalLines: ReadonlyArray<string> = [];
   #suggestions:
     | { readonly kind: "file" | "thread"; readonly items: ReadonlyArray<string> }
     | undefined;
@@ -658,6 +661,11 @@ class AgentScreen {
         return `${here ? "●" : "○"} ${index + 1}. ${model.displayName}  ${model.endpoint}${model.contextLimit === undefined ? "" : `  ${Math.round(model.contextLimit / 1000)}k`}`;
       });
       this.#panelText.content = t`${fg(p.textSecondary)(lines.length === 0 ? "No harness endpoint offers a model yet. Add one in Settings → Providers." : lines.join("\n"))}\n${dim(fg(p.muted)("/model N switches the thread's model."))}`;
+      this.#panel.visible = true;
+    } else if (this.#listing === "goal") {
+      this.#panel.title = " Goal ";
+      this.#panel.borderColor = p.border;
+      this.#panelText.content = t`${fg(p.textSecondary)(this.#goalLines.join("\n"))}\n${dim(fg(p.muted)("/goal revise text changes the objective. /goal closes this."))}`;
       this.#panel.visible = true;
     } else if (this.#showHelp) {
       this.#panel.title = " Keys ";
@@ -1398,7 +1406,8 @@ class AgentScreen {
       return;
     }
     if (revise === null) {
-      this.#note = describeAgentGoal(read.goal);
+      this.#goalLines = describeAgentGoalLedger(read.goal);
+      this.#listing = this.#listing === "goal" ? undefined : "goal";
       this.#draw();
       return;
     }

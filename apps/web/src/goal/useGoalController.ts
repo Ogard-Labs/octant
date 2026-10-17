@@ -12,6 +12,12 @@ export interface UseGoalControllerOptions {
   readonly client: GoalClient | undefined;
   readonly enabled: boolean;
   readonly threadId: string | undefined;
+  /**
+   * Reads the Goal again when this changes. A model sets criteria and records
+   * check outcomes mid-thread, so a surface that stays open re-reads at the
+   * moments the thread settles instead of showing the Goal it first loaded.
+   */
+  readonly refreshKey?: string | undefined;
   /** Injectable id source so tests do not depend on the realm's crypto. */
   readonly newId?: () => string;
 }
@@ -57,7 +63,7 @@ export function useGoalController(options: UseGoalControllerOptions): GoalContro
     setReloadToken((token) => token + 1);
   }, []);
 
-  const { client, enabled, threadId } = options;
+  const { client, enabled, refreshKey, threadId } = options;
 
   useEffect(() => {
     const operation = ++generation.current;
@@ -89,7 +95,7 @@ export function useGoalController(options: UseGoalControllerOptions): GoalContro
     return () => {
       controller.abort();
     };
-  }, [client, enabled, threadId, reloadToken]);
+  }, [client, enabled, refreshKey, threadId, reloadToken]);
 
   const mintId = useCallback(
     () => (idSource.current ?? (() => globalThis.crypto.randomUUID()))(),

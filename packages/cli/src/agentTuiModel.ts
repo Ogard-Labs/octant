@@ -297,6 +297,28 @@ export function describeAgentGoal(goal: ThreadGoal): string {
   return `Goal (${goal.status}): ${goal.objective}${progress}`;
 }
 
+/**
+ * The goal and its ledger, one block per criterion: whether it holds, how it
+ * is checked, and what the last check observed. Plain words and no colour, so
+ * the same lines serve a piped command and the terminal panel.
+ */
+export function describeAgentGoalLedger(goal: ThreadGoal): ReadonlyArray<string> {
+  const lines = [describeAgentGoal(goal)];
+  const criteria = goal.criteria ?? [];
+  const width = Math.max(...criteria.map((criterion) => criterion.id.length), 0);
+  const indent = "    ";
+  for (const criterion of criteria) {
+    lines.push(
+      `  ${criterion.status === "met" ? "met  " : "unmet"}  ${criterion.id.padEnd(width)}  ${criterion.text}`,
+      `${indent}check: ${criterion.check ?? "confirmed by a person"}`,
+      criterion.evidence === undefined
+        ? `${indent}evidence: none yet`
+        : `${indent}evidence (${criterion.evidence.kind}, ${criterion.evidence.observedAt}): ${criterion.evidence.summary}`,
+    );
+  }
+  return lines;
+}
+
 /** A checkpoint's default name: when it was marked, to the minute. */
 export function defaultCheckpointLabel(now: Date = new Date()): string {
   return `Checkpoint ${now.toISOString().slice(0, 16).replace("T", " ")}`;
