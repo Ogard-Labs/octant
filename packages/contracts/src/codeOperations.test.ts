@@ -34,7 +34,7 @@ import {
   decodeCodeTerminalLiveFrame,
   decodeCodeTerminalLiveRequest,
   MAX_CODE_EVIDENCE_BATCH_ITEMS,
-  MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS,
+  MAX_CODE_TERMINAL_LIVE_FRAME_BYTES,
 } from "./codeOperations";
 import { MAX_THREAD_MENTIONS_PER_TURN } from "./threadMentionIdentity";
 
@@ -134,7 +134,18 @@ describe("Code operation contracts", () => {
     expect(() =>
       decodeCodeTerminalLiveFrame({
         ...frame,
-        text: "x".repeat(MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS + 1),
+        text: "x".repeat(MAX_CODE_TERMINAL_LIVE_FRAME_BYTES + 1),
+      }),
+    ).toThrow();
+    // The bound is encoded bytes, not characters: the same number of CJK
+    // characters is three times as many bytes, and an emoji is four.
+    const cjkAtBound = "界".repeat(Math.floor(MAX_CODE_TERMINAL_LIVE_FRAME_BYTES / 3));
+    expect(decodeCodeTerminalLiveFrame({ ...frame, text: cjkAtBound }).text).toBe(cjkAtBound);
+    expect(() => decodeCodeTerminalLiveFrame({ ...frame, text: cjkAtBound + "界" })).toThrow();
+    expect(() =>
+      decodeCodeTerminalLiveFrame({
+        ...frame,
+        text: "😀".repeat(MAX_CODE_TERMINAL_LIVE_FRAME_BYTES / 4 + 1),
       }),
     ).toThrow();
   });

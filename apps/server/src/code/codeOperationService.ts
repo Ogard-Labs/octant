@@ -29,7 +29,6 @@ import {
   type CodeTerminalId,
   type CodeTerminalLiveFrame,
   type CodeTerminalLiveRequest,
-  MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS,
   type TerminalBrowserGrantOutcome,
   type CodeRepositoryTestDefinition,
   type CodeRepositoryTestRun,
@@ -72,6 +71,7 @@ import {
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import type { TerminalBrowserGrantService } from "./terminalBrowserGrantService";
 import type { TerminalLauncher, TerminalObserveOptions } from "./terminalService";
+import { liveFramesOf } from "./terminalLiveFrames";
 import type { CodeAttachmentStore } from "./codeAttachmentStore";
 import type { CodeApprovalValidationPort } from "./codeOperationApprovalStore";
 import { codeRepositoryTestDefinitionsMatch } from "./repositoryTestDiscoveryService";
@@ -285,6 +285,13 @@ const MAX_TERMINAL_READERS = 4;
  * late a window sees output and has no effect on what is written to the store.
  */
 const LIVE_TERMINAL_WINDOW_MS = 16;
+
+/**
+ * The most characters one publish carries to a live reader before it is sent
+ * the transcript's tail instead. Characters, not bytes: the frames made from a
+ * publish are split by encoded size afterwards.
+ */
+const MAX_LIVE_TERMINAL_PUBLISH_CHARACTERS = 64 * 1024;
 
 /** Frames a slow reader may fall behind before it is resynchronised instead. */
 const MAX_LIVE_TERMINAL_FRAMES_QUEUED = 8;
@@ -1639,21 +1646,22 @@ export class CodeOperationService {
     let wake: (() => void) | undefined;
     let resynchronise = false;
     let stopObserving: (() => void) | undefined;
-    const frameOf = (emission: {
+    const framesOf = (emission: {
       readonly text: string;
       readonly replace: boolean;
       readonly characters: number;
       readonly snapshot: CodeOperationTerminalSnapshot;
-    }): CodeTerminalLiveFrame => ({
-      terminalId: input.terminalId,
-      text: emission.text,
-      replace: emission.replace,
-      characters: emission.characters,
-      state: emission.snapshot.status,
-      ...(emission.snapshot.status === "exited"
-        ? { exitCode: emission.snapshot.exitCode ?? null }
-        : {}),
-    });
+    }): ReadonlyArray<CodeTerminalLiveFrame> =>
+      liveFramesOf({
+        terminalId: input.terminalId,
+        text: emission.text,
+        replace: emission.replace,
+        characters: emission.characters,
+        state: emission.snapshot.status,
+        ...(emission.snapshot.exitCode === undefined
+          ? {}
+          : { exitCode: emission.snapshot.exitCode }),
+      });
     const follow = (afterCharacters: number) => {
       stopObserving?.();
       stopObserving = observe(
@@ -1667,14 +1675,14 @@ export class CodeOperationService {
             queue.length = 0;
             resynchronise = true;
           } else {
-            queue.push(frameOf(emission));
+            queue.push(...framesOf(emission));
           }
           wake?.();
         },
         {
           afterCharacters,
           windowMs: LIVE_TERMINAL_WINDOW_MS,
-          maxDeltaCharacters: MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS,
+          maxDeltaCharacters: MAX_LIVE_TERMINAL_PUBLISH_CHARACTERS,
         },
       );
     };
@@ -1694,7 +1702,7 @@ export class CodeOperationService {
       // Catching the window up and observing from where that answer ended is one
       // synchronous step, so no output falls between the two.
       const first = readSince(terminalId, input.afterCharacters ?? Number.MAX_SAFE_INTEGER);
-      queue.push(frameOf(first));
+      queue.push(...framesOf(first));
       follow(first.characters);
       for (;;) {
         if (revocation.signal.aborted) return;
@@ -1705,7 +1713,7 @@ export class CodeOperationService {
         if (resynchronise) {
           const current = readSince(terminalId, Number.MAX_SAFE_INTEGER);
           resynchronise = false;
-          queue.push(frameOf(current));
+          queue.push(...framesOf(current));
           follow(current.characters);
         }
         const next = queue.shift();

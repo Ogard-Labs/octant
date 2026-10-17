@@ -5969,7 +5969,13 @@ mechanisms are:
   after a quiet window sent at once) and never written to the journal or the
   store. A frame carries the text, whether it `replace`s what the window holds,
   the terminal's absolute character offset (`characters`), and the shell's state.
-  A frame is at most 64 KiB; a longer run, or a reader that fell more than eight
+  A frame's text is at most 64 KiB of UTF-8, counted in encoded bytes rather
+  than characters, so CJK text and emoji are bounded the same as ASCII. Output
+  longer than that is split across consecutive frames in order, never inside a
+  character or a surrogate pair; each frame's `characters` is the offset its own
+  last character ends at, so a window that drops after any frame resumes
+  exactly there, and only the last frame of a publish carries the shell's state.
+  A publish of more than 64 Ki characters, or a reader that fell more than eight
   frames behind, is sent the bounded tail of the transcript as a replace, not
   every step it missed.
   The journal stays authoritative: reload, export, and a window whose live

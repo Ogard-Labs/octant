@@ -3874,6 +3874,30 @@ describe("CodeOperationService live terminal output", () => {
     }
   });
 
+  it("splits a burst of CJK output into frames that stay within the byte bound and add up to what was printed", async () => {
+    vi.useFakeTimers();
+    try {
+      const { service, shell } = await fixture();
+      const live = follow(await service.watchTerminal(ids.window, scope));
+      await vi.advanceTimersByTimeAsync(0);
+
+      // 40,000 characters is under the publish limit but about 120 KiB encoded.
+      const burst = "界".repeat(40_000);
+      shell.print(burst);
+      await vi.advanceTimersByTimeAsync(20);
+
+      const printed = live.received.filter((frame) => frame.text !== "");
+      expect(printed.length).toBe(2);
+      for (const frame of printed) {
+        expect(Buffer.byteLength(frame.text, "utf8")).toBeLessThanOrEqual(64 * 1024);
+      }
+      expect(applied(live.received)).toBe(burst);
+      expect(live.received.at(-1)?.characters).toBe(burst.length);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("sends a reader that falls behind where the shell is now instead of every step it missed", async () => {
     vi.useFakeTimers();
     try {

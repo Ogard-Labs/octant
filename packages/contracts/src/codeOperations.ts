@@ -139,8 +139,8 @@ export const CodeTerminalInspection = Schema.Struct({
 }).annotations(strict);
 export type CodeTerminalInspection = typeof CodeTerminalInspection.Type;
 
-/** The most characters one live terminal frame carries; a longer run arrives as a replace. */
-export const MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS = 64 * 1024;
+/** The most UTF-8 bytes of text one live terminal frame carries; longer output is split across frames. */
+export const MAX_CODE_TERMINAL_LIVE_FRAME_BYTES = 64 * 1024;
 
 /**
  * What a window asks to follow a terminal's output live. `afterCharacters` is
@@ -165,7 +165,7 @@ export type CodeTerminalLiveRequest = typeof CodeTerminalLiveRequest.Type;
  */
 export const CodeTerminalLiveFrame = Schema.Struct({
   terminalId: CodeTerminalId,
-  text: Schema.String.pipe(Schema.maxLength(MAX_CODE_TERMINAL_LIVE_FRAME_CHARACTERS)),
+  text: boundedText(MAX_CODE_TERMINAL_LIVE_FRAME_BYTES),
   replace: Schema.Boolean,
   characters: Schema.Int.pipe(Schema.greaterThanOrEqualTo(0)),
   state: Schema.Literal("running", "exited", "interrupted"),
