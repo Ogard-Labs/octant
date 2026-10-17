@@ -374,7 +374,7 @@ describe("local listener observation", () => {
         return "p4213\ncnode\nu501\nn127.0.0.1:5173";
       }
       if (command === "lsof" && args.includes("cwd")) {
-        expect(args).toEqual(["-nP", "-a", "-p", "4213", "-d", "cwd", "-Fn"]);
+        expect(args).toEqual(["-nP", "-a", "-p", "4213", "-d", "cwd", "-Ffn"]);
         return "p4213\nfcwd\nn/Users/example/code/octant";
       }
       if (command === "ps") {
@@ -445,6 +445,28 @@ describe("working directory resolution", () => {
     expect(parseLsofCwd("p4213\nftxt\nn/usr/local/bin/node")).toBeUndefined();
     expect(parseLsofCwd("p4213\nfcwd\nnnot-an-absolute-path")).toBeUndefined();
     expect(parseLsofCwd("")).toBeUndefined();
+  });
+
+  it("reads the cwd from Linux and macOS lsof output, which differ in the f record", async () => {
+    // Both samples are what `lsof -nP -a -p <pid> -d cwd` prints for the
+    // requested field set. Linux prints a record's `f` field only when `f` is
+    // named in `-F`; macOS prints it either way.
+    const linuxFields = (fields: string) =>
+      fields.includes("f")
+        ? "p20114\nfcwd\nn/home/ubuntu/octant/worktrees/feature-login\n"
+        : "p20114\nn/home/ubuntu/octant/worktrees/feature-login\n";
+    const macFields = () => "p4213\nfcwd\nn/Users/example/code/octant\n";
+
+    const lsofFor =
+      (print: (fields: string) => string) => async (_: string, args: ReadonlyArray<string>) =>
+        print(args.find((arg) => arg.startsWith("-F")) ?? "");
+
+    expect(await createLsofWorkingDirectoryResolver(lsofFor(linuxFields))(20114)).toBe(
+      "/home/ubuntu/octant/worktrees/feature-login",
+    );
+    expect(await createLsofWorkingDirectoryResolver(lsofFor(macFields))(4213)).toBe(
+      "/Users/example/code/octant",
+    );
   });
 
   it("resolves undefined instead of guessing when the host query fails", async () => {

@@ -336,7 +336,7 @@ export function createLsofWorkingDirectoryResolver(
     try {
       const output = await execute(
         "lsof",
-        ["-nP", "-a", "-p", String(pid), "-d", "cwd", "-Fn"],
+        ["-nP", "-a", "-p", String(pid), "-d", "cwd", "-Ffn"],
         signal,
       );
       return parseLsofCwd(output);
@@ -530,9 +530,11 @@ export function parseLsofFields(
 }
 
 /**
- * Extract the cwd path from `lsof -a -p <pid> -d cwd -Fn` output: an `fcwd`
- * field followed by its `n` path. Only an absolute path counts; anything else
- * is treated as unreadable.
+ * Extract the cwd path from `lsof -a -p <pid> -d cwd -Ffn` output: an `fcwd`
+ * field followed by its `n` path. The query asks for the `f` field by name
+ * because Linux `lsof` prints no file descriptor record unless it is
+ * requested, while macOS prints one either way. Only an absolute path counts;
+ * anything else is treated as unreadable.
  */
 export function parseLsofCwd(output: string): string | undefined {
   let inCwdRecord = false;
