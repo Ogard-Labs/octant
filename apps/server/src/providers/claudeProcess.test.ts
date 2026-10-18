@@ -11,6 +11,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -822,6 +823,105 @@ describe("Claude runtime confinement", () => {
     expect(readdirSync(configDirectory).sort()).toEqual(["projects", "sessions"]);
     expect(existsSync(sessionPath)).toBe(true);
     expect(existsSync(`${sessionPath}.jsonl`)).toBe(false);
+  });
+
+  /** The rules a Plan launch is prepared with for a home with no account folder named. */
+  function planRulesForHome(
+    home: string,
+    extraEnvironment: Record<string, string> = {},
+  ): {
+    readonly rules: ReadonlyArray<string>;
+    readonly readRoots: ReadonlyArray<string>;
+  } {
+    const target = fixture();
+    const { CLAUDE_CONFIG_DIR: _unset, ...environment } = target.environment;
+    const confinement = recordingConfinement();
+    const child = makePort(target, { confinement: confinement.port }).spawn({
+      projectRoot: target.root,
+      executionPolicy: "plan",
+    })({
+      command: target.binaryPath,
+      args: ["sdk-test", "--session-id", randomUUID()],
+      cwd: target.root,
+      env: { ...environment, HOME: home, ...extraEnvironment },
+      signal: new AbortController().signal,
+    });
+    child.kill("SIGTERM");
+    const launch = confinement.prepared[0];
+    if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
+    return { rules: launch.extraRules ?? [], readRoots: launch.readRoots ?? [] };
+  }
+
+  it.runIf(process.platform === "darwin")(
+    "lets a Plan turn read the default account's global configuration file by literal path",
+    () => {
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-home-")));
+      directories.push(home);
+      writeFileSync(join(home, ".claude.json"), "{}");
+
+      const { rules, readRoots } = planRulesForHome(home);
+
+      // Refused, the runtime retries the read for about six seconds, longer
+      // than the sign-in probe waits. Only that file, never a subtree.
+      expect(rules).toContain(seatbeltAllowLiteralReadRule(join(home, ".claude.json")));
+      expect(readRoots).not.toContain(join(home, ".claude.json"));
+      expect(readRoots).not.toContain(home);
+    },
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "grants no global configuration file that is a link, to a folder or to a file",
+    () => {
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-home-")));
+      const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-elsewhere-")));
+      directories.push(home, elsewhere);
+      writeFileSync(join(elsewhere, "target.json"), "{}");
+      for (const target of [elsewhere, join(elsewhere, "target.json")]) {
+        rmSync(join(home, ".claude.json"), { force: true });
+        symlinkSync(target, join(home, ".claude.json"));
+
+        const { rules, readRoots } = planRulesForHome(home);
+
+        expect(rules.some((rule) => rule.includes(elsewhere))).toBe(false);
+        expect(rules.some((rule) => rule.includes(".claude.json"))).toBe(false);
+        expect(readRoots).not.toContain(elsewhere);
+      }
+    },
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "treats an empty account folder setting as none for the global configuration file",
+    () => {
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-home-")));
+      directories.push(home);
+      writeFileSync(join(home, ".claude.json"), "{}");
+
+      const { rules } = planRulesForHome(home, { CLAUDE_CONFIG_DIR: "" });
+
+      expect(rules).toContain(seatbeltAllowLiteralReadRule(join(home, ".claude.json")));
+    },
+  );
+
+  it("grants no global configuration file when the account names its folder", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+
+    const child = makePort(target, { confinement: confinement.port }).spawn({
+      projectRoot: target.root,
+      executionPolicy: "plan",
+    })({
+      command: target.binaryPath,
+      args: ["sdk-test", "--session-id", randomUUID()],
+      cwd: target.root,
+      env: target.environment,
+      signal: new AbortController().signal,
+    });
+    child.kill("SIGTERM");
+
+    const launch = confinement.prepared[0];
+    if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
+    // Linux prepares no extra rules at all, so absence is the same answer.
+    expect((launch.extraRules ?? []).some((rule) => rule.includes(".claude.json"))).toBe(false);
   });
 
   it("grants a Plan turn no transcript when its arguments name no session", () => {

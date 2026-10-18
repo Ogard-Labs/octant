@@ -2387,7 +2387,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   Plan stays read-only for the project and checkout. A confined Plan
   Claude launch reads that assigned leaf and writes only its runtime
   folders, plus the launch temporary directory, as the
-  [security section](#security-and-authority) states.
+  [security section](#security-and-authority) states. On macOS, an account
+  with no assigned directory also reads the one file `~/.claude.json`: refused
+  it, the runtime retries for about six seconds, longer than the sign-in probe
+  waits.
   A thread stays on the instance it started with; there is no
   automatic failover, rotation, or load-balancing between accounts. Discovery can find
   installed runtimes and auto-register them. On first run, a detected Claude
