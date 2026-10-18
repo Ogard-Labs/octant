@@ -81,7 +81,8 @@ done. When a Chat thread cannot reach the host the card dims and **Stop** is
 unavailable; the thread's connection notice says why. Expand it to preview up to
 three active or unresolved children with their task, status, model and last
 reported activity. **View all** opens the full **Agents** list, including finished
-children. A row opens that child's detail. **Stop** acts on one managed child;
+children, including in Chat. A row opens that child's detail, where its retained
+final reply stays readable after completion. **Stop** acts on one managed child;
 **Stop all** asks first and cancels only this thread's managed children.
 Observation-only rows have no execution controls. **Environment → Subagents**
 also lists managed children and marks results you have not reviewed **To review**.

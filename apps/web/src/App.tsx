@@ -2870,7 +2870,10 @@ function LaunchedShell(
     [displayedDockState.tabs],
   );
   const dockAvailable =
-    activeMode !== "chat" &&
+    (activeMode !== "chat" ||
+      dockHasChildRuns === true ||
+      dockAddAgentInvoked ||
+      dockTabs.length > 0) &&
     (dockThreadId !== undefined ||
       projectPullRequestReviewOpen ||
       dockTabs.length > 0 ||

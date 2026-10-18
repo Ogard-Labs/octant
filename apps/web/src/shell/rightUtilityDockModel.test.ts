@@ -97,7 +97,7 @@ describe("resolving what the right utility dock shows", () => {
       {
         id: "agents",
         label: "Agents",
-        modes: ["work", "code"],
+        modes: ["chat", "work", "code"],
         scope: "thread",
       },
       {
@@ -188,7 +188,7 @@ describe("resolving what the right utility dock shows", () => {
     ).toEqual({ kind: "closed", reason: "mode-invalid" });
   });
 
-  it("offers no tool for a Chat thread, which the shell shows without a dock", () => {
+  it("offers only Agents for a Chat thread", () => {
     for (const { id } of RIGHT_UTILITY_DOCK_SURFACES) {
       expect(
         resolveRightUtilityDockSurface({
@@ -198,7 +198,11 @@ describe("resolving what the right utility dock shows", () => {
           presentationAvailability: "available",
           savedSurface: id,
         }),
-      ).toEqual({ kind: "closed", reason: "mode-invalid" });
+      ).toEqual(
+        id === "agents"
+          ? { kind: "surface", surface: surface("agents") }
+          : { kind: "closed", reason: "mode-invalid" },
+      );
     }
   });
 

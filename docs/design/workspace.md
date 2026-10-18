@@ -405,7 +405,8 @@ unreviewed results first while collapsed; a result the parent already received i
 done, not to review. While a Chat thread's host connection is lost it dims and
 withholds Stop without repeating the connection notice; expansion previews up to three active or
 unresolved children. Rows open the corresponding detail in Agents, and View all
-keeps completed history reachable. Provider-observed children carry an explicit
+keeps completed history reachable. Chat admits Agents as its only dock tool;
+opening it does not expose Work or Code tools or the bottom panel. Provider-observed children carry an explicit
 observation-only label and no managed controls. Task-plan progress remains a
 separate disclosure. See
 [DESIGN.md](../../DESIGN.md#welcome-and-composer).
