@@ -9,7 +9,12 @@ import {
   type ImageArtifactId,
   type ImageGenerationScopeId,
 } from "@octant/contracts";
-import { GeneratedImageStore, sniffGeneratedImageMediaType } from "./generatedImageStore";
+import {
+  GeneratedImageInvalid,
+  GeneratedImageStore,
+  readGeneratedImageDimensions,
+  sniffGeneratedImageMediaType,
+} from "./generatedImageStore";
 
 /** 1×1 PNG. Magic-number valid, small enough for every size bound. */
 export const MINIMAL_PNG = Uint8Array.from(
@@ -45,6 +50,45 @@ describe("generated image sniffing", () => {
   it("recognizes PNG magic and rejects unstructured bytes", () => {
     expect(sniffGeneratedImageMediaType(MINIMAL_PNG)).toBe("image/png");
     expect(sniffGeneratedImageMediaType(new Uint8Array([1, 2, 3, 4]))).toBeUndefined();
+  });
+});
+
+describe("generated image dimensions", () => {
+  it("reads the dimensions each format declares", () => {
+    expect(readGeneratedImageDimensions(MINIMAL_PNG, "image/png")).toEqual({ width: 1, height: 1 });
+    const gif = Uint8Array.from([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x40, 0x01, 0xf0, 0x00, 0, 0]);
+    expect(readGeneratedImageDimensions(gif, "image/gif")).toEqual({ width: 320, height: 240 });
+    const jpeg = Uint8Array.from([
+      0xff, 0xd8, 0xff, 0xe0, 0x00, 0x04, 0x4a, 0x46, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x01, 0xe0,
+      0x02, 0x80, 0x01, 0x01, 0x11, 0x00,
+    ]);
+    expect(readGeneratedImageDimensions(jpeg, "image/jpeg")).toEqual({ width: 640, height: 480 });
+    const webp = new Uint8Array(30);
+    webp.set([0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50], 0);
+    webp.set([0x56, 0x50, 0x38, 0x58], 12);
+    webp.set([0xff, 0x01, 0x00, 0xff, 0x00, 0x00], 24);
+    expect(readGeneratedImageDimensions(webp, "image/webp")).toEqual({ width: 512, height: 256 });
+  });
+
+  it("returns nothing for a header it cannot read, so a reader miss never rejects an image", () => {
+    expect(readGeneratedImageDimensions(Uint8Array.from([0xff, 0xd8, 0xff]), "image/jpeg")).toBe(
+      undefined,
+    );
+  });
+
+  it("refuses to stage an image that declares dimensions beyond the bound", async () => {
+    const bomb = Uint8Array.from(MINIMAL_PNG);
+    new DataView(bomb.buffer).setUint32(16, 30_000);
+    new DataView(bomb.buffer).setUint32(20, 30_000);
+    await expect(
+      store.stage({
+        scopeId: makeScopeId(9),
+        attachmentId: makeAttachmentId(9),
+        displayName: "bomb.png",
+        bytes: bomb,
+      }),
+    ).rejects.toBeInstanceOf(GeneratedImageInvalid);
+    expect(await store.hasTemporaryFiles()).toBe(false);
   });
 });
 

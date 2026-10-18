@@ -2455,7 +2455,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `image-generation` (a provider that returns no token counts leaves its row
   `unavailable`, never a measured zero). A job uses exactly one profile; a safety refusal ends it
   and is never retried elsewhere; a job found queued or running after a
-  restart fails as interrupted and is never resent. Adapters accept only
+  restart fails as interrupted and is never resent. A stored image must fit
+  20 MiB and, when its header declares dimensions, 16,384 pixels a side and
+  100 million pixels in all; a full disk fails the job with a plain cause and
+  leaves no partial file. Adapters accept only
   inline image bytes, and the journal holds attachment references and a
   prompt hash, never image bytes or prompt text. See
   [decisions/0056-image-generation-jobs-and-adapters.md](decisions/0056-image-generation-jobs-and-adapters.md).

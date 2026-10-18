@@ -40,6 +40,7 @@ import {
   type OpenAiImageSize,
   type ProviderInstance,
   type ProviderDriverKind,
+  type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
   type UtcTimestamp,
@@ -66,7 +67,11 @@ import { ConcurrencyConflict } from "../persistence/journalErrors";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import { bflImageDriver } from "./bflImageAdapter";
 import { geminiImageDriver } from "./geminiImageAdapter";
-import type { GeneratedImageStore } from "./generatedImageStore";
+import {
+  GeneratedImageInvalid,
+  GeneratedImageTooLarge,
+  type GeneratedImageStore,
+} from "./generatedImageStore";
 import { ideogramImageDriver } from "./ideogramImageAdapter";
 import { makeImageGenerationPorts, type ImageHttpFetch } from "./imageHttp";
 import { ImageJobProjection } from "./imageJobProjection";
@@ -557,13 +562,9 @@ export class ImageJobService {
         return;
       }
       const failed = this.#transition(running, "failed", {
-        failure: {
-          category: "provider-failed",
-          message: "The image job failed.",
-        },
+        failure: storageOrGenericFailure(error),
       });
       this.#resolve(failed);
-      void error;
     } finally {
       this.#abort.delete(String(running.id));
       this.#work.delete(String(running.id));
@@ -916,4 +917,29 @@ interface Deferred<T> {
 
 function hashPrompt(prompt: string): string {
   return createHash("sha256").update(prompt).digest("hex");
+}
+
+/**
+ * What the person is told when the job fails after the provider answered: a
+ * full disk or a rejected image names its cause, anything else stays generic.
+ * Only Octant-authored text reaches the journal, never the thrown message.
+ */
+function storageOrGenericFailure(error: unknown): ProviderFailure {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? (error as { readonly code?: unknown }).code
+      : undefined;
+  if (code === "ENOSPC" || code === "EDQUOT") {
+    return {
+      category: "unavailable",
+      message: "Octant could not store the image because the disk is full. Free space and retry.",
+    };
+  }
+  if (error instanceof GeneratedImageInvalid || error instanceof GeneratedImageTooLarge) {
+    return {
+      category: "protocol",
+      message: "The provider returned an image Octant cannot store (type, size, or dimensions).",
+    };
+  }
+  return { category: "provider-failed", message: "The image job failed." };
 }

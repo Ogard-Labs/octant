@@ -5,16 +5,17 @@ import {
   type OpenAiCompatibleProviderInstance,
 } from "@octant/contracts";
 import {
+  classifyImageHttpFailure,
   imageFailure,
   imageInterrupted,
   readImageJson,
+  sanitizeImageFailure,
   type ImageAdapterRequest,
   type ImageAdapterResult,
   type ImageGenerationAdapter,
 } from "@octant/provider-sdk/image-generation";
 import type { ProviderCredentialResolver } from "../providers/credentialBrokerClient";
 import {
-  classifyCompatibleHttpFailure,
   isProviderFailure,
   makeOpenAiCompatibleEndpoint,
   performCompatibleRequest,
@@ -158,7 +159,7 @@ async function generateCompatibleImage(
     if (refusal !== undefined) return { status: "refused", safetyRefusal: refusal };
     return {
       status: "failed",
-      providerFailure: sanitizeCompatibleFailure(classifyCompatibleHttpFailure(response)),
+      providerFailure: sanitizeImageFailure(classifyImageHttpFailure(response)),
     };
   }
 

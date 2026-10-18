@@ -221,12 +221,30 @@ export function classifyImageHttpFailure(response: Response, now = Date.now()): 
     case 403:
       return imageFailure("unauthorized", "The provider denied this request.");
     case 404:
+      return imageFailure(
+        "unsupported",
+        "The provider does not offer this image model or address. Check the model and address in Settings.",
+      );
     case 405:
     case 501:
       return imageFailure("unsupported", "The provider does not support this endpoint.");
+    case 400:
+    case 422:
+      return imageFailure(
+        "provider-failed",
+        `The provider rejected an option of this request (HTTP ${response.status}). Try a smaller size, lower quality, or one variant.`,
+      );
     case 408:
     case 504:
       return imageFailure("unavailable", "The provider request timed out.");
+    case 500:
+    case 502:
+    case 503:
+    case 529:
+      return imageFailure(
+        "unavailable",
+        `The provider is unavailable (HTTP ${response.status}). Try again shortly.`,
+      );
     case 429: {
       const retryAfterMs = parseRetryAfter(response.headers.get("retry-after"), now);
       return {
