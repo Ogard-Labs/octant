@@ -433,6 +433,18 @@ function projectBearingSubjectTerms(match: (projectColumn: string) => string): A
         AND json_extract(payload_json, '$.run.parentThreadId') IN (${threads(match)})
     ))`,
     ),
+    // An image job made in a thread is that thread's spend: its queued event
+    // names the thread kind and the thread. A library job names no thread.
+    ...PROJECT_THREADS.map(
+      ({ subjectType, threads }) => `(subject_type = 'image-job'
+    AND subject_id IN (
+      SELECT aggregate_id FROM event_journal
+      WHERE aggregate_type = 'image-job'
+        AND event_name = 'image.job-queued@1'
+        AND json_extract(payload_json, '$.job.threadKind') = '${subjectType}'
+        AND json_extract(payload_json, '$.job.scopeId') IN (${threads(match)})
+    ))`,
+    ),
   ];
 }
 
@@ -599,13 +611,19 @@ export function usageModeCondition(
   // so a mode's total still adds up to the unfiltered one.
   return {
     sql: `(subject_type = ?
+    OR (subject_type = 'image-job' AND subject_id IN (
+      SELECT aggregate_id FROM event_journal
+      WHERE aggregate_type = 'image-job'
+        AND event_name = 'image.job-queued@1'
+        AND json_extract(payload_json, '$.job.threadKind') = ?
+    ))
     OR (subject_type = 'agent-run' AND subject_id IN (
       SELECT aggregate_id FROM event_journal
       WHERE aggregate_type = 'agent-run'
         AND event_name = 'agent.run-requested@1'
         AND json_extract(payload_json, '$.run.routingReceipt.mode') = ?
     )))`,
-    params: [`${mode}-thread`, mode],
+    params: [`${mode}-thread`, `${mode}-thread`, mode],
   };
 }
 
@@ -769,4 +787,30 @@ function decodeProjection<T>(decode: () => T): T {
   } catch {
     throw new Error("usage projection decode failed");
   }
+}
+
+/**
+ * The thread kind and thread an image job was made in, from its queued event,
+ * or `undefined` for a library job or one whose event a purge erased.
+ */
+export function readImageJobThread(
+  connection: SqliteConnection,
+  jobId: string,
+): { readonly mode: "chat" | "work" | "code"; readonly threadId: string } | undefined {
+  const row = connection
+    .prepare(
+      `SELECT json_extract(payload_json, '$.job.threadKind') AS thread_kind,
+         json_extract(payload_json, '$.job.scopeId') AS scope_id
+       FROM event_journal
+       WHERE aggregate_type = 'image-job'
+         AND aggregate_id = ?
+         AND event_name = 'image.job-queued@1'`,
+    )
+    .get(jobId) as
+    | { readonly thread_kind: string | null; readonly scope_id: string | null }
+    | undefined;
+  if (row === undefined || row.scope_id === null || row.thread_kind === null) return undefined;
+  const mode = deriveModeFromSubjectType(row.thread_kind);
+  if (mode !== "chat" && mode !== "work" && mode !== "code") return undefined;
+  return { mode, threadId: row.scope_id };
 }

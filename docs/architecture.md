@@ -2450,7 +2450,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   and `ideogram-image`, and for an OpenAI-compatible custom image source, a
   bounded generated-image attachment scope, and usage rows attributed as
   `image-generation` (a provider that returns no token counts leaves its row
-  `unavailable`, never a measured zero). A job uses exactly one profile; a safety refusal ends it
+  `unavailable`, never a measured zero; Usage lists each job with its provider, model, and quality, under the Project and mode of the thread it was made in, and a library job is unfiled). A job uses exactly one profile; a safety refusal ends it
   and is never retried elsewhere; a job found queued or running after a
   restart fails as interrupted and is never resent. Adapters accept only
   inline image bytes, and the journal holds attachment references and a

@@ -12,6 +12,7 @@ import {
 } from "./persistence/usagePersistenceSchema";
 import {
   deriveModeFromSubjectType,
+  readImageJobThread,
   usageModeCondition,
   usageProjectConditionParams,
   usageProjectConditionSql,
@@ -67,7 +68,9 @@ export function readUsageDashboard(
     const mode =
       row.subject_type === "agent-run" && row.subject_id !== null
         ? readChildRunParent(connection, row.subject_id)?.mode
-        : deriveModeFromSubjectType(row.subject_type);
+        : row.subject_type === "image-job" && row.subject_id !== null
+          ? readImageJobThread(connection, row.subject_id)?.mode
+          : deriveModeFromSubjectType(row.subject_type);
     const projectId =
       row.subject_id === null
         ? undefined
@@ -264,10 +267,22 @@ function resolveProjectId(
         AND event_name = 'work.thread-created@1'`,
   };
 
+  const imageThread =
+    subjectType === "image-job" ? readImageJobThread(connection, subjectId) : undefined;
   const projectId =
     subjectType === "agent-run"
       ? resolveChildRunProjectId(connection, cache, subjectId, cacheStats)
-      : readOwningProjectId(connection, ownership[subjectType], subjectId);
+      : subjectType === "image-job"
+        ? imageThread === undefined
+          ? undefined
+          : resolveProjectId(
+              connection,
+              cache,
+              `${imageThread.mode}-thread`,
+              imageThread.threadId,
+              cacheStats,
+            )
+        : readOwningProjectId(connection, ownership[subjectType], subjectId);
   cache.set(key, projectId);
   return projectId;
 }
