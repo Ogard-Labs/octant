@@ -547,6 +547,55 @@ describe("image job service", () => {
     expect(await attachments.hasTemporaryFiles()).toBe(false);
   });
 
+  it("names a full disk as the cause when the image cannot be stored", async () => {
+    const { service, attachments } = openHarness(successfulAdapter());
+    vi.spyOn(attachments, "stage").mockRejectedValue(
+      Object.assign(new Error("ENOSPC: no space left on device, write '/private/path'"), {
+        code: "ENOSPC",
+      }),
+    );
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "a red cube",
+    });
+    const failed = await service.whenTerminal(queued.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.failure).toEqual({
+      category: "unavailable",
+      message: "Octant could not store the image because the disk is full. Free space and retry.",
+    });
+    expect(JSON.stringify(failed)).not.toContain("/private/path");
+    expect(failed.artifacts).toEqual([]);
+  });
+
+  it("fails a provider image that declares dimensions beyond the bound without storing it", async () => {
+    const bomb = Uint8Array.from(png);
+    new DataView(bomb.buffer).setUint32(16, 30_000);
+    new DataView(bomb.buffer).setUint32(20, 30_000);
+    const { service, attachments, directory } = openHarness({
+      generate: async () => ({
+        status: "completed",
+        images: [{ bytes: bomb, mediaType: "image/png" }],
+      }),
+    });
+    const queued = await service.enqueue({
+      threadKind: "chat-thread",
+      scopeId,
+      profileInstanceId: profileId,
+      modelId,
+      prompt: "a red cube",
+    });
+    const failed = await service.whenTerminal(queued.id);
+    expect(failed.status).toBe("failed");
+    expect(failed.failure?.category).toBe("protocol");
+    expect(failed.artifacts).toEqual([]);
+    expect(hasFinalizedImage(directory)).toBe(false);
+    expect(await attachments.hasTemporaryFiles()).toBe(false);
+  });
+
   it("fails a job when the running transition cannot be journaled", async () => {
     const generate = vi.fn(async () => ({
       status: "completed" as const,

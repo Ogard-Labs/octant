@@ -206,6 +206,18 @@ describe("image provider failure mapping", () => {
     expect(isProviderFailure(failure)).toBe(true);
   });
 
+  it.each([
+    [404, "unsupported", "image model or address"],
+    [400, "provider-failed", "rejected an option"],
+    [422, "provider-failed", "rejected an option"],
+    [503, "unavailable", "unavailable"],
+    [401, "unauthenticated", "credential"],
+  ])("gives HTTP %i its own actionable state", (status, category, text) => {
+    const failure = classifyImageHttpFailure(new Response(null, { status }));
+    expect(failure.category).toBe(category);
+    expect(failure.message).toContain(text);
+  });
+
   it("reports an unparseable response body as a protocol failure", async () => {
     await expect(readImageJson(new Response("not json"))).rejects.toEqual({
       category: "protocol",
