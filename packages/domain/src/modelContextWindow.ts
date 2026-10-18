@@ -148,9 +148,15 @@ export const MODEL_CONTEXT_PROFILES: ReadonlyArray<ModelContextProfile> = [
   {
     names: ["deepseek-v4-1-flash"],
     contextWindow: 1_000_000,
-    // The window the maintainer's own Azure AI Foundry deployment of this
-    // model states; no first-party page lists it yet.
-    reference: "Azure AI Foundry model catalog: DeepSeek-V4.1-Flash",
+    // The profile applies to every host of this family, so it takes the lower
+    // output limit that holds on all of them. The provider's direct API pricing
+    // page lists 384K max output for `deepseek-flash` (DeepSeek-V4.1-Flash-1017)
+    // with a 1M context; the Azure AI Foundry catalog page lists 128k output
+    // for DeepSeek-V4.1-Flash, which is the limit Octant's own deployment hits.
+    // Sources: https://api-docs.deepseek.com/quick_start/pricing and
+    // https://ai.azure.com/catalog/models/DeepSeek-V4.1-Flash
+    maxOutput: 128_000,
+    reference: "https://api-docs.deepseek.com/quick_start/pricing",
   },
 ];
 
