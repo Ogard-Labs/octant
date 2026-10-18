@@ -617,9 +617,25 @@ function planStateWriteRoots(
   readsSignInFromKeychain: boolean,
 ): { readonly readRoots: ReadonlyArray<string>; readonly writeRoots: ReadonlyArray<string> } {
   const { configuration, secureStorage } = claudeAccountStateDirectories(environment);
+  // With no `CLAUDE_CONFIG_DIR` the runtime keeps its global configuration in
+  // `~/.claude.json`, beside the folder rather than inside it. Measured on
+  // macOS 27.0.1 with Claude Code 2.1.301: refused that one read, the runtime
+  // retries it for about six seconds before it goes on, which outlasts the
+  // sign-in probe's five. Only that file is read; the shell a Plan turn runs
+  // commands in is refused it with the rest of `readRoots`. With the variable
+  // set, the file sits inside the configuration directory, which is read whole.
+  const globalConfigurationFile =
+    process.platform === "darwin" &&
+    environment.CLAUDE_CONFIG_DIR === undefined &&
+    environment.HOME !== undefined &&
+    isAbsolute(environment.HOME)
+      ? [join(environment.HOME, ".claude.json")]
+      : [];
   const readRoots = refuseStateOverlappingCheckout(
     boundRoot,
-    [configuration, secureStorage].filter((path): path is string => path !== undefined),
+    [configuration, secureStorage, ...globalConfigurationFile].filter(
+      (path): path is string => path !== undefined,
+    ),
   );
   if (configuration === undefined) return { readRoots, writeRoots: [] };
   // The runtime names the folder after the directory it starts in. Seatbelt

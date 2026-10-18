@@ -824,6 +824,54 @@ describe("Claude runtime confinement", () => {
     expect(existsSync(`${sessionPath}.jsonl`)).toBe(false);
   });
 
+  it("lets a Plan turn read the global configuration file beside the default account folder", () => {
+    const target = fixture();
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-home-")));
+    directories.push(home);
+    const { CLAUDE_CONFIG_DIR: _unset, ...environment } = target.environment;
+    const confinement = recordingConfinement();
+
+    const child = makePort(target, { confinement: confinement.port }).spawn({
+      projectRoot: target.root,
+      executionPolicy: "plan",
+    })({
+      command: target.binaryPath,
+      args: ["sdk-test", "--session-id", randomUUID()],
+      cwd: target.root,
+      env: { ...environment, HOME: home },
+      signal: new AbortController().signal,
+    });
+    child.kill("SIGTERM");
+
+    const launch = confinement.prepared[0];
+    if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
+    // Refused, the runtime retries the read for about six seconds, longer than
+    // the sign-in probe waits. Only that file, not the home folder, is read.
+    const expected = process.platform === "darwin" ? [join(home, ".claude.json")] : [];
+    expect(launch.readRoots).toEqual(expect.arrayContaining([join(home, ".claude"), ...expected]));
+    expect(launch.readRoots).not.toContain(home);
+  });
+
+  it("does not add the global configuration file when the account names its folder", () => {
+    const target = fixture();
+    const confinement = recordingConfinement();
+
+    const child = makePort(target, { confinement: confinement.port }).spawn({
+      projectRoot: target.root,
+      executionPolicy: "plan",
+    })({
+      command: target.binaryPath,
+      args: ["sdk-test", "--session-id", randomUUID()],
+      cwd: target.root,
+      env: target.environment,
+      signal: new AbortController().signal,
+    });
+    child.kill("SIGTERM");
+
+    const launch = confinement.prepared[0];
+    expect(launch?.readRoots?.some((path) => path.endsWith(".claude.json"))).toBe(false);
+  });
+
   it("grants a Plan turn no transcript when its arguments name no session", () => {
     const target = fixture();
     const configDirectory = realpathSync(target.environment.CLAUDE_CONFIG_DIR ?? "");
