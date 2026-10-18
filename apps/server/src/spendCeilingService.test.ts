@@ -182,6 +182,53 @@ function seedChildRun(
 }
 
 describe("SpendCeilingService", () => {
+  it("does not count an image job made in a Project thread toward that Project's token ceiling", () => {
+    const { connection, service } = openService();
+    seedChatThread(connection, ids.thread, ids.project);
+    const jobId = "73000000-0000-4000-8000-0000000000c1";
+    connection
+      .prepare(
+        `INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+          event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+        ) VALUES (?, 'image-job', ?, 1, 'image.job-queued@1', 1, ?, 'system', ?, ?, ?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        jobId,
+        crypto.randomUUID(),
+        ids.provider,
+        now,
+        JSON.stringify({ job: { id: jobId, threadKind: "chat-thread", scopeId: ids.thread } }),
+      );
+    // A provider that reports no token counts leaves an unavailable row.
+    insertUsage(connection, {
+      id: "73000000-0000-4000-8000-0000000000c2",
+      subjectType: "image-job",
+      subjectId: jobId,
+      tokens: { input: 0, output: 0 },
+      quality: "unavailable",
+      sequence: 1,
+    });
+    const set = service.execute("local-window", {
+      kind: "set-spend-ceiling",
+      scope: { kind: "project", projectId: decodeProjectId(ids.project) },
+      expectedVersion: decodeAggregateVersion(0),
+      policy: { tokenBudget: 1_000 },
+      window: { kind: "calendar", period: "day", timeZone: "UTC" },
+    });
+    expect(set.kind).toBe("set");
+
+    const admission = service.admit({
+      reservationId: ids.reservationA,
+      threadId: ids.thread,
+      threadType: "chat-thread",
+      projectId: ids.project,
+      turnUpperBoundTokens: 100,
+    });
+    expect(admission.status).toBe("admitted");
+  });
+
   it("reserves remaining tokens so concurrent turns cannot both admit past the ceiling", () => {
     const { service } = openService();
     const set = service.execute("local-window", {

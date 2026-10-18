@@ -28,6 +28,10 @@ describe("usage identity labels", () => {
       "12345678-1234-4123-8123-123456789012",
     );
   });
+  it("names an image job as one, with a short job id", () => {
+    render(<UsageName kind="image-job" id="12345678-1234-4123-8123-123456789012" />);
+    expect(screen.getByText("Image job · 12345678…")).toBeInTheDocument();
+  });
   it("reads usage from purged threads as erased threads, even when a row's subject is purged while it is shown", () => {
     const { rerender } = render(<UsageName kind="chat-thread" id="t1" />);
     expect(screen.getByText("t1")).toBeInTheDocument();

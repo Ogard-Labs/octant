@@ -264,6 +264,54 @@ describe("readUsageDashboard", () => {
     expect(read(connection, { filter: { mode: "chat" } }, scope).detail).toEqual([]);
   });
 
+  it("shows an image job's usage under the Project and mode of the thread it was made in", () => {
+    const connection = connect();
+    const imageJob = "67000000-0000-4000-8000-0000000000aa";
+    const libraryJob = "67000000-0000-4000-8000-0000000000ab";
+    seedWorkThread(connection, ids.workThread, ids.project);
+    for (const [jobId, threadKind, scopeId] of [
+      [imageJob, "work-thread", ids.workThread],
+      [libraryJob, "image-library", "67000000-0000-4000-8000-0000000000ac"],
+    ] as const) {
+      connection
+        .prepare(`
+          INSERT INTO event_journal (
+            event_id, aggregate_type, aggregate_id, aggregate_version, event_name,
+            event_version, correlation_id, actor_kind, actor_id, occurred_at, payload_json
+          ) VALUES (?, 'image-job', ?, 1, 'image.job-queued@1', 1, ?, 'system', ?, ?, ?)
+        `)
+        .run(
+          `event-${jobId}`,
+          jobId,
+          `correlation-${jobId}`,
+          ids.provider,
+          now,
+          JSON.stringify({ job: { id: jobId, threadKind, scopeId } }),
+        );
+      seedUsageRow(connection, {
+        reconciliationId: `${jobId.slice(0, -2)}f${jobId.slice(-1)}`,
+        subjectType: "image-job",
+        subjectId: jobId,
+        sequence: jobId === imageJob ? 1 : 2,
+      });
+    }
+
+    const scope = { kind: "projects", projectIds: [ids.project] } as const;
+    const project = read(connection, {}, scope);
+    expect(project.detail).toHaveLength(1);
+    expect(project.detail[0]).toMatchObject({
+      subjectType: "image-job",
+      subjectId: imageJob,
+      projectId: ids.project,
+      mode: "work",
+      quality: "exact",
+    });
+    expect(read(connection, { filter: { mode: "work" } }, scope).detail).toHaveLength(1);
+    expect(read(connection, { filter: { mode: "chat" } }, scope).detail).toEqual([]);
+    // The library job names no thread, so only the unfiled read places it.
+    expect(read(connection).detail.map((row) => row.subjectId)).toEqual([libraryJob]);
+  });
+
   it("filters Chat and Code thread usage by the durable Project", () => {
     const connection = connect();
     seedChatThread(connection, ids.project);

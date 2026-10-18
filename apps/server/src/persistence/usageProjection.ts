@@ -417,7 +417,10 @@ const PROJECT_THREADS = [
  * mode are on its `agent.run-requested@1` event, which a purge erases with the
  * thread; the run's rows then belong to no Project.
  */
-function projectBearingSubjectTerms(match: (projectColumn: string) => string): Array<string> {
+function projectBearingSubjectTerms(
+  match: (projectColumn: string) => string,
+  includeImageJobs: boolean,
+): Array<string> {
   return [
     ...PROJECT_THREADS.map(
       ({ subjectType, threads }) => `(subject_type = '${subjectType}'
@@ -433,11 +436,32 @@ function projectBearingSubjectTerms(match: (projectColumn: string) => string): A
         AND json_extract(payload_json, '$.run.parentThreadId') IN (${threads(match)})
     ))`,
     ),
+    // An image job made in a thread is that thread's spend: its queued event
+    // names the thread kind and the thread. A library job names no thread.
+    // Only the dashboard attributes them: a spend ceiling selects its rows
+    // through the same predicate and must keep counting what it always has.
+    ...(includeImageJobs ? PROJECT_THREADS : []).map(
+      ({ subjectType, threads }) => `(subject_type = 'image-job'
+    AND subject_id IN (
+      SELECT aggregate_id FROM event_journal
+      WHERE aggregate_type = 'image-job'
+        AND event_name = 'image.job-queued@1'
+        AND json_extract(payload_json, '$.job.threadKind') = '${subjectType}'
+        AND json_extract(payload_json, '$.job.scopeId') IN (${threads(match)})
+    ))`,
+    ),
   ];
 }
 
+/** `includeImageJobs` places an image job under its thread's Project; only the dashboard asks. */
+export interface UsageScopeOptions {
+  readonly includeImageJobs?: boolean;
+}
+
 /** How many times `usageProjectConditionSql` repeats the Project list. */
-const PROJECT_BEARING_SUBJECT_COUNT = projectBearingSubjectTerms(() => "").length;
+function projectBearingSubjectCount(includeImageJobs: boolean): number {
+  return projectBearingSubjectTerms(() => "", includeImageJobs).length;
+}
 
 /**
  * SQL predicate placing a usage row in one of `projectCount` Projects.
@@ -456,17 +480,26 @@ const PROJECT_BEARING_SUBJECT_COUNT = projectBearingSubjectTerms(() => "").lengt
  * would discard rows the cap already spent, so a Project would report fewer
  * rows — or none — while its durable rows still exist.
  */
-export function usageProjectConditionSql(projectCount: number): string {
+export function usageProjectConditionSql(
+  projectCount: number,
+  options: UsageScopeOptions = {},
+): string {
   const placeholders = Array.from({ length: projectCount }, () => "?").join(", ");
-  const terms = projectBearingSubjectTerms((column) => `${column} IN (${placeholders})`);
+  const terms = projectBearingSubjectTerms(
+    (column) => `${column} IN (${placeholders})`,
+    options.includeImageJobs === true,
+  );
   return `(\n  ${terms.join("\n  OR ")}\n)`;
 }
 
 /** The Project list repeated once per term `usageProjectConditionSql` emits. */
 export function usageProjectConditionParams(
   projectIds: ReadonlyArray<string>,
+  options: UsageScopeOptions = {},
 ): ReadonlyArray<string> {
-  return Array.from({ length: PROJECT_BEARING_SUBJECT_COUNT }).flatMap(() => projectIds);
+  return Array.from({
+    length: projectBearingSubjectCount(options.includeImageJobs === true),
+  }).flatMap(() => projectIds);
 }
 
 /**
@@ -480,8 +513,11 @@ export function usageProjectConditionParams(
  * explicitly: SQL would otherwise propagate NULL through `NOT (...)` and drop
  * the row from both scopes, erasing retained spend from every read.
  */
-export function usageUnfiledConditionSql(): string {
-  const terms = projectBearingSubjectTerms((column) => `${column} IS NOT NULL`);
+export function usageUnfiledConditionSql(options: UsageScopeOptions = {}): string {
+  const terms = projectBearingSubjectTerms(
+    (column) => `${column} IS NOT NULL`,
+    options.includeImageJobs === true,
+  );
   return `(subject_id IS NULL OR NOT (\n  ${terms.join("\n  OR ")}\n))`;
 }
 
@@ -593,19 +629,32 @@ export function queryUsageRecords(
  */
 export function usageModeCondition(
   mode: string,
+  options: UsageScopeOptions = {},
 ): { readonly sql: string; readonly params: ReadonlyArray<string> } | undefined {
   if (mode !== "chat" && mode !== "work" && mode !== "code") return undefined;
   // A child run is in its parent thread's mode, the one its request records,
-  // so a mode's total still adds up to the unfiltered one.
+  // so a mode's total still adds up to the unfiltered one. An image job is in
+  // its thread's mode for the dashboard only.
+  const imageJobs = options.includeImageJobs === true;
   return {
-    sql: `(subject_type = ?
+    sql: `(subject_type = ?${
+      imageJobs
+        ? `
+    OR (subject_type = 'image-job' AND subject_id IN (
+      SELECT aggregate_id FROM event_journal
+      WHERE aggregate_type = 'image-job'
+        AND event_name = 'image.job-queued@1'
+        AND json_extract(payload_json, '$.job.threadKind') = ?
+    ))`
+        : ""
+    }
     OR (subject_type = 'agent-run' AND subject_id IN (
       SELECT aggregate_id FROM event_journal
       WHERE aggregate_type = 'agent-run'
         AND event_name = 'agent.run-requested@1'
         AND json_extract(payload_json, '$.run.routingReceipt.mode') = ?
     )))`,
-    params: [`${mode}-thread`, mode],
+    params: imageJobs ? [`${mode}-thread`, `${mode}-thread`, mode] : [`${mode}-thread`, mode],
   };
 }
 
@@ -769,4 +818,30 @@ function decodeProjection<T>(decode: () => T): T {
   } catch {
     throw new Error("usage projection decode failed");
   }
+}
+
+/**
+ * The thread kind and thread an image job was made in, from its queued event,
+ * or `undefined` for a library job or one whose event a purge erased.
+ */
+export function readImageJobThread(
+  connection: SqliteConnection,
+  jobId: string,
+): { readonly mode: "chat" | "work" | "code"; readonly threadId: string } | undefined {
+  const row = connection
+    .prepare(
+      `SELECT json_extract(payload_json, '$.job.threadKind') AS thread_kind,
+         json_extract(payload_json, '$.job.scopeId') AS scope_id
+       FROM event_journal
+       WHERE aggregate_type = 'image-job'
+         AND aggregate_id = ?
+         AND event_name = 'image.job-queued@1'`,
+    )
+    .get(jobId) as
+    | { readonly thread_kind: string | null; readonly scope_id: string | null }
+    | undefined;
+  if (row === undefined || row.scope_id === null || row.thread_kind === null) return undefined;
+  const mode = deriveModeFromSubjectType(row.thread_kind);
+  if (mode !== "chat" && mode !== "work" && mode !== "code") return undefined;
+  return { mode, threadId: row.scope_id };
 }
