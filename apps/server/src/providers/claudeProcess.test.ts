@@ -898,7 +898,9 @@ describe("Claude runtime confinement", () => {
     child.kill("SIGTERM");
 
     const launch = confinement.prepared[0];
-    expect(launch?.extraRules?.some((rule) => rule.includes(".claude.json"))).toBe(false);
+    if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
+    // Linux prepares no extra rules at all, so absence is the same answer.
+    expect((launch.extraRules ?? []).some((rule) => rule.includes(".claude.json"))).toBe(false);
   });
 
   it("grants a Plan turn no transcript when its arguments name no session", () => {
