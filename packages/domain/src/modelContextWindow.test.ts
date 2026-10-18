@@ -88,7 +88,11 @@ describe("model context window", () => {
     expect(resolveModelContextWindow(deployment)).toBeUndefined();
     expect(
       resolveModelContextWindow({ ...deployment, servedModelId: "DeepSeek-V4.1-Flash" }),
-    ).toEqual({ contextWindow: 1_000_000, source: "reviewed-catalog" });
+    ).toEqual({
+      contextWindow: 1_000_000,
+      maxOutput: 128_000,
+      source: "reviewed-catalog",
+    });
   });
 
   it("plans a profiled model for its profile's maximum output, however the window was found", () => {
@@ -116,7 +120,7 @@ describe("model context window", () => {
 
   it("gives no maximum output where no profile matches or the profile lists none", () => {
     expect(resolveModelMaxOutput({ id: "team-chat-prod" }, 128_000)).toBeUndefined();
-    expect(resolveModelMaxOutput({ id: "DeepSeek-V4.1-Flash" }, 1_000_000)).toBeUndefined();
+    expect(resolveModelMaxOutput({ id: "DeepSeek-V4.1-Flash" }, 1_000_000)).toBe(128_000);
     expect(resolveModelMaxOutput({ id: "gpt-4o" }, 8_000)).toBeUndefined();
   });
 
