@@ -4,6 +4,7 @@ import {
   accessSync,
   constants,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -671,15 +672,17 @@ function planStateWriteRoots(
 /**
  * The global configuration file of an account with no assigned directory.
  *
- * With no `CLAUDE_CONFIG_DIR` the runtime keeps it in `~/.claude.json`, beside
- * the account folder rather than inside it. Measured on macOS 27.0.1 with
- * Claude Code 2.1.301: refused that one read, the runtime retries it for about
- * six seconds before it goes on, which outlasts the sign-in probe's five. The
- * grant is for that one file, so it is returned only when the path resolves,
- * through any links, to a regular file outside the checkout; a link to a
- * folder, a missing file or a path into the checkout gets no grant, and the
- * caller reads it by literal path, never as a subtree. With the variable set,
- * the file sits inside the configuration directory, which is read whole.
+ * With no `CLAUDE_CONFIG_DIR` (an empty one counts as none) the runtime keeps it
+ * in `~/.claude.json`, beside the account folder rather than inside it.
+ * Measured on macOS 27.0.1 with Claude Code 2.1.301: refused that one read, the
+ * runtime retries it for about six seconds before it goes on, which outlasts the
+ * sign-in probe's five. The grant is for that one file at that one path, so it
+ * is returned only when `~/.claude.json` is itself a regular file, not a link
+ * to somewhere else, and sits outside the checkout. The path is named under the
+ * resolved home folder and read by literal path, never as a subtree. A link, a
+ * folder, a missing file or a path into the checkout gets no grant. With the
+ * variable set, the file sits inside the configuration directory, which is read
+ * whole.
  */
 function claudeGlobalConfigurationFile(
   boundRoot: string,
@@ -688,23 +691,19 @@ function claudeGlobalConfigurationFile(
   const home = environment.HOME;
   if (
     process.platform !== "darwin" ||
-    environment.CLAUDE_CONFIG_DIR !== undefined ||
+    (environment.CLAUDE_CONFIG_DIR !== undefined && environment.CLAUDE_CONFIG_DIR !== "") ||
     home === undefined ||
     !isAbsolute(home)
   ) {
     return undefined;
   }
   try {
-    const resolved = realpathSync(join(home, ".claude.json"));
-    if (!statSync(resolved).isFile()) return undefined;
-    if (
-      resolved === boundRoot ||
-      resolved.startsWith(`${boundRoot}${sep}`) ||
-      boundRoot.startsWith(`${resolved}${sep}`)
-    ) {
+    if (!lstatSync(join(home, ".claude.json")).isFile()) return undefined;
+    const file = join(realpathSync(home), ".claude.json");
+    if (file.startsWith(`${boundRoot}${sep}`) || boundRoot.startsWith(`${file}${sep}`)) {
       return undefined;
     }
-    return resolved;
+    return file;
   } catch {
     return undefined;
   }

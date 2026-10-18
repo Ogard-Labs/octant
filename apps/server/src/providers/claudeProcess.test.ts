@@ -826,7 +826,10 @@ describe("Claude runtime confinement", () => {
   });
 
   /** The rules a Plan launch is prepared with for a home with no account folder named. */
-  function planRulesForHome(home: string): {
+  function planRulesForHome(
+    home: string,
+    extraEnvironment: Record<string, string> = {},
+  ): {
     readonly rules: ReadonlyArray<string>;
     readonly readRoots: ReadonlyArray<string>;
   } {
@@ -840,7 +843,7 @@ describe("Claude runtime confinement", () => {
       command: target.binaryPath,
       args: ["sdk-test", "--session-id", randomUUID()],
       cwd: target.root,
-      env: { ...environment, HOME: home },
+      env: { ...environment, HOME: home, ...extraEnvironment },
       signal: new AbortController().signal,
     });
     child.kill("SIGTERM");
@@ -867,17 +870,35 @@ describe("Claude runtime confinement", () => {
   );
 
   it.runIf(process.platform === "darwin")(
-    "grants no global configuration file that is a link to a folder",
+    "grants no global configuration file that is a link, to a folder or to a file",
     () => {
       const home = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-home-")));
       const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-elsewhere-")));
       directories.push(home, elsewhere);
-      symlinkSync(elsewhere, join(home, ".claude.json"));
+      writeFileSync(join(elsewhere, "target.json"), "{}");
+      for (const target of [elsewhere, join(elsewhere, "target.json")]) {
+        rmSync(join(home, ".claude.json"), { force: true });
+        symlinkSync(target, join(home, ".claude.json"));
 
-      const { rules, readRoots } = planRulesForHome(home);
+        const { rules, readRoots } = planRulesForHome(home);
 
-      expect(rules.some((rule) => rule.includes(elsewhere))).toBe(false);
-      expect(readRoots).not.toContain(elsewhere);
+        expect(rules.some((rule) => rule.includes(elsewhere))).toBe(false);
+        expect(rules.some((rule) => rule.includes(".claude.json"))).toBe(false);
+        expect(readRoots).not.toContain(elsewhere);
+      }
+    },
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "treats an empty account folder setting as none for the global configuration file",
+    () => {
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-home-")));
+      directories.push(home);
+      writeFileSync(join(home, ".claude.json"), "{}");
+
+      const { rules } = planRulesForHome(home, { CLAUDE_CONFIG_DIR: "" });
+
+      expect(rules).toContain(seatbeltAllowLiteralReadRule(join(home, ".claude.json")));
     },
   );
 
