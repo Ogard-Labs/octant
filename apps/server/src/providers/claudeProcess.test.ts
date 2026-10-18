@@ -11,6 +11,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -824,13 +825,14 @@ describe("Claude runtime confinement", () => {
     expect(existsSync(`${sessionPath}.jsonl`)).toBe(false);
   });
 
-  it("lets a Plan turn read the global configuration file beside the default account folder", () => {
+  /** The rules a Plan launch is prepared with for a home with no account folder named. */
+  function planRulesForHome(home: string): {
+    readonly rules: ReadonlyArray<string>;
+    readonly readRoots: ReadonlyArray<string>;
+  } {
     const target = fixture();
-    const home = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-home-")));
-    directories.push(home);
     const { CLAUDE_CONFIG_DIR: _unset, ...environment } = target.environment;
     const confinement = recordingConfinement();
-
     const child = makePort(target, { confinement: confinement.port }).spawn({
       projectRoot: target.root,
       executionPolicy: "plan",
@@ -842,17 +844,44 @@ describe("Claude runtime confinement", () => {
       signal: new AbortController().signal,
     });
     child.kill("SIGTERM");
-
     const launch = confinement.prepared[0];
     if (launch === undefined) throw new Error("Expected the Plan launch to be confined.");
-    // Refused, the runtime retries the read for about six seconds, longer than
-    // the sign-in probe waits. Only that file, not the home folder, is read.
-    const expected = process.platform === "darwin" ? [join(home, ".claude.json")] : [];
-    expect(launch.readRoots).toEqual(expect.arrayContaining([join(home, ".claude"), ...expected]));
-    expect(launch.readRoots).not.toContain(home);
-  });
+    return { rules: launch.extraRules ?? [], readRoots: launch.readRoots ?? [] };
+  }
 
-  it("does not add the global configuration file when the account names its folder", () => {
+  it.runIf(process.platform === "darwin")(
+    "lets a Plan turn read the default account's global configuration file by literal path",
+    () => {
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-home-")));
+      directories.push(home);
+      writeFileSync(join(home, ".claude.json"), "{}");
+
+      const { rules, readRoots } = planRulesForHome(home);
+
+      // Refused, the runtime retries the read for about six seconds, longer
+      // than the sign-in probe waits. Only that file, never a subtree.
+      expect(rules).toContain(seatbeltAllowLiteralReadRule(join(home, ".claude.json")));
+      expect(readRoots).not.toContain(join(home, ".claude.json"));
+      expect(readRoots).not.toContain(home);
+    },
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "grants no global configuration file that is a link to a folder",
+    () => {
+      const home = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-home-")));
+      const elsewhere = realpathSync(mkdtempSync(join(tmpdir(), "octant-claude-elsewhere-")));
+      directories.push(home, elsewhere);
+      symlinkSync(elsewhere, join(home, ".claude.json"));
+
+      const { rules, readRoots } = planRulesForHome(home);
+
+      expect(rules.some((rule) => rule.includes(elsewhere))).toBe(false);
+      expect(readRoots).not.toContain(elsewhere);
+    },
+  );
+
+  it("grants no global configuration file when the account names its folder", () => {
     const target = fixture();
     const confinement = recordingConfinement();
 
@@ -869,7 +898,7 @@ describe("Claude runtime confinement", () => {
     child.kill("SIGTERM");
 
     const launch = confinement.prepared[0];
-    expect(launch?.readRoots?.some((path) => path.endsWith(".claude.json"))).toBe(false);
+    expect(launch?.extraRules?.some((rule) => rule.includes(".claude.json"))).toBe(false);
   });
 
   it("grants a Plan turn no transcript when its arguments name no session", () => {

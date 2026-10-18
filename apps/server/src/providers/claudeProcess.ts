@@ -617,25 +617,9 @@ function planStateWriteRoots(
   readsSignInFromKeychain: boolean,
 ): { readonly readRoots: ReadonlyArray<string>; readonly writeRoots: ReadonlyArray<string> } {
   const { configuration, secureStorage } = claudeAccountStateDirectories(environment);
-  // With no `CLAUDE_CONFIG_DIR` the runtime keeps its global configuration in
-  // `~/.claude.json`, beside the folder rather than inside it. Measured on
-  // macOS 27.0.1 with Claude Code 2.1.301: refused that one read, the runtime
-  // retries it for about six seconds before it goes on, which outlasts the
-  // sign-in probe's five. Only that file is read; the shell a Plan turn runs
-  // commands in is refused it with the rest of `readRoots`. With the variable
-  // set, the file sits inside the configuration directory, which is read whole.
-  const globalConfigurationFile =
-    process.platform === "darwin" &&
-    environment.CLAUDE_CONFIG_DIR === undefined &&
-    environment.HOME !== undefined &&
-    isAbsolute(environment.HOME)
-      ? [join(environment.HOME, ".claude.json")]
-      : [];
   const readRoots = refuseStateOverlappingCheckout(
     boundRoot,
-    [configuration, secureStorage, ...globalConfigurationFile].filter(
-      (path): path is string => path !== undefined,
-    ),
+    [configuration, secureStorage].filter((path): path is string => path !== undefined),
   );
   if (configuration === undefined) return { readRoots, writeRoots: [] };
   // The runtime names the folder after the directory it starts in. Seatbelt
@@ -682,6 +666,48 @@ function planStateWriteRoots(
       ...credentialsFile,
     ]),
   };
+}
+
+/**
+ * The global configuration file of an account with no assigned directory.
+ *
+ * With no `CLAUDE_CONFIG_DIR` the runtime keeps it in `~/.claude.json`, beside
+ * the account folder rather than inside it. Measured on macOS 27.0.1 with
+ * Claude Code 2.1.301: refused that one read, the runtime retries it for about
+ * six seconds before it goes on, which outlasts the sign-in probe's five. The
+ * grant is for that one file, so it is returned only when the path resolves,
+ * through any links, to a regular file outside the checkout; a link to a
+ * folder, a missing file or a path into the checkout gets no grant, and the
+ * caller reads it by literal path, never as a subtree. With the variable set,
+ * the file sits inside the configuration directory, which is read whole.
+ */
+function claudeGlobalConfigurationFile(
+  boundRoot: string,
+  environment: SpawnOptions["env"],
+): string | undefined {
+  const home = environment.HOME;
+  if (
+    process.platform !== "darwin" ||
+    environment.CLAUDE_CONFIG_DIR !== undefined ||
+    home === undefined ||
+    !isAbsolute(home)
+  ) {
+    return undefined;
+  }
+  try {
+    const resolved = realpathSync(join(home, ".claude.json"));
+    if (!statSync(resolved).isFile()) return undefined;
+    if (
+      resolved === boundRoot ||
+      resolved.startsWith(`${boundRoot}${sep}`) ||
+      boundRoot.startsWith(`${resolved}${sep}`)
+    ) {
+      return undefined;
+    }
+    return resolved;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -1031,6 +1057,7 @@ function confineClaudeLaunch(
       spawnOptions.env,
       readsSignInFromKeychain,
     );
+    const globalConfiguration = claudeGlobalConfigurationFile(boundRoot, spawnOptions.env);
     const keychainRules = readsSignInFromKeychain
       ? [
           seatbeltExecRule("/usr/bin/security"),
@@ -1039,6 +1066,8 @@ function confineClaudeLaunch(
           seatbeltAllowLiteralReadRule(claudeLoginKeychainPath()),
         ]
       : [];
+    const configurationRules =
+      globalConfiguration === undefined ? [] : [seatbeltAllowLiteralReadRule(globalConfiguration)];
     const runsCommands = confinement.runsCommands === true && claudePlanRunsCommands();
     const runtimePrograms = [
       ...new Set(
@@ -1057,12 +1086,10 @@ function confineClaudeLaunch(
     const commandRules =
       commands === undefined
         ? []
-        : planCommandRules(
-            runtimePrograms,
-            commands.programs,
-            temporaryDirectory,
-            stateRoots.readRoots,
-          );
+        : planCommandRules(runtimePrograms, commands.programs, temporaryDirectory, [
+            ...stateRoots.readRoots,
+            ...(globalConfiguration === undefined ? [] : [globalConfiguration]),
+          ]);
     // The shell finds `git` where the shim would have started it. The folder
     // is the launch's own and goes with it.
     let searchPath = spawnOptions.env.PATH;
@@ -1072,7 +1099,7 @@ function confineClaudeLaunch(
       symlinkSync(commands.gitBehindShim, join(gitFolder, "git"));
       searchPath = searchPath === undefined ? gitFolder : `${gitFolder}:${searchPath}`;
     }
-    const extraRules = [...keychainRules, ...commandRules];
+    const extraRules = [...keychainRules, ...configurationRules, ...commandRules];
     const launch = options.confinement.prepare({
       executable: spawnOptions.command,
       args: spawnOptions.args,
