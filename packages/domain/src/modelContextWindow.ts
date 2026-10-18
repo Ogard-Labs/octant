@@ -148,9 +148,11 @@ export const MODEL_CONTEXT_PROFILES: ReadonlyArray<ModelContextProfile> = [
   {
     names: ["deepseek-v4-1-flash"],
     contextWindow: 1_000_000,
-    // The window the maintainer's own Azure AI Foundry deployment of this
-    // model states; no first-party page lists it yet.
-    reference: "Azure AI Foundry model catalog: DeepSeek-V4.1-Flash",
+    // Listed on the provider's own pricing page as the `deepseek-flash` model
+    // (DeepSeek-V4.1-Flash-1017), context length 1M. That page also lists a
+    // max output of 384K, which is not set here: the Azure model catalog page
+    // lists 128k output for this model, so the two first-party sources disagree.
+    reference: "https://api-docs.deepseek.com/quick_start/pricing",
   },
 ];
 
