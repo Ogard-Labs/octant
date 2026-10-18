@@ -94,12 +94,19 @@ export function readGeneratedImageDimensions(
   return readJpegDimensions(bytes, view);
 }
 
+const byteAt = (bytes: Uint8Array, index: number): number => bytes[index] ?? 0;
+
 function readWebpDimensions(bytes: Uint8Array, view: DataView) {
   if (bytes.length < 30) return undefined;
-  const chunk = String.fromCharCode(bytes[12]!, bytes[13]!, bytes[14]!, bytes[15]!);
+  const chunk = String.fromCharCode(
+    byteAt(bytes, 12),
+    byteAt(bytes, 13),
+    byteAt(bytes, 14),
+    byteAt(bytes, 15),
+  );
   if (chunk === "VP8X") {
-    const width = 1 + (bytes[24]! | (bytes[25]! << 8) | (bytes[26]! << 16));
-    const height = 1 + (bytes[27]! | (bytes[28]! << 8) | (bytes[29]! << 16));
+    const width = 1 + (byteAt(bytes, 24) | (byteAt(bytes, 25) << 8) | (byteAt(bytes, 26) << 16));
+    const height = 1 + (byteAt(bytes, 27) | (byteAt(bytes, 28) << 8) | (byteAt(bytes, 29) << 16));
     return { width, height };
   }
   if (chunk === "VP8 " && bytes[23] === 0x9d && bytes[24] === 0x01 && bytes[25] === 0x2a) {
@@ -116,7 +123,7 @@ function readJpegDimensions(bytes: Uint8Array, view: DataView) {
   let offset = 2;
   while (offset + 9 < bytes.length) {
     if (bytes[offset] !== 0xff) return undefined;
-    const marker = bytes[offset + 1]!;
+    const marker = byteAt(bytes, offset + 1);
     if (marker === 0xff) {
       offset += 1;
       continue;
