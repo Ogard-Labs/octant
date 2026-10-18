@@ -107,7 +107,7 @@ export interface InlineThreadCanvasProps {
   readonly onOpen?: (card: CanvasThreadReferenceCard) => void;
   /**
    * What opening does, in the person's words. Work and Code open the dock's
-   * Canvas tool beside the thread; Chat has no dock and opens a Canvas tab.
+   * Canvas tool beside the thread; Chat has no Canvas dock tool and opens a tab.
    */
   readonly openLabel?: string;
 }

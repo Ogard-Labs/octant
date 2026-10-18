@@ -416,7 +416,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
   const dockOverview = (() => {
     if (!dockPresentedOpen || dockResolution.kind !== "closed") return undefined;
     if (dockThread === undefined) return undefined;
-    // Chat has no dock, which the shell guaranteed through `dockPresentedOpen`.
+    // Chat's Agents-only dock has no Work or Code thread overview.
     const mode = activeMode;
     if (mode === "chat") return undefined;
     const thread = overviewThread;

@@ -3254,9 +3254,14 @@ describe("App", () => {
     expect(within(dock).getByRole("button", { name: "Agents" })).toBeVisible();
   });
 
-  it.each(["composer tray", "Agents list"])(
-    "returns an already-open child from the %s to the full list on every View all request",
-    async (openedFrom) => {
+  it.each([
+    ["chat", "composer tray"],
+    ["chat", "Agents list"],
+    ["code", "composer tray"],
+    ["code", "Agents list"],
+  ])(
+    "opens completed replies in %s and returns from the %s on every View all request",
+    async (mode, openedFrom) => {
       const user = userEvent.setup();
       const runId = decodeAgentRunId("30000000-0000-4000-8000-000000000003");
       const finishedRunId = decodeAgentRunId("30000000-0000-4000-8000-000000000004");
@@ -3274,6 +3279,21 @@ describe("App", () => {
             executionKind: "octant-managed",
             usageQuality: "unavailable",
             resultAcknowledgement: { required: false, acknowledged: false },
+            ...(entry.runId === finishedRunId
+              ? {
+                  resultPackets: [
+                    resultPacketFixture({
+                      runId: finishedRunId,
+                      parentThreadId,
+                      reportedSummary: {
+                        status: "available",
+                        text: "Retained completed reply",
+                        truncated: false,
+                      },
+                    }),
+                  ],
+                }
+              : {}),
             version: 1,
             updatedAt: "2026-09-26T19:00:35.599Z",
           })),
@@ -3281,7 +3301,7 @@ describe("App", () => {
         conversation: vi.fn(async () => {
           throw new Error("No live transcript in this fixture");
         }),
-        center: vi.fn(),
+        center: vi.fn(async () => ({ items: [] })),
         snapshotCanvas: vi.fn(),
         acknowledge: vi.fn(),
         cancel: vi.fn(),
@@ -3293,15 +3313,22 @@ describe("App", () => {
       render(
         <App
           agentRunClient={agentRunClient}
+          chatClient={chats()}
           codeClient={codes()}
+          providerClient={providers()}
           isNarrow={false}
           launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
           projectClient={projects()}
           projectWindowCapability={projectWindowCapability}
-          shellClient={client(codeShellBootstrap())}
+          shellClient={client(mode === "chat" ? chatShellBootstrap() : codeShellBootstrap())}
         />,
       );
 
+      if (mode === "chat") {
+        const [olderChat] = await screen.findAllByRole("button", { name: /Older chat/ });
+        if (olderChat === undefined) throw new Error("Expected Chat navigation");
+        await user.click(olderChat);
+      }
       const tray = await screen.findByRole("group", { name: "Subagents" });
       if (openedFrom === "composer tray") {
         await user.click(within(tray).getByRole("button", { name: /Subagents,.*Show them/ }));
@@ -3325,6 +3352,12 @@ describe("App", () => {
         await user.click(within(dock).getByRole("button", { name: /Inspect parser/ }));
         expect(await within(dock).findByRole("region", { name: "Subagent" })).toBeVisible();
       }
+      await user.click(
+        within(tray).getByRole("button", { name: "View all 2 subagents in Agents" }),
+      );
+      await user.click(await within(dock).findByRole("button", { name: /Earlier review/ }));
+      expect(await within(dock).findByText("Retained completed reply")).toBeVisible();
+      expect(within(dock).queryByRole("button", { name: "Terminal" })).not.toBeInTheDocument();
       expect(agentRunClient.conversation).toHaveBeenCalledWith(runId);
       expect(agentRunClient.cancel).not.toHaveBeenCalled();
     },

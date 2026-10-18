@@ -290,8 +290,8 @@ or a valid launchable tool. An available empty dock opens on a thread overview (
 changes; see [DESIGN.md](../../DESIGN.md#shell-and-layout))
 above a grid of tool tiles; an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
-Tests, iOS Simulator, and Android emulator, as mode and capability allow; Chat
-has no dock and no bottom panel. Side
+Tests, iOS Simulator, and Android emulator, as mode and capability allow. Chat
+admits only the [Agents dock](#subagents) and has no bottom panel. Side
 Chat is a Chat conversation about the pane's thread: it reads that thread's
 conversation, current state, files, and subagent results, and changes none of
 them ([authority](../architecture.md#security-and-authority)). Its notice says
@@ -319,7 +319,7 @@ window remembers an expansion the same way; **Collapse** returns an inline
 Canvas to its faded frame, and **Show as card** returns an expanded row to its
 row. In Work and Code the frame also holds **Open in sidebar**, which opens
 the same Canvas in the dock tool, and a row opens it there too. Chat has no
-dock, so there the frame holds **Open Canvas**, and the frame and a row open
+Canvas dock tool, so there the frame holds **Open Canvas**, and the frame and a row open
 the Canvas as a content tab beside the thread. Editing, comments, and sharing stay there.
 A design that runs script is a prototype. Wherever it is drawn, a note under its
 header says what it can still send out: on desktop that it runs with no network
@@ -393,6 +393,9 @@ a key button cannot grant it. Toolbar Home, Lock, Back, and Type text share the
 ordered input queue with taps and typing. The host owns observation,
 input, and evidence safety under the [device transport contract](../architecture.md#device-transport-and-evidence).
 Dock visibility and responsive presentation follow [DESIGN.md](../../DESIGN.md#shell-and-layout).
+
+### Subagents
+
 Environment belongs to a
 thread as a context-aware dock tab opened from the dock tab strip or Add tool. Its
 Subagents row counts the active thread's server-authored child AgentRuns
@@ -405,7 +408,8 @@ unreviewed results first while collapsed; a result the parent already received i
 done, not to review. While a Chat thread's host connection is lost it dims and
 withholds Stop without repeating the connection notice; expansion previews up to three active or
 unresolved children. Rows open the corresponding detail in Agents, and View all
-keeps completed history reachable. Provider-observed children carry an explicit
+keeps completed history reachable. Chat admits Agents as its only dock tool;
+opening it does not expose Work or Code tools or the bottom panel. Provider-observed children carry an explicit
 observation-only label and no managed controls. Task-plan progress remains a
 separate disclosure. See
 [DESIGN.md](../../DESIGN.md#welcome-and-composer).

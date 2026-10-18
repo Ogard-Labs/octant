@@ -81,7 +81,8 @@ done. When a Chat thread cannot reach the host the card dims and **Stop** is
 unavailable; the thread's connection notice says why. Expand it to preview up to
 three active or unresolved children with their task, status, model and last
 reported activity. **View all** opens the full **Agents** list, including finished
-children. A row opens that child's detail. **Stop** acts on one managed child;
+children, including in Chat. A row opens that child's detail, where its retained
+final reply stays readable after completion. **Stop** acts on one managed child;
 **Stop all** asks first and cancels only this thread's managed children.
 Observation-only rows have no execution controls. **Environment → Subagents**
 also lists managed children and marks results you have not reviewed **To review**.
@@ -209,7 +210,8 @@ start screen, in the Inbox, in the command palette, and in the menu bar. The row
 thread and the child (for example "Research subagent needs your approval") and
 has one action, **Review request**, which opens the parent thread on its Agents
 tab with that child selected. Answer there; the row has no Approve or Deny of
-its own. Chat has no Agents tab, so a Chat subagent does not appear.
+its own. This card lists Work and Code subagents only; Chat's Agents dock does not
+add Chat subagents to the card.
 
 **Steer** sends a note to a running child when its provider supports it.
 Octant's harness applies the note at the next complete response or tool-results

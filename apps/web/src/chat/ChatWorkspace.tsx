@@ -1054,8 +1054,7 @@ export function ChatWorkspace(props: ChatWorkspaceProps) {
                     <ThreadCanvases
                       cards={canvasPlacement.byRow.get(String(turn.id))}
                       client={canvasClient}
-                      // The shell shows Chat without a dock, so there is no dock
-                      // Canvas tool to open: the Canvas opens as a content tab
+                      // Chat's dock admits only Agents, so a Canvas opens as a content tab
                       // beside the thread instead.
                       {...(props.onOpenCanvas === undefined ? {} : { onOpen: props.onOpenCanvas })}
                       openLabel="Open Canvas"
