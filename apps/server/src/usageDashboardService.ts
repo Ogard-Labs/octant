@@ -127,6 +127,9 @@ export function readUsageDashboard(
   });
 }
 
+/** The dashboard attributes image jobs to their thread's Project; ceilings do not. */
+const dashboardScope = { includeImageJobs: true } as const;
+
 function selectRows(
   connection: SqliteConnection,
   request: UsageDashboardRequest,
@@ -178,21 +181,21 @@ function selectRows(
     params.push(`%"category":"${filter.category}"%`);
   }
   if (filter.projectId !== undefined) {
-    conditions.push(usageProjectConditionSql(1));
-    params.push(...usageProjectConditionParams([String(filter.projectId)]));
+    conditions.push(usageProjectConditionSql(1, dashboardScope));
+    params.push(...usageProjectConditionParams([String(filter.projectId)], dashboardScope));
   }
   // The authority scope narrows the same bounded query, so it can never be
   // widened by a filter and never truncates rows the caller may see in favour
   // of rows it may not.
   if (projectScope.kind === "unfiled") {
-    conditions.push(usageUnfiledConditionSql());
+    conditions.push(usageUnfiledConditionSql(dashboardScope));
   } else {
     if (projectScope.projectIds.length === 0) return { rows: [], truncated: false };
-    conditions.push(usageProjectConditionSql(projectScope.projectIds.length));
-    params.push(...usageProjectConditionParams(projectScope.projectIds));
+    conditions.push(usageProjectConditionSql(projectScope.projectIds.length, dashboardScope));
+    params.push(...usageProjectConditionParams(projectScope.projectIds, dashboardScope));
   }
   if (filter.mode !== undefined) {
-    const condition = usageModeCondition(filter.mode);
+    const condition = usageModeCondition(filter.mode, dashboardScope);
     if (condition === undefined) return { rows: [], truncated: false };
     conditions.push(condition.sql);
     params.push(...condition.params);
