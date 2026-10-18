@@ -305,7 +305,7 @@ describe("subagent pending requests", () => {
     expect(await list({ authorize: false })).toEqual([]);
   });
 
-  it("does not list a Chat subagent, whose parent has no Agents tab to answer in", async () => {
+  it("keeps Chat subagents outside the Work and Code pending-request projection", async () => {
     const { askApproval, list } = fixture();
     void askApproval({ child: true });
     expect(await list({ run: agentRun({ mode: "chat" }) })).toEqual([]);

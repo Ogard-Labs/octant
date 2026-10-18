@@ -143,7 +143,7 @@ can share or export it. Any other Canvas appears there as a row that opens it.
 
 - **Open in sidebar** (the panel icon) opens the same Canvas in the sidebar next to a Work or
   Code thread. There you can comment, edit a board or plan, and see its
-  history. Chat has no sidebar, so in Chat the button says **Open Canvas** and
+  history. Chat has no Canvas sidebar tool, so its button says **Open Canvas** and
   opens the Canvas in its own tab.
 - **Expand in thread** (the expand icon, on the frame or on a row) shows the
   whole Canvas in place, including a board, a plan, or a mockup. It grows

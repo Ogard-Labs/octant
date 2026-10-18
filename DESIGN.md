@@ -1892,8 +1892,10 @@ never the theme's focus role.
 
 ### Mode-specific utility chrome
 
-Chat has no right dock and no bottom panel: the shell makes both unavailable
-in Chat, and the conversation uses the available workspace width. A Chat
+Chat admits only the Agents dock when helpers exist, it was explicitly requested,
+or its tab is retained; see the [workspace rule](docs/design/workspace.md#subagents).
+Chat has no bottom panel. With the dock closed, the conversation uses the available
+workspace width. A Chat
 Canvas opens as a content tab beside the thread (**Open Canvas**). Work shares
 Code's quiet transcript edge: Browser is a dock tool and completion lives in the
 composer's compact Task actions menu, preserving its confirmation flow.

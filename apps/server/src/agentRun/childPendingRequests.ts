@@ -115,7 +115,8 @@ export function windowMayListChildThread(
  * cancelled, or was lost to a restart is never offered. Each waiter is matched
  * to the pending item the session journaled, and only an item that names its
  * run is a subagent's: a lead's own approval or question is not listed here.
- * A Chat parent has no Agents tab to answer in, so its subagents are not listed.
+ * This projection is limited to Work and Code; Chat's Agents dock does not
+ * extend its pending-request scope.
  * Anything that cannot be matched, read, or authorized is left out, never
  * guessed at, because a row for a request the Agents tab cannot show would
  * send the person to a place with nothing to answer.

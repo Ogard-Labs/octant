@@ -210,7 +210,8 @@ start screen, in the Inbox, in the command palette, and in the menu bar. The row
 thread and the child (for example "Research subagent needs your approval") and
 has one action, **Review request**, which opens the parent thread on its Agents
 tab with that child selected. Answer there; the row has no Approve or Deny of
-its own. Chat has no Agents tab, so a Chat subagent does not appear.
+its own. This card lists Work and Code subagents only; Chat's Agents dock does not
+add Chat subagents to the card.
 
 **Steer** sends a note to a running child when its provider supports it.
 Octant's harness applies the note at the next complete response or tool-results

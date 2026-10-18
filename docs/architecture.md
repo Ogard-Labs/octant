@@ -5660,8 +5660,8 @@ mechanisms are:
   route also requires the thread to be the open surface; the list does not,
   because the row is how a person finds a request on a thread they are not
   looking at. Answering still goes through that route after the row opens the
-  thread. A disabled parent mode is not listed. A Chat child is never listed because Chat has no Agents tab to
-  review it in. An approval a child raises still covers that request only and
+  thread. A disabled parent mode is not listed. This pending-request projection lists Work and Code children only;
+  Chat's [Agents dock](design/workspace.md#subagents) does not extend that scope. An approval a child raises still covers that request only and
   never offers a remembered grant. A Code turn's Browser site ask
   is a Code approval and is listed with `browserOrigin`, the site it waits to
   open, which a provider's own approval never carries. Text keeps
