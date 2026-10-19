@@ -202,7 +202,9 @@ const chatThread = {
 };
 
 /** A host that holds one Chat thread and no Projects, and records the shell commands it is sent. */
-function chatHost() {
+function chatHost(options: { duplicateNames?: boolean; refuseSelection?: boolean } = {}) {
+  const commands: unknown[] = [];
+  const accountIds = [ids.provider, "50000000-0000-4000-8000-000000000002"];
   const shell: Array<{ mode: string; kind: string }> = [];
   const session: OpenedLocalControlSession = {
     kind: "opened",
@@ -221,7 +223,32 @@ function chatHost() {
         shell.push({ mode: operation.mode, kind: operation.surface.kind });
         return { status: 200, body: {} };
       }
+      if (request.path === "/api/providers/bootstrap") {
+        return {
+          status: 200,
+          body: {
+            ...providers,
+            instances: accountIds.map((id, index) => ({
+              ...providers.instances[0],
+              id,
+              driverKind: "codex",
+              displayName: options.duplicateNames || index === 0 ? "Subscription" : "API",
+              configuration: { kind: "codex-cli", binaryPath: "codex" },
+            })),
+            observedStates: accountIds.map((instanceId) => ({
+              ...providers.observedStates[0],
+              instanceId,
+            })),
+          },
+        };
+      }
       if (request.path === "/api/chat/commands") {
+        commands.push(request.body);
+        if ((request.body as { kind: string }).kind === "change-chat-provider") {
+          return options.refuseSelection
+            ? { status: 409, body: { message: "The selected account is unavailable." } }
+            : { status: 200, body: { kind: "thread-updated", thread: chatThread } };
+        }
         return { status: 200, body: { kind: "thread-created", thread: chatThread } };
       }
       if (request.path === `/api/chat/threads/${chatThread.id}`) {
@@ -244,10 +271,58 @@ function chatHost() {
     },
     close: async () => undefined,
   };
-  return { session, shell };
+  return { session, shell, commands };
 }
 
 describe("a Chat thread in the terminal's window", () => {
+  it("selects the requested CLI account before returning a new Chat thread", async () => {
+    const fake = chatHost();
+    expect(
+      await createAgentThread(fake.session, {
+        mode: "chat",
+        title: "Account selection",
+        model: "API/loopback-model",
+      }),
+    ).toMatchObject({ kind: "created", mode: "chat" });
+    expect(fake.commands).toEqual([
+      { kind: "create-chat-thread", title: "Account selection" },
+      {
+        kind: "change-chat-provider",
+        threadId: chatThread.id,
+        expectedVersion: 1,
+        providerInstanceId: "50000000-0000-4000-8000-000000000002",
+        modelId: "loopback-model",
+      },
+    ]);
+  });
+
+  it.each([
+    ["missing", false],
+    ["loopback-model", false],
+    ["Subscription/loopback-model", true],
+  ])(
+    "refuses an unknown or ambiguous selection %s before creating a Chat thread",
+    async (model, duplicateNames) => {
+      const fake = chatHost({ duplicateNames });
+      expect(
+        await createAgentThread(fake.session, { mode: "chat", title: "No inference", model }),
+      ).toMatchObject({ kind: "refused" });
+      expect(fake.commands).toEqual([]);
+    },
+  );
+
+  it("does not return a sendable thread when the host refuses the account change", async () => {
+    const fake = chatHost({ refuseSelection: true });
+    expect(
+      await createAgentThread(fake.session, {
+        mode: "chat",
+        title: "No fallback",
+        model: "API/loopback-model",
+      }),
+    ).toEqual({ kind: "refused", message: "The selected account is unavailable." });
+    expect(fake.shell).toEqual([]);
+  });
+
   it("is open in the window once the terminal creates it, so its harness session answers", async () => {
     const fake = chatHost();
     const result = await createAgentThread(fake.session, {

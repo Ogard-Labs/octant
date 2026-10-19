@@ -80,7 +80,7 @@ export type AgentCliCommand =
       readonly quiet: boolean;
       /** `auto` follows the folder: a Code or Work Project holding it, else Chat. */
       readonly mode: "chat" | "work" | "code" | "auto";
-      /** A harness model for a new Work or Code thread: `model` or `endpoint/model`. */
+      /** A model for a new thread; Work and Code use harness endpoints: `model` or `endpoint/model`. */
       readonly model?: string;
     }
   | { readonly action: "harness-slots"; readonly json: boolean }
@@ -990,6 +990,15 @@ async function readSession(
 
 async function resolveThread(input: RunAgentCliCommandInput): Promise<string | undefined> {
   if (input.command.action !== "agent") return undefined;
+  if (
+    input.command.model !== undefined &&
+    (input.command.threadId !== undefined || input.command.last)
+  ) {
+    input.stderr.write(
+      "--model selects a new thread. To change an existing thread's model, use its model picker.\n",
+    );
+    return undefined;
+  }
   if (
     (input.command.threadId !== undefined || input.command.last) &&
     input.command.mode !== "chat"

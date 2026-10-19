@@ -72,6 +72,37 @@ function sink() {
 }
 
 describe("octant agent command line", () => {
+  it.each([{ threadId: "existing" }, { last: true }])(
+    "refuses a model override while attaching to an existing thread",
+    async (attachment) => {
+      const stderr = sink();
+      const seen: LocalControlRequest[] = [];
+      const code = await runAgentCliCommand({
+        command: {
+          action: "agent",
+          mode: "chat",
+          model: "API/model",
+          prompt: "Do not send",
+          json: true,
+          plain: false,
+          quiet: true,
+          last: false,
+          ...attachment,
+        },
+        session: session((request) => {
+          seen.push(request);
+          return { status: 404, body: {} };
+        }),
+        stdin: Readable.from([]),
+        stdout: sink(),
+        stderr,
+      });
+      expect(code).toBe(1);
+      expect(stderr.text()).toContain("--model selects a new thread");
+      expect(seen).toEqual([]);
+    },
+  );
+
   it("parses the agent and harness forms and refuses unknown flags", () => {
     expect(resolveAgentCliCommand("agent", [], { prompt: "hi", json: true })).toEqual({
       action: "agent",

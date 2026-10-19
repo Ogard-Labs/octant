@@ -24,7 +24,7 @@ import {
   ThreadMentionCommandResult,
   decodeHostAnswer,
 } from "@octant/contracts";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isImageProfileDriverKind, isNativeHarnessDriverKind } from "@octant/domain";
 import type { OpenedLocalControlSession } from "./localControl";
 
 /**
@@ -537,16 +537,18 @@ export interface AgentModelChoice {
   readonly contextLimit: number | undefined;
 }
 
-/** Models a harness endpoint offers, endpoint by endpoint. */
+/** Models offered by enabled providers; harness-only unless selecting a new Chat thread. */
 export async function listAgentModels(
   session: OpenedLocalControlSession,
+  scope: "harness" | "chat" = "harness",
 ): Promise<ReadonlyArray<AgentModelChoice>> {
   const response = await session.send({ path: "/api/providers/bootstrap", method: "GET" });
   if (response.status !== 200) return [];
   const snapshot = decodeHostAnswer(ProviderRegistrySnapshot)(response.body);
   const choices: AgentModelChoice[] = [];
   for (const instance of snapshot.instances) {
-    if (!instance.enabled || !isNativeHarnessDriverKind(instance.driverKind)) continue;
+    if (!instance.enabled || isImageProfileDriverKind(instance.driverKind)) continue;
+    if (scope === "harness" && !isNativeHarnessDriverKind(instance.driverKind)) continue;
     const observed = snapshot.observedStates.find(
       (state) => String(state.instanceId) === String(instance.id),
     );
@@ -565,7 +567,7 @@ export async function listAgentModels(
 
 export async function changeAgentModel(
   session: OpenedLocalControlSession,
-  thread: ChatThreadView,
+  thread: Pick<ChatThreadView, "thread">,
   choice: Pick<AgentModelChoice, "instanceId" | "modelId">,
 ): Promise<HostRefusal | { readonly kind: "changed" }> {
   const response = await session.send({
