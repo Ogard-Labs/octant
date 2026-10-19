@@ -6,6 +6,8 @@ import {
   decodeProviderSessionId,
 } from "@octant/contracts";
 import { Schema } from "effect";
+import { decodeMessage } from "./claudeAgentSdkDecoder";
+import type { ClaudeOpenQueryInput } from "./claudeAgentSdkPort";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -142,6 +144,154 @@ describe("mapClaudeMessage", () => {
       expect(chunks.join("")).toBe(source);
       expect(chunks.map((chunk) => Array.from(chunk).length)).toEqual([65_536, 1]);
       expect(chunks.join("")).not.toContain("�");
+    },
+  );
+
+  it.each(["Write", "Edit"])("completes after the runtime refuses disabled %s in Plan", (name) => {
+    const ctx = context();
+    const input: ClaudeOpenQueryInput = {
+      binaryPath: "/claude",
+      projectRoot,
+      authEnvironment: {},
+      model: "sonnet",
+      executionPolicy: "plan",
+      tools: ["Read", "Glob", "Grep"],
+      canUseTool: async () => ({ behavior: "deny", message: "Plan is read-only." }),
+      preToolUse: async () => ({ behavior: "deny", message: "Plan is read-only." }),
+    };
+    const decode = (raw: unknown) =>
+      decodeMessage(raw, input, { kind: "active", sessionId: claudeSessionId });
+    const content = {
+      type: "tool_use",
+      id: "disabled-1",
+      name,
+      input: { file_path: "/outside/private", content: "private body" },
+      caller: { type: "direct" },
+    };
+    const start = mapped(
+      ctx,
+      decode({
+        type: "stream_event",
+        session_id: claudeSessionId,
+        parent_tool_use_id: null,
+        event: { type: "content_block_start", index: 0, content_block: { ...content, input: {} } },
+      }),
+    );
+    const assistant = mapped(
+      ctx,
+      decode({
+        type: "assistant",
+        session_id: claudeSessionId,
+        parent_tool_use_id: null,
+        message: {
+          id: "message-1",
+          type: "message",
+          role: "assistant",
+          model: "sonnet",
+          stop_reason: "tool_use",
+          stop_sequence: null,
+          content: [content],
+          usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+      }),
+    );
+    const refused = mapped(
+      ctx,
+      decode({
+        type: "user",
+        session_id: claudeSessionId,
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "disabled-1",
+              is_error: true,
+              content: "No such tool available. Private runtime detail.",
+            },
+          ],
+        },
+      }),
+    );
+    const completed = mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      permissionDenials: [],
+      usage,
+    });
+    expect(start).toMatchObject([{ kind: "event", event: { kind: "tool-start", toolName: name } }]);
+    expect(refused).toMatchObject([
+      { kind: "event", event: { kind: "tool-failure", message: "Tool failed." } },
+    ]);
+    expect(completed).toContainEqual(
+      expect.objectContaining({
+        kind: "event",
+        event: expect.objectContaining({ kind: "completed" }),
+      }),
+    );
+    const all = [...start, ...assistant, ...refused, ...completed];
+    expect(all.some((item) => item.kind === "failure")).toBe(false);
+    expect(eventValues(all).some((item) => item.kind === "file-change")).toBe(false);
+    expect(JSON.stringify(all)).not.toMatch(/private body|outside\/private|Private runtime/);
+  });
+
+  it.each(["success", "missing", "changed correlation"])(
+    "fails closed when a disabled tool has %s refusal evidence",
+    (scenario) => {
+      const ctx = context();
+      const content = {
+        kind: "tool-use",
+        toolUseId: "disabled-1",
+        toolName: "Write",
+        input: {},
+        disabled: true,
+      } as const;
+      mapped(ctx, {
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event: { kind: "content-start", index: 0, content },
+      });
+      const result =
+        scenario === "success"
+          ? mapped(ctx, {
+              kind: "tool-results",
+              sessionId: claudeSessionId,
+              results: [{ toolUseId: "disabled-1", isError: false }],
+            })
+          : scenario === "missing"
+            ? mapped(ctx, {
+                kind: "result",
+                sessionId: claudeSessionId,
+                outcome: "success",
+                subtype: "success",
+                stopReason: "end_turn",
+                permissionDenials: [],
+                usage,
+              })
+            : mapped(ctx, {
+                kind: "stream-event",
+                sessionId: claudeSessionId,
+                event: {
+                  kind: "content-start",
+                  index: 0,
+                  content: {
+                    kind: "tool-use",
+                    toolUseId: "disabled-1",
+                    toolName: "Write",
+                    input: {},
+                  },
+                },
+              });
+      expect(result).toMatchObject([{ kind: "failure", failure: { category: "protocol" } }]);
     },
   );
 

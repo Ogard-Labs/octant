@@ -80,6 +80,45 @@ describe("Claude failure sanitizer", () => {
   });
 });
 
+describe("Disabled Plan file tools", () => {
+  const active = { kind: "active", sessionId: "session-1" } as const;
+  const stream = (name: string, input: unknown = {}) => ({
+    type: "stream_event",
+    session_id: "session-1",
+    parent_tool_use_id: null,
+    event: {
+      type: "content_block_start",
+      index: 0,
+      content_block: {
+        type: "tool_use",
+        id: "disabled-1",
+        name,
+        input,
+        caller: { type: "direct" },
+      },
+    },
+  });
+
+  it.each(["Write", "Edit"])("recognizes a disabled %s attempt without offering it", (name) => {
+    const input = { ...openInput, executionPolicy: "plan" as const };
+    expect(decodeMessage(stream(name), input, active)).toMatchObject({
+      kind: "stream-event",
+      event: { content: { kind: "tool-use", toolName: name, disabled: true } },
+    });
+    expect(input.tools).toEqual(["Read"]);
+    expect(() => decodeMessage(stream(name), openInput, active)).toThrow();
+    expect(() => decodeMessage(stream(name, []), input, active)).toThrow();
+  });
+
+  it("still rejects unknown and unoffered runtime tools in Plan", () => {
+    for (const name of ["FutureTool", "mcp__unknown__write", "Bash", "WebFetch"]) {
+      expect(() =>
+        decodeMessage(stream(name), { ...openInput, executionPolicy: "plan" }, active),
+      ).toThrow();
+    }
+  });
+});
+
 describe("Managed tool progress", () => {
   it("accepts a parent-correlated heartbeat only for an offered app-owned tool", () => {
     const toolName = "mcp__octant__octant_browser";

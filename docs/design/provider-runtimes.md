@@ -7,6 +7,18 @@ owns the driver interface, honest capability, credentials, and confinement
 ([Architecture: providers](../architecture.md#providers) and
 [security and authority](../architecture.md#security-and-authority)).
 
+## Claude Code
+
+A Claude Plan turn may report an attempted `Write` or `Edit` before the runtime
+returns its disabled-tool error (observed with Claude Code 2.1.301). The adapter
+recognizes those two unoffered file tools only in Plan and records their failed
+activity without treating their inputs as an applied file change. A success
+result for either disabled tool, a changed tool correlation, or a successful
+turn that omits the refusal fails closed. Other unoffered tools and malformed
+messages remain protocol failures. Recognition grants no tool authority: the
+launch tool list, permission hooks, OS confinement, and Keychain policy remain
+as specified in [Security and authority](../architecture.md#security-and-authority).
+
 ## OpenCode
 
 The installed OpenCode binary's
