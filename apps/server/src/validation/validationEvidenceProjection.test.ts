@@ -29,11 +29,11 @@ import { EventActor } from "@octant/contracts/events";
 const directories: Array<string> = [];
 const now = "2026-07-24T08:00:00.000Z";
 
-function openConnection(): SqliteConnection {
+function openConnection(migrations = MIGRATIONS): SqliteConnection {
   const directory = mkdtempSync(join(tmpdir(), "octant-validation-projection-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
-  applyMigrations(connection, MIGRATIONS, () => now);
+  applyMigrations(connection, migrations, () => now);
   return connection;
 }
 
@@ -126,11 +126,11 @@ function makeReport(overrides: Partial<ValidationReport> = {}): ValidationReport
   }).report;
 }
 
-function createStore(): {
+function createStore(migrations = MIGRATIONS): {
   store: ValidationEventStore;
   connection: SqliteConnection;
 } {
-  const connection = openConnection();
+  const connection = openConnection(migrations);
   const registry = new EventRegistry()
     .register("validation.plan-created@1", 1, ValidationPlanCreated)
     .register("validation.evidence-recorded@1", 1, ValidationEvidenceRecorded)
@@ -155,6 +155,45 @@ function createStore(): {
 }
 
 describe("ValidationEvidenceProjection", () => {
+  it("upgrades existing evidence without changing its scope, sequence, or journal", () => {
+    const { store, connection } = createStore(MIGRATIONS.filter(({ version }) => version < 82));
+    store.appendPlan({ plan: makePlan(), expectedVersion: 0 });
+    store.appendEvidence({ evidence: makeEvidence(), expectedVersion: 1 });
+    const snapshot = readValidationEvidenceSnapshot(connection, authority, now);
+    const journal = connection.prepare("SELECT * FROM event_journal").all();
+    applyMigrations(connection, MIGRATIONS, () => now);
+    expect(readValidationEvidenceSnapshot(connection, authority, now)).toEqual(snapshot);
+    expect(readValidationEvidenceSequence(connection, authority)).toBe(2);
+    expect(connection.prepare("SELECT * FROM event_journal").all()).toEqual(journal);
+    for (const mode of ["work", "code"]) {
+      expect(() =>
+        connection
+          .prepare("UPDATE validation_evidence_projection SET mode = ?, project_id = NULL")
+          .run(mode),
+      ).toThrow();
+    }
+  });
+
+  it("persists projectless Chat evidence without mixing it with a Project scope", () => {
+    const { store, connection } = createStore();
+    const chat: ToolActionAuthority = {
+      hostId: authority.hostId,
+      mode: "chat",
+      providerInstanceId: authority.providerInstanceId,
+      extension: authority.extension,
+    };
+    const projectChat: ToolActionAuthority = { ...chat, projectId: authority.projectId };
+    store.appendPlan({ plan: makePlan(chat), expectedVersion: 0 });
+    store.appendEvidence({ evidence: makeEvidence({ authority: chat }), expectedVersion: 1 });
+    store.appendPlan({ plan: makePlan(projectChat, ids.supersedingPlan), expectedVersion: 0 });
+    const snapshot = readValidationEvidenceSnapshot(connection, chat, now);
+    expect(snapshot?.authority).toEqual(chat);
+    expect(snapshot?.timeline).toHaveLength(1);
+    expect(readValidationEvidenceSequence(connection, chat)).toBe(2);
+    expect(readValidationEvidenceSnapshot(connection, projectChat, now)?.timeline).toHaveLength(0);
+    expect(readValidationEvidenceSnapshot(connection, authority, now)).toBeUndefined();
+  });
+
   it("returns undefined when no evidence exists for the authority", () => {
     const { connection } = createStore();
     const snapshot = readValidationEvidenceSnapshot(connection, authority, now);
