@@ -94,7 +94,7 @@ describe("confined version probe", () => {
     launch.release();
   });
 
-  it("runs a linked version executable by its canonical path without granting more reads", () => {
+  it("preserves a linked version executable invocation without granting more reads", () => {
     const target = host();
     const bin = join(target.home, ".local", "bin");
     mkdirSync(bin, { recursive: true });
@@ -102,7 +102,7 @@ describe("confined version probe", () => {
     symlinkSync(target.binaryPath, linkedBinary);
     const launch = prepared(target, linkedBinary);
 
-    expect(launch.args.slice(-2)).toEqual([target.binaryPath, "--version"]);
+    expect(launch.args.slice(-2)).toEqual([linkedBinary, "--version"]);
     expect(launch.args[1]).not.toContain(seatbeltAllowRule("file-read*", target.home));
     expect(launch.args[1]).toContain(
       `(deny file-read* (subpath "${join(target.home, "credentials")}"))`,

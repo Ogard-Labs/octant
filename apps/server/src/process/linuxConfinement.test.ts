@@ -137,6 +137,36 @@ describe("Linux Full access extension denials", () => {
 });
 
 describe("Linux Bubblewrap confinement", () => {
+  it("keeps a linked launcher visible through its parent without overlaying the link", () => {
+    const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    const bin = join(root, "home", ".local", "bin");
+    const versions = join(root, "home", ".local", "share", "tool", "versions");
+    mkdirSync(bin, { recursive: true });
+    mkdirSync(versions, { recursive: true });
+    const target = join(versions, "1.2.3");
+    writeFileSync(target, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const linked = join(bin, "tool");
+    symlinkSync(target, linked);
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: linked,
+        args: ["--version"],
+        boundRoot,
+        temporaryDirectory,
+        readRoots: [bin, versions],
+        allowProcessExec: true,
+        networkEgress: "none",
+      },
+      { bwrapPath },
+    );
+
+    expect(launch.args.slice(-2)).toEqual([linked, "--version"]);
+    expect(boundPairs(launch.args, "--ro-bind")).toContainEqual([bin, bin]);
+    expect(boundPairs(launch.args, "--ro-bind")).toContainEqual([versions, versions]);
+    expect(boundPairs(launch.args, "--ro-bind")).not.toContainEqual([target, linked]);
+    expect(launch.args).not.toContain("--share-net");
+  });
+
   it("names only an absent runtime as one a person can fix by installing it", () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-linux-bwrap-")));
     directories.push(root);

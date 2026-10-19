@@ -133,10 +133,7 @@ export function prepareConfinedVersionProbe(
       input.homeDirectory ?? homedir(),
     );
     const launch = confinement.prepare({
-      // Bubblewrap cannot overlay a launcher symlink inside an already bound
-      // bin directory before its deeper target exists. Run the same resolved
-      // program that the read roots already grant; do not widen those roots.
-      executable,
+      executable: input.binaryPath,
       args: input.args ?? ["--version"],
       // There is no thread, so the one root the builder binds is the scratch
       // directory itself: the read's working directory on both platforms, and
