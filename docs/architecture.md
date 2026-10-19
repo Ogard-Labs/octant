@@ -7494,9 +7494,13 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   Chromium's sandbox and lets Chromium refuse when the host cannot establish
   it; it never adds `--no-sandbox`. A separate `unshare` executable has a
   different AppArmor identity and is not a prerequisite probe for Octant.
-  On restricted Ubuntu hosts, packaged acceptance requires an administrator-
-  reviewed profile for the installed executable and a real sandboxed launch;
-  the Linux ADE remains available while that prerequisite is unmet.
+  On restricted Ubuntu hosts, direct packaged acceptance requires an
+  administrator-reviewed profile for the installed executable and a real
+  sandboxed launch. An existing isolated environment that already supports
+  Chromium's sandbox may be used without relaxing host policy; the
+  [Linux host guide](../apps/docs/guide/linux-host.md#isolated-desktop-installation)
+  records the tested rootless Space installation and its evidence boundary.
+  The Linux ADE remains available while desktop prerequisites are unmet.
   An AppImage launch checks
   the signed `<base>/<ring>/linux-x64.json` feed, verifies the signature and
   hash before use, replaces the image atomically (write beside, fsync,

@@ -83,7 +83,7 @@ chmod +x out/Octant-*-linux-x64.AppImage
 
 If your host cannot mount nested AppImages, run with `APPIMAGE_EXTRACT_AND_RUN=1`. Work/Code still need Bubblewrap and a live Secret Service session on the host (see below).
 
-AppRun keeps Electron’s Chromium sandbox when the host allows unprivileged user namespaces (`unshare -Ur`). AppImage mounts are `nosuid`, so the SUID `chrome-sandbox` helper cannot work; `--no-sandbox` is added only when that userns probe fails. On Ubuntu 24.04+, AppArmor can still restrict Chromium’s userns even when the probe succeeds — a dedicated AppArmor profile for the AppImage is out of scope for this packaging path and remains a residual launch risk on those hosts.
+AppRun preserves Chromium's sandbox and lets Chromium refuse when it cannot establish one. It never adds `--no-sandbox`. A separate `unshare` command is not a reliable prerequisite probe because it has a different AppArmor identity. See [Desktop sandbox prerequisites](./linux-host#desktop-sandbox-prerequisites) for a tested isolated installation and the boundary for administrator-reviewed host profiles.
 
 ## Data directory
 

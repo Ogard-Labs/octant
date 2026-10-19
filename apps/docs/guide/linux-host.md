@@ -31,6 +31,56 @@ A supported installation must be checked with a real sandboxed launch before
 claiming packaged desktop acceptance. Octant does not install or relax host
 security policy automatically.
 
+### Isolated desktop installation
+
+A pre-existing rootless Cua Space is a tested option when direct launch on the
+Ubuntu host is restricted. Use a Space whose existing policy already permits
+Chromium to create its sandbox; do not change container privileges, seccomp,
+AppArmor, or host sysctls just to make the application launch. Containers share
+the host kernel, so this is not a separate VM security boundary.
+
+On the validated Ubuntu 24.04.5 x64 Space, copy the built AppImage to a fixed
+path in the Space's home directory and verify its SHA-256 against the build
+artifact. Run as the ordinary desktop user, with the Space's existing display
+and D-Bus session environment:
+
+```sh
+# Run inside the Space, after verifying the copied artifact's checksum.
+mkdir -p "$HOME/Octant-validation/data"
+chmod 700 "$HOME/Octant-validation/data"
+APPIMAGE_EXTRACT_AND_RUN=1 \
+  OCTANT_DATA_DIR="$HOME/Octant-validation/data" \
+  OCTANT_SERVER_PORT=14790 \
+  "$HOME/Octant-0.1.0-linux-x64.AppImage"
+```
+
+Use the actual filename for your build. The extraction option avoids a FUSE
+mount; it does not disable Chromium's sandbox. Do not copy host credentials or
+mount host directories for this launch check. No SUID helper installation is
+needed on the tested Space. A direct host installation remains a separate
+administrator-reviewed configuration; this recipe does not authorize an
+AppArmor exception for home or temporary paths.
+
+Verify more than a visible window. For the real renderer PID, `/proc/<pid>/status`
+must show `NoNewPrivs: 1`, `Seccomp: 2`, zero effective capabilities, and a
+Chromium seccomp filter in addition to any container filter. Its user, PID, and
+network namespace identities under `/proc/<pid>/ns/` must differ from the main
+Electron process. Confirm `--enable-sandbox` on the renderer and no
+`--no-sandbox` or `--disable-setuid-sandbox` on the launch or renderer. Chromium
+may also create a separate `--no-zygote-sandbox` zygote for utility processes;
+that is not the renderer sandbox verdict. Test a UI interaction and host health.
+
+This check passed on 19 October 2026 with Electron 43.7.11 and the AppImage built
+from commit `608e44553ab4ea670356d3a65255a1bff9e1da3e`. The renderer had two
+seccomp filters versus the main process's one, distinct namespaces, and no
+effective capabilities. The existing rootless runtime's AppArmor label was
+`crun (unconfined)`; no new profile or exception was added. The host's
+`kernel.apparmor_restrict_unprivileged_userns=1` stayed enabled. The same artifact
+refused direct launch on the Ubuntu host because no usable Chromium sandbox was
+available. These results cover desktop launch, not provider, credential, or
+Work/Code confinement acceptance. Quit this isolated app to stop the test;
+preserve its data until cleanup is explicitly authorized.
+
 ## Requirements
 
 - **x64 Linux.** Ubuntu is the tested distribution.
