@@ -138,7 +138,12 @@ function destroyNativeObject(value: object | undefined): void {
 export async function computerUsePermissions(request: boolean = false) {
   if (process.platform !== "darwin") return { accessibility: false, screenRecording: false };
   const sdk = await import("@trycua/cua-driver");
-  return request ? sdk.requestMacOsPermissions() : sdk.currentMacOsPermissionStatus();
+  if (!request) return sdk.currentMacOsPermissionStatus();
+  const permissions = sdk.requestMacOsPermissions();
+  // macOS can refuse without showing another prompt; the person must then
+  // enable the installed app in System Settings, as the SDK recommends.
+  if (!permissions.screenRecording) await openComputerUsePermissionSettings();
+  return permissions;
 }
 
 export async function openComputerUsePermissionSettings(): Promise<void> {

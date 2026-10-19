@@ -172,8 +172,12 @@ mentions a computer does not enable the tool.
 
 Open **Settings → Computer use** to enable the plugin, set up Accessibility
 and Screen Recording permissions, and check the installed CuaDriver version.
-macOS may require you to relaunch Octant after changing permissions. Each task
-asks before accessing an application; **Allow app for 5 minutes** grants that
+**Set up permissions** asks macOS for access and opens Screen Recording settings
+if access is still missing. macOS may not show another permission prompt. Enable
+Octant there; if it is absent, use **+** to add the installed Octant app. Relaunch
+Octant after changing permissions, then choose **Recheck**. Recheck reads the
+current state without requesting access. Each task asks before accessing an
+application; **Allow app for 5 minutes** grants that
 task temporary access. Plan mode, remote clients, unavailable permissions,
 and unsupported provider transports refuse control.
 
