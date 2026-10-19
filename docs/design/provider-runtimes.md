@@ -19,7 +19,9 @@ tokens and the usual estimate/unpriced treatment; their spend is not charged
 again on resume.
 
 A missing, invalid, or timed-out baseline, a falling total, or overlapping
-prompts leaves provider cost absent. The ordinary token-based estimate or
+prompts leaves provider cost absent. After a missing or timed-out control answer,
+the query stops requesting snapshots so later prompts do not repeat the wait.
+A new query tries again. The ordinary token-based estimate or
 unknown-spend rules still apply; no cumulative total is presented as a turn's
 cost. This control adds no credential-file access or confinement exception.
 

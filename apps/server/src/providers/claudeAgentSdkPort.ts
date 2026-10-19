@@ -756,6 +756,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           let query: ClaudeAgentSdkQueryLike | undefined;
           let initializedSessionId: string | undefined;
           let costBaseline: number | undefined;
+          let costSnapshotUnavailable = false;
           let pendingCostInputs = 0;
           let managedServer:
             | import("@modelcontextprotocol/sdk/server/mcp.js").McpServer
@@ -1169,9 +1170,12 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                   const separateCostWindow = pendingCostInputs === 0;
                   pendingCostInputs += 1;
                   costBaseline = undefined;
-                  const total = object(
-                    object(query === undefined ? undefined : await askPlanUsage(query))?.session,
-                  )?.total_cost_usd;
+                  const snapshot =
+                    query === undefined || costSnapshotUnavailable
+                      ? undefined
+                      : await askPlanUsage(query);
+                  if (snapshot === undefined) costSnapshotUnavailable = true;
+                  const total = object(object(snapshot)?.session)?.total_cost_usd;
                   if (
                     separateCostWindow &&
                     pendingCostInputs === 1 &&

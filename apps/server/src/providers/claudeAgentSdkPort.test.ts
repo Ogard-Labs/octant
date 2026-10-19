@@ -1570,6 +1570,33 @@ describe("Claude Agent SDK port", () => {
     expect(results[1]).not.toHaveProperty("costUsd");
   });
 
+  test("stops waiting for cost snapshots after the control fails to answer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const harness = makeHarness();
+      const snapshot = vi.fn(() => new Promise<unknown>(() => undefined));
+      harness.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = snapshot;
+      const sent = Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const query = yield* harness.port.openQuery(openInput);
+            yield* query.send({ text: "First" });
+            if (harness.invocation === undefined) throw new Error("missing query");
+            const input = harness.invocation.prompt[Symbol.asyncIterator]();
+            yield* Effect.promise(() => input.next());
+            yield* query.send({ text: "Second" });
+            return yield* Effect.promise(() => input.next());
+          }),
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect((await sent).value?.message.content).toBe("Second");
+      expect(snapshot).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("refreshes the cost baseline for each persistent turn after a failed result", async () => {
     const harness = makeHarness();
     let total = 0.08;
