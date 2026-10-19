@@ -76,23 +76,35 @@ export function usePlanController(options: UsePlanControllerOptions): PlanContro
     }
     const controller = new AbortController();
     setStatus("loading");
+    let updated = false;
+    const unsubscribe = client.subscribeUpdates?.((projection) => {
+      if (generation.current !== operation || String(projection.plan.threadId) !== threadId) return;
+      updated = true;
+      currentPlan.current = projection.plan;
+      setPlan(projection.plan);
+      setHistory(projection.history);
+      setStatus("ready");
+    });
     void client
       .read(threadId, controller.signal)
       .then((projection) => {
-        if (generation.current !== operation) return;
+        if (generation.current !== operation || updated) return;
         currentPlan.current = projection.plan;
         setPlan(projection.plan);
         setHistory(projection.history);
         setStatus("ready");
       })
       .catch((error: unknown) => {
-        if (generation.current !== operation) return;
+        if (generation.current !== operation || updated) return;
         currentPlan.current = null;
         setPlan(null);
         setHistory([]);
         setStatus(classify(error));
       });
-    return () => controller.abort();
+    return () => {
+      unsubscribe?.();
+      controller.abort();
+    };
   }, [client, enabled, threadId, reloadToken]);
 
   const mintId = useCallback(

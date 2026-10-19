@@ -22,6 +22,8 @@ export interface ThreadPlanProjection {
 export interface PlanClient {
   read(threadId: string, signal?: AbortSignal): Promise<ThreadPlanProjection>;
   execute(command: ThreadPlanCommand, signal?: AbortSignal): Promise<ThreadPlanUpdated>;
+  /** Accepted commands from this window's client, not a host event stream. */
+  subscribeUpdates?(listener: (projection: ThreadPlanUpdated) => void): () => void;
 }
 
 /**
@@ -57,8 +59,15 @@ export class PlanClientFailure extends Error {
 export function createPlanClient(options: PlanClientOptions): PlanClient {
   validateLoopbackBaseUrl(options.baseUrl);
   const fetch = bindFetchPort(options.fetch);
+  const listeners = new Set<(projection: ThreadPlanUpdated) => void>();
 
   return {
+    subscribeUpdates(listener) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     async read(threadId, signal) {
       const url = new URL("/api/plans", options.baseUrl);
       url.searchParams.set("threadId", threadId);
@@ -95,7 +104,9 @@ export function createPlanClient(options: PlanClientOptions): PlanClient {
         },
         "Plan command failed.",
       );
-      return decodeHostAnswer(ThreadPlanUpdated)(body);
+      const projection = decodeHostAnswer(ThreadPlanUpdated)(body);
+      for (const listener of listeners) listener(projection);
+      return projection;
     },
   };
 }
