@@ -574,6 +574,10 @@ turns are refused until you sign in again and allow plan access. When the
 plan's usage limit is reached, the failure links to ChatGPT's usage settings
 (`https://chatgpt.com/settings/usage`).
 
+Plan replies can finish without repeating their content in the final stream
+event. Octant uses the completed streamed items and records the reported usage;
+missing item completions or contradictory content still fail the turn.
+
 **Check now** lists the models the plan route reports, with their names,
 context windows, and image input when the route gives them. When it cannot get
 a model list from the route, the row says **No models yet** in words instead of reporting an

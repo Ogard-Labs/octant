@@ -1670,21 +1670,118 @@ describe("sendResponsesTurn", () => {
     },
   );
 
-  it("accepts realistic terminal output that reconciles message and reasoning items", async () => {
-    const messageItem = {
-      id: "msg-a",
-      type: "message",
-      role: "assistant",
-      status: "completed",
-      content: [{ type: "output_text", text: "hello", annotations: [] }],
-    };
-    const reasoningItem = {
-      id: "reason-a",
-      type: "reasoning",
-      status: "completed",
-      summary: [{ type: "summary_text", text: "Think" }],
-      content: [],
-    };
+  it.each([undefined, "chatgpt-plan"] as const)(
+    "reconciles completed message and reasoning items under profile %s",
+    async (profile) => {
+      const messageItem = {
+        id: "msg-a",
+        type: "message",
+        role: "assistant",
+        status: "completed",
+        content: [{ type: "output_text", text: "hello", annotations: [] }],
+      };
+      const reasoningItem = {
+        id: "reason-a",
+        type: "reasoning",
+        status: "completed",
+        summary: [{ type: "summary_text", text: "Think" }],
+        content: [],
+      };
+      const fetch = vi.fn(async () =>
+        sse(
+          created(1),
+          {
+            type: "response.output_text.delta",
+            sequence_number: 2,
+            item_id: "msg-a",
+            output_index: 0,
+            content_index: 0,
+            delta: "hello",
+            logprobs: [],
+          },
+          {
+            type: "response.output_item.done",
+            sequence_number: 3,
+            output_index: 0,
+            item: messageItem,
+          },
+          {
+            type: "response.reasoning_summary_text.delta",
+            sequence_number: 4,
+            item_id: "reason-a",
+            output_index: 1,
+            summary_index: 0,
+            delta: "Think",
+          },
+          {
+            type: "response.output_item.done",
+            sequence_number: 5,
+            output_index: 1,
+            item: reasoningItem,
+          },
+          {
+            ...completed(6),
+            response: {
+              ...responseState("completed", {
+                input_tokens: 7,
+                output_tokens: 5,
+                total_tokens: 12,
+              }),
+              output: profile === "chatgpt-plan" ? [] : [messageItem, reasoningItem],
+            },
+          },
+        ),
+      );
+
+      const result = await Effect.runPromise(sendResponsesTurn(input(fetch, { profile })));
+
+      expect(result).toMatchObject({
+        text: "hello",
+        reasoning: "Think",
+        terminal: "completed",
+        usage: { inputTokens: 7, outputTokens: 5 },
+      });
+    },
+  );
+
+  it.each([
+    {
+      name: "an empty terminal array outside the plan profile",
+      profile: undefined,
+      done: true,
+      text: "hello",
+      output: [],
+    },
+    {
+      name: "a plan stream without item completion",
+      profile: "chatgpt-plan",
+      done: false,
+      text: "hello",
+      output: [],
+    },
+    {
+      name: "a plan item contradicting its streamed text",
+      profile: "chatgpt-plan",
+      done: true,
+      text: "different",
+      output: [],
+    },
+    {
+      name: "a nonempty plan terminal array with a different item",
+      profile: "chatgpt-plan",
+      done: true,
+      text: "hello",
+      output: [
+        {
+          id: "other",
+          type: "message",
+          role: "assistant",
+          status: "completed",
+          content: [{ type: "output_text", text: "hello", annotations: [] }],
+        },
+      ],
+    },
+  ] as const)("refuses $name", async ({ profile, done, text, output }) => {
     const fetch = vi.fn(async () =>
       sse(
         created(1),
@@ -1697,40 +1794,70 @@ describe("sendResponsesTurn", () => {
           delta: "hello",
           logprobs: [],
         },
-        {
-          type: "response.output_item.done",
-          sequence_number: 3,
-          output_index: 0,
-          item: messageItem,
-        },
-        {
-          type: "response.reasoning_summary_text.delta",
-          sequence_number: 4,
-          item_id: "reason-a",
-          output_index: 1,
-          summary_index: 0,
-          delta: "Think",
-        },
-        {
-          type: "response.output_item.done",
-          sequence_number: 5,
-          output_index: 1,
-          item: reasoningItem,
-        },
-        {
-          ...completed(6),
-          response: {
-            ...responseState("completed"),
-            output: [messageItem, reasoningItem],
-          },
-        },
+        ...(done
+          ? [
+              {
+                type: "response.output_item.done",
+                sequence_number: 3,
+                output_index: 0,
+                item: {
+                  id: "msg-a",
+                  type: "message",
+                  role: "assistant",
+                  status: "completed",
+                  content: [{ type: "output_text", text, annotations: [] }],
+                },
+              },
+            ]
+          : []),
+        { ...completed(4), response: { ...responseState("completed"), output } },
       ),
     );
-
-    const result = await Effect.runPromise(sendResponsesTurn(input(fetch)));
-
-    expect(result).toMatchObject({ text: "hello", reasoning: "Think", terminal: "completed" });
+    expect(await failureOf(sendResponsesTurn(input(fetch, { profile })))).toMatchObject({
+      category: "protocol",
+    });
   });
+
+  it.each([[1], [0, 0]])(
+    "refuses plan output slots %j even when every item completed",
+    async (...indices) => {
+      const events: Record<string, unknown>[] = [created(0)];
+      for (const [index, outputIndex] of indices.entries()) {
+        const id = `message-${index}`;
+        events.push(
+          {
+            type: "response.output_text.delta",
+            sequence_number: events.length,
+            item_id: id,
+            output_index: outputIndex,
+            content_index: 0,
+            delta: "hello",
+            logprobs: [],
+          },
+          {
+            type: "response.output_item.done",
+            sequence_number: events.length + 1,
+            output_index: outputIndex,
+            item: {
+              id,
+              type: "message",
+              role: "assistant",
+              status: "completed",
+              content: [{ type: "output_text", text: "hello", annotations: [] }],
+            },
+          },
+        );
+      }
+      events.push({
+        ...completed(events.length),
+        response: { ...responseState("completed"), output: [] },
+      });
+      const fetch = vi.fn(async () => sse(...events));
+      expect(
+        await failureOf(sendResponsesTurn(input(fetch, { profile: "chatgpt-plan" }))),
+      ).toMatchObject({ category: "protocol" });
+    },
+  );
 
   it("reads cached, cache-write, and reasoning tokens from the completed response", async () => {
     const observed = vi.fn();

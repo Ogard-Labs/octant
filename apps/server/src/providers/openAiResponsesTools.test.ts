@@ -144,58 +144,67 @@ const echoTool: ProviderToolDefinition = {
 };
 
 describe("sendResponsesTurn tool calls", () => {
-  it("parses a single structured function call into a correlated tool-call event and tool-calls terminal", async () => {
-    const observed: ProtocolTurnEvent[] = [];
-    const fetch = vi.fn(async () =>
-      sse(
-        created(1),
-        functionCallAdded(2, {
-          id: "fc_private",
-          type: "function_call",
-          status: "in_progress",
-          call_id: "call_abc",
-          name: "octant_capability_echo",
-          arguments: "",
-        }),
-        argumentsDelta(3, "fc_private", '{"echo":"'),
-        argumentsDelta(4, "fc_private", 'hello"}'),
-        functionCallDone(
-          5,
-          functionCallItem("call_abc", "octant_capability_echo", '{"echo":"hello"}'),
+  it.each([undefined, "chatgpt-plan"] as const)(
+    "completes a correlated function call under profile %s",
+    async (profile) => {
+      const observed: ProtocolTurnEvent[] = [];
+      const fetch = vi.fn(async () =>
+        sse(
+          created(1),
+          functionCallAdded(2, {
+            id: "fc_private",
+            type: "function_call",
+            status: "in_progress",
+            call_id: "call_abc",
+            name: "octant_capability_echo",
+            arguments: "",
+          }),
+          argumentsDelta(3, "fc_private", '{"echo":"'),
+          argumentsDelta(4, "fc_private", 'hello"}'),
+          functionCallDone(
+            5,
+            functionCallItem("call_abc", "octant_capability_echo", '{"echo":"hello"}'),
+          ),
+          completed(
+            6,
+            profile === "chatgpt-plan"
+              ? []
+              : [functionCallItem("call_abc", "octant_capability_echo", '{"echo":"hello"}')],
+            {
+              input_tokens: 4,
+              output_tokens: 3,
+              total_tokens: 7,
+            },
+          ),
         ),
-        completed(6, [functionCallItem("call_abc", "octant_capability_echo", '{"echo":"hello"}')], {
-          input_tokens: 4,
-          output_tokens: 3,
-          total_tokens: 7,
+      );
+
+      const result = await Effect.runPromise(
+        sendResponsesTurn({
+          ...input(fetch, { profile }),
+          tools: [echoTool],
+          onEvent: (event) => observed.push(event),
         }),
-      ),
-    );
+      );
 
-    const result = await Effect.runPromise(
-      sendResponsesTurn({
-        ...input(fetch),
-        tools: [echoTool],
-        onEvent: (event) => observed.push(event),
-      }),
-    );
-
-    expect(result.terminal).toBe("tool-calls");
-    expect(result.toolCalls).toEqual<ProtocolToolCall[]>([
-      {
+      expect(result.terminal).toBe("tool-calls");
+      expect(result.toolCalls).toEqual<ProtocolToolCall[]>([
+        {
+          toolCallId: "call_abc",
+          toolName: "octant_capability_echo",
+          argumentsJson: '{"echo":"hello"}',
+        },
+      ]);
+      const toolCallEvent = observed.find((event) => event.kind === "tool-call");
+      expect(toolCallEvent).toBeDefined();
+      expect(toolCallEvent).toMatchObject({
+        kind: "tool-call",
         toolCallId: "call_abc",
         toolName: "octant_capability_echo",
         argumentsJson: '{"echo":"hello"}',
-      },
-    ]);
-    const toolCallEvent = observed.find((event) => event.kind === "tool-call");
-    expect(toolCallEvent).toBeDefined();
-    expect(toolCallEvent).toMatchObject({
-      kind: "tool-call",
-      toolCallId: "call_abc",
-      toolName: "octant_capability_echo",
-      argumentsJson: '{"echo":"hello"}',
-    });
-  });
+      });
+    },
+  );
 
   it("emits the tool-call event only after the function call item completes with valid bounded JSON", async () => {
     const observed: ProtocolTurnEvent[] = [];
