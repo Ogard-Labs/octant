@@ -446,7 +446,9 @@ Chat thread). A Code thread keeps its conversation from one run of
 newest 50 turns. `--model <model>` picks the
 model for a new thread. Chat can select a configured CLI account or endpoint;
 Work and Code select a harness endpoint. Use `endpoint/model` when two
-accounts or endpoints offer the same model id. Unknown or ambiguous names
+accounts or endpoints offer the same model id. On a cold host, Chat waits for
+configured providers that have not finished discovery before resolving the name.
+Unknown or ambiguous names
 are refused before inference and list the available choices. Give accounts
 distinct labels if their qualified names collide. `--model` cannot be combined
 with `--thread` or `--last`; change an existing thread through its model picker.

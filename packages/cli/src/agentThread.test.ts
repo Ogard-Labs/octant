@@ -202,7 +202,15 @@ const chatThread = {
 };
 
 /** A host that holds one Chat thread and no Projects, and records the shell commands it is sent. */
-function chatHost(options: { duplicateNames?: boolean; refuseSelection?: boolean } = {}) {
+function chatHost(
+  options: {
+    duplicateNames?: boolean;
+    refuseSelection?: boolean;
+    cold?: boolean;
+    refuseProbe?: boolean;
+  } = {},
+) {
+  const probed: string[] = [];
   const commands: unknown[] = [];
   const accountIds = [ids.provider, "50000000-0000-4000-8000-000000000002"];
   const shell: Array<{ mode: string; kind: string }> = [];
@@ -235,12 +243,21 @@ function chatHost(options: { duplicateNames?: boolean; refuseSelection?: boolean
               displayName: options.duplicateNames || index === 0 ? "Subscription" : "API",
               configuration: { kind: "codex-cli", binaryPath: "codex" },
             })),
-            observedStates: accountIds.map((instanceId) => ({
-              ...providers.observedStates[0],
-              instanceId,
-            })),
+            observedStates: options.cold
+              ? []
+              : accountIds.map((instanceId) => ({
+                  ...providers.observedStates[0],
+                  instanceId,
+                })),
           },
         };
+      }
+      if (request.path.endsWith("/probe") && request.method === "POST") {
+        const instanceId = request.path.split("/")[3];
+        probed.push(instanceId!);
+        return options.refuseProbe
+          ? { status: 503, body: { message: "Provider discovery is unavailable." } }
+          : { status: 200, body: { ...providers.observedStates[0], instanceId } };
       }
       if (request.path === "/api/chat/commands") {
         commands.push(request.body);
@@ -271,10 +288,52 @@ function chatHost(options: { duplicateNames?: boolean; refuseSelection?: boolean
     },
     close: async () => undefined,
   };
-  return { session, shell, commands };
+  return { session, shell, commands, probed };
 }
 
 describe("a Chat thread in the terminal's window", () => {
+  it("waits for cold provider discovery before selecting an account", async () => {
+    const fake = chatHost({ cold: true });
+    expect(
+      await createAgentThread(fake.session, {
+        mode: "chat",
+        title: "Cold account",
+        model: "API/loopback-model",
+      }),
+    ).toMatchObject({ kind: "created" });
+    expect(fake.probed).toHaveLength(2);
+    expect(fake.commands.at(-1)).toMatchObject({
+      kind: "change-chat-provider",
+      providerInstanceId: "50000000-0000-4000-8000-000000000002",
+    });
+  });
+
+  it("refuses a model shared by accounts after cold discovery", async () => {
+    const fake = chatHost({ cold: true });
+    expect(
+      await createAgentThread(fake.session, {
+        mode: "chat",
+        title: "Ambiguous cold account",
+        model: "loopback-model",
+      }),
+    ).toMatchObject({ kind: "refused" });
+    expect(fake.probed).toHaveLength(2);
+    expect(fake.commands).toEqual([]);
+  });
+
+  it("does not create a thread when cold discovery fails", async () => {
+    const fake = chatHost({ cold: true, refuseProbe: true });
+    expect(
+      await createAgentThread(fake.session, {
+        mode: "chat",
+        title: "Unavailable cold account",
+        model: "API/loopback-model",
+      }),
+    ).toMatchObject({ kind: "refused" });
+    expect(fake.probed.length).toBeGreaterThan(0);
+    expect(fake.commands).toEqual([]);
+  });
+
   it("selects the requested CLI account before returning a new Chat thread", async () => {
     const fake = chatHost();
     expect(

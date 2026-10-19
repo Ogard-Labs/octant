@@ -20,6 +20,7 @@ import {
   ChatNavigation,
   ChatAttachment,
   ProviderRegistrySnapshot,
+  ProviderProbeResult,
   NativeHarnessSteeringTaken,
   ThreadMentionCommandResult,
   decodeHostAnswer,
@@ -545,13 +546,36 @@ export async function listAgentModels(
   const response = await session.send({ path: "/api/providers/bootstrap", method: "GET" });
   if (response.status !== 200) return [];
   const snapshot = decodeHostAnswer(ProviderRegistrySnapshot)(response.body);
-  const choices: AgentModelChoice[] = [];
-  for (const instance of snapshot.instances) {
-    if (!instance.enabled || isImageProfileDriverKind(instance.driverKind)) continue;
-    if (scope === "harness" && !isNativeHarnessDriverKind(instance.driverKind)) continue;
-    const observed = snapshot.observedStates.find(
-      (state) => String(state.instanceId) === String(instance.id),
+  const instances = snapshot.instances.filter(
+    (instance) =>
+      instance.enabled &&
+      !isImageProfileDriverKind(instance.driverKind) &&
+      (scope === "chat" || isNativeHarnessDriverKind(instance.driverKind)),
+  );
+  const observations = [...snapshot.observedStates];
+  if (scope === "chat") {
+    // The listener starts before provider warming finishes. Join the host's
+    // deduplicated probes so missing cold observations cannot hide a match or
+    // make a model shared by two accounts appear unique.
+    const pending = instances.filter(
+      (instance) => !observations.some((state) => String(state.instanceId) === String(instance.id)),
     );
+    const results = await Promise.all(
+      pending.map((instance) =>
+        session.send({
+          path: `/api/providers/${encodeURIComponent(String(instance.id))}/probe`,
+          method: "POST",
+          body: {},
+        }),
+      ),
+    );
+    if (results.some((result) => result.status !== 200)) return [];
+    for (const result of results)
+      observations.push(decodeHostAnswer(ProviderProbeResult)(result.body));
+  }
+  const choices: AgentModelChoice[] = [];
+  for (const instance of instances) {
+    const observed = observations.find((state) => String(state.instanceId) === String(instance.id));
     for (const model of observed?.models ?? []) {
       choices.push({
         instanceId: String(instance.id),
