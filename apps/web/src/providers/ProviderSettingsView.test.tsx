@@ -1230,6 +1230,39 @@ describe("ProviderSettingsView", () => {
     expect(card.textContent).not.toMatch(/official Claude Code|Claude subscription login/i);
   });
 
+  it("keeps host-local key setup available on an existing browser Claude profile", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: claudeProvider("api-key"),
+          credentialManagementAvailable: false,
+          observed: observation({ readiness: "unauthenticated", credentialStatus: "missing" }),
+        })}
+      />,
+    );
+    const card = screen.getByRole("article", { name: "Claude local" });
+    expect(within(card).getByText(/octant provider key set/)).toBeVisible();
+    expect(within(card).getByText(/using this profile.s exact name/)).toBeVisible();
+    expect(within(card).getByText(/On macOS, open this profile in Octant desktop/)).toBeVisible();
+    expect(within(card).queryByText(/Manage API keys in the Octant host app/)).toBeNull();
+    expect(within(card).getByLabelText("Anthropic API key for Claude local")).toBeDisabled();
+  });
+
+  it("keeps runtime incompatibility details beside browser Claude key setup", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: claudeProvider("api-key"),
+          credentialManagementAvailable: false,
+          observed: observation({ readiness: "incompatible", credentialStatus: "stored" }),
+        })}
+      />,
+    );
+    const card = screen.getByRole("article", { name: "Claude local" });
+    expect(within(card).getByText(/octant provider key set/)).toBeVisible();
+    expect(within(card).getByLabelText("Incompatibility details")).toBeVisible();
+  });
+
   it("updates the Claude sign-in command while the binary path is being edited", async () => {
     const user = userEvent.setup();
     const props = fixture({
@@ -1360,7 +1393,7 @@ describe("ProviderSettingsView", () => {
     card = screen.getByRole("article", { name: "Claude local" });
     expect(within(card).getByLabelText("Anthropic API key for Claude local")).toBeDisabled();
     expect(within(card).getByRole("button", { name: "Remove Claude local" })).toBeDisabled();
-    expect(within(card).getByText(/Manage credentials in the Octant host app/)).toBeVisible();
+    expect(within(card).getByText(/octant provider key set/)).toBeVisible();
   });
 
   it("shows semantic provider state and never renders runtime secrets or addresses", async () => {
