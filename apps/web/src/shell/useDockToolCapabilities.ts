@@ -58,16 +58,23 @@ export function useDockToolCapabilities(
       };
     }
     setPlan({ threadId, value: "unknown" });
+    let updated = false;
+    const unsubscribe = planClient.subscribeUpdates?.((projection) => {
+      if (!alive || String(projection.plan.threadId) !== threadId) return;
+      updated = true;
+      setPlan({ threadId, value: isCurrentPlanArtifact(projection.plan) });
+    });
     void planClient
       .read(threadId)
       .then((projection) => {
-        if (alive) setPlan({ threadId, value: isCurrentPlanArtifact(projection.plan) });
+        if (alive && !updated) setPlan({ threadId, value: isCurrentPlanArtifact(projection.plan) });
       })
       .catch(() => {
-        if (alive) setPlan({ threadId, value: false });
+        if (alive && !updated) setPlan({ threadId, value: false });
       });
     return () => {
       alive = false;
+      unsubscribe?.();
     };
   }, [enabled, planClient, threadId]);
 

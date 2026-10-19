@@ -6,7 +6,7 @@ import {
   decodeCodeRelativePath,
   type CodeApprovalId,
 } from "@octant/contracts/code";
-import type { PlanClient } from "@octant/client-runtime/plan-client";
+import { PlanClientFailure, type PlanClient } from "@octant/client-runtime/plan-client";
 import type { CodeBoardCard, CodeBoardView, ThreadPlan } from "@octant/contracts";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -30,6 +30,87 @@ const modelId = "model-one" as never;
 const mentionedThreadId = "90000000-0000-4000-8000-000000000001" as never;
 const alternateProviderId = "80000000-0000-4000-8000-0000000000a2" as never;
 const alternateModelId = "model-two" as never;
+
+describe("Code plan proposals", () => {
+  it.each([0, 503])(
+    "keeps plan retry reachable after an initial read fails with %s",
+    async (status) => {
+      const retry = Promise.withResolvers<Awaited<ReturnType<PlanClient["read"]>>>();
+      const read = vi
+        .fn<PlanClient["read"]>()
+        .mockRejectedValueOnce(new PlanClientFailure("Plan read failed", status))
+        .mockImplementationOnce(() => retry.promise);
+      const client: PlanClient = { read, execute: vi.fn() };
+      const user = userEvent.setup();
+      render(
+        <ThreadPlanProvider client={client} threadId={String(threadId)}>
+          <CodeThreadWorkspace controller={controller()} threadId={threadId} />
+        </ThreadPlanProvider>,
+      );
+
+      await user.click(await screen.findByRole("button", { name: "Propose plan" }));
+      const dialog = await screen.findByRole("dialog", { name: "Propose plan" });
+      expect(within(dialog).queryByRole("textbox", { name: "Plan title" })).not.toBeInTheDocument();
+      await user.click(within(dialog).getByRole("button", { name: "Retry" }));
+      expect(screen.getByRole("dialog", { name: "Propose plan" })).toBe(dialog);
+      expect(within(dialog).queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+      await act(async () => retry.resolve({ plan: null, history: [] }));
+      expect(await within(dialog).findByRole("textbox", { name: "Plan title" })).toBeVisible();
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(client.execute).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["missing", "withdrawn"])(
+    "opens a first-plan form for a %s plan without starting a turn",
+    async (state) => {
+      const { approvedRevisionId: _approved, ...previous } = approvedPlan();
+      const proposed = { ...previous, status: "proposed" as const, title: "Review the change" };
+      const execute = vi.fn(async () => ({ plan: proposed, history: [] }));
+      const client: PlanClient = {
+        read: vi.fn(async () => ({
+          plan: state === "missing" ? null : { ...previous, status: "withdrawn" as const },
+          history: [],
+        })),
+        execute,
+      };
+      const code = controller();
+      const user = userEvent.setup();
+      render(
+        <ThreadPlanProvider client={client} threadId={String(threadId)}>
+          <CodeThreadWorkspace controller={code} threadId={threadId} />
+        </ThreadPlanProvider>,
+      );
+
+      const entry = await screen.findByRole("button", { name: "Propose plan" });
+      entry.focus();
+      await user.keyboard("{Enter}");
+      await screen.findByRole("dialog", { name: "Propose plan" });
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(entry).toHaveFocus();
+      await user.keyboard("{Enter}");
+      const dialog = await screen.findByRole("dialog", { name: "Propose plan" });
+      await user.type(
+        within(dialog).getByRole("textbox", { name: "Plan title" }),
+        "Review the change",
+      );
+      await user.type(
+        within(dialog).getByRole("textbox", { name: "Plan steps" }),
+        "Read the diff\nCheck the result",
+      );
+      await user.click(within(dialog).getByRole("button", { name: "Propose plan" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(execute).toHaveBeenCalledOnce();
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "propose-thread-plan", title: "Review the change" }),
+      );
+      expect(code.sendFollowUp).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
+    },
+  );
+});
 
 describe("Code host queue", () => {
   it.each(["mention resolution", "queue acknowledgment"] as const)(

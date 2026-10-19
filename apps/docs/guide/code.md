@@ -84,12 +84,14 @@ cut. Checkout paths, credentials, and raw provider payloads never appear.
 ## Plans
 
 A Code thread's plan is a durable, ordered list of steps, not prose in the
-transcript. Write one in the thread's **Plan** panel — one step per line, with
-an optional reason after an em dash — and press **Propose plan**. It appears
+transcript. Choose **Propose plan** beside the composer's attachment controls
+to open the plan form. Write one step per line, with an optional reason after
+an em dash, and press **Propose plan**. It appears
 beside the transcript as well, so it stays in view while you read the thread.
 
 The right dock's Plan tool appears only when this thread already has a current
-plan artifact. Proposal stays the thread's planning workflow; the dock does not
+plan artifact. The composer offers a new proposal when no current plan exists,
+including after withdrawal; the dock does not
 show an empty Propose plan form.
 
 A plan starts **Proposed · not approved**. Nothing about it is work yet: the

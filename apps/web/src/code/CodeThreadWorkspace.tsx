@@ -60,6 +60,7 @@ import { TrackerReferenceText } from "../tracker/TrackerReferenceText";
 import { ChildResultCards } from "../agents/ChildResultCards";
 import { isChildResultDelivery } from "../agents/childResultDelivery";
 import { InlineThreadPlan } from "../plan/InlineThreadPlan";
+import { ThreadPlanProposal } from "../plan/ThreadPlanProposal";
 import { useThreadPlan } from "../plan/ThreadPlanContext";
 import type { ThreadTaskChangedFiles } from "../plan/ThreadTaskViewer";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
@@ -2038,6 +2039,9 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   props.controller.setPendingDraft?.(next, next.length);
                 }}
               />
+              {plan == null || plan.status === "withdrawn" ? (
+                <ThreadPlanProposal key={String(thread.id)} />
+              ) : null}
               {/* Two groups with space between: what the person adds sits left,
                   how the turn runs sits right beside send. The model used to
                   hug the attach button, so it jumped sides between a new task

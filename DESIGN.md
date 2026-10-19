@@ -1474,6 +1474,12 @@ or `Step n / total`, and opens a popover with title, step states, evidence, and
 start/finish/reopen/drop actions when approved. It must not invent progress from
 assistant prose or display an empty plan form.
 
+A Code thread without a current journaled plan offers Propose plan beside the
+composer's attachment controls. It opens the existing plan form in a labeled
+dialog, with keyboard focus restored on cancellation. Submission records a
+proposed artifact and does not approve it or change execution access. The
+entry returns after withdrawal; the dock stays artifact-only.
+
 The provider's recorded task list is a separate, initially collapsed group. Its
 header keeps completed/total progress and failed or waiting counts visible while
 folded. An unfinished list after a settled turn says Incomplete; it does not
