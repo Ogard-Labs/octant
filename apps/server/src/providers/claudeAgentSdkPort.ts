@@ -451,6 +451,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly sessionId?: string;
   readonly permissionMode: ClaudePermissionMode;
   readonly allowDangerouslySkipPermissions?: true;
+  readonly settings?: { readonly availableModels: readonly string[] };
   readonly settingSources: readonly [];
   readonly skills: readonly [];
   readonly mcpServers: Readonly<Record<string, never>>;
@@ -677,9 +678,12 @@ function requestsUnavailableBackgroundTool(toolName: unknown, input: unknown): b
 function liveBridge(): ClaudeAgentSdkBridge {
   return {
     query: (invocation) => {
-      const { sandbox, ...baseOptions } = invocation.options;
+      const { sandbox, settings, ...baseOptions } = invocation.options;
       const options: ClaudeSdkOptions = {
         ...baseOptions,
+        ...(settings === undefined
+          ? {}
+          : { settings: { availableModels: [...settings.availableModels] } }),
         settingSources: [...invocation.options.settingSources],
         skills: [...invocation.options.skills],
         mcpServers: { ...invocation.options.mcpServers },
@@ -901,6 +905,12 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               cwd: input.projectRoot,
               env: { ...input.authEnvironment, MCP_TOOL_TIMEOUT: "660000" },
               model: input.model,
+              // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is
+              // excluded. Keep the explicit selection local to this query.
+              ...(input.executionPolicy === "plan" &&
+              (input.model === "haiku" || input.model.startsWith("claude-haiku-"))
+                ? { settings: { availableModels: [input.model] } }
+                : {}),
               ...(input.effort === undefined ? {} : { effort: input.effort }),
               pathToClaudeCodeExecutable: input.binaryPath,
               ...(input.resumeSessionId === undefined ? {} : { resume: input.resumeSessionId }),

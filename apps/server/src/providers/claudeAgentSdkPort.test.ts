@@ -401,6 +401,51 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
+  test.each([
+    ["haiku", undefined],
+    ["haiku", "session-1"],
+    ["claude-haiku-5-5", "session-1"],
+  ] as const)(
+    "keeps selected %s available without a Plan upgrade on resume %s",
+    async (model, resumeSessionId) => {
+      const harness = makeHarness();
+      const { sandbox: _sandbox, resumeSessionId: _resume, ...planInput } = openInput;
+      await Effect.runPromise(
+        Effect.scoped(
+          harness.port.openQuery({
+            ...planInput,
+            model,
+            executionPolicy: "plan",
+            ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
+          }),
+        ),
+      );
+      expect(harness.invocation?.options).toMatchObject({
+        model,
+        permissionMode: "plan",
+        settings: { availableModels: [model] },
+        settingSources: [],
+      });
+      expect(harness.invocation?.options).not.toHaveProperty("sandbox");
+      expect(harness.invocation?.options).not.toHaveProperty("allowDangerouslySkipPermissions");
+      expect(harness.spawnConfinements).toEqual([
+        { projectRoot: "/repo", executionPolicy: "plan", runsCommands: false },
+      ]);
+    },
+  );
+
+  test.each(["default", "sonnet", "opus"])(
+    "preserves the runtime selection policy for %s in Plan",
+    async (model) => {
+      const harness = makeHarness();
+      const { sandbox: _sandbox, ...planInput } = openInput;
+      await Effect.runPromise(
+        Effect.scoped(harness.port.openQuery({ ...planInput, model, executionPolicy: "plan" })),
+      );
+      expect(harness.invocation?.options).not.toHaveProperty("settings");
+    },
+  );
+
   test("bounds streaming input and preserves human origin without leaking SDK input types", async () => {
     const harness = makeHarness();
 
