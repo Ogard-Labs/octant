@@ -2238,6 +2238,11 @@ flowchart LR
 
 ## Providers
 
+- **CLI turn results.** The one-shot and line-mode CLI report a send refusal
+  even when it arrives during projection polling. An earlier completed turn
+  never supplies the new prompt's reply or success status. Streaming may begin
+  before send returns, but only from a newly observed turn.
+
 - **CLI model selection.** An explicit `octant agent --model` selects the
   provider account and model for a new Chat thread before its first prompt.
   Work and Code retain their harness-endpoint selection. Unknown or ambiguous

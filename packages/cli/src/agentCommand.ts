@@ -1143,8 +1143,9 @@ async function followTurn(
     if (input.signal?.aborted) return false;
     await wake.next(fallback, signal);
     if (input.signal?.aborted) return false;
-    if (sent?.kind === "refused") {
-      input.stderr.write(`${sent.message}\n`);
+    const sentAtWake = sent;
+    if (sentAtWake?.kind === "refused") {
+      input.stderr.write(`${sentAtWake.message}\n`);
       return false;
     }
     const session = await readSession(input, threadId, true);
@@ -1198,8 +1199,13 @@ async function followTurn(
       }
       current = (await port.read()) ?? current;
     }
+    // Sending can settle while the projection and approval reads are pending.
+    if (sent?.kind === "refused") {
+      input.stderr.write(`${sent.message}\n`);
+      return false;
+    }
     const turn = current.turns.at(-1);
-    if (turn?.id === before && sent === undefined) continue;
+    if (turn?.id === before) continue;
     const reply = turn?.reply ?? "";
     // The suggested follow-ups are offered as their own list, as the app does,
     // so the block that carries them is not printed with the reply. A script
