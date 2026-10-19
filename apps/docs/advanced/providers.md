@@ -29,6 +29,10 @@ an instance you can enable, disable, rename, remove, edit its binary path, run
 a non-mutating **Connection Check**, and review discovered models and
 capabilities.
 
+The binary path can be an installer's symlink, such as `~/.local/bin/claude`
+on Linux. Connection Check resolves it for the sandboxed version read, so
+you do not need to select a version-specific installation file.
+
 - **Disabling** an instance prevents new sessions while preserving its
   configuration and historical thread references.
 - **Removing** is rejected while active sessions depend on the instance.

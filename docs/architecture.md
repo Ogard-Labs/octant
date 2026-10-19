@@ -5750,7 +5750,12 @@ mechanisms are:
 - **Sandbox.** Git, terminals, test runners, extension executables, and every
   provider `--version` read launch through one shared confinement port
   (`ProcessConfinementPort`), and so do provider runtimes except where the
-  confinement matrix below says a runtime is unwrapped. On macOS that is
+  confinement matrix below says a runtime is unwrapped. Version reads preserve
+  the configured program's invocation path, including a launcher's name and
+  sibling-asset lookup, while retaining their existing install-tree read roots,
+  private scratch home, and network denial. On Linux, an executable symlink
+  already exposed by its nearest bind mount needs no redundant bind over the
+  link; its canonical target remains granted separately. On macOS that is
   `sandbox-exec` with deny-default Seatbelt profiles; on Linux it is Bubblewrap
   (`bwrap`) with private `/tmp`, bound roots, and no unconfined fallback,
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).

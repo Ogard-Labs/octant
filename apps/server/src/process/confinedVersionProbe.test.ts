@@ -94,6 +94,23 @@ describe("confined version probe", () => {
     launch.release();
   });
 
+  it("preserves a linked version executable invocation without granting more reads", () => {
+    const target = host();
+    const bin = join(target.home, ".local", "bin");
+    mkdirSync(bin, { recursive: true });
+    const linkedBinary = join(bin, "example");
+    symlinkSync(target.binaryPath, linkedBinary);
+    const launch = prepared(target, linkedBinary);
+
+    expect(launch.args.slice(-2)).toEqual([linkedBinary, "--version"]);
+    expect(launch.args[1]).not.toContain(seatbeltAllowRule("file-read*", target.home));
+    expect(launch.args[1]).toContain(
+      `(deny file-read* (subpath "${join(target.home, "credentials")}"))`,
+    );
+    expect(launch.args[1]).not.toContain("(allow network*)");
+    launch.release();
+  });
+
   it("binds no project root and grants the read nothing writable but its own scratch", () => {
     const target = host();
     const launch = prepared(target);

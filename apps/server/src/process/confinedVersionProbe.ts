@@ -125,8 +125,10 @@ export function prepareConfinedVersionProbe(
       input.guards ?? {},
     );
     const confinement = input.confinement ?? makeProcessConfinementLive();
+    const executable = safeRealpath(input.binaryPath);
     const readRoots = versionProbeReadRoots(
       input.binaryPath,
+      executable,
       scratchDirectory,
       input.homeDirectory ?? homedir(),
     );
@@ -307,15 +309,10 @@ function versionReadEnvironment(
  */
 function versionProbeReadRoots(
   binaryPath: string,
+  resolved: string,
   scratchDirectory: string,
   homeDirectory: string,
 ): ReadonlyArray<string> {
-  let resolved: string;
-  try {
-    resolved = realpathSync(binaryPath);
-  } catch {
-    resolved = binaryPath;
-  }
   const home = safeRealpath(homeDirectory);
   const dependencyTree = nodeModulesRoot(resolved);
   const candidates = [

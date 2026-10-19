@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, normalize, parse, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, normalize, parse, relative, resolve, sep } from "node:path";
 import {
   confinedExecutableExecPaths,
   ProcessConfinementError,
@@ -320,6 +320,23 @@ export function buildBubblewrapLaunch(
     input.executable,
     input.interpreterSearchPath ?? process.env.PATH,
   )) {
+    // A bound install directory already carries its launcher symlinks. Binding
+    // over one before its target is mounted can fail inside that read-only
+    // directory. Keep the link (and argv[0]) when the nearest mount exposes it;
+    // a tmpfs mask still needs the explicit executable bind below.
+    const parent = [...mounts.values()]
+      .filter((mount) => path.startsWith(`${mount.target}${sep}`))
+      .sort((left, right) => right.target.length - left.target.length)[0];
+    if (
+      parent !== undefined &&
+      (parent.kind === "ro-bind" || parent.kind === "bind") &&
+      existsSync(path) &&
+      lstatSync(path).isSymbolicLink() &&
+      safeRealpathSync(join(parent.source, relative(parent.target, path))) ===
+        safeRealpathSync(path)
+    ) {
+      continue;
+    }
     tryBindReadOnly(path);
   }
 
