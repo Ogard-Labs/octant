@@ -1535,6 +1535,114 @@ describe("Claude Agent SDK port", () => {
     uuid: "result-1",
   } as const;
 
+  test.each([
+    { name: "new session", before: 0, after: 0.01, expected: 0.01 },
+    {
+      name: "resumed session including an interrupted turn",
+      before: 0.08,
+      after: 0.09,
+      expected: 0.01,
+    },
+    { name: "missing baseline", before: undefined, after: 0.09, expected: undefined },
+    { name: "reset total", before: 0.08, after: 0.01, expected: undefined },
+    { name: "unchanged total", before: 0.08, after: 0.08, expected: 0 },
+  ])("attributes only the measured increment for a $name", async ({ before, after, expected }) => {
+    const harness = makeHarness([
+      safeRuntimeInitialization,
+      { ...validResult, total_cost_usd: after },
+      { ...validResult, total_cost_usd: after },
+    ]);
+    harness.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = async () => ({
+      session: { total_cost_usd: before },
+    });
+    const messages = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          yield* query.send({ text: "Hello" });
+          return yield* Stream.runCollect(query.messages);
+        }),
+      ),
+    );
+    const results = Chunk.toReadonlyArray(messages).filter((message) => message.kind === "result");
+    if (expected === undefined) expect(results[0]).not.toHaveProperty("costUsd");
+    else expect(results[0]).toHaveProperty("costUsd", expect.closeTo(expected, 10));
+    expect(results[1]).not.toHaveProperty("costUsd");
+  });
+
+  test("stops waiting for cost snapshots after the control fails to answer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const harness = makeHarness();
+      const snapshot = vi.fn(() => new Promise<unknown>(() => undefined));
+      harness.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = snapshot;
+      const sent = Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const query = yield* harness.port.openQuery(openInput);
+            yield* query.send({ text: "First" });
+            if (harness.invocation === undefined) throw new Error("missing query");
+            const input = harness.invocation.prompt[Symbol.asyncIterator]();
+            yield* Effect.promise(() => input.next());
+            yield* query.send({ text: "Second" });
+            return yield* Effect.promise(() => input.next());
+          }),
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect((await sent).value?.message.content).toBe("Second");
+      expect(snapshot).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("refreshes the cost baseline for each persistent turn after a failed result", async () => {
+    const harness = makeHarness();
+    let total = 0.08;
+    harness.query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET = async () => ({
+      session: { total_cost_usd: total },
+    });
+    harness.query[Symbol.asyncIterator] = async function* () {
+      yield safeRuntimeInitialization;
+      if (harness.invocation === undefined) throw new Error("missing query");
+      let turn = 0;
+      for await (const _message of harness.invocation.prompt) {
+        total += turn === 0 ? 0.01 : 0.02;
+        yield {
+          ...validResult,
+          total_cost_usd: total,
+          ...(turn === 0
+            ? {
+                subtype: "error_during_execution",
+                is_error: true,
+                errors: ["failed"],
+              }
+            : {}),
+        };
+        turn += 1;
+        if (turn === 2) return;
+      }
+    };
+    const costs: number[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const query = yield* harness.port.openQuery(openInput);
+          yield* query.send({ text: "First" });
+          yield* Stream.runForEach(query.messages, (message) =>
+            Effect.gen(function* () {
+              if (message.kind !== "result") return;
+              if (message.costUsd !== undefined) costs.push(message.costUsd);
+              if (costs.length === 1) yield* query.send({ text: "Second" });
+            }),
+          );
+        }),
+      ),
+    );
+    expect(costs).toEqual([expect.closeTo(0.01, 10), expect.closeTo(0.02, 10)]);
+  });
+
   const validAssistant = {
     type: "assistant",
     session_id: "session-1",

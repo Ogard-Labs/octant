@@ -914,7 +914,7 @@ function mapResult(
       context,
       message.usage,
       message.durationMs,
-      message.totalCostUsd,
+      message.costUsd,
       message.contextBreakdown,
     ),
   ];

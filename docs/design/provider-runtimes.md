@@ -9,6 +9,22 @@ owns the driver interface, honest capability, credentials, and confinement
 
 ## Claude Code
 
+Claude Code's result `total_cost_usd` is cumulative for the session, including
+cost restored on resume (observed with 2.1.301). Before each prompt, the adapter
+asks the runtime's existing `get_usage` control for the session total and
+reports only the nonnegative increment on the final result. It consumes that
+baseline once. It never subtracts only the previous successful turn: failed or
+interrupted turns can also have spent money. Those turns keep their own reported
+tokens and the usual estimate/unpriced treatment; their spend is not charged
+again on resume.
+
+A missing, invalid, or timed-out baseline, a falling total, or overlapping
+prompts leaves provider cost absent. After a missing or timed-out control answer,
+the query stops requesting snapshots so later prompts do not repeat the wait.
+A new query tries again. The ordinary token-based estimate or
+unknown-spend rules still apply; no cumulative total is presented as a turn's
+cost. This control adds no credential-file access or confinement exception.
+
 A Claude Plan turn may report an attempted `Write` or `Edit` before the runtime
 returns its disabled-tool error (observed with Claude Code 2.1.301). The adapter
 recognizes those two unoffered file tools only in Plan and records their failed
