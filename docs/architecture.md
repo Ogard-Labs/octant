@@ -6824,7 +6824,11 @@ mechanisms are:
     an exact, unique display name; an ambiguous name is refused with the
     candidates. `set` and `status` need an existing instance that uses
     API-key or bearer authentication, so no secret is written for an
-    instance that cannot use it.
+    instance that cannot use it. A browser may create a Claude API-key
+    instance without a key through the existing configuration command. The
+    host allocates its separate managed account directory; the host-local
+    CLI fills the missing credential afterward. Browser secret entry stays
+    unavailable.
   - **Entry.** When standard input is a terminal, the key is read from it in
     raw mode with nothing echoed — not even a mask, which would show its
     length — and the prompt on standard error; Ctrl-C or Ctrl-D cancels.

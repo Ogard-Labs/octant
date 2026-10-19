@@ -145,6 +145,17 @@ artifact built by `bun scripts/package-headless.ts linux-x64` under
 `octant server upgrade` and rollback. The artifact carries the packages its
 CLI and server import, so it runs without a checkout.
 
+## Add Claude API-key accounts
+
+In **Settings → Providers & Models → Add provider manually**, choose
+**Claude Agent SDK**, give the account a distinct name, and select
+**Anthropic API key**. Add the profile without a key. The browser keeps the
+key input disabled; each new profile gets its own managed account directory.
+On the host, save the key with `octant provider key set "Profile name"`,
+then check the connection in Settings. Repeat with another name for a second
+API-key account. Both accounts run through the official Claude Code CLI.
+Subscription sign-in remains a separate official CLI flow.
+
 ## Save an API key for an endpoint
 
 A browser cannot save a provider key, not even one running on the host. Add

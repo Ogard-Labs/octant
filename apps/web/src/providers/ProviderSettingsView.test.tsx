@@ -775,7 +775,7 @@ describe("ProviderSettingsView", () => {
     },
   );
 
-  it("disables only Claude API-key creation when host credential operations are unavailable", async () => {
+  it("creates a browser Claude API-key profile while keeping secret entry disabled", async () => {
     const user = userEvent.setup();
     const props = fixture({ credentialManagementAvailable: false });
     renderExpanded(<ProviderSettingsView {...props} />);
@@ -792,9 +792,16 @@ describe("ProviderSettingsView", () => {
     );
 
     expect(within(create).getByLabelText("Anthropic API key")).toBeDisabled();
-    expect(submit).toBeDisabled();
-    expect(within(create).getByText(/API-key providers.*Octant host app/i)).toBeVisible();
-    expect(props.onCreateClaude).not.toHaveBeenCalled();
+    expect(submit).toBeEnabled();
+    expect(within(create).getByText(/octant provider key set/)).toBeVisible();
+    await user.type(within(create).getByLabelText("Provider name"), "Claude API");
+    await user.type(within(create).getByLabelText("Claude binary"), "/usr/local/bin/claude");
+    await user.click(submit);
+    expect(props.onCreateClaude).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ authentication: "api-key" }),
+      expect.objectContaining({ value: "" }),
+    );
   });
 
   it.each(["success", "failure"] as const)(

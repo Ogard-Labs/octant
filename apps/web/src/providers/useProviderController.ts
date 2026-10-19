@@ -885,13 +885,17 @@ export function useProviderController(options: ProviderControllerOptions) {
       const instanceId = decodeProviderInstanceId(crypto.randomUUID());
       return queueProviderMutation(mutationQueue, mounted, setBusy, setMessage, () =>
         withTransientCredential(credential, async (credentialValue) => {
-          if (configuration.authentication === "api-key" && hostBridge === undefined) {
+          if (hostBridge === undefined && credentialValue.length > 0) {
             if (mounted.current) {
               setMessage(BROWSER_CANNOT_SAVE_KEYS);
             }
             return false;
           }
-          if (configuration.authentication === "api-key" && credentialValue.length === 0) {
+          if (
+            configuration.authentication === "api-key" &&
+            hostBridge !== undefined &&
+            credentialValue.length === 0
+          ) {
             if (mounted.current) {
               setMessage("Enter an Anthropic API key before creating this provider.");
             }
@@ -913,8 +917,8 @@ export function useProviderController(options: ProviderControllerOptions) {
               install,
             );
             created = true;
-            if (configuration.authentication === "api-key") {
-              await hostBridge!.addProviderApiKey(instanceId, credentialValue);
+            if (configuration.authentication === "api-key" && hostBridge !== undefined) {
+              await hostBridge.addProviderApiKey(instanceId, credentialValue);
             }
             return true;
           } catch (error) {
