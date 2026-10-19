@@ -11,7 +11,9 @@ export function ThreadPlanProposal() {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   if (
-    controller?.status !== "ready" ||
+    controller === undefined ||
+    controller.status === "idle" ||
+    (controller.status === "loading" && !open) ||
     (controller.plan !== null && controller.plan.status !== "withdrawn")
   )
     return null;
