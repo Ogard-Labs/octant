@@ -24,6 +24,7 @@ import {
 } from "@octant/contracts";
 import {
   answerAgentTurnQuestion,
+  changeAgentModel,
   interruptAgentTurn,
   listAgentModels,
   refusalMessage,
@@ -619,6 +620,14 @@ export async function createAgentThread(
     };
   }
   if (mode === "chat") {
+    const models = input.model === undefined ? [] : await listAgentModels(session, "chat");
+    const model = input.model === undefined ? undefined : pickAgentModel(models, input.model);
+    if (input.model !== undefined && model === undefined) {
+      return {
+        kind: "refused",
+        message: `No unique provider/model matches "${input.model}". Models here: ${models.map((entry) => `${entry.endpoint}/${entry.modelId}`).join(", ") || "none"}.`,
+      };
+    }
     const response = await session.send({
       path: "/api/chat/commands",
       method: "POST",
@@ -637,6 +646,12 @@ export async function createAgentThread(
     const created = decodeHostAnswer(ChatCommandResult)(response.body);
     if (created.kind !== "thread-created") {
       return { kind: "refused", message: "The host did not create a thread." };
+    }
+    // Creation uses the host defaults. Apply the explicit choice through the
+    // same command as the composer before this thread can receive a prompt.
+    if (model !== undefined) {
+      const changed = await changeAgentModel(session, created, model);
+      if (changed.kind === "refused") return changed;
     }
     // The harness session routes (questions, pause, follow-ups) answer only a
     // window that has the thread open, a Chat thread included.
@@ -954,10 +969,10 @@ export function pickAgentModel<T extends { readonly endpoint: string; readonly m
   wanted: string,
 ): T | undefined {
   const value = wanted.trim().toLowerCase();
-  const qualified = models.find(
+  const qualified = models.filter(
     (entry) => `${entry.endpoint}/${entry.modelId}`.toLowerCase() === value,
   );
-  if (qualified !== undefined) return qualified;
+  if (qualified.length > 0) return qualified.length === 1 ? qualified[0] : undefined;
   const byId = models.filter((entry) => entry.modelId.toLowerCase() === value);
   return byId.length === 1 ? byId[0] : undefined;
 }

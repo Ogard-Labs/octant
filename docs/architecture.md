@@ -2238,6 +2238,13 @@ flowchart LR
 
 ## Providers
 
+- **CLI model selection.** An explicit `octant agent --model` selects the
+  provider account and model for a new Chat thread before its first prompt.
+  Work and Code retain their harness-endpoint selection. Unknown or ambiguous
+  names refuse before inference; a qualified name must identify exactly one
+  account/model pair. The creation flag cannot silently override or be ignored
+  when attaching with `--thread` or `--last`; that combination is refused.
+
 The provider layer is defined by `@octant/provider-sdk` and implemented in
 `apps/server/src/providers`.
 

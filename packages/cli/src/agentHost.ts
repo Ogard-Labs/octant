@@ -20,11 +20,12 @@ import {
   ChatNavigation,
   ChatAttachment,
   ProviderRegistrySnapshot,
+  ProviderProbeResult,
   NativeHarnessSteeringTaken,
   ThreadMentionCommandResult,
   decodeHostAnswer,
 } from "@octant/contracts";
-import { isNativeHarnessDriverKind } from "@octant/domain";
+import { isImageProfileDriverKind, isNativeHarnessDriverKind } from "@octant/domain";
 import type { OpenedLocalControlSession } from "./localControl";
 
 /**
@@ -537,19 +538,44 @@ export interface AgentModelChoice {
   readonly contextLimit: number | undefined;
 }
 
-/** Models a harness endpoint offers, endpoint by endpoint. */
+/** Models offered by enabled providers; harness-only unless selecting a new Chat thread. */
 export async function listAgentModels(
   session: OpenedLocalControlSession,
+  scope: "harness" | "chat" = "harness",
 ): Promise<ReadonlyArray<AgentModelChoice>> {
   const response = await session.send({ path: "/api/providers/bootstrap", method: "GET" });
   if (response.status !== 200) return [];
   const snapshot = decodeHostAnswer(ProviderRegistrySnapshot)(response.body);
-  const choices: AgentModelChoice[] = [];
-  for (const instance of snapshot.instances) {
-    if (!instance.enabled || !isNativeHarnessDriverKind(instance.driverKind)) continue;
-    const observed = snapshot.observedStates.find(
-      (state) => String(state.instanceId) === String(instance.id),
+  const instances = snapshot.instances.filter(
+    (instance) =>
+      instance.enabled &&
+      !isImageProfileDriverKind(instance.driverKind) &&
+      (scope === "chat" || isNativeHarnessDriverKind(instance.driverKind)),
+  );
+  const observations = [...snapshot.observedStates];
+  if (scope === "chat") {
+    // The listener starts before provider warming finishes. Join the host's
+    // deduplicated probes so missing cold observations cannot hide a match or
+    // make a model shared by two accounts appear unique.
+    const pending = instances.filter(
+      (instance) => !observations.some((state) => String(state.instanceId) === String(instance.id)),
     );
+    const results = await Promise.all(
+      pending.map((instance) =>
+        session.send({
+          path: `/api/providers/${encodeURIComponent(String(instance.id))}/probe`,
+          method: "POST",
+          body: {},
+        }),
+      ),
+    );
+    if (results.some((result) => result.status !== 200)) return [];
+    for (const result of results)
+      observations.push(decodeHostAnswer(ProviderProbeResult)(result.body));
+  }
+  const choices: AgentModelChoice[] = [];
+  for (const instance of instances) {
+    const observed = observations.find((state) => String(state.instanceId) === String(instance.id));
     for (const model of observed?.models ?? []) {
       choices.push({
         instanceId: String(instance.id),
@@ -565,7 +591,7 @@ export async function listAgentModels(
 
 export async function changeAgentModel(
   session: OpenedLocalControlSession,
-  thread: ChatThreadView,
+  thread: Pick<ChatThreadView, "thread">,
   choice: Pick<AgentModelChoice, "instanceId" | "modelId">,
 ): Promise<HostRefusal | { readonly kind: "changed" }> {
   const response = await session.send({

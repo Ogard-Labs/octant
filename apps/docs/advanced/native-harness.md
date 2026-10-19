@@ -444,8 +444,14 @@ Code or Work thread of the Project you are in (anywhere else, your latest
 Chat thread). A Code thread keeps its conversation from one run of
 `octant agent` to the next, tool calls included, and a long one shows its
 newest 50 turns. `--model <model>` picks the
-harness model for a new Work or Code thread — `endpoint/model` when two
-endpoints offer the same id — and an unknown name lists the ones on offer.
+model for a new thread. Chat can select a configured CLI account or endpoint;
+Work and Code select a harness endpoint. Use `endpoint/model` when two
+accounts or endpoints offer the same model id. On a cold host, Chat waits for
+configured providers that have not finished discovery before resolving the name.
+Unknown or ambiguous names
+are refused before inference and list the available choices. Give accounts
+distinct labels if their qualified names collide. `--model` cannot be combined
+with `--thread` or `--last`; change an existing thread through its model picker.
 `--project <name>` files a new thread in a Project. The terminal opens the
 Project and the thread in its own window on the host, exactly as the app
 does, so the same checkout, goal, and approval rules apply to it. Inside the screen,

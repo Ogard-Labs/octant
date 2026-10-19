@@ -125,5 +125,8 @@ describe("choosing a model with --model", () => {
     expect(pickAgentModel(models, "frontier")).toBeUndefined();
     expect(pickAgentModel(models, "backup/frontier")).toBe(models[2]);
     expect(pickAgentModel(models, "missing")).toBeUndefined();
+    expect(
+      pickAgentModel([...models, { endpoint: "backup", modelId: "frontier" }], "backup/frontier"),
+    ).toBeUndefined();
   });
 });
