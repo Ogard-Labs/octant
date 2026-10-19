@@ -320,6 +320,26 @@ describe("desktop packaging boundary", () => {
     ).not.toThrow();
     expect(() => validatePackagedPayload(linuxPayload)).toThrow(/spawn-helper/);
   });
+  it("preserves Chromium sandboxing even when an unrelated user namespace probe would fail", async () => {
+    const root = await mkdtemp(resolve(tmpdir(), "octant-linux-launch-"));
+    try {
+      await writeFile(resolve(root, "AppRun"), createLinuxAppRunScript("Octant"));
+      await writeFile(resolve(root, "unshare"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      await writeFile(resolve(root, "Octant"), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
+      const output = execFileSync("/bin/sh", [resolve(root, "AppRun"), "argument with spaces"], {
+        env: { ...process.env, PATH: `${root}:${process.env.PATH}` },
+        encoding: "utf8",
+      });
+      expect(output).toBe("argument with spaces\n");
+      await writeFile(resolve(root, "Octant"), "#!/bin/sh\nexit 73\n", { mode: 0o755 });
+      expect(() => execFileSync("/bin/sh", [resolve(root, "AppRun")])).toThrow(
+        expect.objectContaining({ status: 73 }),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("stages a Linux AppDir launcher, desktop entry, and pinned appimagetool URL", () => {
     expect(linuxPackageDirectoryName(DESKTOP_PACKAGE_TARGETS["linux-x64"])).toBe(
       "Octant-linux-x64",
@@ -327,12 +347,9 @@ describe("desktop packaging boundary", () => {
     expect(createLinuxDesktopEntry("0.1.0")).toContain("Name=Octant");
     expect(createLinuxDesktopEntry("0.1.0")).toContain("Icon=octant");
     const appRun = createLinuxAppRunScript("Octant");
-    expect(appRun).toContain("unshare -Ur true");
     expect(appRun).toContain('exec "${HERE}/Octant" "$@"');
-    expect(appRun).toContain('exec "${HERE}/Octant" --no-sandbox "$@"');
-    expect(appRun.indexOf('exec "${HERE}/Octant" "$@"')).toBeLessThan(
-      appRun.indexOf('exec "${HERE}/Octant" --no-sandbox "$@"'),
-    );
+    expect(appRun).not.toContain("--no-sandbox");
+    expect(appRun).not.toContain("unshare");
     expect(APPIMAGE_TOOL_URL).toBe(
       "https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage",
     );

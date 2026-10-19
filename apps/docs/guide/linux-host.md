@@ -12,6 +12,25 @@ This page is a draft written from a run on an x64 Ubuntu 26.04 machine with a
 loopback test endpoint rather than a real model. The last section lists what
 does not work yet.
 
+## Desktop sandbox prerequisites
+
+The Linux AppImage keeps Chromium sandboxing enabled. If Chromium reports
+`No usable sandbox` or refuses a user namespace, do not add `--no-sandbox`,
+disable AppArmor, or disable the host's unprivileged-user-namespace restriction.
+The headless server and browser ADE remain usable while the desktop prerequisite
+is resolved.
+
+On Ubuntu with AppArmor user-namespace restrictions, ask the administrator to
+review a profile scoped to the exact installed Octant executable. Use a stable,
+owner-controlled installation path; do not grant every temporary AppImage mount
+or every executable in a home directory permission. The profile must preserve
+sandboxing for renderer children. A successful `unshare` command is not proof
+that Octant has permission, and a refused one is not proof that Octant lacks it.
+See [Ubuntu's AppArmor documentation](https://documentation.ubuntu.com/security/security-features/privilege-restriction/apparmor/).
+A supported installation must be checked with a real sandboxed launch before
+claiming packaged desktop acceptance. Octant does not install or relax host
+security policy automatically.
+
 ## Requirements
 
 - **x64 Linux.** Ubuntu is the tested distribution.

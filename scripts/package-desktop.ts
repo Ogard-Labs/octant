@@ -1119,16 +1119,10 @@ export function createLinuxAppRunScript(executableName: string): string {
     // Resolve the AppDir even when the AppImage was extracted to a temp tree.
     'SELF="$(readlink -f "$0" 2>/dev/null || printf %s "$0")"',
     'HERE="${SELF%/*}"',
-    // AppImage FUSE mounts are nosuid, so chrome-sandbox SUID cannot work.
-    // Keep Chromium's user-namespace sandbox when the host allows unprivileged
-    // userns; only pass --no-sandbox when that probe fails (fail closed for
-    // launch). Residual Ubuntu 24.04 AppArmor profile gaps are documented in
-    // packaging docs rather than weakening sandbox globally.
-    "if unshare -Ur true >/dev/null 2>&1; then",
-    `  exec "\${HERE}/${executableName}" "$@"`,
-    "else",
-    `  exec "\${HERE}/${executableName}" --no-sandbox "$@"`,
-    "fi",
+    // AppImage FUSE mounts are nosuid. Chromium must establish its own
+    // sandbox or refuse launch; a separate unshare probe has a different
+    // AppArmor identity and cannot decide whether this executable may run.
+    `exec "\${HERE}/${executableName}" "$@"`,
     "",
   ].join("\n");
 }

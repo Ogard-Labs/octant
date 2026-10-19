@@ -7483,7 +7483,14 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   `out/Octant.app` on Apple Silicon macOS, or an unsigned
   `out/Octant-<version>-linux-x64.AppImage` on x64 Linux (with
   `out/Octant-linux-x64/` kept for inspection). Linux packages skip Darwin
-  helpers. A dogfood AppImage is not code-signed. An AppImage launch checks
+  helpers. A dogfood AppImage is not code-signed. Its launcher preserves
+  Chromium's sandbox and lets Chromium refuse when the host cannot establish
+  it; it never adds `--no-sandbox`. A separate `unshare` executable has a
+  different AppArmor identity and is not a prerequisite probe for Octant.
+  On restricted Ubuntu hosts, packaged acceptance requires an administrator-
+  reviewed profile for the installed executable and a real sandboxed launch;
+  the Linux ADE remains available while that prerequisite is unmet.
+  An AppImage launch checks
   the signed `<base>/<ring>/linux-x64.json` feed, verifies the signature and
   hash before use, replaces the image atomically (write beside, fsync,
   rename), and relaunches; the new build starts after the old one has stopped.
