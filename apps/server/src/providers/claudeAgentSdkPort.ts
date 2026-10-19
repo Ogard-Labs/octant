@@ -198,6 +198,8 @@ export type ClaudeAssistantContent =
       readonly kind: "tool-use";
       readonly toolUseId: string;
       readonly toolName: string;
+      /** A reported attempt at a file tool disabled in Plan; only an error result is valid. */
+      readonly disabled?: true;
       readonly input: { readonly [key: string]: ClaudeJsonValue };
     };
 

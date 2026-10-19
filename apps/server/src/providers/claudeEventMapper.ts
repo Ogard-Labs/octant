@@ -76,6 +76,7 @@ export interface ClaudeToolState {
   readonly toolCallId: string;
   readonly toolName: string;
   readonly emitsActivity: boolean;
+  readonly disabled?: true;
   lifecycle: "active" | "terminal";
   fileChange?: ClaudeFileChange;
 }
@@ -378,10 +379,12 @@ function toolState(
   context: ClaudeEventContext,
   providerToolUseId: string,
   toolName: string,
+  disabled?: true,
 ): { readonly state: ClaudeToolState; readonly created: boolean } | undefined {
   const existing = context.toolStates.get(providerToolUseId);
   if (existing !== undefined) {
-    return existing.toolName === normalized(toolName, LABEL_MAX_CHARACTERS)
+    return existing.toolName === normalized(toolName, LABEL_MAX_CHARACTERS) &&
+      existing.disabled === disabled
       ? { state: existing, created: false }
       : undefined;
   }
@@ -391,6 +394,7 @@ function toolState(
     toolCallId: context.makeToolCallId(),
     toolName: normalizedToolName,
     emitsActivity: toolName !== "AskUserQuestion",
+    ...(disabled === true ? { disabled } : {}),
     lifecycle: "active",
   };
   context.toolStates.set(providerToolUseId, state);
@@ -403,14 +407,18 @@ function mapToolUse(
   authoritativeInput: boolean,
   authoritativeFileChange?: ClaudeFileChange,
 ): ReadonlyArray<ClaudeMappedMessage> {
-  const resolved = toolState(context, content.toolUseId, content.toolName);
+  const resolved = toolState(context, content.toolUseId, content.toolName, content.disabled);
   if (resolved === undefined) {
     return [failure("Claude returned invalid tool correlation metadata.")];
   }
   if (resolved.state.lifecycle === "terminal") {
     return [failure("Claude returned tool activity after completion.")];
   }
-  if (authoritativeInput && (content.toolName === "Edit" || content.toolName === "Write")) {
+  if (
+    authoritativeInput &&
+    content.disabled !== true &&
+    (content.toolName === "Edit" || content.toolName === "Write")
+  ) {
     if (authoritativeFileChange === undefined) {
       return [failure("Claude returned invalid file-change metadata.")];
     }
@@ -479,7 +487,9 @@ function mapAssistant(
     if (
       normalizedToolName === undefined ||
       (existing !== undefined &&
-        (existing.toolName !== normalizedToolName || existing.lifecycle !== "active"))
+        (existing.toolName !== normalizedToolName ||
+          existing.disabled !== content.disabled ||
+          existing.lifecycle !== "active"))
     ) {
       return [failure("Claude returned invalid tool correlation metadata.")];
     }
@@ -490,7 +500,10 @@ function mapAssistant(
   }
   for (const content of message.content) {
     if (content.kind !== "tool-use") continue;
-    if (content.toolName === "Edit" || content.toolName === "Write") {
+    if (
+      content.disabled !== true &&
+      (content.toolName === "Edit" || content.toolName === "Write")
+    ) {
       const metadata = fileChange(context, content);
       if (metadata === undefined) {
         return [failure("Claude returned invalid file-change metadata.")];
@@ -569,6 +582,9 @@ function mapToolResults(
   }
   if (states.some(({ state }) => state?.lifecycle !== "active")) {
     return [failure("Claude returned a duplicate tool result.")];
+  }
+  if (states.some(({ state, result }) => state?.disabled === true && !result.isError)) {
+    return [failure("Claude reported success for a disabled tool.")];
   }
   const results: ClaudeMappedMessage[] = [];
   for (const pair of states) {
@@ -884,6 +900,14 @@ function mapResult(
   }
   if (!usageIsSafe(message.usage)) {
     return [failure("Claude returned invalid usage metadata.")];
+  }
+  if (
+    message.outcome === "success" &&
+    [...context.toolStates.values()].some(
+      (state) => state.disabled === true && state.lifecycle === "active",
+    )
+  ) {
+    return [failure("Claude did not report a refusal for a disabled tool.")];
   }
   const results: ClaudeMappedMessage[] = [
     usageEvent(

@@ -181,7 +181,7 @@ function decodeJsonValue(value: unknown, depth = 0): ClaudeJsonValue {
 
 function decodeAssistantContent(
   value: unknown,
-  allowedTools: readonly string[],
+  input: Pick<ClaudeOpenQueryInput, "tools" | "executionPolicy">,
 ): ClaudeAssistantContent {
   const block = object(value);
   if (block === undefined || typeof block.type !== "string") {
@@ -211,6 +211,12 @@ function decodeAssistantContent(
     return { kind: "redacted-reasoning" };
   }
   if (block.type === "tool_use") {
+    // Claude 2.1.301 can report a file-tool attempt before its disabled-tool
+    // error in Plan. Recognize that report without granting execution authority.
+    const disabled =
+      input.executionPolicy === "plan" &&
+      !input.tools.includes(String(block.name)) &&
+      (block.name === "Write" || block.name === "Edit");
     const decodedInput = decodeJsonValue(block.input);
     const decodedInputObject = object(decodedInput);
     // Claude Code 2.1.26x stamps every tool call with `caller: { type }`; the
@@ -222,7 +228,7 @@ function decodeAssistantContent(
     if (
       typeof block.id !== "string" ||
       typeof block.name !== "string" ||
-      !allowedTools.includes(block.name) ||
+      (!input.tools.includes(block.name) && !disabled) ||
       decodedInputObject === undefined ||
       !callerIsKnownShape
     ) {
@@ -232,6 +238,7 @@ function decodeAssistantContent(
       kind: "tool-use",
       toolUseId: block.id,
       toolName: block.name,
+      ...(disabled ? { disabled: true as const } : {}),
       input: decodedInputObject as { readonly [key: string]: ClaudeJsonValue },
     };
   }
@@ -249,7 +256,10 @@ const STREAM_STOP_REASONS = new Set([
   "model_context_window_exceeded",
 ]);
 
-function decodeStreamEvent(value: unknown, allowedTools: readonly string[]): ClaudeStreamEvent {
+function decodeStreamEvent(
+  value: unknown,
+  input: Pick<ClaudeOpenQueryInput, "tools" | "executionPolicy">,
+): ClaudeStreamEvent {
   const event = object(value);
   if (event === undefined || typeof event.type !== "string") {
     throw protocol("Claude returned an unsupported runtime message.");
@@ -301,7 +311,7 @@ function decodeStreamEvent(value: unknown, allowedTools: readonly string[]): Cla
     return {
       kind: "content-start",
       index,
-      content: decodeAssistantContent(event.content_block, allowedTools),
+      content: decodeAssistantContent(event.content_block, input),
     };
   }
   if (event.type === "content_block_stop") return { kind: "content-stop", index };
@@ -1151,7 +1161,7 @@ export function decodeMessage(
       sessionId: message.session_id,
       messageId: assistant.id,
       ...(message.error === undefined ? {} : { error: message.error }),
-      content: assistant.content.map((content) => decodeAssistantContent(content, input.tools)),
+      content: assistant.content.map((content) => decodeAssistantContent(content, input)),
       usage: decodeUsage(assistant.usage, true),
     };
   }
@@ -1162,7 +1172,7 @@ export function decodeMessage(
     return {
       kind: "stream-event",
       sessionId: message.session_id,
-      event: decodeStreamEvent(message.event, input.tools),
+      event: decodeStreamEvent(message.event, input),
     };
   }
   if (message.type === "user") return decodeToolResults(message);
