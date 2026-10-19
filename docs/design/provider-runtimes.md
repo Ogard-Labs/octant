@@ -9,6 +9,15 @@ owns the driver interface, honest capability, credentials, and confinement
 
 ## Claude Code
 
+For a selected Haiku model in Plan, the adapter supplies a query-local
+`availableModels` list containing only that selection, on both fresh and resumed
+queries. Claude Code otherwise silently upgrades Haiku to Sonnet in Plan
+(observed with 2.1.301 and documented in
+[Claude Code model configuration](https://code.claude.com/docs/en/model-config)).
+The restriction keeps the displayed selection and the answering model aligned;
+it does not persist user settings or change permissions, tools, or confinement.
+Other model selections and execution policies keep their existing behaviour.
+
 Claude Code's result `total_cost_usd` is cumulative for the session, including
 cost restored on resume (observed with 2.1.301). Before each prompt, the adapter
 asks the runtime's existing `get_usage` control for the session total and

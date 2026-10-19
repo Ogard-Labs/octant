@@ -33,6 +33,10 @@ capabilities.
   configuration and historical thread references.
 - **Removing** is rejected while active sessions depend on the instance.
 
+When you select Haiku for a Claude Code task in Plan, Octant keeps that model
+for new turns and resumed sessions instead of allowing Claude Code's automatic
+switch to Sonnet. Plan remains read-only.
+
 ### Model visibility
 
 Expand a provider and use **Shown / Hidden** beside each reported model to
