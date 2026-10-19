@@ -1583,16 +1583,31 @@ describe("mapClaudeMessage", () => {
       subtype: "success",
       stopReason: "end_turn",
       usage,
-      totalCostUsd: 0.0421,
+      totalCostUsd: 0.5,
+      costUsd: 0.0421,
       permissionDenials: [],
     });
 
-    // The price is Claude's figure. Octant holds no price list, so this is the
-    // only way a cost can reach the thread at all.
+    // Only the measured turn increment reaches the public usage event.
     expect(results[0]).toMatchObject({
       kind: "event",
       event: { kind: "usage", inputTokens: 17, outputTokens: 7, costUsd: 0.0421 },
     });
+  });
+
+  it("does not expose a cumulative session total when the turn baseline is unknown", () => {
+    const results = mapped(context(), {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      usage,
+      totalCostUsd: 0.5,
+      permissionDenials: [],
+    });
+    expect(results[0]).toMatchObject({ kind: "event", event: { kind: "usage" } });
+    expect(results[0]).not.toHaveProperty("event.costUsd");
   });
 
   it("records a max_tokens stop on the completed event and leaves an ordinary finish unstated", () => {

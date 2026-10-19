@@ -278,8 +278,10 @@ export type ClaudeDecodedMessage =
       readonly terminalReason?: string;
       readonly durationMs?: number;
       readonly usage: ClaudeUsage;
-      /** What Claude says this turn cost, in US dollars. */
+      /** Cumulative runtime session cost, including restored turns. */
       readonly totalCostUsd?: number;
+      /** Increment measured from the pre-prompt session snapshot, when available. */
+      readonly costUsd?: number;
       /**
        * What the runtime says fills the window as the turn ends, when it
        * answered. The stream attaches it; the decoder never reads it from the
@@ -507,7 +509,7 @@ export interface ClaudeAgentSdkQueryLike extends AsyncIterable<unknown> {
   readonly accountInfo: () => Promise<unknown>;
   /**
    * Experimental control request (`get_usage`). The name is the process's;
-   * Octant only calls it through `readPlanUsage`.
+   * Octant uses it for plan windows and pre-prompt cost snapshots.
    */
   readonly usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET?: (options?: {
     readonly skipBehaviors?: boolean;
@@ -753,6 +755,8 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
           const issuedMessageIds = new Set<string>();
           let query: ClaudeAgentSdkQueryLike | undefined;
           let initializedSessionId: string | undefined;
+          let costBaseline: number | undefined;
+          let pendingCostInputs = 0;
           let managedServer:
             | import("@modelcontextprotocol/sdk/server/mcp.js").McpServer
             | undefined;
@@ -1071,6 +1075,16 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 }),
               ),
               Stream.flattenIterables,
+              Stream.map((message) => {
+                if (message.kind !== "result") return message;
+                const baseline = costBaseline;
+                costBaseline = undefined;
+                pendingCostInputs = Math.max(0, pendingCostInputs - 1);
+                const total = message.totalCostUsd;
+                return baseline !== undefined && total !== undefined && total >= baseline
+                  ? { ...message, costUsd: total - baseline }
+                  : message;
+              }),
               // The window's make-up is asked for where a turn settles. The
               // answer is the runtime's, so it rides on the result that carries
               // the turn's usage and nowhere else.
@@ -1148,6 +1162,24 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                       await next?.close();
                       throw error;
                     }
+                  }
+                  // Read at each prompt, not from the last successful result:
+                  // a resumed session also contains interrupted/failed usage.
+                  // Overlapping inputs have no separable session-cost window.
+                  const separateCostWindow = pendingCostInputs === 0;
+                  pendingCostInputs += 1;
+                  costBaseline = undefined;
+                  const total = object(
+                    object(query === undefined ? undefined : await askPlanUsage(query))?.session,
+                  )?.total_cost_usd;
+                  if (
+                    separateCostWindow &&
+                    pendingCostInputs === 1 &&
+                    typeof total === "number" &&
+                    Number.isFinite(total) &&
+                    total >= 0
+                  ) {
+                    costBaseline = total;
                   }
                   const messageId = crypto.randomUUID();
                   issuedMessageIds.add(messageId);

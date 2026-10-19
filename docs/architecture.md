@@ -3829,7 +3829,8 @@ none, as for the other dimensions. Spend is the sum of the window's
 `UsageRecord` costs in integer micro-dollars, floored to whole cents. Each
 reconciled request records its cost from the provider runtime's own figure
 (`costUsd` on the normalized `usage` event) as `provider-recorded`: Claude Code
-(`total_cost_usd`), OpenCode, Pi, and an OpenAI-compatible endpoint that reports
+(the measured turn increment in `total_cost_usd`, as specified in
+[Provider runtimes](design/provider-runtimes.md#claude-code)), OpenCode, Pi, and an OpenAI-compatible endpoint that reports
 `usage.cost` (OpenRouter; a BYOK `cost` is only OpenRouter's fee and is not
 used). Without a provider figure, a model in the checked-in standard-rate price
 table (`packages/domain/src/localUsagePricing.ts`, the same table and rule the
