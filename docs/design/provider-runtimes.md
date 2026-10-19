@@ -211,7 +211,12 @@ has completed: the plan endpoint observed on 2026-10-19 omitted the repeated
 items there. Item completion must still reconcile text, reasoning, and tool
 arguments against the deltas, and output slots must be distinct and contiguous.
 A nonempty terminal array must fully match the stream; other Responses profiles
-retain their existing terminal coverage checks. The plan contract
+retain their existing terminal coverage checks. Reasoning items may omit the
+optional `status` field: their added/done event supplies the phase, and a
+completed response may repeat such an item without status. Explicit status
+values still have to agree with the phase; missing status never bypasses item
+identity, index, ordering, completion, or content reconciliation. Message and
+function-call status requirements are unchanged. The plan contract
 covers Responses turns, not model enumeration, so Check connection reads
 the route's `/models` answer through the profile: a model list is reported
 as discovered, whether the OpenAI `{data:[{id}]}` shape or the plan's own

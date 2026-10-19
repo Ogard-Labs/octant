@@ -610,15 +610,23 @@ function validateOutputItem(
     throw failure("unsupported", "The provider attempted an unsupported tool call.");
   }
   const isAdded = event.type === "response.output_item.added";
+  // Responses reasoning items may omit status; the enclosing added/done
+  // event supplies their phase. An explicit status must still agree.
+  const status =
+    item.type === "reasoning" && item.status === undefined
+      ? isAdded
+        ? "in_progress"
+        : "completed"
+      : item.status;
   if (
-    (isAdded && item.status !== "in_progress") ||
-    (!isAdded && item.status !== "completed" && item.status !== "incomplete")
+    (isAdded && status !== "in_progress") ||
+    (!isAdded && status !== "completed" && status !== "incomplete")
   ) {
     throw invalidLifecycle();
   }
   if (item.type === "message") {
     if (item.role !== "assistant" || !Array.isArray(item.content)) throw invalidLifecycle();
-    reconcileItemLifecycle(state, item.id, "message", event.output_index, item.status, isAdded);
+    reconcileItemLifecycle(state, item.id, "message", event.output_index, status, isAdded);
     const coveredKeys = validateMessageContent(
       item.id,
       item.content,
@@ -637,7 +645,7 @@ function validateOutputItem(
   ) {
     throw invalidLifecycle();
   }
-  reconcileItemLifecycle(state, item.id, "reasoning", event.output_index, item.status, isAdded);
+  reconcileItemLifecycle(state, item.id, "reasoning", event.output_index, status, isAdded);
   const coveredKeys = validateReasoningItem(
     item.id,
     item.summary,
@@ -1026,7 +1034,12 @@ function validateTerminalOutput(output: unknown[], state: NormalizationState): v
       return;
     }
     if (value.type !== "message" && value.type !== "reasoning") throw invalidLifecycle();
-    if (value.status !== "completed") throw invalidLifecycle();
+    if (
+      value.status !== "completed" &&
+      !(value.type === "reasoning" && value.status === undefined)
+    ) {
+      throw invalidLifecycle();
+    }
     if (value.type === "message") validateTerminalMessageRefusal(value);
 
     const tracked = state.items.get(value.id);

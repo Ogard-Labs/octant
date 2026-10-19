@@ -239,6 +239,87 @@ describe("sendResponsesTurn", () => {
     expect(JSON.stringify(result)).not.toContain("private");
   });
 
+  it.each([undefined, "chatgpt-plan"] as const)(
+    "accepts reasoning items without optional status in the %s profile",
+    async (profile) => {
+      const reasoning = { id: "reason_private", type: "reasoning", summary: [] };
+      const finished = { ...reasoning, summary: [{ type: "summary_text", text: "Consider" }] };
+      const fetch = vi.fn(async () =>
+        sse(
+          created(0),
+          {
+            type: "response.output_item.added",
+            sequence_number: 1,
+            output_index: 0,
+            item: reasoning,
+          },
+          {
+            type: "response.reasoning_summary_text.delta",
+            sequence_number: 2,
+            output_index: 0,
+            item_id: reasoning.id,
+            summary_index: 0,
+            delta: "Consider",
+          },
+          {
+            type: "response.output_item.done",
+            sequence_number: 3,
+            output_index: 0,
+            item: finished,
+          },
+          {
+            type: "response.completed",
+            sequence_number: 4,
+            response: {
+              ...responseState("completed", { input_tokens: 7, output_tokens: 2, total_tokens: 9 }),
+              output: [finished],
+            },
+          },
+        ),
+      );
+      const result = await Effect.runPromise(
+        sendResponsesTurn(
+          input(fetch, profile === undefined ? {} : { profile, subscriptionUsageGranted: true }),
+        ),
+      );
+      expect(result).toMatchObject({
+        terminal: "completed",
+        reasoning: "Consider",
+        usage: { inputTokens: 7, outputTokens: 2 },
+        toolCalls: [],
+      });
+    },
+  );
+
+  it.each([null, "incomplete", "in_progress", "failed"])(
+    "rejects an explicit invalid completed reasoning status %s",
+    async (status) => {
+      const reasoning = { id: "reason_private", type: "reasoning", summary: [] };
+      const fetch = vi.fn(async () =>
+        sse(
+          created(0),
+          {
+            type: "response.output_item.added",
+            sequence_number: 1,
+            output_index: 0,
+            item: reasoning,
+          },
+          {
+            type: "response.output_item.done",
+            sequence_number: 2,
+            output_index: 0,
+            item: { ...reasoning, status },
+          },
+          completed(3),
+        ),
+      );
+      expect(await failureOf(sendResponsesTurn(input(fetch)))).toMatchObject({
+        category: "protocol",
+        message: "The provider stream contained invalid lifecycle data.",
+      });
+    },
+  );
+
   it("rejects duplicate or out-of-order provider sequences", async () => {
     const fetch = vi.fn(async () =>
       sse(created(2), {
