@@ -49,7 +49,8 @@ export function ClaudeCreateAuthenticationFields(props: {
             <p className="provider-settings__field-guidance">
               Add this profile without a key. On the Linux host, run{" "}
               <code>octant provider key set &quot;Profile name&quot;</code> using its exact name,
-              then check the connection. This browser cannot save API keys.
+              then check the connection. On macOS, open this profile in Octant desktop to add its
+              key. This browser cannot save API keys.
             </p>
           ) : null}
         </>

@@ -40,7 +40,8 @@ name.
 A browser can create a named Claude API-key profile without a credential.
 The key input remains disabled, with guidance to run
 `octant provider key set "Profile name"` on the Linux host, then check the
-connection. Creation stores only the configuration and uses the existing
+connection. For a macOS host, the guidance directs the person to open the
+profile in Octant desktop to add its key. Creation stores only the configuration and uses the existing
 per-instance account-directory allocation. Desktop creation still requires
 a key and saves it through native IPC. A browser-supplied secret is refused
 before profile creation; host-local credential authority is unchanged.
