@@ -167,7 +167,6 @@ export function ProviderCreateForm(
     providerType === "ideogram-image" ||
     providerType === "mistral-vibe" ||
     providerType === "fx" ||
-    (providerType === "claude" && claudeAuthentication === "api-key") ||
     (providerType === "grok" && grokAuthentication === "api-key") ||
     (providerType === "glm" && glmAuthentication === "api-key") ||
     (providerType === "gemini" && geminiAuthentication === "api-key") ||
@@ -990,9 +989,6 @@ export function ProviderCreateForm(
               disabled={
                 props.busy ||
                 creating ||
-                (providerType === "claude" &&
-                  claudeAuthentication === "api-key" &&
-                  !props.credentialManagementAvailable) ||
                 (providerType === "mistral-vibe" &&
                   vibeAuthentication === "api-key" &&
                   !props.credentialManagementAvailable) ||

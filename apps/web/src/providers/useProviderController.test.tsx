@@ -2775,9 +2775,13 @@ describe("useProviderController", () => {
     await expect(result.current.providerCredentialStatus(id)).resolves.toBe("unavailable");
   });
 
-  it("blocks browser-only Claude API-key creation at the host authority boundary", async () => {
+  it("creates a browser Claude API-key profile without transporting a credential", async () => {
     const calls: string[] = [];
     const api = client();
+    vi.mocked(api.execute).mockImplementation(async (command) => ({
+      kind: "provider-created",
+      instance: claudeProvider({ id: "instanceId" in command ? command.instanceId : id }),
+    }));
     const { result } = renderHook(() => useProviderController({ client: api }));
     await waitFor(() => expect(result.current.status).toBe("ready"));
 
@@ -2787,18 +2791,49 @@ describe("useProviderController", () => {
           "Claude key",
           {
             kind: "claude-agent-sdk",
-            binaryPath: "/opt/homebrew/bin/claude",
+            binaryPath: "/usr/local/bin/claude",
             authentication: "api-key",
           },
           transientCredential("", calls),
         ),
-      ).resolves.toBe(false);
+      ).resolves.toBe(true);
     });
 
+    expect(api.execute).toHaveBeenCalledWith({
+      kind: "create-claude-provider",
+      instanceId: expect.any(String),
+      expectedVersion: 0,
+      displayName: "Claude key",
+      configuration: {
+        kind: "claude-agent-sdk",
+        binaryPath: "/usr/local/bin/claude",
+        authentication: "api-key",
+      },
+    });
+    expect(calls).toEqual(["field.clear"]);
+  });
+
+  it("refuses and clears a Claude key supplied without host credential authority", async () => {
+    const calls: string[] = [];
+    const api = client();
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => {
+      await expect(
+        result.current.createClaude(
+          "Claude key",
+          {
+            kind: "claude-agent-sdk",
+            binaryPath: "/usr/local/bin/claude",
+            authentication: "api-key",
+          },
+          transientCredential("private-value", calls),
+        ),
+      ).resolves.toBe(false);
+    });
     expect(api.execute).not.toHaveBeenCalled();
     expect(calls).toEqual(["field.clear"]);
-    expect(result.current.message).toMatch(/cannot save provider keys.*octant provider key set/i);
-    expect(result.current.message).not.toMatch(/enter.*API key/i);
+    expect(result.current.message).toMatch(/cannot save provider keys/i);
   });
 
   it("keeps Claude subscription creation available in a browser-only window", async () => {

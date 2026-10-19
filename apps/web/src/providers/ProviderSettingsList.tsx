@@ -721,6 +721,7 @@ function ProviderRow(props: ProviderRowProps) {
     isImageProfile ||
     ((isClaude || isVibe || isGrok || isGlm || isGemini || isCline || isQwen) &&
       props.instance.configuration.authentication === "api-key");
+  const browserClaudeKeySetup = isClaude && usesCredential && !props.credentialManagementAvailable;
   const credential = useCredentialStatus(props, !usesCredential);
   const setupGuidance = guidance(
     props.instance,
@@ -901,8 +902,21 @@ function ProviderRow(props: ProviderRowProps) {
               {detectedButDisabled ? (
                 <p className="provider-card__guidance">Detected on this host — enable to use</p>
               ) : null}
-              {setupGuidance}
-              {usesCredential && !props.credentialManagementAvailable ? (
+              {!browserClaudeKeySetup ||
+              readiness !== "unauthenticated" ||
+              providerRefusalGuidance(props.instance, props.observed) !== undefined
+                ? setupGuidance
+                : null}
+              {browserClaudeKeySetup ? (
+                <p className="provider-card__guidance">
+                  On the Linux host, run{" "}
+                  <code>octant provider key set &quot;Profile name&quot;</code> using this
+                  profile&apos;s exact name, then check the connection. On macOS, open this profile
+                  in Octant desktop to add or replace its key. This browser cannot save or remove
+                  credentials.
+                </p>
+              ) : null}
+              {usesCredential && !props.credentialManagementAvailable && !browserClaudeKeySetup ? (
                 <p className="provider-card__guidance">
                   Manage credentials in the Octant host app. Credential replacement, clearing, and
                   provider removal are unavailable in this browser.
@@ -913,7 +927,7 @@ function ProviderRow(props: ProviderRowProps) {
                   Credential: <strong>{credentialStatusLabel(credential.status)}</strong>
                 </p>
               ) : null}
-              {usesCredential && acceptsApiKeyPool(props.instance) ? (
+              {usesCredential && acceptsApiKeyPool(props.instance) && !browserClaudeKeySetup ? (
                 <ProviderApiKeyEditor
                   disabled={disabled}
                   displayName={name}
