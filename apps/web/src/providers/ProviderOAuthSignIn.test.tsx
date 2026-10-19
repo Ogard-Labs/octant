@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProviderOAuthSignIn, ProviderOAuthSignInPanel } from "./ProviderOAuthSignIn";
+import { runProviderOAuthCommand } from "./providerOAuthClient";
 
 const handlers = () => ({
   onSignIn: vi.fn(),
@@ -154,6 +155,52 @@ describe("provider sign-in panel", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("allows another completion check after a stalled host request times out", async () => {
+    vi.useFakeTimers();
+    const fetchHost = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ kind: "awaiting-consent", attemptId: "pending" }))
+      .mockImplementationOnce(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+              once: true,
+            });
+          }),
+      )
+      .mockResolvedValueOnce(Response.json({ kind: "signed-in", accountLabel: "ChatGPT plan" }));
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="stalled-host"
+        termsSummary="Terms"
+        run={(command) =>
+          runProviderOAuthCommand({
+            baseUrl: "http://localhost:14750",
+            windowCapability: "fixture-capability",
+            fetch: fetchHost,
+            command,
+          })
+        }
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "I've finished in the browser" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(screen.getByText(/Couldn't check sign-in/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "I've finished in the browser" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
+    expect(fetchHost).toHaveBeenCalledTimes(3);
   });
 
   it("offers a status retry after a lost sign-out response instead of risking a replacement sign-in", async () => {

@@ -15,32 +15,43 @@ export async function runProviderOAuthCommand(options: {
   readonly command: ProviderOAuthCommand;
 }): Promise<ProviderOAuthCommandResult | undefined> {
   const fetchImpl = options.fetch ?? globalThis.fetch;
-  const response = await fetchImpl(new URL("/api/providers/oauth", options.baseUrl), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-octant-window-capability": options.windowCapability,
-    },
-    body: JSON.stringify(options.command),
-  });
-  const body: unknown = await response.json();
-  if (!isRecord(body) || typeof body.kind !== "string") return undefined;
-  // The route answers a refusal with an error status and a typed body; the
-  // body is what the panel shows, so it is kept instead of dropped.
-  if (!response.ok && body.kind !== "refused") return undefined;
-  if (TOKEN_FIELDS.some((field) => field in body)) return undefined;
-  return {
-    kind: body.kind as ProviderOAuthCommandResult["kind"],
-    ...(typeof body.termsRequired === "boolean" ? { termsRequired: body.termsRequired } : {}),
-    ...(typeof body.accountLabel === "string" ? { accountLabel: body.accountLabel } : {}),
-    ...(typeof body.authorizationUrl === "string"
-      ? { authorizationUrl: body.authorizationUrl }
-      : {}),
-    ...(typeof body.userCode === "string" ? { userCode: body.userCode } : {}),
-    ...(typeof body.verificationUri === "string" ? { verificationUri: body.verificationUri } : {}),
-    ...(typeof body.reason === "string" ? { reason: body.reason } : {}),
-    ...(typeof body.attemptId === "string" ? { attemptId: body.attemptId } : {}),
-  };
+  // A stalled host must release the panel's single-flight check so the
+  // person can retry. Aborting also bounds reading the response body.
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetchImpl(new URL("/api/providers/oauth", options.baseUrl), {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "content-type": "application/json",
+        "x-octant-window-capability": options.windowCapability,
+      },
+      body: JSON.stringify(options.command),
+    });
+    const body: unknown = await response.json();
+    if (!isRecord(body) || typeof body.kind !== "string") return undefined;
+    // The route answers a refusal with an error status and a typed body; the
+    // body is what the panel shows, so it is kept instead of dropped.
+    if (!response.ok && body.kind !== "refused") return undefined;
+    if (TOKEN_FIELDS.some((field) => field in body)) return undefined;
+    return {
+      kind: body.kind as ProviderOAuthCommandResult["kind"],
+      ...(typeof body.termsRequired === "boolean" ? { termsRequired: body.termsRequired } : {}),
+      ...(typeof body.accountLabel === "string" ? { accountLabel: body.accountLabel } : {}),
+      ...(typeof body.authorizationUrl === "string"
+        ? { authorizationUrl: body.authorizationUrl }
+        : {}),
+      ...(typeof body.userCode === "string" ? { userCode: body.userCode } : {}),
+      ...(typeof body.verificationUri === "string"
+        ? { verificationUri: body.verificationUri }
+        : {}),
+      ...(typeof body.reason === "string" ? { reason: body.reason } : {}),
+      ...(typeof body.attemptId === "string" ? { attemptId: body.attemptId } : {}),
+    };
+  } finally {
+    clearTimeout(deadline);
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

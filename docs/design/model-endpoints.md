@@ -51,7 +51,9 @@ failed states are explicit and announced. A pending attempt offers the sign-in
 page link and I've finished in the browser. Opening Settings never starts a new
 sign-in or acknowledges terms. Returning to Settings resumes the originating
 window's pending host attempt; repeated Begin requests reuse it. Attempts expire
-with the provider deadline and do not survive a host restart.
+with the provider deadline and do not survive a host restart. Each host request
+times out after 15 seconds so a stalled connection cannot lock the completion
+check; retrying keeps the same host attempt.
 
 Signed-in account details keep Sign out visible with a description of its scope.
 Octant asks for provider revocation when supported, then removes the local grant.
