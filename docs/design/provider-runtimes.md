@@ -169,6 +169,12 @@ hosted tools are refused. A request that cannot be expressed is refused
 with a typed reason, and the route's `subscription_sharing_*` error codes
 map to user-facing states (usage limit with a manage-usage link, bounded
 backoff on unavailability, unauthenticated on 401/403). The plan contract
+accepts an empty `response.completed.output` array after every streamed item
+has completed: the plan endpoint observed on 2026-10-19 omitted the repeated
+items there. Item completion must still reconcile text, reasoning, and tool
+arguments against the deltas, and output slots must be distinct and contiguous.
+A nonempty terminal array must fully match the stream; other Responses profiles
+retain their existing terminal coverage checks. The plan contract
 covers Responses turns, not model enumeration, so Check connection reads
 the route's `/models` answer through the profile: a model list is reported
 as discovered, whether the OpenAI `{data:[{id}]}` shape or the plan's own

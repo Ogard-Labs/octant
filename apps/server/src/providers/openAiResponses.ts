@@ -990,7 +990,20 @@ function validateTerminalItems(response: unknown, state: NormalizationState): vo
   if (!isRecord(response)) throw invalidLifecycle();
   if (response.output !== undefined) {
     if (!Array.isArray(response.output)) throw invalidLifecycle();
-    validateTerminalOutput(response.output, state);
+    // The plan route observed on 2026-10-19 sends output: [] after validated
+    // output_item.done events. Those events already reconcile content and
+    // arguments; still require distinct, contiguous output slots below.
+    if (state.planProfile && response.output.length === 0) {
+      const indices = new Set<number>();
+      for (const item of state.items.values()) {
+        if (item.outputIndex >= state.items.size || indices.has(item.outputIndex)) {
+          throw invalidLifecycle();
+        }
+        indices.add(item.outputIndex);
+      }
+    } else {
+      validateTerminalOutput(response.output, state);
+    }
   }
   for (const item of state.items.values()) {
     if (item.status !== "completed") {
