@@ -3,7 +3,7 @@ import {
   ValidationPlanCreated,
   ValidationReportCompleted,
   type EventEnvelope,
-  type ToolActionAuthority,
+  ToolActionAuthority,
   type ValidationEvidenceRecord,
   type ValidationEvidenceSnapshot,
   type ValidationOutcome,
@@ -269,7 +269,7 @@ function decodeAuthority(row: ValidationEvidenceProjectionRow): ToolActionAuthor
   const base = {
     hostId: row.host_id,
     mode: row.mode,
-    projectId: row.project_id,
+    ...(row.project_id === null ? {} : { projectId: row.project_id }),
     ...(row.root_id !== null ? { rootId: row.root_id } : {}),
     ...(row.worktree_id !== null ? { worktreeId: row.worktree_id } : {}),
     providerInstanceId: row.provider_instance_id,
@@ -278,10 +278,10 @@ function decodeAuthority(row: ValidationEvidenceProjectionRow): ToolActionAuthor
         ? { kind: "core" as const }
         : {
             kind: "trusted-extension" as const,
-            extensionId: row.extension_id!,
+            extensionId: row.extension_id,
           },
   };
-  return base as ToolActionAuthority;
+  return Schema.decodeUnknownSync(ToolActionAuthority)(base);
 }
 
 function upsertState(connection: SqliteConnection, state: ValidationEvidenceProjectionState): void {
@@ -322,7 +322,7 @@ function upsertState(connection: SqliteConnection, state: ValidationEvidenceProj
       VALIDATION_PROJECTION_SCHEMA_VERSION,
       state.authority.hostId,
       state.authority.mode,
-      state.authority.projectId,
+      state.authority.projectId ?? null,
       ("rootId" in state.authority ? state.authority.rootId : undefined) ?? null,
       ("worktreeId" in state.authority ? state.authority.worktreeId : undefined) ?? null,
       state.authority.providerInstanceId,
@@ -356,7 +356,7 @@ export function readValidationEvidenceSnapshot(
     .prepare(
       `
       SELECT * FROM validation_evidence_projection
-      WHERE host_id = ? AND mode = ? AND project_id = ? AND root_id IS ? AND worktree_id IS ?
+      WHERE host_id = ? AND mode = ? AND project_id IS ? AND root_id IS ? AND worktree_id IS ?
         AND provider_instance_id = ? AND extension_kind = ? AND extension_id IS ?
       ORDER BY plan_sequence DESC
       LIMIT 1
@@ -365,7 +365,7 @@ export function readValidationEvidenceSnapshot(
     .get(
       authority.hostId,
       authority.mode,
-      authority.projectId,
+      authority.projectId ?? null,
       ("rootId" in authority ? authority.rootId : undefined) ?? null,
       ("worktreeId" in authority ? authority.worktreeId : undefined) ?? null,
       authority.providerInstanceId,
@@ -404,7 +404,7 @@ export function readValidationEvidenceSequence(
       `
       SELECT last_sequence AS last_sequence
       FROM validation_evidence_projection
-      WHERE host_id = ? AND mode = ? AND project_id = ? AND root_id IS ? AND worktree_id IS ?
+      WHERE host_id = ? AND mode = ? AND project_id IS ? AND root_id IS ? AND worktree_id IS ?
         AND provider_instance_id = ? AND extension_kind = ? AND extension_id IS ?
       ORDER BY plan_sequence DESC
       LIMIT 1
@@ -413,7 +413,7 @@ export function readValidationEvidenceSequence(
     .get(
       authority.hostId,
       authority.mode,
-      authority.projectId,
+      authority.projectId ?? null,
       ("rootId" in authority ? authority.rootId : undefined) ?? null,
       ("worktreeId" in authority ? authority.worktreeId : undefined) ?? null,
       authority.providerInstanceId,

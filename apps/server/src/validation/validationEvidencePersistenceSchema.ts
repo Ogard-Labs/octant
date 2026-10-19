@@ -20,7 +20,7 @@ export interface ValidationEvidenceProjectionRow {
   readonly plan_id: string;
   readonly host_id: string;
   readonly mode: "chat" | "work" | "code";
-  readonly project_id: string;
+  readonly project_id: string | null;
   readonly root_id: string | null;
   readonly worktree_id: string | null;
   readonly provider_instance_id: string;

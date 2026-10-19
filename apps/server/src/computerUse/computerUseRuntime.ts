@@ -401,103 +401,120 @@ export function createComputerUseRuntime(_options: {
       cleaned: false,
     };
     sessions.set(input.request.sessionId, session);
-    await append(session, "session-started", "Visible computer-use session started.");
-    session.expirationTimer = setTimeout(
-      () => void expire(session),
-      input.policy.maxSessionDurationMs,
-    );
-
     try {
-      session.observation = await adapter.observe(input.request, session.controller.signal);
-    } catch (error) {
+      await append(session, "session-started", "Visible computer-use session started.");
+      session.expirationTimer = setTimeout(
+        () => void expire(session),
+        input.policy.maxSessionDurationMs,
+      );
+
+      try {
+        session.observation = await adapter.observe(input.request, session.controller.signal);
+      } catch (error) {
+        if (session.controller.signal.aborted) return await finishAborted(session);
+        session.state = isProcessDeath(error) ? "interrupted" : "failed";
+        await append(
+          session,
+          session.state === "interrupted" ? "session-interrupted" : "session-failed",
+          "Host observation failed before action execution.",
+        );
+        await cleanup(session);
+        return view(session);
+      }
       if (session.controller.signal.aborted) return await finishAborted(session);
-      session.state = isProcessDeath(error) ? "interrupted" : "failed";
       await append(
         session,
-        session.state === "interrupted" ? "session-interrupted" : "session-failed",
-        "Host observation failed before action execution.",
+        "observation-recorded",
+        session.observation.stale === true
+          ? "Host observation was stale."
+          : "Fresh host observation recorded.",
       );
-      await cleanup(session);
-      return view(session);
-    }
-    if (session.controller.signal.aborted) return await finishAborted(session);
-    await append(
-      session,
-      "observation-recorded",
-      session.observation.stale === true
-        ? "Host observation was stale."
-        : "Fresh host observation recorded.",
-    );
-    if (session.controller.signal.aborted) return await finishAborted(session);
+      if (session.controller.signal.aborted) return await finishAborted(session);
 
-    if (session.observation.stale === true) {
+      if (session.observation.stale === true) {
+        session.state = "failed";
+        await append(session, "session-failed", "Stale observation cannot authorize an action.");
+        await cleanup(session);
+        return view(session);
+      }
+      if (
+        session.observation.sensitiveFieldKind !== undefined &&
+        (input.request.kind === "type-text" || input.request.kind === "key-press")
+      ) {
+        session.state = "failed";
+        await append(session, "session-failed", "Sensitive field is protected.");
+        await cleanup(session);
+        return view(session);
+      }
+
+      const approvalId = options.uuid();
+      const policyDecision = evaluateComputerUseAction(
+        input.request,
+        {
+          sessionId: input.request.sessionId,
+          actionId: input.request.actionId,
+          correlationId: input.request.correlationId,
+          authority: input.request.authority,
+          policy: input.policy,
+          state: "active",
+          approvalId: approvalId as never,
+          createdAt: options.clock() as never,
+        },
+        input.request.authority,
+        session.observation.targetApp,
+      );
+      if (policyDecision.kind === "denied") {
+        session.state = "failed";
+        await append(session, "session-failed", policyDecision.reason);
+        await cleanup(session);
+        return view(session);
+      }
+
+      const allowlistEntry = input.policy.allowlist.find(
+        (entry) =>
+          entry.actionKind === input.request.kind &&
+          (entry.targetApp === undefined || entry.targetApp === session.observation.targetApp),
+      );
+      if (allowlistEntry?.requiresApproval === true) {
+        const approvalScope =
+          typeof options.approvalScope === "function"
+            ? options.approvalScope(input.request)
+            : options.approvalScope;
+        session.state = "waiting-for-approval";
+        session.pendingApproval = {
+          approvalId,
+          actionId: input.request.actionId,
+          expiresAt: new Date(Date.parse(options.clock()) + approvalTtlMs).toISOString(),
+          summary:
+            options.approvalSummary?.(input.request) ??
+            (approvalScope === "application-session"
+              ? `Allow control of ${session.observation.targetApp} for this task for 5 minutes.`
+              : `${input.request.kind} in ${session.observation.targetApp}`),
+          ...(approvalScope === undefined ? {} : { scope: approvalScope }),
+          ...outsideContentOf(options.approvalOutsideContent?.(input.request)),
+        };
+        await append(session, "approval-requested", "One-time approval is required.");
+        return view(session);
+      }
+
+      session.execution = execute(session);
+      return await session.execution;
+    } catch {
       session.state = "failed";
-      await append(session, "session-failed", "Stale observation cannot authorize an action.");
+      session.pendingApproval = undefined;
+      session.controller.abort();
+      try {
+        await append(
+          session,
+          "session-failed",
+          "Computer-use evidence recording failed before approval or execution.",
+        );
+      } catch {
+        // Persistence may still be unavailable; native cleanup cannot depend on it.
+      }
       await cleanup(session);
       return view(session);
     }
-    if (
-      session.observation.sensitiveFieldKind !== undefined &&
-      (input.request.kind === "type-text" || input.request.kind === "key-press")
-    ) {
-      session.state = "failed";
-      await append(session, "session-failed", "Sensitive field is protected.");
-      await cleanup(session);
-      return view(session);
-    }
-
-    const approvalId = options.uuid();
-    const policyDecision = evaluateComputerUseAction(
-      input.request,
-      {
-        sessionId: input.request.sessionId,
-        actionId: input.request.actionId,
-        correlationId: input.request.correlationId,
-        authority: input.request.authority,
-        policy: input.policy,
-        state: "active",
-        approvalId: approvalId as never,
-        createdAt: options.clock() as never,
-      },
-      input.request.authority,
-      session.observation.targetApp,
-    );
-    if (policyDecision.kind === "denied") {
-      session.state = "failed";
-      await append(session, "session-failed", policyDecision.reason);
-      await cleanup(session);
-      return view(session);
-    }
-
-    const allowlistEntry = input.policy.allowlist.find(
-      (entry) =>
-        entry.actionKind === input.request.kind &&
-        (entry.targetApp === undefined || entry.targetApp === session.observation.targetApp),
-    );
-    if (allowlistEntry?.requiresApproval === true) {
-      const approvalScope =
-        typeof options.approvalScope === "function"
-          ? options.approvalScope(input.request)
-          : options.approvalScope;
-      session.state = "waiting-for-approval";
-      session.pendingApproval = {
-        approvalId,
-        actionId: input.request.actionId,
-        expiresAt: new Date(Date.parse(options.clock()) + approvalTtlMs).toISOString(),
-        summary:
-          options.approvalSummary?.(input.request) ??
-          (approvalScope === "application-session"
-            ? `Allow control of ${session.observation.targetApp} for this task for 5 minutes.`
-            : `${input.request.kind} in ${session.observation.targetApp}`),
-        ...(approvalScope === undefined ? {} : { scope: approvalScope }),
-        ...outsideContentOf(options.approvalOutsideContent?.(input.request)),
-      };
-      await append(session, "approval-requested", "One-time approval is required.");
-      return view(session);
-    }
-
-    session.execution = execute(session);
-    return await session.execution;
   };
 
   const decide: ComputerUseRuntime["decide"] = async (input) => {

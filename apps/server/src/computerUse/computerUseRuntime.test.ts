@@ -102,6 +102,22 @@ function fixture(options?: {
 }
 
 describe("ComputerUseRuntime", () => {
+  it.each(["session-started", "observation-recorded", "approval-requested"])(
+    "fails closed and cleans up when recording %s fails",
+    async (failedKind) => {
+      const { adapter, runtime } = fixture({
+        record: ({ event }) => {
+          if (event.kind === failedKind) throw new Error("Evidence unavailable");
+        },
+      });
+      const result = await runtime.start({ ownerWindowId, threadId, requestedBy, request, policy });
+      expect(result.state).toBe("failed");
+      expect(result.pendingApproval).toBeUndefined();
+      expect(adapter.execute).not.toHaveBeenCalled();
+      expect(adapter.cleanup).toHaveBeenCalledOnce();
+    },
+  );
+
   it("executes a representative visible action only after exact one-time approval", async () => {
     const { adapter, advance, recorded, runtime } = fixture();
     const waiting = await runtime.start({

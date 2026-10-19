@@ -2197,6 +2197,45 @@ ALTER TABLE code_runtime_projection
     // this covering index answers it from the newest entries alone.
     sql: `CREATE INDEX event_journal_occurred_at ON event_journal (occurred_at, aggregate_type);`,
   },
+  {
+    version: 82,
+    name: "allow_projectless_chat_validation_evidence",
+    sql: `
+CREATE TABLE validation_evidence_projection_next (
+  plan_id TEXT PRIMARY KEY CHECK(length(trim(plan_id)) > 0),
+  schema_version INTEGER NOT NULL CHECK(schema_version > 0),
+  host_id TEXT NOT NULL CHECK(length(trim(host_id)) > 0),
+  mode TEXT NOT NULL CHECK(mode IN ('chat', 'work', 'code')),
+  project_id TEXT CHECK(project_id IS NULL OR length(trim(project_id)) > 0)
+    CHECK(mode = 'chat' OR project_id IS NOT NULL),
+  root_id TEXT CHECK(root_id IS NULL OR length(trim(root_id)) > 0),
+  worktree_id TEXT CHECK(worktree_id IS NULL OR length(trim(worktree_id)) > 0),
+  provider_instance_id TEXT NOT NULL CHECK(length(trim(provider_instance_id)) > 0),
+  extension_kind TEXT NOT NULL CHECK(extension_kind IN ('core', 'trusted-extension')),
+  extension_id TEXT CHECK(extension_id IS NULL OR length(trim(extension_id)) > 0),
+  plan_json TEXT CHECK(plan_json IS NULL OR json_valid(plan_json)),
+  timeline_json TEXT NOT NULL CHECK(json_valid(timeline_json)),
+  steps_json TEXT NOT NULL CHECK(json_valid(steps_json)),
+  overall_outcome TEXT NOT NULL CHECK(overall_outcome IN (
+    'passed', 'failed', 'inconclusive', 'unavailable', 'interrupted', 'skipped'
+  )),
+  report_json TEXT CHECK(report_json IS NULL OR json_valid(report_json)),
+  aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+  last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+  plan_sequence INTEGER NOT NULL DEFAULT 0 CHECK(plan_sequence >= 0)
+) STRICT;
+
+INSERT INTO validation_evidence_projection_next (plan_id, schema_version, host_id, mode, project_id, root_id, worktree_id, provider_instance_id, extension_kind, extension_id, plan_json, timeline_json, steps_json, overall_outcome, report_json, aggregate_version, last_sequence, plan_sequence)
+SELECT plan_id, schema_version, host_id, mode, project_id, root_id, worktree_id, provider_instance_id, extension_kind, extension_id, plan_json, timeline_json, steps_json, overall_outcome, report_json, aggregate_version, last_sequence, plan_sequence FROM validation_evidence_projection;
+DROP TABLE validation_evidence_projection;
+ALTER TABLE validation_evidence_projection_next RENAME TO validation_evidence_projection;
+CREATE INDEX validation_evidence_authority_idx
+  ON validation_evidence_projection(
+    host_id, mode, project_id, root_id, worktree_id, provider_instance_id,
+    extension_kind, extension_id
+  );
+`,
+  },
 ];
 
 interface AppliedMigrationRow {
