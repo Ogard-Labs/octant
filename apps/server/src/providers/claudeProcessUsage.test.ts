@@ -65,7 +65,7 @@ describe("Claude process plan usage", () => {
     ).toBeUndefined();
   });
 
-  it("says plan limits do not apply when the process reports they are unavailable", () => {
+  it("preserves the process report that limits are unavailable", () => {
     expect(
       decodeClaudeProcessPlanUsage({ rate_limits_available: false, rate_limits: null }, observedAt),
     ).toEqual({ available: false });
