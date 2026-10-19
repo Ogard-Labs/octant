@@ -279,9 +279,7 @@ describe("sendResponsesTurn", () => {
       );
       const result = await Effect.runPromise(
         sendResponsesTurn(
-          input(fetch, {
-            ...(profile === undefined ? {} : { profile, subscriptionUsageGranted: true }),
-          }),
+          input(fetch, profile === undefined ? {} : { profile, subscriptionUsageGranted: true }),
         ),
       );
       expect(result).toMatchObject({
