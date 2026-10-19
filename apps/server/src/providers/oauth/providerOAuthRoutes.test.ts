@@ -1,5 +1,9 @@
 import { decodeProviderInstance, decodeWindowId, type ProviderInstanceId } from "@octant/contracts";
-import type { HostOAuthDescriptor, SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
+import {
+  decodeHostOAuthSignInState,
+  type HostOAuthDescriptor,
+  type SubscriptionOAuthOffer,
+} from "@octant/contracts/host-oauth";
 import { encodeSubscriptionOAuthCredential } from "@octant/provider-sdk/subscription-oauth";
 import { describe, expect, it, vi } from "vitest";
 import { WindowAuthorityStore } from "../../windowAuthorityStore";
@@ -48,6 +52,46 @@ function instanceAt(baseUrl: string) {
 }
 
 describe("provider OAuth routes", () => {
+  it("collects the same pending sign-in when Settings is reopened, without minting a second grant", async () => {
+    const attemptId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const begin = vi.fn<HostOAuthService["begin"]>(async () =>
+      decodeHostOAuthSignInState({
+        kind: "awaiting-consent",
+        attemptId,
+        descriptorId: descriptor.descriptorId,
+        flow: "authorization-code-pkce",
+        authorizationUrl: "https://example.com/authorize",
+        expiresAt: "2026-10-19T12:00:00.000Z",
+      }),
+    );
+    const status = vi.fn<HostOAuthService["status"]>(async () => ({
+      kind: "signed-in",
+      attemptId,
+      descriptorId: descriptor.descriptorId,
+      credentialRef: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    }));
+    const credentials = {
+      has: vi.fn(async () => false),
+      resolve: vi.fn(async () => ""),
+      set: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    };
+    const route = fixture({ begin, status, credentials });
+    const [first, repeated] = await Promise.all([route(command("begin")), route(command("begin"))]);
+    expect(await first?.json()).toMatchObject({ kind: "awaiting-consent", attemptId });
+    expect(await repeated?.json()).toMatchObject({ kind: "awaiting-consent", attemptId });
+    expect(begin).toHaveBeenCalledOnce();
+    const unauthorizedRequest = command("status");
+    unauthorizedRequest.headers.set("x-octant-window-capability", "wrong");
+    const unauthorized = await route(unauthorizedRequest);
+    expect(unauthorized?.status).toBe(401);
+    expect(status).not.toHaveBeenCalled();
+    const restored = await route(command("status"));
+    expect(await restored?.json()).toEqual({ kind: "signed-in", accountLabel: "Fixture account" });
+    expect(status).toHaveBeenCalledWith(expect.objectContaining({ attemptId }));
+    expect(credentials.set).toHaveBeenCalledOnce();
+  });
+
   it("does not reflect a foreign Origin into CORS", async () => {
     const route = fixture();
     const response = await route(

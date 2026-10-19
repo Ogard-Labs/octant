@@ -2971,6 +2971,11 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   border-top: 1px solid var(--oct-hairline);
 }
 
+.provider-oauth-sign-in > p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 .provider-oauth-sign-in__consent {
   flex-basis: 100%;
   margin: 0;

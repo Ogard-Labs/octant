@@ -78,6 +78,11 @@ function status(input: Partial<EndpointStatusInput>) {
 }
 
 describe("endpoint row state", () => {
+  it("does not claim signed out while the sign-in status is unresolved", () => {
+    expect(status({ signInOffer: plan }).label).toBe("Checking sign-in…");
+    expect(endpointSubLine(gateway(), undefined, plan)).toContain("checking sign-in…");
+    expect(status({ signInOffer: plan, signIn: { kind: "linking" } }).label).toBe("Signing in…");
+  });
   it.each<[string, Partial<EndpointStatusInput>, string, string | undefined, string | undefined]>([
     ["a ready endpoint", { observed: observed() }, "Ready", undefined, undefined],
     [

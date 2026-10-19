@@ -14,8 +14,8 @@ export interface SignInTarget {
 /**
  * Each sign-in endpoint's sign-in as the host reports it, so a row can say
  * who is signed in, or that it needs a sign-in, without opening its details.
- * Asking is read-only: the status command starts, acknowledges, and ends
- * nothing.
+ * Status can collect an already approved browser callback, but never starts
+ * a new sign-in or acknowledges terms.
  */
 export function useEndpointSignIns(
   targets: ReadonlyArray<SignInTarget>,
@@ -44,10 +44,12 @@ export function useEndpointSignIns(
         kind: "status",
         instanceId: target.instanceId,
         descriptorId: target.descriptorId,
-      }).then((result) => {
-        if (cancelled) return;
-        setSignIns((prior) => new Map(prior).set(target.instanceId, signInOf(result)));
-      });
+      })
+        .catch(() => undefined)
+        .then((result) => {
+          if (cancelled) return;
+          setSignIns((prior) => new Map(prior).set(target.instanceId, signInOf(result)));
+        });
     }
     return () => {
       cancelled = true;
@@ -71,6 +73,8 @@ function signInOf(result: ProviderOAuthCommandResult | undefined): EndpointSignI
     case "signed-in":
     case "not-revoked":
       return { kind: "signed-in", accountLabel: result.accountLabel ?? "your account" };
+    case "awaiting-consent":
+      return { kind: "linking" };
     case "expired":
       return { kind: "expired" };
     case "signed-out":
@@ -86,6 +90,18 @@ function signInOfState(
   prior: EndpointSignIn | undefined,
 ): EndpointSignIn | undefined {
   switch (state.kind) {
+    case "checking":
+    case "signing-out":
+      return { kind: "checking" };
+    case "opening-browser":
+    case "completing":
+    case "awaiting-consent":
+      return { kind: "linking" };
+    case "refused":
+    case "check-failed":
+      return { kind: "unknown" };
+    case "cancelled":
+      return { kind: "signed-out", termsRequired: false };
     case "signed-in":
     case "not-revoked":
       return { kind: "signed-in", accountLabel: state.accountLabel };

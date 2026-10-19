@@ -19,14 +19,9 @@ interface GlyphSpec {
 // with `currentColor`; named provider identities live in the licensed
 // `PROVIDER_LOGOS` table.
 const GLYPHS: Readonly<Record<string, GlyphSpec>> = {
-  // Octant's own harness: the eight-sided mark, hollow, with the core lit.
   "octant-harness": {
-    mark: (
-      <g fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5">
-        <path d="M5.4 1.8h5.2l3.6 3.6v5.2l-3.6 3.6H5.4L1.8 10.6V5.4z" />
-        <circle cx="8" cy="8" r="2" fill="currentColor" stroke="none" />
-      </g>
-    ),
+    viewBox: "0 0 100 100",
+    mark: <use href="./icons.svg#aperture" />,
   },
 };
 

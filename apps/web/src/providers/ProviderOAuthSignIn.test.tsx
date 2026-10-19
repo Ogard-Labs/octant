@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProviderOAuthSignIn, ProviderOAuthSignInPanel } from "./ProviderOAuthSignIn";
+import { runProviderOAuthCommand } from "./providerOAuthClient";
 
 const handlers = () => ({
   onSignIn: vi.fn(),
@@ -98,8 +99,139 @@ describe("provider sign-in", () => {
 });
 
 describe("provider sign-in panel", () => {
+  it("shows checking without offering another sign-in before the host answers", async () => {
+    const answer = Promise.withResolvers<{ kind: "signed-in"; accountLabel: string }>();
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="checking-account"
+        termsSummary="Terms"
+        run={() => answer.promise}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Checking sign-in");
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    await act(async () => answer.resolve({ kind: "signed-in", accountLabel: "ChatGPT plan" }));
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
+  });
+
+  it("recovers the host's pending attempt after returning to Settings without opening another browser", async () => {
+    vi.useFakeTimers();
+    const openUrl = vi.fn();
+    const run = vi.fn(async (command: { readonly kind: string }) =>
+      command.kind === "status"
+        ? {
+            kind: "awaiting-consent" as const,
+            attemptId: "pending",
+            authorizationUrl: "https://example.com/authorize",
+          }
+        : { kind: "signed-in" as const, accountLabel: "ChatGPT plan" },
+    );
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="returning-account"
+        termsSummary="Terms"
+        run={run}
+        openUrl={openUrl}
+        startSignIn
+        consentShown
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText(/Continue in the browser/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "I've finished in the browser" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
+    expect(openUrl).not.toHaveBeenCalled();
+    expect(run.mock.calls.map(([command]) => command.kind)).toEqual(["status", "poll"]);
+  });
+
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("allows another completion check after a stalled host request times out", async () => {
+    vi.useFakeTimers();
+    const fetchHost = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ kind: "awaiting-consent", attemptId: "pending" }))
+      .mockImplementationOnce(
+        (_url, init) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+              once: true,
+            });
+          }),
+      )
+      .mockResolvedValueOnce(Response.json({ kind: "signed-in", accountLabel: "ChatGPT plan" }));
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="stalled-host"
+        termsSummary="Terms"
+        run={(command) =>
+          runProviderOAuthCommand({
+            baseUrl: "http://localhost:14750",
+            windowCapability: "fixture-capability",
+            fetch: fetchHost,
+            command,
+          })
+        }
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "I've finished in the browser" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(screen.getByText(/Couldn't check sign-in/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "I've finished in the browser" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
+    expect(fetchHost).toHaveBeenCalledTimes(3);
+  });
+
+  it("offers a status retry after a lost sign-out response instead of risking a replacement sign-in", async () => {
+    const run = vi.fn(async (command: { readonly kind: string }) => {
+      if (command.kind === "sign-out") throw new Error("offline");
+      return { kind: "signed-in" as const, accountLabel: "ChatGPT plan" };
+    });
+    const user = userEvent.setup();
+    render(
+      <ProviderOAuthSignInPanel
+        accountLabel="ChatGPT plan"
+        descriptorId="chatgpt-plan"
+        instanceId="lost-signout"
+        termsSummary="Terms"
+        run={run}
+        startSignIn
+        consentShown
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: "Sign out" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn't confirm your sign-in status",
+    );
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Check sign-in status" }));
+    expect(await screen.findByRole("button", { name: "Sign out" })).toBeEnabled();
+    expect(run.mock.calls.map(([command]) => command.kind)).toEqual([
+      "status",
+      "sign-out",
+      "status",
+    ]);
   });
 
   it("records the terms and begins a sign-in it is asked to start, and only once", async () => {

@@ -91,6 +91,13 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
   const offers = dependencies.offers ?? subscriptionOAuthOffers();
   const now = dependencies.now ?? Date.now;
   const bodyLimit = dependencies.maxRequestBodySize ?? 16_384;
+  // Settings can unmount while the browser owns consent. Keep the public
+  // attempt on this host, scoped to its originating window and endpoint.
+  // Serial requests also prevent a double begin from creating another grant.
+  const pending = new Map<
+    string,
+    { readonly view: Promise<ProviderOAuthView>; readonly expiresAt: number }
+  >();
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
     if (url.pathname !== "/api/providers/oauth") return undefined;
@@ -138,15 +145,51 @@ export function createProviderOAuthRouteHandler(dependencies: ProviderOAuthRoute
     );
     if (offer === undefined) return json({ kind: "refused", reason: "invalid" }, 400, origin);
     const descriptor = decodeHostOAuthDescriptor(offer.descriptor);
+    const key = `${windowId}\n${command.instanceId}\n${command.descriptorId}`;
     try {
-      const view = await dispatch({
-        dependencies,
-        command,
-        descriptor,
-        offer,
-        principal,
-        actorId: windowId,
+      for (const [key, attempt] of pending) {
+        if (attempt.expiresAt <= now()) pending.delete(key);
+      }
+      const prior = principal === "local-window" ? pending.get(key) : undefined;
+      const execute = async (): Promise<ProviderOAuthView> => {
+        let resumed = command;
+        if (
+          prior !== undefined &&
+          (command.kind === "begin" || command.kind === "status" || command.kind === "poll")
+        ) {
+          const previous = await prior.view;
+          if (command.kind === "begin") return previous;
+          if (previous.kind === "awaiting-consent") {
+            resumed = { ...command, kind: "poll", attemptId: previous.attemptId };
+          } else if (command.kind === "poll") {
+            return previous;
+          }
+        }
+        return dispatch({
+          dependencies,
+          command: resumed,
+          descriptor,
+          offer,
+          principal,
+          actorId: windowId,
+        });
+      };
+      const viewPromise = execute();
+      const tracking =
+        principal === "local-window" && (command.kind === "begin" || prior !== undefined);
+      if (tracking)
+        pending.set(key, { view: viewPromise, expiresAt: prior?.expiresAt ?? now() + 15 * 60_000 });
+      const view = await viewPromise.catch((error: unknown) => {
+        if (pending.get(key)?.view === viewPromise) pending.delete(key);
+        throw error;
       });
+      if (tracking && pending.get(key)?.view === viewPromise) {
+        if (view.kind === "awaiting-consent") {
+          pending.set(key, { view: viewPromise, expiresAt: Date.parse(view.expiresAt) });
+        } else {
+          pending.delete(key);
+        }
+      }
       return json(view, 200, origin);
     } catch (error) {
       // Storing the credential pointer or binding the endpoint failed after
