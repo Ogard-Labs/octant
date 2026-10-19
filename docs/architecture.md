@@ -5375,7 +5375,9 @@ Lifecycle evidence retains the exact tool authority: Chat may have no Project;
 Work and Code still require one. Projectless evidence is isolated from
 Project-scoped evidence. If recording startup or approval evidence fails,
 the session fails closed, clears pending approval, and cleans up owned resources
-without executing a native action.
+without executing a native action. Terminal sessions leave the in-memory list
+after five minutes from the last evidence attempt, even if persistence rejected
+every event; failed writes never become claimed evidence.
 
 Computer observations verify that the requested window still belongs to the
 current application process before requesting its accessibility state or pixels.

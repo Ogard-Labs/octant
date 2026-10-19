@@ -102,6 +102,26 @@ function fixture(options?: {
 }
 
 describe("ComputerUseRuntime", () => {
+  it("expires failed sessions even when no evidence can be persisted", async () => {
+    const { adapter, advance, runtime } = fixture({
+      record: () => {
+        throw new Error("Evidence unavailable");
+      },
+    });
+    const result = await runtime.start({ ownerWindowId, threadId, requestedBy, request, policy });
+    expect(result.state).toBe("failed");
+    expect(result.events).toEqual([]);
+    expect(result.pendingApproval).toBeUndefined();
+    expect(adapter.execute).not.toHaveBeenCalled();
+    expect(adapter.cleanup).toHaveBeenCalledOnce();
+    expect(runtime.list(ownerWindowId)).toHaveLength(1);
+    advance(5 * 60_000 + 1);
+    expect(runtime.list(ownerWindowId)).toEqual([]);
+    expect(
+      runtime.inspect({ ownerWindowId, threadId, authority, sessionId: request.sessionId }),
+    ).toBeUndefined();
+  });
+
   it.each(["session-started", "observation-recorded", "approval-requested"])(
     "fails closed and cleans up when recording %s fails",
     async (failedKind) => {

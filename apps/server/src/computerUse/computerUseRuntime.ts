@@ -186,6 +186,8 @@ export function createComputerUseRuntime(_options: {
         occurredAt: options.clock(),
         detail,
       };
+      // Failed writes still bound terminal retention during a persistence outage.
+      session.lastEventAttemptAt = event.occurredAt;
       await options.evidence.record({
         sessionId: session.request.sessionId,
         actionId: session.request.actionId,
@@ -392,6 +394,7 @@ export function createComputerUseRuntime(_options: {
       policy: input.policy,
       state: "running",
       events: [],
+      lastEventAttemptAt: options.clock(),
       controller: new AbortController(),
       observation: { targetApp: "unobserved", reference: "unobserved" },
       pendingApproval: undefined,
@@ -673,11 +676,9 @@ export function createComputerUseRuntime(_options: {
       const now = Date.parse(options.clock());
       const owned: ComputerUseRuntimeView[] = [];
       for (const [sessionId, session] of sessions) {
-        const terminalAt = session.events.at(-1)?.occurredAt;
         if (
           isTerminal(session.state) &&
-          terminalAt !== undefined &&
-          now - Date.parse(terminalAt) > TERMINAL_SESSION_RETENTION_MS
+          now - Date.parse(session.lastEventAttemptAt) > TERMINAL_SESSION_RETENTION_MS
         ) {
           sessions.delete(sessionId);
           continue;
@@ -700,6 +701,7 @@ interface RuntimeSession {
   readonly policy: ComputerUsePolicy;
   state: ComputerUseRuntimeState;
   readonly events: ComputerUseRuntimeEvent[];
+  lastEventAttemptAt: string;
   readonly controller: AbortController;
   observation: ComputerUseNativeObservation;
   pendingApproval: ComputerUsePendingApproval | undefined;
