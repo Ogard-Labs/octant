@@ -567,6 +567,10 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   gap: 8px;
 }
 
+.thread-plan-proposal {
+  padding: var(--oct-space-4);
+}
+
 .thread-plan__compose {
   display: flex;
   flex-direction: column;

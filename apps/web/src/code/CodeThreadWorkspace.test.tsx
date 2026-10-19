@@ -31,6 +31,58 @@ const mentionedThreadId = "90000000-0000-4000-8000-000000000001" as never;
 const alternateProviderId = "80000000-0000-4000-8000-0000000000a2" as never;
 const alternateModelId = "model-two" as never;
 
+describe("Code plan proposals", () => {
+  it.each(["missing", "withdrawn"])(
+    "opens a first-plan form for a %s plan without starting a turn",
+    async (state) => {
+      const { approvedRevisionId: _approved, ...previous } = approvedPlan();
+      const proposed = { ...previous, status: "proposed" as const, title: "Review the change" };
+      const execute = vi.fn(async () => ({ plan: proposed, history: [] }));
+      const client: PlanClient = {
+        read: vi.fn(async () => ({
+          plan: state === "missing" ? null : { ...previous, status: "withdrawn" as const },
+          history: [],
+        })),
+        execute,
+      };
+      const code = controller();
+      const user = userEvent.setup();
+      render(
+        <ThreadPlanProvider client={client} threadId={String(threadId)}>
+          <CodeThreadWorkspace controller={code} threadId={threadId} />
+        </ThreadPlanProvider>,
+      );
+
+      const entry = await screen.findByRole("button", { name: "Propose plan" });
+      entry.focus();
+      await user.keyboard("{Enter}");
+      await screen.findByRole("dialog", { name: "Propose plan" });
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(entry).toHaveFocus();
+      await user.keyboard("{Enter}");
+      const dialog = await screen.findByRole("dialog", { name: "Propose plan" });
+      await user.type(
+        within(dialog).getByRole("textbox", { name: "Plan title" }),
+        "Review the change",
+      );
+      await user.type(
+        within(dialog).getByRole("textbox", { name: "Plan steps" }),
+        "Read the diff\nCheck the result",
+      );
+      await user.click(within(dialog).getByRole("button", { name: "Propose plan" }));
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(execute).toHaveBeenCalledOnce();
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "propose-thread-plan", title: "Review the change" }),
+      );
+      expect(code.sendFollowUp).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
+    },
+  );
+});
+
 describe("Code host queue", () => {
   it.each(["mention resolution", "queue acknowledgment"] as const)(
     "allows a new submission after switching threads during %s",
