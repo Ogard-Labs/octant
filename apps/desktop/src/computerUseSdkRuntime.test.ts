@@ -8,11 +8,16 @@ const native = vi.hoisted(() => ({
   stop: vi.fn(async () => {}),
   destroyClient: vi.fn(),
   destroyHost: vi.fn(),
+  requestPermissions: vi.fn(),
+  currentPermissions: vi.fn(),
+  openPermissionSettings: vi.fn(async () => {}),
 }));
 vi.mock("./computerUseDriverRelease", () => ({
   verifyComputerDriverBinary: vi.fn(async () => {}),
 }));
 vi.mock("@trycua/cua-driver", () => ({
+  requestMacOsPermissions: native.requestPermissions,
+  currentMacOsPermissionStatus: native.currentPermissions,
   EmbeddedPermissionMode: { Standard: "standard" },
   EmbeddedDriverHostOptions: { create: (options: unknown) => options },
   EmbeddedCuaDriverHost: {
@@ -32,7 +37,10 @@ vi.mock("@trycua/cua-driver", () => ({
     connect: () => ({ callTool: native.callTool, uniffiDestroy: native.destroyClient }),
   },
 }));
-import { startComputerDriverRuntime } from "./computerUseSdkRuntime";
+vi.mock("@trycua/cua-driver/electron", () => ({
+  openMacOSScreenRecordingSettings: native.openPermissionSettings,
+}));
+import { computerUsePermissions, startComputerDriverRuntime } from "./computerUseSdkRuntime";
 
 let root: string;
 beforeEach(async () => {
@@ -86,5 +94,33 @@ describe("Embedded computer runtime identity", () => {
     });
     await expect(start()).rejects.toThrow(/host application identity/);
     expect(native.stop).toHaveBeenCalledOnce();
+  });
+});
+
+describe.skipIf(process.platform !== "darwin")("Computer permission setup", () => {
+  it("opens System Settings when a permission request leaves Screen Recording unavailable", async () => {
+    const denied = { accessibility: true, screenRecording: false };
+    native.requestPermissions.mockReturnValue(denied);
+
+    expect(await computerUsePermissions(true)).toEqual(denied);
+    expect(native.openPermissionSettings).toHaveBeenCalledOnce();
+    expect(native.callTool).not.toHaveBeenCalled();
+  });
+
+  it("rechecks missing permissions without requesting access or opening System Settings", async () => {
+    const denied = { accessibility: false, screenRecording: false };
+    native.currentPermissions.mockReturnValue(denied);
+
+    expect(await computerUsePermissions()).toEqual(denied);
+    expect(native.requestPermissions).not.toHaveBeenCalled();
+    expect(native.openPermissionSettings).not.toHaveBeenCalled();
+  });
+
+  it("leaves System Settings closed when the request reports Screen Recording allowed", async () => {
+    const allowed = { accessibility: true, screenRecording: true };
+    native.requestPermissions.mockReturnValue(allowed);
+
+    expect(await computerUsePermissions(true)).toEqual(allowed);
+    expect(native.openPermissionSettings).not.toHaveBeenCalled();
   });
 });

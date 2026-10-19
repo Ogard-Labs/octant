@@ -124,7 +124,7 @@ export function ComputerUseSettingsView(props: {
       </SettingsSection>
       <SettingsSection
         title="macOS permissions"
-        description="Octant asks macOS the first time a task needs one; a refusal can only be changed in System Settings."
+        description="Set up permissions asks macOS for access and opens Screen Recording settings if access is still missing."
       >
         <div className="setgroup">
           <SettingRow
@@ -158,7 +158,7 @@ export function ComputerUseSettingsView(props: {
           <SettingRow
             settingId="computer-use-permission-actions"
             label="Permission setup"
-            description="Review what macOS has granted, or recheck the current state."
+            description="If Octant is missing in System Settings, add this installed app with +, then relaunch and recheck."
             scope="host"
           >
             <div className="settings-view__actions">
