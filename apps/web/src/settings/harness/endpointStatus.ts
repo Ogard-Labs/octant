@@ -43,7 +43,9 @@ export type EndpointSignIn =
   | { readonly kind: "signed-in"; readonly accountLabel: string }
   | { readonly kind: "signed-out"; readonly termsRequired: boolean }
   | { readonly kind: "expired" }
-  | { readonly kind: "unknown" };
+  | { readonly kind: "unknown" }
+  | { readonly kind: "checking" }
+  | { readonly kind: "linking" };
 
 export interface EndpointStatusInput {
   readonly instance: ModelEndpointInstance;
@@ -89,6 +91,15 @@ export function endpointStatus(input: EndpointStatusInput): EndpointStatus {
   }
   const offer = input.signInOffer;
   if (offer !== undefined) {
+    if ((input.signIn === undefined && observed === undefined) || input.signIn?.kind === "checking")
+      return { tone: "checking", label: "Checking sign-in…" };
+    if (input.signIn?.kind === "linking") return { tone: "checking", label: "Signing in…" };
+    if (input.signIn?.kind === "unknown")
+      return {
+        tone: "unchecked",
+        label: "Sign-in not checked",
+        sentence: "Open Sign-in to check your account.",
+      };
     if (input.signIn?.kind === "expired") return signedOut(offer);
     if (input.signIn?.kind === "signed-out") return signInToUse(offer);
   }
@@ -299,9 +310,10 @@ export function endpointSubLine(
   offer: { readonly accountLabel: string } | undefined,
 ): string {
   if (offer !== undefined) {
-    return signIn?.kind === "signed-in"
-      ? `Signed in as ${signIn.accountLabel}`
-      : `${offer.accountLabel} · not signed in`;
+    if (signIn?.kind === "signed-in") return `Signed in as ${signIn.accountLabel}`;
+    if (signIn?.kind === "signed-out" || signIn?.kind === "expired")
+      return `${offer.accountLabel} · not signed in`;
+    return `${offer.accountLabel} · ${signIn?.kind === "linking" ? "signing in…" : signIn?.kind === "unknown" ? "sign-in not checked" : "checking sign-in…"}`;
   }
   const host = endpointHost(instance);
   if (instance.driverKind === "ollama") return `Ollama · ${host}`;

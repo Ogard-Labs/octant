@@ -1,7 +1,14 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export type ProviderOAuthSignInState =
+  | { readonly kind: "checking" }
+  | { readonly kind: "check-failed" }
+  | { readonly kind: "opening-browser" }
+  | { readonly kind: "completing" }
+  | { readonly kind: "signing-out" }
+  | { readonly kind: "cancelled" }
   | { readonly kind: "signed-out"; readonly notice?: string }
   | { readonly kind: "awaiting-consent"; readonly detail: string; readonly href?: string }
   | { readonly kind: "signed-in"; readonly accountLabel: string }
@@ -26,6 +33,8 @@ export interface ProviderOAuthSignInProps {
   readonly onSignIn: () => void;
   /** Absent where the endpoint takes no key, such as one a sign-in created. */
   readonly onUseApiKey?: () => void;
+  readonly onCheckSignIn?: () => void;
+  readonly onCheckStatus?: () => void;
   readonly onSignOut: () => void;
   readonly onSignOutLocally: () => void;
 }
@@ -35,16 +44,38 @@ export interface ProviderOAuthSignInProps {
  * state it is given: no token, code verifier, or credential reference.
  */
 export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
-  const disabled = props.disabled === true;
+  const busy = ["checking", "opening-browser", "completing", "signing-out"].includes(
+    props.state.kind,
+  );
+  const disabled = props.disabled === true || busy;
   const signedIn = props.state.kind === "signed-in" || props.state.kind === "not-revoked";
   // Terms are a line under the button, not a step before it: acknowledging
   // first and then signing in was two clicks for one decision.
-  const showConsent = props.termsRequired && !signedIn;
+  const showConsent = props.termsRequired && !signedIn && !busy;
   const consentId = useId();
   return (
-    <div className="provider-card__edit-actions provider-oauth-sign-in">
+    <div className="provider-card__edit-actions provider-oauth-sign-in" aria-busy={busy}>
+      {busy ? (
+        <p role="status">
+          {props.state.kind === "checking"
+            ? "Checking sign-in…"
+            : props.state.kind === "opening-browser"
+              ? "Opening your browser…"
+              : props.state.kind === "completing"
+                ? "Checking browser completion…"
+                : "Signing out…"}
+        </p>
+      ) : null}
+      {props.state.kind === "check-failed" ? (
+        <OctantAlert tone="warning">
+          Couldn't confirm your sign-in status. Check again before signing in or out.
+        </OctantAlert>
+      ) : null}
+      {props.state.kind === "cancelled" ? (
+        <p role="status">Sign-in cancelled. You can try again when you're ready.</p>
+      ) : null}
       {props.state.kind === "signed-in" ? (
-        <p>
+        <p role="status">
           Signed in as <span className="oct-meta--mono">{props.state.accountLabel}</span>
         </p>
       ) : null}
@@ -61,7 +92,9 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
       {props.state.kind === "expired" ? (
         <p>Your sign-in expired. Sign in again to use it.</p>
       ) : null}
-      {props.state.kind === "refused" ? <p>{props.state.message}</p> : null}
+      {props.state.kind === "refused" ? (
+        <OctantAlert tone="warning">{props.state.message}</OctantAlert>
+      ) : null}
       {props.state.kind === "awaiting-consent" ? (
         <p aria-live="polite">
           {props.state.detail}
@@ -75,10 +108,35 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
           )}
         </p>
       ) : null}
-      {signedIn ? null : (
+      {props.state.kind === "awaiting-consent" && props.onCheckSignIn !== undefined ? (
+        <OctantButton
+          disabled={disabled}
+          onClick={props.onCheckSignIn}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          I've finished in the browser
+        </OctantButton>
+      ) : null}
+      {props.state.kind === "check-failed" ? (
+        <OctantButton
+          disabled={disabled}
+          onClick={props.onCheckStatus}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          Check sign-in status
+        </OctantButton>
+      ) : null}
+      {signedIn ||
+      busy ||
+      props.state.kind === "awaiting-consent" ||
+      props.state.kind === "check-failed" ? null : (
         <OctantButton
           {...(showConsent ? { "aria-describedby": consentId } : {})}
-          disabled={disabled || props.state.kind === "awaiting-consent"}
+          disabled={disabled}
           onClick={props.onSignIn}
           size="sm"
           type="button"
@@ -97,6 +155,12 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
           Use an API key
         </OctantButton>
       )}
+      {signedIn ? (
+        <p className="provider-oauth-sign-in__consent">
+          Sign out removes this computer's saved sign-in and asks the provider to revoke it when
+          supported. It does not remove every connection from your provider account.
+        </p>
+      ) : null}
       {signedIn ? (
         <OctantButton
           disabled={disabled}
@@ -184,7 +248,7 @@ export function ProviderOAuthSignInPanel(props: {
   readonly openUrl?: (url: string) => void;
 }) {
   const [termsRequired, setTermsRequired] = useState(true);
-  const [state, setState] = useState<ProviderOAuthSignInState>({ kind: "signed-out" });
+  const [state, setState] = useState<ProviderOAuthSignInState>({ kind: "checking" });
   const [attemptId, setAttemptId] = useState<string>();
   const [statusKnown, setStatusKnown] = useState(false);
   const started = useRef(false);
@@ -201,13 +265,13 @@ export function ProviderOAuthSignInPanel(props: {
   const termsRequiredRef = useRef(termsRequired);
   termsRequiredRef.current = termsRequired;
   const canRun = run !== undefined;
-  // The state stays signed-out while the acknowledgment is in flight, so a
-  // double-click, or a click while startSignIn runs, would begin two attempts.
+  // A second click must not begin another attempt while acknowledgment runs.
   const signingIn = useRef(false);
   const signIn = () => {
     const current = runRef.current;
     if (current === undefined || signingIn.current) return;
     signingIn.current = true;
+    setState({ kind: "opening-browser" });
     void (async () => {
       try {
         // The click that starts the sign-in is the acknowledgment: the button
@@ -215,65 +279,87 @@ export function ProviderOAuthSignInPanel(props: {
         // own command before it will begin.
         if (termsRequiredRef.current) {
           const acknowledged = await current({ kind: "acknowledge", instanceId, descriptorId });
-          apply(acknowledged ?? unreadable, setState, setTermsRequired, setAttemptId);
+          if (acknowledged?.termsRequired !== undefined)
+            setTermsRequired(acknowledged.termsRequired);
           if (
             acknowledged === undefined ||
             acknowledged.kind === "refused" ||
             acknowledged.termsRequired === true
           ) {
+            apply(acknowledged ?? unreadable, setState, setTermsRequired, setAttemptId);
             return;
           }
         }
         const result = await current({ kind: "begin", instanceId, descriptorId });
         apply(result ?? unreadable, setState, setTermsRequired, setAttemptId, openUrl);
+      } catch {
+        apply(unreadable, setState, setTermsRequired, setAttemptId);
       } finally {
         signingIn.current = false;
       }
     })();
   };
 
-  // Reported only once the host has answered, so the panel's starting
-  // "signed out" placeholder is never passed on as the host's word.
+  // The surrounding row shares the explicit pending state, never a signed-out placeholder.
   useEffect(() => {
-    if (statusKnown) onStateChangeRef.current?.(state);
-  }, [state, statusKnown]);
+    if (canRun) onStateChangeRef.current?.(state);
+  }, [canRun, state]);
 
   useEffect(() => {
     const current = runRef.current;
+    setState({ kind: "checking" });
+    setStatusKnown(false);
+    setAttemptId(undefined);
+    started.current = false;
     if (!canRun || current === undefined) return;
     let cancelled = false;
-    void current({ kind: "status", instanceId, descriptorId }).then((result) => {
-      if (cancelled || result === undefined) return;
-      apply(result, setState, setTermsRequired, setAttemptId);
-      setStatusKnown(true);
-    });
+    void current({ kind: "status", instanceId, descriptorId })
+      .catch(() => undefined)
+      .then((result) => {
+        if (cancelled) return;
+        if (result === undefined || result.kind === "refused") setState({ kind: "check-failed" });
+        else apply(result, setState, setTermsRequired, setAttemptId);
+        setStatusKnown(true);
+      });
     return () => {
       cancelled = true;
     };
   }, [canRun, descriptorId, instanceId]);
 
+  const polling = useRef(false);
+  const checkSignIn = (manual = false) => {
+    if (polling.current || attemptId === undefined) return;
+    polling.current = true;
+    if (manual) setState({ kind: "completing" });
+    void runRef
+      .current?.({ kind: "poll", instanceId, descriptorId, attemptId })
+      .catch(() => undefined)
+      .then((result) => {
+        if (result !== undefined) apply(result, setState, setTermsRequired, setAttemptId);
+        else
+          setState({
+            kind: "awaiting-consent",
+            detail:
+              "Couldn't check sign-in. Try checking again, or return here when the host is available.",
+          });
+      })
+      .finally(() => {
+        polling.current = false;
+      });
+  };
+
   useEffect(() => {
     if (!canRun || attemptId === undefined || state.kind !== "awaiting-consent") return;
-    const timer = setInterval(() => {
-      // An unreadable poll answer is a passing failure (the server may be
-      // restarting); the next poll asks again until the attempt ends.
-      void runRef
-        .current?.({
-          kind: "poll",
-          instanceId,
-          descriptorId,
-          attemptId,
-        })
-        .then((result) => {
-          if (result === undefined) return;
-          apply(result, setState, setTermsRequired, setAttemptId);
-        });
-    }, 2000);
+    const timer = setInterval(() => checkSignIn(), 2000);
     return () => clearInterval(timer);
   }, [attemptId, canRun, descriptorId, instanceId, state.kind]);
 
   useEffect(() => {
     if (props.startSignIn !== true || started.current || !statusKnown) return;
+    if (state.kind === "signed-in" || state.kind === "awaiting-consent") {
+      started.current = true;
+      return;
+    }
     // An expired sign-in never restarts by itself: the host's expired answer
     // does not say whether the terms changed since, so the person signs in
     // again from the button that carries the consent line.
@@ -289,25 +375,44 @@ export function ProviderOAuthSignInPanel(props: {
       {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
       {...(props.signInLabel === undefined ? {} : { signInLabel: props.signInLabel })}
       onSignIn={signIn}
+      onCheckSignIn={() => checkSignIn(true)}
+      onCheckStatus={() => {
+        setState({ kind: "checking" });
+        void run?.({ kind: "status", instanceId, descriptorId })
+          .catch(() => undefined)
+          .then((result) => {
+            if (result === undefined || result.kind === "refused")
+              setState({ kind: "check-failed" });
+            else apply(result, setState, setTermsRequired, setAttemptId);
+          });
+      }}
       onSignOut={() => {
+        setState({ kind: "signing-out" });
         void run?.({
           kind: "sign-out",
           instanceId,
           descriptorId,
-        }).then((result) => {
-          if (result === undefined) return;
-          apply(result, setState, setTermsRequired, setAttemptId);
-        });
+        })
+          .catch(() => undefined)
+          .then((result) => {
+            if (result === undefined || result.kind === "refused")
+              setState({ kind: "check-failed" });
+            else apply(result, setState, setTermsRequired, setAttemptId);
+          });
       }}
       onSignOutLocally={() => {
+        setState({ kind: "signing-out" });
         void run?.({
           kind: "sign-out-locally",
           instanceId,
           descriptorId,
-        }).then((result) => {
-          if (result === undefined) return;
-          apply(result, setState, setTermsRequired, setAttemptId);
-        });
+        })
+          .catch(() => undefined)
+          .then((result) => {
+            if (result === undefined || result.kind === "refused")
+              setState({ kind: "check-failed" });
+            else apply(result, setState, setTermsRequired, setAttemptId);
+          });
       }}
       {...(props.onUseApiKey === undefined ? {} : { onUseApiKey: props.onUseApiKey })}
       state={state}
@@ -356,7 +461,11 @@ function apply(
   }
   if (result.kind === "refused") {
     setAttemptId(undefined);
-    setState({ kind: "refused", message: refusalMessage(result.reason) });
+    setState(
+      result.reason === "denied"
+        ? { kind: "cancelled" }
+        : { kind: "refused", message: refusalMessage(result.reason) },
+    );
     return;
   }
   setAttemptId(result.attemptId);

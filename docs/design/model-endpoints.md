@@ -43,6 +43,25 @@ Octant Harness lists its model endpoints differently: as rows in one list, never
 
 Opening a row replaces the page with the endpoint's detail sub-page (breadcrumb Settings / Octant Harness / endpoint, a Back control, and Escape), whose h1 is the endpoint's name; Back returns focus to the row. The sub-page leads with the state, Check now, and Use, then the one fix, then Sign-in or API key, Models (search, a Shown / Hidden / All filter, a switch per model, and the plain tags "Reads images" and "Chat only · Verify tools"), Where your data goes (two labelled checkboxes the person sets, with per-model overrides in a disclosure), Name and address, Diagnostics (a disclosure that opens by itself only while the endpoint is failing, holding the address, protocol, authentication, last check with the host's precise answer, tool use, and capabilities), and Remove last, confirmed in a dialog that starts on Keep and names the model roles that lose a model. Precise terms (protocol names, bearer, capability names) appear only in Diagnostics.
 
+### Subscription sign-in lifecycle
+
+The sign-in section shows Checking sign-in until the host answers. Opening the
+browser, waiting for consent, checking completion, signed in, cancelled, and
+failed states are explicit and announced. A pending attempt offers the sign-in
+page link and I've finished in the browser. Opening Settings never starts a new
+sign-in or acknowledges terms. Returning to Settings resumes the originating
+window's pending host attempt; repeated Begin requests reuse it. Attempts expire
+with the provider deadline and do not survive a host restart.
+
+Signed-in account details keep Sign out visible with a description of its scope.
+Octant asks for provider revocation when supported, then removes the local grant.
+If revocation fails, it keeps the grant and offers an explicit local-only action.
+Neither action promises removal of every provider account connection.
+
+Octant Harness uses the existing `icons.svg#aperture` brand mark in provider lists
+and model pickers. The mark inherits the theme's text color; the surrounding
+control supplies its accessible name.
+
 ### Add endpoint
 
 Add endpoint opens a dialog: the sign-ins first, then a guided flow with a numbered strip of steps. Kind is four cards (Azure AI Foundry, OpenAI-compatible, Anthropic-compatible, Local (Ollama)). Connect asks for a name, the address, and the key, each with a one-line hint, and no control is greyed out without a sentence saying why; protocol, how the key is sent, and "It takes no key" sit under Advanced, and an Azure address entered as OpenAI-compatible offers Switch to Azure AI Foundry. Azure also names at least one deployment, as chips, because the host cannot add it without one. Check and add adds the endpoint and shows its row state in the dialog, with its fix; from then on the endpoint exists, and closing the dialog keeps it. Models lists a short catalogue whole and chosen; a long one is searched, lists at most eight matches with a count of the rest, starts with nothing chosen, and has an Add by ID row; models left unchosen are hidden from the model picker. Azure edits its deployment chips; Local lists the models installed in Ollama, with no Add by ID. Verify tools checks each chosen model, one request at a time, after a button that says how many requests it sends; each model reads Checking…, Verified, or "Chat only" with the reason and Retry, and a failed check never stops the endpoint being added. Ollama models are Chat only without a request, with the reason said once. Agents is optional: only verified models can be offered to helper agents or given an Octant Harness role (a Chat only model is listed with its checkbox off and a sentence saying why; role choices list verified models only, and Reading images only those that read images). A chosen role makes the model its first choice and keeps what it had as backups, saved with the roles' version; a stale version reloads the roles and asks again. In a browser, a kind that needs a key is added without one and reads Needs key, sending the person to the desktop app; Local works fully. "Chat only · Verify tools" is the one label for an unverified model on the endpoint row (when no shown model is verified), the endpoint's Models, the model pickers, and Add endpoint. Targets are 44px tall at phone width.

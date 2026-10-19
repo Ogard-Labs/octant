@@ -551,6 +551,18 @@ one of these offers the same sign-in beside its API key. The host refuses a
 sign-in started from a paired device; sign in from the Octant app or a browser
 on the host.
 
+While Octant checks your saved account, the Sign-in section says **Checking
+sign-in**. After you choose Sign in, it shows the browser progress and a link to
+reopen the sign-in page. You can leave Settings and return to the same pending
+attempt while Octant's host is running. Choose **I've finished in the browser**
+to check immediately; Octant also checks automatically while the section is open.
+A cancelled or expired attempt explains how to try again.
+
+**Sign out** stays beside the connected account in the Sign-in section. It ends
+this computer's saved session, asking the provider to revoke it when supported.
+It does not promise to remove all entries from the provider's connected-app list
+or connections in other workspaces.
+
 The sign-in opens the provider's authorization page in the system browser and
 completes on a loopback callback; Octant never sees or types your credentials.
 On the first sign-in the host registers itself as a user-defined agent: the

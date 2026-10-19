@@ -4,6 +4,18 @@ import { ProviderGlyph } from "./ProviderGlyph";
 import { PROVIDER_LOGOS } from "./providerLogoPaths";
 
 describe("ProviderGlyph", () => {
+  it("reuses the Octant sprite mark for Harness while its surrounding label names it", () => {
+    const { container } = render(
+      <span>
+        Octant Harness
+        <ProviderGlyph displayName="Octant Harness" driverKind="octant-harness" />
+      </span>,
+    );
+    expect(container.querySelector("svg")).toHaveAttribute("viewBox", "0 0 100 100");
+    expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(container.querySelector("use")).toHaveAttribute("href", "./icons.svg#aperture");
+    expect(screen.getByText("Octant Harness")).toBeInTheDocument();
+  });
   it("renders an Octant-owned bundled mark without a network image", () => {
     const { container } = render(
       <span title="Codex">

@@ -10,6 +10,7 @@ import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { filterModelPickerGroups } from "@octant/domain";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
+import { ProviderGlyph } from "./ProviderGlyph";
 
 export interface ModelPickerProps {
   readonly groups: ReadonlyArray<PickerGroup>;
@@ -109,6 +110,7 @@ export function ModelPicker(props: ModelPickerProps) {
             block.kind === "octant" ? (
               <div className="model-picker__group model-picker__group--octant" key="octant-harness">
                 <div className="model-picker__group-header">
+                  <ProviderGlyph displayName="Octant" driverKind="octant-harness" />
                   <span className="model-picker__group-name">Octant</span>
                   <span className="model-picker__group-meta">
                     <span className="model-picker__group-driver">Native harness</span>
