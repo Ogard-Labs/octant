@@ -2241,7 +2241,10 @@ flowchart LR
 - **CLI turn results.** The one-shot and line-mode CLI report a send refusal
   even when it arrives during projection polling. An earlier completed turn
   never supplies the new prompt's reply or success status. Streaming may begin
-  before send returns, but only from a newly observed turn.
+  before send returns, but only from a newly observed turn. A readable baseline
+  transcript is required before sending; a failed read is never an empty
+  conversation. Questions and approvals are handled only after a new turn is
+  observed, with a settled send refusal checked after each polling read.
 
 - **CLI model selection.** An explicit `octant agent --model` selects the
   provider account and model for a new Chat thread before its first prompt.

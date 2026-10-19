@@ -259,7 +259,7 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
     threadId,
     read: async () => {
       const [current, turns] = await Promise.all([loadThread(), transcript()]);
-      if (current === undefined) return undefined;
+      if (current === undefined || turns === undefined) return undefined;
       return {
         id: threadId,
         mode: "work",
@@ -267,7 +267,7 @@ function workThreadPort(session: OpenedLocalControlSession, threadId: string): A
         providerInstanceId: String(current.providerInstanceId),
         modelId: String(current.modelId),
         version: current.version,
-        turns: (turns?.turns ?? []).map((turn) => ({
+        turns: turns.turns.map((turn) => ({
           id: String(turn.turnId),
           at: turn.acceptedAt,
           prompt: turn.prompt,
