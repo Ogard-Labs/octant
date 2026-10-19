@@ -125,13 +125,18 @@ export function prepareConfinedVersionProbe(
       input.guards ?? {},
     );
     const confinement = input.confinement ?? makeProcessConfinementLive();
+    const executable = safeRealpath(input.binaryPath);
     const readRoots = versionProbeReadRoots(
       input.binaryPath,
+      executable,
       scratchDirectory,
       input.homeDirectory ?? homedir(),
     );
     const launch = confinement.prepare({
-      executable: input.binaryPath,
+      // Bubblewrap cannot overlay a launcher symlink inside an already bound
+      // bin directory before its deeper target exists. Run the same resolved
+      // program that the read roots already grant; do not widen those roots.
+      executable,
       args: input.args ?? ["--version"],
       // There is no thread, so the one root the builder binds is the scratch
       // directory itself: the read's working directory on both platforms, and
@@ -307,15 +312,10 @@ function versionReadEnvironment(
  */
 function versionProbeReadRoots(
   binaryPath: string,
+  resolved: string,
   scratchDirectory: string,
   homeDirectory: string,
 ): ReadonlyArray<string> {
-  let resolved: string;
-  try {
-    resolved = realpathSync(binaryPath);
-  } catch {
-    resolved = binaryPath;
-  }
   const home = safeRealpath(homeDirectory);
   const dependencyTree = nodeModulesRoot(resolved);
   const candidates = [
