@@ -2208,8 +2208,15 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .provider-settings__create--openai-compatible,
+.provider-settings__create--codex,
 .provider-settings__create--claude {
   grid-template-columns: repeat(2, minmax(180px, 1fr));
+}
+
+/* Account settings are complete rows, not cells in the compact binary form. */
+.provider-settings__create > .setrow {
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 
 /* Image profiles carry five-plus fields (allowlist, default model, quality,
@@ -2232,6 +2239,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 
 .provider-settings__create--openai-compatible .settings-view__action,
 .provider-settings__create--claude .settings-view__action,
+.provider-settings__create--codex .settings-view__action,
 .provider-settings__models-field,
 .provider-settings__field-guidance {
   grid-column: 1 / -1;
@@ -4583,6 +4591,17 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
     grid-template-columns: 1fr;
   }
 
+  .provider-settings__create > .setrow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .provider-settings__create > .setrow > .setrow-control {
+    grid-column: 1;
+    grid-row: auto;
+    justify-self: start;
+    margin-top: var(--oct-space-3);
+  }
+
   .provider-settings__intro {
     align-items: stretch;
     flex-direction: column;
@@ -4619,6 +4638,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   }
   .provider-settings__create--openai-compatible .settings-view__action,
   .provider-settings__create--claude .settings-view__action,
+  .provider-settings__create--codex .settings-view__action,
   .provider-settings__create--openai-image .settings-view__action,
   .provider-settings__create--gemini-native-image .settings-view__action,
   .provider-settings__create--bfl-image .settings-view__action,
