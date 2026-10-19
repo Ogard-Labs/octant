@@ -4546,6 +4546,34 @@ describe("Claude account sign-in", () => {
     await recreated.close();
   });
 
+  it.each([
+    { rate_limits_available: false, rate_limits: null },
+    { rate_limits_available: true, rate_limits: null },
+  ])("keeps a subscription's cold process reading unavailable: %j", async (payload) => {
+    const subscription = harness("subscription", "current-session");
+    subscription.setOpenQuery(() =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          const query = new FakeQuery("sdk-cold-usage");
+          query.readPlanUsage.mockReturnValue(Effect.succeed(payload));
+          subscription.queries.push(query);
+          return query;
+        }),
+        (query) => query.close(),
+      ),
+    );
+    const facts = subscription.driver.contextFacts;
+    if (facts === undefined) throw new Error("Claude exposes context facts.");
+    const result = await Effect.runPromise(
+      Effect.scoped(Effect.either(facts.observeServiceLimits({ instanceId, onDemand: true }))),
+    );
+    expect(result._tag === "Left" ? result.left : undefined).toMatchObject({
+      category: "unavailable",
+      message: "Claude plan usage is unavailable.",
+    });
+    expect(subscription.queries[0]?.readPlanUsage).toHaveBeenCalledOnce();
+  });
+
   it("reads plan usage from the Claude process only on request and never for an API-key account", async () => {
     const subscription = harness("subscription", "current-session", {
       configDirectory: "/Users/example/.claude",

@@ -968,11 +968,10 @@ function makeClaudeContextFacts(
         const payload = yield* query.readPlanUsage();
         const observedAt = clock() as UtcTimestamp;
         const decoded = decodeClaudeProcessPlanUsage(payload, observedAt);
-        if (decoded === undefined) {
+        // A cold subscription process can report no limits before its first turn.
+        // Only the configured API-key authentication above establishes no plan.
+        if (decoded === undefined || !decoded.available) {
           return yield* Effect.fail(failure("unavailable", "Claude plan usage is unavailable."));
-        }
-        if (!decoded.available) {
-          return yield* Effect.fail(failure("unsupported", "Plan limits do not apply."));
         }
         return claudeProcessPlanUsageLimits(instanceId, decoded, observedAt);
       }),

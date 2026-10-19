@@ -2318,7 +2318,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   before a turn. Observed with Claude Code 2.1.296, a process started
   only for the question holds no windows until it has made a model
   request, and answers with none; that is no answer, and the last
-  snapshot stays. Octant never reads a token or credential file to
+  snapshot stays. Claude Code 2.1.301 can also report
+  `rate_limits_available: false` in that cold process. For a subscription
+  account this means unavailable usage, not that a plan does not apply.
+  Only explicit API-key authentication establishes the no-plan state.
+  Octant never reads a token or credential file to
   fetch those numbers, and never calls a vendor usage endpoint
   itself. Each account keeps its own snapshot, keyed by
   the instance and the state directory that session ran under. The
