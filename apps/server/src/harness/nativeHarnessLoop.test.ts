@@ -879,9 +879,14 @@ describe("fitting a request to the endpoint", () => {
       expect(ledgerUsageCost(model, usage)).toBeUndefined();
     });
 
-    it.each([false, true])(
-      "leaves the estimate unavailable after usage, retry, and interruption=%s",
-      async (cancelled) => {
+    it.each([
+      { retried: true, cancelled: false, journalFails: false },
+      { retried: true, cancelled: true, journalFails: false },
+      { retried: false, cancelled: false, journalFails: false },
+      { retried: false, cancelled: false, journalFails: true },
+    ])(
+      "preserves known pricing once after failure with retried=$retried, cancelled=$cancelled, journalFails=$journalFails",
+      async ({ retried, cancelled, journalFails }) => {
         const model = "gpt-5.6-luna" as ProviderModelId;
         const transport: NativeHarnessTransport = {
           open: async () => ({
@@ -894,13 +899,25 @@ describe("fitting a request to the endpoint", () => {
                 cacheReadInputTokens: 0,
                 reasoningTokens: 5,
               });
-              stream.onEvent({
-                kind: "retrying",
-                attempt: 2,
-                maxAttempts: 5,
-                delayMs: 500,
-                reason: "empty-completion",
-              });
+              if (retried)
+                stream.onEvent({
+                  kind: "retrying",
+                  attempt: 2,
+                  maxAttempts: 5,
+                  delayMs: 500,
+                  reason: "empty-completion",
+                });
+              if (journalFails)
+                return {
+                  text: "done",
+                  toolCalls: [],
+                  usage: {
+                    inputTokens: 148099,
+                    outputTokens: 165,
+                    cacheReadInputTokens: 0,
+                    reasoningTokens: 5,
+                  },
+                };
               throw {
                 category: cancelled ? "interrupted" : "unavailable",
                 message: "Request stopped.",
@@ -912,10 +929,17 @@ describe("fitting a request to the endpoint", () => {
         const events = await Effect.runPromise(
           Effect.scoped(
             Effect.gen(function* () {
-              const connection = yield* connect(
-                transport,
-                new MemoryNativeHarnessTranscriptStore(),
-              );
+              const transcripts = new MemoryNativeHarnessTranscriptStore();
+              if (journalFails) {
+                const append = transcripts.append.bind(transcripts);
+                let appended = 0;
+                transcripts.append = (...args) => {
+                  appended += 1;
+                  if (appended === 2) throw new Error("Synthetic transcript failure after usage");
+                  return append(...args);
+                };
+              }
+              const connection = yield* connect(transport, transcripts);
               yield* connection.start({
                 sessionId,
                 modelId: model,
@@ -932,11 +956,11 @@ describe("fitting a request to the endpoint", () => {
           outputTokens: 165,
           cacheReadInputTokens: 0,
           reasoningTokens: 5,
-          estimatedCostUsd: null,
+          estimatedCostUsd: retried ? null : expect.closeTo(0.0298178, 12),
         });
-        expect(
-          ledgerUsageCost(model, usage ?? { inputTokens: 0, outputTokens: 0 }),
-        ).toBeUndefined();
+        expect(ledgerUsageCost(model, usage ?? { inputTokens: 0, outputTokens: 0 })).toEqual(
+          retried ? undefined : { kind: "api-estimate", usdMicros: 29818 },
+        );
       },
     );
 

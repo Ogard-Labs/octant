@@ -165,6 +165,7 @@ interface SessionState {
   latestReportedUsage: NativeHarnessUsage | undefined;
   estimatedCostUsd: number | null;
   pricingBoundariesKnown: boolean;
+  requestEstimateUsd: number | null | undefined;
   /** When the request now in flight was sent, which dates the usage it reports. */
   requestStartedAt: string | undefined;
   /**
@@ -293,6 +294,7 @@ export function createNativeHarnessConnection(
       latestReportedUsage: undefined,
       estimatedCostUsd: 0,
       pricingBoundariesKnown: true,
+      requestEstimateUsd: undefined,
       requestStartedAt: undefined,
       compaction: input.compaction,
     });
@@ -340,13 +342,20 @@ export function createNativeHarnessConnection(
       const controller = new AbortController();
       state.abortController = controller;
       state.steps += 1;
+      state.requestEstimateUsd = undefined;
       const step = sendOnLead(state, request, controller.signal)
         .then((response) => settleResponse(state, response))
         .catch((error: unknown) => {
           if (state.latestReportedUsage !== undefined) {
             // Replace the partial request reports so an unfinished retry cannot
             // leave a whole-turn estimate, without adding the known tokens twice.
-            emit(state, { kind: "usage", ...state.latestReportedUsage, estimatedCostUsd: null });
+            const estimatedCostUsd =
+              state.pricingBoundariesKnown &&
+              state.estimatedCostUsd !== null &&
+              typeof state.requestEstimateUsd === "number"
+                ? state.estimatedCostUsd + state.requestEstimateUsd
+                : null;
+            emit(state, { kind: "usage", ...state.latestReportedUsage, estimatedCostUsd });
           }
           state.pending = undefined;
           state.acceptingSteering = false;
@@ -392,8 +401,12 @@ export function createNativeHarnessConnection(
         // lets its timing leave out the tool time between requests.
         onEvent: (event: NativeHarnessStreamEvent) => {
           if (event.kind === "retrying") state.pricingBoundariesKnown = false;
-          if (event.kind === "usage")
+          if (event.kind === "usage") {
             state.latestReportedUsage = addNativeHarnessUsage(state.usage, event);
+            state.requestEstimateUsd = state.pricingBoundariesKnown
+              ? (estimateTurnCostUsd(String(leadTarget(state).modelId), event) ?? null)
+              : null;
+          }
           emit(
             state,
             event.kind === "usage"
@@ -402,9 +415,7 @@ export function createNativeHarnessConnection(
                   ...(state.requestStartedAt === undefined
                     ? {}
                     : { requestStartedAt: state.requestStartedAt }),
-                  estimatedCostUsd: state.pricingBoundariesKnown
-                    ? (estimateTurnCostUsd(String(leadTarget(state).modelId), event) ?? null)
-                    : null,
+                  estimatedCostUsd: state.requestEstimateUsd,
                 }
               : { ...event },
           );
@@ -433,7 +444,6 @@ export function createNativeHarnessConnection(
           state.requestStartedAt = options.clock();
           return await (state.fallback?.endpoint ?? state.endpoint).send(current, stream);
         } catch (error) {
-          state.pricingBoundariesKnown = false;
           if (!signal.aborted && !recoveredFromOverflow) {
             const refused = sanitizeFailure(error);
             if (isContextOverflowFailure(refused)) {
@@ -441,6 +451,7 @@ export function createNativeHarnessConnection(
                 reduceOnce: true,
               });
               if (refit !== undefined) {
+                state.pricingBoundariesKnown = false;
                 recoveredFromOverflow = true;
                 current = refit;
                 continue;
@@ -484,6 +495,7 @@ export function createNativeHarnessConnection(
             );
           }
           state.fallback?.endpoint.release();
+          state.pricingBoundariesKnown = false;
           state.fallback = { target: outcome.target, endpoint: outcome.endpoint };
           current = moved;
         }
@@ -601,6 +613,8 @@ export function createNativeHarnessConnection(
         state.estimatedCostUsd === null || requestCost === undefined
           ? null
           : state.estimatedCostUsd + requestCost;
+      // This request is now included in the settled total even if journaling fails below.
+      state.requestEstimateUsd = 0;
       if (response.usage !== undefined) {
         state.usage = addNativeHarnessUsage(state.usage, response.usage);
         state.latestReportedUsage = state.usage;
