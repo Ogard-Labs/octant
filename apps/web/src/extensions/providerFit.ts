@@ -1,3 +1,4 @@
+import { ProviderDriverKind } from "@octant/contracts/providers";
 import type { ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import { isExtensionComponentModeSafe } from "@octant/plugin-host";
 import { driverLabel } from "../providers/providerSettingsPresentation";
@@ -26,6 +27,7 @@ export function providerFit(pkg: InstalledPackage): ProviderFit {
   const components = pkg.components.map((state) => state.component);
   const full: string[] = [];
   const limits: string[] = [];
+  const partial: { readonly mode: string; readonly kept: string }[] = [];
   for (const mode of modes) {
     const safe = components.filter((component) => isExtensionComponentModeSafe(mode, component));
     if (components.length === 0 || safe.length === components.length) {
@@ -37,16 +39,25 @@ export function providerFit(pkg: InstalledPackage): ProviderFit {
       continue;
     }
     const kept = describeKinds(safe.map((component) => component.kind));
-    limits.push(`In ${MODE_LABEL[mode]}, ${kept} only.`);
+    partial.push({ mode: MODE_LABEL[mode], kept });
   }
   const providers =
     pkg.compatibility.providerFamilies.length === 0
       ? "every provider"
       : joinWords(pkg.compatibility.providerFamilies.map((family) => familyLabel(String(family))));
-  const sentence =
-    full.length === 0
-      ? `Needs a provider among ${providers}.`
-      : `Works in ${joinWords(full)} with ${providers}.`;
+  // With no mode that takes the whole package, the partial modes carry the
+  // sentence; otherwise each one is a limit under it.
+  let sentence: string;
+  if (full.length > 0) {
+    sentence = `Works in ${joinWords(full)} with ${providers}.`;
+    for (const { mode, kept } of partial) limits.push(`In ${mode}, ${kept} only.`);
+  } else if (partial.length > 0) {
+    const kinds = new Set(partial.map(({ kept }) => kept));
+    const only = kinds.size === 1 ? `, ${[...kinds].join("")} only` : ", in part";
+    sentence = `Works in ${joinWords(partial.map(({ mode }) => mode))} with ${providers}${only}.`;
+  } else {
+    sentence = "Does not run in any mode it declares.";
+  }
   if (components.some((component) => component.kind === "mcp-server")) {
     limits.push(
       "A provider that cannot carry Octant's tools refuses a turn that selects its servers.",
@@ -67,11 +78,8 @@ function describeKinds(kinds: ReadonlyArray<string>): string {
 }
 
 function familyLabel(family: string): string {
-  try {
-    return driverLabel(family as never) ?? family;
-  } catch {
-    return family;
-  }
+  const known = ProviderDriverKind.literals.find((kind) => kind === family);
+  return known === undefined ? family : driverLabel(known);
 }
 
 function joinWords(words: ReadonlyArray<string>): string {

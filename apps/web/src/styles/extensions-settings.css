@@ -611,6 +611,7 @@
 
 /* Where a package works, under its source line. */
 .extcard-fit {
+  grid-column: 2 / -1;
   display: grid;
   gap: 2px;
   margin: 0;

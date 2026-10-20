@@ -52,4 +52,24 @@ describe("where a package works, in words", () => {
       "A provider that cannot carry Octant's tools refuses a turn that selects its servers.",
     ]);
   });
+
+  it("says what a Chat-only package keeps instead of asking for a provider among every provider", () => {
+    const fit = providerFit(
+      pkg(
+        ["chat"],
+        [],
+        [{ kind: "skill-instructions" }, { kind: "mcp-server", capabilities: ["filesystem"] }],
+      ),
+    );
+    expect(fit.sentence).toBe("Works in Chat with every provider, its skills only.");
+    expect(fit.limits).toEqual([
+      "A provider that cannot carry Octant's tools refuses a turn that selects its servers.",
+    ]);
+  });
+
+  it("shows a provider family Octant does not know by its own name", () => {
+    expect(providerFit(pkg(["code"], ["acme-runtime", "codex"], [])).sentence).toBe(
+      "Works in Code with acme-runtime and Codex.",
+    );
+  });
 });
