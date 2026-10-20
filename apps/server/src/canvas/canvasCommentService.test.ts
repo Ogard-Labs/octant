@@ -202,6 +202,45 @@ describe("CanvasCommentService", () => {
     });
   });
 
+  it("records a send to the agent against the Canvas head the host holds and lists it for the agent tool", () => {
+    const { service } = fixture();
+    const comments = service();
+    comments.comment(add(0), context, project, { kind: "host" });
+    expect(
+      comments.comment(
+        {
+          kind: "canvas-comment-send-to-agent",
+          canvasId: ids.canvas,
+          commentId: ids.comment,
+          // The renderer's actor and version are both replaced by the host's.
+          sentBy: { kind: "agent", actorId: ids.provider },
+          canvasSequence: 9,
+          expectedSequence: 1,
+          issuedAt: now,
+        },
+        context,
+        project,
+        { kind: "host" },
+      ),
+    ).toMatchObject({ kind: "accepted", sequence: 2 });
+
+    const restarted = service();
+    const outcome = restarted.comments(canvasId, context, project);
+    expect(outcome.kind === "ready" && outcome.threads[0]?.comment.sentToAgent).toEqual({
+      canvasSequence: 1,
+      sentAt: now,
+    });
+    expect(restarted.agentRequests(canvasId)).toEqual([
+      {
+        commentId: ids.comment,
+        anchor: { kind: "block", blockId: "block-1" },
+        body: "Rename the API box",
+        replies: [],
+        canvasSequence: 1,
+      },
+    ]);
+  });
+
   it("refuses the second of two comments written against the same sequence", () => {
     const { service } = fixture();
     const a = service();

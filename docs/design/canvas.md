@@ -530,6 +530,23 @@ unauthorized reads with no bodies, and stamps each comment's origin (`host` or
 the authenticated `remote-device`) beside its `local-user` author. The host
 stamps that author (and a resolve's or delete's actor) itself and ignores the
 actor the request names, so a renderer can never author a comment as an agent.
+A person can send an open comment, with its replies, to the Canvas's owning
+thread as a focused revision request (**Send to agent**, event
+`canvas.comment-sent-to-agent@1`, command `canvas-comment-send-to-agent`). The
+renderer queues one follow-up turn through the thread's message queue, so the
+turn runs under that thread's own authority and no new authority exists; the
+prompt names the Canvas, the anchor by block, node, edge, row or region id, and
+the text, and asks for a change to that part alone with every other block kept
+identical. A Chat thread also carries the Canvas as a context selection. The
+action is absent when the Canvas has no thread the person can reach, when a
+version older than the head is on screen, and while a request is already with
+the agent. The host marks the comment sent only after the thread took the
+turn, stamping the Canvas head it holds. The Canvas tool's read lists open
+requests as `requestedChanges`, and a revise result carries a `warning`
+when blocks outside every requested anchor changed; the warning does not refuse
+the revision. A comment reads "Addressed in vN" once an agent-authored version
+after the one it was sent against exists; a person's own layout edit does not
+answer it. A send stays on this computer and is not carried by artifact sync.
 A table row is either a list of cells or `{ id, cells }`; the id is the
 author's, unique within the table (the domain policy refuses a repeat as
 `duplicate-table-row-id`), and arrives with Canvas schema version 13. A `row`

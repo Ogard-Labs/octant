@@ -18,7 +18,10 @@ import type {
   CanvasVersionHistoryEntry,
 } from "@octant/contracts/canvas-revision";
 import type { CanvasCommentCommand, CanvasCommentThread } from "@octant/contracts/canvas-board";
-import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
+import type {
+  CanvasContextSelection,
+  CanvasContextSelectionId,
+} from "@octant/contracts/canvasContext";
 import type {
   CanvasRefreshCancelRequest,
   CanvasRefreshRequest,
@@ -42,6 +45,8 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
+import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
+import { canvasCommentAgentPrompt, enqueueCanvasCommentTurn } from "./canvasCommentAgentTurn";
 import type {
   CanvasExportOfferList,
   CanvasExportPrepareRequest,
@@ -71,6 +76,12 @@ type CanvasToolDialog = (typeof CANVAS_TOOL_DIALOGS)[number];
 export interface CanvasWorkspaceTabProps {
   readonly client: CanvasClient | undefined;
   readonly onAttachContext?: (selection: CanvasContextSelection) => void;
+  /**
+   * The message queue of the Canvas's owning thread. Without it no comment
+   * offers Send to agent; with it the turn still runs under the thread's own
+   * authority, and the host refuses it when the person cannot reach the thread.
+   */
+  readonly queueClient?: ThreadMessageQueueClient;
   readonly tab: Extract<WorkspaceTab, { readonly kind: "canvas" }>;
   readonly onPinCanvasInFocusZone?: (request: {
     readonly canvasId: CanvasId;
@@ -654,6 +665,40 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             undefined,
           );
   const commentsAvailable = commentsClient !== undefined && reviseBase !== null;
+  // The agent works on the head, so a request made from an older version on
+  // screen could name blocks the head no longer has.
+  const headSequence = history.reduce((head, entry) => Math.max(head, entry.sequence), 0);
+  const queueClient = props.queueClient;
+  const onSendToAgent =
+    queueClient === undefined ||
+    reviseBase === null ||
+    selectedVersionId === undefined ||
+    expectedSequence < headSequence
+      ? undefined
+      : async (thread: CanvasCommentThread, anchorLabel: string) => {
+          const sent = await enqueueCanvasCommentTurn(queueClient, {
+            mode: reviseBase.mode,
+            threadId: String(reviseBase.originThreadId),
+            prompt: canvasCommentAgentPrompt({
+              definition,
+              canvasId: String(props.tab.canvasId),
+              sequence: expectedSequence,
+              thread,
+              anchorLabel,
+            }),
+            canvasSelection: {
+              id: crypto.randomUUID() as CanvasContextSelectionId,
+              canvasId: props.tab.canvasId,
+              versionId: selectedVersionId,
+              sequence: expectedSequence,
+              displayName: definition.title,
+              scope: "whole-canvas",
+            },
+          });
+          return sent.status === "sent"
+            ? ({ status: "sent", canvasSequence: expectedSequence } as const)
+            : sent;
+        };
   // Refine and Refresh write the next version on top of the head, and the host
   // refuses either from an older version as stale. Comments anchor to blocks of
   // the Canvas rather than to a version, so the host takes them from any
@@ -911,6 +956,8 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               }}
               onThreadsChange={setCommentThreads}
               send={commentsClient.send}
+              history={history}
+              {...(onSendToAgent === undefined ? {} : { onSendToAgent })}
               {...(focusedBlockId === undefined ? {} : { focusedBlockId })}
               {...(focusedRowId === undefined ? {} : { focusedRowId })}
             />

@@ -24,6 +24,7 @@ import type { ChildCanvasWorkspaceResolution } from "./childCanvasWorkspace";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ReaderMarking } from "../context/inheritedExternalContentMark";
 import type { CanvasService } from "./canvasService";
+import type { CanvasCommentAgentRequestView } from "./canvasCommentService";
 import type {
   CanvasPreviewOutcome,
   CanvasPreviewService,
@@ -185,6 +186,12 @@ export interface CanvasAgentToolPort {
     { readonly id: string; readonly type: string; readonly lifecycle: string } | undefined
   >;
   readonly canvas: Pick<CanvasService, "create" | "revise" | "get" | "threadReferenceCards">;
+  /**
+   * The open comments a person sent to the agent about a Canvas. Absent on a
+   * host without comments; the tool then shows no requests and checks no
+   * revision against them.
+   */
+  readonly commentRequests?: (canvasId: CanvasId) => ReadonlyArray<CanvasCommentAgentRequestView>;
   /**
    * Marks the thread or managed child about to read a Canvas, when the
    * Canvas carries outside content (`markCanvasReader`). Called after a read or
@@ -1070,12 +1077,24 @@ function canvasToolSet(options: {
         if (!readerMarked(options, canvasId)) {
           return { result: { error: CANVAS_READER_UNMARKED }, isError: true };
         }
+        const requested = pendingCommentRequests(options.port, canvasId, outcome.version.sequence);
         return {
           result: {
             canvasId: input.canvasId,
             title: outcome.version.definition.title,
             sequence: outcome.version.sequence,
             blocks: outcome.version.definition.blocks,
+            ...(requested.length === 0
+              ? {}
+              : {
+                  requestedChanges: requested.map((request) => ({
+                    commentId: request.commentId,
+                    anchor: request.anchor,
+                    comment: request.body,
+                    ...(request.replies.length === 0 ? {} : { replies: request.replies }),
+                  })),
+                  requestedChangesGuidance: REQUESTED_CHANGES_GUIDANCE,
+                }),
           },
         };
       }
@@ -1178,6 +1197,9 @@ function canvasToolSet(options: {
       const placed = placement(input);
       const actor =
         options.author ?? decodeCanvasActor({ kind: "agent", actorId: options.port.uuid() });
+      // What the person asked to change, and the blocks as they stand, read
+      // before the revision so the result can say whether it stayed inside.
+      const focus = revisionFocus(options.port, input, target);
       const revision = {
         schemaVersion: 1,
         kind: "canvas-revise",
@@ -1225,6 +1247,7 @@ function canvasToolSet(options: {
         effective === "sidebar"
           ? canvasInlineRefusal(input.blocks)
           : undefined);
+      const strayed = focus === undefined ? [] : blocksChangedOutsideRequests(focus, input.blocks);
       return {
         result: {
           canvasId: input.canvasId,
@@ -1234,10 +1257,99 @@ function canvasToolSet(options: {
           ...(effective === undefined ? {} : { presentation: effective }),
           ...(note === undefined ? {} : { presentationNote: note }),
           ...(effective === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),
+          ...(strayed.length === 0 ? {} : { warning: outsideRequestWarning(strayed) }),
         },
       };
     },
   };
+}
+
+// Carried on the read that shows the requests rather than in the tool's
+// always-visible definition, which is kept under a size budget.
+const REQUESTED_CHANGES_GUIDANCE =
+  "A person sent these comments to you. Revise only the block each anchor names (and within it only the named node, edge, row, or region) and keep every other block identical, including block ids and order; the revise result warns when other blocks changed.";
+
+/**
+ * The comments a person sent to the agent that no later version has answered:
+ * a request made at the Canvas's current sequence. One made at an earlier
+ * sequence has had a version land since and is no longer shown, so an agent
+ * is not told to redo a change it already made.
+ */
+function pendingCommentRequests(
+  port: CanvasAgentToolPort,
+  canvasId: CanvasId,
+  sequence: number,
+): ReadonlyArray<CanvasCommentAgentRequestView> {
+  return (port.commentRequests?.(canvasId) ?? []).filter(
+    (request) => request.canvasSequence === sequence,
+  );
+}
+
+interface RevisionFocus {
+  readonly requests: ReadonlyArray<CanvasCommentAgentRequestView>;
+  readonly before: ReadonlyArray<CanvasBlock>;
+}
+
+/** The pending requests and the blocks they were made against, or nothing when none are pending. */
+function revisionFocus(
+  port: CanvasAgentToolPort,
+  input: { readonly canvasId?: string; readonly expectedSequence?: number },
+  target: Extract<ResolvedCanvasTarget, { readonly kind: "ready" }>,
+): RevisionFocus | undefined {
+  if (input.canvasId === undefined || input.expectedSequence === undefined) return undefined;
+  let canvasId: CanvasId;
+  try {
+    canvasId = decodeCanvasId(input.canvasId);
+  } catch {
+    return undefined;
+  }
+  const requests = pendingCommentRequests(port, canvasId, input.expectedSequence);
+  if (requests.length === 0) return undefined;
+  const current = port.canvas.get(canvasId, target.context, target.project);
+  if (current.kind !== "ready" || current.version.sequence !== input.expectedSequence) {
+    return undefined;
+  }
+  return { requests, before: current.version.definition.blocks };
+}
+
+/**
+ * The ids of blocks this revision changed, added, removed, or moved that no
+ * pending request names. Blocks are compared with their keys in one order,
+ * because the agent's JSON and the stored definition spell the same block in
+ * different orders.
+ */
+function blocksChangedOutsideRequests(
+  focus: RevisionFocus,
+  after: ReadonlyArray<CanvasBlock>,
+): ReadonlyArray<string> {
+  const named = new Set(focus.requests.map((request) => String(request.anchor.blockId)));
+  const previous = new Map(
+    focus.before.map((block, index) => [String(block.blockId), { index, text: canonical(block) }]),
+  );
+  const changed: string[] = [];
+  after.forEach((block, index) => {
+    const id = String(block.blockId);
+    const was = previous.get(id);
+    previous.delete(id);
+    if (was !== undefined && was.index === index && was.text === canonical(block)) return;
+    if (!named.has(id)) changed.push(id);
+  });
+  for (const id of previous.keys()) if (!named.has(id)) changed.push(id);
+  return changed;
+}
+
+function outsideRequestWarning(blockIds: ReadonlyArray<string>): string {
+  return `This revision changed, moved, or removed blocks the person did not ask about: ${blockIds.join(", ")}. The request was to change only the anchored block and keep the rest identical; revise again if that was not intended.`;
+}
+
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) =>
+    inner !== null && typeof inner === "object" && !Array.isArray(inner)
+      ? Object.fromEntries(
+          Object.entries(inner as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)),
+        )
+      : inner,
+  );
 }
 
 const CANVAS_READER_UNMARKED =

@@ -4,6 +4,7 @@ import {
   CanvasCommentDeleted,
   CanvasCommentReplied,
   CanvasCommentResolved,
+  CanvasCommentSentToAgent,
   CorrelationId,
   EventActor,
   EventId,
@@ -13,6 +14,7 @@ import {
   decodeCanvasActor,
   type CanvasActor,
   type CanvasComment,
+  type CanvasCommentAnchor,
   type CanvasCommentCommandResult,
   type CanvasCommentDenialCode,
   type CanvasCommentEvent,
@@ -28,6 +30,7 @@ import {
   CANVAS_COMMENT_DELETED,
   CANVAS_COMMENT_REPLIED,
   CANVAS_COMMENT_RESOLVED,
+  CANVAS_COMMENT_SENT_TO_AGENT,
 } from "@octant/contracts/canvas-board";
 import {
   CANVAS_MAX_COMMENTS_PER_CANVAS,
@@ -61,7 +64,21 @@ export function registerCanvasCommentEvents(registry: EventRegistry): EventRegis
     .register(CANVAS_COMMENT_ADDED, 1, CanvasCommentAdded)
     .register(CANVAS_COMMENT_REPLIED, 1, CanvasCommentReplied)
     .register(CANVAS_COMMENT_RESOLVED, 1, CanvasCommentResolved)
-    .register(CANVAS_COMMENT_DELETED, 1, CanvasCommentDeleted);
+    .register(CANVAS_COMMENT_DELETED, 1, CanvasCommentDeleted)
+    .register(CANVAS_COMMENT_SENT_TO_AGENT, 1, CanvasCommentSentToAgent);
+}
+
+/**
+ * A comment a person sent to the agent, as the Canvas tool shows it to the
+ * agent: the anchor to change, what was said, and the Canvas version the
+ * request was made against.
+ */
+export interface CanvasCommentAgentRequestView {
+  readonly commentId: string;
+  readonly anchor: CanvasCommentAnchor;
+  readonly body: string;
+  readonly replies: ReadonlyArray<string>;
+  readonly canvasSequence: number;
 }
 
 type JournalPort = Pick<Journal, "append" | "replayAggregateType">;
@@ -97,6 +114,8 @@ function eventNameOf(event: CanvasCommentEvent): string {
       return CANVAS_COMMENT_RESOLVED;
     case "deleted":
       return CANVAS_COMMENT_DELETED;
+    case "sent-to-agent":
+      return CANVAS_COMMENT_SENT_TO_AGENT;
   }
 }
 
@@ -110,7 +129,9 @@ function eventFromEnvelope(envelope: EventEnvelope): CanvasCommentEvent | undefi
           ? "resolved"
           : envelope.eventName === CANVAS_COMMENT_DELETED
             ? "deleted"
-            : undefined;
+            : envelope.eventName === CANVAS_COMMENT_SENT_TO_AGENT
+              ? "sent-to-agent"
+              : undefined;
   if (kind === undefined) return undefined;
   try {
     return decodeCanvasCommentEvent({ kind, event: envelope.payload });
@@ -221,7 +242,7 @@ export class CanvasCommentService {
     }
     const state = this.#stateFor(canvasId);
     const admitted = admitCanvasCommentCommand(
-      withPersonActor(requestInput, this.#person),
+      withHostFacts(requestInput, this.#person, entry.currentVersion.sequence),
       state,
       origin,
     );
@@ -276,6 +297,30 @@ export class CanvasCommentService {
     this.#append(input.canvasId, state, event);
     this.#state.set(String(input.canvasId), applyCanvasCommentEvent(state, event));
     return "applied";
+  }
+
+  /**
+   * The open comments a person sent to the agent, for the Canvas tool. It
+   * does not pass through `authorize`: the tool has already read the Canvas
+   * under the thread's own scope, and a request is about that Canvas alone.
+   */
+  agentRequests(canvasId: CanvasId): ReadonlyArray<CanvasCommentAgentRequestView> {
+    const state = this.#stateFor(canvasId);
+    return state.comments.flatMap((comment) =>
+      comment.sentToAgent === undefined || comment.resolvedAt !== undefined
+        ? []
+        : [
+            {
+              commentId: String(comment.commentId),
+              anchor: comment.anchor,
+              body: comment.body,
+              replies: state.replies
+                .filter((reply) => String(reply.commentId) === String(comment.commentId))
+                .map((reply) => reply.body),
+              canvasSequence: comment.sentToAgent.canvasSequence,
+            },
+          ],
+    );
   }
 
   #append(canvasId: CanvasId, state: CanvasCommentState, event: CanvasCommentEvent): void {
@@ -448,8 +493,14 @@ function commentDenialCode(code: CanvasBoardRejectionCode): CanvasCommentDenialC
  * device, so the host names that person as the author. The command's author
  * fields were once trusted as sent, and the renderer copied the creating
  * agent's identity into them: a comment typed in the Canvas showed "Agent".
+ * A send-to-agent likewise takes the Canvas head the host holds, so the
+ * version a request stands against is never a renderer's stale view.
  */
-function withPersonActor(requestInput: unknown, person: CanvasActor): unknown {
+function withHostFacts(
+  requestInput: unknown,
+  person: CanvasActor,
+  canvasSequence: number,
+): unknown {
   if (typeof requestInput !== "object" || requestInput === null) return requestInput;
   const kind: unknown = Reflect.get(requestInput, "kind");
   switch (kind) {
@@ -460,6 +511,8 @@ function withPersonActor(requestInput: unknown, person: CanvasActor): unknown {
       return { ...requestInput, resolvedBy: person };
     case "canvas-comment-delete":
       return { ...requestInput, deletedBy: person };
+    case "canvas-comment-send-to-agent":
+      return { ...requestInput, sentBy: person, canvasSequence };
     default:
       return requestInput;
   }
@@ -474,6 +527,7 @@ function toCommentEvent(event: AdmittedEvent): CanvasCommentEvent {
   if ("comment" in event) return { kind: "added", event };
   if ("reply" in event) return { kind: "replied", event };
   if ("resolvedBy" in event) return { kind: "resolved", event };
+  if ("sentBy" in event) return { kind: "sent-to-agent", event };
   return { kind: "deleted", event };
 }
 
@@ -487,5 +541,7 @@ function occurredAtOf(event: CanvasCommentEvent): UtcTimestamp {
       return event.event.resolvedAt;
     case "deleted":
       return event.event.deletedAt;
+    case "sent-to-agent":
+      return event.event.sentAt;
   }
 }
