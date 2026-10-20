@@ -1,4 +1,8 @@
-import { createTabActivationRegistry, TabActivationProvider } from "./shell/TabActivation";
+import {
+  createTabActivationRegistry,
+  TabActivationProvider,
+  type TabActivationRegistry,
+} from "./shell/TabActivation";
 import { workspaceDockTabId } from "./dockModules/workspaceDockTab";
 import { useMenuBarThread } from "./shell/useMenuBarThread";
 import {
@@ -1298,8 +1302,15 @@ function LaunchedShell(
   const projectPullRequestReviewOpen = selectedProjectPullRequest !== undefined;
   const dockThreadKey =
     dockThreadId === undefined ? undefined : threadUtilityDockKey(activeMode, String(dockThreadId));
-  // Dock tab ids can repeat across threads; activation never crosses that scope.
-  const dockTabActivation = useMemo(() => createTabActivationRegistry(), [dockThreadKey]);
+  // Preserve explicit intent on return, without sharing identical tab ids across threads.
+  const dockTabActivations = useRef(new Map<string | undefined, TabActivationRegistry>());
+  const dockTabActivation = useMemo(() => {
+    const existing = dockTabActivations.current.get(dockThreadKey);
+    if (existing !== undefined) return existing;
+    const registry = createTabActivationRegistry();
+    dockTabActivations.current.set(dockThreadKey, registry);
+    return registry;
+  }, [dockThreadKey]);
   // A saved comparison is a navigation request, not a remembered tool for a
   // thread. Leaving its scope must not restore that request on a later visit.
   useEffect(() => {
