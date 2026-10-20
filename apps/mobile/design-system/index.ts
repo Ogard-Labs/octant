@@ -31,7 +31,15 @@ export {
   type ThemeContextValue,
 } from "./theme";
 export { themeAtmosphereSources, themeAtmosphereOpacity } from "./themeAtmospheres";
-export { ScreenCanvas, type ScreenCanvasProps, type CanvasBackgroundMode } from "./ScreenCanvas";
+export { ScreenCanvas, type ScreenCanvasProps } from "./ScreenCanvas";
+export {
+  clampEffect,
+  DEFAULT_EFFECT,
+  EFFECT_MAX,
+  EFFECT_MIN,
+  type GroundEffect,
+  type GroundPicture,
+} from "./groundPrint";
 export { GlassSurface, type GlassSurfaceProps } from "./GlassSurface";
 export { GlassCard, type GlassCardProps } from "./GlassCard";
 export { GlassChip, type GlassChipProps } from "./GlassChip";

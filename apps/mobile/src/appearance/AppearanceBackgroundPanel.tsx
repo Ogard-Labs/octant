@@ -3,12 +3,15 @@ import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from "
 import * as ImagePicker from "expo-image-picker";
 import {
   GlassChip,
-  GlassSurface,
+  EFFECT_MAX,
+  EFFECT_MIN,
   radii,
   space,
   typography,
   useTheme,
   type ColorSchemePreference,
+  type GroundEffect,
+  type GroundPicture,
   type SurfaceStylePreference,
 } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
@@ -35,6 +38,27 @@ const SURFACE_OPTIONS: ReadonlyArray<{
   { id: "flat", label: MOBILE_COPY.surfaceFlat },
 ];
 
+const PICTURE_OPTIONS: ReadonlyArray<{
+  readonly id: GroundPicture;
+  readonly label: string;
+}> = [
+  { id: "soft-glow", label: MOBILE_COPY.backgroundPictureSoftGlow },
+  { id: "soft-graphite", label: MOBILE_COPY.backgroundPictureSoftGraphite },
+  { id: "soft-sunset", label: MOBILE_COPY.backgroundPictureSoftSunset },
+  { id: "atmosphere", label: MOBILE_COPY.backgroundPictureAtmosphere },
+  { id: "custom", label: MOBILE_COPY.backgroundPictureCustom },
+  { id: "plain", label: MOBILE_COPY.backgroundPicturePlain },
+];
+
+const EFFECT_OPTIONS: ReadonlyArray<{
+  readonly id: GroundEffect["kind"];
+  readonly label: string;
+}> = [
+  { id: "none", label: MOBILE_COPY.backgroundEffectNone },
+  { id: "pixelate", label: MOBILE_COPY.backgroundEffectPixelate },
+  { id: "dither", label: MOBILE_COPY.backgroundEffectDither },
+];
+
 async function readAsDataUri(uri: string): Promise<string> {
   if (uri.startsWith("data:")) return uri;
   const response = await fetch(uri);
@@ -50,6 +74,83 @@ async function readAsDataUri(uri: string): Promise<string> {
   });
 }
 
+interface DialProps {
+  readonly label: string;
+  readonly value: number;
+  readonly onChange: (value: number) => void;
+  readonly testID: string;
+}
+
+/** A whole-number dial on the desktop's 2..16 range, with 44pt steppers. */
+function Dial(props: DialProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        dialRow: {
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+        },
+        dialLabel: { color: colors.textPrimary, fontSize: typography.body.fontSize },
+        dialControls: { flexDirection: "row", alignItems: "center", gap: space.sm },
+        dialButton: {
+          width: 44,
+          height: 44,
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: radii.pill,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.glassStroke,
+        },
+        dialButtonLabel: { color: colors.textPrimary, fontSize: 20, fontWeight: "500" },
+        dialValue: {
+          minWidth: 32,
+          textAlign: "center",
+          color: colors.textPrimary,
+          fontSize: typography.body.fontSize,
+        },
+      }),
+    [colors],
+  );
+  return (
+    <View style={styles.dialRow} testID={props.testID}>
+      <Text style={styles.dialLabel}>{props.label}</Text>
+      <View style={styles.dialControls}>
+        <Pressable
+          accessibilityLabel={`${MOBILE_COPY.backgroundDialLess} ${props.label.toLowerCase()}`}
+          accessibilityRole="button"
+          disabled={props.value <= EFFECT_MIN}
+          onPress={() => props.onChange(props.value - 1)}
+          style={styles.dialButton}
+          testID={`${props.testID}-less`}
+        >
+          <Text style={styles.dialButtonLabel}>−</Text>
+        </Pressable>
+        <Text
+          accessibilityLabel={props.label}
+          accessibilityRole="adjustable"
+          accessibilityValue={{ min: EFFECT_MIN, max: EFFECT_MAX, now: props.value }}
+          style={styles.dialValue}
+          testID={`${props.testID}-value`}
+        >
+          {props.value}
+        </Text>
+        <Pressable
+          accessibilityLabel={`${MOBILE_COPY.backgroundDialMore} ${props.label.toLowerCase()}`}
+          accessibilityRole="button"
+          disabled={props.value >= EFFECT_MAX}
+          onPress={() => props.onChange(props.value + 1)}
+          style={styles.dialButton}
+          testID={`${props.testID}-more`}
+        >
+          <Text style={styles.dialButtonLabel}>+</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 export function AppearanceBackgroundPanel() {
   const appearance = useAppearance();
   const { colors } = useTheme();
@@ -57,8 +158,9 @@ export function AppearanceBackgroundPanel() {
   const [message, setMessage] = useState<string | undefined>();
   const writeTail = useRef(Promise.resolve());
   const inflightWrites = useRef(0);
-  const backgroundMode = appearance.preferences.backgroundMode;
-  const custom = backgroundMode === "custom";
+  const picture = appearance.preferences.picture;
+  const effect = appearance.preferences.effect;
+  const custom = picture === "custom";
   const themePreference = appearance.preferences.colorSchemePreference;
   const surfaceStyle = appearance.preferences.surfaceStyle;
 
@@ -93,13 +195,6 @@ export function AppearanceBackgroundPanel() {
           flexDirection: "row",
           flexWrap: "wrap",
           gap: space.sm,
-        },
-        previewPad: {
-          padding: space.md,
-        },
-        previewLabel: {
-          color: colors.textPrimary,
-          fontWeight: "500",
         },
         button: {
           backgroundColor: colors.accent,
@@ -216,50 +311,74 @@ export function AppearanceBackgroundPanel() {
       <Text style={styles.help}>{MOBILE_COPY.surfaceHelp}</Text>
 
       <Text style={styles.section}>{MOBILE_COPY.backgroundSectionTitle}</Text>
-      <GlassSurface contentStyle={styles.previewPad} material="thin" radius={radii.md}>
-        <Text style={styles.previewLabel}>
-          {custom
-            ? MOBILE_COPY.backgroundModeCustom
-            : backgroundMode === "atmosphere"
-              ? MOBILE_COPY.backgroundModeAtmosphere
-              : MOBILE_COPY.backgroundModeCodeGradient}
-        </Text>
-      </GlassSurface>
+      <Text style={styles.help}>{MOBILE_COPY.backgroundPictureTitle}</Text>
+      <View style={styles.themeRow} testID="mobile-appearance-picture-row">
+        {PICTURE_OPTIONS.map((option) => (
+          <GlassChip
+            key={option.id}
+            active={picture === option.id}
+            label={option.label}
+            onPress={() => {
+              const id = option.id;
+              if (id === "custom") {
+                void pickImage();
+              } else {
+                runBackgroundAction(() => appearance.setPicture(id), option.label);
+              }
+            }}
+            testID={`mobile-appearance-picture-${option.id}`}
+          />
+        ))}
+      </View>
 
-      <Pressable
-        disabled={busy}
-        onPress={() => void pickImage()}
-        style={[styles.button, busy ? styles.buttonDisabled : null]}
-        testID="mobile-appearance-pick-image"
-      >
-        {busy ? (
-          <ActivityIndicator color={colors.sendLabel} />
-        ) : (
-          <Text style={styles.buttonLabel}>{MOBILE_COPY.backgroundPickImage}</Text>
-        )}
-      </Pressable>
+      {custom ? (
+        <Pressable
+          disabled={busy}
+          onPress={() => void pickImage()}
+          style={[styles.button, busy ? styles.buttonDisabled : null]}
+          testID="mobile-appearance-pick-image"
+        >
+          {busy ? (
+            <ActivityIndicator color={colors.sendLabel} />
+          ) : (
+            <Text style={styles.buttonLabel}>{MOBILE_COPY.backgroundPickImage}</Text>
+          )}
+        </Pressable>
+      ) : null}
 
-      <Pressable
-        disabled={busy}
-        onPress={() => {
-          runBackgroundAction(appearance.useCodeGradient, MOBILE_COPY.backgroundModeCodeGradient);
-        }}
-        style={[styles.secondary, busy ? styles.buttonDisabled : null]}
-        testID="mobile-appearance-use-code-gradient"
-      >
-        <Text style={styles.secondaryLabel}>{MOBILE_COPY.backgroundUseCodeGradient}</Text>
-      </Pressable>
-
-      <Pressable
-        disabled={busy}
-        onPress={() => {
-          runBackgroundAction(appearance.useAtmosphere, MOBILE_COPY.backgroundModeAtmosphere);
-        }}
-        style={[styles.secondary, busy ? styles.buttonDisabled : null]}
-        testID="mobile-appearance-use-atmosphere"
-      >
-        <Text style={styles.secondaryLabel}>{MOBILE_COPY.backgroundUseAtmosphere}</Text>
-      </Pressable>
+      <Text style={styles.help}>{MOBILE_COPY.backgroundEffectTitle}</Text>
+      <View style={styles.themeRow} testID="mobile-appearance-effect-row">
+        {EFFECT_OPTIONS.map((option) => (
+          <GlassChip
+            key={option.id}
+            active={effect.kind === option.id}
+            label={option.label}
+            onPress={() => {
+              void appearance.setEffect({ ...effect, kind: option.id });
+            }}
+            testID={`mobile-appearance-effect-${option.id}`}
+          />
+        ))}
+      </View>
+      {effect.kind !== "none" ? (
+        <>
+          <Dial
+            label={MOBILE_COPY.backgroundPixelSize}
+            onChange={(cell) => void appearance.setEffect({ ...effect, cell })}
+            testID="mobile-appearance-dial-cell"
+            value={effect.cell}
+          />
+          {effect.kind === "dither" ? (
+            <Dial
+              label={MOBILE_COPY.backgroundColours}
+              onChange={(levels) => void appearance.setEffect({ ...effect, levels })}
+              testID="mobile-appearance-dial-levels"
+              value={effect.levels}
+            />
+          ) : null}
+        </>
+      ) : null}
+      <Text style={styles.help}>{MOBILE_COPY.backgroundEffectHelp}</Text>
 
       {custom ? (
         <Pressable

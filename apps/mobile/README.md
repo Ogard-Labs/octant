@@ -88,6 +88,13 @@ omits the scenario entirely, and production code fails closed to live mode.
 The mock workspace never reads the paired-host registry, registers push tokens,
 opens a remote session, or persists mock thread content.
 
+## Background ground
+
+The background prints the same pictures and Pixelate/Dither effect as the
+desktop through `expo-gl`. `expo-gl` is a native module, so the native app must
+be rebuilt after this dependency lands; the mock web build renders the same
+shader through WebGL.
+
 ## Internal and TestFlight builds
 
 EAS profiles live in `eas.json`:
