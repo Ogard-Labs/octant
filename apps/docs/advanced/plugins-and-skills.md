@@ -255,6 +255,16 @@ servers, and its commands, agents and hooks are left out, which the review
 says. Octant never writes to the other tools' files. The section appears
 only in the Octant window on this host.
 
+### Where a plugin works
+
+Each package card says, in words, where it works: the modes it may run in
+and the providers it is limited to, or every provider when it names none.
+When only part of a package may run in a mode, the card says which part (for
+example, "In Chat, its skills only"), and a package with MCP servers notes
+that a provider which cannot carry Octant's tools refuses a turn that selects
+them. The words follow the same rules the host applies when it decides what
+a turn may use.
+
 ### Use a plugin in a Project without typing @
 
 Open a plugin's card under **Extension packages** and expand **Use in a

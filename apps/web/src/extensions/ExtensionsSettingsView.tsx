@@ -27,6 +27,7 @@ import { AddMcpServerDialog } from "./AddMcpServerDialog";
 import { DiscoveredToolingSection } from "./DiscoveredToolingSection";
 import { McpServerSignInControl } from "./McpServerSignInControl";
 import { ConnectorsView } from "./ConnectorsView";
+import { providerFit } from "./providerFit";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -1708,6 +1709,21 @@ interface InstalledPackageCardProps {
   readonly onUninstall: () => Promise<boolean>;
 }
 
+/** Where the package works, in words: the modes and providers the host would allow. */
+function ProviderFitLine(props: { readonly packageState: ExtensionSnapshot["packages"][number] }) {
+  const fit = providerFit(props.packageState);
+  return (
+    <p className="extcard-fit">
+      <span>{fit.sentence}</span>
+      {fit.limits.map((limit) => (
+        <span className="extcard-fit__limit" key={limit}>
+          {limit}
+        </span>
+      ))}
+    </p>
+  );
+}
+
 function InstalledPackageCard(props: InstalledPackageCardProps) {
   const pkg = props.packageState;
   const pluginRuntimeBlocked = pkg.components.some(
@@ -1764,6 +1780,7 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
       <span className="extcard-src">
         {sourceLabel(pkg.source)} · v<span>{pkg.version}</span>
       </span>
+      <ProviderFitLine packageState={pkg} />
       <div className="extcard-scopes">
         {pkg.compatibility.platforms.map((platform) => (
           <span className="tag" key={`platform:${platform}`}>

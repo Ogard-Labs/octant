@@ -608,3 +608,16 @@
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
+
+/* Where a package works, under its source line. */
+.extcard-fit {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+.extcard-fit__limit {
+  color: var(--oct-meta);
+}

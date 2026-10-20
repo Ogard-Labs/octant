@@ -5461,6 +5461,14 @@ catalog, mode and provider checks apply as for an explicit selection. Chat
 has no Project and no pins. Only a local window sets a pin; a paired device
 may read the list. Uninstalling a package forgets its pins everywhere.
 
+**Where a package works, on its card.** Each installed package's card says in
+words where it works, derived from the same data and rules the host applies
+at activation: the manifest's modes, narrowed per mode to the components that
+`isExtensionComponentModeSafe` allows there, and the provider families it
+names, or every provider when it names none; a package with MCP servers adds
+that a provider which cannot carry Octant's tools refuses a turn that selects
+them. The card never claims more than the activation ladder would grant.
+
 **Connectors catalog.** Settings › Skills & Extensions has a Connectors view:
 a bundled, first-party list of hosted MCP servers (`connectorCatalog` in
 `@octant/domain`), each with a name, one line, a category, the vendor's own
