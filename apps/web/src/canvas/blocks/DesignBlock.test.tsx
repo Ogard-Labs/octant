@@ -307,6 +307,31 @@ describe("design block", () => {
     expect(within(player).getByRole("button", { name: "Next slide" })).toBeDisabled();
   });
 
+  it("enters full screen from the player and keeps the arrow keys moving slides", () => {
+    const requestFullscreen = vi.fn(() => Promise.resolve());
+    Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
+      configurable: true,
+      value: requestFullscreen,
+    });
+    try {
+      render(
+        <CanvasDocument definition={{ ...canvasFixture, blocks: [launchDeckExampleBlock] }} />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Present" }));
+      const player = screen.getByRole("dialog", { name: "Presenting Launch plan" });
+
+      fireEvent.click(within(player).getByRole("button", { name: "Full screen" }));
+
+      expect(requestFullscreen).toHaveBeenCalledTimes(1);
+      fireEvent.keyDown(within(player).getByRole("button", { name: "Next slide" }), {
+        key: "ArrowRight",
+      });
+      expect(within(player).getByText("2 / 2")).toBeVisible();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "requestFullscreen");
+    }
+  });
+
   it("never draws a frame that may run script beside Octant's own origin", () => {
     // Same origin is safe only for a page that runs nothing; together with
     // script it would hand the page Octant itself. Every size and theme, on the

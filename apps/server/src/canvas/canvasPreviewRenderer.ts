@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { access, readFile } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
-import { chromium, type Browser } from "playwright-core";
+import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
 import type { CanvasDefinition, CanvasDesignAssetResolution } from "@octant/contracts/canvas";
 import { DEFAULT_BROWSER_EXECUTABLE_CANDIDATES } from "../browser/playwrightBrowserRuntime";
 import { canvasDesignPageHeaders } from "./canvasDesignPage";
@@ -89,10 +89,65 @@ export interface CanvasPreviewRenderer {
   render(request: CanvasPreviewRenderRequest): Promise<CanvasPreviewRenderOutcome>;
 }
 
+/**
+ * One frame of a design drawn as a picture: the standalone page the HTML
+ * export writes for it, the sandbox that page is drawn in, and its size.
+ */
+export interface CanvasExportPictureFrame {
+  readonly page: string;
+  readonly sandbox: "" | "allow-scripts";
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * What a picture export draws. A design's frames are drawn one to a sheet at
+ * their own size — a PNG each, or a PDF page each. A Canvas with no such
+ * frames is drawn as the preview page draws it: one tall PNG, or a PDF the
+ * browser paginates.
+ */
+export interface CanvasExportPictureRequest {
+  readonly format: "png" | "pdf";
+  readonly theme: "light" | "dark";
+  readonly subject:
+    | { readonly kind: "frames"; readonly frames: ReadonlyArray<CanvasExportPictureFrame> }
+    | {
+        readonly kind: "document";
+        readonly definition: CanvasDefinition;
+        readonly designPages?: ReadonlyArray<CanvasPreviewDesignPage>;
+      };
+}
+
+export type CanvasExportPictureOutcome =
+  | {
+      readonly kind: "rendered";
+      /** One PNG per frame (or one of the document), or exactly one PDF. */
+      readonly files: ReadonlyArray<Uint8Array>;
+    }
+  | {
+      readonly kind: "unavailable";
+      readonly reason: "no-browser" | "no-renderer" | "failed";
+    };
+
+/** The seam a picture export reaches the browser through; a test fakes it here. */
+export interface CanvasExportRenderer {
+  available(): Promise<boolean>;
+  renderPictures(request: CanvasExportPictureRequest): Promise<CanvasExportPictureOutcome>;
+}
+
 /** The image is never wider than this, whatever the requested width. */
 export const CANVAS_PREVIEW_MAX_IMAGE_WIDTH = 1_600;
 /** A taller Canvas is cut off here; the warnings still read the whole document. */
 export const CANVAS_PREVIEW_MAX_IMAGE_HEIGHT = 4_096;
+/** A document exported as one PNG is drawn this wide, and cut off this tall. */
+export const CANVAS_EXPORT_DOCUMENT_PICTURE_WIDTH = 1_200;
+export const CANVAS_EXPORT_DOCUMENT_PICTURE_MAX_HEIGHT = 16_384;
+/**
+ * A document exported as a PDF is laid out at the width of an A4 page inside
+ * its margins, so the browser paginates the same column a reader would print.
+ */
+export const CANVAS_EXPORT_DOCUMENT_PDF_WIDTH = 700;
+const CANVAS_EXPORT_DOCUMENT_PDF_MARGIN = "12mm";
 
 /**
  * The origin the preview page is loaded under. `.invalid` never resolves, so
@@ -102,6 +157,8 @@ export const CANVAS_PREVIEW_ORIGIN = "http://canvas-preview.octant.invalid";
 /** The preview page's folder inside the built web assets. */
 export const CANVAS_PREVIEW_ASSET_FOLDER = "canvas-preview";
 const CANVAS_PREVIEW_PAGE = "canvas-preview.html";
+/** The page that lays a design's frames out one to a sheet, built in memory. */
+const CANVAS_EXPORT_SHEETS_PAGE = "canvas-export-sheets.html";
 /** Where the preview page finds a running design's page, by its position. */
 const CANVAS_PREVIEW_DESIGN_PAGE_PREFIX = "/design-page/";
 /** How long the page may take to load and settle before the look is abandoned. */
@@ -141,7 +198,7 @@ export interface PlaywrightCanvasPreviewRendererOptions {
 
 export function createPlaywrightCanvasPreviewRenderer(
   options: PlaywrightCanvasPreviewRendererOptions,
-): CanvasPreviewRenderer {
+): CanvasPreviewRenderer & CanvasExportRenderer {
   const candidates =
     options.executableCandidates ??
     (process.env.OCTANT_BROWSER_EXECUTABLE === undefined
@@ -170,27 +227,118 @@ export function createPlaywrightCanvasPreviewRenderer(
     return undefined;
   }
 
+  /**
+   * The preview page with this document written into it, or why there is
+   * none: a build without the page, or a page that is not the preview page.
+   */
+  async function previewPage(input: {
+    readonly definition: CanvasDefinition;
+    readonly theme: "light" | "dark";
+    readonly placement: "document" | "thread";
+    readonly designAssets: ReadonlyArray<CanvasPreviewDesignAssets>;
+    readonly designPages: ReadonlyArray<CanvasPreviewDesignPage>;
+  }): Promise<string | undefined> {
+    let pageMarkup: string;
+    try {
+      pageMarkup = await readFile(resolve(previewRoot, CANVAS_PREVIEW_PAGE), "utf8");
+    } catch {
+      return undefined;
+    }
+    return canvasPreviewPageWithInput(pageMarkup, {
+      definition: input.definition,
+      theme: input.theme,
+      placement: input.placement,
+      designAssets: input.designAssets,
+      designPages: input.designPages.map((entry, index) => ({
+        blockId: entry.blockId,
+        path: `${CANVAS_PREVIEW_DESIGN_PAGE_PREFIX}${String(index)}`,
+      })),
+    });
+  }
+
+  /**
+   * A browser context that answers only what the host built — the page named
+   * here, a design page by its position, and the preview page's own built
+   * files from disk — and aborts every other request, so the network stays
+   * off. Every request, not only navigations.
+   */
+  async function openContext(
+    browser: Browser,
+    input: {
+      readonly viewport: { readonly width: number; readonly height: number };
+      readonly theme: "light" | "dark";
+      readonly page: { readonly name: string; readonly html: string };
+      readonly designPages: ReadonlyArray<{ readonly html: string }>;
+    },
+  ): Promise<BrowserContext> {
+    const context = await browser.newContext({
+      viewport: { width: input.viewport.width, height: input.viewport.height },
+      deviceScaleFactor: 1,
+      colorScheme: input.theme,
+      serviceWorkers: "block",
+      acceptDownloads: false,
+    });
+    await context.route("**/*", async (route) => {
+      const url = route.request().url();
+      if (url === `${CANVAS_PREVIEW_ORIGIN}/${input.page.name}`) {
+        await route.fulfill({ status: 200, contentType: "text/html", body: input.page.html });
+        return;
+      }
+      const designPage = input.designPages[canvasPreviewDesignPageIndex(url) ?? -1];
+      if (designPage !== undefined) {
+        await route.fulfill({
+          status: 200,
+          headers: canvasDesignPageHeaders("text/html; charset=utf-8"),
+          body: designPage.html,
+        });
+        return;
+      }
+      const asset = canvasPreviewAssetPath(url, previewRoot);
+      if (asset === undefined) {
+        await route.abort();
+        return;
+      }
+      try {
+        const body = await readFile(asset);
+        await route.fulfill({ status: 200, contentType: contentTypeFor(asset), body });
+      } catch {
+        await route.abort();
+      }
+    });
+    return context;
+  }
+
+  /** The preview page opened and settled, or `undefined` when it never said ready. */
+  async function openPreviewPage(
+    context: BrowserContext,
+    runningDesigns: boolean,
+  ): Promise<Page | undefined> {
+    const tab = await context.newPage();
+    await tab.goto(`${CANVAS_PREVIEW_ORIGIN}/${CANVAS_PREVIEW_PAGE}`, {
+      waitUntil: "load",
+      timeout: SETTLE_TIMEOUT_MS,
+    });
+    await tab.waitForSelector("html[data-canvas-preview]", {
+      state: "attached",
+      timeout: SETTLE_TIMEOUT_MS,
+    });
+    if ((await tab.getAttribute("html", "data-canvas-preview")) !== "ready") return undefined;
+    if (runningDesigns) await tab.waitForTimeout(RUNNING_DESIGN_SETTLE_MS);
+    return tab;
+  }
+
   return {
     available: async () => (await resolveExecutable()) !== undefined,
     render: async (request) => {
       const executable = await resolveExecutable();
       if (executable === undefined) return { kind: "unavailable", reason: "no-browser" };
-      let pageMarkup: string;
-      try {
-        pageMarkup = await readFile(resolve(previewRoot, CANVAS_PREVIEW_PAGE), "utf8");
-      } catch {
-        return { kind: "unavailable", reason: "no-renderer" };
-      }
       const designPages = request.designPages ?? [];
-      const page = canvasPreviewPageWithInput(pageMarkup, {
+      const page = await previewPage({
         definition: request.definition,
         theme: request.theme,
         placement: request.placement,
         designAssets: request.designAssets ?? [],
-        designPages: designPages.map((entry, index) => ({
-          blockId: entry.blockId,
-          path: `${CANVAS_PREVIEW_DESIGN_PAGE_PREFIX}${String(index)}`,
-        })),
+        designPages,
       });
       if (page === undefined) return { kind: "unavailable", reason: "no-renderer" };
 
@@ -203,56 +351,14 @@ export function createPlaywrightCanvasPreviewRenderer(
       let browser: Browser | undefined;
       try {
         browser = await launch(executable);
-        const context = await browser.newContext({
+        const context = await openContext(browser, {
           viewport: { width, height: 600 },
-          deviceScaleFactor: 1,
-          colorScheme: request.theme,
-          serviceWorkers: "block",
-          acceptDownloads: false,
+          theme: request.theme,
+          page: { name: CANVAS_PREVIEW_PAGE, html: page },
+          designPages,
         });
-        // Every request, not only navigations. Only the preview page's own built
-        // files are answered, from disk; anything else is a bug, not a
-        // resource, and is aborted so the network stays off.
-        await context.route("**/*", async (route) => {
-          const url = route.request().url();
-          if (url === `${CANVAS_PREVIEW_ORIGIN}/${CANVAS_PREVIEW_PAGE}`) {
-            await route.fulfill({ status: 200, contentType: "text/html", body: page });
-            return;
-          }
-          const designPage = designPages[canvasPreviewDesignPageIndex(url) ?? -1];
-          if (designPage !== undefined) {
-            await route.fulfill({
-              status: 200,
-              headers: canvasDesignPageHeaders("text/html; charset=utf-8"),
-              body: designPage.html,
-            });
-            return;
-          }
-          const asset = canvasPreviewAssetPath(url, previewRoot);
-          if (asset === undefined) {
-            await route.abort();
-            return;
-          }
-          try {
-            const body = await readFile(asset);
-            await route.fulfill({ status: 200, contentType: contentTypeFor(asset), body });
-          } catch {
-            await route.abort();
-          }
-        });
-        const tab = await context.newPage();
-        await tab.goto(`${CANVAS_PREVIEW_ORIGIN}/${CANVAS_PREVIEW_PAGE}`, {
-          waitUntil: "load",
-          timeout: SETTLE_TIMEOUT_MS,
-        });
-        await tab.waitForSelector("html[data-canvas-preview]", {
-          state: "attached",
-          timeout: SETTLE_TIMEOUT_MS,
-        });
-        if ((await tab.getAttribute("html", "data-canvas-preview")) !== "ready") {
-          return { kind: "unavailable", reason: "failed" };
-        }
-        if (designPages.length > 0) await tab.waitForTimeout(RUNNING_DESIGN_SETTLE_MS);
+        const tab = await openPreviewPage(context, designPages.length > 0);
+        if (tab === undefined) return { kind: "unavailable", reason: "failed" };
         const designs = await readPreviewDesignFrames(tab);
         const box = await tab.locator(".canvas-preview-page").boundingBox();
         const height = Math.min(
@@ -273,7 +379,180 @@ export function createPlaywrightCanvasPreviewRenderer(
         await browser?.close().catch(() => undefined);
       }
     },
+    renderPictures: async (request) => {
+      const executable = await resolveExecutable();
+      if (executable === undefined) return { kind: "unavailable", reason: "no-browser" };
+      const subject = request.subject;
+      // What is opened: a design's frames on sheets of their own size, or the
+      // preview page at the width the picture is drawn at.
+      let opened:
+        | {
+            readonly kind: "sheets";
+            readonly html: string;
+            readonly frames: ReadonlyArray<CanvasExportPictureFrame>;
+          }
+        | { readonly kind: "preview"; readonly html: string };
+      let viewport: { readonly width: number; readonly height: number };
+      let designPages: ReadonlyArray<{ readonly html: string }>;
+      if (subject.kind === "frames") {
+        if (subject.frames.length === 0) return { kind: "unavailable", reason: "failed" };
+        opened = {
+          kind: "sheets",
+          html: canvasExportSheetsPage(subject.frames),
+          frames: subject.frames,
+        };
+        viewport = {
+          width: Math.max(...subject.frames.map((frame) => frame.width)),
+          height: Math.max(...subject.frames.map((frame) => frame.height)),
+        };
+        designPages = subject.frames.map((frame) => ({ html: frame.page }));
+      } else {
+        const pages = subject.designPages ?? [];
+        const html = await previewPage({
+          definition: subject.definition,
+          theme: request.theme,
+          placement: "document",
+          designAssets: [],
+          designPages: pages,
+        });
+        if (html === undefined) return { kind: "unavailable", reason: "no-renderer" };
+        opened = { kind: "preview", html };
+        viewport = {
+          width:
+            request.format === "pdf"
+              ? CANVAS_EXPORT_DOCUMENT_PDF_WIDTH
+              : CANVAS_EXPORT_DOCUMENT_PICTURE_WIDTH,
+          height: 600,
+        };
+        designPages = pages;
+      }
+      let browser: Browser | undefined;
+      try {
+        browser = await launch(executable);
+        const context = await openContext(browser, {
+          viewport,
+          theme: request.theme,
+          page:
+            opened.kind === "sheets"
+              ? { name: CANVAS_EXPORT_SHEETS_PAGE, html: opened.html }
+              : { name: CANVAS_PREVIEW_PAGE, html: opened.html },
+          designPages,
+        });
+        let tab: Page | undefined;
+        if (opened.kind === "sheets") {
+          tab = await context.newPage();
+          // The page's own load waits for every sheet's frame; a frame that
+          // runs script gets the same settle a preview gives it.
+          await tab.goto(`${CANVAS_PREVIEW_ORIGIN}/${CANVAS_EXPORT_SHEETS_PAGE}`, {
+            waitUntil: "load",
+            timeout: SETTLE_TIMEOUT_MS,
+          });
+          await tab.evaluate(() => document.fonts.ready.then(() => undefined));
+          if (opened.frames.some((frame) => frame.sandbox === "allow-scripts")) {
+            await tab.waitForTimeout(RUNNING_DESIGN_SETTLE_MS);
+          }
+        } else {
+          tab = await openPreviewPage(context, designPages.length > 0);
+          if (tab === undefined) return { kind: "unavailable", reason: "failed" };
+        }
+        let files: Uint8Array[];
+        if (request.format === "pdf") {
+          files = [
+            await tab.pdf(
+              opened.kind === "sheets"
+                ? // Each sheet declares its own page size, so the PDF has one
+                  // page per frame at the frame's size and no margin.
+                  { printBackground: true, preferCSSPageSize: true, margin: NO_MARGIN }
+                : {
+                    printBackground: true,
+                    format: "A4",
+                    margin: {
+                      top: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
+                      right: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
+                      bottom: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
+                      left: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
+                    },
+                  },
+            ),
+          ];
+        } else if (opened.kind === "sheets") {
+          files = [];
+          for (let index = 0; index < opened.frames.length; index += 1) {
+            files.push(
+              await tab
+                .locator(".octant-sheet")
+                .nth(index)
+                .screenshot({ type: "png", timeout: SETTLE_TIMEOUT_MS }),
+            );
+          }
+        } else {
+          const box = await tab.locator(".canvas-preview-page").boundingBox();
+          const height = Math.min(
+            CANVAS_EXPORT_DOCUMENT_PICTURE_MAX_HEIGHT,
+            Math.max(1, Math.ceil(box?.height ?? 1)),
+          );
+          files = [
+            await tab.screenshot({
+              type: "png",
+              fullPage: true,
+              clip: { x: 0, y: 0, width: viewport.width, height },
+              timeout: SETTLE_TIMEOUT_MS,
+            }),
+          ];
+        }
+        await context.close();
+        return { kind: "rendered", files };
+      } catch {
+        return { kind: "unavailable", reason: "failed" };
+      } finally {
+        await browser?.close().catch(() => undefined);
+      }
+    },
   };
+}
+
+const NO_MARGIN = { top: "0", right: "0", bottom: "0", left: "0" } as const;
+
+/**
+ * The page that holds a design's frames one to a sheet, each a frame of the
+ * served design page at its position, at the frame's own size. A sheet is a
+ * page of its own size when printed — a named `@page` per distinct size,
+ * because frames of two designs can differ — and the box a PNG is cut from
+ * on screen. The page loads nothing but those frames; its policy says so.
+ */
+export function canvasExportSheetsPage(frames: ReadonlyArray<CanvasExportPictureFrame>): string {
+  const sizes = new Map<string, { readonly width: number; readonly height: number }>();
+  const pageNames: string[] = [];
+  for (const frame of frames) {
+    const key = `${String(frame.width)}x${String(frame.height)}`;
+    if (!sizes.has(key)) sizes.set(key, { width: frame.width, height: frame.height });
+    pageNames.push(`sheet-${key}`);
+  }
+  const pageRules = [...sizes.entries()]
+    .map(
+      ([key, size]) =>
+        `@page sheet-${key} { size: ${String(size.width)}px ${String(size.height)}px; margin: 0; }`,
+    )
+    .join("\n");
+  const sheets = frames
+    .map((frame, index) => {
+      const style = `width:${String(frame.width)}px;height:${String(frame.height)}px;page:${pageNames[index] ?? "auto"}`;
+      return `<div class="octant-sheet" style="${style}"><iframe sandbox="${frame.sandbox}" src="${CANVAS_PREVIEW_DESIGN_PAGE_PREFIX}${String(index)}" style="width:${String(frame.width)}px;height:${String(frame.height)}px"></iframe></div>`;
+    })
+    .join("");
+  return [
+    "<!doctype html>",
+    '<html><head><meta charset="utf-8">',
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; frame-src 'self'">`,
+    "<style>",
+    "html, body { margin: 0; background: white; }",
+    ".octant-sheet { overflow: hidden; break-after: page; page-break-after: always; }",
+    ".octant-sheet:last-child { break-after: auto; page-break-after: auto; }",
+    ".octant-sheet iframe { display: block; border: 0; }",
+    pageRules,
+    "</style></head>",
+    `<body>${sheets}</body></html>`,
+  ].join("");
 }
 
 /**

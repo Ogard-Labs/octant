@@ -4425,6 +4425,11 @@
   height: 100%;
 }
 
+/* Full screen lifts the body out of the dialog, so it paints its own ground. */
+.canvas-design-player__body:fullscreen {
+  background: var(--oct-bg);
+}
+
 .canvas-design-player__bar {
   display: flex;
   align-items: center;

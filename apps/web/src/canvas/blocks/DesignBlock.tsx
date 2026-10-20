@@ -9,7 +9,16 @@ import {
   type RefObject,
   type SyntheticEvent,
 } from "react";
-import { ChevronLeft, ChevronRight, Play, RotateCcw, Square, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Maximize2,
+  Minimize2,
+  Play,
+  RotateCcw,
+  Square,
+  X,
+} from "lucide-react";
 import {
   CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS,
   CANVAS_DESIGN_VIEWPORT,
@@ -315,6 +324,29 @@ function DesignPlayer({
   const last = block.frames.length - 1;
 
   const step = (by: number) => setIndex((value) => Math.min(last, Math.max(0, value + by)));
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  // The browser owns leaving: Esc ends full screen before any key reaches the
+  // page, so the state follows the document rather than the toggle.
+  useEffect(() => {
+    const body = bodyRef.current;
+    const sync = () => setFullscreen(document.fullscreenElement === body);
+    document.addEventListener("fullscreenchange", sync);
+    return () => {
+      document.removeEventListener("fullscreenchange", sync);
+      if (document.fullscreenElement === body)
+        void document.exitFullscreen().catch(() => undefined);
+    };
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+    // A host that refuses (an embedded view, a denied request) leaves the
+    // player in its window, which still works.
+    void bodyRef.current?.requestFullscreen?.().catch(() => undefined);
+  };
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!slides) return;
     if (event.key === "ArrowRight" || event.key === "PageDown") {
@@ -335,7 +367,7 @@ function DesignPlayer({
       restoreFocus={restoreFocus}
     >
       {/* Keys reach the deck here; a slide frame takes no focus or pointer. */}
-      <div className="canvas-design-player__body" onKeyDown={onKeyDown}>
+      <div className="canvas-design-player__body" onKeyDown={onKeyDown} ref={bodyRef}>
         <header className="canvas-design-player__bar">
           <span className="canvas-design-player__title">{block.title}</span>
           {slides ? (
@@ -380,6 +412,20 @@ function DesignPlayer({
                 Restart
               </OctantButton>
             )}
+            <OctantButton
+              aria-label={fullscreen ? "Leave full screen" : "Full screen"}
+              aria-pressed={fullscreen}
+              onClick={toggleFullscreen}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+            >
+              {fullscreen ? (
+                <Minimize2 aria-hidden="true" size={16} strokeWidth={1.8} />
+              ) : (
+                <Maximize2 aria-hidden="true" size={16} strokeWidth={1.8} />
+              )}
+            </OctantButton>
             <OctantButton
               aria-label="Close"
               onClick={onClose}

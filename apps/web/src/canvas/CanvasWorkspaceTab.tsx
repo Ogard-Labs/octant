@@ -591,7 +591,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         return Promise.reject(new Error("Canvas export is unavailable on this host."));
       }
       return prepareExport(
-        holdsDesign && request.format === "html"
+        holdsDesign && request.format !== "markdown"
           ? { ...request, frameTheme: readWorkspaceFrameTheme(document.documentElement) }
           : request,
       );

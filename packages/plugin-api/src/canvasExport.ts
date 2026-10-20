@@ -9,20 +9,26 @@ export type {
   CanvasExportDecideRequest,
   CanvasExportDecideResult,
   CanvasExportDelivery,
+  CanvasExportFileName,
   CanvasExportFilePath,
   CanvasExportFormat,
   CanvasExportImplementedFormat,
   CanvasExportOfferList,
+  CanvasExportPictureFormat,
   CanvasExportPrepareRequest,
   CanvasExportPrepareResult,
   CanvasExportReceipt,
   CanvasExportRecorded,
   CanvasExportRefusal,
   CanvasExportRefusalCode,
+  CanvasExportRenderedFile,
   CanvasExportRenderedOutput,
+  CanvasExportRenderedPictures,
+  CanvasExportRenderedText,
   CanvasExportTargetId,
   CanvasExportTargetOffer,
   CanvasExportTargetStatus,
+  CanvasExportTextFormat,
   CanvasExportVisibility,
 } from "@octant/contracts/canvas-export";
 
@@ -32,6 +38,7 @@ export {
   decodeCanvasExportDelivery,
   decodeCanvasExportRenderedOutput,
   isCanvasExportImplementedFormat,
+  isCanvasExportPictureFormat,
 } from "@octant/contracts/canvas-export";
 
 import type {
@@ -93,7 +100,9 @@ export interface CanvasExportTarget {
    * Perform the export. `confirmed` is the destination the approval card named
    * — including the audience the person chose — and the person approved; when
    * it is absent the target has no confirmation and, for a local destination,
-   * writes alongside an existing file instead of over it.
+   * writes alongside an existing file instead of over it. A text form arrives
+   * as one body; a picture form arrives as named files, and only at a target
+   * that declared that format.
    */
   readonly exportDocument: (
     output: CanvasExportRenderedOutput,

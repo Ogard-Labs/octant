@@ -6,8 +6,9 @@ import { UtcTimestamp } from "./events";
 
 // A destination plugin receives a rendered Canvas and returns a receipt or a
 // typed refusal. The server renders, shows the payload and destination on an
-// approval card, and calls the plugin only after approval. PDF and PNG are
-// named so a later target can declare them; this host does not render them.
+// approval card, and calls the plugin only after approval. Markdown and HTML
+// are text; PNG and PDF are pictures the host draws in its own browser, and a
+// destination that declares them receives files rather than a body.
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
 const boundedText = (maximum: number) =>
@@ -50,20 +51,57 @@ const exportBody = Schema.String.pipe(
   }),
 );
 
-/** Formats a destination may declare. Only markdown and html are rendered. */
+/** Formats a destination may declare. Every one is rendered by this host. */
 export const CanvasExportFormat = Schema.Literal("markdown", "html", "pdf", "png");
 export type CanvasExportFormat = typeof CanvasExportFormat.Type;
 
-export const CanvasExportImplementedFormat = Schema.Literal("markdown", "html");
+/** The forms rendered as one text body. */
+export const CanvasExportTextFormat = Schema.Literal("markdown", "html");
+export type CanvasExportTextFormat = typeof CanvasExportTextFormat.Type;
+
+/**
+ * The forms drawn as pictures: a PNG per design frame (or one of the whole
+ * document), or one PDF of a page per frame (or the document paginated).
+ */
+export const CanvasExportPictureFormat = Schema.Literal("png", "pdf");
+export type CanvasExportPictureFormat = typeof CanvasExportPictureFormat.Type;
+
+export const CanvasExportImplementedFormat = Schema.Literal("markdown", "html", "png", "pdf");
 export type CanvasExportImplementedFormat = typeof CanvasExportImplementedFormat.Type;
 
-export const CANVAS_EXPORT_IMPLEMENTED_FORMATS = ["markdown", "html"] as const;
+export const CANVAS_EXPORT_IMPLEMENTED_FORMATS = ["markdown", "html", "png", "pdf"] as const;
 
 export function isCanvasExportImplementedFormat(
   format: string,
 ): format is CanvasExportImplementedFormat {
   return (CANVAS_EXPORT_IMPLEMENTED_FORMATS as ReadonlyArray<string>).includes(format);
 }
+
+export function isCanvasExportPictureFormat(format: string): format is CanvasExportPictureFormat {
+  return format === "png" || format === "pdf";
+}
+
+/**
+ * How much a picture export may weigh in all, and how many files it may be.
+ * A pending approval holds the bytes until it is answered or expires, so the
+ * bound is what a handful of held decks may pin in memory, not disk.
+ */
+export const CANVAS_EXPORT_PICTURES_MAX_BYTES = 32 * 1024 * 1024;
+export const CANVAS_EXPORT_PICTURE_FILES_MAX = 96;
+
+/**
+ * The name of one file a picture export writes: a bare name with no separator
+ * and no leading dot, scanned for credential-shaped text like every other
+ * exported string, because it is shown on the card and written to disk.
+ */
+export const CanvasExportFileName = Schema.NonEmptyTrimmedString.pipe(
+  Schema.maxLength(160),
+  Schema.pattern(/^[^./\\\0][^/\\\0]*$/),
+  Schema.filter((value) => isExportCredentialFreeText(value), {
+    message: () => "An export file name must not contain a secret.",
+  }),
+);
+export type CanvasExportFileName = typeof CanvasExportFileName.Type;
 
 export const CanvasExportTargetId = boundedToken("CanvasExportTargetId");
 export type CanvasExportTargetId = typeof CanvasExportTargetId.Type;
@@ -129,7 +167,7 @@ export const CanvasExportTargetOffer = Schema.Struct({
   targetId: CanvasExportTargetId,
   label: safeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
   formats: Schema.Array(CanvasExportImplementedFormat).pipe(
-    Schema.maxItems(2),
+    Schema.maxItems(4),
     Schema.filter(uniqueFormats, {
       message: () => "Canvas export formats must be unique.",
     }),
@@ -167,15 +205,76 @@ export const CanvasExportMetadata = Schema.Struct({
 }).annotations(strict);
 export type CanvasExportMetadata = typeof CanvasExportMetadata.Type;
 
-export const CanvasExportRenderedOutput = Schema.Struct({
+export const CanvasExportRenderedText = Schema.Struct({
   schemaVersion: CanvasExportSchemaVersion,
   kind: Schema.Literal("canvas-export-output"),
-  format: CanvasExportImplementedFormat,
+  format: CanvasExportTextFormat,
   title: safeBounded(256),
   body: exportBody,
   metadata: CanvasExportMetadata,
 }).annotations(strict);
+export type CanvasExportRenderedText = typeof CanvasExportRenderedText.Type;
+
+/** One file of a picture export, with the bytes the destination writes. */
+export const CanvasExportRenderedFile = Schema.Struct({
+  name: CanvasExportFileName,
+  bytes: Schema.Uint8ArrayFromSelf.pipe(
+    Schema.filter((bytes) => bytes.length > 0, {
+      message: () => "An export file must hold at least one byte.",
+    }),
+  ),
+}).annotations(strict);
+export type CanvasExportRenderedFile = typeof CanvasExportRenderedFile.Type;
+
+export const CanvasExportPictureMetadata = Schema.Struct({
+  canvasId: CanvasId,
+  versionId: CanvasVersionId,
+  sequence: Schema.Int.pipe(Schema.positive()),
+  byteLength: Schema.Int.pipe(
+    Schema.nonNegative(),
+    Schema.lessThanOrEqualTo(CANVAS_EXPORT_PICTURES_MAX_BYTES),
+  ),
+  contentDigest: CanvasExportPayloadDigest,
+}).annotations(strict);
+export type CanvasExportPictureMetadata = typeof CanvasExportPictureMetadata.Type;
+
+/**
+ * A picture export: the files the host drew, in the order they are written.
+ * It never crosses the wire — the card carries names and sizes — so the bytes
+ * travel as they are, from the host's browser to the destination.
+ */
+export const CanvasExportRenderedPictures = Schema.Struct({
+  schemaVersion: CanvasExportSchemaVersion,
+  kind: Schema.Literal("canvas-export-output"),
+  format: CanvasExportPictureFormat,
+  title: safeBounded(256),
+  files: Schema.NonEmptyArray(CanvasExportRenderedFile).pipe(
+    Schema.maxItems(CANVAS_EXPORT_PICTURE_FILES_MAX),
+    Schema.filter((files) => new Set(files.map((file) => file.name)).size === files.length, {
+      message: () => "Export file names must be unique.",
+    }),
+  ),
+  metadata: CanvasExportPictureMetadata,
+}).annotations(strict);
+export type CanvasExportRenderedPictures = typeof CanvasExportRenderedPictures.Type;
+
+/**
+ * What a destination receives. A target only ever sees a format it declared,
+ * so one that declared text alone never has to handle files; it still narrows
+ * on `format` to read the body, which is what keeps that true in the types.
+ */
+export const CanvasExportRenderedOutput = Schema.Union(
+  CanvasExportRenderedText,
+  CanvasExportRenderedPictures,
+);
 export type CanvasExportRenderedOutput = typeof CanvasExportRenderedOutput.Type;
+
+/** One file as the approval card names it: its name and weight, never its bytes. */
+export const CanvasExportApprovalFile = Schema.Struct({
+  name: CanvasExportFileName,
+  byteLength: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type CanvasExportApprovalFile = typeof CanvasExportApprovalFile.Type;
 
 const exportUrl = Schema.String.pipe(
   Schema.maxLength(2_048),
@@ -328,12 +427,29 @@ export const CanvasExportApprovalCard = Schema.Struct({
    * markup leaves unchecked.
    */
   writesDesignMarkup: Schema.optional(Schema.Literal(true)),
-  /** The rendered document the person is approving. Not a summary of it. */
-  payload: exportBody,
+  /**
+   * Present when the pictures are of a design's frames. Pixels of markup are
+   * as unreadable to the share filter as the markup, so naming this is what
+   * makes approving the card the person's acknowledgement.
+   */
+  drawsDesignFrames: Schema.optional(Schema.Literal(true)),
+  /**
+   * The rendered document the person is approving, for a text form. Not a
+   * summary of it. A picture form has no text to show and names its files.
+   */
+  payload: Schema.optional(exportBody),
+  /** The files a picture form writes, named and weighed, in writing order. */
+  files: Schema.optional(
+    Schema.NonEmptyArray(CanvasExportApprovalFile).pipe(
+      Schema.maxItems(CANVAS_EXPORT_PICTURE_FILES_MAX),
+    ),
+  ),
+  /** How many pages a PDF holds. */
+  pages: Schema.optional(Schema.Int.pipe(Schema.positive())),
   payloadDigest: CanvasExportPayloadDigest,
   byteLength: Schema.Int.pipe(
     Schema.nonNegative(),
-    Schema.lessThanOrEqualTo(CANVAS_EXPORT_BODY_MAX_BYTES),
+    Schema.lessThanOrEqualTo(CANVAS_EXPORT_PICTURES_MAX_BYTES),
   ),
   /** Past this instant the host drops the held approval; answering it expires. */
   expiresAt: UtcTimestamp,
@@ -347,6 +463,24 @@ export const CanvasExportApprovalCard = Schema.Struct({
       (card) => card.replacesExisting === undefined || card.destinationPath !== undefined,
       {
         message: () => "Only a card that names a destination path can say it replaces one.",
+      },
+    ),
+  )
+  // A text form shows its payload and a picture form names its files, never
+  // neither and never both: a card with nothing to approve, or with a body no
+  // file will hold, would not be the export it describes.
+  .pipe(
+    Schema.filter(
+      (card) =>
+        isCanvasExportPictureFormat(card.format)
+          ? card.payload === undefined && card.files !== undefined
+          : card.payload !== undefined &&
+            card.files === undefined &&
+            card.pages === undefined &&
+            card.byteLength <= CANVAS_EXPORT_BODY_MAX_BYTES,
+      {
+        message: () =>
+          "A text export card shows its payload; a picture export card names its files.",
       },
     ),
   )

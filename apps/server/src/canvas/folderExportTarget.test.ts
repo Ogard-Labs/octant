@@ -12,10 +12,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  decodeCanvasExportRenderedOutput,
-  type CanvasExportRenderedOutput,
-} from "@octant/contracts/canvas-export";
+import { Schema } from "effect";
+import { CanvasExportRenderedText } from "@octant/contracts/canvas-export";
 import { createCanvasExportFilePort } from "./canvasExportFilePort";
 import { createFolderExportTarget, type FolderExportAvailability } from "./folderExportTarget";
 
@@ -47,9 +45,9 @@ function document(input: {
   readonly title?: string;
   readonly body?: string;
   readonly format?: "markdown" | "html";
-}): CanvasExportRenderedOutput {
+}): CanvasExportRenderedText {
   const body = input.body ?? "# Launch plan\n";
-  return decodeCanvasExportRenderedOutput({
+  return Schema.decodeUnknownSync(CanvasExportRenderedText)({
     schemaVersion: 1,
     kind: "canvas-export-output",
     format: input.format ?? "markdown",

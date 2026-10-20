@@ -1,8 +1,15 @@
 import { createHash } from "node:crypto";
-import type { CanvasBlock, CanvasId, CanvasVersionId } from "@octant/contracts/canvas";
+import type {
+  CanvasBlock,
+  CanvasDefinition,
+  CanvasDesignBlock,
+  CanvasId,
+  CanvasVersionId,
+} from "@octant/contracts/canvas";
 import {
   CANVAS_EXPORT_APPROVAL_TTL_MS,
   CANVAS_EXPORT_MAX_PENDING_PER_CANVAS,
+  CANVAS_EXPORT_PICTURES_MAX_BYTES,
   canvasExportBodyByteLength,
   decodeCanvasExportApprovalCard,
   decodeCanvasExportDecideResult,
@@ -13,18 +20,22 @@ import {
   decodeCanvasExportRecorded,
   decodeCanvasExportRenderedOutput,
   isCanvasExportImplementedFormat,
+  isCanvasExportPictureFormat,
   CanvasExportApprovalId,
   CanvasExportRecordId,
+  type CanvasExportApprovalCard,
   type CanvasExportDecideResult,
   type CanvasExportDelivery,
-  type CanvasExportImplementedFormat,
+  type CanvasExportFrameTheme,
   type CanvasExportOfferList,
+  type CanvasExportPictureFormat,
   type CanvasExportPrepareRequest,
   type CanvasExportPrepareResult,
   type CanvasExportRecorded,
   type CanvasExportRefusal,
   type CanvasExportRenderedOutput,
   type CanvasExportTargetId,
+  type CanvasExportTextFormat,
   type CanvasExportVisibility,
 } from "@octant/contracts/canvas-export";
 import type { CanvasExportDestination, CanvasExportTarget } from "@octant/plugin-api/canvas-export";
@@ -33,9 +44,16 @@ import {
   type CanvasExportActivationFacts,
 } from "@octant/plugin-host/canvas-export-contributions";
 import type { EventActor, UtcTimestamp } from "@octant/contracts";
+import { canvasExportPictureFileNames } from "@octant/domain";
 import { Schema } from "effect";
 import { renderArtifactDocument } from "./artifactDocumentRender";
+import { renderCanvasDesignExportFrames, renderCanvasDesignPage } from "./canvasDesignPage";
 import { CanvasExportEventStore } from "./canvasExportEventStore";
+import type {
+  CanvasExportPictureFrame,
+  CanvasExportPictureRequest,
+  CanvasExportRenderer,
+} from "./canvasPreviewRenderer";
 
 /**
  * Server-owned Canvas export.
@@ -57,6 +75,12 @@ export interface CanvasExportDocument {
   readonly sequence: number;
   readonly title: string;
   readonly blocks: ReadonlyArray<CanvasBlock>;
+  /**
+   * The whole definition, which a picture of the document is drawn from with
+   * the thread's own renderer. A loader that hands over the blocks alone can
+   * still export text and a design's frames.
+   */
+  readonly definition?: CanvasDefinition;
 }
 
 export interface CanvasExportServiceOptions {
@@ -72,6 +96,11 @@ export interface CanvasExportServiceOptions {
   readonly eventStore: CanvasExportEventStore;
   readonly uuid: () => string;
   readonly clock: () => UtcTimestamp;
+  /**
+   * The host's own browser, which draws a picture export. Absent on a host
+   * that has none, where a picture export is refused as a value.
+   */
+  readonly renderer?: CanvasExportRenderer;
 }
 
 /**
@@ -111,6 +140,7 @@ export class CanvasExportService {
   readonly #eventStore: CanvasExportEventStore;
   readonly #uuid: () => string;
   readonly #clock: () => UtcTimestamp;
+  readonly #renderer: CanvasExportRenderer | undefined;
   readonly #pending = new Map<string, PendingExport>();
 
   constructor(options: CanvasExportServiceOptions) {
@@ -119,6 +149,7 @@ export class CanvasExportService {
     this.#eventStore = options.eventStore;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
+    this.#renderer = options.renderer;
   }
 
   offers(canvasId: CanvasId): CanvasExportOfferList | undefined {
@@ -140,9 +171,15 @@ export class CanvasExportService {
   }
 
   /**
-   * Render the document and hold an approval card. The destination is not called.
+   * Render the document and hold an approval card. The destination is not
+   * called. A text form renders at once; a picture form is drawn in the host's
+   * browser first, so the card names exactly the files it holds and a host
+   * with no browser refuses here, before anything is held.
    */
-  prepare(request: CanvasExportPrepareRequest, permitted: boolean): CanvasExportPrepareResult {
+  async prepare(
+    request: CanvasExportPrepareRequest,
+    permitted: boolean,
+  ): Promise<CanvasExportPrepareResult> {
     if (!permitted) {
       return decodeCanvasExportPrepareResult(
         refused("unauthorized", "Export is not authorized for this canvas."),
@@ -182,35 +219,25 @@ export class CanvasExportService {
       );
     }
 
-    // A design's frames are written into the HTML form, and the card below
-    // says so: approving it is the person's acknowledgement that markup
-    // leaves as written, which the share filter cannot check.
-    const rendered = renderArtifactDocument(document, request.format, {
-      frames: "as-written",
-      ...(request.frameTheme === undefined ? {} : { frameTheme: request.frameTheme }),
-    });
-    if (rendered.kind === "too-large") {
-      return decodeCanvasExportPrepareResult(
-        refused("too-large", "The rendered document is too large to export."),
-      );
-    }
-    const payloadDigest = decodeCanvasExportPayloadDigest(digestOf(rendered.body));
+    const rendered = isCanvasExportPictureFormat(request.format)
+      ? await this.#renderPictures(document, request.format, request.frameTheme)
+      : renderText(document, request.format, request.frameTheme);
+    if (rendered.kind === "refused") return decodeCanvasExportPrepareResult(rendered);
     const approvalId = decodeApprovalId(this.#uuid());
-    const byteLength = canvasExportBodyByteLength(rendered.body);
     let output: CanvasExportRenderedOutput;
     try {
       output = decodeCanvasExportRenderedOutput({
         schemaVersion: 1,
         kind: "canvas-export-output",
-        format: request.format,
-        title: rendered.title,
-        body: rendered.body,
+        format: rendered.format,
+        title: document.title,
+        ...(rendered.kind === "text" ? { body: rendered.body } : { files: rendered.files }),
         metadata: {
           canvasId: document.canvasId,
           versionId: document.versionId,
           sequence: document.sequence,
-          byteLength,
-          contentDigest: payloadDigest,
+          byteLength: rendered.byteLength,
+          contentDigest: rendered.payloadDigest,
         },
       });
     } catch {
@@ -236,8 +263,8 @@ export class CanvasExportService {
       sequence: document.sequence,
       targetId: offer.targetId,
       destinationLabel: offer.label,
-      format: request.format,
-      title: rendered.title,
+      format: rendered.format,
+      title: document.title,
       ...(destination?.path === undefined
         ? {}
         : {
@@ -249,10 +276,9 @@ export class CanvasExportService {
         ? {}
         : { destinationVisibility: destination.visibility }),
       ...(destination?.note === undefined ? {} : { destinationNote: destination.note }),
-      ...(rendered.writesDesignMarkup ? { writesDesignMarkup: true } : {}),
-      payload: rendered.body,
-      payloadDigest,
-      byteLength,
+      ...rendered.card,
+      payloadDigest: rendered.payloadDigest,
+      byteLength: rendered.byteLength,
       expiresAt: new Date(expiresAtMs).toISOString(),
     });
     const result = decodeCanvasExportPrepareResult({ kind: "approval", card });
@@ -456,10 +482,189 @@ export class CanvasExportService {
       return refused("refused", "The destination did not complete the export.");
     }
   }
+
+  /**
+   * Draw the pictures in the host's browser. A design's device-size frames are
+   * drawn one to a picture, the way the HTML export writes them; a Canvas with
+   * none is drawn as the thread draws it. A host with no browser, a build with
+   * no renderer, and a drawing that failed are each a refusal the person reads.
+   */
+  async #renderPictures(
+    document: CanvasExportDocument,
+    format: CanvasExportPictureFormat,
+    frameTheme: CanvasExportFrameTheme | undefined,
+  ): Promise<Rendered | CanvasExportRefusal> {
+    const renderer = this.#renderer;
+    if (renderer === undefined || !(await renderer.available())) {
+      return refused(
+        "unavailable",
+        "This host has no browser to draw pictures with. Export as HTML or Markdown instead.",
+      );
+    }
+    const subject = pictureSubject(document, frameTheme);
+    if (subject.kind === "refused") return subject;
+    const drawn = await renderer.renderPictures({
+      format,
+      theme: frameTheme?.scheme ?? "light",
+      subject,
+    });
+    if (drawn.kind !== "rendered") {
+      return refused(
+        "unavailable",
+        drawn.reason === "no-browser"
+          ? "This host has no browser to draw pictures with. Export as HTML or Markdown instead."
+          : drawn.reason === "no-renderer"
+            ? "This build carries no Canvas renderer to draw pictures with."
+            : "The browser could not draw this Canvas.",
+      );
+    }
+    const names = canvasExportPictureFileNames(document.title, format, drawn.files.length);
+    const files = drawn.files.map((bytes, index) => ({
+      name: names[index] ?? `${String(index + 1)}.${format}`,
+      bytes,
+    }));
+    const byteLength = files.reduce((total, file) => total + file.bytes.length, 0);
+    if (byteLength > CANVAS_EXPORT_PICTURES_MAX_BYTES) {
+      return refused("too-large", "The rendered pictures are too large to export.");
+    }
+    return {
+      kind: "pictures",
+      format,
+      files,
+      byteLength,
+      payloadDigest: decodeCanvasExportPayloadDigest(digestOfFiles(files)),
+      card: {
+        files: files.map((file) => ({ name: file.name, byteLength: file.bytes.length })),
+        ...(format === "pdf" && subject.kind === "frames" ? { pages: subject.frames.length } : {}),
+        ...(subject.kind === "frames" ? { drawsDesignFrames: true as const } : {}),
+      },
+    };
+  }
+}
+
+/**
+ * What one prepare rendered: the output's own part, its weight and digest,
+ * and what the card shows of it — the body of a text form, the files of a
+ * picture form.
+ */
+type Rendered =
+  | {
+      readonly kind: "text";
+      readonly format: CanvasExportTextFormat;
+      readonly body: string;
+      readonly byteLength: number;
+      readonly payloadDigest: ReturnType<typeof decodeCanvasExportPayloadDigest>;
+      readonly card: Pick<CanvasExportApprovalCard, "payload" | "writesDesignMarkup">;
+    }
+  | {
+      readonly kind: "pictures";
+      readonly format: CanvasExportPictureFormat;
+      readonly files: ReadonlyArray<{ readonly name: string; readonly bytes: Uint8Array }>;
+      readonly byteLength: number;
+      readonly payloadDigest: ReturnType<typeof decodeCanvasExportPayloadDigest>;
+      readonly card: {
+        readonly files: ReadonlyArray<{ readonly name: string; readonly byteLength: number }>;
+        readonly pages?: number;
+        readonly drawsDesignFrames?: true;
+      };
+    };
+
+/**
+ * A design's frames are written into the HTML form, and the card says so:
+ * approving it is the person's acknowledgement that markup leaves as
+ * written, which the share filter cannot check.
+ */
+function renderText(
+  document: CanvasExportDocument,
+  format: CanvasExportTextFormat,
+  frameTheme: CanvasExportFrameTheme | undefined,
+): Rendered | CanvasExportRefusal {
+  const rendered = renderArtifactDocument(document, format, {
+    frames: "as-written",
+    ...(frameTheme === undefined ? {} : { frameTheme }),
+  });
+  if (rendered.kind === "too-large") {
+    return refused("too-large", "The rendered document is too large to export.");
+  }
+  return {
+    kind: "text",
+    format,
+    body: rendered.body,
+    byteLength: canvasExportBodyByteLength(rendered.body),
+    payloadDigest: decodeCanvasExportPayloadDigest(digestOf(rendered.body)),
+    card: {
+      payload: rendered.body,
+      ...(rendered.writesDesignMarkup ? { writesDesignMarkup: true as const } : {}),
+    },
+  };
+}
+
+/**
+ * What a picture export draws: every device-size frame of every design, each
+ * the standalone page the HTML export writes for it, or — when the Canvas
+ * holds none — the document itself, with a running design's page built as
+ * the preview builds it so a prototype runs in the picture.
+ *
+ * A themed design needs the theme the window draws it with; the window sends
+ * it with every picture request, so refusing without one is the honest
+ * answer to a request that did not come from the window.
+ */
+function pictureSubject(
+  document: CanvasExportDocument,
+  frameTheme: CanvasExportFrameTheme | undefined,
+): CanvasExportPictureRequest["subject"] | CanvasExportRefusal {
+  const frames: CanvasExportPictureFrame[] = [];
+  for (const block of document.blocks) {
+    if (block.kind !== "design" || block.size === "document") continue;
+    const pages = renderCanvasDesignExportFrames(block, frameTheme);
+    if (pages === undefined) {
+      return refused(
+        "malformed",
+        "A design in the workspace theme needs the theme the window draws it with.",
+      );
+    }
+    for (const page of pages) {
+      if (page.width === undefined) continue;
+      frames.push({
+        page: page.page,
+        sandbox: page.sandbox,
+        width: page.width,
+        height: page.height,
+      });
+    }
+  }
+  if (frames.length > 0) return { kind: "frames", frames };
+  const definition = document.definition;
+  if (definition === undefined) {
+    return refused("unavailable", "This Canvas cannot be drawn as a picture on this host.");
+  }
+  return {
+    kind: "document",
+    definition,
+    designPages: definition.blocks
+      .filter(
+        (block): block is CanvasDesignBlock => block.kind === "design" && block.runsScript === true,
+      )
+      .map((block) => ({
+        blockId: String(block.blockId),
+        html: renderCanvasDesignPage(block, String(block.frames[0]?.frameId ?? ""), []),
+      })),
+  };
 }
 
 function digestOf(body: string): string {
   return `sha256:${createHash("sha256").update(body).digest("hex")}`;
+}
+
+/** One digest over the set: each file's name and bytes, in writing order. */
+function digestOfFiles(
+  files: ReadonlyArray<{ readonly name: string; readonly bytes: Uint8Array }>,
+): string {
+  const hash = createHash("sha256");
+  for (const file of files) {
+    hash.update(file.name).update("\0").update(file.bytes).update("\0");
+  }
+  return `sha256:${hash.digest("hex")}`;
 }
 
 /**
