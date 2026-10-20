@@ -60,9 +60,10 @@ export const SYSTEM_UI_FAMILY =
  * whichever face was the default when they saved.
  */
 export function savedUiFamily(family: string): string {
-  return family === LEGACY_DEFAULT_UI_FAMILY ||
-    family === UNBUNDLED_GEIST_FAMILY ||
-    family === GEIST_DEFAULT_UI_FAMILY
+  // The old Geist entry was an explicit pick of Geist, so it keeps Geist now
+  // that Geist is no longer the default.
+  if (family === UNBUNDLED_GEIST_FAMILY) return GEIST_UI_FAMILY;
+  return family === LEGACY_DEFAULT_UI_FAMILY || family === GEIST_DEFAULT_UI_FAMILY
     ? DEFAULT_UI_TYPOGRAPHY.fontFamily
     : family;
 }

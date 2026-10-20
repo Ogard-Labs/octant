@@ -723,9 +723,9 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 | Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                                       |
 | Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme compatibility and accent tints                       |
 | Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                          |
-| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                          |
+| Accent fill            | `--octant-accent`                                   | `#f5f5f7` | `#141414`   | One primary action or active mark                          |
 | Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                                        |
-| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast                  |
+| Accent text            | `--octant-accent-text`                              | `#f5f5f7` | `#141414`   | Accent used as text; normal-text contrast                  |
 | Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash          |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
@@ -750,7 +750,7 @@ and categorical data may retain semantic colour alongside a label or shape.
 | Meaning       | Surface                                                      | Text/border                                                                                 |
 | ------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | Success       | `--octant-success-surface` (`#16281f` dark, `#bfd8cc` light) | `--octant-success-text` (`#6bb299` dark, `#0f6144` light)                                   |
-| Warning       | `--octant-warning-surface` (`#2b2b2b` dark, `#f0f0ef` light) | `--octant-warning-text` (`#f0f0f0` dark, `#1b1b1b` light); border `--octant-warning-border` |
+| Warning       | `--octant-warning-surface` (`#2b2b2b` dark, `#f0f0ef` light) | `--octant-warning-text` (`#f5f5f7` dark, `#141414` light); border `--octant-warning-border` |
 | Danger        | No default surface                                           | `--octant-danger-text` (`#e17d96` dark, `#a8102f` light)                                    |
 | Diff addition | No default surface                                           | `--octant-addition-text`                                                                    |
 | Diff deletion | No default surface                                           | `--octant-deletion-text`                                                                    |
@@ -804,9 +804,11 @@ and disabled ligatures.
 
 A saved stack that only ever meant "the default" reads as today's default
 (`savedUiFamily` in `packages/theme/src/typography.ts`): the old system
-interface stack beginning `-apple-system, BlinkMacSystemFont`, the unbundled
-`Geist, system-ui, sans-serif`, the bundled-Geist default stack that began
-`'Geist Variable', -apple-system`, and the JetBrains code and terminal stacks.
+interface stack beginning `-apple-system, BlinkMacSystemFont`, the bundled-Geist
+default stack that began `'Geist Variable', -apple-system`, and the JetBrains
+code and terminal stacks. The old Geist entry's unbundled
+`Geist, system-ui, sans-serif` was an explicit pick, so it reads as bundled
+Geist.
 The Geist entry now saves `'Geist Variable', system-ui, sans-serif`, so a Geist
 pick made from here on stays distinct; a Geist pick saved under the old
 default's identical string cannot be told apart and moves to the platform face.

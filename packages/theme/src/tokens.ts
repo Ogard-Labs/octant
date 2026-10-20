@@ -223,8 +223,8 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#1b1b1b",
-    defaultDark: "#f0f0f0",
+    defaultLight: "#141414",
+    defaultDark: "#f5f5f7",
   },
   {
     id: "accent-foreground",
@@ -243,8 +243,8 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#1b1b1b",
-    defaultDark: "#f0f0f0",
+    defaultLight: "#141414",
+    defaultDark: "#f5f5f7",
   },
   {
     id: "success-surface",
@@ -293,8 +293,8 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "status",
     contrastTarget: "warning-surface",
     contrastLevel: "normal-text",
-    defaultLight: "#1b1b1b",
-    defaultDark: "#f0f0f0",
+    defaultLight: "#141414",
+    defaultDark: "#f5f5f7",
   },
   {
     // Targeted at `floating`, not `workspace`: status text sits inside

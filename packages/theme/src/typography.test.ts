@@ -170,9 +170,7 @@ describe("interface face migration", () => {
       ui: { ...DEFAULT_THEME_SETTINGS.typography.ui, family: "Geist, system-ui, sans-serif" },
     };
 
-    expect(resolveTypographyProjection(picked, []).ui.fontFamily).toBe(
-      DEFAULT_THEME_SETTINGS.typography.ui.family,
-    );
+    expect(resolveTypographyProjection(picked, []).ui.fontFamily).toBe(GEIST_UI_FAMILY);
   });
 
   it("keeps a deliberately chosen system stack", () => {

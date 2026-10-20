@@ -14,7 +14,7 @@ describe("approvalSurfacePalette", () => {
       border: "#303030",
       control: "#2b2b2b",
       controlHover: "#333333",
-      accent: "#f0f0f0",
+      accent: "#f5f5f7",
       accentForeground: "#171717",
     });
   });

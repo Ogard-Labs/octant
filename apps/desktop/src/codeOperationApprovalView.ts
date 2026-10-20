@@ -629,8 +629,8 @@ function approvalPaletteCss(palette: CodeOperationApprovalPalette | undefined): 
   // theme it resolved; a reported palette is absolute, so no media query.
   if (palette === undefined) {
     return (
-      ":root{color-scheme:light dark;--approval-bg:#fdfdfc;--approval-fg:#141414;--approval-muted:#45454a;--approval-border:#e0e0de;--approval-control:#f0f0ef;--approval-hover:#e8e8e6;--approval-primary:#1b1b1b;--approval-primary-fg:#ffffff}\n" +
-      "@media(prefers-color-scheme:dark){:root{--approval-bg:#232323;--approval-fg:#f5f5f7;--approval-muted:#bcbcc2;--approval-border:#303030;--approval-control:#2b2b2b;--approval-hover:#333333;--approval-primary:#f0f0f0;--approval-primary-fg:#1b1b1b}}"
+      ":root{color-scheme:light dark;--approval-bg:#fdfdfc;--approval-fg:#141414;--approval-muted:#45454a;--approval-border:#e0e0de;--approval-control:#f0f0ef;--approval-hover:#e8e8e6;--approval-primary:#141414;--approval-primary-fg:#ffffff}\n" +
+      "@media(prefers-color-scheme:dark){:root{--approval-bg:#232323;--approval-fg:#f5f5f7;--approval-muted:#bcbcc2;--approval-border:#303030;--approval-control:#2b2b2b;--approval-hover:#333333;--approval-primary:#f5f5f7;--approval-primary-fg:#1b1b1b}}"
     );
   }
   return `:root{color-scheme:${palette.mode};--approval-bg:${palette.surface};--approval-fg:${palette.text};--approval-muted:${palette.muted};--approval-border:${palette.border};--approval-control:${palette.control};--approval-hover:${palette.controlHover};--approval-primary:${palette.accent};--approval-primary-fg:${palette.accentForeground}}`;
@@ -641,7 +641,7 @@ export function approvalViewHtml(palette?: CodeOperationApprovalPalette): string
 ${approvalPaletteCss(palette)}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 *{box-sizing:border-box}html,body{height:100%;margin:0;background:transparent}
-body{color:var(--approval-fg);font:13px/1.45 'Geist Variable',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+body{color:var(--approval-fg);font:13px/1.45 system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 main{height:100%;display:flex;flex-direction:column;gap:12px;padding:14px 16px;border:1px solid var(--approval-border);border-radius:12px;background:var(--approval-bg);box-shadow:0 12px 32px -16px rgb(0 0 0 / 40%);overflow:hidden}
 .content{display:flex;flex-direction:column;gap:10px;min-height:0;overflow:auto;flex:1}
 .heading{display:flex;align-items:flex-start;gap:10px}
