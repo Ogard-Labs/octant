@@ -244,6 +244,98 @@ describe("mapClaudeMessage", () => {
     expect(JSON.stringify(all)).not.toMatch(/private body|outside\/private|Private runtime/);
   });
 
+  it("completes a tool call whose streamed input is interleaved with keep-alive pings", () => {
+    const ctx = context();
+    const toolName = "mcp__octant__octant_canvas";
+    const input: ClaudeOpenQueryInput = {
+      binaryPath: "/claude",
+      projectRoot,
+      authEnvironment: {},
+      model: "sonnet",
+      executionPolicy: "approval-gated",
+      tools: ["Read", toolName],
+      managedToolServer: true,
+      canUseTool: async () => ({ behavior: "allow" }),
+      preToolUse: async () => ({ behavior: "allow" }),
+    };
+    const decode = (raw: unknown) =>
+      decodeMessage(raw, input, { kind: "active", sessionId: claudeSessionId });
+    const streamed = (event: unknown) => ({
+      type: "stream_event",
+      session_id: claudeSessionId,
+      parent_tool_use_id: null,
+      event,
+    });
+    const inputDelta = (partial_json: string) =>
+      streamed({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "input_json_delta", partial_json },
+      });
+    const ping = streamed({ type: "ping" });
+    const content = {
+      type: "tool_use",
+      id: "canvas-1",
+      name: toolName,
+      input: { title: "Pitch deck" },
+      caller: { type: "direct" },
+    };
+    const all = [
+      streamed({ type: "content_block_start", index: 0, content_block: { ...content, input: {} } }),
+      inputDelta('{"title":'),
+      ping,
+      inputDelta('"Pitch deck"}'),
+      ping,
+      streamed({ type: "content_block_stop", index: 0 }),
+      {
+        type: "assistant",
+        session_id: claudeSessionId,
+        parent_tool_use_id: null,
+        message: {
+          id: "message-1",
+          type: "message",
+          role: "assistant",
+          model: "sonnet",
+          stop_reason: "tool_use",
+          stop_sequence: null,
+          content: [content],
+          usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+      },
+      {
+        type: "user",
+        session_id: claudeSessionId,
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "canvas-1", content: "ok" }],
+        },
+      },
+    ].flatMap((raw) => mapped(ctx, decode(raw)));
+    expect(mapped(ctx, decode(ping))).toEqual([{ kind: "ignored" }]);
+    const completed = mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      permissionDenials: [],
+      usage,
+    });
+    expect(all.some((item) => item.kind === "failure")).toBe(false);
+    expect(eventValues(all).map((item) => item.kind)).toEqual([
+      "tool-start",
+      "usage",
+      "tool-success",
+    ]);
+    expect(eventValues(completed).map((item) => item.kind)).toEqual(["usage", "completed"]);
+  });
+
   it.each(["success", "missing", "changed correlation"])(
     "fails closed when a disabled tool has %s refusal evidence",
     (scenario) => {

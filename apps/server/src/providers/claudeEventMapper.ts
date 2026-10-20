@@ -980,6 +980,7 @@ function mapStreamEvent(
         ? [{ kind: "ignored" }]
         : [failure("Claude returned invalid usage metadata.")];
     case "message-stop":
+    case "ping":
     case "tool-input-delta":
     case "reasoning-signature":
     case "citation-delta":
