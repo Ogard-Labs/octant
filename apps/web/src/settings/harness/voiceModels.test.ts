@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { voiceModelsOf } from "./voiceModels";
+import { isSpeechUsable, voiceModelsOf } from "./voiceModels";
 
 const ids = (...list: string[]) => list.map((id) => ({ id: id as never }));
 
@@ -28,5 +28,18 @@ describe("the voice models an endpoint offers", () => {
     expect(voiceModelsOf(ids("whisper-large"), { transcription: "voxtral-mini-latest" })).toEqual({
       transcription: "whisper-large",
     });
+  });
+});
+
+describe("which endpoints Voice can use", () => {
+  const instance = (driverKind: string, enabled: boolean) =>
+    ({ driverKind, enabled }) as unknown as Parameters<typeof isSpeechUsable>[0];
+
+  it("accepts only an enabled OpenAI-compatible endpoint", () => {
+    expect(isSpeechUsable(instance("openai-compatible", true))).toBe(true);
+    expect(isSpeechUsable(instance("openai-compatible", false))).toBe(false);
+    expect(isSpeechUsable(instance("ollama", true))).toBe(false);
+    expect(isSpeechUsable(instance("azure-foundry", true))).toBe(false);
+    expect(isSpeechUsable(instance("anthropic-compatible", true))).toBe(false);
   });
 });

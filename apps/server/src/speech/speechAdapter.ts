@@ -74,6 +74,14 @@ const SYNTHESIS_LIMITS: CompatibleHttpLimits = {
   streamIdleTimeoutMs: 30_000,
 };
 
+// Mistral answers JSON carrying the audio as base64, which is 4/3 the size of
+// the audio itself, so the raw response must be allowed to be that much larger
+// than the decoded ceiling or valid audio near the limit is cut off early.
+const BASE64_ENCODED_SYNTHESIS_LIMITS: CompatibleHttpLimits = {
+  ...SYNTHESIS_LIMITS,
+  responseBodyBytes: Math.ceil((SPEECH_SYNTHESIS_MAX_AUDIO_BYTES * 4) / 3) + 65_536,
+};
+
 const AUDIO_FILE_EXTENSIONS: Readonly<Record<SpeechAudioMediaType, string>> = {
   "audio/wav": "wav",
   "audio/webm": "webm",
@@ -152,7 +160,7 @@ export function makeOpenAiCompatibleSpeechAdapter(options: SpeechAdapterOptions)
         // its own reading of the reply.
         const mistral = isMistralHost(options.instance.configuration.baseUrl);
         const response = await performCompatibleRequest(
-          endpoint(SYNTHESIS_LIMITS),
+          endpoint(mistral ? BASE64_ENCODED_SYNTHESIS_LIMITS : SYNTHESIS_LIMITS),
           "audio/speech",
           {
             method: "POST",
@@ -216,12 +224,14 @@ function decodeAudioData(payload: unknown): Uint8Array {
   if (typeof payload !== "object" || payload === null) return new Uint8Array(0);
   const encoded = (payload as { readonly audio_data?: unknown }).audio_data;
   if (typeof encoded !== "string" || encoded.length === 0) return new Uint8Array(0);
-  try {
-    return new Uint8Array(Buffer.from(encoded, "base64"));
-  } catch {
-    return new Uint8Array(0);
-  }
+  // Buffer.from skips anything outside the alphabet, so a damaged reply would
+  // decode to garbage audio instead of failing; check the shape first.
+  const compact = encoded.replace(/\s+/g, "");
+  if (compact.length % 4 !== 0 || !BASE64_PATTERN.test(compact)) return new Uint8Array(0);
+  return new Uint8Array(Buffer.from(compact, "base64"));
 }
+
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
 
 function readTranscriptText(payload: unknown): string | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;

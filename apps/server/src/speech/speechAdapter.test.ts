@@ -178,6 +178,20 @@ describe("OpenAI-compatible speech adapter", () => {
       format: "mp3",
     });
     expect(refused.status).toBe("failed");
+
+    const malformed = makeOpenAiCompatibleSpeechAdapter({
+      instance: instance({ baseUrl: "https://api.mistral.ai/v1" }),
+      credentialResolver,
+      fetch: async () => new Response(JSON.stringify({ audio_data: "CQgH!!" }), { status: 200 }),
+    });
+    expect(
+      await malformed.synthesize({
+        text: "Hei",
+        modelId: "voxtral-mini-tts-2603" as never,
+        voice: "x" as never,
+        format: "mp3",
+      }),
+    ).toMatchObject({ status: "failed", providerFailure: { category: "protocol" } });
   });
 
   it("returns synthesized bytes in the requested format and refuses an empty body", async () => {

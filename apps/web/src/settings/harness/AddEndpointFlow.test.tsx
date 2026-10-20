@@ -858,6 +858,24 @@ describe("voice models on a new endpoint", () => {
     expect(onUseForTranscription).toHaveBeenCalledWith(id, "whisper-1");
   });
 
+  it("offers no voice tip for an endpoint Voice could not use, even when it lists a voice model", async () => {
+    const user = userEvent.setup();
+    renderFlow({
+      creates: { ...endpoint("openai-compatible"), enabled: false } as ModelEndpointInstance,
+      observedAfterCreate: observed([model("gpt-4.1"), model("whisper-1")]),
+      voice: { settings: undefined, onUseForTranscription: vi.fn(), onOpenVoice: vi.fn() },
+    });
+    const form = await connect(user, "OpenAI-compatible", {
+      name: "Team gateway",
+      url: "https://gateway.example/v1",
+      key: "k",
+    });
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(screen.queryByTestId("voice-tip")).not.toBeInTheDocument();
+  });
+
   it("says nothing about voice when the endpoint lists no voice model", async () => {
     const user = userEvent.setup();
     renderFlow({

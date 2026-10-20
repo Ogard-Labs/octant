@@ -49,7 +49,7 @@ import {
   type EndpointPreset,
   type ToolCheck,
 } from "./addEndpointSteps";
-import { voiceModelsOf } from "./voiceModels";
+import { isSpeechUsable, voiceModelsOf } from "./voiceModels";
 import { VoiceTip, type VoiceLinks } from "./VoiceTip";
 import { NEEDS_KEY_LABEL, type EndpointStatus, type ModelEndpointInstance } from "./endpointStatus";
 import type { EndpointDetailFocus } from "./ModelEndpointDetail";
@@ -1653,7 +1653,7 @@ function DoneStep(props: {
           </p>
         )}
       </div>
-      {props.voice === undefined ? null : (
+      {props.voice === undefined || !isSpeechUsable(props.added.instance) ? null : (
         <VoiceTip
           instanceId={props.added.instance.id}
           instanceName={props.added.instance.displayName}

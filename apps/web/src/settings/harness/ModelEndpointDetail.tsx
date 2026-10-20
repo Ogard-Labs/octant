@@ -26,6 +26,7 @@ import type { ProviderSettingsViewProps } from "../../providers/ProviderSettings
 import { endpointPresetForUrl } from "./addEndpointSteps";
 import { voiceModelsOf } from "./voiceModels";
 import { VoiceTip, type VoiceLinks } from "./VoiceTip";
+import { isSpeechUsable } from "./voiceModels";
 import {
   capabilityLabels,
   driverLabel,
@@ -541,7 +542,7 @@ function toggleTag(tags: ReadonlyArray<ProviderDataTag>, tag: ProviderDataTag): 
  * click instead of by typing a model id there.
  */
 function VoiceSection(props: ModelEndpointDetailProps & { readonly disabled: boolean }) {
-  if (props.voice === undefined) return null;
+  if (props.voice === undefined || !isSpeechUsable(props.instance)) return null;
   const voiceModels = voiceModelsOf(
     props.observed?.models,
     endpointPresetForUrl(props.instance.configuration.baseUrl)?.voice,
