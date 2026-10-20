@@ -47,5 +47,27 @@ export function upsertThreadTaskProgress(
   return next;
 }
 
+/**
+ * Applies a provider's restated plan: keeps only the listed tasks, in the
+ * listed order. The restatement's own items arrive first as single updates,
+ * so a listed id the list has not seen is one the cap already turned away.
+ */
+export function restateThreadTaskList(
+  tasks: ThreadTaskProgressList | undefined,
+  taskIds: ReadonlyArray<string>,
+): ThreadTaskProgressList {
+  const previous = tasks ?? [];
+  const byId = new Map(previous.map((task) => [task.taskId, task]));
+  const next = taskIds.flatMap((taskId) => {
+    const task = byId.get(taskId);
+    if (task === undefined) return [];
+    byId.delete(taskId);
+    return [task];
+  });
+  const unchanged =
+    next.length === previous.length && next.every((task, index) => task === previous[index]);
+  return unchanged ? previous : next;
+}
+
 export const decodeThreadTaskProgress = Schema.decodeUnknownSync(ThreadTaskProgress);
 export const decodeThreadTaskProgressList = Schema.decodeUnknownSync(ThreadTaskProgressList);

@@ -21,6 +21,7 @@ import {
   type WorkTurnFailure,
   type WorkTurnRequestId,
   type WorkTurnState,
+  restateThreadTaskList,
   upsertThreadTaskProgress,
   type ThreadTaskProgressList,
 } from "@octant/contracts";
@@ -359,6 +360,12 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                     state: event.status === "in-progress" ? "running" : event.status,
                     summary: event.summary,
                   });
+                  if (next === tasks) return;
+                  tasks = next;
+                  input.onTasks?.(next);
+                }
+                if (event.kind === "task-list") {
+                  const next = restateThreadTaskList(tasks, event.taskIds);
                   if (next === tasks) return;
                   tasks = next;
                   input.onTasks?.(next);

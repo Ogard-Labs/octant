@@ -90,6 +90,7 @@ export type CodeTurnEventCategory =
   | "question"
   | "observation"
   | "task-progress"
+  | "task-list"
   | "usage"
   | "provider-limit"
   | "child-activity"
@@ -113,6 +114,8 @@ export interface CodeTurnEvent {
   readonly requestId?: string;
   /** The labels a provider question offers; absent on every other category. */
   readonly options?: ReadonlyArray<string>;
+  /** The ids a restated plan still lists, in order; only on `task-list`. */
+  readonly taskIds?: ReadonlyArray<string>;
   readonly toolCallId?: string;
   readonly toolName?: string;
   readonly status?: string;
@@ -796,6 +799,12 @@ function normalizeProviderEvent(
         requestId: text(event.taskId),
         status: event.status,
         text: text(event.summary),
+      });
+    case "task-list":
+      return Effect.succeed({
+        ...base,
+        category: "task-list",
+        taskIds: event.taskIds.map(text),
       });
     case "child-agent-activity":
       return Effect.succeed({

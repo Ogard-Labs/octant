@@ -27,6 +27,7 @@ import {
   type ProviderServiceLimits,
   type TurnStopReason,
   type TurnUsage,
+  restateThreadTaskList,
   upsertThreadTaskProgress,
 } from "@octant/contracts";
 import {
@@ -1377,6 +1378,13 @@ export class ChatTurnRunner {
                     state: event.status === "in-progress" ? "running" : event.status,
                     summary: event.summary,
                   });
+                  if (nextTasks === currentAttempt.tasks) return;
+                  currentAttempt = { ...currentAttempt, tasks: nextTasks, updatedAt: updatedAt() };
+                  yield* input.persistAttempt(currentAttempt);
+                  return;
+                }
+                if (event.kind === "task-list") {
+                  const nextTasks = restateThreadTaskList(currentAttempt.tasks, event.taskIds);
                   if (nextTasks === currentAttempt.tasks) return;
                   currentAttempt = { ...currentAttempt, tasks: nextTasks, updatedAt: updatedAt() };
                   yield* input.persistAttempt(currentAttempt);

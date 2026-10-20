@@ -3,6 +3,7 @@ import {
   decodeThreadTaskProgress,
   decodeThreadTaskProgressList,
   MAX_THREAD_TASKS_PER_TURN,
+  restateThreadTaskList,
   upsertThreadTaskProgress,
 } from "./threadTasks";
 
@@ -62,5 +63,20 @@ describe("the thread task progress contract", () => {
     });
     expect(list).toHaveLength(MAX_THREAD_TASKS_PER_TURN);
     expect(list.some((entry) => entry.taskId === "task-extra")).toBe(false);
+  });
+
+  it("keeps only the tasks a restated plan lists, in its order", () => {
+    const list = decodeThreadTaskProgressList([
+      task,
+      { taskId: "task-2", state: "pending", summary: "Write the note" },
+      { taskId: "task-3", state: "pending", summary: "Dropped step" },
+    ]);
+    expect(restateThreadTaskList(list, ["task-2", "task-1"]).map(({ taskId }) => taskId)).toEqual([
+      "task-2",
+      "task-1",
+    ]);
+    expect(restateThreadTaskList(list, [])).toEqual([]);
+    // An unchanged plan returns the same list, so callers skip a needless journal write.
+    expect(restateThreadTaskList(list, ["task-1", "task-2", "task-3"])).toBe(list);
   });
 });

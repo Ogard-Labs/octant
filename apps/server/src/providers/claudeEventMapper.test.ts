@@ -4,6 +4,9 @@ import {
   decodeProviderInstanceId,
   decodeProviderRuntimeEvent,
   decodeProviderSessionId,
+  restateThreadTaskList,
+  upsertThreadTaskProgress,
+  type ThreadTaskProgressList,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { decodeMessage } from "./claudeAgentSdkDecoder";
@@ -495,13 +498,15 @@ describe("mapClaudeMessage", () => {
       { kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "Read the spec" },
       { kind: "task-progress", taskId: "task-2", status: "pending", summary: "Write the test" },
       { kind: "task-progress", taskId: "task-3", status: "pending", summary: "Read the spec" },
+      { kind: "task-list", taskIds: ["task-1", "task-2", "task-3"] },
     ]);
     // The same items keep their ids; an item with an undocumented status is left out.
     expect(second).toMatchObject([
       { kind: "task-progress", taskId: "task-1", status: "completed" },
       { kind: "task-progress", taskId: "task-2", status: "in-progress" },
+      { kind: "task-list", taskIds: ["task-1", "task-2"] },
     ]);
-    expect(second).toHaveLength(2);
+    expect(second).toHaveLength(3);
     expect([...first, ...second].some((event) => event.kind === "tool-start")).toBe(false);
   });
 
@@ -539,6 +544,52 @@ describe("mapClaudeMessage", () => {
       "task-2 Write code",
       "task-3 Test",
     ]);
+  });
+
+  it("drops checklist rows Claude removes and follows its latest order and wording", () => {
+    const ctx = context();
+    let panel: ThreadTaskProgressList = [];
+    const write = (toolUseId: string, items: ReadonlyArray<string>) => {
+      for (const event of eventValues(
+        mapped(ctx, {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: `message-${toolUseId}`,
+          content: [
+            {
+              kind: "tool-use",
+              toolUseId,
+              toolName: "TodoWrite",
+              input: {
+                todos: items.map((content) => ({
+                  content,
+                  status: "pending",
+                  activeForm: content,
+                })),
+              },
+            },
+          ],
+          usage,
+        }),
+      )) {
+        if (event.kind === "task-progress")
+          panel = upsertThreadTaskProgress(panel, {
+            taskId: event.taskId,
+            state: "pending",
+            summary: event.summary,
+          });
+        if (event.kind === "task-list") panel = restateThreadTaskList(panel, event.taskIds);
+      }
+      return panel.map((task) => task.summary);
+    };
+
+    expect(write("sdk-todo-a", ["Read", "Write", "Test"])).toEqual(["Read", "Write", "Test"]);
+    // Shrink: the dropped last row goes rather than lingering until the turn ends.
+    expect(write("sdk-todo-b", ["Read", "Test"])).toEqual(["Read", "Test"]);
+    // Rename and reorder.
+    expect(write("sdk-todo-c", ["Test it", "Read the spec"])).toEqual(["Test it", "Read the spec"]);
+    // An empty list clears the panel.
+    expect(write("sdk-todo-d", [])).toEqual([]);
   });
 
   it("ignores raw provider tool summaries regardless of Unicode length", () => {

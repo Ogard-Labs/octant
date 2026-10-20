@@ -766,6 +766,7 @@ function mapNotification(
         return correlationFailure();
       }
       const results: CodexMappedMessage[] = [];
+      const taskIds: string[] = [];
       const occurrences = new Map<string, number>();
       message.params.plan.forEach((step) => {
         const summary = normalized(step.step, SUMMARY_MAX_CHARACTERS);
@@ -778,6 +779,7 @@ function mapNotification(
           taskId = context.makeTaskId();
           context.taskIds.set(key, taskId);
         }
+        taskIds.push(taskId);
         results.push(
           event(context, {
             kind: "task-progress",
@@ -787,7 +789,9 @@ function mapNotification(
           }),
         );
       });
-      return results.length === 0 ? [{ kind: "ignored" }] : results;
+      // Codex restates the whole plan, so the steps it left out are gone.
+      results.push(event(context, { kind: "task-list", taskIds }));
+      return results;
     }
     case "thread/tokenUsage/updated": {
       if (message.params.threadId !== context.threadId) return correlationFailure();
