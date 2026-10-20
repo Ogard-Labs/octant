@@ -1019,21 +1019,19 @@ describe("the MCP authorization dialect", () => {
       );
       expect(begun.status).toBe(200);
       const started: unknown = await begun.json();
-      if (
-        !isRecord(started) ||
-        typeof started.attemptId !== "string" ||
-        typeof started.authorizationUrl !== "string"
-      ) {
+      const attemptId = isRecord(started) ? started.attemptId : undefined;
+      const authorizationUrl = isRecord(started) ? started.authorizationUrl : undefined;
+      if (typeof attemptId !== "string" || typeof authorizationUrl !== "string") {
         throw new Error("expected a PKCE attempt over the route");
       }
-      const authorization = new URL(started.authorizationUrl);
+      const authorization = new URL(authorizationUrl);
       expect(authorization.searchParams.get("redirect_uri")).toBe(
         `http://127.0.0.1:${port}/oauth/callback`,
       );
       expect(authorization.searchParams.get("resource")).toBe("https://mcp.example/mcp");
-      await fetch(started.authorizationUrl);
-      await waitForState(() => runtime.status(started.attemptId), "signed-in");
-      const done = runtime.status(started.attemptId);
+      await fetch(authorizationUrl);
+      await waitForState(() => runtime.status(attemptId), "signed-in");
+      const done = runtime.status(attemptId);
       if (done.kind !== "signed-in") throw new Error("expected signed-in");
       expect(await runtime.refresh(done.credentialRef)).toEqual({ kind: "refreshed" });
       expect(await runtime.access(done.credentialRef)).toMatchObject({
