@@ -54,8 +54,8 @@ application ground, to a Vivid tile's face, and to a Project's letter tile;
 chrome stays flat. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground (0091): a first-party picture or a
-person's photo, shown plain or through one still print effect, behind the
-start screens or inside the primary card.
+person's photo, shown plain or through one still print effect, or the field of
+Pulsing characters, behind the start screens or inside the primary card.
 
 ## Language
 
@@ -506,8 +506,8 @@ at most half opaque, whose brightness drifts in slow patches and breathes as
 a whole at twelve frames a second while a few glyphs swap. A click over it
 sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
 it grows, trailed by a fainter echo, and about one click in six draws a heart
-instead; it fades within two seconds; on the monochrome default the accent is the ink, so the ring is only
-brighter. It carries no picture, so the effect controls do not apply, and it
+instead, and fades within two seconds. With the default Mono accent the ring
+is the ink, only brighter; a chosen accent colours it. It carries no picture, so the effect controls do not apply, and it
 pauses while the window is hidden. Reduced motion holds it on one still frame
 and takes no rings. Behind a
 start screen the ground is masked away behind the composer and fades out below
