@@ -1060,6 +1060,7 @@ describe("signing in to a hosted server from Settings", () => {
     });
     const status = await handler(request("/api/extensions/sign-in", { kind: "status", ...target }));
     expect(await status?.json()).toEqual({ kind: "signed-out" });
+    expect(signIn.status).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
     const begun = await handler(request("/api/extensions/sign-in", { kind: "begin", ...target }));
     expect(await begun?.json()).toMatchObject({ kind: "awaiting-consent" });
     expect(signIn.begin).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
@@ -1074,6 +1075,8 @@ describe("signing in to a hosted server from Settings", () => {
     const out = await handler(request("/api/extensions/sign-in", { kind: "sign-out", ...target }));
     expect(await out?.json()).toEqual({ kind: "signed-out" });
 
+    await handler(pairedDeviceRequest("/api/extensions/sign-in", { kind: "status", ...target }));
+    expect(signIn.status).toHaveBeenLastCalledWith(extensionId, "mcp-docs", "remote-device");
     const remote = await handler(
       pairedDeviceRequest("/api/extensions/sign-in", { kind: "begin", ...target }),
     );

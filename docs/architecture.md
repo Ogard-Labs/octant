@@ -5453,27 +5453,37 @@ Project pins each arrive as their own change on these same seams.
 HTTP shows Sign in under its component in Settings. The host runs the MCP
 authorization flow as the protocol lays it out: a bare request to the server
 answers 401 and names its protected resource metadata (RFC 9728, or the
-well-known path when the header names none); that names the authorization
-server; its metadata (RFC 8414, or the OpenID discovery document) names the
-endpoints and must allow PKCE with S256; Octant registers itself there as a
+well-known path when the header names none), whose `resource` must be the
+server's own canonical address, or a server could obtain a bearer meant for
+another API and receive it on connect; that names the authorization server;
+its metadata (RFC 8414, or the OpenID discovery document) must name that
+same issuer, names the endpoints and must allow PKCE with S256; Octant
+registers itself there as a
 public client (RFC 7591, `token_endpoint_auth_method: none`) naming a
 loopback callback whose port it chose first; then the host OAuth runner runs
 its ordinary PKCE flow under the `mcp-authorization` dialect, which sends the
 server's canonical address as `resource` (RFC 8707) on authorize, exchange and
-refresh, binds the chosen port, and accepts an empty scope list. Every issuer
+refresh, binds the chosen port, and accepts an empty scope list. Scopes
+follow the RFC 6749 scope-token grammar, so a URL-shaped scope survives. An
+issuer may grant an access token without a refresh token; such a grant lasts
+as long as the access token and then asks for a new sign-in. Every issuer
 endpoint must be https. The grant lives in the credential broker like a
 provider sign-in; the host keeps only its reference, the descriptor that made
 it and the issuer's host name, in its own state file, and attaches the bearer
 to the launch each time the server connects, refreshed through the broker. A
-grant the broker can no longer honour leaves the launch bare, the server
-answers 401, and Settings offers Sign in again. Sign out revokes the grant
+grant the broker reports gone (revoked, expired, reused) leaves the launch
+bare, the server answers 401, and Settings shows Sign in again from the
+next status read; a broker that is merely unavailable changes nothing. Sign
+out revokes the grant
 where the issuer allows and forgets it either way; uninstalling the package
 does the same for every sign-in it had. An issuer that offers no client
 registration is refused in plain words, since Octant cannot invent a client
 id; a server that never asks for a sign-in is reported as such. The
 person's click on Sign in is the acknowledgment: there is no vendor terms
 text for a server they added themselves. A paired device can read the state
-and nothing more. The release-boundary hold on a connector
+and nothing more: a status read from a device returns the last known state
+of a pending attempt without polling the broker, since polling can finish
+the sign-in and store the grant, which is a host action. The release-boundary hold on a connector
 marketplace was lifted by the maintainer on 2026-10-20; the start gates in
 [release-boundary holds](release-boundary-holds.md) are met by this section
 and the rules above.

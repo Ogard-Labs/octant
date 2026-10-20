@@ -51,7 +51,11 @@ export function createExtensionRouteHandler(options: {
   };
   /** Sign-in to a hosted server a person added, through the host OAuth runner. */
   readonly mcpServerSignIn?: {
-    status(extensionId: string, componentId: string): Promise<McpServerSignInView>;
+    status(
+      extensionId: string,
+      componentId: string,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
     begin(
       extensionId: string,
       componentId: string,
@@ -367,7 +371,7 @@ export function createExtensionRouteHandler(options: {
       try {
         if (signIn.kind === "status") {
           return response(
-            await options.mcpServerSignIn.status(extensionId, componentId),
+            await options.mcpServerSignIn.status(extensionId, componentId, principalKind),
             200,
             origin,
           );
