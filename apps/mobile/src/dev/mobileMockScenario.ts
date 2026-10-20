@@ -18,7 +18,6 @@ import {
 } from "@octant/contracts";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
 import type { MobileHostRegistration } from "../hosts/HostRegistry";
-import type { MobileHostHealth } from "../session/MobileHostSessionHub";
 
 import {
   resolveMobileMockScenario,
