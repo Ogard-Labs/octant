@@ -57,6 +57,7 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [forwarding, setForwarding] = useState(false);
+  const [retryPending, setRetryPending] = useState(false);
   const forwardingRef = useRef(false);
   const forwardingChanged = useCallback((value: boolean) => {
     forwardingRef.current = value;
@@ -110,7 +111,8 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
   // A separate session control can resume a held turn without changing the
   // thread-list props. Keep observing until its unreached notes are claimed.
   const hasPendingFollowUp =
-    queue !== undefined && view?.steering?.some((note) => note.status === "queued") === true;
+    retryPending ||
+    (queue !== undefined && view?.steering?.some((note) => note.status === "queued") === true);
   // One read when the thread opens and when a turn starts or ends, so notes
   // the lead never reached show up at the turn's end.
   useEffect(() => {
@@ -187,6 +189,7 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
           settled={!running && (view.session.status === "idle" || view.session.status === "failed")}
           blocked={busy}
           onBusy={forwardingChanged}
+          onRetryPending={setRetryPending}
           notes={notes}
           refresh={load}
         />

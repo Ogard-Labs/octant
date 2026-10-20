@@ -19,6 +19,7 @@ interface Props {
   readonly settled: boolean;
   readonly blocked?: boolean;
   readonly onBusy?: (busy: boolean) => void;
+  readonly onRetryPending?: (pending: boolean) => void;
   readonly notes: ReadonlyArray<NativeHarnessSteeringNote>;
   readonly refresh: () => Promise<unknown>;
 }
@@ -39,6 +40,12 @@ export function UnreachedSteeringFollowUp(props: Props) {
   const [retry, setRetry] = useState<
     { readonly kind: "send" | "admit"; readonly claimed: Claimed } | undefined
   >();
+
+  const retryPending = retry !== undefined;
+  useEffect(() => {
+    props.onRetryPending?.(retryPending);
+    return () => props.onRetryPending?.(false);
+  }, [props.onRetryPending, retryPending]);
 
   async function admit(claimed: Claimed) {
     try {

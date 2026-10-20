@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   decodeThreadMessageQueueScope,
   decodeAggregateVersion,
+  decodeNativeHarnessSteeringTaken,
+  type ThreadMessageQueueCommand,
+  type ThreadMessageQueueResult,
   type NativeHarnessSessionView,
 } from "@octant/contracts";
 import { NativeHarnessClientFailure } from "@octant/client-runtime/native-harness-client";
@@ -245,6 +248,67 @@ describe("ThreadHarnessSteering", () => {
       }
     },
   );
+
+  it("observes external resume for locally retained notes after the host queue is empty", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let current = view("idle", [queued]);
+      const client = {
+        session: vi.fn(async () => current),
+        steer: vi.fn(),
+        takeSteering: vi.fn(async () => {
+          current = view("paused-by-user", []);
+          return decodeNativeHarnessSteeringTaken({ taken: [queued] });
+        }),
+      };
+      const snapshot = {
+        scope: decodeThreadMessageQueueScope({ mode: "chat", threadId }),
+        version: decodeAggregateVersion(0),
+        paused: false,
+        items: [],
+      };
+      const queue = {
+        read: vi.fn(async () => snapshot),
+        execute: vi.fn(
+          async (command: ThreadMessageQueueCommand): Promise<ThreadMessageQueueResult> => ({
+            status: "refused",
+            reason: "queue-full",
+            requestId: command.requestId,
+          }),
+        ),
+      };
+      render(
+        <ThreadHarnessSteering
+          client={client}
+          queueClient={queue}
+          threadId={threadId}
+          running={false}
+          refreshIntervalMs={50}
+        />,
+      );
+      const retry = await screen.findByRole("button", { name: "Retry next message" });
+      await waitFor(() => expect(retry).toBeDisabled());
+      expect(screen.getByText(queued.text)).toBeVisible();
+      current = view("idle", []);
+      await vi.advanceTimersByTimeAsync(100);
+      await waitFor(() => expect(retry).toBeEnabled());
+      queue.execute.mockImplementationOnce(async (command) => ({
+        status: "applied",
+        requestId: command.requestId,
+        snapshot,
+      }));
+      await userEvent.click(retry);
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Retry next message" })).toBeNull(),
+      );
+      const reads = client.session.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(200);
+      expect(client.session).toHaveBeenCalledTimes(reads);
+      expect(client.takeSteering).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("keeps reading while the session runs even when the thread list says the turn is parked", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
