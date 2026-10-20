@@ -59,12 +59,14 @@ function foldToolEvent(
   event: Extract<CodeOperationEvent, { kind: "tool-activity" }>,
 ): ToolActivityRow {
   const summary = event.summary ?? previous?.summary;
+  const publishedPage = event.publishedPage ?? previous?.publishedPage;
   return {
     kind: "tool",
     id: String(event.toolCallId),
     toolName: event.toolName,
     state: event.state,
     ...(summary === undefined ? {} : { summary }),
+    ...(publishedPage === undefined ? {} : { publishedPage }),
   };
 }
 

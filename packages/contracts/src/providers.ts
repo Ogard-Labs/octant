@@ -1,6 +1,7 @@
 import { Schema } from "effect";
 import { AggregateVersion, CorrelationId, UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
+import { PublishedPage } from "./threadToolSteps";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -2180,6 +2181,12 @@ export const ProviderRuntimeEvent = Schema.Union(
     kind: Schema.Literal("tool-success"),
     toolCallId: Schema.NonEmptyTrimmedString,
     summary: Schema.NonEmptyTrimmedString,
+    /**
+     * Where the call published a page, when that is what it did. The summary
+     * still says so in words for a client that ignores this; a client that
+     * reads it shows the page as a card instead of parsing the summary.
+     */
+    publishedPage: Schema.optional(PublishedPage),
   }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,

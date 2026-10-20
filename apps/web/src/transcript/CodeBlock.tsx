@@ -72,7 +72,8 @@ function copyLabel(state: CopyState): string {
   }
 }
 
-async function copyToClipboard(value: string): Promise<boolean> {
+/** Whether the text reached the clipboard; a host without one says no rather than claiming it did. */
+export async function copyToClipboard(value: string): Promise<boolean> {
   const clipboard = globalThis.navigator?.clipboard;
   if (clipboard === undefined || typeof clipboard.writeText !== "function") return false;
   try {

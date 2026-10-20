@@ -50,7 +50,7 @@ The sidebar **Thread board** is a server-derived view of Work threads as Ready, 
 
 Work has no shell and no Git. The agent in a Work thread is never given a way to run commands, so it never asks you to approve one; changes to files in the Project still ask first. When Work work becomes software engineering, use a [promotion](/guide/promotions) to start a linked Code thread with explicit user approval.
 
-On Claude Code, a Work thread can publish an HTML or Markdown file from the Project as a private page on your Anthropic account and show you the link. It asks you first every time, naming the file and title; see [Publishing a page](/advanced/privacy-and-security#publishing-a-page).
+On Claude Code, a Work thread can publish an HTML or Markdown file from the Project as a private page on your Anthropic account. The published page appears as a card under the turn's tool rows with its title and address, **Open** to open it in your browser, and **Copy link**. It asks you first every time, naming the file and title; see [Publishing a page](/advanced/privacy-and-security#publishing-a-page).
 
 ## Work settings
 

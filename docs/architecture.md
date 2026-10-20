@@ -5718,9 +5718,18 @@ mechanisms are:
   `shared` or `all` scope is refused, as is every other action, including the
   `read` a newer runtime offers, because those would bring other people's text
   or a page's content into the thread. A successful publish is reported as
-  the tool's result, "Published: " and the address, which the transcript
-  renders as a link; the decoder reads only that address out of the tool
-  result, never the rest of it. A refused publish (an account that cannot
+  the tool's result, "Published: " and the address, and the same success
+  event carries the page as structured data (`publishedPage`: the address,
+  which must be plain `https`, and the title the publish was asked for,
+  redacted like the prompt's); the field is provider-neutral and optional on
+  the normalized `tool-success` event, the journaled tool step, and the Code
+  `tool-activity` event, so a replayed thread shows the page the same way a
+  live one does. The transcript shows it as a card under the turn's tool rows
+  (title, address, Open through the host's external open, Copy link), outside
+  the settled fold, while the row's summary still renders the address as a
+  link for a client that ignores the field. The decoder reads only that
+  address out of the tool result, never the rest of it. A refused publish (an
+  account that cannot
   publish, for one) is reported as the tool's failure in fixed words, and the
   runtime's reason reaches the person through the model's reply, so nothing
   is ever presented as published that was not. The driver declares

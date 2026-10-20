@@ -236,16 +236,27 @@ function onlyHttpUrls(url: string): string {
  * the host's external open otherwise. Right-click offers both plus the URL
  * itself, because a link the agent wrote is also a thing the person copies.
  */
+/**
+ * The host's external open, as the surface provides it, or a browser tab when
+ * no surface does. Shared by every control that opens an address the agent
+ * produced, so a card's Open and a link's click leave the app the same way.
+ */
+export function useExternalLinkOpener(): (url: string) => void {
+  const actions = useContext(MarkdownLinkActionsContext);
+  return (url: string) => {
+    if (actions?.openExternal !== undefined) {
+      actions.openExternal(url);
+      return;
+    }
+    globalThis.open?.(url, "_blank", "noopener,noreferrer");
+  };
+}
+
 export function MarkdownLink(props: { readonly href: string; readonly children: ReactNode }) {
   const actions = useContext(MarkdownLinkActionsContext);
   const [open, setOpen] = useState(false);
-  const openExternal = () => {
-    if (actions?.openExternal !== undefined) {
-      actions.openExternal(props.href);
-      return;
-    }
-    globalThis.open?.(props.href, "_blank", "noopener,noreferrer");
-  };
+  const openExternalLink = useExternalLinkOpener();
+  const openExternal = () => openExternalLink(props.href);
   const copyUrl = () => {
     const writeText = globalThis.navigator?.clipboard?.writeText;
     if (writeText === undefined) return;

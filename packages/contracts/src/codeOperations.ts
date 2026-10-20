@@ -2,6 +2,7 @@ import { personDecides } from "./hostAnswer";
 import { HarnessRetryEventFields } from "./harnessRetry";
 import { ContextHandoffOmissions } from "./contextHandoff";
 import { ProviderChildActivityEvent } from "./providers";
+import { PublishedPage } from "./threadToolSteps";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
@@ -1257,6 +1258,8 @@ const ToolEvent = Schema.Struct({
   toolName: boundedNonEmptyText(255),
   state: Schema.Literal("started", "running", "completed", "failed"),
   summary: Schema.optional(boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES)),
+  /** Where a completed call published a page, carried from the provider's success event. */
+  publishedPage: Schema.optional(PublishedPage),
 }).annotations(strict);
 /**
  * The bounds a Code approval or question is journaled under. Exported so a

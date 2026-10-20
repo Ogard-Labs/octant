@@ -280,6 +280,13 @@ describe("CodeTurnRunner", () => {
         Stream.fromIterable([
           event({ kind: "tool-start", toolCallId: "call-1", toolName: "Read" }),
           event({ kind: "tool-success", toolCallId: "call-1", summary: "Tool completed." }),
+          event({ kind: "tool-start", toolCallId: "call-2", toolName: "Artifact" }),
+          event({
+            kind: "tool-success",
+            toolCallId: "call-2",
+            summary: "Published: https://claude.ai/artifact/abc-123",
+            publishedPage: { url: "https://claude.ai/artifact/abc-123", title: "Report" },
+          }),
           event({ kind: "completed" }),
         ]),
       ),
@@ -315,6 +322,21 @@ describe("CodeTurnRunner", () => {
         toolCallId: "call-1",
         toolName: "Read",
         status: "provider-claimed-success",
+      }),
+    );
+    const read = observed.find(
+      (entry) => entry.toolCallId === "call-1" && entry.category === "observation",
+    );
+    expect(read).not.toHaveProperty("publishedPage");
+    // A published page rides on the outcome it came with, so the journal
+    // keeps the card's address and title, not only the words of the summary.
+    expect(observed).toContainEqual(
+      expect.objectContaining({
+        category: "observation",
+        providerKind: "tool-success",
+        toolCallId: "call-2",
+        toolName: "Artifact",
+        publishedPage: { url: "https://claude.ai/artifact/abc-123", title: "Report" },
       }),
     );
   });

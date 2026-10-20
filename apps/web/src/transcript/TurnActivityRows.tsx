@@ -1,8 +1,27 @@
+import type { PublishedPage } from "@octant/contracts";
 import { ChatRichText } from "../chat/ChatRichText";
-import { Check, ChevronRight, Circle, CircleX, Clock3, LoaderCircle } from "lucide-react";
-import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "react";
-import { MarkdownLink } from "../markdown/Markdown";
+import {
+  Check,
+  ChevronRight,
+  Circle,
+  CircleX,
+  Clock3,
+  Copy,
+  ExternalLink,
+  Globe,
+  LoaderCircle,
+} from "lucide-react";
+import {
+  useEffect,
+  useId,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+  type ToggleEvent,
+} from "react";
+import { MarkdownLink, useExternalLinkOpener } from "../markdown/Markdown";
 import { OctantButton } from "../ui/base/OctantButton";
+import { copyToClipboard } from "./CodeBlock";
 import {
   alwaysVisibleActivityRows,
   settledTurnActivitySummary,
@@ -144,6 +163,14 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
   const foldableRows = activity.rows.filter((row) => !pinnedIds.has(rowKey(row)));
   const summary = settledTurnActivitySummary(activity);
   const foldSettledToolchain = settled && !running && summary.length > 0 && foldableRows.length > 0;
+  // A published page is what the turn produced, not machinery: its card stays
+  // below the rows and outside the settled fold, so it is never buried behind
+  // "N tool calls".
+  const publishedPages = activity.rows.flatMap((row) =>
+    row.kind === "tool" && row.publishedPage !== undefined
+      ? [{ id: rowKey(row), page: row.publishedPage }]
+      : [],
+  );
 
   const onToggle = (id: string) => (event: ToggleEvent<HTMLDetailsElement>) => {
     const nextOpen = event.newState === "open";
@@ -239,7 +266,87 @@ export function TurnActivityRows(props: TurnActivityRowsProps) {
       ) : (
         <>{activity.rows.map(renderDisclosure)}</>
       )}
+      {publishedPages.map(({ id, page }) => (
+        <PublishedPageCard key={id} page={page} />
+      ))}
     </div>
+  );
+}
+
+type CopyState = "idle" | "copied" | "refused";
+
+/** How long the Copy control reports its outcome before it offers to copy again. */
+const COPY_RECEIPT_MS = 1600;
+
+function copyLabel(state: CopyState): string {
+  switch (state) {
+    case "idle":
+      return "Copy link";
+    case "copied":
+      return "Copied";
+    case "refused":
+      return "Not copied";
+  }
+}
+
+/**
+ * The page a tool published, as the turn's product: its title, its address,
+ * and the two things a person does with an address. Open leaves the app the
+ * same way a link in the reply does; Copy reports honestly when the host has
+ * no clipboard. The tool row above still records the call and its summary.
+ */
+function PublishedPageCard(props: { readonly page: PublishedPage }) {
+  const openExternal = useExternalLinkOpener();
+  const [copyState, setCopyState] = useState<CopyState>("idle");
+  const titleId = useId();
+  const title = props.page.title ?? "Published page";
+
+  useEffect(() => {
+    if (copyState === "idle") return;
+    const timer = setTimeout(() => setCopyState("idle"), COPY_RECEIPT_MS);
+    return () => clearTimeout(timer);
+  }, [copyState]);
+
+  return (
+    <section aria-labelledby={titleId} className="turn-published-page">
+      <Globe aria-hidden="true" className="turn-published-page__mark" size={16} strokeWidth={1.7} />
+      <div className="turn-published-page__text">
+        <h3 className="turn-published-page__title" id={titleId} title={title}>
+          {title}
+        </h3>
+        <p className="turn-published-page__url" title={props.page.url}>
+          {props.page.url}
+        </p>
+      </div>
+      <div className="turn-published-page__actions">
+        <OctantButton
+          onClick={() => openExternal(props.page.url)}
+          size="sm"
+          type="button"
+          variant="outline"
+        >
+          <ExternalLink aria-hidden="true" data-icon="inline-start" strokeWidth={1.7} />
+          Open
+        </OctantButton>
+        <OctantButton
+          onClick={() => {
+            void copyToClipboard(props.page.url).then((copied) =>
+              setCopyState(copied ? "copied" : "refused"),
+            );
+          }}
+          size="sm"
+          type="button"
+          variant="ghost"
+        >
+          {copyState === "copied" ? (
+            <Check aria-hidden="true" data-icon="inline-start" strokeWidth={2} />
+          ) : (
+            <Copy aria-hidden="true" data-icon="inline-start" strokeWidth={1.7} />
+          )}
+          {copyLabel(copyState)}
+        </OctantButton>
+      </div>
+    </section>
   );
 }
 

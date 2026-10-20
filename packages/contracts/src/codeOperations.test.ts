@@ -800,6 +800,30 @@ describe("Code operation contracts", () => {
     }
   });
 
+  it("journals the page a completed tool call published beside its summary, as a plain https address", () => {
+    const frame = {
+      threadId: ids.thread,
+      operationId: ids.operation,
+      cursor: 5,
+      occurredAt: "2026-07-21T12:00:00.000Z",
+      event: {
+        kind: "tool-activity",
+        toolCallId: "call-1",
+        toolName: "Artifact",
+        state: "completed",
+        summary: "Published: https://claude.ai/artifact/abc-123",
+        publishedPage: { url: "https://claude.ai/artifact/abc-123", title: "Quarterly report" },
+      },
+    } as const;
+    expect(decodeCodeOperationEventFrame(frame)).toEqual(frame);
+    expect(() =>
+      decodeCodeOperationEventFrame({
+        ...frame,
+        event: { ...frame.event, publishedPage: { url: "http://claude.ai/artifact/abc-123" } },
+      }),
+    ).toThrow();
+  });
+
   it("uses monotonically increasing resource cursors and opaque evidence in events", () => {
     const frame = {
       threadId: ids.thread,

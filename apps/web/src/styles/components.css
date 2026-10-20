@@ -1357,6 +1357,76 @@ html[data-octant-reduced-motion="true"] .turn-activity__status-icon {
   animation: none;
 }
 
+/* The page a tool published: a work product, so it is boxed the way the
+   files-changed card is (hairline ring on the card fill, no lift, no hue) and
+   sits below the tool rows, outside the settled fold. The title is what a
+   person scans for; the address gives way first. The buttons keep the recipe's
+   paint. */
+.turn-published-page {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+  max-width: 72ch;
+  min-width: 0;
+  margin: var(--oct-space-2) 0 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  background: var(--octant-card, var(--octant-workspace));
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-md);
+}
+
+.turn-published-page__mark {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.turn-published-page__text {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.turn-published-page__title {
+  margin: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.turn-published-page__url {
+  margin: 0;
+  overflow: hidden;
+  color: var(--oct-meta);
+  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-detail);
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.turn-published-page__actions {
+  display: flex;
+  flex: none;
+  gap: var(--oct-space-1);
+}
+
+@media (max-width: 480px) {
+  .turn-published-page {
+    flex-wrap: wrap;
+  }
+
+  .turn-published-page__actions {
+    flex-basis: 100%;
+    padding-left: calc(var(--oct-space-3) + var(--oct-space-4));
+  }
+}
+
 /* The mark for the owned checkbox recipe. `appearance: none` removes the
    control the operating system drew for itself — which ignored the theme — so
    the tick has to be drawn here. Two borders on a rotated box keep it a shape

@@ -17,6 +17,32 @@ describe("the thread tool step contract", () => {
     expect(() => decodeThreadToolStep({ ...step, summary: "x".repeat(2_049) })).toThrow();
   });
 
+  it("carries the page a call published only as a plain https address with an optional title", () => {
+    const page = { url: "https://claude.ai/artifact/abc-123", title: "Quarterly report" };
+    expect(decodeThreadToolStep({ ...step, publishedPage: page })).toEqual({
+      ...step,
+      publishedPage: page,
+    });
+    expect(decodeThreadToolStep({ ...step, publishedPage: { url: page.url } })).toEqual({
+      ...step,
+      publishedPage: { url: page.url },
+    });
+    for (const url of [
+      "http://claude.ai/artifact/abc-123",
+      "https://user:token@claude.ai/artifact/abc-123",
+      "javascript:alert(1)",
+      "claude.ai/artifact/abc-123",
+    ]) {
+      expect(() => decodeThreadToolStep({ ...step, publishedPage: { url } })).toThrow();
+    }
+    expect(() =>
+      decodeThreadToolStep({ ...step, publishedPage: { url: page.url, title: "t".repeat(257) } }),
+    ).toThrow();
+    expect(() =>
+      decodeThreadToolStep({ ...step, publishedPage: { url: page.url, html: "<p>page</p>" } }),
+    ).toThrow();
+  });
+
   it("refuses more tool calls than one turn may keep", () => {
     expect(() =>
       decodeThreadToolStepList(

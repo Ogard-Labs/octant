@@ -2456,6 +2456,12 @@ describe("provider runtime contracts", () => {
     },
     { kind: "tool-progress", toolCallId: "tool-1", message: "Reading" },
     { kind: "tool-success", toolCallId: "tool-1", summary: "Read file" },
+    {
+      kind: "tool-success",
+      toolCallId: "tool-5",
+      summary: "Published: https://claude.ai/artifact/abc-123",
+      publishedPage: { url: "https://claude.ai/artifact/abc-123", title: "Quarterly report" },
+    },
     { kind: "tool-failure", toolCallId: "tool-1", message: "Denied" },
     { kind: "usage", inputTokens: 10, outputTokens: 4 },
     {
@@ -2559,6 +2565,27 @@ describe("provider runtime contracts", () => {
     expect(decodeProviderRuntimeEvent({ ...common, ...event })).toMatchObject(event);
     expect(() =>
       decodeProviderRuntimeEvent({ ...common, ...event, providerPayload: { private: true } }),
+    ).toThrow();
+  });
+
+  it("refuses a published page whose address is not plain https", () => {
+    const success = {
+      ...common,
+      kind: "tool-success",
+      toolCallId: "tool-5",
+      summary: "Published",
+    } as const;
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...success,
+        publishedPage: { url: "http://claude.ai/artifact/abc-123" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderRuntimeEvent({
+        ...success,
+        publishedPage: { url: "https://user:secret@claude.ai/artifact/abc-123" },
+      }),
     ).toThrow();
   });
 

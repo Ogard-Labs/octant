@@ -123,6 +123,33 @@ describe("transcript activity", () => {
     expect(started.rows[0]).not.toHaveProperty("output");
   });
 
+  it("keeps the page a completed call published on its row", () => {
+    const page = { url: "https://claude.ai/artifact/abc-123", title: "Quarterly report" };
+    const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
+      kind: "tool-activity",
+      toolCallId: "call-1" as never,
+      toolName: "Artifact",
+      state: "started",
+    } as CodeOperationEvent);
+    const finished = applyActivityEvent(started, {
+      kind: "tool-activity",
+      toolCallId: "call-1" as never,
+      toolName: "Artifact",
+      state: "completed",
+      summary: `Published: ${page.url}`,
+      publishedPage: page,
+    } as CodeOperationEvent);
+    expect(started.rows[0]).not.toHaveProperty("publishedPage");
+    expect(finished.rows[0]).toEqual({
+      kind: "tool",
+      id: "call-1",
+      toolName: "Artifact",
+      state: "completed",
+      summary: `Published: ${page.url}`,
+      publishedPage: page,
+    });
+  });
+
   it("replaces the summary when a later event records a different one", () => {
     const started = applyActivityEvent(EMPTY_TURN_ACTIVITY, tool("running"));
     const finished = applyActivityEvent(started, {

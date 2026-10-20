@@ -631,6 +631,12 @@ describe("mapClaudeMessage", () => {
         kind: "tool-success",
         toolCallId: "tool-1",
         summary: "Published: https://claude.ai/artifact/abc-123",
+        // The page the transcript cards: the address the runtime returned and
+        // the title the publish was asked for, the one the approval named.
+        publishedPage: {
+          url: "https://claude.ai/artifact/abc-123",
+          title: "Quarterly report private-title",
+        },
       },
       {
         kind: "tool-failure",
@@ -643,7 +649,50 @@ describe("mapClaudeMessage", () => {
         summary: "Published, but the runtime returned no link.",
       },
     ]);
-    expect(JSON.stringify(completed)).not.toMatch(/private-title|sdk-publish/);
+    const [, , silent] = eventValues(completed);
+    expect(silent).not.toHaveProperty("publishedPage");
+    // The rest of the tool's input (the favicon here) and the runtime's own
+    // ids never cross; the title crosses redacted, as it does on the prompt.
+    expect(JSON.stringify(completed)).not.toMatch(/favicon|📊|sdk-publish/);
+  });
+
+  it("redacts a secret-shaped publish title before it names the page", () => {
+    const ctx = context();
+    mapped(ctx, {
+      kind: "assistant",
+      sessionId: claudeSessionId,
+      messageId: "sdk-message-private",
+      content: [
+        {
+          kind: "tool-use",
+          toolUseId: "sdk-publish-secret",
+          toolName: "Artifact",
+          input: {
+            file_path: "/repo/docs/report.html",
+            title: "Report sk-ant-fixture-api-key-must-not-cross",
+          },
+        },
+      ],
+      usage,
+    });
+    const completed = mapped(ctx, {
+      kind: "tool-results",
+      sessionId: claudeSessionId,
+      results: [
+        {
+          toolUseId: "sdk-publish-secret",
+          isError: false,
+          artifactUrl: "https://claude.ai/artifact/abc-123",
+        },
+      ],
+    });
+    expect(eventValues(completed)).toMatchObject([
+      {
+        kind: "tool-success",
+        publishedPage: { url: "https://claude.ai/artifact/abc-123", title: "Report [redacted]" },
+      },
+    ]);
+    expect(JSON.stringify(completed)).not.toContain("sk-ant-fixture");
   });
 
   it("emits authoritative confined Edit and Write changes only after successful results", () => {

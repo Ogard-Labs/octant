@@ -9,6 +9,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderResumeCursor,
   type ProviderUsageLimit,
+  type PublishedPage,
   type TurnStopReason,
   type UsageCost,
 } from "@octant/contracts";
@@ -116,6 +117,8 @@ export interface CodeTurnEvent {
   readonly toolCallId?: string;
   readonly toolName?: string;
   readonly status?: string;
+  /** Where a succeeded tool published a page, carried as the provider reported it. */
+  readonly publishedPage?: PublishedPage;
   readonly path?: string;
   readonly change?: string;
   readonly inputTokens?: number;
@@ -769,6 +772,7 @@ function normalizeProviderEvent(
           ...normalized,
           toolCallId: text(event.toolCallId),
           status: "provider-claimed-success",
+          ...(event.publishedPage === undefined ? {} : { publishedPage: event.publishedPage }),
         })),
       );
     case "tool-failure":

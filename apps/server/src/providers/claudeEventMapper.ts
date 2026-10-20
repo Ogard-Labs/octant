@@ -83,6 +83,11 @@ export interface ClaudeToolState {
   fileChange?: ClaudeFileChange;
   /** An Artifact call that publishes a page, as its authoritative input said. */
   artifactPublish?: true;
+  /**
+   * The title the publish was asked for, redacted and bounded like the approval
+   * prompt's; it names the page on the card once the address comes back.
+   */
+  artifactTitle?: string;
 }
 
 /** The runtime's own tool that publishes a Project file as a page on the person's account. */
@@ -440,6 +445,11 @@ function mapToolUse(
   }
   if (authoritativeInput && isArtifactPublish(content.toolName, content.input)) {
     resolved.state.artifactPublish = true;
+    const title =
+      typeof content.input.title === "string"
+        ? normalized(redactedLine(content.input.title), LABEL_MAX_CHARACTERS)
+        : undefined;
+    if (title !== undefined) resolved.state.artifactTitle = title;
   }
   if (!resolved.created || !resolved.state.emitsActivity) return [{ kind: "ignored" }];
   const start = event(context, {
@@ -621,14 +631,25 @@ function mapToolResults(
       continue;
     }
     if (state.artifactPublish === true) {
+      const url = pair.result.artifactUrl;
       results.push(
         event(context, {
           kind: "tool-success",
           toolCallId: state.toolCallId,
           summary:
-            pair.result.artifactUrl === undefined
+            url === undefined
               ? "Published, but the runtime returned no link."
-              : `Published: ${pair.result.artifactUrl}`,
+              : `Published: ${url}`,
+          // The decoder matched the address against the runtime's own https
+          // shape, so the page carries only what that match allows.
+          ...(url === undefined
+            ? {}
+            : {
+                publishedPage: {
+                  url,
+                  ...(state.artifactTitle === undefined ? {} : { title: state.artifactTitle }),
+                },
+              }),
         }),
       );
       continue;

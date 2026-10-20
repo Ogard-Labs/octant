@@ -61,9 +61,11 @@ runtime returns to the model names the page's address as
 `claude.ai/artifact/{id}` or `claude.ai/code/artifact/{uuid}` (the runtime's
 own tool description names both shapes); the decoder reads that address out
 of the `tool_result` block's text and nothing else, and the mapper reports a
-successful publish as `Published: <address>`, a successful publish whose
-result names no address as published without a link, and an error result as
-a refusal in fixed words. The approval prompt reads
+successful publish as `Published: <address>` with the page beside it as
+`publishedPage` (the address and, when the call named one, the `title` from
+its input, redacted like the prompt's), a successful publish whose result
+names no address as published without a link and without a page, and an
+error result as a refusal in fixed words. The approval prompt reads
 `Artifact · publish <path> to your Anthropic account as "<title>"`, with the
 title redacted like a shell command, or
 `Artifact · list the pages on your Anthropic account`.

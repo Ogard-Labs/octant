@@ -1,12 +1,29 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { MarkdownLinkActionsContext } from "../markdown/Markdown";
 import {
   ACCESSIBLE_SUMMARY_LIMIT,
   TOOL_SUMMARY_PREVIEW_LIMIT,
   TurnActivityRows,
 } from "./TurnActivityRows";
 import type { TurnActivity } from "./turnActivity";
+
+const publishedPageUrl = "https://claude.ai/artifact/abc-123";
+const publishedTurn: TurnActivity = {
+  reasoning: "",
+  rows: [
+    { kind: "tool", id: "call-0", toolName: "Read", state: "completed", summary: "Read 40 lines" },
+    {
+      kind: "tool",
+      id: "call-1",
+      toolName: "Artifact",
+      state: "completed",
+      summary: `Published: ${publishedPageUrl}`,
+      publishedPage: { url: publishedPageUrl, title: "Quarterly report" },
+    },
+  ],
+};
 
 const mixed: TurnActivity = {
   reasoning: "Check the failing suite first.",
@@ -190,6 +207,86 @@ describe("TurnActivityRows", () => {
     const link = screen.getByRole("link", { name: "https://claude.ai/artifact/abc-123" });
     expect(link).toHaveAttribute("href", "https://claude.ai/artifact/abc-123");
     expect(screen.getByText(/^Published: /)).toBeVisible();
+    // A success that names no page is a plain tool row: no card below it.
+    expect(screen.queryByRole("region", { name: /Published page|report/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copy link" })).not.toBeInTheDocument();
+  });
+
+  it("shows a published page as a card with its title and address, which Open opens through the host and Copy link copies", async () => {
+    const user = userEvent.setup();
+    const openExternal = vi.fn();
+    const writeText = vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+    render(
+      <MarkdownLinkActionsContext.Provider value={{ openExternal }}>
+        <TurnActivityRows activity={publishedTurn} running={false} />
+      </MarkdownLinkActionsContext.Provider>,
+    );
+
+    const card = screen.getByRole("region", { name: "Quarterly report" });
+    expect(card).toBeVisible();
+    expect(within(card).getByText(publishedPageUrl)).toBeVisible();
+    // The card is the product, so it needs no row to be expanded first.
+    expect(screen.getByRole("button", { name: "Artifact, done" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    await user.click(within(card).getByRole("button", { name: "Open" }));
+    expect(openExternal).toHaveBeenCalledWith(publishedPageUrl);
+
+    await user.click(within(card).getByRole("button", { name: "Copy link" }));
+    expect(writeText).toHaveBeenCalledWith(publishedPageUrl);
+    expect(await within(card).findByRole("button", { name: "Copied" })).toBeVisible();
+    writeText.mockRestore();
+  });
+
+  it("reaches the card's actions by keyboard and keeps the card outside a settled turn's fold", async () => {
+    const user = userEvent.setup();
+    const openExternal = vi.fn();
+    render(
+      <MarkdownLinkActionsContext.Provider value={{ openExternal }}>
+        <TurnActivityRows activity={publishedTurn} running={false} settled />
+      </MarkdownLinkActionsContext.Provider>,
+    );
+
+    // The rows fold behind one line; the page the turn produced does not.
+    expect(screen.getByRole("button", { name: "2 tool calls" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    const card = screen.getByRole("region", { name: "Quarterly report" });
+    expect(card).toBeVisible();
+
+    const open = within(card).getByRole("button", { name: "Open" });
+    open.focus();
+    await user.keyboard("{Enter}");
+    expect(openExternal).toHaveBeenCalledWith(publishedPageUrl);
+    await user.tab();
+    expect(within(card).getByRole("button", { name: "Copy link" })).toHaveFocus();
+  });
+
+  it("names a card whose publish was given no title as a published page", () => {
+    render(
+      <TurnActivityRows
+        activity={{
+          reasoning: "",
+          rows: [
+            {
+              kind: "tool",
+              id: "call-1",
+              toolName: "Artifact",
+              state: "completed",
+              summary: `Published: ${publishedPageUrl}`,
+              publishedPage: { url: publishedPageUrl },
+            },
+          ],
+        }}
+        running={false}
+      />,
+    );
+    const card = screen.getByRole("region", { name: "Published page" });
+    expect(within(card).getByText(publishedPageUrl)).toBeVisible();
   });
 
   it("does not present a provider progress message as tool arguments", async () => {

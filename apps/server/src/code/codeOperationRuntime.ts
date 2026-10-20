@@ -4069,6 +4069,7 @@ function normalizedOperationEvent(
       toolName: event.toolName,
       state: event.providerKind === "tool-success" ? "completed" : "failed",
       ...(summary === undefined ? {} : { summary }),
+      ...(event.publishedPage === undefined ? {} : { publishedPage: event.publishedPage }),
     };
   }
   if (event.category === "usage")

@@ -1,4 +1,4 @@
-import type { HarnessRetryNotice, ThreadToolStep } from "@octant/contracts";
+import type { HarnessRetryNotice, PublishedPage, ThreadToolStep } from "@octant/contracts";
 
 /**
  * What a running turn is doing, beyond the message it is writing.
@@ -19,6 +19,8 @@ export type TurnActivityRow =
        * from output; this is a progress or result message, not captured tool I/O.
        */
       readonly summary?: string;
+      /** The page a completed call published, shown as its own card under the rows. */
+      readonly publishedPage?: PublishedPage;
     }
   | {
       readonly kind: "task";
@@ -65,6 +67,7 @@ export function toolStepsActivity(
       toolName: step.toolName,
       state: step.state,
       ...(step.summary === undefined ? {} : { summary: step.summary }),
+      ...(step.publishedPage === undefined ? {} : { publishedPage: step.publishedPage }),
     })),
     reasoning: "",
     ...(truncated === true ? { truncated: true } : {}),

@@ -36,6 +36,40 @@ describe("a turn's tool steps", () => {
     });
   });
 
+  it("keeps the page a call published on its step, and leaves a failed call without one", () => {
+    const page = { url: "https://claude.ai/artifact/abc-123", title: "Quarterly report" };
+    const steps = fold([
+      event({ kind: "tool-start", toolCallId: "a", toolName: "Artifact" }),
+      event({ kind: "tool-start", toolCallId: "b", toolName: "Artifact" }),
+      event({
+        kind: "tool-success",
+        toolCallId: "a",
+        summary: `Published: ${page.url}`,
+        publishedPage: page,
+      }),
+      event({
+        kind: "tool-failure",
+        toolCallId: "b",
+        message: "The Claude runtime refused to publish the page.",
+      }),
+    ]);
+    expect(steps?.steps).toEqual([
+      {
+        toolCallId: "a",
+        toolName: "Artifact",
+        state: "completed",
+        summary: `Published: ${page.url}`,
+        publishedPage: page,
+      },
+      {
+        toolCallId: "b",
+        toolName: "Artifact",
+        state: "failed",
+        summary: "The Claude runtime refused to publish the page.",
+      },
+    ]);
+  });
+
   it("does not reopen a tool that already ended when a late progress message arrives", () => {
     const steps = fold([
       event({ kind: "tool-start", toolCallId: "a", toolName: "Read" }),

@@ -179,9 +179,11 @@ purpose, so it works like this:
 - The prompt names the file, relative to the Project, and the title the page
   is published under. Only a file inside the Project can be published.
 - If you say no, nothing is sent and the agent is told you refused.
-- When a publish succeeds, the thread shows the page's link in the tool's
-  result. The page is private to your Anthropic account; Octant keeps no copy
-  of it and no credential for it.
+- When a publish succeeds, the thread shows the page as a card under the
+  turn's tool rows: its title, its address, **Open** to open it in your
+  browser, and **Copy link**. The card stays when you reopen the thread. The
+  page is private to your Anthropic account; Octant keeps no copy of it and
+  no credential for it, only the address and title the card shows.
 - If the account cannot publish (an API-key sign-in, for example), the tool
   fails and the agent tells you why. Nothing is shown as published that was
   not.

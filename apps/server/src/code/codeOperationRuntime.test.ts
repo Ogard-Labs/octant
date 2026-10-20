@@ -3167,6 +3167,54 @@ describe("CodeOperationRuntime", () => {
         (frame) => frame.event.kind === "tool-activity" && frame.event.state === "completed",
       );
       expect(closed?.event).toMatchObject({ toolName: "Read", summary: "Tool completed." });
+      expect(closed?.event).not.toHaveProperty("publishedPage");
+    });
+    fixture.close();
+  });
+
+  it("journals the page a tool published so a reopened thread still shows its card", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(22);
+    await fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: startOperation,
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+    });
+    await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+    const page = { url: "https://claude.ai/artifact/abc-123", title: "Quarterly report" };
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({ kind: "tool-start", toolCallId: "call-1", toolName: "Artifact" }),
+      ),
+    );
+    await Effect.runPromise(
+      Queue.offer(
+        queue,
+        providerEvent({
+          kind: "tool-success",
+          toolCallId: "call-1",
+          summary: `Published: ${page.url}`,
+          publishedPage: page,
+        }),
+      ),
+    );
+
+    await vi.waitFor(async () => {
+      const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+      const closed = frames.find(
+        (frame) => frame.event.kind === "tool-activity" && frame.event.state === "completed",
+      );
+      expect(closed?.event).toMatchObject({
+        toolName: "Artifact",
+        summary: `Published: ${page.url}`,
+        publishedPage: page,
+      });
     });
     fixture.close();
   });

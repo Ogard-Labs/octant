@@ -1,7 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { alwaysVisibleActivityRows, settledTurnActivitySummary } from "./turnActivity";
+import {
+  alwaysVisibleActivityRows,
+  settledTurnActivitySummary,
+  toolStepsActivity,
+} from "./turnActivity";
 
 describe("turn activity", () => {
+  it("carries a recorded step's published page onto its row and nothing onto the others", () => {
+    const page = { url: "https://claude.ai/artifact/abc-123", title: "Quarterly report" };
+    const activity = toolStepsActivity(
+      [
+        { toolCallId: "a", toolName: "Read", state: "completed", summary: "Read 40 lines" },
+        {
+          toolCallId: "b",
+          toolName: "Artifact",
+          state: "completed",
+          summary: `Published: ${page.url}`,
+          publishedPage: page,
+        },
+      ],
+      false,
+    );
+    expect(activity?.rows).toEqual([
+      { kind: "tool", id: "a", toolName: "Read", state: "completed", summary: "Read 40 lines" },
+      {
+        kind: "tool",
+        id: "b",
+        toolName: "Artifact",
+        state: "completed",
+        summary: `Published: ${page.url}`,
+        publishedPage: page,
+      },
+    ]);
+  });
+
   it("summarizes a settled turn's toolchain for the quiet fold line", () => {
     expect(
       settledTurnActivitySummary({
