@@ -376,7 +376,13 @@ Descriptions explain the existing presentation flows and distinguish creation,
 queued jobs, and work proposals from opened previews or completed work.
 Work also includes a short, budgeted artifact instruction in its required
 context, so runtimes that use their own file tools know how written documents
-appear in Files and Document. That instruction offers no tools or authority.
+appear in Files and Document, and every turn that offers `octant_canvas` (Work,
+Code, and a Chat thread in a Chat Project) includes a short, budgeted Canvas
+delivery instruction, so a runtime delivers kept or shared work as a Canvas
+rather than as its own file or a long reply; its text is owned by
+[Canvas](design/canvas.md#agent-tool-and-recipes). Neither instruction offers
+tools or authority, and the Canvas one is absent wherever the tool is not
+offered.
 
 ### Desktop menu bar
 

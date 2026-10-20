@@ -85,6 +85,22 @@ no Project, are not offered `octant_canvas`: a Canvas there has nowhere to belon
 and every call would be refused. The refusal for a window without a Chat
 Project stays as the backstop.
 
+The delivery rule also reaches the model as an instruction, not only as the
+tool description. Every turn that offers `octant_canvas` (Work, Code, and a
+Chat thread in a Chat Project) carries one short, provider-neutral,
+budgeted entry in its required context: deliver a document, report, memo,
+plan, deck, dashboard, page, or prototype the person will keep or share as a
+Canvas with `octant_canvas`, not as a file written with the runtime's own file
+tools and not as a long reply, unless the person asks for a file or for plain
+text. The entry grants no tools or authority, is attributed as Octant policy
+like the Work artifact instruction, and is absent from every turn that does
+not offer the tool. Work's artifact instruction defers to it: a document goes
+in the task folder when the person asked for a file or no Canvas tool is
+offered. The rule moved into required context because, in a live Work turn, a
+runtime with its own file tools read the tool description and still wrote the
+memo as a Markdown file, then pasted it into the reply after the write was
+denied.
+
 ## Presentation and schema versions
 
 `create` and `revise` take an optional thread `presentation`: `inline` or
