@@ -5706,6 +5706,161 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Back to workspace" })).not.toBeInTheDocument();
   });
 
+  it.each(["select", "add", "bottom"])(
+    "starts a restored dock terminal only after an explicit %s gesture",
+    async (gesture) => {
+      window.localStorage.clear();
+      const user = userEvent.setup();
+      const codeApi = codes();
+      vi.mocked(codeApi.executeOperation).mockImplementation(async (command) => ({
+        kind: "operation-failed",
+        operationId: command.operationId,
+        failure: { category: "unavailable", message: "Terminal is unavailable." },
+      }));
+      writeUtilityDockPresentation(globalThis, String(windowId), {
+        open: true,
+        threads: new Map([
+          [
+            threadUtilityDockKey("code", String(codeThreadId)),
+            {
+              tabs: [{ id: "terminal", surface: "terminal" }],
+              active: "terminal",
+            },
+          ],
+        ]),
+      });
+      render(
+        <App
+          codeClient={codeApi}
+          contextClient={contextClient()}
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projects()}
+          projectWindowCapability={projectWindowCapability}
+          providerClient={providersWithToolModel()}
+          shellClient={client(codeShellBootstrap())}
+        />,
+      );
+      const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+      expect(await within(dock).findByRole("button", { name: "Start terminal" })).toBeVisible();
+      expect(
+        vi
+          .mocked(codeApi.executeOperation)
+          .mock.calls.some(([command]) => command.kind === "start-terminal"),
+      ).toBe(false);
+      if (gesture === "bottom") {
+        await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
+      } else if (gesture === "select") {
+        await user.click(within(dock).getByRole("tab", { name: "Terminal" }));
+      } else {
+        await user.click(within(dock).getByRole("button", { name: "Add tool" }));
+        await user.click(
+          within(await screen.findByRole("menu", { name: "Add tool" })).getByRole("menuitem", {
+            name: "Terminal",
+          }),
+        );
+      }
+      await waitFor(() =>
+        expect(
+          vi
+            .mocked(codeApi.executeOperation)
+            .mock.calls.filter(([command]) => command.kind === "start-terminal"),
+        ).toHaveLength(1),
+      );
+    },
+  );
+
+  it("retains terminal selection across thread switches without activating another thread", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const codeApi = codes();
+    const initial = codeShellBootstrap();
+    const layout = initial.workspace.layouts.code;
+    if (layout.kind !== "pane") throw new Error("Expected Code pane");
+    const otherId = decodeCodeThreadId("00000000-0000-4000-8000-000000000807");
+    const original = await codeApi.thread(codeThreadId);
+    const other = { ...original.thread, id: otherId, title: "Another Code thread" };
+    vi.mocked(codeApi.thread).mockImplementation(async (id) => ({
+      ...original,
+      thread: String(id) === String(otherId) ? other : original.thread,
+    }));
+    const workspace = applyWorkspaceOperation(
+      initial.workspace,
+      decodeWorkspaceOperation({
+        kind: "split-pane",
+        mode: "code",
+        targetPaneId: layout.paneId,
+        surface: {
+          kind: "code-overview",
+          mode: "code",
+          id: "00000000-0000-4000-8000-000000000808",
+          threadId: otherId,
+          title: other.title,
+        },
+        splitNodeId: "00000000-0000-4000-8000-000000000809",
+        newPaneNodeId: "00000000-0000-4000-8000-000000000810",
+        newPaneId: "00000000-0000-4000-8000-000000000811",
+        orientation: "horizontal",
+        placement: "after",
+        ratio: 0.5,
+      }),
+    );
+    writeUtilityDockPresentation(globalThis, String(windowId), {
+      open: true,
+      threads: new Map(
+        [codeThreadId, otherId].map((id) => [
+          threadUtilityDockKey("code", String(id)),
+          { tabs: [{ id: "terminal", surface: "terminal" }], active: "terminal" },
+        ]),
+      ),
+    });
+    const pendingAttach = deferred<void>();
+    let holdAttach = true;
+    vi.mocked(codeApi.executeOperation).mockImplementation(async (command) => {
+      if (
+        command.kind === "attach-terminal" &&
+        String(command.threadId) === String(codeThreadId) &&
+        holdAttach
+      ) {
+        await pendingAttach.promise;
+      }
+      return {
+        kind: "operation-failed",
+        operationId: command.operationId,
+        failure: { category: "unavailable", message: "Terminal is unavailable." },
+      };
+    });
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client({ ...initial, workspace, workspaceVersion: workspace.version })}
+      />,
+    );
+    const first = await screen.findByRole("region", {
+      name: "Workspace pane: Controller foundation",
+    });
+    const second = screen.getByRole("region", { name: "Workspace pane: Another Code thread" });
+    await user.click(first);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await user.click(within(dock).getByRole("tab", { name: "Terminal" }));
+    await user.click(second);
+    expect(await within(dock).findByRole("button", { name: "Start terminal" })).toBeVisible();
+    const starts = () =>
+      vi.mocked(codeApi.executeOperation).mock.calls.filter(([c]) => c.kind === "start-terminal");
+    expect(starts()).toHaveLength(0);
+    holdAttach = false;
+    await act(async () => pendingAttach.resolve());
+    await user.click(first);
+    await waitFor(() => expect(starts()).toHaveLength(1));
+    expect(starts()[0]?.[0].threadId).toBe(codeThreadId);
+  });
+
   it("restores a thread's dock tools after the window reloads", async () => {
     writeUtilityDockPresentation(globalThis, String(windowId), {
       open: true,
