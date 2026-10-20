@@ -2,7 +2,8 @@
 
 This topic specification owns the Canvas agent tool's `describe`, `read`, and
 `preview` operations, document recipes, thread presentation, the closed block catalogue,
-diagram boards and comments, and the `design` block. Architecture owns the
+diagram boards and comments, the `design` block, and the list of in-tree export
+destinations. Architecture owns the
 Canvas boundary and authority rules
 ([Architecture: process topology](../architecture.md#process-topology)) and the
 approved direction for documents, designs, and prototypes
@@ -807,6 +808,31 @@ listener and asks the resolver for none of its names (`dns-prefetch` and
 `preconnect` links, STUN and TURN servers named by host name), while the same
 page in a frame of the app's own process does look them up.
 
+## Export destinations
+
+Export renders a Canvas to Markdown or HTML, shows the rendered payload and the
+destination on an approval card, and calls the destination only after the
+person approves. The seam, the approval, the journal record, the host ports a
+destination may receive, and the `not-connected` / `ready` / `refused` states
+every destination reports are architecture's
+([Canvas export](../architecture.md#extensions-and-skills)); this section lists
+the destinations that ship in-tree on that seam, each registered exactly as a
+third-party contribution would be
+(`apps/server/src/canvas/canvasExportTargets.ts`).
+
+| Destination          | Formats        | Where it goes                                    | Offered when                                      |
+| -------------------- | -------------- | ------------------------------------------------ | ------------------------------------------------- |
+| A folder on this Mac | Markdown, HTML | A file in a folder the person chose              | Always; `not-connected` until a folder is chosen  |
+| GitHub Gist          | Markdown       | A secret or public gist on the connected account | Always; `not-connected` until GitHub is connected |
+
+A destination that publishes a rendered Canvas as a private page on the
+person's own account with a provider is built from the registration's host
+ports alone: it asks the page-publishing port which enabled provider instances
+can publish pages and publishes there, and never names a provider or reaches
+an adapter. No such destination ships yet; "Share to Claude" is a follow-up on
+that port, delivered with the Claude driver's implementation of the seam's
+page-publishing operation.
+
 ## Verification
 
 - Block policies and layouts: `packages/domain/src/canvas*.ts` and their tests
@@ -815,3 +841,8 @@ page in a frame of the app's own process does look them up.
 - Service, revision routes, and comments: `apps/server/src/canvas/canvasService.test.ts`.
 - Preview: `apps/server/src/canvas/canvasPreviewService.test.ts`,
   `canvasPreviewWarnings.test.ts`, and `canvasPreviewBrowser.smoke.ts`.
+- Export destinations: `apps/server/src/canvas/canvasExportService.test.ts`
+  (offers, approval before any call, the journaled receipt or refusal for each
+  destination), `folderExportTarget.test.ts`, and `gistExportTarget.test.ts`;
+  the host's page-publishing port in
+  `apps/server/src/providers/providerPagePublishing.test.ts`.

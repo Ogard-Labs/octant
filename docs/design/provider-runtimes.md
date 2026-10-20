@@ -68,6 +68,15 @@ a refusal in fixed words. The approval prompt reads
 title redacted like a shell command, or
 `Artifact · list the pages on your Anthropic account`.
 
+Publishing a page outside a thread (a Canvas export destination) goes through
+the provider seam's page-publishing operation (`pagePublishing` on the driver,
+`@octant/provider-sdk/page-publishing`; the rule is in
+[Architecture: providers](../architecture.md#providers)), never through a
+caller that opens the SDK port, the runtime registry, or the account
+environment itself. The Claude driver does not implement the operation yet;
+its implementation is a follow-up change that runs the same `Artifact` tool in
+a one-shot session and passes the seam's page-publishing conformance suite.
+
 ## OpenCode
 
 The installed OpenCode binary's
@@ -261,6 +270,12 @@ failing the check with their typed states.
   result), and `claudeEventMapper.test.ts` (the prompt and result wording).
   A publish against a real account has not been run from Octant; the result
   wording the decoder reads is taken from the runtime's own tool description.
+- Page publishing seam: `packages/provider-sdk/src/pagePublishingConformance.test.ts`
+  (the suite a publishing driver must pass),
+  `packages/contracts/src/pagePublishing.test.ts` (the shapes), and
+  `apps/server/src/providers/providerPagePublishing.test.ts` (which instances
+  the host port lists and what it refuses). No driver implements the
+  operation yet.
 - OpenCode: `apps/server/src/providers/openCodeDriver.test.ts`,
   `openCodeClient.test.ts`, `openCodeEventMapper.test.ts`,
   `openCodeProcess.test.ts`, `openCodeConformance.test.ts`, and the

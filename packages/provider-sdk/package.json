@@ -14,7 +14,9 @@
     "./driver-plugins": "./src/driverPlugins.ts",
     "./subscription-oauth": "./src/subscriptionOAuth.ts",
     "./image-generation": "./src/imageGeneration.ts",
-    "./image-generation-conformance": "./src/imageGenerationConformance.ts"
+    "./image-generation-conformance": "./src/imageGenerationConformance.ts",
+    "./page-publishing": "./src/pagePublishing.ts",
+    "./page-publishing-conformance": "./src/pagePublishingConformance.ts"
   },
   "scripts": {
     "build": "tsdown src/index.ts --format esm --dts",

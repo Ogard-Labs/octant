@@ -19,6 +19,7 @@ import type {
 } from "@octant/contracts";
 import type { Effect, Scope, Stream } from "effect";
 import type { ProviderContextFactsSource, ProviderLocalUsageHistorySource } from "./contextFacts";
+import type { ProviderPagePublishingSource } from "./pagePublishing";
 
 export type {
   ProviderAttachmentInput,
@@ -137,6 +138,14 @@ export interface ProviderDriver {
   readonly contextFacts?: ProviderContextFactsSource;
   /** Optional read-only local history reader owned by the configured driver. */
   readonly localUsageHistory?: ProviderLocalUsageHistorySource;
+  /**
+   * Publishing a page on the person's own account with this provider, outside
+   * a thread. Present only on a driver whose observed capabilities say
+   * `artifactPublish: "supported"`; the host asks a driver that lacks either
+   * nothing, and a driver that offers it passes the page-publishing
+   * conformance suite.
+   */
+  readonly pagePublishing?: ProviderPagePublishingSource;
   readonly probe: (
     input: ProviderProbeInput,
   ) => Effect.Effect<ProviderProbeResult, ProviderFailure, Scope.Scope>;
