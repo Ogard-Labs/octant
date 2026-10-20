@@ -12,21 +12,32 @@ import type { PagePublisherOffer, PagePublishingPort } from "@octant/plugin-api/
 import type { ProviderDriver, ProviderPagePublishingSource } from "@octant/provider-sdk";
 
 /**
- * The host's page-publishing port: every enabled provider instance whose
- * driver implements the seam's page-publishing operation and whose probe
- * observed `artifactPublish: "supported"` on a ready runtime, and nothing
- * else. A destination reaches a provider only through this, so the port
+ * The host's page publishing: every enabled provider instance whose driver
+ * implements the seam's page-publishing operation and whose probe observed
+ * `artifactPublish: "supported"` on a ready runtime, and nothing else. It
  * names no vendor: it resolves the instance's driver, asks the seam, and
  * decodes what comes back. A driver's rejection or a malformed answer is
  * reported as unavailable in fixed words, so a provider's own error text
  * never reaches a card, and a publish to an instance the list does not hold
  * is refused as a value before any driver is asked.
+ *
+ * `publishers` is the plugin-facing port. `publish` stays host-internal: the
+ * Canvas export service calls it only from the single-use grant it issues
+ * inside an approved export, with the render the person approved, so no
+ * destination ever holds it.
  */
 export interface ProviderPagePublishingOptions {
   readonly instances: () => ReadonlyArray<ProviderInstance>;
   /** The configured driver for an enabled instance, or nothing when it cannot be built. */
   readonly resolveDriver: (instance: ProviderInstance) => ProviderDriver | undefined;
   readonly observedState: (instanceId: ProviderInstanceId) => ProviderObservedState | undefined;
+}
+
+export interface ProviderPagePublishing extends PagePublishingPort {
+  readonly publish: (
+    instanceId: ProviderInstanceId,
+    request: PagePublishRequest,
+  ) => Promise<PagePublishOutcome>;
 }
 
 const NOT_A_PUBLISHER = "This provider cannot publish pages.";
@@ -65,7 +76,7 @@ function publisherOf(
 
 export function makeProviderPagePublishing(
   options: ProviderPagePublishingOptions,
-): PagePublishingPort {
+): ProviderPagePublishing {
   const publishers = (): ReadonlyArray<Publisher> =>
     options
       .instances()

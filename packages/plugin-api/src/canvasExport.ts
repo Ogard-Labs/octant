@@ -40,13 +40,16 @@ import type {
   CanvasExportRenderedOutput,
   CanvasExportVisibility,
 } from "@octant/contracts/canvas-export";
+import type { PagePublishOutcome, ProviderInstanceId } from "@octant/contracts";
 import type { PagePublishingPort } from "./pagePublishing";
 
 /**
  * The host capabilities a destination may receive instead of host internals.
- * Each is a typed, capability-scoped port: a destination that publishes
- * through a provider asks `pagePublishing` which instances can and publishes
- * there, and never reaches a provider adapter, a runtime, or a credential.
+ * Each is a typed, capability-scoped port, and each is a read: a destination
+ * that publishes through a provider asks `pagePublishing` which instances can,
+ * names one on its card, and publishes only through the grant the host hands
+ * it inside the approved export. It never reaches a provider adapter, a
+ * runtime, or a credential, and holding these ports lets it publish nothing.
  */
 export interface CanvasExportHostPorts {
   readonly pagePublishing: PagePublishingPort;
@@ -54,6 +57,25 @@ export interface CanvasExportHostPorts {
 
 /** How a destination that needs host ports is built: from the ports alone. */
 export type CanvasExportTargetFactory = (ports: CanvasExportHostPorts) => CanvasExportTarget;
+
+/**
+ * What the host grants a destination for one approved export, and for nothing
+ * longer. Each grant is bound to the render the person approved and to what
+ * the approval card named, is good exactly once, and lapses when
+ * `exportDocument` settles; every other call is refused as a value, never
+ * forwarded. A destination therefore cannot publish before approval, with a
+ * page the person did not see, to an account the card did not name, or twice.
+ */
+export interface CanvasExportGrants {
+  /**
+   * Publish the approved rendered output as a page on `instanceId`, which must
+   * be the publisher the destination named on the card. The host supplies the
+   * title, the HTML, and the file name from the approved render; the
+   * destination supplies nothing but the instance, so it cannot publish
+   * something other than what was approved.
+   */
+  readonly publishPage: (instanceId: ProviderInstanceId) => Promise<PagePublishOutcome>;
+}
 
 /**
  * What a destination plans to do with one document, described while the
@@ -76,6 +98,14 @@ export interface CanvasExportDestination {
   readonly replacesExisting?: boolean;
   /** The account this export will act as, when the destination acts as one. */
   readonly account?: string;
+  /**
+   * The provider instance this export publishes a page through, when it does:
+   * one the page-publishing port lists as ready. The host, not the
+   * destination, puts that instance's account on the card, and binds the
+   * export's `publishPage` grant to this instance alone; naming one the port
+   * does not list refuses the export before any card is shown.
+   */
+  readonly publisher?: ProviderInstanceId;
   /** Whether the result is visible to anyone, or only to `account`. */
   readonly visibility?: CanvasExportVisibility;
   /** The destination's own plain note about this export, shown on the card. */
@@ -107,10 +137,15 @@ export interface CanvasExportTarget {
    * Perform the export. `confirmed` is the destination the approval card named
    * — including the audience the person chose — and the person approved; when
    * it is absent the target has no confirmation and, for a local destination,
-   * writes alongside an existing file instead of over it.
+   * writes alongside an existing file instead of over it. `grants` is what the
+   * host lets this one approved export do beyond the destination's own code;
+   * it exists only for the duration of this call, and only the host issues
+   * one, so a call made without it (a direct test of a destination) has no
+   * way to publish a page.
    */
   readonly exportDocument: (
     output: CanvasExportRenderedOutput,
     confirmed?: CanvasExportDestination,
+    grants?: CanvasExportGrants,
   ) => Promise<CanvasExportDelivery>;
 }

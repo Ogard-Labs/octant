@@ -828,10 +828,13 @@ third-party contribution would be
 A destination that publishes a rendered Canvas as a private page on the
 person's own account with a provider is built from the registration's host
 ports alone: it asks the page-publishing port which enabled provider instances
-can publish pages and publishes there, and never names a provider or reaches
-an adapter. No such destination ships yet; "Share to Claude" is a follow-up on
-that port, delivered with the Claude driver's implementation of the seam's
-page-publishing operation.
+can publish pages, names one on its card, and publishes only through the
+single-use grant the host hands it after approval, which publishes the
+approved render to that instance and refuses everything else as a value. The
+card shows the account the host knows for that instance. The destination
+never names a provider or reaches an adapter. No such destination ships yet;
+"Share to Claude" is a follow-up on that seam, delivered with the Claude
+driver's implementation of the seam's page-publishing operation.
 
 ## Verification
 
@@ -843,6 +846,9 @@ page-publishing operation.
   `canvasPreviewWarnings.test.ts`, and `canvasPreviewBrowser.smoke.ts`.
 - Export destinations: `apps/server/src/canvas/canvasExportService.test.ts`
   (offers, approval before any call, the journaled receipt or refusal for each
-  destination), `folderExportTarget.test.ts`, and `gistExportTarget.test.ts`;
-  the host's page-publishing port in
+  destination, and the page grant: no publish from the factory or the card,
+  exactly the approved render once, and refusals for a second call, an
+  unnamed account, and a call after the export settled),
+  `folderExportTarget.test.ts`, and `gistExportTarget.test.ts`; the host's
+  page-publishing port in
   `apps/server/src/providers/providerPagePublishing.test.ts`.

@@ -45,9 +45,10 @@ export interface CanvasExportTargetRegistration {
   /**
    * The host ports a destination built from a `CanvasExportTargetFactory`
    * receives. A destination that publishes through a provider asks
-   * `ports.pagePublishing` which enabled instances can and publishes there;
-   * it is built from these ports alone, as a plugin's contribution would be,
-   * and never from a provider adapter.
+   * `ports.pagePublishing` which enabled instances can, names one on its
+   * card, and publishes through the grant the export service hands it after
+   * approval; it is built from these ports alone, as a plugin's contribution
+   * would be, and the ports themselves can publish nothing.
    */
   readonly ports: CanvasExportHostPorts;
 }

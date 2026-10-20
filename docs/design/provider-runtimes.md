@@ -73,7 +73,10 @@ the provider seam's page-publishing operation (`pagePublishing` on the driver,
 `@octant/provider-sdk/page-publishing`; the rule is in
 [Architecture: providers](../architecture.md#providers)), never through a
 caller that opens the SDK port, the runtime registry, or the account
-environment itself. The Claude driver does not implement the operation yet;
+environment itself. Only the host's Canvas export service calls the
+operation, from the single-use grant it hands a destination inside an
+approved export; a destination reads which instances can publish and holds
+nothing that publishes. The Claude driver does not implement the operation yet;
 its implementation is a follow-up change that runs the same `Artifact` tool in
 a one-shot session and passes the seam's page-publishing conformance suite.
 
