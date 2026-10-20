@@ -244,7 +244,37 @@ describe("CodeWorkspace", () => {
     ).toBeVisible();
   });
 
-  it("opens a restored Terminal tab without asking the user to start it", async () => {
+  it("does not start a replacement for a restored terminal owned by another thread", async () => {
+    const client = codeClient();
+    (client.executeOperation as ReturnType<typeof vi.fn>).mockImplementation(async (command) =>
+      command.terminalId === ids.thread
+        ? {
+            kind: "operation-failed",
+            operationId: command.operationId,
+            failure: {
+              category: "unauthorized",
+              message: "Terminal belongs to another code thread.",
+            },
+          }
+        : terminalUnavailableResult(),
+    );
+    render(
+      <CodeWorkspace
+        client={client}
+        controller={controller("approval-gated")}
+        createUuid={uuidFactory()}
+        tab={tab("code-terminal", "Terminal")}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: "Start terminal" })).toBeVisible();
+    expect(
+      (client.executeOperation as ReturnType<typeof vi.fn>).mock.calls.every(
+        ([command]) => command.kind === "attach-terminal",
+      ),
+    ).toBe(true);
+  });
+
+  it("waits for an explicit Start before launching a restored Terminal", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
 
@@ -252,9 +282,6 @@ describe("CodeWorkspace", () => {
       .mockResolvedValueOnce(terminalUnavailableResult())
       .mockResolvedValueOnce(terminalResult);
 
-    // A restored Terminal tab is already an explicit persisted request for the
-    // thread-owned shell. Opening it should attach or start immediately rather
-    // than putting a second confirmation button in the surface.
     render(
       <CodeWorkspace
         client={client}
@@ -264,6 +291,12 @@ describe("CodeWorkspace", () => {
       />,
     );
 
+    const start = await screen.findByRole("button", { name: "Start terminal" });
+    expect(client.executeOperation).toHaveBeenCalledTimes(1);
+    expect(client.executeOperation).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "attach-terminal" }),
+    );
+    fireEvent.click(start);
     expect(await screen.findByRole("region", { name: "Repository terminal" })).toBeVisible();
     expect(client.executeOperation).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "start-terminal", terminalId: ids.thread }),
@@ -273,9 +306,9 @@ describe("CodeWorkspace", () => {
   it("opens a terminal when a restored tab is activated while already mounted", async () => {
     const client = codeClient();
     (client.inspectTerminal as ReturnType<typeof vi.fn>).mockRejectedValue(terminalUnavailable());
-    (client.executeOperation as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce(terminalUnavailableResult())
-      .mockResolvedValueOnce(terminalResult);
+    (client.executeOperation as ReturnType<typeof vi.fn>).mockImplementation(async (command) =>
+      command.kind === "start-terminal" ? terminalResult : terminalUnavailableResult(),
+    );
     const registry = createTabActivationRegistry();
 
     render(
@@ -288,6 +321,10 @@ describe("CodeWorkspace", () => {
         />
       </TabActivationProvider>,
     );
+
+    expect(await screen.findByRole("button", { name: "Start terminal" })).toBeVisible();
+    expect(client.executeOperation).toHaveBeenCalledTimes(1);
+    act(() => registry.noteActivated(TAB_ID));
 
     expect(await screen.findByRole("region", { name: "Repository terminal" })).toBeVisible();
     expect(client.executeOperation).toHaveBeenCalledWith(

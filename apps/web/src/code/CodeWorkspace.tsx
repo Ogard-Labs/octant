@@ -23,6 +23,7 @@ import { LoaderCircle } from "lucide-react";
 import { documentIsVisible } from "../polling/documentVisibility";
 import { lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ShellState } from "../shell/ShellState";
+import { useTabActivatedThisSession } from "../shell/TabActivation";
 import {
   OctantEmptyHeader,
   OctantEmptyDescription,
@@ -1194,9 +1195,9 @@ function TerminalWorkspaceSurface(
   );
   const [starting, setStarting] = useState(false);
   const startInFlight = useRef(false);
-  // A Terminal tab is already the user's explicit request for a thread-owned
-  // shell. Open or restore it by attaching the existing process, then start a
-  // fresh one when the old process is gone. Plan mode remains read-only.
+  // Restoring a tab may attach a surviving process, but does not authorize a
+  // new shell. Only this session's explicit tab activation may start one.
+  const activatedThisSession = useTabActivatedThisSession(props.tab.id);
   const autoStarted = useRef(false);
   const startRef = useRef<(terminalId?: CodeTerminalId) => Promise<void>>(async () => {});
   useEffect(() => {
@@ -1278,10 +1279,12 @@ function TerminalWorkspaceSurface(
         ) {
           const replacementTerminalId = props.nextUuid() as unknown as CodeTerminalId;
           setTerminalId(replacementTerminalId);
-          autoStarted.current = true;
           setFailure(undefined);
           setReattaching(false);
-          void startRef.current(replacementTerminalId);
+          if (activatedThisSession && !autoStarted.current) {
+            autoStarted.current = true;
+            void startRef.current(replacementTerminalId);
+          }
           return;
         }
         if (result.kind === "operation-failed" && result.failure.category !== "unavailable") {
@@ -1300,7 +1303,14 @@ function TerminalWorkspaceSurface(
       } finally {
         if (active && initial) setReattaching(false);
       }
-      if (active && initial && absent && !autoStarted.current && props.threadPolicy !== "plan") {
+      if (
+        active &&
+        initial &&
+        absent &&
+        activatedThisSession &&
+        !autoStarted.current &&
+        props.threadPolicy !== "plan"
+      ) {
         autoStarted.current = true;
         void startRef.current();
       }
@@ -1317,6 +1327,7 @@ function TerminalWorkspaceSurface(
       }
     };
   }, [
+    activatedThisSession,
     props.checkoutAvailability,
     props.client,
     props.nextUuid,
