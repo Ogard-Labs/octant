@@ -45,7 +45,9 @@ The design rests on a small set of invariants that every package obeys:
   `Artifact` tool publishes a file as a private page on the person's own
   Anthropic account, and only after the person approves that publish, every
   time ([Security and authority](#security-and-authority), "Publishing a page
-  from a thread").
+  from a thread"). The Canvas "Share to Claude" export destination runs that
+  same tool once, on a rendered Canvas, after the person approves the export
+  card ([Canvas export](#extensions-and-skills)).
 - **The server is the authority.** Every authority check (mode, Project,
   thread, provider, approval, remote principal, optional spend ceiling) runs in
   `apps/server` before a side effect. The renderer and mobile app render what
@@ -5422,6 +5424,38 @@ document does, and one that fails it is refused rather than published. The
 receipt is the gist URL and its id, journaled in `canvas.export@1` like any
 other destination's.
 
+The "Share to Claude" destination ships in-tree on the same port and publishes
+the rendered HTML as a private page on the person's own Anthropic account. It
+is the one export destination that runs a provider: the page is published by
+the Claude runtime this host already manages, through the same SDK port and
+account environment a Claude thread launches with, in a one-shot session that
+exists for that publish alone. The session is offered the runtime's `Artifact`
+tool and no other, so a request for a file, shell, web, or MCP tool is refused
+by the port's allowlist by name before either authority callback runs; it is
+bound to an owner-only folder only that publish names, which holds the rendered
+HTML and is removed with the session; its `PreToolUse` hook allows one
+`Artifact` publish of exactly that file and replaces the call's input with the
+approved file and title, so nothing the model added (another file, a page to
+overwrite, a pin, a capability) reaches the runtime, and denies every other
+call; and its permission callback denies whatever still reaches it. The
+destination is offered only on a host with an enabled Claude provider (omitted
+otherwise, as an uninstalled destination is), is `not-connected` until the
+probe has observed a signed-in account that declares `artifactPublish`, and is
+`refused` with the reason for an account signed in with an API key, which has
+no Claude sign-in to hold a page. The approval card names the account and says
+the page is private and that each share makes a new page: a one-shot session
+has never opened an earlier page, so it cannot update one, and a later share of
+the same Canvas creates another page rather than replacing the first. The
+person's approval of the card is the consent: the one-shot raises no second
+prompt, never runs from an agent turn, and is reached only through the export
+service's approved delivery. The runtime's own refusal of the publish (an
+account that cannot publish, for one), a denied call, a session that ends
+without publishing, and a session that does not finish in time are each
+reported as a refused or unavailable export, never as a page; the receipt is
+the page's address, read out of the tool result by the decoder as in a thread
+and journaled in `canvas.export@1` like any other destination's. The adapter's
+wire detail is in [Provider runtimes](design/provider-runtimes.md#claude-code).
+
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured
 selection and supplies `octant_computer` through the provider's existing
@@ -5695,7 +5729,11 @@ mechanisms are:
   purpose, and the boundary is drawn here: the file leaves the machine for
   Anthropic's service under the person's own account, Octant holds no copy,
   no credential, and no record of the page beyond the address the thread
-  shows, and nothing else in the host publishes. The driver offers the tool
+  shows or the export journal keeps. The one other publisher in the host is
+  the Canvas "Share to Claude" export destination, which runs this same tool
+  in a one-shot session on a rendered Canvas after the person approves the
+  export card; its rules are under [Canvas export](#extensions-and-skills),
+  and nothing else in the host publishes. The driver offers the tool
   in Work and Code only (`claudeExecutionOptions`): Chat has no Project
   files, Plan is read-only and publishing has no read-only form, and a
   session acquired without a mode is not offered it, so a Plan or Chat call

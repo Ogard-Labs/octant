@@ -15,6 +15,7 @@ import type {
   FolderBrowseResult,
 } from "@octant/contracts/folder-browse";
 import { useState } from "react";
+import { MarkdownLink } from "../markdown/Markdown";
 import { FolderPicker } from "../projects/FolderPicker";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -38,6 +39,16 @@ const STATUS_LABEL: Record<CanvasExportTargetStatus, string> = {
 };
 
 /**
+ * What the panel says after an export. A remote destination's receipt is an
+ * address the person opens or copies, so it is kept apart from the words and
+ * drawn as a link rather than flattened into them.
+ */
+interface ExportNotice {
+  readonly text: string;
+  readonly href?: string;
+}
+
+/**
  * Asks the host to render a Canvas, then shows the payload and destination
  * before anything is sent. The host re-checks approval; this panel does not
  * call a destination itself.
@@ -53,7 +64,9 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
   const formats = selected?.formats ?? [];
   const [format, setFormat] = useState(formats[0] ?? "markdown");
   const [card, setCard] = useState<CanvasExportApprovalCard | undefined>(undefined);
-  const [message, setMessage] = useState<string | undefined>(undefined);
+  const [notice, setNotice] = useState<ExportNotice | undefined>(undefined);
+  const setMessage = (text: string | undefined) =>
+    setNotice(text === undefined ? undefined : { text });
   const [busy, setBusy] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
   // The audience the person chose for a remote export. Reset to the
@@ -118,11 +131,12 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
       });
       setCard(undefined);
       if (result.kind === "exported") {
-        setMessage(receiptText(result.record.outcome));
+        setNotice(receiptNotice(result.record.outcome));
         return;
       }
       if (result.kind === "unrecorded") {
-        setMessage(`${receiptText(result.outcome)} ${result.message}`);
+        const receipt = receiptNotice(result.outcome);
+        setNotice({ ...receipt, text: `${receipt.text} ${result.message}` });
         return;
       }
       setMessage(result.message);
@@ -283,9 +297,15 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
           </pre>
         </OctantApprovalCard>
       )}
-      {message === undefined ? null : (
+      {notice === undefined ? null : (
         <p className="canvas-export__note" role="status">
-          {message}
+          {notice.text}
+          {notice.href === undefined ? null : (
+            <>
+              {" "}
+              <MarkdownLink href={notice.href}>{notice.href}</MarkdownLink>
+            </>
+          )}
         </p>
       )}
       {folder?.message === undefined ? null : (
@@ -330,10 +350,10 @@ function destinationLabel(target: CanvasExportTargetOffer): string {
   return `${target.label} — ${STATUS_LABEL[target.status]}`;
 }
 
-function receiptText(outcome: CanvasExportDelivery): string {
-  if (outcome.kind === "refused") return outcome.message;
+function receiptNotice(outcome: CanvasExportDelivery): ExportNotice {
+  if (outcome.kind === "refused") return { text: outcome.message };
   const receipt = outcome.receipt;
-  if (receipt.kind === "link") return `Exported. ${receipt.href}`;
-  if (receipt.kind === "path") return `Exported. ${receipt.path}`;
-  return `Exported. ${receipt.remoteId}`;
+  if (receipt.kind === "link") return { text: "Exported.", href: receipt.href };
+  if (receipt.kind === "path") return { text: `Exported. ${receipt.path}` };
+  return { text: `Exported. ${receipt.remoteId}` };
 }

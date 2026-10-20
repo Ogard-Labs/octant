@@ -317,4 +317,66 @@ describe("CanvasExportPanel", () => {
 
     expect(onDecide).toHaveBeenCalledWith(expect.objectContaining({ visibility: "public" }));
   });
+
+  it("shows a published page's address as a link the person can open or copy", async () => {
+    const user = userEvent.setup();
+    const onPrepare = vi.fn(async () => ({
+      kind: "approval" as const,
+      card: {
+        schemaVersion: 1 as const,
+        kind: "canvas-export-approval" as const,
+        approvalId,
+        canvasId,
+        versionId,
+        sequence: 1,
+        targetId: "claude-page",
+        destinationLabel: "Share to Claude",
+        format: "html" as const,
+        title: "Launch plan",
+        destinationAccount: "Claude",
+        destinationNote: "Each share makes a new page.",
+        payload: "<!doctype html><p>Launch plan</p>",
+        payloadDigest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        byteLength: 33,
+      },
+    }));
+    const onDecide = vi.fn(async () => ({
+      kind: "exported" as const,
+      record: {
+        schemaVersion: 1 as const,
+        kind: "canvas-export" as const,
+        exportId: "66666666-6666-4666-8666-666666666666",
+        canvasId,
+        versionId,
+        sequence: 1,
+        targetId: "claude-page",
+        destinationLabel: "Share to Claude",
+        format: "html" as const,
+        payloadDigest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        approvalId,
+        outcome: {
+          kind: "receipt" as const,
+          receipt: { kind: "link" as const, href: "https://claude.ai/artifact/abc-123" },
+        },
+      },
+    }));
+    render(
+      <CanvasExportPanel
+        offers={offers()}
+        onDecide={onDecide as never}
+        onPrepare={onPrepare as never}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Review export" }));
+    // No audience to choose: the page is private to the account.
+    expect(await screen.findByTestId("canvas-export-account")).toHaveTextContent("Posts as Claude");
+    expect(screen.queryByRole("combobox", { name: "Who can see this export" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Approve export" }));
+
+    const status = await screen.findByRole("status");
+    expect(status).toHaveTextContent("Exported.");
+    const link = screen.getByRole("link", { name: "https://claude.ai/artifact/abc-123" });
+    expect(link).toHaveAttribute("href", "https://claude.ai/artifact/abc-123");
+  });
 });

@@ -2,7 +2,8 @@
 
 This topic specification owns the Canvas agent tool's `describe`, `read`, and
 `preview` operations, document recipes, thread presentation, the closed block catalogue,
-diagram boards and comments, and the `design` block. Architecture owns the
+diagram boards and comments, the `design` block, and the list of in-tree export
+destinations. Architecture owns the
 Canvas boundary and authority rules
 ([Architecture: process topology](../architecture.md#process-topology)) and the
 approved direction for documents, designs, and prototypes
@@ -807,6 +808,47 @@ listener and asks the resolver for none of its names (`dns-prefetch` and
 `preconnect` links, STUN and TURN servers named by host name), while the same
 page in a frame of the app's own process does look them up.
 
+## Export destinations
+
+Export renders a Canvas to Markdown or HTML, shows the rendered payload and the
+destination on an approval card, and calls the destination only after the
+person approves. The seam, the approval, the journal record, and the
+`not-connected` / `ready` / `refused` states every destination reports are
+architecture's
+([Canvas export](../architecture.md#extensions-and-skills)); this section lists
+the destinations that ship in-tree on that seam, each registered exactly as a
+third-party contribution would be
+(`apps/server/src/canvas/canvasExportTargets.ts`).
+
+| Destination          | Formats        | Where it goes                                        | Offered when                                                  |
+| -------------------- | -------------- | ---------------------------------------------------- | ------------------------------------------------------------- |
+| A folder on this Mac | Markdown, HTML | A file in a folder the person chose                  | Always; `not-connected` until a folder is chosen              |
+| GitHub Gist          | Markdown       | A secret or public gist on the connected account     | Always; `not-connected` until GitHub is connected             |
+| Share to Claude      | HTML           | A private page on the person's own Anthropic account | A Claude provider is enabled; `not-connected` until signed in |
+
+**Share to Claude** publishes the rendered HTML as a private page on the
+person's Anthropic account and reports the page's address as a link receipt.
+The page is published by the Claude runtime this host already manages, signed
+in as the person's existing Claude account, in a one-shot session that is
+offered the runtime's `Artifact` tool and no other and may publish exactly the
+approved file; architecture states that boundary under
+[Security and authority](../architecture.md#security-and-authority),
+"Publishing a page from a thread", and the Claude adapter's detail is in
+[Provider runtimes](provider-runtimes.md#claude-code). The destination is
+listed only on a host with an enabled Claude provider, as a destination whose
+package is not installed is omitted rather than shown; a provider with no
+signed-in account is `not-connected`, and an account signed in with an API key
+is `refused` with the reason, because pages live with a Claude sign-in. The
+card names the account (the provider's display name) and says that the page is
+private until the person shares it on the account and that each share makes a
+new page: a one-shot session cannot update a page it never opened, so a later
+share of the same Canvas creates another page rather than replacing the first.
+The card offers no audience. The rendered HTML passes the same path-and-secret
+filter the gist does, and a document that fails it is refused rather than
+published. The person's approval of the card is the consent: the destination
+never runs from an agent turn, raises no second prompt, and reports a refusal
+or failure from the runtime as a refused export, never as a page.
+
 ## Verification
 
 - Block policies and layouts: `packages/domain/src/canvas*.ts` and their tests
@@ -815,3 +857,9 @@ page in a frame of the app's own process does look them up.
 - Service, revision routes, and comments: `apps/server/src/canvas/canvasService.test.ts`.
 - Preview: `apps/server/src/canvas/canvasPreviewService.test.ts`,
   `canvasPreviewWarnings.test.ts`, and `canvasPreviewBrowser.smoke.ts`.
+- Export destinations: `apps/server/src/canvas/canvasExportService.test.ts`
+  (offers, approval before any call, the journaled receipt or refusal for each
+  destination), `folderExportTarget.test.ts`, `gistExportTarget.test.ts`, and
+  `claudePageExportTarget.test.ts`; the Claude one-shot itself in
+  `apps/server/src/providers/claudePagePublisher.test.ts`. A share against a
+  real Anthropic account has not been run from Octant.

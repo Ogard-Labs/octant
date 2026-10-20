@@ -181,7 +181,8 @@ gravatar.com again on its own.
 ### Destinations you choose
 
 Git remotes, GitHub when a Project is connected, browser and computer-use
-destinations, a Canvas export to a GitHub Gist, and remote access you enable
+destinations, a Canvas export to a GitHub Gist or to a private page on your
+Anthropic account, and remote access you enable
 are traffic you pointed Octant at. Remote access is off by default. See
 [Remote access](/advanced/remote-access).
 
@@ -198,6 +199,17 @@ posted. The journal keeps the receipt, the gist's address and id. Octant
 does not delete a gist afterward; take it down on GitHub. A folder export
 makes no network call. See
 [Export a Canvas or artifact](/guide/export#export-to-a-github-gist).
+
+A Canvas export to **Share to Claude** publishes the rendered HTML of one
+Canvas as a private page on your Anthropic account. The Claude runtime on this
+Mac sends it, signed in as the Claude account you already use for the Claude
+provider; Octant reads no credential and holds no copy of the page. Nothing is
+sent until you approve a card that shows the exact HTML and the account it
+publishes as. The page is private to that account until you share it there,
+and each share makes a new page. The HTML passes the same check as every other
+export. The journal keeps the receipt, the page's address. Octant does not
+delete a page afterward; remove it on your Anthropic account. See
+[Export a Canvas or artifact](/guide/export#share-to-claude).
 
 ## What never leaves
 

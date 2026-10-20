@@ -134,7 +134,10 @@ export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<IntegrationsWiring, "gistConnection" | "threadOutsideContentMarks"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
   Pick<CodeWiring, "folderBrowseService"> &
-  Pick<ProvidersWiring, "chatDataDirectory" | "extensionApiService" | "imageJobService"> &
+  Pick<
+    ProvidersWiring,
+    "chatDataDirectory" | "claudePagePublisher" | "extensionApiService" | "imageJobService"
+  > &
   Pick<
     FoundationsWiring,
     "providerRuntimeRegistry" | "workArtifactProjection" | "workThreadProjection"
@@ -144,6 +147,7 @@ export function wireCanvas(deps: CanvasDependencies) {
   const {
     agentRunPersistence,
     chatDataDirectory,
+    claudePagePublisher,
     contributeChildTools,
     extensionApiService,
     folderBrowseService,
@@ -946,6 +950,10 @@ export function wireCanvas(deps: CanvasDependencies) {
       availability: () => gistConnection.availability(),
       gists: createGhGistCreationPort(options.ghExecutable),
     },
+    // The Claude page destination publishes through the Claude runtime this
+    // host already manages, signed in as the person's own account; the
+    // publisher holds the one-shot, this registration only offers it.
+    claudePage: claudePagePublisher,
   };
   // Destinations arrive through the export contribution and are offered
   // through the same activation policy a plugin's contribution passes. The

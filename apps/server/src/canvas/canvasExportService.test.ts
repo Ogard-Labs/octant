@@ -47,9 +47,15 @@ import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
 } from "./canvasExportTargets";
+import { CLAUDE_PAGE_EXPORT_TARGET_ID } from "./claudePageExportTarget";
 import { FOLDER_EXPORT_TARGET_ID } from "./folderExportTarget";
 import { GIST_EXPORT_TARGET_ID, type GistExportAvailability } from "./gistExportTarget";
 import type { GistCreationRequest, GistCreationResult } from "../github/gistCreationPort";
+import type {
+  ClaudePageAvailability,
+  ClaudePagePublishOutcome,
+  ClaudePagePublishRequest,
+} from "../providers/claudePagePublisher";
 
 const directories: string[] = [];
 const start = Date.parse("2026-08-01T21:00:00.000Z");
@@ -163,6 +169,37 @@ function gistRegistration(availability: GistExportAvailability): {
   };
 }
 
+/**
+ * The folder registration plus a fake Claude page publisher, so a share to the
+ * person's Anthropic account runs through the same service and journal a real
+ * one would, without a runtime.
+ */
+function claudePageRegistration(
+  availability: ClaudePageAvailability,
+  outcome: ClaudePagePublishOutcome = {
+    kind: "published",
+    url: "https://claude.ai/artifact/abc-123",
+  },
+): {
+  readonly registration: CanvasExportTargetRegistration;
+  readonly requests: ClaudePagePublishRequest[];
+} {
+  const requests: ClaudePagePublishRequest[] = [];
+  return {
+    requests,
+    registration: {
+      ...exportFolder().registration,
+      claudePage: {
+        availability: () => availability,
+        publish: async (request) => {
+          requests.push(request);
+          return outcome;
+        },
+      },
+    },
+  };
+}
+
 interface FactOverrides {
   readonly installed?: boolean;
   readonly trusted?: boolean;
@@ -242,7 +279,7 @@ function harness(
   };
 }
 
-function prepareRequest(targetId = "reading-copy") {
+function prepareRequest(targetId = "reading-copy", format: "markdown" | "html" = "markdown") {
   return decodeCanvasExportPrepareRequest({
     schemaVersion: 1,
     kind: "canvas-export-prepare",
@@ -250,7 +287,7 @@ function prepareRequest(targetId = "reading-copy") {
     versionId,
     expectedSequence: 1,
     targetId,
-    format: "markdown",
+    format,
   });
 }
 
@@ -886,6 +923,156 @@ describe("canvas export service", () => {
     });
 
     expect(requests[0]?.visibility).toBe("secret");
+    connection.close();
+  });
+
+  it("offers Share to Claude as not connected until a Claude account is signed in", () => {
+    const { registration } = claudePageRegistration({ kind: "not-signed-in" });
+    const { service, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+
+    const offer = service
+      .offers(canvasId)
+      ?.targets.find((candidate) => String(candidate.targetId) === CLAUDE_PAGE_EXPORT_TARGET_ID);
+
+    expect(offer?.status).toBe("not-connected");
+    expect(offer?.label).toBe("Share to Claude");
+    expect(offer?.formats).toEqual(["html"]);
+    connection.close();
+  });
+
+  it("does not list Share to Claude on a host with no Claude provider", () => {
+    const { registration } = claudePageRegistration({ kind: "absent" });
+    const { service, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+
+    const offer = service
+      .offers(canvasId)
+      ?.targets.find((candidate) => String(candidate.targetId) === CLAUDE_PAGE_EXPORT_TARGET_ID);
+
+    expect(offer).toBeUndefined();
+    connection.close();
+  });
+
+  it("offers Share to Claude as refused, with the reason, when the account cannot publish pages", () => {
+    const { registration } = claudePageRegistration({
+      kind: "refused",
+      reason: "Claude is signed in with an API key, which cannot publish pages.",
+    });
+    const { service, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+
+    const offer = service
+      .offers(canvasId)
+      ?.targets.find((candidate) => String(candidate.targetId) === CLAUDE_PAGE_EXPORT_TARGET_ID);
+
+    expect(offer?.status).toBe("refused");
+    expect(offer?.message).toContain("API key");
+    connection.close();
+  });
+
+  it("publishes the approved HTML to Claude only after approval, and journals the page's link", async () => {
+    const { registration, requests } = claudePageRegistration({ kind: "ready", account: "Claude" });
+    const { service, eventStore, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+
+    const prepared = service.prepare(prepareRequest(CLAUDE_PAGE_EXPORT_TARGET_ID, "html"), true);
+    expect(prepared.kind).toBe("approval");
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+    expect(prepared.card.destinationLabel).toBe("Share to Claude");
+    expect(prepared.card.destinationAccount).toBe("Claude");
+    expect(prepared.card.destinationNote).toContain("private page");
+    // The page has no address until it exists, and no audience to choose: it
+    // is private to the account.
+    expect(prepared.card.destinationPath).toBeUndefined();
+    expect(prepared.card.destinationVisibility).toBeUndefined();
+    expect(requests).toHaveLength(0);
+
+    const exported = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(exported.kind).toBe("exported");
+    // The runtime is handed the very HTML the person saw on the card.
+    expect(requests).toEqual([
+      { fileName: "Launch plan.html", title: "Launch plan", html: prepared.card.payload },
+    ]);
+    expect(eventStore.replay()[0]?.outcome).toEqual({
+      kind: "receipt",
+      receipt: { kind: "link", href: "https://claude.ai/artifact/abc-123" },
+    });
+    connection.close();
+  });
+
+  it("publishes nothing to Claude when the person declines", async () => {
+    const { registration, requests } = claudePageRegistration({ kind: "ready", account: "Claude" });
+    const { service, eventStore, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+    const prepared = service.prepare(prepareRequest(CLAUDE_PAGE_EXPORT_TARGET_ID, "html"), true);
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+
+    const denied = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "denied",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(denied.kind).toBe("denied");
+    expect(requests).toHaveLength(0);
+    expect(eventStore.replay()).toEqual([]);
+    connection.close();
+  });
+
+  it("records a runtime refusal as a refused export, never as a published page", async () => {
+    const { registration } = claudePageRegistration(
+      { kind: "ready", account: "Claude" },
+      { kind: "refused", message: "The Claude runtime refused to publish the page." },
+    );
+    const { service, eventStore, connection } = harness(() =>
+      canvasExportTargetBindings(registration, canvasId),
+    );
+    const prepared = service.prepare(prepareRequest(CLAUDE_PAGE_EXPORT_TARGET_ID, "html"), true);
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+
+    const exported = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(exported).toMatchObject({
+      kind: "exported",
+      record: {
+        outcome: {
+          kind: "refused",
+          code: "refused",
+          message: "The Claude runtime refused to publish the page.",
+        },
+      },
+    });
+    expect(eventStore.replay()[0]?.outcome).toMatchObject({ kind: "refused" });
     connection.close();
   });
 });

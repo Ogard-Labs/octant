@@ -90,7 +90,10 @@ makes on its own, or because you asked, are different relationships:
 - **Git remotes, GitHub, browser destinations, and remote clients** are
   endpoints you pointed Octant at. That includes a Canvas export to a GitHub
   Gist: once you approve it, GitHub receives the exported Markdown as the
-  account you approved. See [Privacy notice](/advanced/privacy-notice#destinations-you-choose).
+  account you approved. It also includes a Canvas export to Share to Claude:
+  once you approve it, Anthropic receives the exported HTML as a private page
+  on the Claude account you approved, sent by the Claude runtime on this Mac.
+  See [Privacy notice](/advanced/privacy-notice#destinations-you-choose).
 
 Whether any of those parties is a processor, a sub-processor, or neither
 is a legal question this draft does not close. The product fact is that

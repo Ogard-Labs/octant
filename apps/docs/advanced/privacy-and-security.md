@@ -10,8 +10,8 @@ analytics, crash reporting, or cloud dependency** by default, and no
 credential storage inside the event store.
 
 Most network traffic is yours to configure: provider API requests for Chat,
-Work, and Code, a Canvas export to a GitHub Gist that you approve, and remote
-access when you enable pairing. Two HTTPS calls
+Work, and Code, a Canvas export to a GitHub Gist or to a private page on your
+Anthropic account that you approve, and remote access when you enable pairing. Two HTTPS calls
 Octant makes on its own behalf are the exception: [update checks](/guide/installation#updates)
 and [marketplace fetches](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 Neither is a telemetry channel. This page states the posture of those two
@@ -189,6 +189,16 @@ purpose, so it works like this:
   agent cannot list pages other people shared with you, and cannot read a
   page's content back into the thread.
 - Chat threads and Plan mode never get the tool.
+
+A Canvas export's **Share to Claude** destination uses the same publishing
+tool without a thread. When you approve its export card, Octant starts the
+Claude runtime once, signed in as your existing Claude account, in a private
+folder that holds only the rendered HTML, allowed only the publishing tool and
+only for that one file; anything else it asks for is refused. The runtime
+publishes the page and the folder is removed. Your approval of the card is the
+only consent, no agent turn can trigger it, and a refusal or failure is
+reported as a refused export. See
+[Export a Canvas or artifact](/guide/export#share-to-claude).
 
 ## Confinement
 

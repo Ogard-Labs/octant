@@ -68,6 +68,29 @@ a refusal in fixed words. The approval prompt reads
 title redacted like a shell command, or
 `Artifact · list the pages on your Anthropic account`.
 
+The Canvas "Share to Claude" export destination runs the same tool outside a
+thread (`apps/server/src/providers/claudePagePublisher.ts`). It opens one query
+through the SDK port with `tools: ["Artifact"]` as the whole launch tool list,
+the `approval-gated` posture (the runtime's `default` permission mode, with the
+sandbox settings a thread of that posture carries, bound to the one-shot's
+folder), the `sonnet` alias the readiness probe already proves, and the account
+environment of the chosen Claude provider, which is the first enabled instance
+whose observation is `ready` with `artifactPublish: "supported"` and whose
+authentication is `subscription`. The `PreToolUse` hook answers `allow` only
+for an `Artifact` call whose action is `publish` (or absent) and whose
+`file_path`, resolved against the folder, is the approved file, and answers it
+with `updatedInput: { file_path, title }` so the runtime publishes the approved
+file under the approved title and nothing else the model asked for; every other
+call, including `list`, `read`, and any other tool, is denied, and the
+permission callback denies whatever reaches it. The prompt names the file and
+the title and asks for that one call. The outcome is read from the decoded
+stream: a `tool-results` entry for an `Artifact` call that carries an address
+is `published`; one that is an error is `refused`; a `result` that reports a
+permission denial is `refused`; a `result` without a publish, or a session that
+does not finish within 120 seconds, is `unavailable`; and an `unauthenticated`
+failure opening the query is `not-signed-in`. The folder and the page are
+removed when the session closes, on every path.
+
 ## OpenCode
 
 The installed OpenCode binary's
@@ -261,6 +284,9 @@ failing the check with their typed states.
   result), and `claudeEventMapper.test.ts` (the prompt and result wording).
   A publish against a real account has not been run from Octant; the result
   wording the decoder reads is taken from the runtime's own tool description.
+  The Canvas one-shot: `claudePagePublisher.test.ts` (the tool list, the
+  folder and sandbox, the pinned hook decision, and each outcome); a share
+  against a real account has not been run either.
 - OpenCode: `apps/server/src/providers/openCodeDriver.test.ts`,
   `openCodeClient.test.ts`, `openCodeEventMapper.test.ts`,
   `openCodeProcess.test.ts`, `openCodeConformance.test.ts`, and the

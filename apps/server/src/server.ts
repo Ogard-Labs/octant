@@ -364,6 +364,7 @@ export function startOctantServer(
       agentPluginMcpSessionManager,
       chatAttachmentStore,
       chatDataDirectory,
+      claudePagePublisher,
       claudeResumeIdentityStore,
       codeThreadDrivers,
       configuredDriverOptions,
@@ -522,6 +523,7 @@ export function startOctantServer(
     } = wireCanvas({
       agentRunPersistence,
       chatDataDirectory,
+      claudePagePublisher,
       contributeChildTools,
       extensionApiService,
       folderBrowseService,

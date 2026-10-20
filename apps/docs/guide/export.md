@@ -1,12 +1,13 @@
 ---
-description: How exporting a Canvas or artifact works — to a folder you choose or to a GitHub Gist — what the approval card shows, and what the receipt is.
+description: How exporting a Canvas or artifact works — to a folder you choose, to a GitHub Gist, or to a private page on your Anthropic account — what the approval card shows, and what the receipt is.
 ---
 
 # Export a Canvas or artifact
 
 Export writes a readable copy of a Canvas or an artifact somewhere you choose.
 The copy is Markdown or HTML, so any editor, viewer, or other tool can open it.
-Two destinations ship today: a folder on this Mac, and a GitHub Gist.
+Three destinations ship today: a folder on this Mac, a GitHub Gist, and a
+private page on your Anthropic account ("Share to Claude").
 
 Whatever the destination, Octant renders the document first and shows it to you
 before anything is sent or written. A destination is called only after you
@@ -121,10 +122,61 @@ The gist destination reports one of three states:
   stored in plain text on this Mac, so Octant will not send through it. The same
   rule applies to Octant's other GitHub features.
 
+## Share to Claude
+
+**Share to Claude** publishes the rendered HTML as a private page on your
+Anthropic account and gives you its link. Octant uses the Claude Code sign-in
+you already have for the Claude provider; you do not sign in again, and Octant
+holds no credential for it. The page is published by the Claude runtime on this
+Mac, started once for that page alone and allowed to do nothing but publish it.
+
+HTML only. The page is the rendered document exactly as the approval card shows
+it.
+
+### What the approval card shows
+
+The card carries the rendered HTML, the Claude account it will publish as, and
+a note that the page is private: only you can open it until you share it on
+your Anthropic account. Nothing is sent until you approve the card, and
+declining sends nothing. Approving the card is the whole consent; Claude does
+not ask again.
+
+Each share makes a new page. Sharing the same Canvas again creates another page
+rather than replacing the first; the card says so.
+
+### Secret boundary
+
+The HTML goes through the same checks as every other export: no absolute file
+paths and no secret-shaped values. A document that still contains one is
+refused rather than published.
+
+### The receipt, and when Claude refuses
+
+The receipt is the page's link. It appears where export results appear, and
+you can open it or copy it from there. Octant records the link with the export,
+and keeps no copy of the page itself. Octant does not delete a page afterward;
+remove it on your Anthropic account.
+
+If the Claude runtime refuses to publish, if it does not finish, or if nothing
+was published, the export says so and nothing is shown as published.
+
+### Status
+
+The destination reports one of three states, and is listed only when a Claude
+provider is enabled on this host:
+
+- **Not connected** — no Claude account is signed in and ready. Sign in with the
+  official Claude Code application, then run the provider's connection check
+  from Settings → Providers & Models.
+- **Ready** — a signed-in Claude account can publish.
+- **Refused**, with the reason — the Claude provider is signed in with an API
+  key. Pages belong to a Claude sign-in, so an API key cannot publish one.
+
 ## Formats and platforms
 
 Markdown and HTML are rendered today. PDF and PNG are named in the export seam
 so a later destination can declare them; this host does not render them.
 
 Export to a folder works on macOS and Linux. The gist destination needs a
-working GitHub connection.
+working GitHub connection. Share to Claude needs an enabled Claude provider
+signed in with a Claude account.

@@ -7,12 +7,14 @@ import {
 import type { CanvasExportFilePort } from "./canvasExportFilePort";
 import type { CanvasExportTargetBinding } from "./canvasExportService";
 import { isInsideHomeDirectory } from "./artifactMirrorFilePort";
+import { createClaudePageExportTarget } from "./claudePageExportTarget";
 import { createFolderExportTarget, type FolderExportAvailability } from "./folderExportTarget";
 import {
   createGistExportTarget,
   type GistExportAvailability,
   type GistExportTargetDependencies,
 } from "./gistExportTarget";
+import type { ClaudePageAvailability, ClaudePagePublisher } from "../providers/claudePagePublisher";
 
 /**
  * In-tree export destinations.
@@ -41,6 +43,13 @@ export interface CanvasExportTargetRegistration {
    * connected can change while the host runs.
    */
   readonly gist?: GistExportTargetDependencies;
+  /**
+   * The private-page destination on the person's Anthropic account, published
+   * by the Claude runtime this host manages. Its availability is read per
+   * listing, because which Claude account is signed in can change while the
+   * host runs; a host with no enabled Claude provider lists no such target.
+   */
+  readonly claudePage?: ClaudePagePublisher;
 }
 
 export function canvasExportTargetBindings(
@@ -48,20 +57,32 @@ export function canvasExportTargetBindings(
   canvasId: CanvasId,
 ): ReadonlyArray<CanvasExportTargetBinding> {
   const availability = () => folderAvailability(registration, registration.folderFor(canvasId));
-  const folder: CanvasExportTargetBinding = {
-    facts: activationFacts(availability()),
-    target: createFolderExportTarget({
-      availability,
-      files: registration.files,
-      newTempId: registration.newTempId,
-    }),
-  };
-  const gist = registration.gist;
-  if (gist === undefined) return [folder];
-  return [
-    folder,
-    { facts: gistActivationFacts(gist.availability()), target: createGistExportTarget(gist) },
+  const bindings: CanvasExportTargetBinding[] = [
+    {
+      facts: activationFacts(availability()),
+      target: createFolderExportTarget({
+        availability,
+        files: registration.files,
+        newTempId: registration.newTempId,
+      }),
+    },
   ];
+  const gist = registration.gist;
+  if (gist !== undefined) {
+    bindings.push({
+      facts: gistActivationFacts(gist.availability()),
+      target: createGistExportTarget(gist),
+    });
+  }
+  const claudePage = registration.claudePage;
+  const claudePageAvailability = claudePage?.availability();
+  if (claudePage !== undefined && claudePageAvailability?.kind !== "absent") {
+    bindings.push({
+      facts: claudePageActivationFacts(claudePageAvailability),
+      target: createClaudePageExportTarget(claudePage),
+    });
+  }
+  return bindings;
 }
 
 /** The offered list for one Canvas, through the same policy every destination passes. */
@@ -130,6 +151,28 @@ export function gistActivationFacts(
     connected: availability.kind !== "not-connected",
   };
   return availability.kind === "refused"
+    ? { ...facts, standingRefusal: availability.reason }
+    : facts;
+}
+
+/**
+ * The Claude page destination's activation facts. A Claude provider with no
+ * signed-in account is `connected: false`, offered honestly as not-connected,
+ * and an account that cannot publish pages is a standing refusal. A host with
+ * no Claude provider never reaches here: that target is omitted, as a
+ * destination whose package is not installed is.
+ */
+export function claudePageActivationFacts(
+  availability: Exclude<ClaudePageAvailability, { readonly kind: "absent" }> | undefined,
+): CanvasExportActivationFacts {
+  const facts: CanvasExportActivationFacts = {
+    installed: true,
+    trusted: true,
+    desiredEnabled: true,
+    effectiveState: { kind: "effective" },
+    connected: availability !== undefined && availability.kind !== "not-signed-in",
+  };
+  return availability?.kind === "refused"
     ? { ...facts, standingRefusal: availability.reason }
     : facts;
 }
