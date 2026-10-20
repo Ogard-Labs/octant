@@ -129,6 +129,12 @@ const userAddedSecretValue = Schema.Struct({
 }).annotations(strict);
 export const UserAddedMcpServerRequest = Schema.Struct({
   name: boundedText(64),
+  /**
+   * The catalog connector this server is, when it was added from Connectors.
+   * The host checks it against the bundled catalog and names the package after
+   * it, so the package stays recognizable whatever its display name is.
+   */
+  connectorId: Schema.optional(boundedText(64)),
   server: Schema.Union(
     Schema.Struct({
       type: Schema.Literal("stdio"),
@@ -165,6 +171,12 @@ export const DiscoveredMcpServer = Schema.Struct({
   summary: boundedText(512),
   /** Variables the other tool reads from its environment that this host could not find. */
   needsValues: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
+  /**
+   * Variables the other tool expands inside the command, its arguments or the
+   * address. Octant never copies a host value into those fields, so a server
+   * that has any cannot be added from here.
+   */
+  unsupportedPlaceholders: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
   /** Values that will be kept in the credential store rather than the package. */
   secretNames: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
 }).annotations(strict);
@@ -507,6 +519,13 @@ export const ExtensionCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("extension-state-updated"),
     snapshot: ExtensionSnapshot,
+    /** Set only when the update was a user-added server: the package that add created. */
+    addedPackage: Schema.optional(
+      Schema.Struct({
+        extensionId: ToolExtensionId,
+        componentId: Schema.optional(ExtensionComponentId),
+      }).annotations(strict),
+    ),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("extension-effective-state"),

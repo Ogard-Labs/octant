@@ -16,7 +16,8 @@ const TermsId = Schema.String.pipe(
   Schema.brand("HostOAuthTermsId"),
 );
 const ClientId = Schema.String.pipe(Schema.pattern(/^[^\s/?#]{1,256}$/));
-const Scope = Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9._:-]{1,128}$/));
+// RFC 6749 §3.3 scope-token: printable ASCII without space, quote, or backslash.
+const Scope = Schema.String.pipe(Schema.pattern(/^[\x21\x23-\x5B\x5D-\x7E]{1,256}$/));
 
 const Endpoint = Schema.String.pipe(
   Schema.filter((value) => {

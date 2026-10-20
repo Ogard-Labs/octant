@@ -32,6 +32,7 @@ import type { ExtensionSource } from "@octant/contracts/extensions";
 import type { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import type { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
 import type { ExtensionToolApprovalAnswerer } from "./extensions/extensionToolApprovalService";
+import type { DiscoveredServerRefusal } from "./extensions/agentToolingDiscovery";
 import { UserAddedMcpServerError } from "./extensions/userAddedMcpServers";
 
 export interface ExtensionRouteService {
@@ -50,6 +51,7 @@ export function createExtensionRouteHandler(options: {
   /** Writes the package for an MCP server a person adds by hand. */
   readonly userAddedMcpServers?: {
     add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }>;
+    remove(sourceRef: string): Promise<void>;
   };
   /** Plugins pinned to Projects, and the Projects a local window may pin to. */
   readonly extensionProjectPins?: {
@@ -58,7 +60,11 @@ export function createExtensionRouteHandler(options: {
   };
   /** Sign-in to a hosted server a person added, through the host OAuth runner. */
   readonly mcpServerSignIn?: {
-    status(extensionId: string, componentId: string): Promise<McpServerSignInView>;
+    status(
+      extensionId: string,
+      componentId: string,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
     begin(
       extensionId: string,
       componentId: string,
@@ -80,6 +86,7 @@ export function createExtensionRouteHandler(options: {
   readonly agentToolingDiscovery?: {
     list(): Promise<DiscoveredAgentToolingListing>;
     server(id: string): UserAddedMcpServerRequest | undefined;
+    refusal(id: string): DiscoveredServerRefusal | undefined;
     pluginPath(id: string): string | undefined;
   };
   /**
@@ -295,7 +302,7 @@ export function createExtensionRouteHandler(options: {
           { kind: "inspect-package", source: registered.source },
           request.signal,
         );
-        return response(inspected, 200, origin);
+        return response(withLoaderNotes(inspected, registered.notes), 200, origin);
       } catch (error) {
         if (error instanceof AgentPluginsError) {
           return response(failure("invalid", error.message), 400, origin);
@@ -418,7 +425,7 @@ export function createExtensionRouteHandler(options: {
       try {
         if (signIn.kind === "status") {
           return response(
-            await options.mcpServerSignIn.status(extensionId, componentId),
+            await options.mcpServerSignIn.status(extensionId, componentId, principalKind),
             200,
             origin,
           );
@@ -503,6 +510,20 @@ export function createExtensionRouteHandler(options: {
             origin,
           );
         }
+        const refusal = options.agentToolingDiscovery.refusal(discovered.id);
+        if (refusal !== undefined) {
+          const names = refusal.names.join(", ");
+          return response(
+            failure(
+              "invalid",
+              refusal.kind === "unsupported-placeholders"
+                ? `Octant does not copy ${names} into this server's command or address. Add it by hand with the value filled in.`
+                : `This server needs a value for ${names}. Add it by hand and enter it there.`,
+            ),
+            400,
+            origin,
+          );
+        }
         return addUserMcpServer(
           options.service,
           options.userAddedMcpServers,
@@ -525,7 +546,7 @@ export function createExtensionRouteHandler(options: {
           { kind: "inspect-package", source: registered.source },
           request.signal,
         );
-        return response(inspected, 200, origin);
+        return response(withLoaderNotes(inspected, registered.notes), 200, origin);
       } catch (error) {
         if (error instanceof AgentPluginsError) {
           return response(failure("invalid", error.message), 400, origin);
@@ -702,9 +723,34 @@ function hasExactKeys(
  * trusts and switches it on as one act, because the person just asked for
  * exactly that; the ladder still records each step.
  */
+/**
+ * What the loader left out of another tool's plugin rides on the inspection's
+ * own diagnostics, so the review that precedes Install shows the omission.
+ */
+function withLoaderNotes(
+  inspected: ExtensionCommandResult,
+  notes: ReadonlyArray<string>,
+): ExtensionCommandResult {
+  if (notes.length === 0 || inspected.kind !== "package-inspected") return inspected;
+  const added = notes.map((note, index) => ({
+    code: `plugin-left-out-${index + 1}`,
+    message: note.replaceAll("/", " ").replaceAll("\\", " ").slice(0, 1024),
+  }));
+  return {
+    ...inspected,
+    preview: {
+      ...inspected.preview,
+      diagnostics: [...inspected.preview.diagnostics, ...added].slice(0, 128),
+    },
+  };
+}
+
 async function addUserMcpServer(
   service: ExtensionRouteService,
-  store: { add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }> },
+  store: {
+    add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }>;
+    remove(sourceRef: string): Promise<void>;
+  },
   added: UserAddedMcpServerRequest,
   signal: AbortSignal,
   origin: string | null,
@@ -713,35 +759,54 @@ async function addUserMcpServer(
   try {
     source = (await store.add(added)).source;
   } catch (error) {
+    // Like every other extension command, a refusal is a typed result the
+    // client decodes, so it travels as a 200 and the dialog can show the
+    // host's own words. The failure vocabulary has no "conflict", so a taken
+    // name is an invalid request.
     if (error instanceof UserAddedMcpServerError) {
-      // A name already in use is answered as a conflict (409) in the
-      // route's own words; the failure vocabulary has no such category.
-      const status =
-        error.category === "conflict" ? 409 : error.category === "unavailable" ? 503 : 400;
       const category =
         error.category === "unavailable"
           ? "unavailable"
           : error.category === "failed"
             ? "failed"
             : "invalid";
-      return response(failure(category, error.message), status, origin);
+      return response(failure(category, error.message), 200, origin);
     }
-    return response(failure("invalid", "The server could not be added."), 400, origin);
+    return response(failure("invalid", "The server could not be added."), 200, origin);
   }
-  const inspected = await service.execute({ kind: "inspect-package", source }, signal);
-  if (inspected.kind !== "package-inspected") return response(inspected, 200, origin);
+  // `add` wrote and registered the package, so any refusal or failure before
+  // it is installed removes it again; otherwise the same name would report a
+  // conflict on every retry.
+  const abandon = async (result: ExtensionCommandResult) => {
+    if ("sourceRef" in source) await store.remove(source.sourceRef).catch(() => undefined);
+    return response(result, 200, origin);
+  };
+  let inspected: ExtensionCommandResult;
+  try {
+    inspected = await service.execute({ kind: "inspect-package", source }, signal);
+  } catch {
+    return await abandon(failure("failed", "The server could not be inspected."));
+  }
+  if (inspected.kind !== "package-inspected") return await abandon(inspected);
   const entry = inspected.preview.entry;
-  const installed = await service.execute(
-    {
-      kind: "install-package",
-      extensionId: entry.extensionId,
-      packageId: entry.packageId,
-      version: entry.version,
-      digest: entry.digest,
-    },
-    signal,
-  );
-  if (installed.kind !== "extension-state-updated") return response(installed, 200, origin);
+  let installed: ExtensionCommandResult;
+  try {
+    installed = await service.execute(
+      {
+        kind: "install-package",
+        extensionId: entry.extensionId,
+        packageId: entry.packageId,
+        version: entry.version,
+        digest: entry.digest,
+      },
+      signal,
+    );
+  } catch {
+    return await abandon(failure("failed", "The server could not be installed."));
+  }
+  if (installed.kind !== "extension-state-updated") return await abandon(installed);
+  // The person just typed this server in, so trusting and switching it on is
+  // what they asked for; the ladder still records each step.
   let current = installed;
   const enable = async (command: Readonly<Record<string, unknown>>) => {
     const state = current.snapshot.packages.find(
@@ -772,5 +837,18 @@ async function addUserMcpServer(
       desired: true,
     });
   }
-  return response(current, 200, origin);
+  const addedComponent = installedState?.components.find(
+    (component) => component.component.kind === "mcp-server",
+  );
+  return response(
+    {
+      ...current,
+      addedPackage: {
+        extensionId: entry.extensionId,
+        ...(addedComponent === undefined ? {} : { componentId: addedComponent.component.id }),
+      },
+    },
+    200,
+    origin,
+  );
 }

@@ -97,6 +97,12 @@ export function makeHostOAuthBrokerClient(options: {
           ...(input.descriptor.agentNameHint === undefined
             ? {}
             : { agentNameHint: input.descriptor.agentNameHint }),
+          ...(input.descriptor.resource === undefined
+            ? {}
+            : { resource: input.descriptor.resource }),
+          ...(input.descriptor.redirectPort === undefined
+            ? {}
+            : { redirectPort: input.descriptor.redirectPort }),
         },
       });
     },

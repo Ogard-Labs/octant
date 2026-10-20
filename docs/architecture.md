@@ -5421,10 +5421,16 @@ marks secret never enters the package: the host stores it in the credential
 broker's own namespace for these secrets (`/v1/mcp-server-credentials/*`, the
 `mcp-server-credential` Keychain service or Secret Service attribute) and the
 package carries `${OCTANT_SECRET:<id>}` in its place. The session manager
-fills references in at launch, only for a `user-added` package, so a
-third-party package can never name a secret; a reference the broker cannot
-answer fails the launch rather than starting the server with a blank.
-Uninstalling the package removes its folder and every secret it referenced.
+fills references in at launch, only for a package the host's own store of
+generated folders vouches for by source reference (the installed manifest's
+source kind is rewritten to `plugin-package`, so it cannot be the authority),
+so a third-party package can never name a secret; a reference the broker
+cannot answer fails the launch rather than starting the server with a blank.
+Uninstalling the package removes its folder and every secret it referenced,
+and an add that fails before the package is installed removes them too, so a
+retry with the same name is not blocked. Refusals travel as typed results
+(HTTP 200) like every other extension command, so the dialog shows the host's
+own sentence.
 On a host without a broker the add is refused when it carries a secret, with
 the Octant app named as the way to do it. **Found on this Mac.** The same Settings section lists what Claude Code and
 Codex already know on this computer, read-only: the MCP servers in Claude
@@ -5437,10 +5443,16 @@ imported, trusted or enabled until the person clicks that one item, and
 Octant never writes to the other tools' files. The listing names each item
 by an opaque id and shows a command line or address, never a path or a
 value. Adding a found server is the same act as Add MCP server: `${VAR}`
-and the tools' token variables are filled from the host environment where
-present, a value whose name reads like a credential is marked secret so it
-goes to the broker, and a variable the environment lacks is named on the
-row rather than invented. A found plugin goes through the ordinary folder
+and the tools' token variables are filled from the host environment only in
+a value the broker can hold (an environment value or a header), and that
+value is marked secret so it goes to the broker. A variable in the command,
+an argument or the address is never expanded, so no host value reaches the
+listing or the saved package; the row names it (`unsupportedPlaceholders`).
+A variable the environment lacks is named on the row rather than invented
+(`needsValues`). The server refuses to add either kind before writing
+anything, and the row's button is off with the reason; the person adds such
+a server by hand. The folder import returns what the loader left out of a
+plugin as diagnostics on its inspection, so the review shows them. A found plugin goes through the ordinary folder
 import for review and install; the folder loader reads all three layouts
 (Agent Plugins, Codex, Claude Code) and turns a Claude Code plugin into an
 Agent Plugins package in memory, keeping its skills and MCP servers and
@@ -5475,7 +5487,14 @@ catalog relates to the plugin marketplace only in that both end in an
 installed package under the one activation ladder. Connect makes an
 ordinary user-added server for the entry's address and then starts the
 sign-in, or takes the key (kept in the broker like any user-added secret),
-or just connects. An entry is listed only after a probe showed the address
+or just connects. The add request carries the entry's id; the host accepts it
+only for an id in the bundled catalog at that entry's own address, and names
+the package `connector-<id>`, a name it refuses to a hand-added server. The
+view recognizes a connected entry by that package name, never by a display
+name, so a server a person happened to call "Linear" neither shows as
+Connected nor receives its sign-in. The add's answer names the package it
+created (`addedPackage`), and the sign-in starts on that package rather than
+on whichever one a snapshot diff shows. An entry is listed only after a probe showed the address
 behaving as its kind claims (a sign-in server: 401 with resource metadata,
 an authorization server with PKCE S256 and dynamic client registration); a
 vendor whose issuer offers no registration is listed as a key entry or not
@@ -5489,27 +5508,37 @@ MCP server.
 HTTP shows Sign in under its component in Settings. The host runs the MCP
 authorization flow as the protocol lays it out: a bare request to the server
 answers 401 and names its protected resource metadata (RFC 9728, or the
-well-known path when the header names none); that names the authorization
-server; its metadata (RFC 8414, or the OpenID discovery document) names the
-endpoints and must allow PKCE with S256; Octant registers itself there as a
+well-known path when the header names none), whose `resource` must be the
+server's own canonical address, or a server could obtain a bearer meant for
+another API and receive it on connect; that names the authorization server;
+its metadata (RFC 8414, or the OpenID discovery document) must name that
+same issuer, names the endpoints and must allow PKCE with S256; Octant
+registers itself there as a
 public client (RFC 7591, `token_endpoint_auth_method: none`) naming a
 loopback callback whose port it chose first; then the host OAuth runner runs
 its ordinary PKCE flow under the `mcp-authorization` dialect, which sends the
 server's canonical address as `resource` (RFC 8707) on authorize, exchange and
-refresh, binds the chosen port, and accepts an empty scope list. Every issuer
+refresh, binds the chosen port, and accepts an empty scope list. Scopes
+follow the RFC 6749 scope-token grammar, so a URL-shaped scope survives. An
+issuer may grant an access token without a refresh token; such a grant lasts
+as long as the access token and then asks for a new sign-in. Every issuer
 endpoint must be https. The grant lives in the credential broker like a
 provider sign-in; the host keeps only its reference, the descriptor that made
 it and the issuer's host name, in its own state file, and attaches the bearer
 to the launch each time the server connects, refreshed through the broker. A
-grant the broker can no longer honour leaves the launch bare, the server
-answers 401, and Settings offers Sign in again. Sign out revokes the grant
+grant the broker reports gone (revoked, expired, reused) leaves the launch
+bare, the server answers 401, and Settings shows Sign in again from the
+next status read; a broker that is merely unavailable changes nothing. Sign
+out revokes the grant
 where the issuer allows and forgets it either way; uninstalling the package
 does the same for every sign-in it had. An issuer that offers no client
 registration is refused in plain words, since Octant cannot invent a client
 id; a server that never asks for a sign-in is reported as such. The
 person's click on Sign in is the acknowledgment: there is no vendor terms
 text for a server they added themselves. A paired device can read the state
-and nothing more. The release-boundary hold on a connector
+and nothing more: a status read from a device returns the last known state
+of a pending attempt without polling the broker, since polling can finish
+the sign-in and store the grant, which is a host action. The release-boundary hold on a connector
 marketplace was lifted by the maintainer on 2026-10-20; the start gates in
 [release-boundary holds](release-boundary-holds.md) are met by this section
 and the rules above.
