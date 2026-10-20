@@ -2,7 +2,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { ThreadFollowUpSuggestions } from "@octant/contracts";
-import { FollowUpSuggestionChips } from "./FollowUpSuggestionChips";
+import {
+  EnvironmentSuggestedTasks,
+  FollowUpSuggestionChips,
+  FollowUpSuggestionContext,
+} from "./FollowUpSuggestionChips";
 
 const threadId = "00000000-0000-4000-8000-000000000020";
 const suggestionId = "00000000-0000-4000-8000-000000000041";
@@ -68,7 +72,7 @@ describe("FollowUpSuggestionChips", () => {
       />,
     );
 
-    await userEvent.click(await screen.findByRole("button", { name: "Add tests" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Start Add tests" }));
     expect(await screen.findByText(/starts a new Code thread on its own worktree/)).toBeVisible();
     expect(client.activate).not.toHaveBeenCalled();
 
@@ -84,11 +88,11 @@ describe("FollowUpSuggestionChips", () => {
       prompt: "Write tests for nested lists in the parser.",
     });
     await waitFor(() =>
-      expect(screen.queryByRole("group", { name: "Suggested follow-ups" })).toBeNull(),
+      expect(screen.queryByRole("region", { name: "Suggested follow-ups" })).toBeNull(),
     );
   });
 
-  it("says why the host refused a suggestion and keeps the chips", async () => {
+  it("says why the host refused a suggestion and keeps its card", async () => {
     const client = {
       suggestions: vi.fn(async () => suggestions()),
       preview: vi.fn(async () => ({
@@ -107,9 +111,38 @@ describe("FollowUpSuggestionChips", () => {
         threadId={threadId}
       />,
     );
-    await userEvent.click(await screen.findByRole("button", { name: "Add tests" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Start Add tests" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("target-unavailable");
-    expect(screen.getByRole("button", { name: "Add tests" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Start Add tests" })).toBeVisible();
+  });
+
+  it("keeps open suggestions in Environment's Suggested tasks card, and shows no card without them", async () => {
+    const offered = {
+      suggestions: vi.fn(async () => suggestions()),
+      preview: vi.fn(),
+      activate: vi.fn(),
+    };
+    const { unmount } = render(
+      <FollowUpSuggestionContext
+        value={{ client: offered as never, mode: "code", onCreated: vi.fn(), threadId }}
+      >
+        <EnvironmentSuggestedTasks />
+      </FollowUpSuggestionContext>,
+    );
+    const card = await screen.findByRole("group", { name: "Suggested tasks" });
+    expect(card).toHaveTextContent("Add tests");
+    unmount();
+
+    const none = { suggestions: vi.fn(async () => null), preview: vi.fn(), activate: vi.fn() };
+    render(
+      <FollowUpSuggestionContext
+        value={{ client: none as never, mode: "code", onCreated: vi.fn(), threadId }}
+      >
+        <EnvironmentSuggestedTasks />
+      </FollowUpSuggestionContext>,
+    );
+    await waitFor(() => expect(none.suggestions).toHaveBeenCalled());
+    expect(screen.queryByRole("group", { name: "Suggested tasks" })).toBeNull();
   });
 
   it("stays out of the composer when the latest reply suggested nothing", async () => {
