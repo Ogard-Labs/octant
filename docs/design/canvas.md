@@ -831,12 +831,17 @@ a private page on the person's own account with a provider and reports the
 page's address as a link receipt. It is built from the registration's host
 ports alone, as a plugin's would be: it asks the page-publishing port
 (`@octant/plugin-api/page-publishing`) which enabled provider instances can
-publish pages and publishes through the first one listed, and it never names a
-provider or reaches an adapter, a runtime, or a credential. The host resolves
-that instance through the provider seam's page-publishing operation, which the
-Claude driver implements with the runtime's `Artifact` tool in a one-shot
-session that may publish exactly the approved file; architecture states that
-boundary under [Security and authority](../architecture.md#security-and-authority),
+publish pages, names the first one listed as the `publisher` on its card, and
+publishes only through the single-use grant the host hands it inside the
+approved export, which publishes the approved render to that instance and
+refuses everything else as a value (the rule is architecture's,
+[Canvas export](../architecture.md#extensions-and-skills)). The port itself
+publishes nothing, and the destination never names a provider or reaches an
+adapter, a runtime, or a credential. The host resolves that instance through
+the provider seam's page-publishing operation, which the Claude driver
+implements with the runtime's `Artifact` tool in a one-shot session that may
+publish exactly the approved file; architecture states that boundary under
+[Security and authority](../architecture.md#security-and-authority),
 "Publishing a page from a thread", and the Claude adapter's detail is in
 [Provider runtimes](provider-runtimes.md#claude-code). The destination's label
 is "Share to" and the listed instance's display name, so with a Claude account
@@ -845,15 +850,15 @@ as a destination whose package is not installed is omitted rather than shown;
 a listed instance with no signed-in account is `not-connected`, and one whose
 account cannot publish pages (a Claude account signed in with an API key, for
 one) is `refused` with the reason the driver gave. The card names the account
-the page goes out under and says that the page is private until the person
-shares it on the account and that each share makes a new page: a later share
-of the same Canvas creates another page rather than replacing the first. The
-card offers no audience. The rendered HTML passes the same path-and-secret
-filter the gist does, and a document that fails it is refused rather than
-published. The person's approval of the card is the consent: the destination
-never runs from an agent turn, raises no second prompt, and reports a
-`refused`, `not-signed-in`, or `unavailable` outcome from the port as a refused
-export, never as a page.
+the host knows for that instance as the one the page goes out under, and says
+that the page is private until the person shares it on the account and that
+each share makes a new page: a later share of the same Canvas creates another
+page rather than replacing the first. The card offers no audience. The
+rendered HTML passes the same path-and-secret filter the gist does, and a
+document that fails it is refused rather than published. The person's approval
+of the card is the consent: the destination never runs from an agent turn,
+raises no second prompt, and reports a `refused`, `not-signed-in`, or
+`unavailable` outcome from the grant as a refused export, never as a page.
 
 ## Verification
 
@@ -865,8 +870,12 @@ export, never as a page.
   `canvasPreviewWarnings.test.ts`, and `canvasPreviewBrowser.smoke.ts`.
 - Export destinations: `apps/server/src/canvas/canvasExportService.test.ts`
   (offers, approval before any call, the journaled receipt or refusal for each
-  destination), `folderExportTarget.test.ts`, `gistExportTarget.test.ts`, and
-  `pageExportTarget.test.ts`; the host's page-publishing port in
+  destination, and the page grant: no publish from the factory or the card,
+  exactly the approved render once, and refusals for a second call, an
+  unnamed account, and a call after the export settled),
+  `folderExportTarget.test.ts`, `gistExportTarget.test.ts`, and
+  `pageExportTarget.test.ts` (which also proves the page destination publishes
+  nothing without the grant); the host's page-publishing port in
   `apps/server/src/providers/providerPagePublishing.test.ts`; the Claude
   driver's page-publishing operation in
   `apps/server/src/providers/claudePagePublishing.test.ts` and the seam's

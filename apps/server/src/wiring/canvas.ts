@@ -951,9 +951,10 @@ export function wireCanvas(deps: CanvasDependencies) {
       gists: createGhGistCreationPort(options.ghExecutable),
     },
     // The host ports a destination built from a factory receives: the same
-    // typed, capability-scoped ports a plugin's contribution would, and no
-    // provider adapter, runtime, or credential.
-    ports: { pagePublishing: providerPagePublishing },
+    // typed, capability-scoped reads a plugin's contribution would, and no
+    // provider adapter, runtime, or credential. Publishing is not among them;
+    // the export service alone holds it and grants it per approved export.
+    ports: { pagePublishing: { publishers: () => providerPagePublishing.publishers() } },
   };
   // Destinations arrive through the export contribution and are offered
   // through the same activation policy a plugin's contribution passes. The
@@ -984,6 +985,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     }),
     uuid: randomUUID,
     clock: () => new Date().toISOString() as never,
+    pagePublishing: providerPagePublishing,
   });
   // The library is a host-wide read of the same journal-derived projection
   // the per-Project inventory reads. It is deliberately wider than a window's

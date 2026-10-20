@@ -118,6 +118,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
   [
+    "packages/provider-sdk/src/pagePublishingConformance.ts",
+    "Page-publishing seam conformance harness that page-publishing driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the page-publishing seam is retired.",
+  ],
+  [
     "packages/provider-sdk/src/imageGenerationConformance.ts",
     "Image-seam conformance harness that image driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the image seam is retired.",
   ],

@@ -73,7 +73,10 @@ through the provider seam's page-publishing operation (`pagePublishing` on the
 driver, `@octant/provider-sdk/page-publishing`; the rule is in
 [Architecture: providers](../architecture.md#providers)), never through a
 caller that opens the SDK port, the runtime registry, or the account
-environment itself. The Claude driver implements the operation
+environment itself. Only the host's Canvas export service calls the
+operation, from the single-use grant it hands a destination inside an
+approved export; a destination reads which instances can publish and holds
+nothing that publishes. The Claude driver implements the operation
 (`apps/server/src/providers/claudePagePublishing.ts`) by running the same tool
 in a one-shot session. `availability` answers from what the driver already
 knows and starts nothing: `absent` for any instance but the driver's own,

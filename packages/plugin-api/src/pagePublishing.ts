@@ -1,16 +1,17 @@
 /**
  * Page publishing as a plugin sees it: which enabled provider instances can
- * publish a page on the person's own account, and publishing one there. The
- * host resolves each instance through the provider seam's page-publishing
- * operation; a plugin never learns which provider, runtime, or tool answers.
- * The shapes live in `@octant/contracts/page-publishing`.
+ * publish a page on the person's own account. The host resolves each instance
+ * through the provider seam's page-publishing operation; a plugin never learns
+ * which provider, runtime, or tool answers. The shapes live in
+ * `@octant/contracts/page-publishing`.
+ *
+ * Publishing itself is not on this port. It arrives only inside an approved
+ * export, as the single-use grant in `CanvasExportGrants`
+ * (`@octant/plugin-api/canvas-export`), because a long-lived port that could
+ * publish would let a destination publish from its factory, while the card is
+ * built, or with a page the person never approved.
  */
-import type {
-  PagePublishAvailability,
-  PagePublishOutcome,
-  PagePublishRequest,
-  ProviderInstanceId,
-} from "@octant/contracts";
+import type { PagePublishAvailability, ProviderInstanceId } from "@octant/contracts";
 
 export type {
   PagePublishAvailability,
@@ -27,17 +28,11 @@ export interface PagePublisherOffer {
 }
 
 /**
- * The host port a destination asks to publish a page. `publishers` is read
- * while an offer or an approval card is built, so it is synchronous and lists
- * only instances that are enabled, whose driver implements the operation, and
- * whose observed capabilities say pages are supported; `publish` to any other
- * instance is refused as a value. The host decodes every answer, so a
- * destination never sees a published outcome without an address.
+ * The read a destination has while an offer or an approval card is built: the
+ * instances that are enabled, whose driver implements the operation, and whose
+ * observed capabilities say pages are supported. It is synchronous, and it
+ * publishes nothing.
  */
 export interface PagePublishingPort {
   readonly publishers: () => ReadonlyArray<PagePublisherOffer>;
-  readonly publish: (
-    instanceId: ProviderInstanceId,
-    request: PagePublishRequest,
-  ) => Promise<PagePublishOutcome>;
 }

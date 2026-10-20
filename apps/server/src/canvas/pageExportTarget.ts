@@ -6,7 +6,6 @@ import {
   type CanvasExportRefusal,
 } from "@octant/contracts/canvas-export";
 import { isCanvasShareSafeText } from "@octant/contracts/canvas-share";
-import { canvasExportPlannedName } from "@octant/domain";
 import type {
   CanvasExportHostPorts,
   CanvasExportTargetFactory,
@@ -21,11 +20,14 @@ import type { PagePublisherOffer } from "@octant/plugin-api/page-publishing";
  * do: it declares a contribution, describes what the person is approving, and
  * is called only after approval. It is built from the host's ports alone, as a
  * plugin's contribution would be: it asks the page-publishing port which
- * enabled provider instances can publish pages and publishes through the first
- * one listed, and it never learns which provider, runtime, or tool answers —
- * no adapter, no credential, no vendor name. The destination is labelled after
- * that instance's display name, so it reads "Share to" and the name the person
- * gave the account in Settings.
+ * enabled provider instances can publish pages, names the first one listed as
+ * the card's publisher, and publishes through the single-use grant the host
+ * hands it inside the approved export. The port itself publishes nothing, and
+ * the grant publishes only the render the person approved, so this code never
+ * holds a page it could publish on its own; it never learns which provider,
+ * runtime, or tool answers — no adapter, no credential, no vendor name. The
+ * destination is labelled after that instance's display name, so it reads
+ * "Share to" and the name the person gave the account in Settings.
  *
  * HTML only: the page is the rendered document as the person saw it on the
  * card. The rendered HTML passes the same path-and-secret filter every
@@ -49,6 +51,7 @@ export function pageExportNote(publisher: string): string {
 const UNLISTED_LABEL = "Share as a page";
 const NO_PUBLISHER = "No account that can publish pages is available.";
 const NOT_SIGNED_IN = "The account that publishes pages is not signed in.";
+const NOT_APPROVED = "A page is published only from an approved export.";
 
 function refused(code: CanvasExportRefusal["code"], message: string): CanvasExportDelivery {
   return { kind: "refused", code, message };
@@ -88,14 +91,16 @@ export const createPageExportTarget: CanvasExportTargetFactory = (ports) => {
       if (publisher === undefined || publisher.availability.kind !== "ready") return undefined;
       // No path: the page has no address until it exists. No audience either:
       // the page is private, and making it public is done on the account, not
-      // here. The account the page goes out under is what the person approves.
+      // here. The instance is what the approval binds the grant to; the host
+      // puts that instance's own account on the card.
       return {
+        publisher: publisher.instanceId,
         account: publisher.availability.account,
         note: pageExportNote(publisher.label),
       };
     },
 
-    async exportDocument(output) {
+    async exportDocument(output, _confirmed, grants) {
       const publisher = current();
       if (publisher === undefined) return refused("not-connected", NO_PUBLISHER);
       const availability = publisher.availability;
@@ -107,11 +112,10 @@ export const createPageExportTarget: CanvasExportTargetFactory = (ports) => {
       if (!isCanvasShareSafeText(output.body)) {
         return refused("refused", "The document contains text that cannot leave this Mac.");
       }
-      const outcome = await ports.pagePublishing.publish(publisher.instanceId, {
-        fileName: canvasExportPlannedName(output.title, "html"),
-        title: output.title,
-        html: output.body,
-      });
+      // Only the host issues a grant, inside an approved export; a call that
+      // carries none has nothing it may publish.
+      if (grants === undefined) return refused("refused", NOT_APPROVED);
+      const outcome = await grants.publishPage(publisher.instanceId);
       if (outcome.kind === "not-signed-in") return refused("not-connected", NOT_SIGNED_IN);
       if (outcome.kind === "refused") return refused("refused", outcome.message);
       if (outcome.kind === "unavailable") return refused("unavailable", outcome.message);

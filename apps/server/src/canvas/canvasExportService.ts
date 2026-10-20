@@ -27,12 +27,24 @@ import {
   type CanvasExportTargetId,
   type CanvasExportVisibility,
 } from "@octant/contracts/canvas-export";
-import type { CanvasExportDestination, CanvasExportTarget } from "@octant/plugin-api/canvas-export";
+import { canvasExportPlannedName } from "@octant/domain";
+import type {
+  CanvasExportDestination,
+  CanvasExportGrants,
+  CanvasExportTarget,
+} from "@octant/plugin-api/canvas-export";
+import type { PagePublisherOffer } from "@octant/plugin-api/page-publishing";
 import {
   offerCanvasExportTargets,
   type CanvasExportActivationFacts,
 } from "@octant/plugin-host/canvas-export-contributions";
-import type { EventActor, UtcTimestamp } from "@octant/contracts";
+import type {
+  EventActor,
+  PagePublishOutcome,
+  PagePublishRequest,
+  ProviderInstanceId,
+  UtcTimestamp,
+} from "@octant/contracts";
 import { Schema } from "effect";
 import { renderArtifactDocument } from "./artifactDocumentRender";
 import { CanvasExportEventStore } from "./canvasExportEventStore";
@@ -59,6 +71,20 @@ export interface CanvasExportDocument {
   readonly blocks: ReadonlyArray<CanvasBlock>;
 }
 
+/**
+ * The host's page publishing, as the export service holds it. The service is
+ * the only caller of `publish`: it calls it from the single-use grant it hands
+ * a destination inside an approved export, with the render the person
+ * approved, so the account side effect happens only behind the approval.
+ */
+export interface CanvasExportPagePublishing {
+  readonly publishers: () => ReadonlyArray<PagePublisherOffer>;
+  readonly publish: (
+    instanceId: ProviderInstanceId,
+    request: PagePublishRequest,
+  ) => Promise<PagePublishOutcome>;
+}
+
 export interface CanvasExportServiceOptions {
   readonly load: (
     canvasId: CanvasId,
@@ -72,6 +98,8 @@ export interface CanvasExportServiceOptions {
   readonly eventStore: CanvasExportEventStore;
   readonly uuid: () => string;
   readonly clock: () => UtcTimestamp;
+  /** Absent on a host that publishes no pages; every page grant then refuses. */
+  readonly pagePublishing?: CanvasExportPagePublishing;
 }
 
 /**
@@ -90,6 +118,12 @@ type PendingExport =
        * target on approval, which is what lets it replace an existing file.
        */
       readonly confirmedDestination?: CanvasExportDestination;
+      /**
+       * The one provider instance the card's account belongs to, when the
+       * destination publishes a page. The export's page grant publishes here
+       * and nowhere else.
+       */
+      readonly publisher?: ProviderInstanceId;
       /** Instant past which answering this approval is an `expired` refusal. */
       readonly expiresAtMs: number;
     }
@@ -97,6 +131,8 @@ type PendingExport =
       readonly released: true;
       readonly canvasId: CanvasId;
     };
+
+type HeldExport = Extract<PendingExport, { readonly released?: undefined }>;
 
 const decodeApprovalId = Schema.decodeUnknownSync(CanvasExportApprovalId);
 const decodeRecordId = Schema.decodeUnknownSync(CanvasExportRecordId);
@@ -111,6 +147,7 @@ export class CanvasExportService {
   readonly #eventStore: CanvasExportEventStore;
   readonly #uuid: () => string;
   readonly #clock: () => UtcTimestamp;
+  readonly #pagePublishing: CanvasExportPagePublishing | undefined;
   readonly #pending = new Map<string, PendingExport>();
 
   constructor(options: CanvasExportServiceOptions) {
@@ -119,6 +156,7 @@ export class CanvasExportService {
     this.#eventStore = options.eventStore;
     this.#uuid = options.uuid;
     this.#clock = options.clock;
+    this.#pagePublishing = options.pagePublishing;
   }
 
   offers(canvasId: CanvasId): CanvasExportOfferList | undefined {
@@ -225,6 +263,21 @@ export class CanvasExportService {
     // an existing one; naming an account and an audience is what lets the
     // person see whose name it goes out under and who can see it.
     const destination = binding?.target.describeDestination?.(output);
+    // A destination that publishes a page names the instance; the host names
+    // the account. The card shows the account the host knows for that
+    // instance, never the destination's own claim, and an instance the host
+    // does not list as ready to publish is refused before any card exists,
+    // because the grant issued on approval could only refuse it anyway.
+    const publisher =
+      destination?.publisher === undefined
+        ? undefined
+        : this.#readyPublisher(destination.publisher);
+    if (destination?.publisher !== undefined && publisher === undefined) {
+      return decodeCanvasExportPrepareResult(
+        refused("refused", "That destination cannot publish a page on that account."),
+      );
+    }
+    const account = publisher?.availability.account ?? destination?.account;
     const nowMs = Date.parse(this.#clock());
     const expiresAtMs = nowMs + CANVAS_EXPORT_APPROVAL_TTL_MS;
     const card = decodeCanvasExportApprovalCard({
@@ -244,7 +297,7 @@ export class CanvasExportService {
             destinationPath: destination.path,
             replacesExisting: destination.replacesExisting ?? false,
           }),
-      ...(destination?.account === undefined ? {} : { destinationAccount: destination.account }),
+      ...(account === undefined ? {} : { destinationAccount: account }),
       ...(destination?.visibility === undefined
         ? {}
         : { destinationVisibility: destination.visibility }),
@@ -262,6 +315,7 @@ export class CanvasExportService {
         output,
         expiresAtMs,
         ...(destination === undefined ? {} : { confirmedDestination: destination }),
+        ...(publisher === undefined ? {} : { publisher: publisher.instanceId }),
       });
     }
     return result;
@@ -350,7 +404,7 @@ export class CanvasExportService {
     // offered one.
     const delivery = await this.#deliver(
       binding.target,
-      pending.output,
+      pending,
       confirmedDestination(pending.confirmedDestination, input.visibility),
     );
     const record = decodeCanvasExportRecorded({
@@ -387,14 +441,11 @@ export class CanvasExportService {
    * entry releases its payload; nothing is held past its expiry in practice,
    * and eviction is reported as `expired` when an answer arrives.
    */
-  #holdPending(
-    canvasId: CanvasId,
-    pending: Omit<Extract<PendingExport, { readonly released?: undefined }>, "canvasId">,
-  ): void {
+  #holdPending(canvasId: CanvasId, pending: Omit<HeldExport, "canvasId">): void {
     const canvasKey = String(canvasId);
     this.#sweepExpired();
     const held = [...this.#pending.entries()].filter(
-      (entry): entry is [string, Extract<PendingExport, { readonly released?: undefined }>] =>
+      (entry): entry is [string, HeldExport] =>
         entry[1].released !== true && String(entry[1].canvasId) === canvasKey,
     );
     while (held.length >= CANVAS_EXPORT_MAX_PENDING_PER_CANVAS) {
@@ -445,17 +496,87 @@ export class CanvasExportService {
     return bindings.length === 1 ? bindings[0] : undefined;
   }
 
+  /** The listed publisher with this id, when it can publish right now. */
+  #readyPublisher(
+    instanceId: ProviderInstanceId,
+  ): (PagePublisherOffer & { readonly availability: { readonly kind: "ready" } }) | undefined {
+    const offer = this.#pagePublishing
+      ?.publishers()
+      .find((candidate) => String(candidate.instanceId) === String(instanceId));
+    if (offer === undefined || offer.availability.kind !== "ready") return undefined;
+    return { ...offer, availability: offer.availability };
+  }
+
+  /**
+   * Call the destination with the approved render, the confirmed destination,
+   * and a page grant that lives exactly as long as this call. The grant is
+   * closed whether the destination returns, throws, or hands the grant to
+   * something that outlives it: nothing publishes after delivery settles.
+   */
   async #deliver(
     target: CanvasExportTarget,
-    output: CanvasExportRenderedOutput,
+    pending: HeldExport,
     confirmed?: CanvasExportDestination,
   ): Promise<CanvasExportDelivery> {
+    const grant = issuePageGrant(pending, this.#pagePublishing);
     try {
-      return decodeCanvasExportDelivery(await target.exportDocument(output, confirmed));
+      return decodeCanvasExportDelivery(
+        await target.exportDocument(pending.output, confirmed, grant.grants),
+      );
     } catch {
       return refused("refused", "The destination did not complete the export.");
+    } finally {
+      grant.settle();
     }
   }
+}
+
+/**
+ * The single-use page grant for one approved export.
+ *
+ * It publishes the render the person approved (the held output's title and
+ * body, under the name the folder destination would also use) to the one
+ * instance the card's account belongs to, and does so at most once. A second
+ * call, an instance the card did not name, a render that is not the HTML form,
+ * a host without page publishing, and a call after the export settled are each
+ * refused as a value; none reaches a provider. The destination contributes
+ * only the instance id, so it has no way to change what is published.
+ */
+function issuePageGrant(
+  pending: HeldExport,
+  publishing: CanvasExportPagePublishing | undefined,
+): { readonly grants: CanvasExportGrants; readonly settle: () => void } {
+  let state: "open" | "used" | "settled" = "open";
+  const refusal = (message: string): PagePublishOutcome => ({ kind: "refused", message });
+  return {
+    settle: () => {
+      state = "settled";
+    },
+    grants: {
+      publishPage: async (instanceId) => {
+        if (state === "settled") {
+          return refusal("This export has finished and can publish nothing more.");
+        }
+        if (state === "used") return refusal("This export has already published its page.");
+        if (
+          publishing === undefined ||
+          pending.publisher === undefined ||
+          String(instanceId) !== String(pending.publisher)
+        ) {
+          return refusal("The approval did not name that account for a page.");
+        }
+        if (pending.output.format !== "html") {
+          return refusal("Only the HTML form of a document is published as a page.");
+        }
+        state = "used";
+        return publishing.publish(instanceId, {
+          fileName: canvasExportPlannedName(pending.output.title, "html"),
+          title: pending.output.title,
+          html: pending.output.body,
+        });
+      },
+    },
+  };
 }
 
 function digestOf(body: string): string {

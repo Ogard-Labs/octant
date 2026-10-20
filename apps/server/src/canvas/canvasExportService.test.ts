@@ -30,7 +30,12 @@ import {
   type PagePublishOutcome,
   type PagePublishRequest,
 } from "@octant/contracts";
-import type { CanvasExportTarget } from "@octant/plugin-api/canvas-export";
+import type {
+  CanvasExportGrants,
+  CanvasExportHostPorts,
+  CanvasExportTarget,
+  CanvasExportTargetFactory,
+} from "@octant/plugin-api/canvas-export";
 import type { PagePublisherOffer } from "@octant/plugin-api/page-publishing";
 import type { CanvasExportActivationFacts } from "@octant/plugin-host/canvas-export-contributions";
 import type { ExtensionEffectiveState } from "@octant/contracts/extensions";
@@ -44,6 +49,7 @@ import { CanvasExportEventStore, registerCanvasExportEvents } from "./canvasExpo
 import {
   CanvasExportService,
   type CanvasExportDocument,
+  type CanvasExportPagePublishing,
   type CanvasExportTargetBinding,
 } from "./canvasExportService";
 import { createCanvasExportFilePort } from "./canvasExportFilePort";
@@ -115,17 +121,103 @@ function exportFolder(options?: { readonly chosen?: boolean }): {
       standingOutsideApproval: false,
       newTempId: randomUUID,
       // No provider on this host publishes pages, so the port lists none.
-      ports: {
-        pagePublishing: {
-          publishers: () => [],
-          publish: async () => ({
-            kind: "refused",
-            message: "This provider cannot publish pages.",
-          }),
+      ports: { pagePublishing: { publishers: () => [] } },
+    },
+  };
+}
+
+const workAccount = decodeProviderInstanceId("00000000-0000-4000-8000-00000000000a");
+const otherAccount = decodeProviderInstanceId("00000000-0000-4000-8000-00000000000b");
+
+/**
+ * The host's page publishing with one ready instance, recording every page a
+ * grant actually publishes. The account on the card must come from here, not
+ * from whatever a destination claims.
+ */
+function pagePublishing(): {
+  readonly publishing: CanvasExportPagePublishing;
+  readonly published: Array<{ readonly instanceId: string; readonly request: PagePublishRequest }>;
+} {
+  const published: Array<{ readonly instanceId: string; readonly request: PagePublishRequest }> =
+    [];
+  return {
+    published,
+    publishing: {
+      publishers: () => [
+        {
+          instanceId: workAccount,
+          label: "Work",
+          availability: { kind: "ready", account: "Work account" },
         },
+      ],
+      publish: async (instanceId, request) => {
+        published.push({ instanceId: String(instanceId), request });
+        return { kind: "published", address: `https://pages.example/p/${request.fileName}` };
       },
     },
   };
+}
+
+/**
+ * A destination that publishes a page through a provider, built from the host
+ * ports exactly as a third-party contribution would be. It records what the
+ * ports let it do at each step, names `publisher` on its card, and inside
+ * `exportDocument` calls the grant however the test tells it to.
+ */
+function pageDestination(options: {
+  readonly publisher?: ReturnType<typeof decodeProviderInstanceId>;
+  readonly account?: string;
+  readonly publish: (grants: CanvasExportGrants | undefined) => Promise<unknown>;
+}): {
+  readonly binding: CanvasExportTargetBinding;
+  readonly portKeysSeen: string[][];
+} {
+  const portKeysSeen: string[][] = [];
+  const factory: CanvasExportTargetFactory = (ports: CanvasExportHostPorts) => {
+    portKeysSeen.push(Object.keys(ports.pagePublishing));
+    return {
+      contribution: decodeCanvasExportContribution({
+        schemaVersion: 1,
+        kind: "canvas-export-contribution",
+        targetId: "page-on-account",
+        label: "A page on your account",
+        formats: ["html"],
+      }),
+      describeDestination: () => {
+        portKeysSeen.push(Object.keys(ports.pagePublishing));
+        return {
+          ...(options.publisher === undefined ? {} : { publisher: options.publisher }),
+          ...(options.account === undefined ? {} : { account: options.account }),
+        };
+      },
+      exportDocument: async (_output, _confirmed, grants) => {
+        const outcome = await options.publish(grants);
+        return outcome !== null && typeof outcome === "object" && "address" in outcome
+          ? { kind: "receipt", receipt: { kind: "link", href: String(outcome.address) } }
+          : { kind: "refused", code: "refused", message: "The page was not published." };
+      },
+    };
+  };
+  const target = factory({
+    pagePublishing: { publishers: () => pagePublishing().publishing.publishers() },
+  });
+  return {
+    portKeysSeen,
+    binding: {
+      facts: {
+        installed: true,
+        trusted: true,
+        desiredEnabled: true,
+        effectiveState: { kind: "effective" },
+        connected: true,
+      },
+      target,
+    },
+  };
+}
+
+function htmlRequest(targetId: string) {
+  return decodeCanvasExportPrepareRequest({ ...prepareRequest(targetId), format: "html" });
 }
 
 function document(text = "Scope"): CanvasExportDocument {
@@ -178,12 +270,12 @@ function gistRegistration(availability: GistExportAvailability): {
   };
 }
 
-const pagePublisherInstanceId = decodeProviderInstanceId("00000000-0000-4000-8000-00000000000a");
-
 /**
- * The folder registration plus a page-publishing port that lists one account
+ * The folder registration plus the host's page publishing with one account
  * (or none), so a share to the person's own account runs through the same
- * service and journal a real one would, without a provider.
+ * service, grant, and journal a real one would, without a provider. The
+ * registration's port only lists; `publishing` is what the service holds and
+ * what the grant calls, and `requests` records every page it is asked for.
  */
 function pageRegistration(
   availability: PagePublisherOffer["availability"] | { readonly kind: "absent" },
@@ -193,25 +285,26 @@ function pageRegistration(
   },
 ): {
   readonly registration: CanvasExportTargetRegistration;
+  readonly publishing: CanvasExportPagePublishing;
   readonly requests: PagePublishRequest[];
 } {
   const requests: PagePublishRequest[] = [];
+  const publishers = (): ReadonlyArray<PagePublisherOffer> =>
+    availability.kind === "absent"
+      ? []
+      : [{ instanceId: workAccount, label: "Work account", availability }];
   return {
     requests,
+    publishing: {
+      publishers,
+      publish: async (_instanceId, request) => {
+        requests.push(request);
+        return outcome;
+      },
+    },
     registration: {
       ...exportFolder().registration,
-      ports: {
-        pagePublishing: {
-          publishers: () =>
-            availability.kind === "absent"
-              ? []
-              : [{ instanceId: pagePublisherInstanceId, label: "Work account", availability }],
-          publish: async (_instanceId, request) => {
-            requests.push(request);
-            return outcome;
-          },
-        },
-      },
+      ports: { pagePublishing: { publishers } },
     },
   };
 }
@@ -255,7 +348,10 @@ function binding(
 
 function harness(
   bindings?: () => ReadonlyArray<CanvasExportTargetBinding>,
-  options?: { readonly doc?: CanvasExportDocument },
+  options?: {
+    readonly doc?: CanvasExportDocument;
+    readonly pagePublishing?: CanvasExportPagePublishing;
+  },
 ) {
   const calls: CanvasExportRenderedOutput[] = [];
   const held = bindings ?? (() => [binding("reading-copy", calls)]);
@@ -280,6 +376,7 @@ function harness(
     eventStore,
     uuid: nextId,
     clock: () => decodeUtcTimestamp(new Date(clockMs).toISOString()),
+    ...(options?.pagePublishing === undefined ? {} : { pagePublishing: options.pagePublishing }),
   });
   const envelopes = (): ReadonlyArray<EventEnvelope> =>
     journal.replay(decodeReplayCursor({ afterSequence: 0, limit: 100 }));
@@ -991,12 +1088,13 @@ describe("canvas export service", () => {
   });
 
   it("publishes the approved HTML as a page only after approval, and journals the page's link", async () => {
-    const { registration, requests } = pageRegistration({
+    const { registration, publishing, requests } = pageRegistration({
       kind: "ready",
       account: "Work account",
     });
-    const { service, eventStore, connection } = harness(() =>
-      canvasExportTargetBindings(registration, canvasId),
+    const { service, eventStore, connection } = harness(
+      () => canvasExportTargetBindings(registration, canvasId),
+      { pagePublishing: publishing },
     );
 
     const prepared = service.prepare(prepareRequest(PAGE_EXPORT_TARGET_ID, "html"), true);
@@ -1035,12 +1133,13 @@ describe("canvas export service", () => {
   });
 
   it("publishes no page when the person declines", async () => {
-    const { registration, requests } = pageRegistration({
+    const { registration, publishing, requests } = pageRegistration({
       kind: "ready",
       account: "Work account",
     });
-    const { service, eventStore, connection } = harness(() =>
-      canvasExportTargetBindings(registration, canvasId),
+    const { service, eventStore, connection } = harness(
+      () => canvasExportTargetBindings(registration, canvasId),
+      { pagePublishing: publishing },
     );
     const prepared = service.prepare(prepareRequest(PAGE_EXPORT_TARGET_ID, "html"), true);
     if (prepared.kind !== "approval") {
@@ -1063,12 +1162,13 @@ describe("canvas export service", () => {
   });
 
   it("records a provider refusal as a refused export, never as a published page", async () => {
-    const { registration } = pageRegistration(
+    const { registration, publishing } = pageRegistration(
       { kind: "ready", account: "Work account" },
       { kind: "refused", message: "The provider refused to publish the page." },
     );
-    const { service, eventStore, connection } = harness(() =>
-      canvasExportTargetBindings(registration, canvasId),
+    const { service, eventStore, connection } = harness(
+      () => canvasExportTargetBindings(registration, canvasId),
+      { pagePublishing: publishing },
     );
     const prepared = service.prepare(prepareRequest(PAGE_EXPORT_TARGET_ID, "html"), true);
     if (prepared.kind !== "approval") {
@@ -1095,6 +1195,136 @@ describe("canvas export service", () => {
       },
     });
     expect(eventStore.replay()[0]?.outcome).toMatchObject({ kind: "refused" });
+    connection.close();
+  });
+
+  it("lets a destination read the publishers from its factory and its card, but publish from neither", async () => {
+    const { publishing, published } = pagePublishing();
+    const { binding, portKeysSeen } = pageDestination({
+      publisher: workAccount,
+      publish: async (grants) => grants?.publishPage(workAccount),
+    });
+    const { service, connection } = harness(() => [binding], { pagePublishing: publishing });
+
+    const prepared = service.prepare(htmlRequest("page-on-account"), true);
+    expect(prepared.kind).toBe("approval");
+    // The factory ran and the card was described; both saw a port that lists
+    // publishers and nothing else, so neither step had a way to publish.
+    expect(portKeysSeen).toEqual([["publishers"], ["publishers"]]);
+    expect(published).toEqual([]);
+    connection.close();
+  });
+
+  it("publishes exactly the approved render to the account the card named, once", async () => {
+    const { publishing, published } = pagePublishing();
+    const outcomes: unknown[] = [];
+    let kept: CanvasExportGrants | undefined;
+    const { binding } = pageDestination({
+      publisher: workAccount,
+      // The destination claims another account; the card must not repeat it.
+      account: "Whatever I say",
+      publish: async (grants) => {
+        kept = grants;
+        const first = await grants?.publishPage(workAccount);
+        // A second call inside the same export is refused, not forwarded.
+        outcomes.push(await grants?.publishPage(workAccount));
+        return first;
+      },
+    });
+    const { service, eventStore, connection } = harness(() => [binding], {
+      pagePublishing: publishing,
+    });
+
+    const prepared = service.prepare(htmlRequest("page-on-account"), true);
+    expect(prepared.kind).toBe("approval");
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+    expect(prepared.card.destinationAccount).toBe("Work account");
+    expect(published).toEqual([]);
+
+    const exported = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(exported.kind).toBe("exported");
+    expect(published).toEqual([
+      {
+        instanceId: String(workAccount),
+        request: {
+          fileName: "Launch plan.html",
+          title: prepared.card.title,
+          html: prepared.card.payload,
+        },
+      },
+    ]);
+    expect(outcomes).toEqual([
+      { kind: "refused", message: "This export has already published its page." },
+    ]);
+    expect(eventStore.replay()[0]?.outcome).toEqual({
+      kind: "receipt",
+      receipt: { kind: "link", href: "https://pages.example/p/Launch plan.html" },
+    });
+
+    // The export has settled; a grant the destination kept publishes nothing.
+    await expect(kept?.publishPage(workAccount)).resolves.toEqual({
+      kind: "refused",
+      message: "This export has finished and can publish nothing more.",
+    });
+    expect(published).toHaveLength(1);
+    connection.close();
+  });
+
+  it("refuses to publish to an account the card did not name", async () => {
+    const { publishing, published } = pagePublishing();
+    const outcomes: unknown[] = [];
+    const { binding } = pageDestination({
+      publisher: workAccount,
+      publish: async (grants) => {
+        outcomes.push(await grants?.publishPage(otherAccount));
+        return undefined;
+      },
+    });
+    const { service, connection } = harness(() => [binding], { pagePublishing: publishing });
+    const prepared = service.prepare(htmlRequest("page-on-account"), true);
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+
+    const exported = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(exported.kind).toBe("exported");
+    expect(outcomes).toEqual([
+      { kind: "refused", message: "The approval did not name that account for a page." },
+    ]);
+    expect(published).toEqual([]);
+    connection.close();
+  });
+
+  it("refuses the export before any card when the destination names an account that cannot publish", () => {
+    const { publishing, published } = pagePublishing();
+    const { binding } = pageDestination({
+      publisher: otherAccount,
+      publish: async (grants) => grants?.publishPage(otherAccount),
+    });
+    const { service, connection } = harness(() => [binding], { pagePublishing: publishing });
+
+    const prepared = service.prepare(htmlRequest("page-on-account"), true);
+
+    expect(prepared).toMatchObject({ kind: "refused", code: "refused" });
+    expect(published).toEqual([]);
     connection.close();
   });
 });
