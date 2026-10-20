@@ -192,6 +192,10 @@
   margin-bottom: var(--oct-space-2);
 }
 
+.thread-harness-steering:empty {
+  display: none;
+}
+
 .thread-harness-steering__input {
   flex: 1 1 12rem;
   min-width: 0;

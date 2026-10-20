@@ -933,9 +933,14 @@ function subagentsTrayFor(surface: WorkspaceTab, props: WorkspaceViewProps): Rea
   const steering =
     props.nativeHarnessClient === undefined || !ownHost ? null : (
       <ThreadHarnessSteering
+        key={threadId}
         client={props.nativeHarnessClient}
         running={props.runningThreadIds?.has(threadId) === true}
         threadId={threadId}
+        {...(props.projectServerUrl === undefined ? {} : { serverUrl: props.projectServerUrl })}
+        {...(props.projectWindowCapability === undefined
+          ? {}
+          : { windowCapability: props.projectWindowCapability })}
       />
     );
   const tray =

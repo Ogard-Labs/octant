@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { NativeHarnessSessionView } from "@octant/contracts";
 import {
   NativeHarnessClientFailure,
@@ -9,13 +9,21 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
 import "./native-harness.css";
+import { UnreachedSteeringFollowUp } from "./UnreachedSteeringFollowUp";
+import {
+  createThreadMessageQueueClient,
+  type ThreadMessageQueueClient,
+} from "../messageQueue/threadMessageQueueClient";
 
 export interface ThreadHarnessSteeringProps {
-  readonly client: Pick<NativeHarnessClient, "session" | "steer">;
+  readonly client: Pick<NativeHarnessClient, "session" | "steer" | "takeSteering">;
   readonly threadId: string;
   /** The thread list says a turn is running; it starts and stops the quick refresh. */
   readonly running: boolean;
   readonly refreshIntervalMs?: number;
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
+  readonly queueClient?: ThreadMessageQueueClient;
 }
 
 /**
@@ -31,12 +39,29 @@ export interface ThreadHarnessSteeringProps {
  */
 export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
   const { client, threadId, running } = props;
+  const queue = useMemo(
+    () =>
+      props.queueClient ??
+      (props.serverUrl === undefined || props.windowCapability === undefined
+        ? undefined
+        : createThreadMessageQueueClient({
+            serverUrl: props.serverUrl,
+            windowCapability: props.windowCapability,
+          })),
+    [props.queueClient, props.serverUrl, props.windowCapability],
+  );
   const [read, setRead] = useState<{
     readonly threadId: string;
     readonly view: NativeHarnessSessionView | null;
   }>();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [forwarding, setForwarding] = useState(false);
+  const forwardingRef = useRef(false);
+  const forwardingChanged = useCallback((value: boolean) => {
+    forwardingRef.current = value;
+    setForwarding(value);
+  }, []);
   const [notice, setNotice] = useState<string>();
   const generation = useRef(0);
   const inFlight = useRef(false);
@@ -123,7 +148,7 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
   );
 
   const discard = useCallback(async () => {
-    if (busy) return;
+    if (busy || forwardingRef.current) return;
     setBusy(true);
     try {
       await client.steer(threadId, { kind: "clear" });
@@ -144,10 +169,24 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
   const steerable = view.session.status === "running";
   const notes = view.steering ?? [];
   const unreached = !steerable && notes.some((note) => note.status === "queued");
-  if (!steerable && notes.length === 0) return null;
+  if (!steerable && notes.length === 0 && queue === undefined) return null;
 
   return (
     <section aria-label="Notes for the lead" className="thread-harness-steering">
+      {queue === undefined ? null : (
+        <UnreachedSteeringFollowUp
+          key={threadId}
+          client={client}
+          queue={queue}
+          threadId={threadId}
+          mode={view.session.mode}
+          settled={!running && (view.session.status === "idle" || view.session.status === "failed")}
+          blocked={busy}
+          onBusy={forwardingChanged}
+          notes={notes}
+          refresh={load}
+        />
+      )}
       {notes.length === 0 ? null : (
         <ul aria-label="Notes for the running turn" className="native-harness-steering">
           {notes.map((note) => (
@@ -190,11 +229,9 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
         </form>
       ) : null}
       {unreached ? (
-        // The terminal sends a note the lead never reached as the next
-        // prompt; here the person can drop it instead.
         <div className="native-harness-panel__actions">
           <OctantButton
-            disabled={busy}
+            disabled={busy || forwarding}
             onClick={() => void discard()}
             size="sm"
             type="button"
