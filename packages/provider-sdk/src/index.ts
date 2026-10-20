@@ -10,3 +10,5 @@ export * from "./subscriptionOAuth";
 export * from "./childObservations";
 export * from "./imageGeneration";
 export * from "./imageGenerationConformance";
+export * from "./pagePublishing";
+export * from "./pagePublishingConformance";

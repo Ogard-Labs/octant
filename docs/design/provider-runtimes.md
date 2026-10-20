@@ -68,28 +68,42 @@ a refusal in fixed words. The approval prompt reads
 title redacted like a shell command, or
 `Artifact · list the pages on your Anthropic account`.
 
-The Canvas "Share to Claude" export destination runs the same tool outside a
-thread (`apps/server/src/providers/claudePagePublisher.ts`). It opens one query
-through the SDK port with `tools: ["Artifact"]` as the whole launch tool list,
-the `approval-gated` posture (the runtime's `default` permission mode, with the
-sandbox settings a thread of that posture carries, bound to the one-shot's
-folder), the `sonnet` alias the readiness probe already proves, and the account
-environment of the chosen Claude provider, which is the first enabled instance
-whose observation is `ready` with `artifactPublish: "supported"` and whose
-authentication is `subscription`. The `PreToolUse` hook answers `allow` only
-for an `Artifact` call whose action is `publish` (or absent) and whose
-`file_path`, resolved against the folder, is the approved file, and answers it
-with `updatedInput: { file_path, title }` so the runtime publishes the approved
-file under the approved title and nothing else the model asked for; every other
-call, including `list`, `read`, and any other tool, is denied, and the
-permission callback denies whatever reaches it. The prompt names the file and
-the title and asks for that one call. The outcome is read from the decoded
-stream: a `tool-results` entry for an `Artifact` call that carries an address
-is `published`; one that is an error is `refused`; a `result` that reports a
-permission denial is `refused`; a `result` without a publish, or a session that
-does not finish within 120 seconds, is `unavailable`; and an `unauthenticated`
-failure opening the query is `not-signed-in`. The folder and the page are
-removed when the session closes, on every path.
+Publishing a page outside a thread (the Canvas page export destination) goes
+through the provider seam's page-publishing operation (`pagePublishing` on the
+driver, `@octant/provider-sdk/page-publishing`; the rule is in
+[Architecture: providers](../architecture.md#providers)), never through a
+caller that opens the SDK port, the runtime registry, or the account
+environment itself. The Claude driver implements the operation
+(`apps/server/src/providers/claudePagePublishing.ts`) by running the same tool
+in a one-shot session. `availability` answers from what the driver already
+knows and starts nothing: `absent` for any instance but the driver's own,
+`not-signed-in` unless the registry's observation of that instance is `ready`
+with `artifactPublish: "supported"`, `refused` for an account signed in with an
+API key (pages live with a Claude sign-in, and the runtime would fail the
+publish after the session started), and otherwise `ready` with the instance's
+display name as the account. `publish` opens one query through the SDK port
+with `tools: ["Artifact"]` as the whole launch tool list, the `approval-gated`
+posture (the runtime's `default` permission mode, with the sandbox settings a
+thread of that posture carries, bound to the one-shot's folder), the `sonnet`
+alias the readiness probe already proves, and the account environment this
+driver's threads launch with. The folder is owner-only, created for that
+publish alone, and holds only the approved HTML written with mode 0600. The
+`PreToolUse` hook answers `allow` only for an `Artifact` call whose action is
+`publish` (or absent) and whose `file_path`, resolved against the folder, is
+the approved file, and answers it with `updatedInput: { file_path, title }` so
+the runtime publishes the approved file under the approved title and nothing
+else the model asked for; the first allowed publish is the only one, and every
+other call, including `list`, `read`, a second publish, and any other tool, is
+denied, and the permission callback denies whatever reaches it. The prompt
+names the file and the title and asks for that one call. The outcome is read
+from the decoded stream: a `tool-results` entry for an `Artifact` call that
+carries an address is `published` with that address; one that is an error is
+`refused`; a `result` that reports a permission denial is `refused`; a
+`result` without a publish, or a session that does not finish within 120
+seconds, is `unavailable`; and an `unauthenticated` failure opening the query
+is `not-signed-in`. The folder and the page are removed when the session
+closes, on every path. The operation passes the seam's page-publishing
+conformance suite.
 
 ## OpenCode
 
@@ -284,9 +298,16 @@ failing the check with their typed states.
   result), and `claudeEventMapper.test.ts` (the prompt and result wording).
   A publish against a real account has not been run from Octant; the result
   wording the decoder reads is taken from the runtime's own tool description.
-  The Canvas one-shot: `claudePagePublisher.test.ts` (the tool list, the
-  folder and sandbox, the pinned hook decision, and each outcome); a share
-  against a real account has not been run either.
+  The page-publishing operation: `claudePagePublishing.test.ts` (the tool
+  list, the folder and sandbox, the pinned hook decision, and each outcome)
+  and the seam's conformance suite run against the driver in
+  `claudeConformance.test.ts`; a share against a real account has not been
+  run either.
+- Page publishing seam: `packages/provider-sdk/src/pagePublishingConformance.test.ts`
+  (the suite a publishing driver must pass),
+  `packages/contracts/src/pagePublishing.test.ts` (the shapes), and
+  `apps/server/src/providers/providerPagePublishing.test.ts` (which instances
+  the host port lists and what it refuses).
 - OpenCode: `apps/server/src/providers/openCodeDriver.test.ts`,
   `openCodeClient.test.ts`, `openCodeEventMapper.test.ts`,
   `openCodeProcess.test.ts`, `openCodeConformance.test.ts`, and the

@@ -136,7 +136,11 @@ export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<CodeWiring, "folderBrowseService"> &
   Pick<
     ProvidersWiring,
-    "chatDataDirectory" | "claudePagePublisher" | "extensionApiService" | "imageJobService"
+    | "chatDataDirectory"
+    | "claudePagePublisher"
+    | "extensionApiService"
+    | "imageJobService"
+    | "providerPagePublishing"
   > &
   Pick<
     FoundationsWiring,
@@ -157,6 +161,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     options,
     persistence,
     projectService,
+    providerPagePublishing,
     providerRuntimeRegistry,
     shellService,
     threadOutsideContentMarks,
@@ -954,6 +959,10 @@ export function wireCanvas(deps: CanvasDependencies) {
     // host already manages, signed in as the person's own account; the
     // publisher holds the one-shot, this registration only offers it.
     claudePage: claudePagePublisher,
+    // The host ports a destination built from a factory receives: the same
+    // typed, capability-scoped ports a plugin's contribution would, and no
+    // provider adapter, runtime, or credential.
+    ports: { pagePublishing: providerPagePublishing },
   };
   // Destinations arrive through the export contribution and are offered
   // through the same activation policy a plugin's contribution passes. The

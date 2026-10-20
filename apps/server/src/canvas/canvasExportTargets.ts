@@ -1,5 +1,6 @@
 import type { CanvasId } from "@octant/contracts/canvas";
 import { canvasExportFolderRefusalText, judgeCanvasExportFolder } from "@octant/domain";
+import type { CanvasExportHostPorts } from "@octant/plugin-api/canvas-export";
 import {
   offerCanvasExportTargets,
   type CanvasExportActivationFacts,
@@ -50,6 +51,14 @@ export interface CanvasExportTargetRegistration {
    * host runs; a host with no enabled Claude provider lists no such target.
    */
   readonly claudePage?: ClaudePagePublisher;
+  /**
+   * The host ports a destination built from a `CanvasExportTargetFactory`
+   * receives. A destination that publishes through a provider asks
+   * `ports.pagePublishing` which enabled instances can and publishes there;
+   * it is built from these ports alone, as a plugin's contribution would be,
+   * and never from a provider adapter.
+   */
+  readonly ports: CanvasExportHostPorts;
 }
 
 export function canvasExportTargetBindings(

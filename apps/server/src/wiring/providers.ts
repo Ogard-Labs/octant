@@ -89,6 +89,7 @@ import {
   ReviewedModelManifest,
 } from "../providers/reviewedModelManifest";
 import { ProviderUsageLimitsService } from "../providers/providerUsageLimitsService";
+import { makeProviderPagePublishing } from "../providers/providerPagePublishing";
 import { unavailableLimitsReason } from "../providers/providerLimitsReporting";
 import { createProviderUsageLimitsRouteHandler } from "../providers/providerUsageLimitsRoutes";
 import { ProviderAccountPlanUsageStore } from "../providers/providerAccountPlanUsageStore";
@@ -1053,6 +1054,21 @@ export function wireProviders(deps: ProvidersDependencies) {
         return persistence.readProviderInstances();
       },
     };
+    // The host's page-publishing port, which an export destination asks
+    // instead of any provider adapter. It reads the probe's observation to
+    // say which enabled instances can publish and resolves each through the
+    // provider seam; nothing runs until an approved export calls it.
+    const providerPagePublishing = makeProviderPagePublishing({
+      instances: () => persistence.readProviderInstances(),
+      resolveDriver: (instance) => {
+        try {
+          return makeConfiguredProviderDriver(instance, configuredDriverOptions);
+        } catch {
+          return undefined;
+        }
+      },
+      observedState: (instanceId) => providerRuntimeRegistry.observedState(instanceId),
+    });
     // Where a harness lead goes when its own model stays down. It builds
     // drivers from the options above, whose lead hook asks it in turn; both
     // only run once a turn is under way.
@@ -1250,6 +1266,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       probeProviderForThreads,
       providerDataDirectory,
       providerOAuthRoutes,
+      providerPagePublishing,
       providerRoutes,
       providerService,
       providerUsageLimitsRoutes,

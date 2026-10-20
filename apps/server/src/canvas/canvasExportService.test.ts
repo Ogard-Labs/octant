@@ -115,6 +115,16 @@ function exportFolder(options?: { readonly chosen?: boolean }): {
       home,
       standingOutsideApproval: false,
       newTempId: randomUUID,
+      // No provider on this host publishes pages, so the port lists none.
+      ports: {
+        pagePublishing: {
+          publishers: () => [],
+          publish: async () => ({
+            kind: "refused",
+            message: "This provider cannot publish pages.",
+          }),
+        },
+      },
     },
   };
 }

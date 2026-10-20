@@ -40,6 +40,20 @@ import type {
   CanvasExportRenderedOutput,
   CanvasExportVisibility,
 } from "@octant/contracts/canvas-export";
+import type { PagePublishingPort } from "./pagePublishing";
+
+/**
+ * The host capabilities a destination may receive instead of host internals.
+ * Each is a typed, capability-scoped port: a destination that publishes
+ * through a provider asks `pagePublishing` which instances can and publishes
+ * there, and never reaches a provider adapter, a runtime, or a credential.
+ */
+export interface CanvasExportHostPorts {
+  readonly pagePublishing: PagePublishingPort;
+}
+
+/** How a destination that needs host ports is built: from the ports alone. */
+export type CanvasExportTargetFactory = (ports: CanvasExportHostPorts) => CanvasExportTarget;
 
 /**
  * What a destination plans to do with one document, described while the

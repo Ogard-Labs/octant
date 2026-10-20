@@ -45,9 +45,11 @@ The design rests on a small set of invariants that every package obeys:
   `Artifact` tool publishes a file as a private page on the person's own
   Anthropic account, and only after the person approves that publish, every
   time ([Security and authority](#security-and-authority), "Publishing a page
-  from a thread"). The Canvas "Share to Claude" export destination runs that
-  same tool once, on a rendered Canvas, after the person approves the export
-  card ([Canvas export](#extensions-and-skills)).
+  from a thread"). The Canvas page export destination ("Share to Claude" with
+  a Claude account) publishes a rendered Canvas through the provider seam's
+  page-publishing operation, which the Claude driver carries out with that
+  same tool, once, after the person approves the export card
+  ([Canvas export](#extensions-and-skills)).
 - **The server is the authority.** Every authority check (mode, Project,
   thread, provider, approval, remote principal, optional spend ceiling) runs in
   `apps/server` before a side effect. The renderer and mobile app render what
@@ -2517,6 +2519,35 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   or given an empty prompt, records unreachable providers and unexpected
   errors as sanitized failures, and returns only bytes the host's media-type
   check accepted.
+  **Page publishing** is the seam's other optional operation
+  (`@octant/provider-sdk/page-publishing`, `pagePublishing` on the driver):
+  publishing one HTML document as a private page on the person's own account
+  with that provider, outside any thread. A driver offers it only when its
+  observed capabilities also say `artifactPublish: "supported"`; the host
+  asks a driver that lacks either nothing and emulates a page for no
+  provider. The operation takes a file name, a title, and the HTML
+  (`@octant/contracts/page-publishing`), reads availability synchronously
+  from what the driver already knows (`ready` with the account the page goes
+  out under, `not-signed-in`, `refused` with the reason, or `absent`), and
+  answers a publish with a value, never a thrown expected failure:
+  `published` with the page's address, `refused` with a message,
+  `not-signed-in`, or `unavailable` with a message. Every string is bounded
+  and free of paths and secrets, and a published outcome decodes only with a
+  credential-free http(s) address, so nothing is presented as published that
+  was not. The host reaches the operation through its own page-publishing
+  port (`@octant/plugin-api/page-publishing`), which lists the enabled
+  instances whose driver implements the operation on a ready runtime that
+  declares the capability and refuses a publish to any other instance as a
+  value; a destination that publishes through a provider receives that port
+  and never a provider adapter. The seam's conformance harness
+  (`page-publishing-conformance`) proves a driver publishes nothing on an
+  instance with no signed-in account and says so, knows no instance it was
+  not configured with, names the account a ready instance publishes under,
+  reports a publish as published only with an address, and returns a
+  provider's refusal as a value. The Claude driver implements the operation
+  through the runtime's own `Artifact` tool and passes that harness
+  ([Provider runtimes](design/provider-runtimes.md#claude-code)); no other
+  driver does.
   The OpenAI, Gemini, Black Forest Labs, and Ideogram drivers ship in-tree but
   import only `@octant/contracts` and the image seam, as a third-party image
   plugin would; a test fails on any other import. They declare their hosts:
@@ -5424,37 +5455,45 @@ document does, and one that fails it is refused rather than published. The
 receipt is the gist URL and its id, journaled in `canvas.export@1` like any
 other destination's.
 
-The "Share to Claude" destination ships in-tree on the same port and publishes
-the rendered HTML as a private page on the person's own Anthropic account. It
-is the one export destination that runs a provider: the page is published by
-the Claude runtime this host already manages, through the same SDK port and
-account environment a Claude thread launches with, in a one-shot session that
-exists for that publish alone. The session is offered the runtime's `Artifact`
-tool and no other, so a request for a file, shell, web, or MCP tool is refused
-by the port's allowlist by name before either authority callback runs; it is
-bound to an owner-only folder only that publish names, which holds the rendered
-HTML and is removed with the session; its `PreToolUse` hook allows one
-`Artifact` publish of exactly that file and replaces the call's input with the
-approved file and title, so nothing the model added (another file, a page to
-overwrite, a pin, a capability) reaches the runtime, and denies every other
-call; and its permission callback denies whatever still reaches it. The
-destination is offered only on a host with an enabled Claude provider (omitted
-otherwise, as an uninstalled destination is), is `not-connected` until the
-probe has observed a signed-in account that declares `artifactPublish`, and is
-`refused` with the reason for an account signed in with an API key, which has
-no Claude sign-in to hold a page. The approval card names the account and says
-the page is private and that each share makes a new page: a one-shot session
-has never opened an earlier page, so it cannot update one, and a later share of
-the same Canvas creates another page rather than replacing the first. The
-person's approval of the card is the consent: the one-shot raises no second
-prompt, never runs from an agent turn, and is reached only through the export
-service's approved delivery. The runtime's own refusal of the publish (an
-account that cannot publish, for one), a denied call, a session that ends
-without publishing, and a session that does not finish in time are each
-reported as a refused or unavailable export, never as a page; the receipt is
-the page's address, read out of the tool result by the decoder as in a thread
-and journaled in `canvas.export@1` like any other destination's. The adapter's
-wire detail is in [Provider runtimes](design/provider-runtimes.md#claude-code).
+A destination that needs more than its own code is built from the host's
+typed, capability-scoped ports (`CanvasExportHostPorts` in
+`@octant/plugin-api/canvas-export`, through a `CanvasExportTargetFactory`) and
+from nothing else; an in-tree destination receives the same ports from the
+export registration, so it is granted nothing a plugin could not have. The one
+port today is page publishing (`@octant/plugin-api/page-publishing`): a
+destination that publishes a rendered Canvas as a private page on the person's
+own account asks it which enabled provider instances can publish pages and
+publishes there, and the host resolves each instance through the provider
+seam's page-publishing operation ([Providers](#providers)). The destination
+never learns which provider, runtime, or tool answers, names no vendor, and
+reaches no adapter, runtime registry, or account environment; a destination
+wired to one provider's adapter is a boundary violation, whatever it ships in.
+
+The page destination (`apps/server/src/canvas/pageExportTarget.ts`) ships
+in-tree on that port and is the one export destination that runs a provider.
+It is built from the registration's ports alone, exactly as a plugin's would
+be, and is listed only while the port lists a publisher, as a destination whose
+package is not installed is omitted rather than shown. It takes the first
+instance the port lists: its label is "Share to" and that instance's display
+name, so with a Claude account it reads "Share to Claude"; a listed instance
+with no signed-in account is `not-connected`, and one whose account cannot
+publish pages is `refused` with the reason the driver gave. The approval card
+names the account the page goes out under and says the page is private and
+that each share makes a new page: a later share of the same Canvas creates
+another page rather than replacing the first. The card offers no audience. The
+page is HTML only, and the rendered HTML passes the same path-and-secret filter
+every exported document does; one that fails it is refused rather than
+published. The person's approval of the card is the consent: the destination
+never runs from an agent turn, raises no second prompt, and is reached only
+through the export service's approved delivery. A `refused`, `not-signed-in`,
+or `unavailable` outcome from the port is a refused export, never a page; the
+receipt is the page's address, journaled in `canvas.export@1` like any other
+destination's. How the Claude driver carries out the operation — one session
+offered the runtime's `Artifact` tool and no other, bound to an owner-only
+folder holding only the approved HTML, allowed exactly one publish of exactly
+that file — is the adapter's own business, stated under
+[Security and authority](#security-and-authority) and in
+[Provider runtimes](design/provider-runtimes.md#claude-code).
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured
@@ -5523,17 +5562,18 @@ Plugin projections are namespaced by package id and remain rebuildable.
 These are the current extraction boundaries; eligibility is not a claim that the
 feature is already an independently packaged plugin:
 
-| Surface                                                               | Boundary to preserve                                                                                                           |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Thread boards                                                         | Separable projection and UI; Work/Code status policy stays host-owned and Chat has no board                                    |
-| GitHub and Linear                                                     | Integration ports and contributed views; no direct host-service wiring                                                         |
-| Canvas and preview viewers                                            | Scoped artifact contracts, renderer modules, and registered viewers                                                            |
-| Zen, backgrounds, theme presets                                       | Appearance contributions and their scoped state                                                                                |
-| Usage, diagnostics, Navigator, automations UI                         | Scoped reads/actions and independent presentation; underlying authority stays in the host                                      |
-| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench | Only presentation and optional adapters are extraction candidates; core capability, lifecycle, and security remain app-managed |
-| Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
-| Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
-| Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                          |
+| Surface                                                                      | Boundary to preserve                                                                                                                                                            |
+| ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Thread boards                                                                | Separable projection and UI; Work/Code status policy stays host-owned and Chat has no board                                                                                     |
+| GitHub and Linear                                                            | Integration ports and contributed views; no direct host-service wiring                                                                                                          |
+| Canvas and preview viewers                                                   | Scoped artifact contracts, renderer modules, and registered viewers                                                                                                             |
+| Zen, backgrounds, theme presets                                              | Appearance contributions and their scoped state                                                                                                                                 |
+| Usage, diagnostics, Navigator, automations UI                                | Scoped reads/actions and independent presentation; underlying authority stays in the host                                                                                       |
+| Browser/computer use, agent hierarchy, remote/mobile, Apple workbench        | Only presentation and optional adapters are extraction candidates; core capability, lifecycle, and security remain app-managed                                                  |
+| Marketplace and plugin registry                                              | Stay in the host because they admit and activate other components                                                                                                               |
+| Provider drivers                                                             | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned                                                            |
+| Image adapters (OpenAI, Gemini, BFL, Ideogram)                               | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                                                                           |
+| Page publishing (a Canvas export destination that publishes with a provider) | A driver implements the provider-sdk page-publishing operation; the destination receives only the plugin-api page-publishing port; offer, approval, and journal stay host-owned |
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -5730,10 +5770,11 @@ mechanisms are:
   Anthropic's service under the person's own account, Octant holds no copy,
   no credential, and no record of the page beyond the address the thread
   shows or the export journal keeps. The one other publisher in the host is
-  the Canvas "Share to Claude" export destination, which runs this same tool
-  in a one-shot session on a rendered Canvas after the person approves the
-  export card; its rules are under [Canvas export](#extensions-and-skills),
-  and nothing else in the host publishes. The driver offers the tool
+  the Canvas page export destination, which publishes a rendered Canvas
+  through the provider seam's page-publishing operation after the person
+  approves the export card; its rules are under
+  [Canvas export](#extensions-and-skills), and nothing else in the host
+  publishes. The driver offers the tool
   in Work and Code only (`claudeExecutionOptions`): Chat has no Project
   files, Plan is read-only and publishing has no read-only form, and a
   session acquired without a mode is not offered it, so a Plan or Chat call
@@ -5763,7 +5804,16 @@ mechanisms are:
   runtime's reason reaches the person through the model's reply, so nothing
   is ever presented as published that was not. The driver declares
   `artifactPublish: "supported"`; no other driver names the capability, and
-  the host never emulates it.
+  the host never emulates it. The one way the host publishes a page outside
+  a thread is the provider seam's page-publishing operation, which a driver
+  declaring this capability also implements and which a Canvas export
+  destination reaches only through the host's page-publishing port
+  ([Providers](#providers), [Canvas export](#extensions-and-skills)). The
+  Claude driver's implementation runs this same tool in a one-shot session
+  offered no other tool, bound to an owner-only folder that holds only the
+  approved HTML, with a hook that allows one publish of exactly that file and
+  denies everything else; the wire detail is in
+  [Provider runtimes](design/provider-runtimes.md#claude-code).
 - **Pending requests across modes.** `GET /api/pending-requests` returns every
   approval, question, and turn decision (next item) the calling window can
   answer, oldest waiting first,
