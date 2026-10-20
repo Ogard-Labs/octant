@@ -71,6 +71,7 @@ import {
   CONFINED_CLAUDE_EXECUTION_POLICIES,
   type ClaudeProcessPort,
 } from "./claudeProcess";
+import { makeClaudePagePublishing } from "./claudePagePublishing";
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -322,6 +323,8 @@ type ClaudeEnvironmentFactory = (
 
 export interface ClaudeDriverOptions {
   readonly instanceId: ProviderInstanceId;
+  /** The instance's display name, which a page publish names as the account it goes out under. */
+  readonly displayName: string;
   readonly binaryPath: string;
   readonly authentication: ClaudeAuthentication;
   /** Claude-owned directory for this account. */
@@ -1056,6 +1059,20 @@ export function makeClaudeDriver(options: ClaudeDriverOptions): ProviderDriver {
     conversationOwnership: "provider",
     probe: makeProbe(options, environmentFactory, factories.clock),
     contextFacts: makeClaudeContextFacts(options, environmentFactory, factories.clock),
+    // The seam's page-publishing operation, carried out with the runtime's own
+    // Artifact tool in a one-shot session under this instance's account.
+    pagePublishing: makeClaudePagePublishing({
+      instanceId: options.instanceId,
+      displayName: options.displayName,
+      binaryPath: options.binaryPath,
+      authentication: options.authentication,
+      ...(options.configDirectory === undefined
+        ? {}
+        : { configDirectory: options.configDirectory }),
+      sdk: options.sdk,
+      runtimeRegistry: options.runtimeRegistry,
+      makeEnvironmentScope: environmentFactory,
+    }),
     acquire: ({ instanceId, projectRoot, mode }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(

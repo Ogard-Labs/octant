@@ -24,10 +24,14 @@ import {
 import {
   EventActor,
   ReplayCursor,
+  decodeProviderInstanceId,
   decodeUtcTimestamp,
   type EventEnvelope,
+  type PagePublishOutcome,
+  type PagePublishRequest,
 } from "@octant/contracts";
 import type { CanvasExportTarget } from "@octant/plugin-api/canvas-export";
+import type { PagePublisherOffer } from "@octant/plugin-api/page-publishing";
 import type { CanvasExportActivationFacts } from "@octant/plugin-host/canvas-export-contributions";
 import type { ExtensionEffectiveState } from "@octant/contracts/extensions";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
@@ -47,15 +51,10 @@ import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
 } from "./canvasExportTargets";
-import { CLAUDE_PAGE_EXPORT_TARGET_ID } from "./claudePageExportTarget";
 import { FOLDER_EXPORT_TARGET_ID } from "./folderExportTarget";
 import { GIST_EXPORT_TARGET_ID, type GistExportAvailability } from "./gistExportTarget";
+import { PAGE_EXPORT_TARGET_ID } from "./pageExportTarget";
 import type { GistCreationRequest, GistCreationResult } from "../github/gistCreationPort";
-import type {
-  ClaudePageAvailability,
-  ClaudePagePublishOutcome,
-  ClaudePagePublishRequest,
-} from "../providers/claudePagePublisher";
 
 const directories: string[] = [];
 const start = Date.parse("2026-08-01T21:00:00.000Z");
@@ -179,31 +178,38 @@ function gistRegistration(availability: GistExportAvailability): {
   };
 }
 
+const pagePublisherInstanceId = decodeProviderInstanceId("00000000-0000-4000-8000-00000000000a");
+
 /**
- * The folder registration plus a fake Claude page publisher, so a share to the
- * person's Anthropic account runs through the same service and journal a real
- * one would, without a runtime.
+ * The folder registration plus a page-publishing port that lists one account
+ * (or none), so a share to the person's own account runs through the same
+ * service and journal a real one would, without a provider.
  */
-function claudePageRegistration(
-  availability: ClaudePageAvailability,
-  outcome: ClaudePagePublishOutcome = {
+function pageRegistration(
+  availability: PagePublisherOffer["availability"] | { readonly kind: "absent" },
+  outcome: PagePublishOutcome = {
     kind: "published",
-    url: "https://claude.ai/artifact/abc-123",
+    address: "https://pages.example/p/abc-123",
   },
 ): {
   readonly registration: CanvasExportTargetRegistration;
-  readonly requests: ClaudePagePublishRequest[];
+  readonly requests: PagePublishRequest[];
 } {
-  const requests: ClaudePagePublishRequest[] = [];
+  const requests: PagePublishRequest[] = [];
   return {
     requests,
     registration: {
       ...exportFolder().registration,
-      claudePage: {
-        availability: () => availability,
-        publish: async (request) => {
-          requests.push(request);
-          return outcome;
+      ports: {
+        pagePublishing: {
+          publishers: () =>
+            availability.kind === "absent"
+              ? []
+              : [{ instanceId: pagePublisherInstanceId, label: "Work account", availability }],
+          publish: async (_instanceId, request) => {
+            requests.push(request);
+            return outcome;
+          },
         },
       },
     },
@@ -936,40 +942,40 @@ describe("canvas export service", () => {
     connection.close();
   });
 
-  it("offers Share to Claude as not connected until a Claude account is signed in", () => {
-    const { registration } = claudePageRegistration({ kind: "not-signed-in" });
+  it("offers the page destination under the listed account's name, as not connected until it is signed in", () => {
+    const { registration } = pageRegistration({ kind: "not-signed-in" });
     const { service, connection } = harness(() =>
       canvasExportTargetBindings(registration, canvasId),
     );
 
     const offer = service
       .offers(canvasId)
-      ?.targets.find((candidate) => String(candidate.targetId) === CLAUDE_PAGE_EXPORT_TARGET_ID);
+      ?.targets.find((candidate) => String(candidate.targetId) === PAGE_EXPORT_TARGET_ID);
 
     expect(offer?.status).toBe("not-connected");
-    expect(offer?.label).toBe("Share to Claude");
+    expect(offer?.label).toBe("Share to Work account");
     expect(offer?.formats).toEqual(["html"]);
     connection.close();
   });
 
-  it("does not list Share to Claude on a host with no Claude provider", () => {
-    const { registration } = claudePageRegistration({ kind: "absent" });
+  it("does not list the page destination when no provider can publish pages", () => {
+    const { registration } = pageRegistration({ kind: "absent" });
     const { service, connection } = harness(() =>
       canvasExportTargetBindings(registration, canvasId),
     );
 
     const offer = service
       .offers(canvasId)
-      ?.targets.find((candidate) => String(candidate.targetId) === CLAUDE_PAGE_EXPORT_TARGET_ID);
+      ?.targets.find((candidate) => String(candidate.targetId) === PAGE_EXPORT_TARGET_ID);
 
     expect(offer).toBeUndefined();
     connection.close();
   });
 
-  it("offers Share to Claude as refused, with the reason, when the account cannot publish pages", () => {
-    const { registration } = claudePageRegistration({
+  it("offers the page destination as refused, with the reason, when the account cannot publish pages", () => {
+    const { registration } = pageRegistration({
       kind: "refused",
-      reason: "Claude is signed in with an API key, which cannot publish pages.",
+      reason: "The account is signed in with an API key, which cannot publish pages.",
     });
     const { service, connection } = harness(() =>
       canvasExportTargetBindings(registration, canvasId),
@@ -977,27 +983,30 @@ describe("canvas export service", () => {
 
     const offer = service
       .offers(canvasId)
-      ?.targets.find((candidate) => String(candidate.targetId) === CLAUDE_PAGE_EXPORT_TARGET_ID);
+      ?.targets.find((candidate) => String(candidate.targetId) === PAGE_EXPORT_TARGET_ID);
 
     expect(offer?.status).toBe("refused");
     expect(offer?.message).toContain("API key");
     connection.close();
   });
 
-  it("publishes the approved HTML to Claude only after approval, and journals the page's link", async () => {
-    const { registration, requests } = claudePageRegistration({ kind: "ready", account: "Claude" });
+  it("publishes the approved HTML as a page only after approval, and journals the page's link", async () => {
+    const { registration, requests } = pageRegistration({
+      kind: "ready",
+      account: "Work account",
+    });
     const { service, eventStore, connection } = harness(() =>
       canvasExportTargetBindings(registration, canvasId),
     );
 
-    const prepared = service.prepare(prepareRequest(CLAUDE_PAGE_EXPORT_TARGET_ID, "html"), true);
+    const prepared = service.prepare(prepareRequest(PAGE_EXPORT_TARGET_ID, "html"), true);
     expect(prepared.kind).toBe("approval");
     if (prepared.kind !== "approval") {
       connection.close();
       return;
     }
-    expect(prepared.card.destinationLabel).toBe("Share to Claude");
-    expect(prepared.card.destinationAccount).toBe("Claude");
+    expect(prepared.card.destinationLabel).toBe("Share to Work account");
+    expect(prepared.card.destinationAccount).toBe("Work account");
     expect(prepared.card.destinationNote).toContain("private page");
     // The page has no address until it exists, and no audience to choose: it
     // is private to the account.
@@ -1014,23 +1023,26 @@ describe("canvas export service", () => {
     });
 
     expect(exported.kind).toBe("exported");
-    // The runtime is handed the very HTML the person saw on the card.
+    // The provider is handed the very HTML the person saw on the card.
     expect(requests).toEqual([
       { fileName: "Launch plan.html", title: "Launch plan", html: prepared.card.payload },
     ]);
     expect(eventStore.replay()[0]?.outcome).toEqual({
       kind: "receipt",
-      receipt: { kind: "link", href: "https://claude.ai/artifact/abc-123" },
+      receipt: { kind: "link", href: "https://pages.example/p/abc-123" },
     });
     connection.close();
   });
 
-  it("publishes nothing to Claude when the person declines", async () => {
-    const { registration, requests } = claudePageRegistration({ kind: "ready", account: "Claude" });
+  it("publishes no page when the person declines", async () => {
+    const { registration, requests } = pageRegistration({
+      kind: "ready",
+      account: "Work account",
+    });
     const { service, eventStore, connection } = harness(() =>
       canvasExportTargetBindings(registration, canvasId),
     );
-    const prepared = service.prepare(prepareRequest(CLAUDE_PAGE_EXPORT_TARGET_ID, "html"), true);
+    const prepared = service.prepare(prepareRequest(PAGE_EXPORT_TARGET_ID, "html"), true);
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -1050,15 +1062,15 @@ describe("canvas export service", () => {
     connection.close();
   });
 
-  it("records a runtime refusal as a refused export, never as a published page", async () => {
-    const { registration } = claudePageRegistration(
-      { kind: "ready", account: "Claude" },
-      { kind: "refused", message: "The Claude runtime refused to publish the page." },
+  it("records a provider refusal as a refused export, never as a published page", async () => {
+    const { registration } = pageRegistration(
+      { kind: "ready", account: "Work account" },
+      { kind: "refused", message: "The provider refused to publish the page." },
     );
     const { service, eventStore, connection } = harness(() =>
       canvasExportTargetBindings(registration, canvasId),
     );
-    const prepared = service.prepare(prepareRequest(CLAUDE_PAGE_EXPORT_TARGET_ID, "html"), true);
+    const prepared = service.prepare(prepareRequest(PAGE_EXPORT_TARGET_ID, "html"), true);
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -1078,7 +1090,7 @@ describe("canvas export service", () => {
         outcome: {
           kind: "refused",
           code: "refused",
-          message: "The Claude runtime refused to publish the page.",
+          message: "The provider refused to publish the page.",
         },
       },
     });

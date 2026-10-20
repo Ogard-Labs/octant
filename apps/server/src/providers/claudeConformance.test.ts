@@ -1,15 +1,19 @@
+import { readdirSync } from "node:fs";
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
   type ProviderFailure,
+  type ProviderInstanceId,
   type ProviderModelId,
 } from "@octant/contracts";
+import type { ProviderDriver, ProviderPagePublishingSource } from "@octant/provider-sdk";
 import {
   runProviderConformance,
   runSessionCompactionConformance,
 } from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
-import { Effect, PubSub, Stream } from "effect";
+import { runPagePublishingConformance } from "@octant/provider-sdk/page-publishing-conformance";
+import { Effect, PubSub, Queue, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import type {
@@ -38,12 +42,21 @@ const staleSessionId = decodeProviderSessionId("80000000-0000-4000-8000-00000000
 const modelId = "claude-sonnet" as ProviderModelId;
 const projectRoot = "/tmp/octant-claude-conformance";
 const occurredAt = "2026-07-17T00:00:00.000Z";
+const signedInPageInstanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000726");
+const signedOutPageInstanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000727");
+const pageRequest = { fileName: "launch-plan.html", title: "Launch plan", html: "<p>Plan</p>" };
+const refusedPageRequest = { fileName: "too-big.html", title: "Too big", html: "<p>Nope</p>" };
+const publishedPageAddress = "https://claude.ai/artifact/conformance";
 
 function conformanceDriver(
   makeQuery: (input: ClaudeOpenQueryInput, sdkSessionId: string) => ConformanceQuery = (
     input,
     sdkSessionId,
   ) => new ConformanceQuery(input, sdkSessionId),
+  account: { readonly instanceId: ProviderInstanceId; readonly pagesReady: boolean } = {
+    instanceId,
+    pagesReady: false,
+  },
 ) {
   const opened: ConformanceQuery[] = [];
   const histories = new Map<string, ClaudeSessionMetadata>();
@@ -87,8 +100,43 @@ function conformanceDriver(
     },
   };
   const registry = new ProviderRuntimeRegistry();
+  // Page publishing answers from the probe's observation, so the fixture's
+  // signed-in account carries one that declares the capability; the
+  // signed-out account has none, as an account the probe never saw ready.
+  if (account.pagesReady) {
+    registry.setObservedState({
+      instanceId: account.instanceId,
+      readiness: "ready",
+      processState: "stopped",
+      detectedVersion: "2.1.211",
+      models: [],
+      capabilities: {
+        streaming: "supported",
+        resume: "supported",
+        interruption: "supported",
+        approvals: "supported",
+        userQuestions: "supported",
+        reasoning: "supported",
+        usage: "supported",
+        toolActivity: "supported",
+        fileChanges: "supported",
+        diffs: "supported",
+        taskProgress: "supported",
+        nativeChildAgents: "unsupported",
+        harnessAutoReview: "supported",
+        nativeAttachments: "unsupported",
+        nativeWebResearch: "unsupported",
+        appManagedTools: "supported",
+        citations: "unsupported",
+        artifactPublish: "supported",
+      },
+      lastSuccessfulProbeAt: occurredAt,
+      observedAt: occurredAt,
+    });
+  }
   const driver = makeClaudeDriver({
-    instanceId,
+    instanceId: account.instanceId,
+    displayName: "Claude",
     binaryPath: "/opt/homebrew/bin/claude",
     authentication: "subscription",
     process: {
@@ -238,7 +286,56 @@ describe("Claude provider conformance", () => {
     });
     expect(chatEvidence).toMatchObject({ nativeAttachmentHonest: true, released: true });
   });
+
+  it("holds Claude to its page-publishing claim", async () => {
+    // A Claude driver holds one account, so the suite's signed-in and
+    // signed-out instances are two drivers; each answers through the seam for
+    // its own instance and reports every other as absent.
+    const signedIn = conformanceDriver(
+      (input, sdkSessionId) => new PublishingQuery(input, sdkSessionId),
+      { instanceId: signedInPageInstanceId, pagesReady: true },
+    );
+    const signedOut = conformanceDriver(
+      (input, sdkSessionId) => new PublishingQuery(input, sdkSessionId),
+      { instanceId: signedOutPageInstanceId, pagesReady: false },
+    );
+    const sourceFor = (requested: ProviderInstanceId) =>
+      pagePublishingOf(
+        String(requested) === String(signedOutPageInstanceId) ? signedOut.driver : signedIn.driver,
+      );
+    const source: ProviderPagePublishingSource = {
+      availability: (input) => sourceFor(input.instanceId).availability(input),
+      publish: (input) => sourceFor(input.instanceId).publish(input),
+    };
+
+    await expect(
+      runPagePublishingConformance({
+        source,
+        signedInInstanceId: signedInPageInstanceId,
+        signedOutInstanceId: signedOutPageInstanceId,
+        request: pageRequest,
+        refusedRequest: refusedPageRequest,
+      }),
+    ).resolves.toEqual({
+      signedOutPublishesNothing: true,
+      unknownInstanceAbsent: true,
+      readyNamesAccount: true,
+      publishedNamesAddress: true,
+      refusalIsValue: true,
+    });
+    // Only the signed-in account ran a session, one per publish, and each closed.
+    expect(signedOut.opened).toHaveLength(0);
+    expect(signedIn.opened).toHaveLength(2);
+    expect(signedIn.opened.every((query) => query.closed)).toBe(true);
+  });
 });
+
+function pagePublishingOf(driver: ProviderDriver): ProviderPagePublishingSource {
+  if (driver.pagePublishing === undefined) {
+    throw new Error("The Claude driver offers no page publishing.");
+  }
+  return driver.pagePublishing;
+}
 
 class ConformanceQuery implements ClaudeQueryPort {
   readonly #pubsub = Effect.runSync(PubSub.unbounded<ClaudeDecodedMessage>());
@@ -464,6 +561,60 @@ function usage() {
     cacheCreationInputTokens: 0,
     cacheReadInputTokens: 0,
   };
+}
+
+/**
+ * A runtime asked to publish a page: it publishes the one file in its folder
+ * with the Artifact tool, or fails that call when the file is the page the
+ * fixture says the provider refuses.
+ */
+class PublishingQuery extends ConformanceQuery {
+  // A queue, not the parent's pub-sub: the one-shot subscribes only after its
+  // prompt is sent, and a pub-sub drops what it published before then.
+  readonly #queue = Effect.runSync(Queue.unbounded<ClaudeDecodedMessage>());
+  override readonly messages: Stream.Stream<ClaudeDecodedMessage, ProviderFailure> =
+    Stream.fromQueue(this.#queue);
+
+  override readonly send: ClaudeQueryPort["send"] = () =>
+    Effect.promise(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const [fileName] = readdirSync(this.input.projectRoot);
+      const refusedPage = fileName === refusedPageRequest.fileName;
+      const offer = (message: ClaudeDecodedMessage) =>
+        Effect.runPromise(Queue.offer(this.#queue, message));
+      await offer({
+        kind: "assistant",
+        sessionId: this.sdkSessionId,
+        messageId: "message-1",
+        content: [
+          {
+            kind: "tool-use",
+            toolUseId: "publish-1",
+            toolName: "Artifact",
+            input: { file_path: `${this.input.projectRoot}/${fileName ?? ""}` },
+          },
+        ],
+        usage: usage(),
+      });
+      await offer({
+        kind: "tool-results",
+        sessionId: this.sdkSessionId,
+        results: [
+          refusedPage
+            ? { toolUseId: "publish-1", isError: true }
+            : { toolUseId: "publish-1", isError: false, artifactUrl: publishedPageAddress },
+        ],
+      });
+      await offer({
+        kind: "result",
+        sessionId: this.sdkSessionId,
+        outcome: "success",
+        subtype: "success",
+        stopReason: "end_turn",
+        usage: usage(),
+        permissionDenials: [],
+      });
+    });
 }
 
 /**

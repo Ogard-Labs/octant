@@ -56,7 +56,6 @@ import { subscriptionOAuthHostFromBroker } from "../providers/oauth/subscription
 import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
 import { type ClaudeAgentSdkPort, makeClaudeAgentSdkPort } from "../providers/claudeAgentSdkPort";
 import type { ClaudeResumeIdentityPort } from "../providers/claudeDriver";
-import { makeClaudePagePublisher } from "../providers/claudePagePublisher";
 import { type ClaudeProcessPort, makeClaudeProcessLive } from "../providers/claudeProcess";
 import { ClaudeResumeIdentityJournal } from "../providers/claudeResumeIdentityJournal";
 import { ClaudeResumeIdentityStore } from "../providers/claudeResumeIdentityStore";
@@ -759,15 +758,6 @@ export function wireProviders(deps: ProvidersDependencies) {
       });
     const claudeSdk =
       options.claudeSdk ?? makeClaudeAgentSdkPort({ spawnClaudeCodeProcess: claudeProcess.spawn });
-    // The Canvas "Share to Claude" destination publishes through the same SDK
-    // port and account environment a Claude thread launches with. It reads the
-    // probe's observation to say whether an account can publish; it never
-    // probes or launches on its own until an approved export calls it.
-    const claudePagePublisher = makeClaudePagePublisher({
-      instances: () => persistence.readProviderInstances(),
-      runtimeRegistry: providerRuntimeRegistry,
-      sdk: claudeSdk,
-    });
     const claudeResumeIdentityStore =
       options.claudeResumeIdentityStore ??
       new ClaudeResumeIdentityStore({
@@ -1243,7 +1233,6 @@ export function wireProviders(deps: ProvidersDependencies) {
       agentPluginMcpSessionManager,
       chatAttachmentStore,
       chatDataDirectory,
-      claudePagePublisher,
       claudeResumeIdentityStore,
       codeThreadDrivers,
       configuredDriverOptions,

@@ -1,6 +1,7 @@
 import type { CanvasId } from "@octant/contracts/canvas";
 import { canvasExportFolderRefusalText, judgeCanvasExportFolder } from "@octant/domain";
 import type { CanvasExportHostPorts } from "@octant/plugin-api/canvas-export";
+import type { PagePublisherOffer } from "@octant/plugin-api/page-publishing";
 import {
   offerCanvasExportTargets,
   type CanvasExportActivationFacts,
@@ -8,14 +9,13 @@ import {
 import type { CanvasExportFilePort } from "./canvasExportFilePort";
 import type { CanvasExportTargetBinding } from "./canvasExportService";
 import { isInsideHomeDirectory } from "./artifactMirrorFilePort";
-import { createClaudePageExportTarget } from "./claudePageExportTarget";
 import { createFolderExportTarget, type FolderExportAvailability } from "./folderExportTarget";
 import {
   createGistExportTarget,
   type GistExportAvailability,
   type GistExportTargetDependencies,
 } from "./gistExportTarget";
-import type { ClaudePageAvailability, ClaudePagePublisher } from "../providers/claudePagePublisher";
+import { createPageExportTarget, pagePublisher } from "./pageExportTarget";
 
 /**
  * In-tree export destinations.
@@ -44,13 +44,6 @@ export interface CanvasExportTargetRegistration {
    * connected can change while the host runs.
    */
   readonly gist?: GistExportTargetDependencies;
-  /**
-   * The private-page destination on the person's Anthropic account, published
-   * by the Claude runtime this host manages. Its availability is read per
-   * listing, because which Claude account is signed in can change while the
-   * host runs; a host with no enabled Claude provider lists no such target.
-   */
-  readonly claudePage?: ClaudePagePublisher;
   /**
    * The host ports a destination built from a `CanvasExportTargetFactory`
    * receives. A destination that publishes through a provider asks
@@ -83,12 +76,14 @@ export function canvasExportTargetBindings(
       target: createGistExportTarget(gist),
     });
   }
-  const claudePage = registration.claudePage;
-  const claudePageAvailability = claudePage?.availability();
-  if (claudePage !== undefined && claudePageAvailability?.kind !== "absent") {
+  // The page destination is listed only while some enabled provider can
+  // publish pages, read per listing because which account is signed in can
+  // change while the host runs; a host with none lists no such target.
+  const publisher = pagePublisher(registration.ports);
+  if (publisher !== undefined) {
     bindings.push({
-      facts: claudePageActivationFacts(claudePageAvailability),
-      target: createClaudePageExportTarget(claudePage),
+      facts: pageActivationFacts(publisher.availability),
+      target: createPageExportTarget(registration.ports),
     });
   }
   return bindings;
@@ -165,23 +160,23 @@ export function gistActivationFacts(
 }
 
 /**
- * The Claude page destination's activation facts. A Claude provider with no
- * signed-in account is `connected: false`, offered honestly as not-connected,
- * and an account that cannot publish pages is a standing refusal. A host with
- * no Claude provider never reaches here: that target is omitted, as a
- * destination whose package is not installed is.
+ * The page destination's activation facts. A listed account with no sign-in
+ * is `connected: false`, offered honestly as not-connected, and an account
+ * that cannot publish pages is a standing refusal with the reason the driver
+ * gave. A host whose port lists no publisher never reaches here: that target
+ * is omitted, as a destination whose package is not installed is.
  */
-export function claudePageActivationFacts(
-  availability: Exclude<ClaudePageAvailability, { readonly kind: "absent" }> | undefined,
+export function pageActivationFacts(
+  availability: PagePublisherOffer["availability"],
 ): CanvasExportActivationFacts {
   const facts: CanvasExportActivationFacts = {
     installed: true,
     trusted: true,
     desiredEnabled: true,
     effectiveState: { kind: "effective" },
-    connected: availability !== undefined && availability.kind !== "not-signed-in",
+    connected: availability.kind !== "not-signed-in",
   };
-  return availability?.kind === "refused"
+  return availability.kind === "refused"
     ? { ...facts, standingRefusal: availability.reason }
     : facts;
 }

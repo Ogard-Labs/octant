@@ -1,10 +1,9 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
-  decodeProviderInstance,
   decodeProviderInstanceId,
+  type ClaudeAuthentication,
   type ProviderFailure,
-  type ProviderInstance,
 } from "@octant/contracts";
 import { Effect, PubSub, Scope, Stream } from "effect";
 import { describe, expect, it } from "vitest";
@@ -20,43 +19,18 @@ import {
   CLAUDE_PAGE_API_KEY_REFUSAL,
   claudePagePublishDecision,
   claudePagePublishOnce,
-  makeClaudePagePublisher,
-} from "./claudePagePublisher";
+  makeClaudePagePublishing,
+} from "./claudePagePublishing";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000901");
-const keyedInstanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000902");
+const otherInstanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000902");
 const observedAt = "2026-10-20T12:00:00.000Z";
 const pageUrl = "https://claude.ai/artifact/abc-123";
 
-function claudeInstance(
-  input: {
-    readonly id?: ProviderInstance["id"];
-    readonly apiKey?: boolean;
-    readonly enabled?: boolean;
-  } = {},
-): ProviderInstance {
-  return decodeProviderInstance({
-    id: input.id ?? instanceId,
-    displayName: input.apiKey === true ? "Claude (key)" : "Claude",
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: 1,
-    createdAt: observedAt,
-    updatedAt: observedAt,
-    driverKind: "claude",
-    configuration: {
-      kind: "claude-agent-sdk",
-      binaryPath: "/opt/homebrew/bin/claude",
-      authentication: input.apiKey === true ? "api-key" : "subscription",
-      ...(input.apiKey === true ? { configDirectory: "/accounts/claude-key" } : {}),
-    },
-  });
-}
-
-function ready(registry: ProviderRuntimeRegistry, id: ProviderInstance["id"]) {
+function ready(registry: ProviderRuntimeRegistry) {
   registry.setObservedState({
-    instanceId: id,
+    instanceId,
     readiness: "ready",
     processState: "stopped",
     detectedVersion: "2.1.304",
@@ -170,22 +144,24 @@ const finished = (outcome: "success" | "error", denials = 0): ClaudeDecodedMessa
 });
 
 function harness(input: {
-  readonly instances?: ReadonlyArray<ProviderInstance>;
+  readonly authentication?: ClaudeAuthentication;
   readonly signedIn?: boolean;
   readonly onSend?: (query: FakeQuery) => Promise<void>;
   readonly openFailure?: ProviderFailure;
   readonly timeoutMs?: number;
 }) {
   const registry = new ProviderRuntimeRegistry();
-  const instances = input.instances ?? [claudeInstance()];
-  if (input.signedIn !== false) {
-    for (const instance of instances) if (instance.enabled) ready(registry, instance.id);
-  }
+  if (input.signedIn !== false) ready(registry);
+  const authentication = input.authentication ?? "subscription";
   const opens: ClaudeOpenQueryInput[] = [];
   const queries: FakeQuery[] = [];
   const releasedEnvironments: string[] = [];
-  const publisher = makeClaudePagePublisher({
-    instances: () => instances,
+  const source = makeClaudePagePublishing({
+    instanceId,
+    displayName: "Claude",
+    binaryPath: "/opt/homebrew/bin/claude",
+    authentication,
+    ...(authentication === "api-key" ? { configDirectory: "/accounts/claude-key" } : {}),
     runtimeRegistry: registry,
     sdk: {
       openQuery: (openInput) =>
@@ -201,28 +177,27 @@ function harness(input: {
               (query) => query.close(),
             ),
     },
-    makeEnvironmentScope: (authentication, options) =>
+    makeEnvironmentScope: (mode, options) =>
       Effect.acquireRelease(
         Effect.succeed({
           environment: {
             PATH: "/usr/bin",
-            CLAUDE_CONFIG_DIR: options?.configDirectory ?? `/provider-native/${authentication}`,
+            CLAUDE_CONFIG_DIR: options?.configDirectory ?? `/provider-native/${mode}`,
           },
         } satisfies ClaudeEnvironmentScope),
         () =>
           Effect.sync(() => {
-            releasedEnvironments.push(authentication);
+            releasedEnvironments.push(mode);
           }),
       ) as Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope>,
-    homeDirectory: "/Users/person",
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
   });
-  const publish = async (request: Parameters<typeof publisher.publish>[0]) => {
-    const outcome = await publisher.publish(request);
+  const publish = async (page: typeof request, target = instanceId) => {
+    const outcome = await source.publish({ instanceId: target, ...page });
     for (const query of queries) if (query.error !== undefined) throw query.error;
     return outcome;
   };
-  return { publisher, publish, opens, queries, releasedEnvironments };
+  return { source, publish, opens, queries, releasedEnvironments };
 }
 
 const request = {
@@ -252,7 +227,7 @@ describe("publishing a Canvas page through the Claude runtime", () => {
 
     const outcome = await publish(request);
 
-    expect(outcome).toEqual({ kind: "published", url: pageUrl });
+    expect(outcome).toEqual({ kind: "published", address: pageUrl });
     expect(opens).toHaveLength(1);
     const open = opens[0];
     if (open === undefined) throw new Error("Expected one session.");
@@ -267,7 +242,6 @@ describe("publishing a Canvas page through the Claude runtime", () => {
     // The session's root is a folder only this publish names, and its sandbox
     // reads and writes nothing outside it.
     expect(folder).toBeDefined();
-    expect(folder).not.toBe("/Users/person");
     expect(open.sandbox?.filesystem).toEqual({
       denyRead: ["/"],
       allowRead: [folder],
@@ -344,7 +318,7 @@ describe("publishing a Canvas page through the Claude runtime", () => {
       },
     });
 
-    await expect(publish(request)).resolves.toEqual({ kind: "published", url: pageUrl });
+    await expect(publish(request)).resolves.toEqual({ kind: "published", address: pageUrl });
   });
 
   it("reports a runtime refusal as a refusal, never as published", async () => {
@@ -400,46 +374,45 @@ describe("publishing a Canvas page through the Claude runtime", () => {
     expect(existsSync(opens[0]?.projectRoot ?? "")).toBe(false);
   });
 
-  it("reports not signed in when the runtime refuses the account, and when no account is ready", async () => {
+  it("reports not signed in when the runtime refuses the account, and when the account is not ready", async () => {
     const unauthenticated = harness({
       openFailure: failure("unauthenticated", "Claude authentication is required."),
     });
-    await expect(unauthenticated.publisher.publish(request)).resolves.toEqual({
-      kind: "not-signed-in",
-    });
+    await expect(unauthenticated.publish(request)).resolves.toEqual({ kind: "not-signed-in" });
 
     const unobserved = harness({ signedIn: false });
-    expect(unobserved.publisher.availability()).toEqual({ kind: "not-signed-in" });
-    await expect(unobserved.publisher.publish(request)).resolves.toEqual({
-      kind: "not-signed-in",
-    });
+    expect(unobserved.source.availability({ instanceId })).toEqual({ kind: "not-signed-in" });
+    await expect(unobserved.publish(request)).resolves.toEqual({ kind: "not-signed-in" });
     expect(unobserved.opens).toHaveLength(0);
   });
 
-  it("names the signed-in account when ready, and is absent without an enabled Claude provider", () => {
-    expect(harness({}).publisher.availability()).toEqual({ kind: "ready", account: "Claude" });
-    expect(harness({ instances: [] }).publisher.availability()).toEqual({ kind: "absent" });
-    expect(
-      harness({ instances: [claudeInstance({ enabled: false })] }).publisher.availability(),
-    ).toEqual({ kind: "absent" });
+  it("names the account when ready, and holds no other instance", async () => {
+    const { source, publish, opens } = harness({});
+    expect(source.availability({ instanceId })).toEqual({ kind: "ready", account: "Claude" });
+    expect(source.availability({ instanceId: otherInstanceId })).toEqual({ kind: "absent" });
+    await expect(publish(request, otherInstanceId)).resolves.toMatchObject({ kind: "refused" });
+    expect(opens).toHaveLength(0);
   });
 
-  it("refuses an account signed in with an API key, and prefers a signed-in account over it", async () => {
-    const keyed = harness({ instances: [claudeInstance({ id: keyedInstanceId, apiKey: true })] });
-    expect(keyed.publisher.availability()).toEqual({
+  it("refuses an account signed in with an API key without starting a session", async () => {
+    const keyed = harness({ authentication: "api-key" });
+    expect(keyed.source.availability({ instanceId })).toEqual({
       kind: "refused",
       reason: CLAUDE_PAGE_API_KEY_REFUSAL,
     });
-    await expect(keyed.publisher.publish(request)).resolves.toEqual({
+    await expect(keyed.publish(request)).resolves.toEqual({
       kind: "refused",
       message: CLAUDE_PAGE_API_KEY_REFUSAL,
     });
     expect(keyed.opens).toHaveLength(0);
+  });
 
-    const both = harness({
-      instances: [claudeInstance({ id: keyedInstanceId, apiKey: true }), claudeInstance()],
+  it("refuses a request that names a folder instead of a file without starting a session", async () => {
+    const { publish, opens } = harness({});
+    await expect(publish({ ...request, fileName: "../Launch plan.html" })).resolves.toMatchObject({
+      kind: "refused",
     });
-    expect(both.publisher.availability()).toEqual({ kind: "ready", account: "Claude" });
+    expect(opens).toHaveLength(0);
   });
 });
 

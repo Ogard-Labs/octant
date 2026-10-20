@@ -1,22 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeProviderInstanceId,
+  type PagePublishOutcome,
+  type PagePublishRequest,
+} from "@octant/contracts";
+import {
   decodeCanvasExportRenderedOutput,
   type CanvasExportRenderedOutput,
 } from "@octant/contracts/canvas-export";
-import {
-  CLAUDE_PAGE_EXPORT_TARGET_ID,
-  CLAUDE_PAGE_NOTE,
-  createClaudePageExportTarget,
-} from "./claudePageExportTarget";
-import type {
-  ClaudePageAvailability,
-  ClaudePagePublishOutcome,
-  ClaudePagePublishRequest,
-} from "../providers/claudePagePublisher";
+import type { CanvasExportHostPorts } from "@octant/plugin-api/canvas-export";
+import type { PagePublisherOffer } from "@octant/plugin-api/page-publishing";
+import { PAGE_EXPORT_TARGET_ID, createPageExportTarget, pageExportNote } from "./pageExportTarget";
 
 const canvasId = "11111111-1111-4111-8111-111111111111";
 const versionId = "22222222-2222-4222-8222-222222222222";
-const pageUrl = "https://claude.ai/artifact/abc-123";
+const instanceId = decodeProviderInstanceId("00000000-0000-4000-8000-00000000000a");
+const pageUrl = "https://pages.example/p/abc-123";
 
 function document(input: {
   readonly body?: string;
@@ -39,52 +38,60 @@ function document(input: {
   });
 }
 
-/** A publisher that records every request and answers with a fixed outcome. */
+/** Host ports whose page-publishing port lists one account (or none) and answers with a fixed outcome. */
 function target(
-  availability: ClaudePageAvailability = { kind: "ready", account: "Claude" },
-  outcome: ClaudePagePublishOutcome = { kind: "published", url: pageUrl },
+  availability: PagePublisherOffer["availability"] | "none" = {
+    kind: "ready",
+    account: "Work account",
+  },
+  outcome: PagePublishOutcome = { kind: "published", address: pageUrl },
 ) {
-  const requests: ClaudePagePublishRequest[] = [];
-  return {
-    requests,
-    target: createClaudePageExportTarget({
-      availability: () => availability,
-      publish: async (request) => {
-        requests.push(request);
+  const requests: { readonly instanceId: string; readonly request: PagePublishRequest }[] = [];
+  const ports: CanvasExportHostPorts = {
+    pagePublishing: {
+      publishers: () =>
+        availability === "none" ? [] : [{ instanceId, label: "Work account", availability }],
+      publish: async (target, request) => {
+        requests.push({ instanceId: String(target), request });
         return outcome;
       },
-    }),
+    },
   };
+  return { requests, target: createPageExportTarget(ports) };
 }
 
-describe("the Share to Claude export destination", () => {
-  it("publishes the rendered HTML under the Canvas title and reports the page's link", async () => {
+describe("the page export destination", () => {
+  it("publishes the rendered HTML under the Canvas title through the listed account and reports the page's link", async () => {
     const { requests, target: page } = target();
     const output = document({});
 
     const delivery = await page.exportDocument(output);
 
     expect(requests).toEqual([
-      { fileName: "Launch plan.html", title: "Launch plan", html: output.body },
+      {
+        instanceId: String(instanceId),
+        request: { fileName: "Launch plan.html", title: "Launch plan", html: output.body },
+      },
     ]);
     expect(delivery).toEqual({ kind: "receipt", receipt: { kind: "link", href: pageUrl } });
   });
 
-  it("names the account and says the page is private and never replaced on the card", () => {
+  it("is labelled after the listed account and names it on the card, saying the page is private and never replaced", () => {
     const { target: page } = target();
 
+    expect(page.contribution.label).toBe("Share to Work account");
     expect(page.describeDestination?.(document({}))).toEqual({
-      account: "Claude",
-      note: CLAUDE_PAGE_NOTE,
+      account: "Work account",
+      note: pageExportNote("Work account"),
     });
-    expect(CLAUDE_PAGE_NOTE).toContain("private");
-    expect(CLAUDE_PAGE_NOTE).toContain("new page");
+    expect(pageExportNote("Work account")).toContain("private");
+    expect(pageExportNote("Work account")).toContain("new page");
   });
 
   it("declares HTML only and refuses Markdown without publishing", async () => {
     const { requests, target: page } = target();
 
-    expect(String(page.contribution.targetId)).toBe(CLAUDE_PAGE_EXPORT_TARGET_ID);
+    expect(String(page.contribution.targetId)).toBe(PAGE_EXPORT_TARGET_ID);
     expect(page.contribution.formats).toEqual(["html"]);
     const delivery = await page.exportDocument(document({ format: "markdown", body: "# Plan\n" }));
     expect(delivery).toMatchObject({ kind: "refused", code: "unsupported-format" });
@@ -102,8 +109,18 @@ describe("the Share to Claude export destination", () => {
     expect(requests).toHaveLength(0);
   });
 
-  it("is not connected, describes nothing, and publishes nothing while Claude is signed out", async () => {
+  it("is not connected, describes nothing, and publishes nothing while the account is signed out", async () => {
     const { requests, target: page } = target({ kind: "not-signed-in" });
+
+    const delivery = await page.exportDocument(document({}));
+
+    expect(delivery).toMatchObject({ kind: "refused", code: "not-connected" });
+    expect(requests).toHaveLength(0);
+    expect(page.describeDestination?.(document({}))).toBeUndefined();
+  });
+
+  it("is not connected and publishes nothing when the port lists no account", async () => {
+    const { requests, target: page } = target("none");
 
     const delivery = await page.exportDocument(document({}));
 
@@ -115,7 +132,7 @@ describe("the Share to Claude export destination", () => {
   it("refuses with the account's reason when it cannot publish pages", async () => {
     const { requests, target: page } = target({
       kind: "refused",
-      reason: "Claude is signed in with an API key.",
+      reason: "The account is signed in with an API key.",
     });
 
     const delivery = await page.exportDocument(document({}));
@@ -123,15 +140,15 @@ describe("the Share to Claude export destination", () => {
     expect(delivery).toEqual({
       kind: "refused",
       code: "refused",
-      message: "Claude is signed in with an API key.",
+      message: "The account is signed in with an API key.",
     });
     expect(requests).toHaveLength(0);
   });
 
-  it("reports the runtime's refusal as a refusal, never as a published page", async () => {
+  it("reports the provider's refusal as a refusal, never as a published page", async () => {
     const { target: page } = target(
-      { kind: "ready", account: "Claude" },
-      { kind: "refused", message: "The Claude runtime refused to publish the page." },
+      { kind: "ready", account: "Work account" },
+      { kind: "refused", message: "The provider refused to publish the page." },
     );
 
     const delivery = await page.exportDocument(document({}));
@@ -139,21 +156,21 @@ describe("the Share to Claude export destination", () => {
     expect(delivery).toEqual({
       kind: "refused",
       code: "refused",
-      message: "The Claude runtime refused to publish the page.",
+      message: "The provider refused to publish the page.",
     });
   });
 
-  it("reports a runtime that could not finish as unavailable, and a sign-in lost mid-way as not connected", async () => {
+  it("reports a provider that could not finish as unavailable, and a sign-in lost mid-way as not connected", async () => {
     const stalled = target(
-      { kind: "ready", account: "Claude" },
-      { kind: "unavailable", message: "Claude did not publish the page in time." },
+      { kind: "ready", account: "Work account" },
+      { kind: "unavailable", message: "The provider did not publish the page in time." },
     );
     expect(await stalled.target.exportDocument(document({}))).toMatchObject({
       kind: "refused",
       code: "unavailable",
     });
 
-    const signedOut = target({ kind: "ready", account: "Claude" }, { kind: "not-signed-in" });
+    const signedOut = target({ kind: "ready", account: "Work account" }, { kind: "not-signed-in" });
     expect(await signedOut.target.exportDocument(document({}))).toMatchObject({
       kind: "refused",
       code: "not-connected",

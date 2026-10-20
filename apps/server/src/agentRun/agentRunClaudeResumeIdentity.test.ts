@@ -369,6 +369,7 @@ async function driverFixture(port: ReturnType<typeof createAgentRunClaudeResumeI
   );
   const driver = makeClaudeDriver({
     instanceId: identity.providerInstanceId,
+    displayName: "Claude",
     binaryPath: "/unused/claude",
     authentication: "subscription",
     process: {

@@ -312,6 +312,7 @@ function harness(
   const makeDriver = (selectedAuthentication = authentication) =>
     makeClaudeDriver({
       instanceId,
+      displayName: "Claude",
       binaryPath: "/opt/homebrew/bin/claude",
       authentication: selectedAuthentication,
       ...(options.configDirectory === undefined

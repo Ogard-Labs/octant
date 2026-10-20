@@ -196,6 +196,7 @@ export async function createClaudeSmokeHarness(
   };
   const driver = makeClaudeDriver({
     instanceId,
+    displayName: "Claude",
     binaryPath: claudeSmokeBinaryPath,
     authentication,
     process: processPort,

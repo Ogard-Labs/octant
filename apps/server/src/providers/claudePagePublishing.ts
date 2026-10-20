@@ -1,9 +1,17 @@
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import type { ProviderFailure, ProviderInstance } from "@octant/contracts";
-import { effectiveClaudeAccountConfigDirectory } from "@octant/domain";
-import { Effect, Stream } from "effect";
+import {
+  decodePagePublishRequest,
+  type ClaudeAuthentication,
+  type PagePublishAvailability,
+  type PagePublishOutcome,
+  type PagePublishRequest,
+  type ProviderFailure,
+  type ProviderInstanceId,
+} from "@octant/contracts";
+import type { ProviderPagePublishingSource } from "@octant/provider-sdk/page-publishing";
+import { Effect, type Scope, Stream } from "effect";
 import { failure } from "./claudeAgentSdkDecoder";
 import type {
   ClaudeAgentSdkPort,
@@ -11,22 +19,22 @@ import type {
   ClaudePreToolDecision,
   ClaudePreToolRequest,
 } from "./claudeAgentSdkPort";
-import { makeClaudeEnvironmentScope } from "./claudeEnvironment";
+import type { ClaudeEnvironmentScope, ClaudeEnvironmentScopeOptions } from "./claudeEnvironment";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 /**
- * Publishing one HTML page on the person's Anthropic account through the
- * Claude runtime Octant already manages.
+ * The Claude driver's page-publishing operation: publishing one HTML page on
+ * the person's Anthropic account through the Claude runtime Octant already
+ * manages, outside any thread.
  *
  * The runtime's own `Artifact` tool is the only thing that can publish a page,
- * so this runs it: a one-shot session, signed in as the person's existing
- * Claude account, bound to a private folder only this call can name, offered
- * the `Artifact` tool and no other, and allowed exactly one publish of exactly
- * the approved file. Everything Claude-shaped — the tool's name, its input,
- * the hook that pins it — stays in this adapter; callers speak in pages,
- * refusals, and addresses. The person's approval of the export card is the
- * consent; nothing here raises a second prompt and nothing here runs from an
- * agent turn.
+ * so this runs it: a one-shot session, signed in as this instance's account,
+ * bound to a private folder only this call can name, offered the `Artifact`
+ * tool and no other, and allowed exactly one publish of exactly the approved
+ * file. Everything Claude-shaped — the tool's name, its input, the hook that
+ * pins it — stays in this adapter; the seam speaks in pages, refusals, and
+ * addresses. The person's approval of the export card is the consent; nothing
+ * here raises a second prompt and nothing here runs from an agent turn.
  */
 
 /** The runtime's own tool that publishes a file as a private page. */
@@ -39,51 +47,24 @@ const PUBLISH_MODEL = "sonnet";
 /** A publish is one tool call; a session that takes longer is not finishing. */
 const DEFAULT_PUBLISH_TIMEOUT_MS = 120_000;
 
-export type ClaudePageAvailability =
-  /** A signed-in Claude account can publish. `account` names it on the card. */
-  | { readonly kind: "ready"; readonly account: string }
-  /** Claude is set up on this host but no account is signed in and ready. */
-  | { readonly kind: "not-signed-in" }
-  /** An account is ready but cannot publish pages, and the reason says why. */
-  | { readonly kind: "refused"; readonly reason: string }
-  /** No enabled Claude provider exists, so the destination is not offered. */
-  | { readonly kind: "absent" };
+type ClaudeEnvironmentFactory = (
+  authentication: ClaudeAuthentication,
+  options?: ClaudeEnvironmentScopeOptions,
+) => Effect.Effect<ClaudeEnvironmentScope, ProviderFailure, Scope.Scope>;
 
-export type ClaudePagePublishOutcome =
-  | { readonly kind: "published"; readonly url: string }
-  /** The runtime, or Octant's own gate, refused the publish. Nothing was published. */
-  | { readonly kind: "refused"; readonly message: string }
-  | { readonly kind: "not-signed-in" }
-  /** The runtime could not be run to completion. Nothing is known to be published. */
-  | { readonly kind: "unavailable"; readonly message: string };
-
-export interface ClaudePagePublishRequest {
-  /** The file name the page is written under, already made safe by export policy. */
-  readonly fileName: string;
-  readonly title: string;
-  readonly html: string;
-}
-
-export interface ClaudePagePublisher {
-  /** Read while an offer or card is built, so it is synchronous. */
-  readonly availability: () => ClaudePageAvailability;
-  readonly publish: (request: ClaudePagePublishRequest) => Promise<ClaudePagePublishOutcome>;
-}
-
-export interface ClaudePagePublisherOptions {
-  readonly instances: () => ReadonlyArray<ProviderInstance>;
-  readonly runtimeRegistry: Pick<ProviderRuntimeRegistry, "observedState">;
+export interface ClaudePagePublishingOptions {
+  readonly instanceId: ProviderInstanceId;
+  /** The instance's display name, which the card names as the account the page goes out under. */
+  readonly displayName: string;
+  readonly binaryPath: string;
+  readonly authentication: ClaudeAuthentication;
+  /** Claude-owned directory for this account. */
+  readonly configDirectory?: string;
   readonly sdk: Pick<ClaudeAgentSdkPort, "openQuery">;
-  readonly makeEnvironmentScope?: typeof makeClaudeEnvironmentScope;
-  readonly homeDirectory?: string;
+  readonly runtimeRegistry: Pick<ProviderRuntimeRegistry, "observedState">;
+  readonly makeEnvironmentScope: ClaudeEnvironmentFactory;
   readonly timeoutMs?: number;
 }
-
-type ClaudeInstance = Extract<ProviderInstance, { readonly driverKind: "claude" }>;
-
-type ClaudeAccountChoice =
-  | { readonly kind: "ready"; readonly instance: ClaudeInstance }
-  | Exclude<ClaudePageAvailability, { readonly kind: "ready" }>;
 
 export const CLAUDE_PAGE_API_KEY_REFUSAL =
   "Claude is signed in with an API key, which cannot publish pages. Sign in to Claude with the official application.";
@@ -93,31 +74,31 @@ const NOT_FINISHED = "Claude did not finish publishing the page.";
 const NOT_PUBLISHED = "Claude did not publish the page.";
 const NOT_STARTED = "Claude could not be started to publish the page.";
 const TIMED_OUT = "Claude did not publish the page in time.";
+const NOT_THIS_ACCOUNT = "This Claude provider does not hold the account asked to publish.";
+const MALFORMED_REQUEST = "The page is not one Claude can publish.";
 
 /**
- * Which account publishes. Readiness is the probe's observation, the same one
- * a thread launch trusts, and the capability it declared: a driver that does
- * not say `artifactPublish` is not asked to. An API-key account is refused
- * rather than tried, because pages live with a Claude sign-in, not a console
- * key, and the runtime would fail the publish after the session started. A
- * disabled provider is the person's choice and counts as absent.
+ * Whether this instance can publish right now. Readiness is the probe's
+ * observation, the same one a thread launch trusts, and the capability it
+ * declared: a runtime that does not say `artifactPublish` is not asked to. An
+ * API-key account is refused rather than tried, because pages live with a
+ * Claude sign-in, not a console key, and the runtime would fail the publish
+ * after the session started. Any other instance id is absent: a driver holds
+ * one account.
  */
-function chooseAccount(options: ClaudePagePublisherOptions): ClaudeAccountChoice {
-  const enabled = options
-    .instances()
-    .filter((instance): instance is ClaudeInstance => instance.driverKind === "claude")
-    .filter((instance) => instance.enabled);
-  if (enabled.length === 0) return { kind: "absent" };
-  const ready = enabled.filter((instance) => {
-    const observed = options.runtimeRegistry.observedState(instance.id);
-    return observed?.readiness === "ready" && observed.capabilities.artifactPublish === "supported";
-  });
-  const signedIn = ready.find(
-    (instance) => instance.configuration.authentication === "subscription",
-  );
-  if (signedIn !== undefined) return { kind: "ready", instance: signedIn };
-  if (ready.length > 0) return { kind: "refused", reason: CLAUDE_PAGE_API_KEY_REFUSAL };
-  return { kind: "not-signed-in" };
+function availabilityOf(
+  options: ClaudePagePublishingOptions,
+  instanceId: ProviderInstanceId,
+): PagePublishAvailability {
+  if (String(instanceId) !== String(options.instanceId)) return { kind: "absent" };
+  const observed = options.runtimeRegistry.observedState(options.instanceId);
+  if (observed?.readiness !== "ready" || observed.capabilities.artifactPublish !== "supported") {
+    return { kind: "not-signed-in" };
+  }
+  if (options.authentication !== "subscription") {
+    return { kind: "refused", reason: CLAUDE_PAGE_API_KEY_REFUSAL };
+  }
+  return { kind: "ready", account: options.displayName };
 }
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
@@ -175,7 +156,7 @@ export function claudePagePublishOnce(approved: {
 
 interface PublishTally {
   readonly artifactCalls: Set<string>;
-  publishedUrl?: string;
+  publishedAddress?: string;
   artifactRefused: boolean;
   gateDenied: boolean;
   result?: "success" | "error";
@@ -203,7 +184,7 @@ function tally(state: PublishTally, message: ClaudeDecodedMessage): PublishTally
       for (const result of message.results) {
         if (!state.artifactCalls.has(result.toolUseId)) continue;
         if (result.isError) state.artifactRefused = true;
-        else if (result.artifactUrl !== undefined) state.publishedUrl ??= result.artifactUrl;
+        else if (result.artifactUrl !== undefined) state.publishedAddress ??= result.artifactUrl;
       }
       return state;
     case "result":
@@ -220,15 +201,17 @@ function tally(state: PublishTally, message: ClaudeDecodedMessage): PublishTally
  * tool call is a refusal; anything else is not known to have published, and
  * says so rather than guessing.
  */
-function outcomeOf(state: PublishTally): ClaudePagePublishOutcome {
-  if (state.publishedUrl !== undefined) return { kind: "published", url: state.publishedUrl };
+function outcomeOf(state: PublishTally): PagePublishOutcome {
+  if (state.publishedAddress !== undefined) {
+    return { kind: "published", address: state.publishedAddress };
+  }
   if (state.artifactRefused) return { kind: "refused", message: RUNTIME_REFUSED };
   if (state.gateDenied) return { kind: "refused", message: GATE_REFUSED };
   if (state.result === "error") return { kind: "unavailable", message: NOT_FINISHED };
   return { kind: "unavailable", message: NOT_PUBLISHED };
 }
 
-function outcomeOfFailure(failed: ProviderFailure): ClaudePagePublishOutcome {
+function outcomeOfFailure(failed: ProviderFailure): PagePublishOutcome {
   if (failed.category === "unauthenticated") return { kind: "not-signed-in" };
   if (failed.category === "unavailable" && failed.message === TIMED_OUT) {
     return { kind: "unavailable", message: TIMED_OUT };
@@ -256,23 +239,19 @@ function prompt(fileName: string, title: string): string {
   return `Publish the file ${fileName} in this folder as a private page with the Artifact tool, titled ${JSON.stringify(title)}. Make that one tool call and nothing else, then reply "done".`;
 }
 
-export function makeClaudePagePublisher(options: ClaudePagePublisherOptions): ClaudePagePublisher {
-  const environmentFactory = options.makeEnvironmentScope ?? makeClaudeEnvironmentScope;
-  const home = options.homeDirectory ?? homedir();
+export function makeClaudePagePublishing(
+  options: ClaudePagePublishingOptions,
+): ProviderPagePublishingSource {
   const timeoutMs = options.timeoutMs ?? DEFAULT_PUBLISH_TIMEOUT_MS;
 
-  const run = (
-    instance: ClaudeInstance,
-    request: ClaudePagePublishRequest,
-  ): Effect.Effect<ClaudePagePublishOutcome, ProviderFailure> =>
+  const run = (request: PagePublishRequest): Effect.Effect<PagePublishOutcome, ProviderFailure> =>
     Effect.scoped(
       Effect.gen(function* () {
-        const configDirectory = effectiveClaudeAccountConfigDirectory(instance, home);
         // The same account environment a thread of this instance launches
         // with. Acquired before the folder and the query, so it outlives both.
-        const environment = yield* environmentFactory(
-          "subscription",
-          configDirectory === undefined ? {} : { configDirectory },
+        const environment = yield* options.makeEnvironmentScope(
+          options.authentication,
+          options.configDirectory === undefined ? {} : { configDirectory: options.configDirectory },
         );
         const folder = yield* privatePageFolder;
         const filePath = join(folder, request.fileName);
@@ -284,7 +263,7 @@ export function makeClaudePagePublisher(options: ClaudePagePublisherOptions): Cl
         const approved = { filePath, title: request.title };
         const publishOnce = claudePagePublishOnce(approved);
         const query = yield* options.sdk.openQuery({
-          binaryPath: instance.configuration.binaryPath,
+          binaryPath: options.binaryPath,
           projectRoot: folder,
           authEnvironment: environment.environment,
           model: PUBLISH_MODEL,
@@ -332,22 +311,30 @@ export function makeClaudePagePublisher(options: ClaudePagePublisherOptions): Cl
     );
 
   return {
-    availability: () => {
-      const choice = chooseAccount(options);
-      return choice.kind === "ready"
-        ? { kind: "ready", account: choice.instance.displayName }
-        : choice;
-    },
-    publish: (request) => {
-      const choice = chooseAccount(options);
-      if (choice.kind === "refused") {
-        return Promise.resolve({ kind: "refused", message: choice.reason });
+    availability: ({ instanceId }) => availabilityOf(options, instanceId),
+    publish: (input) => {
+      const availability = availabilityOf(options, input.instanceId);
+      if (availability.kind === "absent") {
+        return Promise.resolve({ kind: "refused", message: NOT_THIS_ACCOUNT });
       }
-      if (choice.kind !== "ready") return Promise.resolve({ kind: "not-signed-in" });
+      if (availability.kind === "refused") {
+        return Promise.resolve({ kind: "refused", message: availability.reason });
+      }
+      if (availability.kind === "not-signed-in") return Promise.resolve({ kind: "not-signed-in" });
+      // The host decodes the request before asking; this adapter writes the
+      // file name into a folder, so it holds the same line on its own.
+      let request: PagePublishRequest;
+      try {
+        request = decodePagePublishRequest({
+          fileName: input.fileName,
+          title: input.title,
+          html: input.html,
+        });
+      } catch {
+        return Promise.resolve({ kind: "refused", message: MALFORMED_REQUEST });
+      }
       return Effect.runPromise(
-        run(choice.instance, request).pipe(
-          Effect.catchAll((failed) => Effect.succeed(outcomeOfFailure(failed))),
-        ),
+        run(request).pipe(Effect.catchAll((failed) => Effect.succeed(outcomeOfFailure(failed)))),
       );
     },
   };

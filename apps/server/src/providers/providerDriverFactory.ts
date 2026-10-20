@@ -193,6 +193,7 @@ export function makeProviderDriver(
       const configDirectory = effectiveClaudeAccountConfigDirectory(instance, homedir());
       return makeClaudeDriver({
         instanceId: instance.id,
+        displayName: instance.displayName,
         binaryPath: instance.configuration.binaryPath,
         authentication: instance.configuration.authentication,
         ...(configDirectory === undefined ? {} : { configDirectory }),

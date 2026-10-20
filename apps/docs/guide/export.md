@@ -162,13 +162,14 @@ was published, the export says so and nothing is shown as published.
 
 ### Status
 
-The destination reports one of three states, and is listed only when a Claude
-provider is enabled on this host:
+The destination is named after the Claude provider as you named it in Settings,
+so it reads **Share to Claude** for a provider named "Claude". It is listed
+once that provider is enabled and its connection check has seen a signed-in
+account; until then it does not appear. Sign in with the official Claude Code
+application, then run the provider's connection check from Settings →
+Providers & Models. Once listed, it reports one of two states:
 
-- **Not connected** — no Claude account is signed in and ready. Sign in with the
-  official Claude Code application, then run the provider's connection check
-  from Settings → Providers & Models.
-- **Ready** — a signed-in Claude account can publish.
+- **Ready** — the signed-in Claude account can publish.
 - **Refused**, with the reason — the Claude provider is signed in with an API
   key. Pages belong to a Claude sign-in, so an API key cannot publish one.
 
