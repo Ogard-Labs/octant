@@ -49,6 +49,7 @@ import type {
 } from "@octant/contracts/canvas-export";
 import { CanvasExportPanel } from "./CanvasExportPanel";
 import { useCanvasExportFolder } from "./useCanvasExportFolder";
+import { CanvasPublicLinksSection } from "./CanvasPublicLinksSection";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 import {
   CanvasRefreshPanel,
@@ -111,6 +112,14 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const [commentThreads, setCommentThreads] = useState<ReadonlyArray<CanvasCommentThread>>([]);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [dialog, setDialog] = useState<CanvasToolDialog | undefined>(undefined);
+  // Update on a public link opens Export on that destination; the menu opens it
+  // on whichever destination is first ready. The revision re-reads the links
+  // each time the Share dialog opens, so an export made meanwhile shows up.
+  const [exportTargetId, setExportTargetId] = useState<string | undefined>(undefined);
+  const [publicLinksRevision, setPublicLinksRevision] = useState(0);
+  useEffect(() => {
+    if (dialog === "share") setPublicLinksRevision((value) => value + 1);
+  }, [dialog]);
   const [compare, setCompare] = useState<
     | {
         readonly kind: "ready";
@@ -847,7 +856,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             items={overflowItems}
             onValueChange={(value) => {
               const chosen = CANVAS_TOOL_DIALOGS.find((candidate) => candidate === value);
-              if (chosen !== undefined) setDialog(chosen);
+              if (chosen === undefined) return;
+              setExportTargetId(undefined);
+              setDialog(chosen);
             }}
             selectionMode="action"
             trigger={<MoreHorizontal aria-hidden="true" size={16} strokeWidth={1.8} />}
@@ -966,6 +977,19 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               : { resolveDesignPage: props.client.sharedDesignPageUrl })}
           />
         ) : null}
+        {props.client?.publicShares !== undefined &&
+        props.client.revokePublicShare !== undefined ? (
+          <CanvasPublicLinksSection
+            canvasId={props.tab.canvasId}
+            onList={props.client.publicShares}
+            onRevoke={props.client.revokePublicShare}
+            onUpdate={() => {
+              setExportTargetId("public-link");
+              setDialog("export");
+            }}
+            revision={publicLinksRevision}
+          />
+        ) : null}
       </OctantDialog>
       <OctantDialog
         className="canvas-workspace-tab__share-dialog"
@@ -979,8 +1003,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         props.client?.prepareExport !== undefined &&
         props.client.decideExport !== undefined ? (
           <CanvasExportPanel
-            key={`${String(exportOffers.canvasId)}:${String(exportOffers.versionId)}`}
+            key={`${String(exportOffers.canvasId)}:${String(exportOffers.versionId)}:${exportTargetId ?? ""}`}
             folder={exportFolder}
+            {...(exportTargetId === undefined ? {} : { initialTargetId: exportTargetId })}
             offers={exportOffers}
             onDecide={props.client.decideExport}
             onExportFolderChosen={() => void loadExportOffers()}
