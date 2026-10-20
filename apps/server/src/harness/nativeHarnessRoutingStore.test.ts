@@ -1,9 +1,18 @@
+import {
+  sendSteeringFollowUp,
+  takeSteeringFollowUp,
+} from "../../../../packages/cli/src/agentSteeringFollowUp";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Schema } from "effect";
-import { EventActor, decodeNativeHarnessSlotCandidate, decodeProjectId } from "@octant/contracts";
+import {
+  NativeHarnessSteeringNote,
+  EventActor,
+  decodeNativeHarnessSlotCandidate,
+  decodeProjectId,
+} from "@octant/contracts";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
 import { Journal } from "../persistence/journal";
@@ -850,6 +859,91 @@ describe("native harness session store", () => {
     // A retry that arrives after the note was taken is still the same note.
     expect(after.queueSteering(threadId, note(1, "Use sqlite."))).toBe("queued");
     expect(open().read(threadId)?.steering).toEqual([]);
+  });
+
+  it("retains notes claimed by a terminal after refusal without defeating consumed-note deduplication", async () => {
+    const threadId = "00000000-0000-4000-8000-000000000028";
+    const connection = openConnection();
+    const uuid = uuidFactory();
+    const open = () =>
+      new NativeHarnessSessionStore({
+        journal: journalFor(connection),
+        uuid,
+        actor,
+        clock: () => now,
+      });
+    const store = open();
+    store.ensure({
+      threadId,
+      mode: "code",
+      leadSlotId: "default" as never,
+      lead: candidate("big"),
+    });
+    const note = Schema.decodeUnknownSync(NativeHarnessSteeringNote)({
+      id: "00000000-0000-4000-8000-000000000081",
+      text: "Use sqlite.",
+      status: "queued",
+      at: now,
+    });
+    const second = Schema.decodeUnknownSync(NativeHarnessSteeringNote)({
+      ...note,
+      id: "00000000-0000-4000-8000-000000000082",
+      text: "Skip the docs.",
+    });
+    store.queueSteering(threadId, note);
+    store.queueSteering(threadId, second);
+    const send = vi.fn(async () => ({
+      kind: "refused" as const,
+      message: "The thread is paused.",
+    }));
+    const retained = await takeSteeringFollowUp({
+      displayedText: "stale display",
+      take: async () => ({ kind: "taken", notes: store.takeSteering(threadId) }),
+      send,
+    });
+    expect(retained).toEqual({
+      text: "Use sqlite.\n\nSkip the docs.",
+      status: "submission-unknown",
+      message:
+        "The thread is paused. Acceptance was not confirmed. Check the conversation and queue before resending.",
+    });
+    expect(send).toHaveBeenCalledExactlyOnceWith("Use sqlite.\n\nSkip the docs.");
+    const otherClient = vi.fn(async () => ({ kind: "sent" as const }));
+    expect(
+      await takeSteeringFollowUp({
+        displayedText: note.text,
+        take: async () => ({ kind: "taken", notes: open().takeSteering(threadId) }),
+        send: otherClient,
+      }),
+    ).toBeUndefined();
+    expect(otherClient).not.toHaveBeenCalled();
+    store.queueSteering(threadId, note);
+    expect(open().read(threadId)?.steering).toEqual([]);
+    if (retained === undefined) throw new Error("The terminal lost its notes.");
+    expect(retained.text).toBe("Use sqlite.\n\nSkip the docs.");
+    expect(otherClient).not.toHaveBeenCalled();
+  });
+
+  it("does not send a displayed snapshot when the destructive take response is lost", async () => {
+    const send = vi.fn(async () => ({ kind: "sent" as const }));
+    expect(
+      await takeSteeringFollowUp({
+        displayedText: "Use sqlite.",
+        take: async () => {
+          throw new Error("Connection lost");
+        },
+        send,
+      }),
+    ).toMatchObject({ text: "Use sqlite.", status: "ownership-unknown" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("retains text with uncertain submission rather than claiming a lost prompt response was refused", async () => {
+    expect(
+      await sendSteeringFollowUp("Use sqlite.", async () => {
+        throw new Error("Connection lost");
+      }),
+    ).toMatchObject({ text: "Use sqlite.", status: "submission-unknown" });
   });
 
   it("refuses a steering note for a thread with no harness run yet", () => {
