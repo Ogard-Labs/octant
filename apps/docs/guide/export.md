@@ -25,9 +25,9 @@ Export uses one folder per choice:
 
 - A folder you choose while a Canvas or artifact is open is remembered for that
   Project.
-- A thread filed under no Project exports to the host's folder. Choose one the
-  same way from any Canvas, and it applies to everything without a Project of
-  its own.
+- A thread filed under no Project, and a Canvas made in such a Chat thread,
+  export to the host's folder. Choose one the same way from any Canvas, and it
+  applies to everything without a Project of its own.
 
 The folder always comes from Octant's own folder browser, which lists folders on
 this computer. Octant never takes a folder path typed or sent from a window.
