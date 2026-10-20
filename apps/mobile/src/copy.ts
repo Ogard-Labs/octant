@@ -133,6 +133,19 @@ export const MOBILE_COPY = {
   hostsUnavailable: "hosts unavailable",
   approvalDesktopOnly:
     "Approve or reject on the desktop host. High-risk approval challenges stay local-host-only.",
+  approvalAllow: "Allow",
+  approvalAllowSession: "Allow this session",
+  approvalDeny: "Deny",
+  approvalSendFailed: "Couldn't send that. Check the connection and try again.",
+  approvalReconnecting: "Reconnecting…",
+  approvalBiometricUnavailable: "Set up Face ID, Touch ID or a passcode to allow from this phone.",
+  approvalBiometricDenied:
+    "Allow cancelled. Confirm with Face ID, Touch ID or your passcode to allow.",
+  approvalAskedPlain: "This is waiting for your answer before it runs.",
+  approvalChildAsked: "Allow this request for this child.",
+  approvalShowAll: "Show all",
+  approvalShowLess: "Show less",
+  outsideContentLead: "This thread has taken in outside content",
   revokeDeviceHint:
     "Revoke removes only this phone’s registration. Other paired clients stay connected.",
   appearanceTitle: "Appearance",

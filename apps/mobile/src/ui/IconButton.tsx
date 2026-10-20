@@ -3,6 +3,8 @@ import { Pressable, StyleSheet, type StyleProp, type ViewStyle } from "react-nat
 import { Ionicons } from "@expo/vector-icons";
 import { GlassSurface, useTheme } from "../../design-system";
 
+const MIN_TAP_TARGET = 44;
+
 export type MobileIconName = keyof typeof Ionicons.glyphMap;
 
 export interface IconButtonProps {
@@ -49,6 +51,8 @@ export function IconButton(props: IconButtonProps) {
   );
 
   const size = props.size ?? 36;
+  // Smaller buttons keep their look and still reach a 44pt touch area.
+  const slop = Math.max(0, Math.ceil((MIN_TAP_TARGET - size) / 2));
   const iconSize = props.iconSize ?? Math.round(size * 0.5);
   const variant = props.variant ?? "solid";
   const disabled = props.disabled === true || props.onPress === undefined;
@@ -74,6 +78,7 @@ export function IconButton(props: IconButtonProps) {
         accessibilityLabel={props.accessibilityLabel}
         accessibilityRole="button"
         disabled={disabled}
+        hitSlop={slop}
         onPress={props.onPress}
         style={[
           { width: size, height: size, borderRadius: size / 2 },
@@ -99,6 +104,7 @@ export function IconButton(props: IconButtonProps) {
       accessibilityLabel={props.accessibilityLabel}
       accessibilityRole="button"
       disabled={disabled}
+      hitSlop={slop}
       onPress={props.onPress}
       style={[
         styles.base,
