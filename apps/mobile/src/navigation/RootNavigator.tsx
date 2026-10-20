@@ -23,6 +23,7 @@ import { useTheme } from "../../design-system";
 import { IconButton } from "../ui/IconButton";
 import { useMobileHardwareBack } from "./useMobileHardwareBack";
 import { mobileThreadReturnRouteForDeepLink } from "./navigationState";
+import { deepLinkRefusal } from "./deepLinkNavigation";
 
 export interface RootNavigatorProps {
   readonly activeRoute: MobileRouteId;
@@ -35,11 +36,14 @@ function HostsBody(props: {
   readonly entryMode: "manage" | "add";
   readonly onBack: () => void;
   readonly onPaired: () => void;
+  /** Why a link the person followed was not opened, if it was not. */
+  readonly notice?: string | undefined;
 }) {
   const { colors } = useTheme();
   const {
     environment,
     hosts,
+    hostsError,
     health,
     registry,
     refreshHosts,
@@ -52,16 +56,20 @@ function HostsBody(props: {
     setPlacementHostId,
   } = useMobileSession();
   const [keyNotDeleted, setKeyNotDeleted] = useState(false);
+  const [removeFailed, setRemoveFailed] = useState(false);
   const removeMobileHostInTurn = useMemo(
     () => createMobileHostRemover({ registry, hub, deviceKeyStore }),
     [deviceKeyStore, hub, registry],
   );
   const removeHost = useCallback(
     (hostId: string) => {
-      void removeMobileHostInTurn(hostId).then((result) => {
-        if (!result.localCredentialRemoved) setKeyNotDeleted(true);
-        return refreshHosts();
-      });
+      setRemoveFailed(false);
+      removeMobileHostInTurn(hostId)
+        .then((result) => {
+          if (!result.localCredentialRemoved) setKeyNotDeleted(true);
+          return refreshHosts();
+        })
+        .catch(() => setRemoveFailed(true));
     },
     [refreshHosts, removeMobileHostInTurn],
   );
@@ -199,6 +207,13 @@ function HostsBody(props: {
                 </Text>
               </View>
             ) : null}
+            {props.notice !== undefined ? (
+              <Text style={styles.sectionBody}>{props.notice}</Text>
+            ) : null}
+            {hostsError !== undefined ? <Text style={styles.sectionBody}>{hostsError}</Text> : null}
+            {removeFailed ? (
+              <Text style={styles.sectionBody}>{"Couldn't remove that computer. Try again."}</Text>
+            ) : null}
             {keyNotDeleted ? (
               <Text style={styles.sectionBody} testID="mobile-host-key-not-deleted">
                 {MOBILE_COPY.hostKeyNotDeleted}
@@ -306,7 +321,8 @@ export function RootNavigator(props: RootNavigatorProps) {
   const [homeMode, setHomeMode] = useState<MobileHomeView>("inbox");
   const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add">("manage");
   const [agentListView, setAgentListView] = useState<AgentListView>("all");
-  const { setInboxHostFilter } = useMobileSession();
+  const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
+  const { setInboxHostFilter, hosts, hostsLoaded } = useMobileSession();
   const onHomeBack = useCallback(() => {
     const previous = backMobileHomeView(homeMode);
     if (previous === undefined) return false;
@@ -317,6 +333,21 @@ export function RootNavigator(props: RootNavigatorProps) {
 
   useEffect(() => {
     if (props.pendingDeepLinkRow === undefined) return;
+    // On a cold open the paired list is still being read; deciding now would
+    // call every computer unpaired.
+    if (!hostsLoaded) return;
+    const refusal = deepLinkRefusal(
+      props.pendingDeepLinkRow,
+      hosts.map((host) => host.hostId),
+    );
+    if (refusal !== undefined) {
+      setDeepLinkNotice(refusal);
+      setHostEntryMode("manage");
+      props.onSelectRoute("hosts");
+      props.onDeepLinkConsumed?.();
+      return;
+    }
+    setDeepLinkNotice(undefined);
     setThreadReturnRoute(mobileThreadReturnRouteForDeepLink(props.activeRoute));
     setSelectedThread(props.pendingDeepLinkRow);
     setInboxHostFilter(props.pendingDeepLinkRow.hostId);
@@ -328,6 +359,8 @@ export function RootNavigator(props: RootNavigatorProps) {
     props.onDeepLinkConsumed,
     props.onSelectRoute,
     setInboxHostFilter,
+    hosts,
+    hostsLoaded,
   ]);
 
   return (
@@ -382,6 +415,7 @@ export function RootNavigator(props: RootNavigatorProps) {
           entryMode={hostEntryMode}
           onBack={() => props.onSelectRoute("home")}
           onPaired={() => props.onSelectRoute("home")}
+          notice={deepLinkNotice}
         />
       ) : null}
     </View>
