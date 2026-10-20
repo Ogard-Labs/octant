@@ -50,8 +50,9 @@ html[data-octant-native-host="true"]
   .shell.shell-frame.shell--app-backdrop.shell--material-translucent {
   background: linear-gradient(
     to right,
-    transparent var(--octant-rendered-sidebar-width),
-    var(--octant-app-background) var(--octant-rendered-sidebar-width)
+    transparent calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width)),
+    var(--octant-app-background)
+      calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width))
   );
 }
 
@@ -127,7 +128,7 @@ html[data-octant-native-host="true"] .shell--wide-context-open .shell-frame__nat
 html[data-octant-native-host="true"]
   .shell-frame:has(.workspace-pane__header)
   .shell-frame__native-drag-strip {
-  right: calc(100% - var(--octant-rendered-sidebar-width));
+  right: calc(100% - var(--octant-rail-offset, 0px) - var(--octant-rendered-sidebar-width));
 }
 
 /* The chrome shares the visual title row with the top drag strip, the pane
@@ -185,6 +186,37 @@ html[data-octant-native-host="true"]
 .shell--sidebar-rail.shell-frame > .window-chrome,
 .shell--sidebar-rail.shell-frame > .workspace-layer {
   grid-column: 2;
+}
+
+/* The rail beside the open sidebar takes a column of its own in front of it.
+   `--octant-rail-offset` moves everything placed at the sidebar's trailing
+   edge (the resize handle, the native drag strip, the glass/ground split)
+   right by the rail's width; the sidebar column keeps its own width rules,
+   including the Projects pane and the wide-context clamp. */
+.shell.shell-frame.shell--rail-beside {
+  --octant-rail-offset: 56px;
+  grid-template-columns:
+    var(--octant-rail-offset) var(--octant-rendered-sidebar-width)
+    minmax(0, 1fr);
+}
+
+.shell.shell-frame.shell--rail-beside:has(> .sidebar-rail[data-native-host]) {
+  --octant-rail-offset: 76px;
+}
+
+.shell--rail-beside.shell-frame > .sidebar {
+  grid-column: 2;
+}
+
+.shell--rail-beside.shell-frame > .window-chrome,
+.shell--rail-beside.shell-frame > .workspace-layer {
+  grid-column: 3;
+}
+
+/* The traffic lights sit over the rail, so the sidebar beside it does not
+   hold their space open a second time. */
+.shell--rail-beside.shell-frame > .sidebar .sidebar__traffic-light-space {
+  display: none;
 }
 
 .shell-frame > .sidebar-rail {
@@ -593,7 +625,7 @@ html[data-octant-native-host="true"]
   z-index: 4;
   top: 0;
   bottom: 0;
-  left: calc(var(--octant-rendered-sidebar-width) - 3px);
+  left: calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width) - 3px);
   width: 7px;
   background: transparent;
   cursor: col-resize;

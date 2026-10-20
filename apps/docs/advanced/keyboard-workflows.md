@@ -89,6 +89,7 @@ The remappable set:
 - **Open the command palette** — **⌘/Ctrl+K**
 - **Show context usage** — **⌘/Ctrl+Shift+U**
 - **Toggle Zen mode** — **⌘/Ctrl+Shift+Z**
+- **Show or hide the sidebar** — **⌘/Ctrl+\\**
 - **Show the next focus space** — **⌘/Ctrl+Alt+]**
 - **Show the previous focus space** — **⌘/Ctrl+Alt+[**
 - **Find a file by name** — **⌘/Ctrl+P**, in the active Code thread

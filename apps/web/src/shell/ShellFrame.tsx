@@ -23,6 +23,8 @@ export interface ShellFrameProps {
   readonly sidebarCollapsed?: boolean;
   /** A collapsed sidebar stays as its icon rail rather than leaving nothing. */
   readonly sidebarRail?: boolean;
+  /** The icon rail stands beside the open sidebar, in its own column. */
+  readonly sidebarRailBeside?: boolean;
   readonly projectsSidebarOpen?: boolean;
   readonly sidebarResizable: boolean;
   readonly sidebarVibrancyMode?: SidebarVibrancyMode;
@@ -141,7 +143,9 @@ export function ShellFrame(props: ShellFrameProps) {
                   : ""
               }${props.wideContextOpen ? " shell--wide-context-open" : ""}${
                 props.sidebarCollapsed ? " shell--sidebar-collapsed" : ""
-              }${props.projectsSidebarOpen ? " shell--projects-sidebar-open" : ""}${
+              }${
+                props.sidebarCollapsed && props.sidebarRail === true ? " shell--sidebar-rail" : ""
+              }${props.sidebarRailBeside === true ? " shell--rail-beside" : ""}${props.projectsSidebarOpen ? " shell--projects-sidebar-open" : ""}${
                 props.backdrop === undefined ? "" : " shell--app-backdrop"
               }${
                 props.backdrop !== undefined && props.backdropCoversSidebar === true

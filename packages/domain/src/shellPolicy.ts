@@ -160,7 +160,7 @@ export function defaultShellSettings(): ShellSettings {
     sidebarMoreEnabled: true,
     sidebarCountTiles: true,
     sidebarSearchPresentation: "icon",
-    sidebarCollapsedPresentation: "rail",
+    sidebarCollapsedPresentation: "always",
     environmentPresentationByMode: defaultEnvironmentPresentationByMode(),
     firstRunOnboarding: "pending",
     automaticUpdateChecks: true,

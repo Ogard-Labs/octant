@@ -159,6 +159,7 @@ export interface SidebarContainerProps {
     readonly sequence: number;
   };
   readonly sidebarRail: boolean;
+  readonly sidebarRailBeside: boolean;
   readonly sidebarTileCounts: ReturnType<typeof countSidebarTiles>;
   readonly threadErrorMessage?: string;
   readonly threadExportClient: ReturnType<typeof resolveThreadExportClient>;
@@ -219,6 +220,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     sidebarFilterQuery,
     sidebarListRequest,
     sidebarRail,
+    sidebarRailBeside,
     sidebarTileCounts,
     threadErrorMessage,
     threadExportClient,
@@ -560,6 +562,9 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
         onOpenReview: openReview,
         onOpenDone: () => openSidebarList("completed"),
       }}
+      {...(sidebarRailBeside
+        ? { railBeside: { onOpenActivity: () => openSidebarList("activity") } }
+        : {})}
       {...(sidebarRail
         ? {
             rail: {
