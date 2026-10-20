@@ -2,10 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
-  createMobileChatWithFirstTurn,
   createMobileCodeFromPrompt,
   createMobileWorkFromPrompt,
-  decodeMobileModelOptionId,
   fetchMobileCodeProjects,
   fetchMobileWorkProjects,
   listAllHostsMobileInbox,
@@ -19,10 +17,8 @@ import {
   type MobileInboxRow,
 } from "@octant/client-runtime";
 import type { CodeDeliveryTarget } from "@octant/contracts";
-import { presentStaleHostSecurity } from "@octant/domain";
-import { MOBILE_COPY, mobileHostHealthLabel, mobileModelLabel } from "../copy";
+import { MOBILE_COPY, mobileHostHealthLabel } from "../copy";
 import { useMobileSession } from "../session/MobileSessionContext";
-import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
 import { mobileCreateModePresentation, type MobileCreateMode } from "./createModePresentation";
@@ -31,12 +27,13 @@ import { inboxStatusCounts, inboxWorkStatus } from "./inboxWorkPresentation";
 import { HomeComposerSheet } from "./HomeComposerSheet";
 import { HomeNavigationSheet } from "./HomeNavigationSheet";
 import { InboxComposerDock } from "./InboxComposerDock";
+import { inboxEmptyState } from "./inboxEmptyState";
 import { FloatingComposer } from "../ui/FloatingComposer";
 import { IconButton } from "../ui/IconButton";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { CodeDeliveryTargetSheet } from "./CodeDeliveryTargetSheet";
-import { selectMobilePlacementTransport } from "./placementTransport";
-import { createProjectRequestGuard } from "./projectRequestGuard";
+import { createRequestGuard } from "./requestGuard";
+import { usePlacement } from "./usePlacement";
 import { StatusCard } from "../ui/StatusCard";
 import type { AgentListView } from "./AgentsListScreen";
 import { summarizeMobileInboxFailures } from "./mobileInboxAvailability";
@@ -48,6 +45,8 @@ export interface InboxHomeScreenProps {
   readonly onOpenHosts: () => void;
   readonly onOpenWorkspace: (hostId: string) => void;
   readonly onAddWorkspace: () => void;
+  /** Opens the pairing screen with the QR scanner already open. */
+  readonly onScanToPair: () => void;
   readonly onOpenThread: (row: MobileInboxRow) => void;
 }
 
@@ -67,8 +66,9 @@ function modeIcon(
 
 export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const { colors } = useTheme();
-  const { transports, hosts, placementHostId, transportForHost, health, refreshHosts } =
-    useMobileSession();
+  const { transports, hosts, hostsLoaded, health, refreshHosts } = useMobileSession();
+  const emptyState =
+    props.homeMode === "inbox" ? inboxEmptyState({ hosts, hostsLoaded }) : undefined;
   const [rows, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
   const [transportError, setTransportError] = useState<string | undefined>();
   const [failures, setFailures] = useState<ReadonlyArray<MobileInboxHostFailure>>([]);
@@ -80,7 +80,6 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const [composerSheetOpen, setComposerSheetOpen] = useState(false);
   const [navigationOpen, setNavigationOpen] = useState(false);
   const [composerMode, setComposerMode] = useState<MobileCreateMode>("chat");
-  const [modelOptionId, setModelOptionId] = useState<string | undefined>();
   const [workProjects, setWorkProjects] = useState<ReadonlyArray<MobileWorkProjectOption>>([]);
   const [codeProjects, setCodeProjects] = useState<ReadonlyArray<MobileCodeProjectOption>>([]);
   const [workProjectId, setWorkProjectId] = useState<string | undefined>();
@@ -89,20 +88,24 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const [deliveryTargetProposal, setDeliveryTargetProposal] = useState<
     MobileCodeDeliveryTargetProposal | undefined
   >();
-  const projectRequestGuard = useRef(createProjectRequestGuard()).current;
+  const projectRequestGuard = useRef(createRequestGuard()).current;
+  const inboxRequestGuard = useRef(createRequestGuard()).current;
   const deliveryTargetResolver = useRef<
     ((target: CodeDeliveryTarget | undefined) => void) | undefined
   >(undefined);
 
-  const placementTransport = useMemo(() => {
-    return selectMobilePlacementTransport({ placementHostId, transports, transportForHost });
-  }, [placementHostId, transportForHost, transports]);
-  const placementHealth = useMemo(() => {
-    if (placementTransport === undefined) return "idle" as const;
-    return health.find((entry) => entry.hostId === placementTransport.hostId)?.kind ?? "idle";
-  }, [health, placementTransport]);
-  const staleGate = useMemo(() => presentStaleHostSecurity(placementHealth), [placementHealth]);
-  const models = usePlacementHostModels(placementTransport);
+  const {
+    placementTransport,
+    placementLabel,
+    placementDisabledReason,
+    staleGate,
+    models,
+    modelOptionId,
+    setModelOptionId,
+    selectedModel,
+    modelLabel,
+    createChat,
+  } = usePlacement({ fallbackToFirstHost: false });
   const requestDeliveryTarget = useCallback((proposal: MobileCodeDeliveryTargetProposal) => {
     return new Promise<CodeDeliveryTarget | undefined>((resolve) => {
       deliveryTargetResolver.current?.(undefined);
@@ -129,33 +132,10 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   useEffect(() => {
     setCodeRetry(undefined);
   }, [placementTransport]);
-  const placementLabel = useMemo(() => {
-    if (placementTransport === undefined) return undefined;
-    return hosts.find((host) => host.hostId === placementTransport.hostId)?.label;
-  }, [hosts, placementTransport]);
-  const placementStatus = useMemo(
-    () => health.find((entry) => entry.hostId === placementTransport?.hostId),
-    [health, placementTransport],
-  );
-  const placementDisabledReason = useMemo(() => {
-    if (placementLabel === undefined) return undefined;
-    if (placementStatus?.kind === "stale") {
-      const detail = placementStatus.detail?.replace(/^Last host refresh was /i, "last refresh ");
-      return `${placementLabel} is stale — ${detail ?? "last refresh is unknown"}. Refresh the host to send.`;
-    }
-    if (placementStatus?.kind === "unavailable") return `${placementLabel} is unavailable.`;
-    return undefined;
-  }, [placementLabel, placementStatus]);
   const hostLabels = useMemo(
     () => new Map(hosts.map((host) => [host.hostId, host.label])),
     [hosts],
   );
-
-  useEffect(() => {
-    if (modelOptionId === undefined && models.options[0] !== undefined) {
-      setModelOptionId(models.options[0].id);
-    }
-  }, [modelOptionId, models.options]);
 
   useEffect(() => {
     const request = projectRequestGuard.begin();
@@ -192,14 +172,18 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
   }, [placementTransport, projectRequestGuard]);
 
   const refresh = useCallback(async () => {
+    // A slower, older fetch must not overwrite what a newer one already showed.
+    const request = inboxRequestGuard.begin();
     if (transports.length === 0) {
       setRows([]);
       setTransportError(undefined);
+      setLoading(false);
       return;
     }
     setLoading(true);
     try {
       const result = await listAllHostsMobileInbox(transports);
+      if (!inboxRequestGuard.isCurrent(request)) return;
       setRows(result.rows);
       setFailures(result.failures);
       setTransportError(
@@ -209,6 +193,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         }),
       );
     } catch (cause) {
+      if (!inboxRequestGuard.isCurrent(request)) return;
       setFailures([]);
       setTransportError(
         cause instanceof MobileInboxFailure
@@ -216,18 +201,14 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           : "Could not load threads from your hosts.",
       );
     } finally {
-      setLoading(false);
+      if (inboxRequestGuard.isCurrent(request)) setLoading(false);
     }
-  }, [hostLabels, transports]);
+  }, [hostLabels, inboxRequestGuard, transports]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  const selectedModel = useMemo(
-    () => models.options.find((option) => option.id === modelOptionId),
-    [modelOptionId, models.options],
-  );
   const selectedWorkProject = workProjects.find((project) => project.projectId === workProjectId);
   const selectedCodeProject = codeProjects.find((project) => project.projectId === codeProjectId);
   const modeRows = useMemo(
@@ -296,15 +277,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         props.onOpenThread(row);
         return;
       }
-      const decoded =
-        modelOptionId === undefined ? undefined : decodeMobileModelOptionId(modelOptionId);
-      const row = await createMobileChatWithFirstTurn({
-        transport: placementTransport,
-        prompt,
-        ...(decoded === undefined
-          ? {}
-          : { providerInstanceId: decoded.providerInstanceId, modelId: decoded.modelId }),
-      });
+      const row = await createChat(prompt);
       setPrompt("");
       setComposerSheetOpen(false);
       await refresh();
@@ -321,11 +294,6 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
     }
   };
 
-  const modelLabel =
-    selectedModel?.label ??
-    (models.options.length === 0
-      ? MOBILE_COPY.modelUnavailable
-      : mobileModelLabel(models.options, models.options[0]?.modelId ?? MOBILE_COPY.modelHostOnly));
   const footerHint =
     placementLabel !== undefined
       ? `${MOBILE_COPY.newThreadsUse} ${placementLabel}`
@@ -498,6 +466,35 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           textAlign: "right",
         },
         empty: { color: colors.textSecondary, lineHeight: 20, paddingVertical: space.md },
+        firstRun: {
+          gap: space.md,
+          padding: space.lg,
+          borderRadius: radii.lg,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.glassStroke,
+          backgroundColor: colors.glassFillThin,
+        },
+        firstRunTitle: {
+          color: colors.textPrimary,
+          fontSize: typography.title.fontSize,
+          fontWeight: typography.title.fontWeight,
+        },
+        firstRunBody: {
+          color: colors.textSecondary,
+          fontSize: typography.body.fontSize,
+          lineHeight: 22,
+        },
+        firstRunButton: {
+          backgroundColor: colors.accent,
+          paddingVertical: 14,
+          alignItems: "center",
+          borderRadius: radii.pill,
+        },
+        firstRunButtonLabel: {
+          color: colors.sendLabel,
+          fontWeight: "500",
+          fontSize: typography.body.fontSize,
+        },
         loader: { marginTop: space.md },
         composerError: {
           color: colors.danger,
@@ -673,7 +670,20 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           </View>
         ) : null}
 
-        {props.homeMode === "inbox" ? (
+        {emptyState !== undefined ? (
+          <View style={styles.firstRun} testID="mobile-home-first-run">
+            <Text style={styles.firstRunTitle}>{emptyState.title}</Text>
+            <Text style={styles.firstRunBody}>{emptyState.body}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={props.onScanToPair}
+              style={styles.firstRunButton}
+              testID="mobile-home-scan-to-pair"
+            >
+              <Text style={styles.firstRunButtonLabel}>{emptyState.actionLabel}</Text>
+            </Pressable>
+          </View>
+        ) : props.homeMode === "inbox" ? (
           <View>
             <View style={styles.grid} testID="mobile-home-status-grid">
               <View style={styles.gridRow}>
@@ -775,14 +785,16 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
       </ScrollView>
 
       {props.homeMode === "inbox" ? (
-        <InboxComposerDock
-          onOpen={() => {
-            setComposerMode("chat");
-            setComposerError(undefined);
-            setCodeRetry(undefined);
-            setComposerSheetOpen(true);
-          }}
-        />
+        emptyState === undefined ? (
+          <InboxComposerDock
+            onOpen={() => {
+              setComposerMode("chat");
+              setComposerError(undefined);
+              setCodeRetry(undefined);
+              setComposerSheetOpen(true);
+            }}
+          />
+        ) : null
       ) : (
         <>
           {composerError !== undefined ? (
