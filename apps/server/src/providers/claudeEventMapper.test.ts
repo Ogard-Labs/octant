@@ -51,6 +51,7 @@ function context(overrides: Partial<ClaudeEventContext> = {}): ClaudeEventContex
     callUsage: new Map(),
     requestIds: new Map(),
     taskIds: new Map(),
+    todoTaskIds: new Map(),
     toolStates: new Map(),
     makeRequestId: () => `request-${++request}`,
     makeTaskId: () => `task-${++task}`,
@@ -457,6 +458,51 @@ describe("mapClaudeMessage", () => {
       { kind: "event", event: { kind: "usage", inputTokens: 17, outputTokens: 7 } },
     ]);
     expect(JSON.stringify([started, authoritative])).not.toContain("private-suffix");
+  });
+
+  it("shows Claude's checklist as task progress that keeps each item's id as it advances", () => {
+    const ctx = context();
+    const write = (toolUseId: string, statuses: ReadonlyArray<string>) =>
+      eventValues(
+        mapped(ctx, {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: `message-${toolUseId}`,
+          content: [
+            {
+              kind: "tool-use",
+              toolUseId,
+              toolName: "TodoWrite",
+              input: {
+                todos: ["Read the spec", "Write the test", "Read the spec"].map(
+                  (content, index) => ({
+                    content,
+                    status: statuses[index] ?? "pending",
+                    activeForm: content,
+                  }),
+                ),
+              },
+            },
+          ],
+          usage,
+        }),
+      ).filter((event) => event.kind !== "usage");
+
+    const first = write("sdk-todo-1", ["in_progress", "pending", "pending"]);
+    const second = write("sdk-todo-2", ["completed", "in_progress", "bogus"]);
+
+    expect(first).toMatchObject([
+      { kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "Read the spec" },
+      { kind: "task-progress", taskId: "task-2", status: "pending", summary: "Write the test" },
+      { kind: "task-progress", taskId: "task-3", status: "pending", summary: "Read the spec" },
+    ]);
+    // The same items keep their ids; an item with an undocumented status is left out.
+    expect(second).toMatchObject([
+      { kind: "task-progress", taskId: "task-1", status: "completed" },
+      { kind: "task-progress", taskId: "task-2", status: "in-progress" },
+    ]);
+    expect(second).toHaveLength(2);
+    expect([...first, ...second].some((event) => event.kind === "tool-start")).toBe(false);
   });
 
   it("ignores raw provider tool summaries regardless of Unicode length", () => {

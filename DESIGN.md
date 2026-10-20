@@ -1480,12 +1480,16 @@ dialog, with keyboard focus restored on cancellation. Submission records a
 proposed artifact and does not approve it or change execution access. The
 entry returns after withdrawal; the dock stays artifact-only.
 
-The provider's recorded task list is a separate, initially collapsed group. Its
-header keeps completed/total progress and failed or waiting counts visible while
-folded. An unfinished list after a settled turn says Incomplete; it does not
-claim that the agent is still running. Expansion shows the recorded ordered
-steps in a bounded, scrollable list. Neither this list nor the journaled plan
-borrows progress, completion, or authority from the subagent group.
+The provider's recorded task list is a separate group. It is open while the
+turn that recorded it runs, so the step in hand reads without a click, and
+folds to its header once the turn settles; a person's own open or fold wins
+over both. The header keeps completed/total progress and failed or waiting
+counts visible while folded. An unfinished list after a settled turn says
+Incomplete; it does not claim that the agent is still running. The open list
+shows the recorded ordered steps in a bounded, scrollable list: the running
+step at Medium (500), finished steps struck through in secondary ink, and no
+fill on any row. Neither this list nor the journaled plan borrows progress,
+completion, or authority from the subagent group.
 
 ### Breakpoints
 

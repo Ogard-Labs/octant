@@ -35,6 +35,8 @@ const APPROVAL_TARGET_MAX_CHARACTERS = 120;
 const SECRET_SHAPED =
   /(?:bearer\s+[A-Za-z0-9._-]{20,}|(?:refresh_token|access_token|api[_-]?key|token)\s*[=:]\s*\S+|authorization\s*:\s*[^\r\n]+|\b(?:sk-[A-Za-z0-9_-]{16,}|gh[opusr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|lin_api_[A-Za-z0-9_]+|xox[abp]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b)/gi;
 const SUMMARY_MAX_CHARACTERS = 1_024;
+/** Claude's own checklist tool: it rewrites the whole list on every call. */
+export const CLAUDE_CHECKLIST_TOOL = "TodoWrite";
 const PATH_MAX_CHARACTERS = 4_096;
 /** Claude's own tools that bring outside content to the model, and the input naming what. */
 const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
@@ -133,6 +135,12 @@ export interface ClaudeEventContext {
   readonly callUsage: Map<string, ClaudeUsage>;
   readonly requestIds: Map<string, ClaudeRequestCorrelation>;
   readonly taskIds: Map<string, ClaudeTaskState>;
+  /**
+   * The task id each checklist item was given, keyed by its text and how many
+   * items before it share that text. Claude restates the whole list on every
+   * `TodoWrite`, so an item keeps its id while only its status changes.
+   */
+  readonly todoTaskIds: Map<string, string>;
   readonly toolStates: Map<string, ClaudeToolState>;
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
@@ -393,7 +401,8 @@ function toolState(
   const state: ClaudeToolState = {
     toolCallId: context.makeToolCallId(),
     toolName: normalizedToolName,
-    emitsActivity: toolName !== "AskUserQuestion",
+    // The checklist shows as the thread's task panel, not as a tool row.
+    emitsActivity: toolName !== "AskUserQuestion" && toolName !== CLAUDE_CHECKLIST_TOOL,
     ...(disabled === true ? { disabled } : {}),
     lifecycle: "active",
   };
@@ -427,6 +436,13 @@ function mapToolUse(
     }
     resolved.state.fileChange = authoritativeFileChange;
   }
+  if (
+    authoritativeInput &&
+    content.disabled !== true &&
+    content.toolName === CLAUDE_CHECKLIST_TOOL
+  ) {
+    return checklistEvents(context, content.input);
+  }
   if (!resolved.created || !resolved.state.emitsActivity) return [{ kind: "ignored" }];
   const start = event(context, {
     kind: "tool-start",
@@ -449,6 +465,45 @@ function mapToolUse(
       ...(target === undefined ? {} : { target }),
     }),
   ];
+}
+
+const CHECKLIST_STATUSES: Readonly<Record<string, "pending" | "in-progress" | "completed">> = {
+  pending: "pending",
+  in_progress: "in-progress",
+  completed: "completed",
+};
+
+/**
+ * One `task-progress` event per item of a `TodoWrite` list, in its order. An
+ * item without text or with a status Claude does not document is left out
+ * rather than failing the turn: Claude validates the call itself and refuses
+ * it, and the next list it writes replaces this one.
+ */
+function checklistEvents(
+  context: ClaudeEventContext,
+  input: { readonly [key: string]: ClaudeJsonValue },
+): ReadonlyArray<ClaudeMappedMessage> {
+  const todos = input.todos;
+  if (!Array.isArray(todos)) return [{ kind: "ignored" }];
+  const results: ClaudeMappedMessage[] = [];
+  const occurrences = new Map<string, number>();
+  for (const todo of todos) {
+    if (typeof todo !== "object" || todo === null || Array.isArray(todo)) continue;
+    const text = jsonString(todo, "content");
+    const status = CHECKLIST_STATUSES[jsonString(todo, "status") ?? ""];
+    const summary = text === undefined ? undefined : normalized(text, SUMMARY_MAX_CHARACTERS);
+    if (summary === undefined || status === undefined) continue;
+    const occurrence = occurrences.get(summary) ?? 0;
+    occurrences.set(summary, occurrence + 1);
+    const key = `${createHash("sha256").update(summary).digest("hex")}:${occurrence}`;
+    let taskId = context.todoTaskIds.get(key);
+    if (taskId === undefined) {
+      taskId = context.makeTaskId();
+      context.todoTaskIds.set(key, taskId);
+    }
+    results.push(event(context, { kind: "task-progress", taskId, status, summary }));
+  }
+  return results.length === 0 ? [{ kind: "ignored" }] : results;
 }
 
 function withoutIgnored(
