@@ -11,6 +11,7 @@ import { OctantTextarea } from "../ui/base/OctantTextarea";
 import { OctantToggleGroup, OctantToggleGroupItem } from "../ui/base/OctantToggleGroup";
 import { SettingRow, SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { FontFamilyPicker } from "./FontFamilyPicker";
+import { ACCENT_SWATCHES, currentAccentSwatch, overridesForAccent } from "./accentSwatches";
 import {
   FIRST_PARTY_PLUGINS_EFFECTIVE,
   isAppearancePresetAvailable,
@@ -170,6 +171,43 @@ export function ThemeAppearanceEditor(props: {
               <OctantToggleGroupItem value="default">Default</OctantToggleGroupItem>
               <OctantToggleGroupItem value="vivid">Vivid</OctantToggleGroupItem>
             </OctantToggleGroup>
+          </SettingRow>
+          <SettingRow
+            description="Switches, the send button, selected states, and the click ring. Mono keeps the theme's own."
+            focused={focusedSetting === "appearance.scheme.accent"}
+            label="Accent"
+            scope="app"
+            settingId="appearance.scheme.accent"
+          >
+            <div aria-label="Accent colour" className="settings-accent" role="radiogroup">
+              {ACCENT_SWATCHES.map((swatch) => {
+                const checked = currentAccentSwatch(draft) === swatch.id;
+                return (
+                  <OctantButton
+                    aria-checked={checked}
+                    aria-label={swatch.label}
+                    className="settings-accent__swatch hover:no-underline"
+                    key={swatch.id}
+                    onClick={() =>
+                      void theme.applyPatch({
+                        semanticOverrides: overridesForAccent(draft.semanticOverrides, swatch.id),
+                      })
+                    }
+                    role="radio"
+                    style={
+                      {
+                        "--settings-accent-swatch": swatch.color ?? "var(--octant-text-primary)",
+                      } as CSSProperties
+                    }
+                    title={swatch.label}
+                    type="button"
+                    variant="link"
+                  >
+                    <span aria-hidden="true" className="settings-accent__dot" />
+                  </OctantButton>
+                );
+              })}
+            </div>
           </SettingRow>
         </div>
       </SettingsSection>
@@ -464,6 +502,6 @@ function ThemeTransfer(props: { readonly controller: ThemeController; readonly f
   );
 }
 
-import { useState, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { moveWithinRadioGroup } from "../ui/base/radioGroupKeys";

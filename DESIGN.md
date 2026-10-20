@@ -132,7 +132,12 @@ body and detail use none.
 ### Colour
 
 Neutral graphite, a monochrome accent, semantic statuses, and one neutral
-keyboard focus edge. That is the default preset; the bundled colour presets lean every
+keyboard focus edge. That is the default preset. Appearance › Accent offers a
+one-click accent colour (Mono, Clay, Amber, Green, Blue, Purple) beside it: a
+swatch overrides the accent fill and puts dark ink on it, and leaves accent
+text on the preset's ink, because no swatch clears normal-text contrast on the
+light page. It colours switches, the send button, selected states, and the
+click ring; status colours stay their own. The default preset; the bundled colour presets lean every
 surface toward one hue and keep the accent and focus role available for theme
 compatibility. Text is three greys (primary, secondary, muted) and never a
 fourth. Hairlines separate; fills select. Selected and expanded fills carry
