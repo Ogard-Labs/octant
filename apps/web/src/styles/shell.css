@@ -56,10 +56,15 @@ html[data-octant-native-host="true"]
   );
 }
 
+/* The rail beside the sidebar spends width from the same budget, so the
+   clamp subtracts it too. */
 .shell.shell-frame.shell--wide-context-open {
   --octant-rendered-sidebar-width: min(
     var(--octant-sidebar-width, 232px),
-    calc(100vw - var(--octant-wide-primary-min) - var(--octant-context-sidebar-min))
+    calc(
+      100vw - var(--octant-rail-offset, 0px) - var(--octant-wide-primary-min) -
+        var(--octant-context-sidebar-min)
+    )
   );
 }
 
@@ -70,7 +75,10 @@ html[data-octant-native-host="true"]
 .shell.shell-frame.shell--wide-context-open.shell--projects-sidebar-open {
   --octant-rendered-sidebar-width: min(
     calc(var(--octant-sidebar-width, 232px) + 320px),
-    calc(100vw - var(--octant-wide-primary-min) - var(--octant-context-sidebar-min))
+    calc(
+      100vw - var(--octant-rail-offset, 0px) - var(--octant-wide-primary-min) -
+        var(--octant-context-sidebar-min)
+    )
   );
 }
 

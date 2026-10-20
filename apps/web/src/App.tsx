@@ -1133,8 +1133,12 @@ function LaunchedShell(
   const sidebarRailBeside =
     !sidebarIsDrawer && !isNarrow && !sidebarCollapsed && railPresentation === "always";
   const setSidebarCollapsedPersistent = useCallback(
-    (collapsed: boolean) => {
-      sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
+    (collapsed: boolean, options?: { readonly keepFocus?: boolean }) => {
+      // A keyboard shortcut leaves focus where it was (often the composer);
+      // only a clicked control that unmounts needs its replacement focused.
+      if (options?.keepFocus !== true) {
+        sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
+      }
       if (sidebarIsDrawer) {
         setSidebarDrawerOpen(!collapsed);
         return;
@@ -1146,7 +1150,7 @@ function LaunchedShell(
   );
   useSidebarToggleShortcut(
     useCallback(
-      () => setSidebarCollapsedPersistent(!presentedSidebarCollapsed),
+      () => setSidebarCollapsedPersistent(!presentedSidebarCollapsed, { keepFocus: true }),
       [presentedSidebarCollapsed, setSidebarCollapsedPersistent],
     ),
   );

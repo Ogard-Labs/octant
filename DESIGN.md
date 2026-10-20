@@ -920,7 +920,8 @@ keyboard focus. Settings ›
 Sidebar › Icon rail can choose When hidden (no rail beside the open sidebar)
 or Never, which removes the sidebar completely when hidden and leaves Show
 sidebar and New thread in the native title rail.
-The rail never appears below the drawer breakpoint, where a collapsed sidebar
+Neither rail appears below the narrow-window breakpoint (960px): there the
+width belongs to the page, and below the drawer breakpoint a collapsed sidebar
 is a closed drawer. The right dock defaults to 420px when open. A fresh window
 starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
