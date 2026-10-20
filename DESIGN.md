@@ -907,6 +907,14 @@ places and counts (the count tiles as icons with badges, the destination rows
 including the More ones, Projects, the Activity feed, and Settings), and the
 sidebar beside it keeps its header, search, the Projects row with its list, and
 the profile, so nothing is offered twice. The traffic lights sit over the rail.
+Above Settings, at the foot of either rail, each provider that reports a plan
+window with a figure gets a usage ring in its identity colour: the outer arc is
+what is left of the longest window (the week), the inner arc what is left of
+the shortest (five hours), and a window near or at its limit takes the danger
+ink. Hovering or focusing a ring opens a card with every window, its share
+left, and when it resets; clicking opens Settings › Usage. A provider with no
+figure gets no ring, because an empty ring would claim a limit nobody reported.
+The rings read the host's last observation, never a fresh provider call.
 Mod+\ (rebindable, "Show or hide the sidebar") toggles the sidebar from
 anywhere, text fields included. Hide sidebar
 collapses it to a 56px icon rail (76px in the desktop app, where

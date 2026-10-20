@@ -266,6 +266,7 @@ import {
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
+import { RailUsageRings } from "./usage/RailUsageRings";
 import { AppBackdrop } from "./theme/AppBackdrop";
 import { useThreadUtilityPresentation } from "./shell/useThreadUtilityPresentation";
 import {
@@ -6404,6 +6405,17 @@ function LaunchedShell(
             {...(sidebarListRequest === undefined ? {} : { sidebarListRequest })}
             sidebarRail={sidebarRail}
             sidebarRailBeside={sidebarRailBeside}
+            {...(launchedClients.providerUsageLimitsClient === undefined
+              ? {}
+              : {
+                  railUsage: (
+                    <RailUsageRings
+                      client={launchedClients.providerUsageLimitsClient}
+                      instances={providerController.instances}
+                      onOpenUsage={() => void controller.openSettings({ section: "usage" })}
+                    />
+                  ),
+                })}
             sidebarTileCounts={sidebarTileCounts}
             {...(projectThreadsAccess.errorMessage === undefined
               ? {}
