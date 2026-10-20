@@ -17,7 +17,7 @@ export interface FloatingComposerProps {
   readonly busy?: boolean;
   readonly editable?: boolean;
   readonly testID?: string;
-  readonly footerHint?: string;
+  readonly footerHint?: string | undefined;
   readonly busyLabel?: string;
 }
 

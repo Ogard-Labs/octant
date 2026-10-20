@@ -98,7 +98,6 @@ export const MOBILE_COPY = {
   composerFollowUp: "Reply…",
   composerDisclaimerShort: "Threads live on your computer.",
   newThreadsUse: "New threads use",
-  hostOwnedThread: "Lives on your computer",
   modelHostOnly: "Host models",
   modelUnavailable: "No host models",
   working: "Working",
