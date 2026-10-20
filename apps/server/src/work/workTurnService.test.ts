@@ -1313,6 +1313,7 @@ describe("WorkTurnService", () => {
           },
         ),
       );
+      expect(turnCompleted).toHaveBeenCalledTimes(stage === "provider" ? 0 : 1);
     },
   );
 

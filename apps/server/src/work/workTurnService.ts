@@ -1661,7 +1661,10 @@ export class WorkTurnService {
       });
       runOutcome = outcome;
       const wroteFiles = observation?.finish();
+      const beforeCompletion = this.#projection.lookup(input.command.requestId);
+      if (beforeCompletion === undefined) return;
       if (
+        beforeCompletion.status !== "cancelled" &&
         outcome.kind === "completed" &&
         harnessScope !== undefined &&
         this.#nativeHarness !== undefined
