@@ -11,7 +11,9 @@ credential storage inside the event store.
 
 Most network traffic is yours to configure: provider API requests for Chat,
 Work, and Code, a Canvas export to a GitHub Gist that you approve, and remote
-access when you enable pairing. Two HTTPS calls
+access when you enable pairing. Public links are off until you turn them on:
+a Canvas published to one goes to the public Canvas share service, which can
+read it ([details](/advanced/privacy-notice#destinations-you-choose)). Two HTTPS calls
 Octant makes on its own behalf are the exception: [update checks](/guide/installation#updates)
 and [marketplace fetches](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 Neither is a telemetry channel. This page states the posture of those two

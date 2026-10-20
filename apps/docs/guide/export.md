@@ -6,7 +6,8 @@ description: How exporting a Canvas or artifact works — to a folder you choose
 
 Export writes a readable copy of a Canvas or an artifact somewhere you choose.
 The copy is Markdown or HTML, so any editor, viewer, or other tool can open it.
-Two destinations ship today: a folder on this Mac, and a GitHub Gist.
+Three destinations ship today: a folder on this Mac, a GitHub Gist, and a
+public link.
 
 Whatever the destination, Octant renders the document first and shows it to you
 before anything is sent or written. A destination is called only after you
@@ -120,6 +121,15 @@ The gist destination reports one of three states:
 - **Refused**, with the reason — GitHub is signed in, but its credential is
   stored in plain text on this Mac, so Octant will not send through it. The same
   rule applies to Octant's other GitHub features.
+
+## Publish a public link
+
+A public link is a read-only page hosted by a share service, so anyone you give
+the URL can open the Canvas in a browser. It is off until you turn on
+**Settings › Data & privacy › Public links**. The approval card shows the content that
+will be sent, who can open it, the expiry, and an optional password, and the
+service can read what you publish. See
+[Share a Canvas with a public link](/guide/public-links).
 
 ## Formats and platforms
 
