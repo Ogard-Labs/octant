@@ -1666,7 +1666,9 @@ Providers that report their own task plans (Claude, Codex, ACP, OpenCode) emit
 is its `TodoWrite` tool: the driver offers it in every posture, Plan included,
 and lets it run unasked, because it changes only Claude's own session state
 (no file, shell, network, or person). Each call restates the whole list, and
-an item keeps its task id while its text is unchanged. Each thread surface
+a task id follows a list position, so the panel keeps Claude's latest order and
+wording. `task-progress` cannot remove a task, so a shrinking list leaves its
+old last rows until the turn ends, as it does for every whole-plan provider. Each thread surface
 shows the agent's restated plan as a live "N of M tasks completed" panel while
 any task is open or the turn is still writing: Code from its journaled
 operation events, Chat from `ChatAttempt.tasks` carried on

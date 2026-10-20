@@ -505,6 +505,42 @@ describe("mapClaudeMessage", () => {
     expect([...first, ...second].some((event) => event.kind === "tool-start")).toBe(false);
   });
 
+  it("keeps the task panel in Claude's latest order when an item is renamed or inserted", () => {
+    const ctx = context();
+    const write = (toolUseId: string, items: ReadonlyArray<string>) =>
+      eventValues(
+        mapped(ctx, {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: `message-${toolUseId}`,
+          content: [
+            {
+              kind: "tool-use",
+              toolUseId,
+              toolName: "TodoWrite",
+              input: {
+                todos: items.map((content) => ({
+                  content,
+                  status: "pending",
+                  activeForm: content,
+                })),
+              },
+            },
+          ],
+          usage,
+        }),
+      ).flatMap((event) =>
+        event.kind === "task-progress" ? [`${event.taskId} ${event.summary}`] : [],
+      );
+
+    expect(write("sdk-todo-a", ["Read", "Test"])).toEqual(["task-1 Read", "task-2 Test"]);
+    expect(write("sdk-todo-b", ["Read the spec", "Write code", "Test"])).toEqual([
+      "task-1 Read the spec",
+      "task-2 Write code",
+      "task-3 Test",
+    ]);
+  });
+
   it("ignores raw provider tool summaries regardless of Unicode length", () => {
     const ctx = context();
     const rawSummary = `${"😀".repeat(1_025)}private-tool-output`;

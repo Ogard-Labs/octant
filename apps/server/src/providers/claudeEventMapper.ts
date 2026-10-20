@@ -136,11 +136,12 @@ export interface ClaudeEventContext {
   readonly requestIds: Map<string, ClaudeRequestCorrelation>;
   readonly taskIds: Map<string, ClaudeTaskState>;
   /**
-   * The task id each checklist item was given, keyed by its text and how many
-   * items before it share that text. Claude restates the whole list on every
-   * `TodoWrite`, so an item keeps its id while only its status changes.
+   * The task id of each checklist position. Claude restates the whole list on
+   * every `TodoWrite`, and the task panel keeps a task's first-seen place, so
+   * keying by position keeps the panel in Claude's latest order and wording
+   * when an item is renamed, reordered, or inserted.
    */
-  readonly todoTaskIds: Map<string, string>;
+  readonly todoTaskIds: Map<number, string>;
   readonly toolStates: Map<string, ClaudeToolState>;
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
@@ -478,6 +479,10 @@ const CHECKLIST_STATUSES: Readonly<Record<string, "pending" | "in-progress" | "c
  * item without text or with a status Claude does not document is left out
  * rather than failing the turn: Claude validates the call itself and refuses
  * it, and the next list it writes replaces this one.
+ *
+ * `task-progress` has no way to remove a task, so a list that shrinks leaves
+ * its old last rows in place until the turn ends; the same holds for every
+ * provider that restates a whole plan.
  */
 function checklistEvents(
   context: ClaudeEventContext,
@@ -486,21 +491,19 @@ function checklistEvents(
   const todos = input.todos;
   if (!Array.isArray(todos)) return [{ kind: "ignored" }];
   const results: ClaudeMappedMessage[] = [];
-  const occurrences = new Map<string, number>();
+  let position = 0;
   for (const todo of todos) {
     if (typeof todo !== "object" || todo === null || Array.isArray(todo)) continue;
     const text = jsonString(todo, "content");
     const status = CHECKLIST_STATUSES[jsonString(todo, "status") ?? ""];
     const summary = text === undefined ? undefined : normalized(text, SUMMARY_MAX_CHARACTERS);
     if (summary === undefined || status === undefined) continue;
-    const occurrence = occurrences.get(summary) ?? 0;
-    occurrences.set(summary, occurrence + 1);
-    const key = `${createHash("sha256").update(summary).digest("hex")}:${occurrence}`;
-    let taskId = context.todoTaskIds.get(key);
+    let taskId = context.todoTaskIds.get(position);
     if (taskId === undefined) {
       taskId = context.makeTaskId();
-      context.todoTaskIds.set(key, taskId);
+      context.todoTaskIds.set(position, taskId);
     }
+    position += 1;
     results.push(event(context, { kind: "task-progress", taskId, status, summary }));
   }
   return results.length === 0 ? [{ kind: "ignored" }] : results;
