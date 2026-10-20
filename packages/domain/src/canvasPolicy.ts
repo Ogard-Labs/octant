@@ -50,6 +50,8 @@ import {
   CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
   CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION,
+  CANVAS_THREAD_OWNED_SCHEMA_VERSION,
+  canvasProvenanceIsThreadOwned,
   canvasDiagramUsesStyles,
   canvasPlanUsesGantt,
   isCanvasDiagramNodeRole,
@@ -113,6 +115,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
   CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
   CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
+  CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -466,13 +469,23 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
     schemaVersion?: unknown;
     blocks?: unknown;
     presentation?: unknown;
-    definition?: { blocks?: unknown; presentation?: unknown };
+    provenance?: unknown;
+    definition?: { blocks?: unknown; presentation?: unknown; provenance?: unknown };
   };
   const declared = envelope.schemaVersion;
   if (typeof declared !== "number") return undefined;
   if (!SUPPORTED_CANVAS_SCHEMA_VERSIONS.includes(declared)) return "unsupported-schema-version";
   const presentation = envelope.presentation ?? envelope.definition?.presentation;
   if (declared < CANVAS_PRESENTATION_SCHEMA_VERSION && presentation !== undefined) {
+    return "unsupported-schema-version";
+  }
+  const provenance = envelope.provenance ?? envelope.definition?.provenance;
+  if (
+    declared < CANVAS_THREAD_OWNED_SCHEMA_VERSION &&
+    typeof provenance === "object" &&
+    provenance !== null &&
+    canvasProvenanceIsThreadOwned(provenance)
+  ) {
     return "unsupported-schema-version";
   }
   const blocks = Array.isArray(envelope.blocks)

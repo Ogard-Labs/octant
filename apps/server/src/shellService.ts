@@ -352,21 +352,38 @@ export class ShellService implements ShellServiceApi {
         }
       }
       if (introduced !== undefined && introduced.kind === "canvas") {
-        const project = this.#persistence.readProject(introduced.projectId);
         const canvas = this.#persistence.canvasProjection.getById(introduced.canvasId);
-        if (
-          project === undefined ||
-          project.lifecycle !== "active" ||
-          project.type !== command.operation.mode ||
-          project.type !== introduced.mode ||
-          canvas === undefined ||
-          String(canvas.currentVersion.definition.provenance.projectId) !==
-            String(introduced.projectId)
-        ) {
-          throw new ShellServiceError({
-            category: "invalid",
-            message: "Canvas surface requires an active matching Project and Canvas.",
-          });
+        // A tab naming no Project opens only a Canvas that belongs to a Chat
+        // thread outside every Project; the Canvas routes decide whether the
+        // thread still holds it.
+        if (introduced.projectId === null) {
+          if (
+            introduced.mode !== "chat" ||
+            command.operation.mode !== "chat" ||
+            canvas === undefined ||
+            canvas.currentVersion.definition.provenance.projectId !== null
+          ) {
+            throw new ShellServiceError({
+              category: "invalid",
+              message: "Canvas surface requires a Chat Canvas owned by its thread.",
+            });
+          }
+        } else {
+          const project = this.#persistence.readProject(introduced.projectId);
+          if (
+            project === undefined ||
+            project.lifecycle !== "active" ||
+            project.type !== command.operation.mode ||
+            project.type !== introduced.mode ||
+            canvas === undefined ||
+            String(canvas.currentVersion.definition.provenance.projectId) !==
+              String(introduced.projectId)
+          ) {
+            throw new ShellServiceError({
+              category: "invalid",
+              message: "Canvas surface requires an active matching Project and Canvas.",
+            });
+          }
         }
       }
       const resolved = resolveWorkspaceContext(current, command.operation, this.#contextResolves());
@@ -560,6 +577,13 @@ function reconcileCanvasTabs(
     const surface = layout.surface;
     if (surface.kind !== "canvas") return { ...layout, surface: { ...surface } };
     const projection = persistence.canvasProjection.getById(surface.canvasId);
+    // A tab for a Canvas owned by its thread restores while that Canvas is
+    // still one; it has no Project for the context to match.
+    if (surface.projectId === null) {
+      return projection?.currentVersion.definition.provenance.projectId === null && mode === "chat"
+        ? { ...layout, surface: { ...surface } }
+        : { ...layout, surface: workspaceWelcomeSurface(mode, surface.id) };
+    }
     const canvasProjectId =
       projection === undefined ? null : projection.currentVersion.definition.provenance.projectId;
     const authority = classifyCanvasTabRestore({

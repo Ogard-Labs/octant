@@ -1,4 +1,5 @@
 import {
+  CANVAS_SCHEMA_VERSION,
   decodeChatThreadId,
   decodeEnvironmentPresentationState,
   decodeWorkThread,
@@ -569,6 +570,89 @@ describe("ShellService", () => {
         ? missingBootstrap.workspace.layouts.chat.surface
         : undefined;
     expect(missingSurface?.kind).toBe("welcome");
+  });
+
+  it("restores a Canvas tab that names no Project while its Canvas still belongs to a Chat thread, and quarantines it otherwise", () => {
+    const canvasId = "11111111-1111-4111-8111-111111111112" as never;
+    const projectionWith = (canvasProjectId: typeof projectId | null) => {
+      const projection = new CanvasProjection();
+      projection.applyCreated({
+        canvasId,
+        version: {
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          canvasId,
+          versionId: "22222222-2222-4222-8222-222222222223" as never,
+          sequence: 1,
+          definition: {
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            title: "Memo",
+            provenance: {
+              mode: "chat",
+              hostId: "local" as never,
+              projectId: canvasProjectId,
+              threadId: "99999999-9999-4999-8999-999999999999" as never,
+              actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+              providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" as never,
+              modelId: "octant-test-model" as never,
+              createdAt: now as never,
+            },
+            sourceManifest: [],
+            blocks: [
+              {
+                blockId: "block-1" as never,
+                schemaVersion: CANVAS_SCHEMA_VERSION,
+                kind: "heading",
+                level: 1,
+                text: "Memo",
+              },
+            ],
+          },
+          createdBy: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+          createdAt: now as never,
+        },
+      });
+      return projection;
+    };
+    const base = { ...defaultWindowWorkspace(ids.window), activeMode: "chat" as const };
+    const chat = base.layouts.chat;
+    if (chat.kind !== "pane") throw new Error("expected pane");
+    const restored = {
+      ...base,
+      layouts: {
+        ...base.layouts,
+        chat: {
+          ...chat,
+          surface: {
+            kind: "canvas" as const,
+            id: chat.surface.id,
+            mode: "chat" as const,
+            title: "Memo",
+            canvasId,
+            projectId: null,
+          },
+        },
+      },
+    } as never;
+    const surfaceWith = (canvasProjection: CanvasProjection) => {
+      const fixture = persistenceStub({
+        workspace: { workspace: restored, aggregateVersion: 2 as never },
+        canvasProjection,
+      });
+      const bootstrap = new ShellService({
+        persistence: fixture.persistence,
+        uuid: uuidSequence(),
+        clock: () => now,
+      }).bootstrap(ids.window);
+      return bootstrap.workspace.layouts.chat.kind === "pane"
+        ? bootstrap.workspace.layouts.chat.surface
+        : undefined;
+    };
+    // No Project in the window's Chat context is needed: the Canvas belongs to
+    // its thread, so the tab restores on the Canvas alone.
+    expect(surfaceWith(projectionWith(null))?.kind).toBe("canvas");
+    // A tab naming no Project never stands in for a Project's Canvas.
+    expect(surfaceWith(projectionWith(projectId))?.kind).toBe("welcome");
+    expect(surfaceWith(new CanvasProjection())?.kind).toBe("welcome");
   });
 
   it("requires an active matching Project before appending a preview surface", () => {

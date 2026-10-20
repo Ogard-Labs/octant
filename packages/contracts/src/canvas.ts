@@ -36,8 +36,9 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // id, version 14 the funnel, radar, and sankey chart types, version 15 the
 // dashboard layout block, version 16 the design document size and workspace
 // theme, version 17 a design's declared image assets, version 18 a design
-// that runs script, and version 19 the tabs and columns layout groups, diagram
-// styles, and the plan's Gantt view, which the
+// that runs script, version 19 the tabs and columns layout groups, diagram
+// styles, and the plan's Gantt view, and version 20 a Chat Canvas owned by
+// its thread rather than a Chat Project, which the
 // definition filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
@@ -219,8 +220,24 @@ export const CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION = 19;
 // Diagram styling (closed node roles, edge styles and tones, group tones) and
 // the plan's Gantt view shipped with the layout groups and share their floor.
 export const CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION = CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION;
+// A Chat Canvas whose provenance names its thread and no Project
+// (`projectId: null`): the Canvas belongs to the thread, as a Chat thread
+// outside a Chat Project has no Project to hold it.
+export const CANVAS_THREAD_OWNED_SCHEMA_VERSION = 20;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
+
+/**
+ * Whether a provenance names a thread and no Project: a Chat Canvas that
+ * belongs to its thread. Reads loose fields so the domain's declared-version
+ * check can ask before the document decodes.
+ */
+export function canvasProvenanceIsThreadOwned(provenance: {
+  readonly mode?: unknown;
+  readonly projectId?: unknown;
+}): boolean {
+  return provenance.mode === "chat" && provenance.projectId === null;
+}
 
 /** Whether a block uses a metric field introduced at the metric-trend version. */
 export function canvasMetricUsesTrendFields(block: {
@@ -381,9 +398,13 @@ const CanvasProvenanceCommon = {
 } as const;
 
 export const CanvasProvenance = Schema.Union(
+  // A Chat Canvas belongs to its thread's Chat Project, or, when the thread
+  // is in none, to the thread alone (`projectId: null`, from
+  // `CANVAS_THREAD_OWNED_SCHEMA_VERSION`). Work and Code always have a Project.
   Schema.Struct({
     ...CanvasProvenanceCommon,
     mode: Schema.Literal("chat"),
+    projectId: Schema.NullOr(ProjectId),
     threadId: ChatThreadId,
   }).annotations(strict),
   Schema.Struct({
@@ -2523,8 +2544,9 @@ export const CanvasDefinition = Schema.Struct({
     // version 13, the funnel, radar, and sankey charts from version 14, the
     // dashboard from version 15, a design document or theme from version 16,
     // design assets from version 17, a design that runs script from version
-    // 18, and the tabs and columns layout groups, diagram styles, and the
-    // Gantt view from version 19. A rolled-back runtime that never learned a
+    // 18, the tabs and columns layout groups, diagram styles, and the
+    // Gantt view from version 19, and a Chat Canvas owned by its thread from
+    // version 20. A rolled-back runtime that never learned a
     // kind or hint must see a document carrying it as a declared future
     // version, not as a document that failed to decode. Each keeps its own
     // floor so an earlier document stays valid.
@@ -2535,6 +2557,15 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `Mockup blocks require Canvas schema version ${String(CANVAS_MOCKUP_SCHEMA_VERSION)} or newer.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_THREAD_OWNED_SCHEMA_VERSION ||
+        !canvasProvenanceIsThreadOwned(definition.provenance),
+      {
+        message: () =>
+          `A Canvas owned by its thread requires Canvas schema version ${String(CANVAS_THREAD_OWNED_SCHEMA_VERSION)}.`,
       },
     ),
     Schema.filter(

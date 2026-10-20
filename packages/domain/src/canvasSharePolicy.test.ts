@@ -397,7 +397,12 @@ describe("Canvas share policy", () => {
         current: atCurrentVersion([design]),
         context,
       });
-      expect(decodeCanvasStaticExportDocument(shared.document).blocks).toEqual([design]);
+      expect(decodeCanvasStaticExportDocument(shared.document).blocks).toEqual([
+        {
+          ...design,
+          schemaVersion: Math.min(design.schemaVersion, CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION),
+        },
+      ]);
     }
   });
 
@@ -874,7 +879,13 @@ describe("Canvas share of tabs, columns, diagram styles, and the Gantt view", ()
       CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION,
     );
     const decoded = decodeCanvasStaticExportDocument(JSON.parse(JSON.stringify(receipt.document)));
-    expect(decoded.blocks).toEqual([...designBriefExample, launchGanttExample]);
+    // A share names each block at most the newest version share version 9 represents.
+    expect(decoded.blocks).toEqual(
+      [...designBriefExample, launchGanttExample].map((block) => ({
+        ...block,
+        schemaVersion: Math.min(block.schemaVersion, CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION),
+      })),
+    );
   });
 
   it("is refused by a decoder that declares the previous share version", () => {

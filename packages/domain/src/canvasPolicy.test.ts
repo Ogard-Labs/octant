@@ -36,6 +36,7 @@ import {
   CANVAS_HEATMAP_SCHEMA_VERSION,
   CANVAS_PRESENTATION_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
+  CANVAS_THREAD_OWNED_SCHEMA_VERSION,
   CANVAS_TREEMAP_SCHEMA_VERSION,
   decodeCanvasDefinition,
   type CanvasDefinition,
@@ -276,6 +277,25 @@ describe("Canvas validation policy", () => {
           definition: { ...baseDefinition, schemaVersion: 2, blocks: [mockup] },
           createdBy: { kind: "local-user", actorId: ids.actor },
           createdAt: "2026-08-01T21:00:01.000Z",
+        }),
+      "unsupported-schema-version",
+    );
+  });
+
+  it("refuses a Canvas owned by its thread inside a document declaring an older schema version", () => {
+    const threadOwned = {
+      ...baseDefinition,
+      provenance: { ...provenance, projectId: null },
+      sourceManifest: [],
+    };
+    expect(validateCanvasDefinition(threadOwned).provenance.projectId).toBeNull();
+    const older = CANVAS_THREAD_OWNED_SCHEMA_VERSION - 1;
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition({
+          ...threadOwned,
+          schemaVersion: older,
+          blocks: baseDefinition.blocks.map((block) => ({ ...block, schemaVersion: older })),
         }),
       "unsupported-schema-version",
     );

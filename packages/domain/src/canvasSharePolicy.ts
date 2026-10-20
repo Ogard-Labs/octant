@@ -253,6 +253,11 @@ function sanitizeBlock(block: CanvasBlock, markupAcknowledged: boolean): CanvasS
 
 function redactProvenance(definition: CanvasDefinition): CanvasRedactedProvenance {
   const provenance = definition.provenance;
+  // A share names the Project it was taken from; a Canvas owned by its thread
+  // has none, so it is not shared (see `authorizeCanvasShareRequest`).
+  if (provenance.projectId === null) {
+    reject("scope-mismatch", THREAD_OWNED_SHARE_REFUSAL);
+  }
   return {
     hostId: provenance.hostId,
     projectId: provenance.projectId,
@@ -343,6 +348,9 @@ export function validateCanvasStaticExportRequest(input: {
   ) {
     reject("scope-mismatch", "Canvas export host does not match the authoritative host.");
   }
+  if (input.current.definition.provenance.projectId === null) {
+    reject("scope-mismatch", THREAD_OWNED_SHARE_REFUSAL);
+  }
   if (
     String(request.projectId) !== String(input.context.projectId) ||
     String(request.projectId) !== String(input.current.definition.provenance.projectId)
@@ -351,6 +359,13 @@ export function validateCanvasStaticExportRequest(input: {
   }
   return request;
 }
+
+// A share record and its snapshot name the Project they were taken from, and
+// a reader's access is judged against that Project. A Chat Canvas owned by
+// its thread has none, so sharing it is refused rather than given a Project
+// it does not belong to.
+const THREAD_OWNED_SHARE_REFUSAL =
+  "A Canvas that belongs to a Chat thread outside a Project cannot be shared.";
 
 export function buildCanvasStaticExportDocument(input: {
   readonly request: CanvasStaticExportRequest;

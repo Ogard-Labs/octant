@@ -397,6 +397,10 @@ export class ReplicaArtifactSyncService {
     this.#resolving.delete(String(version.canvasId));
     try {
       if (!this.#queues() || this.#ports.planMode(version)) return;
+      // The store files an artifact by its Project and binds it to a thread
+      // of that Project on another computer; a Canvas owned by a Chat thread
+      // outside every Project has none, so it stays on this computer.
+      if (version.definition.provenance.projectId === null) return;
       // A version another computer wrote, now open in a thread here, is
       // already in the store under its writer's slot; it is not published
       // again under this computer's.

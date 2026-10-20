@@ -334,7 +334,8 @@ export function wireReplica(deps: ReplicaDependencies) {
           message: "The Project or thread this artifact belongs to is no longer available.",
         };
       }
-      const project = persistence.readProject(provenance.projectId);
+      const project =
+        provenance.projectId === null ? undefined : persistence.readProject(provenance.projectId);
       const result = canvasService.revise(
         {
           schemaVersion: 1,
@@ -363,7 +364,7 @@ export function wireReplica(deps: ReplicaDependencies) {
         },
         {
           mode: provenance.mode,
-          projectId: String(provenance.projectId),
+          projectId: provenance.projectId === null ? null : String(provenance.projectId),
           hostId: String(LOCAL_HOST_ID),
           workspace,
           originThreadId: String(provenance.threadId),

@@ -852,13 +852,16 @@ const PreviewWorkspaceTab = Schema.Struct({
   boundCodeThreadId: Schema.optional(CodeThreadId),
 }).annotations(strict);
 
+// A Canvas tab names the Project the Canvas belongs to, or `null` for a Chat
+// Canvas that belongs to its thread alone; the host restores the latter
+// against the Canvas itself rather than against the pane's Project context.
 const CanvasWorkspaceTab = Schema.Struct({
   kind: Schema.Literal("canvas"),
   id: WorkspaceTabId,
   mode: OctantMode,
   title: Schema.NonEmptyTrimmedString,
   canvasId: CanvasId,
-  projectId: ProjectId,
+  projectId: Schema.NullOr(ProjectId),
 }).annotations(strict);
 
 /**
