@@ -234,6 +234,15 @@ export type ClaudeStreamEvent =
   | { readonly kind: "compaction-delta"; readonly index: number }
   | { readonly kind: "content-stop"; readonly index: number };
 
+/**
+ * How long the runtime waits on the PreToolUse hook, in seconds. The hook can
+ * hold a call while a person answers a publish approval, and the runtime's
+ * default of 60 seconds abandons that wait and denies the call while the card
+ * is still open. The permission callback has no deadline, so the hook gets one
+ * long enough that a person, not a timer, ends the wait.
+ */
+export const CLAUDE_PRE_TOOL_HOOK_TIMEOUT_SECONDS = 24 * 60 * 60;
+
 export type ClaudeDecodedMessage =
   | {
       readonly kind: "initialized";
@@ -486,6 +495,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly hooks: {
     readonly PreToolUse: readonly [
       {
+        readonly timeout: number;
         readonly hooks: readonly [
           (
             input: ClaudeAgentSdkHookInput,
@@ -710,7 +720,12 @@ function liveBridge(): ClaudeAgentSdkBridge {
               },
             }),
         hooks: {
-          PreToolUse: [{ hooks: [...invocation.options.hooks.PreToolUse[0].hooks] }],
+          PreToolUse: [
+            {
+              timeout: invocation.options.hooks.PreToolUse[0].timeout,
+              hooks: [...invocation.options.hooks.PreToolUse[0].hooks],
+            },
+          ],
         },
       };
       return queryClaude({
@@ -957,7 +972,11 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
                 runsCommands: input.tools.includes("Bash"),
               }),
               canUseTool,
-              hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
+              hooks: {
+                PreToolUse: [
+                  { timeout: CLAUDE_PRE_TOOL_HOOK_TIMEOUT_SECONDS, hooks: [preToolUse] },
+                ],
+              },
             };
             query = sdk.query({ prompt, options: invocationOptions });
             const initialization = {

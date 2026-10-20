@@ -2119,6 +2119,24 @@ describe("mapClaudeToolRequest", () => {
     });
     expect(JSON.stringify(publish)).not.toMatch(/sk-ant-fixture|\/repo\//);
 
+    const deep = mapClaudeToolRequest(
+      context(),
+      toolRequest({
+        toolName: "Artifact",
+        toolUseId: "sdk-artifact-publish-deep",
+        input: {
+          file_path: `${projectRoot}/${"nested-folder/".repeat(10)}report.html`,
+          title: "A very long title that keeps going well past what fits on a card",
+        },
+      }),
+    );
+    const deepEvent = deep.kind === "approval" ? deep.request.event : undefined;
+    const deepDescription =
+      deepEvent !== undefined && "description" in deepEvent ? String(deepEvent.description) : "";
+    expect(deepDescription).toContain(' to your Anthropic account as "A very long title');
+    expect(deepDescription.endsWith('…"')).toBe(true);
+    expect(Array.from(deepDescription.replace(/^Artifact · /, "")).length).toBeLessThanOrEqual(120);
+
     const listing = mapClaudeToolRequest(
       context(),
       toolRequest({

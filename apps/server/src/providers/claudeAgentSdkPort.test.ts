@@ -3,6 +3,7 @@ import { Chunk, Effect, Stream } from "effect";
 import { describe, expect, test, vi } from "vitest";
 
 import {
+  CLAUDE_PRE_TOOL_HOOK_TIMEOUT_SECONDS,
   makeClaudeAgentSdkPort,
   type ClaudeAgentSdkBridge,
   type ClaudeAgentSdkQueryInvocation,
@@ -243,6 +244,11 @@ describe("Claude Agent SDK port", () => {
           expect(harness.invocation?.options.allowDangerouslySkipPermissions).toBeUndefined();
           expect(harness.invocation?.options.canUseTool).toBeTypeOf("function");
           expect(harness.invocation?.options.hooks?.PreToolUse).toHaveLength(1);
+          // A publish approval waits on the hook; the runtime's 60-second
+          // default would deny it while the person is still reading the card.
+          expect(harness.invocation?.options.hooks?.PreToolUse[0]?.timeout).toBe(
+            CLAUDE_PRE_TOOL_HOOK_TIMEOUT_SECONDS,
+          );
         }),
       ),
     );

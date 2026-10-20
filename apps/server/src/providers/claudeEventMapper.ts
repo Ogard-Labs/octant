@@ -26,6 +26,8 @@ const DIFF_MAX_CHARACTERS = 65_536;
 const LABEL_MAX_CHARACTERS = 256;
 /** A prompt is read at a glance; a command longer than this is cut with an ellipsis. */
 const APPROVAL_TARGET_MAX_CHARACTERS = 120;
+/** A publish title's share of the prompt, leaving the path at least half. */
+const ARTIFACT_TITLE_MAX_CHARACTERS = 32;
 /**
  * Token shapes a shell command might carry as literals. The prompt still
  * shows that something is there; the journal never learns what. The issue
@@ -1342,14 +1344,21 @@ function approvalTarget(
     const relativePath =
       filePath === undefined ? undefined : confinedRelativePath(context, filePath);
     if (relativePath === undefined) return undefined;
+    // The path and title are cut on their own budgets so the destination
+    // always survives: cutting the whole line let a deep path push "to your
+    // Anthropic account" and the title off the card.
     const title =
       typeof input.title === "string"
-        ? normalized(redactedLine(input.title), LABEL_MAX_CHARACTERS)
+        ? normalized(redactedLine(input.title), ARTIFACT_TITLE_MAX_CHARACTERS)
         : undefined;
-    return normalized(
-      `publish ${relativePath} to your Anthropic account${title === undefined ? "" : ` as "${title}"`}`,
-      APPROVAL_TARGET_MAX_CHARACTERS,
-    );
+    const titled = title === undefined ? "" : ` as "${title}"`;
+    const destination = " to your Anthropic account";
+    const pathBudget =
+      APPROVAL_TARGET_MAX_CHARACTERS -
+      "publish ".length -
+      destination.length -
+      Array.from(titled).length;
+    return `publish ${truncate(relativePath, pathBudget)}${destination}${titled}`;
   }
   const path =
     typeof input.file_path === "string"
