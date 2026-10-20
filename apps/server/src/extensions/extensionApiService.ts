@@ -58,7 +58,9 @@ export class ExtensionApiService {
     | ((snapshot: ExtensionSnapshot, command: ExtensionCommand) => void | Promise<void>)
     | undefined;
   readonly #inspections = new Map<string, InspectedExtensionPackage>();
-  readonly #userAddedMcpServers: { remove(sourceRef: string): Promise<void> } | undefined;
+  readonly #userAddedMcpServers:
+    | { owns(sourceRef: string): boolean; remove(sourceRef: string): Promise<void> }
+    | undefined;
 
   constructor(options: {
     readonly lifecycle: ExtensionLifecycleService;
@@ -71,7 +73,10 @@ export class ExtensionApiService {
       command: ExtensionCommand,
     ) => void | Promise<void>;
     /** Removes the folder and secrets of a server the person added by hand, once its package is gone. */
-    readonly userAddedMcpServers?: { remove(sourceRef: string): Promise<void> };
+    readonly userAddedMcpServers?: {
+      owns(sourceRef: string): boolean;
+      remove(sourceRef: string): Promise<void>;
+    };
   }) {
     this.#lifecycle = options.lifecycle;
     this.#resolver = options.resolver;
@@ -135,7 +140,9 @@ export class ExtensionApiService {
           // The generated folder and its secrets go only once the package is
           // really gone; a waiting uninstall keeps them for the retry.
           if (
-            source?.kind === "user-added" &&
+            source !== undefined &&
+            "sourceRef" in source &&
+            this.#userAddedMcpServers?.owns(source.sourceRef) === true &&
             !snapshot.packages.some((candidate) => candidate.extensionId === command.extensionId)
           ) {
             await this.#userAddedMcpServers?.remove(source.sourceRef);

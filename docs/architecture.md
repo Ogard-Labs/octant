@@ -5421,10 +5421,16 @@ marks secret never enters the package: the host stores it in the credential
 broker's own namespace for these secrets (`/v1/mcp-server-credentials/*`, the
 `mcp-server-credential` Keychain service or Secret Service attribute) and the
 package carries `${OCTANT_SECRET:<id>}` in its place. The session manager
-fills references in at launch, only for a `user-added` package, so a
-third-party package can never name a secret; a reference the broker cannot
-answer fails the launch rather than starting the server with a blank.
-Uninstalling the package removes its folder and every secret it referenced.
+fills references in at launch, only for a package the host's own store of
+generated folders vouches for by source reference (the installed manifest's
+source kind is rewritten to `plugin-package`, so it cannot be the authority),
+so a third-party package can never name a secret; a reference the broker
+cannot answer fails the launch rather than starting the server with a blank.
+Uninstalling the package removes its folder and every secret it referenced,
+and an add that fails before the package is installed removes them too, so a
+retry with the same name is not blocked. Refusals travel as typed results
+(HTTP 200) like every other extension command, so the dialog shows the host's
+own sentence.
 On a host without a broker the add is refused when it carries a secret, with
 the Octant app named as the way to do it. This is the base the connector work
 builds on: discovery of servers and plugins other tools already know on this

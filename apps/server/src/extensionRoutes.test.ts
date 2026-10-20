@@ -886,10 +886,43 @@ describe("MCP servers added by hand", () => {
       now: () => now,
     });
     const answered = await handler(request("/api/extensions/user-servers", body));
-    expect(answered?.status).toBe(409);
+    expect(answered?.status).toBe(200);
     expect(await answered?.json()).toMatchObject({
       failure: { category: "invalid", message: "A server with this name is already added." },
     });
+  });
+
+  it("removes the written package again when it cannot be installed, so the name stays free", async () => {
+    const source = { kind: "user-added", sourceRef: "user-docs-search" } as const;
+    const add = vi.fn(async () => ({ source }));
+    const remove = vi.fn(async () => undefined);
+    const execute = vi.fn(async (command: ExtensionCommand) =>
+      command.kind === "inspect-package"
+        ? ({
+            kind: "package-inspected",
+            preview: { entry: { extensionId, packageId, version: "1.0.0", digest, source } },
+          } as never)
+        : ({
+            kind: "extension-command-failed",
+            failure: { category: "blocked", message: "Install refused." },
+          } as never),
+    );
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      userAddedMcpServers: { add, remove } as never,
+      now: () => now,
+    });
+    const answered = await handler(request("/api/extensions/user-servers", body));
+    expect(answered?.status).toBe(200);
+    expect(await answered?.json()).toMatchObject({
+      failure: { category: "blocked", message: "Install refused." },
+    });
+    expect(remove).toHaveBeenCalledWith("user-docs-search");
+
+    execute.mockRejectedValueOnce(new Error("interrupted"));
+    await handler(request("/api/extensions/user-servers", body));
+    expect(remove).toHaveBeenCalledTimes(2);
   });
 });
 
