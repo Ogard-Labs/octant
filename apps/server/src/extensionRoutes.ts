@@ -28,6 +28,7 @@ import type { ExtensionSource } from "@octant/contracts/extensions";
 import type { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import type { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
 import type { ExtensionToolApprovalAnswerer } from "./extensions/extensionToolApprovalService";
+import type { DiscoveredServerRefusal } from "./extensions/agentToolingDiscovery";
 import { UserAddedMcpServerError } from "./extensions/userAddedMcpServers";
 
 export interface ExtensionRouteService {
@@ -51,6 +52,7 @@ export function createExtensionRouteHandler(options: {
   readonly agentToolingDiscovery?: {
     list(): Promise<DiscoveredAgentToolingListing>;
     server(id: string): UserAddedMcpServerRequest | undefined;
+    refusal(id: string): DiscoveredServerRefusal | undefined;
     pluginPath(id: string): string | undefined;
   };
   /**
@@ -266,7 +268,7 @@ export function createExtensionRouteHandler(options: {
           { kind: "inspect-package", source: registered.source },
           request.signal,
         );
-        return response(inspected, 200, origin);
+        return response(withLoaderNotes(inspected, registered.notes), 200, origin);
       } catch (error) {
         if (error instanceof AgentPluginsError) {
           return response(failure("invalid", error.message), 400, origin);
@@ -368,6 +370,20 @@ export function createExtensionRouteHandler(options: {
             origin,
           );
         }
+        const refusal = options.agentToolingDiscovery.refusal(discovered.id);
+        if (refusal !== undefined) {
+          const names = refusal.names.join(", ");
+          return response(
+            failure(
+              "invalid",
+              refusal.kind === "unsupported-placeholders"
+                ? `Octant does not copy ${names} into this server's command or address. Add it by hand with the value filled in.`
+                : `This server needs a value for ${names}. Add it by hand and enter it there.`,
+            ),
+            400,
+            origin,
+          );
+        }
         return addUserMcpServer(
           options.service,
           options.userAddedMcpServers,
@@ -390,7 +406,7 @@ export function createExtensionRouteHandler(options: {
           { kind: "inspect-package", source: registered.source },
           request.signal,
         );
-        return response(inspected, 200, origin);
+        return response(withLoaderNotes(inspected, registered.notes), 200, origin);
       } catch (error) {
         if (error instanceof AgentPluginsError) {
           return response(failure("invalid", error.message), 400, origin);
@@ -565,6 +581,28 @@ function hasExactKeys(
  * trusts and switches it on as one act, because the person just asked for
  * exactly that; the ladder still records each step.
  */
+/**
+ * What the loader left out of another tool's plugin rides on the inspection's
+ * own diagnostics, so the review that precedes Install shows the omission.
+ */
+function withLoaderNotes(
+  inspected: ExtensionCommandResult,
+  notes: ReadonlyArray<string>,
+): ExtensionCommandResult {
+  if (notes.length === 0 || inspected.kind !== "package-inspected") return inspected;
+  const added = notes.map((note, index) => ({
+    code: `plugin-left-out-${index + 1}`,
+    message: note.replaceAll("/", " ").replaceAll("\\", " ").slice(0, 1024),
+  }));
+  return {
+    ...inspected,
+    preview: {
+      ...inspected.preview,
+      diagnostics: [...inspected.preview.diagnostics, ...added].slice(0, 128),
+    },
+  };
+}
+
 async function addUserMcpServer(
   service: ExtensionRouteService,
   store: { add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }> },

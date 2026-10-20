@@ -13,8 +13,20 @@ const listing: DiscoveredAgentToolingListing = {
       name: "docs",
       transport: "stdio",
       summary: "npx -y docs-mcp",
-      needsValues: ["DOCS_URL"],
+      needsValues: [],
+      unsupportedPlaceholders: [],
       secretNames: ["DOCS_TOKEN"],
+    },
+    {
+      id: "claude-00000000000000000000000000000003" as never,
+      origin: "claude-code",
+      scope: "user",
+      name: "remote",
+      transport: "streamable-http",
+      summary: "https://mcp.example/mcp",
+      needsValues: ["MCP_TOKEN"],
+      unsupportedPlaceholders: ["API_HOST"],
+      secretNames: [],
     },
   ],
   plugins: [
@@ -52,7 +64,9 @@ describe("Found on this Mac", () => {
     expect(
       within(servers).getByText(/Kept in the credential store: DOCS_TOKEN/),
     ).toBeInTheDocument();
-    expect(within(servers).getByRole("note")).toHaveTextContent("Needs a value for DOCS_URL");
+    expect(within(servers).getByRole("note")).toHaveTextContent("Uses API_HOST");
+    const buttons = within(servers).getAllByRole("button", { name: "Add to Octant" });
+    expect(buttons[1]).toBeDisabled();
     const plugins = screen.getByRole("list", { name: "Plugins found on this Mac" });
     expect(
       within(plugins).getByText(/Codex · Codex plugin · v1.1.0 · off there/),
@@ -61,7 +75,7 @@ describe("Found on this Mac", () => {
       "legacy (Claude Code)",
     );
 
-    await user.click(within(servers).getByRole("button", { name: "Add to Octant" }));
+    await user.click(buttons[0] as HTMLElement);
     await waitFor(() => expect(onServerAdded).toHaveBeenCalled());
     expect(applyDiscoveredTooling).toHaveBeenCalledWith({
       kind: "add-server",

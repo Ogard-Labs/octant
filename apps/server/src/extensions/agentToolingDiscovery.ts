@@ -38,6 +38,11 @@ interface DiscoveredServerRecord {
   readonly request: UserAddedMcpServerRequest;
 }
 
+/** Why a listed server cannot be added from here, as the route words it. */
+export type DiscoveredServerRefusal =
+  | { readonly kind: "unsupported-placeholders"; readonly names: ReadonlyArray<string> }
+  | { readonly kind: "needs-values"; readonly names: ReadonlyArray<string> };
+
 interface DiscoveredPluginRecord {
   readonly listing: DiscoveredPlugin;
   readonly absolutePath: string;
@@ -75,6 +80,24 @@ export class AgentToolingDiscovery {
   /** The request behind a listed server, by its id, or undefined once the listing is stale. */
   server(id: string): UserAddedMcpServerRequest | undefined {
     return this.#servers.get(id)?.request;
+  }
+
+  /**
+   * Whether a listed server still holds a placeholder no one has filled in.
+   * A variable inside the command, arguments or address is never expanded from
+   * the host environment, and a missing environment variable or header value
+   * would be saved as literal text, so both are refused before anything is added.
+   */
+  refusal(id: string): DiscoveredServerRefusal | undefined {
+    const listing = this.#servers.get(id)?.listing;
+    if (listing === undefined) return undefined;
+    if (listing.unsupportedPlaceholders.length > 0) {
+      return { kind: "unsupported-placeholders", names: listing.unsupportedPlaceholders };
+    }
+    if (listing.needsValues.length > 0) {
+      return { kind: "needs-values", names: listing.needsValues };
+    }
+    return undefined;
   }
 
   /** The folder behind a listed plugin, by its id. The path never leaves the host. */
@@ -137,7 +160,7 @@ export class AgentToolingDiscovery {
         if (typeof value.command !== "string") continue;
         this.#offer(servers, "claude-code", scope, name, {
           type: "stdio",
-          command: this.#expand(value.command, []).value,
+          command: value.command,
           args: stringArray(value.args),
           env: isRecord(value.env) ? value.env : {},
         });
@@ -201,9 +224,11 @@ export class AgentToolingDiscovery {
   }
 
   /**
-   * Turns one found server into the request Add MCP server would send, with
-   * `${VAR}` filled from the environment where it can be, and a value whose
-   * name reads like a credential marked secret so it goes to the broker.
+   * Turns one found server into the request Add MCP server would send. `${VAR}`
+   * is filled from the environment only in a value the credential broker can
+   * hold (an environment value or a header), and that value is marked secret.
+   * In the command, arguments and address it stays as written and is reported,
+   * so no host value reaches the listing or the saved package.
    */
   #offer(
     servers: Map<string, DiscoveredServerRecord>,
@@ -224,6 +249,7 @@ export class AgentToolingDiscovery {
         },
   ): void {
     const needsValues: string[] = [];
+    const unsupported: string[] = [];
     const rows: Array<{ name: string; value: string; secret: boolean }> = [];
     const values = found.type === "stdio" ? found.env : found.headers;
     for (const [key, raw] of Object.entries(values)) {
@@ -242,7 +268,7 @@ export class AgentToolingDiscovery {
             server: {
               type: "stdio",
               command: found.command,
-              args: found.args.map((arg) => this.#expand(arg, needsValues).value),
+              args: found.args,
               env: rows,
             },
           }
@@ -250,10 +276,15 @@ export class AgentToolingDiscovery {
             name,
             server: {
               type: "streamable-http",
-              url: this.#expand(found.url, needsValues).value,
+              url: found.url,
               headers: rows,
             },
           };
+    const fixed = found.type === "stdio" ? [found.command, ...found.args] : [found.url];
+    for (const field of fixed) {
+      for (const match of field.matchAll(VARIABLE))
+        if (match[1] !== undefined) unsupported.push(match[1]);
+    }
     const summary =
       request.server.type === "stdio"
         ? [request.server.command, ...request.server.args].join(" ")
@@ -270,6 +301,7 @@ export class AgentToolingDiscovery {
         transport: request.server.type,
         summary: summary.slice(0, 512),
         needsValues: [...new Set(needsValues)].slice(0, 32),
+        unsupportedPlaceholders: [...new Set(unsupported)].slice(0, 32),
         secretNames: rows
           .filter((row) => row.secret)
           .map((row) => row.name)

@@ -29,6 +29,17 @@ const FORMAT_LABEL = {
   "claude-plugin": "Claude Code plugin",
 } as const;
 
+/** Why a found server cannot be copied as it is, or undefined when it can. */
+function blockedReason(server: DiscoveredMcpServer): string | undefined {
+  if (server.unsupportedPlaceholders.length > 0) {
+    return `Uses ${server.unsupportedPlaceholders.join(", ")} in its command or address, which Octant does not copy. Add it by hand.`;
+  }
+  if (server.needsValues.length > 0) {
+    return `Needs a value for ${server.needsValues.join(", ")}. Add it by hand and enter it there.`;
+  }
+  return undefined;
+}
+
 /**
  * Found on this Mac: the MCP servers and plugins Claude Code and Codex
  * already know here, each with one button that copies it into Octant. The
@@ -130,14 +141,16 @@ export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
                       Kept in the credential store: {server.secretNames.join(", ")}
                     </span>
                   ) : null}
-                  {server.needsValues.length > 0 ? (
+                  {blockedReason(server) === undefined ? null : (
                     <span className="discovered-tooling__detail" role="note">
-                      Needs a value for {server.needsValues.join(", ")}; set it after adding.
+                      {blockedReason(server)}
                     </span>
-                  ) : null}
+                  )}
                 </span>
                 <OctantButton
-                  disabled={props.disabled || busyId !== undefined}
+                  disabled={
+                    props.disabled || busyId !== undefined || blockedReason(server) !== undefined
+                  }
                   onClick={() => void addServer(server)}
                   size="sm"
                   type="button"

@@ -105,6 +105,32 @@ describe("servers and plugins other agent tools know on this computer", () => {
     ]);
   });
 
+  it("leaves a variable in a command argument or address as written and refuses to add the server", async () => {
+    const found = discovery(
+      {
+        [`${HOME}/.claude.json`]: JSON.stringify({
+          mcpServers: {
+            tool: { command: "npx", args: ["--token", "${API_TOKEN}"], env: {} },
+            remote: { type: "http", url: "https://mcp.example/mcp?key=${API_TOKEN}" },
+          },
+        }),
+      },
+      { env: { API_TOKEN: "private-value" } },
+    );
+    const listing = await found.list();
+    expect(JSON.stringify(listing)).not.toContain("private-value");
+    const [tool, remote] = listing.servers;
+    expect(tool?.summary).toBe("npx --token ${API_TOKEN}");
+    expect(tool?.unsupportedPlaceholders).toEqual(["API_TOKEN"]);
+    expect(remote?.summary).toBe("https://mcp.example/mcp?key=${API_TOKEN}");
+    expect(remote?.unsupportedPlaceholders).toEqual(["API_TOKEN"]);
+    expect(JSON.stringify(found.server(tool?.id ?? ""))).not.toContain("private-value");
+    expect(found.refusal(tool?.id ?? "")).toEqual({
+      kind: "unsupported-placeholders",
+      names: ["API_TOKEN"],
+    });
+  });
+
   it("names a variable the environment lacks instead of inventing a value", async () => {
     const found = discovery({
       [`${HOME}/.claude.json`]: JSON.stringify({
@@ -121,6 +147,7 @@ describe("servers and plugins other agent tools know on this computer", () => {
     const remote = listing.servers[0];
     expect(remote?.needsValues).toEqual(["MCP_TOKEN"]);
     expect(remote?.secretNames).toEqual(["Authorization"]);
+    expect(found.refusal(remote?.id ?? "")).toEqual({ kind: "needs-values", names: ["MCP_TOKEN"] });
     const request = found.server(remote?.id ?? "");
     expect(request?.server.type === "streamable-http" ? request.server.headers : []).toEqual([
       { name: "Authorization", value: "Bearer ${MCP_TOKEN}", secret: true },
