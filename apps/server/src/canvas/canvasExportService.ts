@@ -25,8 +25,12 @@ import {
   type CanvasExportRefusal,
   type CanvasExportRenderedOutput,
   type CanvasExportTargetId,
+  type CanvasExportLinkChoice,
   type CanvasExportVisibility,
+  CANVAS_EXPORT_BODY_MAX_BYTES,
 } from "@octant/contracts/canvas-export";
+import type { CanvasPublicShareDocument } from "@octant/contracts/canvas-public-share";
+import { buildCanvasPublicShareDocument, CanvasSharePolicyRejected } from "@octant/domain";
 import type { CanvasExportDestination, CanvasExportTarget } from "@octant/plugin-api/canvas-export";
 import {
   offerCanvasExportTargets,
@@ -34,7 +38,7 @@ import {
 } from "@octant/plugin-host/canvas-export-contributions";
 import type { EventActor, UtcTimestamp } from "@octant/contracts";
 import { Schema } from "effect";
-import { renderArtifactDocument } from "./artifactDocumentRender";
+import { renderArtifactDocument, type ArtifactDocumentRender } from "./artifactDocumentRender";
 import { CanvasExportEventStore } from "./canvasExportEventStore";
 
 /**
@@ -142,7 +146,12 @@ export class CanvasExportService {
   /**
    * Render the document and hold an approval card. The destination is not called.
    */
-  prepare(request: CanvasExportPrepareRequest, permitted: boolean): CanvasExportPrepareResult {
+  prepare(
+    request: CanvasExportPrepareRequest,
+    permitted: boolean,
+    /** Who asked, as the transport authenticated it. A link needs a local window. */
+    requester: "local-window" | "remote-device" = "local-window",
+  ): CanvasExportPrepareResult {
     if (!permitted) {
       return decodeCanvasExportPrepareResult(
         refused("unauthorized", "Export is not authorized for this canvas."),
@@ -182,13 +191,20 @@ export class CanvasExportService {
       );
     }
 
-    // A design's frames are written into the HTML form, and the card below
-    // says so: approving it is the person's acknowledgement that markup
-    // leaves as written, which the share filter cannot check.
-    const rendered = renderArtifactDocument(document, request.format, {
-      frames: "as-written",
-      ...(request.frameTheme === undefined ? {} : { frameTheme: request.frameTheme }),
-    });
+    // A design's frames are written into the HTML form and the share
+    // document, and the card below says so: approving it is the person's
+    // acknowledgement that markup leaves as written, which the share filter
+    // cannot check.
+    const rendered =
+      request.format === "share-document"
+        ? renderShareDocument(document, this.#clock())
+        : renderArtifactDocument(document, request.format, {
+            frames: "as-written",
+            ...(request.frameTheme === undefined ? {} : { frameTheme: request.frameTheme }),
+          });
+    if (rendered.kind === "refused") {
+      return decodeCanvasExportPrepareResult(refused("refused", rendered.message));
+    }
     if (rendered.kind === "too-large") {
       return decodeCanvasExportPrepareResult(
         refused("too-large", "The rendered document is too large to export."),
@@ -224,7 +240,14 @@ export class CanvasExportService {
     // Naming a file is also what makes the approval a confirmation to replace
     // an existing one; naming an account and an audience is what lets the
     // person see whose name it goes out under and who can see it.
-    const destination = binding?.target.describeDestination?.(output);
+    const destination = withoutChoice(binding?.target.describeDestination?.(output));
+    // A link opens for anyone who holds it, so only the person at a local
+    // window may publish one; a paired device can read links, not mint them.
+    if (destination?.linkTerms !== undefined && requester !== "local-window") {
+      return decodeCanvasExportPrepareResult(
+        refused("unauthorized", "A public link can be published only from a window on this Mac."),
+      );
+    }
     const nowMs = Date.parse(this.#clock());
     const expiresAtMs = nowMs + CANVAS_EXPORT_APPROVAL_TTL_MS;
     const card = decodeCanvasExportApprovalCard({
@@ -250,6 +273,9 @@ export class CanvasExportService {
         : { destinationVisibility: destination.visibility }),
       ...(destination?.note === undefined ? {} : { destinationNote: destination.note }),
       ...(rendered.writesDesignMarkup ? { writesDesignMarkup: true } : {}),
+      ...(destination?.linkTerms === undefined
+        ? {}
+        : { destinationLinkTerms: destination.linkTerms }),
       payload: rendered.body,
       payloadDigest,
       byteLength,
@@ -285,6 +311,8 @@ export class CanvasExportService {
      * destination described; a destination that offered no audience ignores it.
      */
     readonly visibility?: CanvasExportVisibility;
+    /** The expiry and password the person chose, when the card offered link terms. */
+    readonly link?: CanvasExportLinkChoice;
   }): Promise<CanvasExportDecideResult> {
     const key = String(input.approvalId);
     const pending = this.#pending.get(key);
@@ -325,6 +353,15 @@ export class CanvasExportService {
       );
     }
 
+    if (
+      pending.confirmedDestination?.linkTerms !== undefined &&
+      input.actor.kind === "remote-device"
+    ) {
+      this.#pending.delete(key);
+      return decodeCanvasExportDecideResult(
+        refused("unauthorized", "A public link can be published only from a window on this Mac."),
+      );
+    }
     const offer = this.#offerFor(pending.card.card.targetId, pending.card.card.canvasId);
     if (offer === undefined || offer.status !== "ready") {
       this.#pending.delete(key);
@@ -351,7 +388,7 @@ export class CanvasExportService {
     const delivery = await this.#deliver(
       binding.target,
       pending.output,
-      confirmedDestination(pending.confirmedDestination, input.visibility),
+      confirmedDestination(pending.confirmedDestination, input.visibility, input.link),
     );
     const record = decodeCanvasExportRecorded({
       schemaVersion: 1,
@@ -458,6 +495,52 @@ export class CanvasExportService {
   }
 }
 
+/**
+ * The share document a link destination draws itself, as the JSON it sends.
+ * It is built by the same filter an authenticated snapshot passes, without
+ * host, Project, thread, Canvas, or source identity; the card shows it whole.
+ */
+function renderShareDocument(
+  document: CanvasExportDocument,
+  publishedAt: UtcTimestamp,
+): ArtifactDocumentRender | { readonly kind: "refused"; readonly message: string } {
+  let shared: CanvasPublicShareDocument;
+  try {
+    shared = buildCanvasPublicShareDocument({
+      definition: document,
+      publishedAt,
+      // The card this body is shown on says the markup leaves as written, and
+      // approving it is the acknowledgement; nothing is sent before that.
+      markupAcknowledged: true,
+    });
+  } catch (error) {
+    if (error instanceof CanvasSharePolicyRejected) {
+      return {
+        kind: "refused",
+        message: "This Canvas holds something a public link cannot carry.",
+      };
+    }
+    throw error;
+  }
+  const body = JSON.stringify(shared, null, 2);
+  if (canvasExportBodyByteLength(body) > CANVAS_EXPORT_BODY_MAX_BYTES) return { kind: "too-large" };
+  return {
+    kind: "rendered",
+    title: shared.title,
+    body,
+    writesDesignMarkup: shared.blocks.some((block) => block.kind === "design"),
+  };
+}
+
+/** A described destination never carries a choice; only the host adds one. */
+function withoutChoice(
+  destination: CanvasExportDestination | undefined,
+): CanvasExportDestination | undefined {
+  if (destination?.link === undefined) return destination;
+  const { link: _link, ...described } = destination;
+  return described;
+}
+
 function digestOf(body: string): string {
   return `sha256:${createHash("sha256").update(body).digest("hex")}`;
 }
@@ -474,7 +557,21 @@ function digestOf(body: string): string {
 function confirmedDestination(
   destination: CanvasExportDestination | undefined,
   visibility: CanvasExportVisibility | undefined,
+  link: CanvasExportLinkChoice | undefined,
 ): CanvasExportDestination | undefined {
-  if (visibility === undefined || destination?.visibility === undefined) return destination;
-  return { ...destination, visibility };
+  if (destination === undefined) return undefined;
+  const withVisibility =
+    visibility === undefined || destination.visibility === undefined
+      ? destination
+      : { ...destination, visibility };
+  // A link destination always hears an expiry: the person's choice, or the
+  // default the card showed them. A destination that offered no terms hears
+  // no choice, as with the audience.
+  if (destination.linkTerms === undefined) return withVisibility;
+  return {
+    ...withVisibility,
+    link: link ?? {
+      expiry: { kind: "days", days: destination.linkTerms.defaultExpiryDays },
+    },
+  };
 }

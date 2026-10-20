@@ -20,7 +20,7 @@ and TLS are not part of this change.
 
 ## Off until the person turns it on
 
-- Settings › Canvas › **Public links** is off by default. Its row names the
+- Settings › Data & privacy › **Public links** is off by default. Its row names the
   service URL, `https://canvas.octant.sh` unless the person enters their own.
   A service URL is `https:`; `http:` is accepted only for a loopback address
   (`127.0.0.1`, `::1`, `localhost`) so a self-hosted service can be tried on
@@ -111,8 +111,12 @@ budget, and the service refuses a larger one.
 
 There are no accounts. At create the service returns a per-share owner secret
 (32 random bytes, URL-safe base64) and stores only its SHA-256. The host keeps
-the secret in the credential broker under `canvas-public-share/<id>`, never in
-the journal, a projection, a response to a window, or a log. Update, revoke,
+the secret in the credential broker's own namespace for it
+(`/v1/canvas-public-share-secrets/*`; a Keychain service and a Secret Service
+attribute of its own) under a random credential reference, never in the
+journal, a projection, a response to a window, or a log. Keeping it apart from
+provider credentials means a provider purge never strands a link its owner
+can no longer revoke. Update, revoke,
 and status present it as `Authorization: Bearer`; the service compares hashes
 in constant time and answers a wrong or missing secret with 403, the same
 answer for an id that does not exist, so the secret cannot be used to probe
@@ -121,8 +125,8 @@ link has expired.
 
 ## The host's record
 
-Each link is journaled (`canvas.public-share.published`, `.updated`,
-`.revoked`) and projected per Canvas as its id, URL, service origin, the
+Each link is journaled (`canvas.public-share-published@1`, `-updated@1`,
+`-revoked@1`, in the `canvas-public-share` aggregate) and projected per Canvas as its id, URL, service origin, the
 Canvas version it carries, publish and update times, expiry, whether it has a
 password, and status (`active`, `expired`, `revoking`, `revoked`). The Canvas
 share panel lists them with **Copy link**, **Update**, and **Revoke**.
@@ -131,8 +135,11 @@ Purging a Canvas, or a thread with the Canvases it owns, revokes each of their
 active links. A revoke the service cannot answer is kept as `revoking`, with
 its owner secret, after the Canvas is gone, and retried when the host starts
 and on each later purge or listing until the service answers that the link is
-gone. Only that pending revocation outlives the purge; it holds no Canvas
-content.
+gone. Only that pending revocation outlives the purge: it is a
+`canvas-public-share-revocation` aggregate naming the link, its service, and
+the secret's reference, and no Canvas, so the purge's ownership walk leaves it.
+The Settings switch is the `canvas-public-link-settings` aggregate, changed
+only from a local window against the version the window read.
 
 ## The service
 
@@ -153,6 +160,8 @@ front of it.
 | `GET /api/v1/shares/<id>`          | owner secret                               | 200 `canvas-public-share-status`          |
 | `POST /api/v1/shares/<id>/reports` | `canvas-public-share-report`               | 202                                       |
 | `GET /s/<id>`, `POST /s/<id>`      | password form for a protected link         | the viewer page, or 404 / 410 / 401 / 429 |
+| `POST /s/<id>/report`              | the viewer's report form (no script)       | a thank-you page                          |
+| `GET /f/<id>/<blockId>?t=<token>`  | user-content origin only                   | one design's frames                       |
 | `GET /healthz`                     | none                                       | 200 `ok`, nothing about any share         |
 
 Every body is decoded strictly against the contract, an unknown field or
@@ -182,7 +191,10 @@ frame-ancestors 'none'`. The page loads one first-party stylesheet and
   own `sandbox` directive. Frame responses carry `frame-ancestors` naming the
   public origin only, and a frame address carries a short-lived token the
   service signs for one link and revision, so a protected link's frames are
-  not open without its password.
+  not open without its password. The token also names whether it opens the
+  static or the running policy. A design drawn in the workspace theme is drawn
+  with the frame kit and the default theme's token values, light or dark as
+  the viewer's system prefers, since no window hands its tokens over.
 
 ### Privacy and limits
 
@@ -227,13 +239,16 @@ keeps Update unambiguous; a second link for the same Canvas is a revoke away.
 
 ## Verification
 
-- `packages/domain` `canvasPublicSharePolicy.test.ts`: the payload is the
-  filtered share document without ids, sources, images, or action blocks, and
-  frames leave only with the acknowledgement.
-- `apps/server` `publicLinkExportTarget.test.ts` and
-  `canvasPublicShareService.test.ts`: nothing is offered or sent while off,
-  publish needs the approval, update reuses the link, revoke and purge revoke
-  at the service, and the owner secret stays in the credential broker.
+- `packages/domain` `canvasSharePolicy.test.ts`: the payload is the filtered
+  share document without ids, sources, images, or action blocks, and frames
+  leave only with the acknowledgement.
+- `apps/server` `canvasPublicShareService.test.ts`: nothing is offered or sent
+  while off, publish needs the approval and a local window, update reuses the
+  link, revoke and purge revoke at the service, and the owner secret stays out
+  of the journal. `canvasAgentTools.test.ts`: no agent operation shares,
+  exports, or publishes.
+- `packages/host-runtime` `credentialBroker.test.ts`: the owner secrets'
+  namespace is out of reach of the provider and sync key routes.
 - `apps/share` tests: ids are 128-bit, owner secret, expiry, revocation (410),
   and password are enforced, viewer headers carry `noindex` and the policy,
   and frames are drawn from the user-content origin.

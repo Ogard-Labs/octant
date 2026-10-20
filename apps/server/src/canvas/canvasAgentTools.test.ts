@@ -62,6 +62,22 @@ describe("createCanvasAgentTools", () => {
     ]);
   });
 
+  it("gives an agent no way to share, export, or publish a public link", () => {
+    const definitions = tools().set.definitions;
+    const schema = JSON.stringify(definitions.map((definition) => definition.inputSchema));
+    expect(JSON.parse(schema)[0].properties.operation.enum).toEqual([
+      "describe",
+      "list",
+      "read",
+      "create",
+      "revise",
+      "preview",
+    ]);
+    for (const word of ["export", "share", "publish", "public-link"]) {
+      expect(schema).not.toContain(`"${word}"`);
+    }
+  });
+
   it("lets an MCP agent discover the Canvas workflow and author the supplied example", async () => {
     const { create, set } = tools();
     const server = createManagedMcpTools(set.definitions, async (name, inputJson) => {

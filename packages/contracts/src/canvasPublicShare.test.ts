@@ -28,9 +28,7 @@ describe("a public share document", () => {
 
   it("refuses an action block", () => {
     const action = { blockId: "go", schemaVersion: 1, kind: "action", label: "Run" };
-    expect(() =>
-      decodeCanvasPublicShareDocument({ ...document, blocks: [action] }),
-    ).toThrow();
+    expect(() => decodeCanvasPublicShareDocument({ ...document, blocks: [action] })).toThrow();
   });
 
   it("refuses a title that names a file on the host", () => {

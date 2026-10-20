@@ -59,6 +59,13 @@ import type { CanvasCommentService } from "./canvas/canvasCommentService";
 import type { CanvasShareService } from "./canvas/canvasShareService";
 import type { CanvasExportService } from "./canvas/canvasExportService";
 import type { CanvasExportFolderService } from "./canvas/canvasExportFolderService";
+import type { CanvasPublicShareService } from "./canvas/canvasPublicShareService";
+import {
+  decodeCanvasPublicLinkSettingsCommand,
+  decodeCanvasPublicLinkSettingsResult,
+  decodeCanvasPublicShareRevokeRequest,
+  decodeCanvasPublicShareRevokeResult,
+} from "@octant/contracts/canvas-public-share";
 import { canvasExportEventActor } from "./canvas/canvasExportActor";
 import {
   canvasDesignPageHeaders,
@@ -90,6 +97,11 @@ export interface CanvasRouteDependencies {
   readonly canvasShareService?: CanvasShareService;
   /** Destination export. Absent when the host cannot journal an export. */
   readonly canvasExportService?: CanvasExportService;
+  /**
+   * Public links: the Settings switch, each Canvas's links, and revoke.
+   * Publishing goes through the export routes, never here.
+   */
+  readonly canvasPublicShareService?: CanvasPublicShareService;
   /**
    * Brings the export destinations' connection state current before they are
    * listed or prepared. The offer list itself is synchronous, so a destination
@@ -206,6 +218,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "export-prepare" &&
       route !== "export-decide" &&
       route !== "export-folder" &&
+      route !== "public-shares" &&
+      route !== "public-share-revoke" &&
+      route !== "public-link-settings" &&
       route !== "thread-reference-cards"
     ) {
       return undefined;
@@ -1110,7 +1125,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           if (context.kind === "ok") await dependencies.refreshCanvasExportTargets?.();
           return jsonResponse(
             decodeCanvasExportPrepareResult(
-              exportService.prepare(requestBody, context.kind === "ok"),
+              exportService.prepare(requestBody, context.kind === "ok", principal.kind),
             ),
             200,
             origin,
@@ -1137,6 +1152,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               ...(requestBody.visibility === undefined
                 ? {}
                 : { visibility: requestBody.visibility }),
+              ...(requestBody.link === undefined ? {} : { link: requestBody.link }),
               // The envelope names the transport principal this host
               // authenticated for the approval, never a fixed local user.
               actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
@@ -1145,6 +1161,116 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           200,
           origin,
         );
+      }
+
+      if (
+        route === "public-shares" ||
+        route === "public-share-revoke" ||
+        route === "public-link-settings"
+      ) {
+        const links = dependencies.canvasPublicShareService;
+        if (links === undefined) {
+          return failureResponse("Public links are unavailable on this host.", 404, origin);
+        }
+        if (route === "public-link-settings" && request.method === "GET") {
+          if (url.searchParams.size !== 0) {
+            return failureResponse("Public link settings request is invalid.", 400, origin);
+          }
+          return jsonResponse(links.settings(), 200, origin);
+        }
+        if (route === "public-link-settings" && request.method === "POST") {
+          // Turning public links on or pointing them at another service is
+          // the person's choice at this Mac, never a paired device's.
+          if (principal.kind !== "local-window") {
+            return jsonResponse(
+              decodeCanvasPublicLinkSettingsResult({
+                kind: "canvas-public-link-settings-refused",
+                reason: "unauthorized",
+                message: "Public link settings can be changed only from a window on this Mac.",
+              }),
+              200,
+              origin,
+            );
+          }
+          const body = await readJson(request);
+          let command;
+          try {
+            if (body.kind !== "ok") throw new Error("malformed");
+            command = decodeCanvasPublicLinkSettingsCommand(body.value);
+          } catch {
+            return jsonResponse(
+              decodeCanvasPublicLinkSettingsResult({
+                kind: "canvas-public-link-settings-refused",
+                reason: "malformed",
+                message: "Public link settings request is malformed.",
+              }),
+              200,
+              origin,
+            );
+          }
+          return jsonResponse(links.changeSettings(command), 200, origin);
+        }
+        if (route === "public-shares" && request.method === "GET") {
+          if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
+            return failureResponse("Public links request is invalid.", 400, origin);
+          }
+          let canvasId;
+          try {
+            canvasId = decodeCanvasId(url.searchParams.get("canvasId") ?? "");
+          } catch {
+            return failureResponse("Canvas ID is invalid.", 400, origin);
+          }
+          const context = await resolveAuthorizedContext(
+            dependencies,
+            authenticatedWindowId,
+            canvasId,
+          );
+          if (context.kind !== "ok") {
+            return failureResponse(
+              "Public links are not available for this canvas.",
+              context.kind === "unauthorized" ? 403 : 404,
+              origin,
+            );
+          }
+          return jsonResponse(links.list(canvasId), 200, origin);
+        }
+        if (route === "public-share-revoke" && request.method === "POST") {
+          const refusedRevoke = (code: "unauthorized" | "malformed", message: string) =>
+            jsonResponse(
+              decodeCanvasPublicShareRevokeResult({ kind: "refused", code, message }),
+              200,
+              origin,
+            );
+          // Revoking is recorded as the owner's act, like an authenticated share's.
+          if (principal.kind !== "local-window") {
+            return refusedRevoke(
+              "unauthorized",
+              "A public link can be revoked only from a window on this Mac.",
+            );
+          }
+          const body = await readJson(request);
+          let revokeRequest;
+          try {
+            if (body.kind !== "ok") throw new Error("malformed");
+            revokeRequest = decodeCanvasPublicShareRevokeRequest(body.value);
+          } catch {
+            return refusedRevoke("malformed", "Public link revoke request is malformed.");
+          }
+          const context = await resolveAuthorizedContext(
+            dependencies,
+            authenticatedWindowId,
+            revokeRequest.canvasId,
+          );
+          if (context.kind !== "ok") {
+            return refusedRevoke("unauthorized", "Public links are not available for this canvas.");
+          }
+          return jsonResponse(
+            await links.revoke(revokeRequest.canvasId, revokeRequest.publicShareId),
+            200,
+            origin,
+          );
+        }
+        return failureResponse("Public links request is invalid.", 405, origin);
       }
 
       if (route === "export-folder" && (request.method === "GET" || request.method === "POST")) {

@@ -221,7 +221,7 @@ export type CanvasPublicShareRefusal = typeof CanvasPublicShareRefusal.Type;
 // The host's side: Settings, the record of each link, and its routes.
 // ---------------------------------------------------------------------------
 
-/** Settings › Canvas › Public links. Off until the person turns it on. */
+/** Settings › Data & privacy › Public links. Off until the person turns it on. */
 export const CanvasPublicLinkSettings = Schema.Struct({
   kind: Schema.Literal("canvas-public-link-settings"),
   enabled: Schema.Boolean,

@@ -533,7 +533,7 @@ document as a future version. Frames follow the
   inside, the approval card names the markup it writes, and a themed design
   is drawn in the theme the person's window hands over; this has shipped.
   Markdown export writes the title. A public link is an export too: off until
-  the person turns on Settings › Canvas › Public links, published only from
+  the person turns on Settings › Data & privacy › Public links, published only from
   the approval card in a local window and never by an agent, it carries the
   share filter's blocks without host, Project, thread, or source identity to
   the public Canvas share service, which can read it, draws design frames only

@@ -514,6 +514,7 @@ export function startOctantServer(
       artifactMirrorRoutes,
       canvasAgentToolPort,
       canvasCommentService,
+      canvasPublicShareService,
       canvasRoutes,
       canvasService,
       replicaArtifactSync,
@@ -1075,6 +1076,7 @@ export function startOctantServer(
       providerCredentialRoutes,
       remoteHost,
     } = wireRemote({
+      canvasPublicShareService,
       threadExportService,
       agentMessageService,
       authenticatedProductDispatch,
