@@ -3,7 +3,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export interface HostOAuthBrokerDescriptor {
   readonly descriptorId: string;
   readonly clientId?: string;
-  readonly dialect?: "openrouter-pkce" | "chatgpt-plan-siwc";
+  readonly dialect?: "openrouter-pkce" | "chatgpt-plan-siwc" | "mcp-authorization";
   readonly flow: "authorization-code-pkce" | "device-code";
   readonly authorizationEndpoint?: string;
   readonly tokenEndpoint: string;
@@ -14,6 +14,9 @@ export interface HostOAuthBrokerDescriptor {
   readonly extAgentHostId?: string;
   /** ChatGPT plan dialect: the app name sent as `agent_name_hint` on registration. */
   readonly agentNameHint?: string;
+  /** MCP authorization dialect: the server the token is for, and the callback port. */
+  readonly resource?: string;
+  readonly redirectPort?: number;
 }
 
 export interface HostOAuthBrokerPort {

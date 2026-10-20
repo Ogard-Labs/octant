@@ -15,6 +15,7 @@ const GRANT_KIND = "host-oauth-grant";
 const CALLBACK_PATH = "/oauth/callback";
 const OPENROUTER_DIALECT = "openrouter-pkce";
 const CHATGPT_PLAN_DIALECT = "chatgpt-plan-siwc";
+const MCP_DIALECT = "mcp-authorization";
 // The ChatGPT plan flow registers a user-defined agent on the first sign-in:
 // the authorize request sends this placeholder client id, and the callback
 // returns the issued client id (oaiapp_...) that the exchange and every later
@@ -53,7 +54,7 @@ const JWKS_CACHE_MS = 10 * 60 * 1_000;
 export type HostOAuthFlow = "authorization-code-pkce" | "device-code";
 
 /** Vendor wire dialects the host OAuth runner can speak. */
-export type HostOAuthDialect = "openrouter-pkce" | "chatgpt-plan-siwc";
+export type HostOAuthDialect = "openrouter-pkce" | "chatgpt-plan-siwc" | "mcp-authorization";
 
 export interface HostOAuthDescriptor {
   readonly descriptorId: string;
@@ -74,6 +75,18 @@ export interface HostOAuthDescriptor {
   readonly extAgentHostId?: string;
   /** ChatGPT plan dialect only: the app name sent as `agent_name_hint` on registration. */
   readonly agentNameHint?: string;
+  /**
+   * MCP authorization dialect only: the canonical address of the MCP server
+   * the token is for (RFC 8707), sent as `resource` on authorize, exchange
+   * and refresh so the issuer binds the token to that server.
+   */
+  readonly resource?: string;
+  /**
+   * MCP authorization dialect only: the loopback port the callback listens
+   * on. The client registration had to name the redirect address before the
+   * flow could begin, so the caller chooses the port and the runner binds it.
+   */
+  readonly redirectPort?: number;
 }
 
 export type HostOAuthSignInAgainReason = "revoked" | "expired" | "refresh-reused";
@@ -202,6 +215,8 @@ interface StoredGrant {
   readonly tokenEndpoint: string;
   readonly generation: number;
   readonly dialect?: string;
+  /** MCP authorization dialect: the resource every refresh names again. */
+  readonly resource?: string;
   /**
    * ChatGPT plan dialect only: the identity token from the last exchange or
    * refresh. Retained so a reauthorization can send it as `id_token_hint`.
@@ -262,6 +277,8 @@ export async function exchangeAuthorizationCode(input: {
   readonly fetch: typeof fetch;
   readonly now: () => number;
   readonly dialect?: HostOAuthDialect;
+  /** MCP authorization dialect: the resource the exchange names (RFC 8707). */
+  readonly resource?: string;
   /** ChatGPT plan dialect: the OIDC nonce bound to the identity token. */
   readonly nonce?: string;
   /** ChatGPT plan dialect: the issued client id captured from the callback. */
@@ -331,12 +348,14 @@ export async function exchangeAuthorizationCode(input: {
       redirect_uri: input.redirectUri,
       client_id: input.clientId,
       code_verifier: input.verifier,
+      ...(input.resource === undefined ? {} : { resource: input.resource }),
     },
     clientId: input.clientId,
     tokenEndpoint: input.tokenEndpoint,
     previousRefresh: undefined,
     generation: 0,
     codeExchange: true,
+    ...(input.resource === undefined ? {} : { resource: input.resource }),
   });
   if (exchanged.kind === "tokens") return exchanged;
   if (exchanged.kind === "transient") return exchanged;
@@ -1021,7 +1040,7 @@ export function createHostOAuthRuntime(options: {
           redirectUri,
         });
       });
-      await listen(listener);
+      await listen(listener, descriptor.redirectPort);
       const address = listener.address() as AddressInfo | null;
       if (address === null) {
         listener.close();
@@ -1058,6 +1077,7 @@ export function createHostOAuthRuntime(options: {
           scope: descriptor.scopes.join(" "),
           state,
           challenge,
+          ...(descriptor.resource === undefined ? {} : { resource: descriptor.resource }),
         });
       }
       const awaiting: HostOAuthBeginResult = {
@@ -1231,6 +1251,9 @@ export function createHostOAuthRuntime(options: {
       fetch: fetchImpl,
       now,
       ...(session.descriptor.dialect === undefined ? {} : { dialect: session.descriptor.dialect }),
+      ...(session.descriptor.resource === undefined
+        ? {}
+        : { resource: session.descriptor.resource }),
       ...(session.nonce === "" ? {} : { nonce: session.nonce }),
       ...(issuedClientId === undefined ? {} : { issuedClientId }),
       ...(session.descriptor.extAgentHostId === undefined
@@ -1470,12 +1493,14 @@ export function createHostOAuthRuntime(options: {
         grant_type: "refresh_token",
         refresh_token: current.refreshToken,
         client_id: current.clientId,
+        ...(current.resource === undefined ? {} : { resource: current.resource }),
       },
       clientId: current.clientId,
       tokenEndpoint: current.tokenEndpoint,
       previousRefresh: current.refreshToken,
       generation,
       codeExchange: false,
+      ...(current.resource === undefined ? {} : { resource: current.resource }),
     });
     if (exchanged.kind === "transient") return { kind: "transient" };
     if (exchanged.kind === "pending") return { kind: "transient" };
@@ -1751,6 +1776,8 @@ async function requestTokens(input: {
   readonly previousRefresh: string | undefined;
   readonly generation: number;
   readonly codeExchange: boolean;
+  /** MCP authorization dialect: kept on the grant so a refresh names it again. */
+  readonly resource?: string;
 }): Promise<TokenRequestResult> {
   let response: Response;
   try {
@@ -1805,6 +1832,7 @@ async function requestTokens(input: {
       tokenEndpoint: input.tokenEndpoint,
       generation: input.generation + 1,
       ...(idToken === undefined ? {} : { idToken }),
+      ...(input.resource === undefined ? {} : { resource: input.resource }),
     },
   };
 }
@@ -1876,7 +1904,9 @@ function decodeGrant(raw: string): StoredGrant {
   const subject = parsed.subject;
   const email = parsed.email;
   const planUsageEnabled = parsed.planUsageEnabled;
+  const resource = parsed.resource;
   if (
+    (resource !== undefined && typeof resource !== "string") ||
     typeof accessToken !== "string" ||
     typeof refreshToken !== "string" ||
     typeof tokenType !== "string" ||
@@ -1905,6 +1935,7 @@ function decodeGrant(raw: string): StoredGrant {
     clientId,
     tokenEndpoint,
     generation,
+    ...(resource === undefined ? {} : { resource }),
     ...(dialect === undefined ? {} : { dialect }),
     ...(idToken === undefined ? {} : { idToken }),
     ...(extAgentHostId === undefined ? {} : { extAgentHostId }),
@@ -1917,7 +1948,32 @@ function decodeGrant(raw: string): StoredGrant {
 function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescriptor | undefined {
   if (!safeId(descriptor.descriptorId) || !safeId(descriptor.termsId)) return undefined;
   const dialect = descriptor.dialect;
-  if (dialect !== undefined && dialect !== OPENROUTER_DIALECT && dialect !== CHATGPT_PLAN_DIALECT) {
+  if (
+    dialect !== undefined &&
+    dialect !== OPENROUTER_DIALECT &&
+    dialect !== CHATGPT_PLAN_DIALECT &&
+    dialect !== MCP_DIALECT
+  ) {
+    return undefined;
+  }
+  if (dialect === MCP_DIALECT) {
+    // The MCP authorization flow registered its client before beginning and
+    // names the server the token is for; a server may grant with no scope.
+    if (typeof descriptor.clientId !== "string" || !safeClientId(descriptor.clientId)) {
+      return undefined;
+    }
+    if (descriptor.resource === undefined || !allowedEndpoint(descriptor.resource)) {
+      return undefined;
+    }
+    if (
+      descriptor.redirectPort !== undefined &&
+      (!Number.isInteger(descriptor.redirectPort) ||
+        descriptor.redirectPort < 1024 ||
+        descriptor.redirectPort > 65535)
+    ) {
+      return undefined;
+    }
+  } else if (descriptor.resource !== undefined || descriptor.redirectPort !== undefined) {
     return undefined;
   }
   // A dialect entry declares its own wire shape (OpenRouter: no client
@@ -2032,16 +2088,21 @@ function authorizationRequest(
     readonly scope: string;
     readonly state: string;
     readonly challenge: string;
+    /** RFC 8707: the server the token is for; the MCP dialect always names it. */
+    readonly resource?: string;
   },
 ): string {
   const url = new URL(endpoint);
   url.searchParams.set("response_type", "code");
   url.searchParams.set("client_id", input.clientId);
   url.searchParams.set("redirect_uri", input.redirectUri);
-  url.searchParams.set("scope", input.scope);
+  // An empty scope is left off: an MCP server that advertises none grants
+  // without one, and some issuers refuse `scope=`.
+  if (input.scope.length > 0) url.searchParams.set("scope", input.scope);
   url.searchParams.set("state", input.state);
   url.searchParams.set("code_challenge", input.challenge);
   url.searchParams.set("code_challenge_method", "S256");
+  if (input.resource !== undefined) url.searchParams.set("resource", input.resource);
   return url.toString();
 }
 
@@ -2101,7 +2162,7 @@ function isLoopback(address: string): boolean {
   return address === "127.0.0.1" || address === "::1" || address === "::ffff:127.0.0.1";
 }
 
-function listen(server: Server): Promise<void> {
+function listen(server: Server, port = 0): Promise<void> {
   return new Promise((resolve, reject) => {
     const onError = (error: Error) => {
       server.off("listening", onListening);
@@ -2113,7 +2174,7 @@ function listen(server: Server): Promise<void> {
     };
     server.once("error", onError);
     server.once("listening", onListening);
-    server.listen(0, "127.0.0.1");
+    server.listen(port, "127.0.0.1");
   });
 }
 

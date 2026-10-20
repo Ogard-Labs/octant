@@ -134,6 +134,9 @@ import { AgentPluginMcpSessionManager } from "../extensions/agentPluginMcpSessio
 import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegistry";
 import { UserAddedMcpServerStore } from "../extensions/userAddedMcpServers";
 import { AgentToolingDiscovery } from "../extensions/agentToolingDiscovery";
+import { McpServerSignIn } from "../extensions/mcpServerSignIn";
+import type { McpServerSignInView } from "@octant/contracts/extension-rpc";
+import { validateAgentPluginsMcpDocument } from "@octant/plugin-host/agent-plugins";
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import { createExtensionToolCallAuthorizer } from "../extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "../extensions/extensionToolGrantStore";
@@ -531,6 +534,20 @@ export function wireProviders(deps: ProvidersDependencies) {
       sourceKind: "user-added",
     });
     yield* Effect.promise(() => userAddedPluginRegistry.initialize());
+    // Sign-in to a hosted server needs the host OAuth service, which is made
+    // further down once the broker is known; the holder lets the session
+    // manager and the routes reach it from here.
+    const mcpServerSignInHolder: { current: McpServerSignIn | undefined } = { current: undefined };
+    const signInOrUnavailable = async (
+      run: (signIn: McpServerSignIn) => Promise<McpServerSignInView>,
+    ): Promise<McpServerSignInView> =>
+      mcpServerSignInHolder.current === undefined
+        ? {
+            kind: "refused",
+            reason: "unavailable",
+            message: "Signing in needs the credential broker.",
+          }
+        : run(mcpServerSignInHolder.current);
     const userAddedMcpServers = new UserAddedMcpServerStore({
       directory: join(providerDataDirectory, "extensions", "user-added"),
       registry: userAddedPluginRegistry,
@@ -598,7 +615,13 @@ export function wireProviders(deps: ProvidersDependencies) {
             readApprovalOutsideContent(persistence.connection, threadId),
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
-        resolveUserAddedSecrets: (launch) => userAddedMcpServers.resolveLaunchSecrets(launch),
+        resolveUserAddedSecrets: async (launch, target) => {
+          const withSecrets = await userAddedMcpServers.resolveLaunchSecrets(launch);
+          const signIn = mcpServerSignInHolder.current;
+          return signIn === undefined
+            ? withSecrets
+            : signIn.attachBearer(target.extensionId, target.componentId, withSecrets);
+        },
         ...(extensionSupervisor instanceof ExtensionSupervisor
           ? { stdioSupervisor: extensionSupervisor }
           : {}),
@@ -635,7 +658,12 @@ export function wireProviders(deps: ProvidersDependencies) {
         // lifecycle state changed; unrelated in-flight MCP calls remain intact.
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
       },
-      userAddedMcpServers,
+      userAddedMcpServers: {
+        remove: async (sourceRef, extensionId) => {
+          await mcpServerSignInHolder.current?.forgetPackage(extensionId);
+          await userAddedMcpServers.remove(sourceRef);
+        },
+      },
     });
     const resolveSelectedExtensions = createSelectedExtensionResolver({
       snapshot: async () => {
@@ -682,6 +710,18 @@ export function wireProviders(deps: ProvidersDependencies) {
       localPluginImportReceipts: new LocalPluginImportReceiptStore(),
       userAddedMcpServers,
       agentToolingDiscovery,
+      mcpServerSignIn: {
+        status: (extensionId, componentId) =>
+          signInOrUnavailable((signIn) => signIn.status(extensionId, componentId)),
+        begin: (extensionId, componentId, principalKind) =>
+          signInOrUnavailable((signIn) => signIn.begin(extensionId, componentId, principalKind)),
+        poll: (extensionId, componentId, attemptId, principalKind) =>
+          signInOrUnavailable((signIn) =>
+            signIn.poll(extensionId, componentId, attemptId, principalKind),
+          ),
+        signOut: (extensionId, componentId, principalKind) =>
+          signInOrUnavailable((signIn) => signIn.signOut(extensionId, componentId, principalKind)),
+      },
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,
     });
@@ -892,6 +932,52 @@ export function wireProviders(deps: ProvidersDependencies) {
       for (const acknowledgment of oauthJournal.acknowledgments()) {
         hostOAuth.restoreAcknowledgment(acknowledgment);
       }
+    }
+    if (hostOAuth !== undefined && oauthBroker !== undefined) {
+      mcpServerSignInHolder.current = new McpServerSignIn({
+        statePath: join(providerDataDirectory, "extensions", "mcp-server-sign-ins.json"),
+        oauth: hostOAuth,
+        access: (credentialRef) => oauthBroker.access(credentialRef),
+        actorId: OCTANT_LOCAL_ACTOR_ID,
+        // The address a user-added server's package names, read from the
+        // installed package itself so a sign-in can only ever target the
+        // server the person added.
+        serverUrl: async (extensionId, componentId) => {
+          const packageState = extensionLifecycleService
+            .snapshot()
+            .packages.find((candidate) => candidate.extensionId === extensionId);
+          if (packageState === undefined || packageState.source.kind !== "user-added") {
+            return undefined;
+          }
+          const componentState = packageState.components.find(
+            (candidate) => candidate.component.id === componentId,
+          );
+          if (componentState?.component.kind !== "mcp-server") return undefined;
+          let raw: unknown;
+          try {
+            raw = JSON.parse(
+              await extensionPackageStore.readVerifiedConfiguration(
+                {
+                  extensionId,
+                  packageId: packageState.packageId,
+                  version: packageState.version,
+                  digest: packageState.digest,
+                },
+                componentId,
+              ),
+            );
+          } catch {
+            return undefined;
+          }
+          const document = validateAgentPluginsMcpDocument(raw, {
+            pluginSchema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+          });
+          const server = document.servers.find(
+            (candidate) => candidate.name === componentState.component.displayName,
+          );
+          return server !== undefined && server.type !== "stdio" ? server.url : undefined;
+        },
+      });
     }
     const subscriptionOAuth =
       oauthBroker === undefined ? undefined : subscriptionOAuthHostFromBroker(oauthBroker);

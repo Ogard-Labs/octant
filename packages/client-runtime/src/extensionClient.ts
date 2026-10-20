@@ -15,6 +15,8 @@ import {
   type UserAddedMcpServerRequest,
   DiscoveredAgentToolingListing,
   type DiscoveredAgentToolingRequest,
+  McpServerSignInView,
+  type McpServerSignInRequest,
 } from "@octant/contracts/extension-rpc";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -51,6 +53,8 @@ export interface ExtensionClient {
   applyDiscoveredTooling(
     request: Exclude<DiscoveredAgentToolingRequest, { readonly kind: "list" }>,
   ): Promise<ExtensionCommandResult>;
+  /** Sign-in state and actions for a hosted server a person added. */
+  mcpServerSignIn(request: McpServerSignInRequest): Promise<McpServerSignInView>;
 }
 
 export class ExtensionClientFailure extends Error {
@@ -208,6 +212,18 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           }
           return value.revoked;
         },
+      );
+    },
+    mcpServerSignIn(signIn) {
+      return request(
+        fetch,
+        new URL("/api/extensions/sign-in", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(signIn),
+        },
+        decodeHostAnswer(McpServerSignInView),
       );
     },
     listDiscoveredTooling() {

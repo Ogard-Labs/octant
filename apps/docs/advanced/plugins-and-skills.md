@@ -213,6 +213,18 @@ package and its secrets. Adding a server works only from the Octant window on
 this host, not from a paired device, and a browser-hosted Settings cannot keep
 secrets.
 
+### Sign in to a hosted server
+
+A server you added by its address can ask you to sign in instead of taking a
+key. Its component in **Extension packages** then shows **Sign in**. Octant
+reads where the server sends people to sign in, registers itself there,
+opens that page in your browser, and keeps the grant in this Mac's
+credential store; the row says **Signed in through** the issuer, with
+**Sign out**. If the grant stops working you see **Sign in again**. A server
+whose sign-in needs a client id Octant cannot register for itself says so;
+you can still add that server with a key in a header. Signing in and out work
+only from the Octant window on this host.
+
 ### Found on this Mac
 
 Below the extension packages, **Found on this Mac** lists the MCP servers

@@ -188,6 +188,64 @@ export type DiscoveredAgentToolingListing = typeof DiscoveredAgentToolingListing
 export const decodeDiscoveredAgentToolingListing = Schema.decodeUnknownSync(
   DiscoveredAgentToolingListing,
 );
+/**
+ * Signing in to a hosted MCP server a person added. The view never carries a
+ * token; the host keeps the grant in the credential broker and attaches the
+ * bearer when it connects.
+ */
+const signInTarget = {
+  extensionId: ToolExtensionId,
+  componentId: ExtensionComponentId,
+};
+export const McpServerSignInRequest = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("status"), ...signInTarget }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("begin"), ...signInTarget }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("poll"),
+    ...signInTarget,
+    attemptId: Schema.UUID,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("sign-out"), ...signInTarget }).annotations(strict),
+);
+export type McpServerSignInRequest = typeof McpServerSignInRequest.Type;
+export const decodeMcpServerSignInRequest = Schema.decodeUnknownSync(McpServerSignInRequest);
+export const McpServerSignInView = Schema.Union(
+  /** A server reached by a command, or one that answered without asking for a sign-in. */
+  Schema.Struct({ kind: Schema.Literal("not-applicable") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("signed-out") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("awaiting-consent"),
+    attemptId: Schema.UUID,
+    authorizationUrl: boundedText(4096),
+    expiresAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("signed-in"),
+    /** The authorization server that issued the grant, for the row. */
+    issuer: boundedText(256),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("sign-in-again"),
+    reason: Schema.Literal("revoked", "expired", "refresh-reused"),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    reason: Schema.Literal(
+      "no-sign-in-offered",
+      "client-registration-unavailable",
+      "issuer-unsupported",
+      "denied",
+      "timeout",
+      "unavailable",
+      "local-host-required",
+      "invalid",
+    ),
+    message: boundedText(512),
+  }).annotations(strict),
+);
+export type McpServerSignInView = typeof McpServerSignInView.Type;
+export const decodeMcpServerSignInView = Schema.decodeUnknownSync(McpServerSignInView);
+
 export const DiscoveredAgentToolingRequest = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
   Schema.Struct({ kind: Schema.Literal("add-server"), id: discoveredId }).annotations(strict),

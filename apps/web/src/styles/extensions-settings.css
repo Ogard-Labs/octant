@@ -509,3 +509,17 @@
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
+
+/* Sign-in to a hosted server, under the component it belongs to. */
+.mcp-sign-in {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  grid-column: 1 / -1;
+}
+
+.mcp-sign-in__state {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}

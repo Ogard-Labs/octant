@@ -196,6 +196,7 @@ function client(
       return result;
     }),
     listDiscoveredTooling: vi.fn(async () => ({ servers: [], plugins: [], notes: [] })),
+    mcpServerSignIn: vi.fn(async () => ({ kind: "not-applicable" }) as const),
     applyDiscoveredTooling: vi.fn(async () => {
       const result: ExtensionCommandResult = {
         kind: "extension-command-failed",

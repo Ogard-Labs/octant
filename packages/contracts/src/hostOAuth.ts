@@ -47,7 +47,11 @@ export type HostOAuthFlow = typeof HostOAuthFlow.Type;
  * a stable host id, and the callback returns the issued `client_id` the
  * exchange and every later refresh must use.
  */
-export const HostOAuthDialect = Schema.Literal("openrouter-pkce", "chatgpt-plan-siwc");
+export const HostOAuthDialect = Schema.Literal(
+  "openrouter-pkce",
+  "chatgpt-plan-siwc",
+  "mcp-authorization",
+);
 export type HostOAuthDialect = typeof HostOAuthDialect.Type;
 
 /**
@@ -83,12 +87,27 @@ export const HostOAuthDescriptor = Schema.Struct({
   extAgentHostId: Schema.optional(ExtAgentHostId),
   /** ChatGPT plan dialect only: the app name sent as `agent_name_hint` on registration. */
   agentNameHint: Schema.optional(AgentNameHint),
+  /**
+   * MCP authorization dialect only: the canonical address of the MCP server
+   * the token is for, sent as `resource` on authorize, exchange and refresh.
+   */
+  resource: Schema.optional(Endpoint),
+  /**
+   * MCP authorization dialect only: the loopback port the callback listens
+   * on, chosen before the flow so the client registration could name it.
+   */
+  redirectPort: Schema.optional(Schema.Int.pipe(Schema.between(1024, 65535))),
 })
   .pipe(
     Schema.filter(
       (descriptor) => {
         if (descriptor.dialect !== undefined && descriptor.flow !== "authorization-code-pkce") {
           return false;
+        }
+        // The MCP authorization dialect registers its client before the flow,
+        // so it names a client id; a server may grant without any scope.
+        if (descriptor.dialect === "mcp-authorization") {
+          return descriptor.clientId !== undefined && descriptor.resource !== undefined;
         }
         // A dialect entry declares its own wire shape; every other flow needs
         // a client identity and at least one scope. The ChatGPT plan dialect

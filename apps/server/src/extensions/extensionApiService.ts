@@ -58,7 +58,9 @@ export class ExtensionApiService {
     | ((snapshot: ExtensionSnapshot, command: ExtensionCommand) => void | Promise<void>)
     | undefined;
   readonly #inspections = new Map<string, InspectedExtensionPackage>();
-  readonly #userAddedMcpServers: { remove(sourceRef: string): Promise<void> } | undefined;
+  readonly #userAddedMcpServers:
+    | { remove(sourceRef: string, extensionId: string): Promise<void> }
+    | undefined;
 
   constructor(options: {
     readonly lifecycle: ExtensionLifecycleService;
@@ -71,7 +73,9 @@ export class ExtensionApiService {
       command: ExtensionCommand,
     ) => void | Promise<void>;
     /** Removes the folder and secrets of a server the person added by hand, once its package is gone. */
-    readonly userAddedMcpServers?: { remove(sourceRef: string): Promise<void> };
+    readonly userAddedMcpServers?: {
+      remove(sourceRef: string, extensionId: string): Promise<void>;
+    };
   }) {
     this.#lifecycle = options.lifecycle;
     this.#resolver = options.resolver;
@@ -138,7 +142,7 @@ export class ExtensionApiService {
             source?.kind === "user-added" &&
             !snapshot.packages.some((candidate) => candidate.extensionId === command.extensionId)
           ) {
-            await this.#userAddedMcpServers?.remove(source.sourceRef);
+            await this.#userAddedMcpServers?.remove(source.sourceRef, command.extensionId);
           }
           return await this.#stateUpdated(snapshot, command);
         }
