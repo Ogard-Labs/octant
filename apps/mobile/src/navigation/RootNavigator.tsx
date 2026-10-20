@@ -7,6 +7,7 @@ import { AgentsListScreen, type AgentListView } from "../inbox/AgentsListScreen"
 import { InboxHomeScreen } from "../inbox/InboxHomeScreen";
 import { backMobileHomeView, type MobileHomeView } from "../inbox/homeView";
 import { ThreadScreen } from "../inbox/ThreadScreen";
+import { hostHealthTone } from "../hosts/hostHealthTone";
 import { PairingPanel } from "../hosts/PairingPanel";
 import { RemoveHostPanel } from "../hosts/RemoveHostPanel";
 import { createUnavailableNotificationPermissionPort } from "../notifications/notificationPermissionPort";
@@ -23,6 +24,7 @@ import { useTheme } from "../../design-system";
 import { IconButton } from "../ui/IconButton";
 import { useMobileHardwareBack } from "./useMobileHardwareBack";
 import { mobileThreadReturnRouteForDeepLink } from "./navigationState";
+import { deepLinkRefusal } from "./deepLinkNavigation";
 
 export interface RootNavigatorProps {
   readonly activeRoute: MobileRouteId;
@@ -32,14 +34,17 @@ export interface RootNavigatorProps {
 }
 
 function HostsBody(props: {
-  readonly entryMode: "manage" | "add";
+  readonly entryMode: "manage" | "add" | "scan";
   readonly onBack: () => void;
   readonly onPaired: () => void;
+  /** Why a link the person followed was not opened, if it was not. */
+  readonly notice?: string | undefined;
 }) {
   const { colors } = useTheme();
   const {
     environment,
     hosts,
+    hostsError,
     health,
     registry,
     refreshHosts,
@@ -52,16 +57,20 @@ function HostsBody(props: {
     setPlacementHostId,
   } = useMobileSession();
   const [keyNotDeleted, setKeyNotDeleted] = useState(false);
+  const [removeFailed, setRemoveFailed] = useState(false);
   const removeMobileHostInTurn = useMemo(
     () => createMobileHostRemover({ registry, hub, deviceKeyStore }),
     [deviceKeyStore, hub, registry],
   );
   const removeHost = useCallback(
     (hostId: string) => {
-      void removeMobileHostInTurn(hostId).then((result) => {
-        if (!result.localCredentialRemoved) setKeyNotDeleted(true);
-        return refreshHosts();
-      });
+      setRemoveFailed(false);
+      removeMobileHostInTurn(hostId)
+        .then((result) => {
+          if (!result.localCredentialRemoved) setKeyNotDeleted(true);
+          return refreshHosts();
+        })
+        .catch(() => setRemoveFailed(true));
     },
     [refreshHosts, removeMobileHostInTurn],
   );
@@ -69,6 +78,11 @@ function HostsBody(props: {
   const notificationPermission = useMemo(() => createUnavailableNotificationPermissionPort(), []);
   const deviceIntegrity = useMemo(() => createUnavailableDeviceIntegrityPort(), []);
   const screenshotPrivacy = useMemo(() => createUnavailableScreenshotPrivacyPort(), []);
+  const healthTint = {
+    neutral: colors.textSecondary,
+    warning: colors.warning,
+    danger: colors.danger,
+  } as const;
   const healthByHostId = useMemo(
     () => new Map(health.map((entry) => [entry.hostId, entry])),
     [health],
@@ -129,10 +143,15 @@ function HostsBody(props: {
           color: colors.textSecondary,
           fontSize: mobileTypography.caption.fontSize,
         },
-        hostHealth: {
-          color: colors.accent,
-          fontSize: mobileTypography.caption.fontSize,
+        hostHealthRow: {
+          flexDirection: "row",
+          alignItems: "center",
+          gap: mobileSpacing.xs,
           marginTop: mobileSpacing.xs,
+        },
+        hostHealthDot: { width: 8, height: 8, borderRadius: 4 },
+        hostHealth: {
+          fontSize: mobileTypography.caption.fontSize,
         },
         placementChip: {
           marginTop: mobileSpacing.sm,
@@ -164,12 +183,12 @@ function HostsBody(props: {
           variant="ghost"
         />
         <Text style={styles.hostsTitle}>
-          {props.entryMode === "add" ? "Add host" : MOBILE_TAB_LABELS.hosts}
+          {props.entryMode === "manage" ? MOBILE_TAB_LABELS.hosts : "Add host"}
         </Text>
         <View style={styles.hostsSpacer} />
       </View>
       <ScrollView contentContainerStyle={styles.body}>
-        {props.entryMode === "add" ? (
+        {props.entryMode !== "manage" ? (
           environment.kind === "mock" ? (
             <View style={styles.mockNotice} testID="mobile-hosts-mock-notice">
               <Text style={styles.mockTitle}>Pair a host</Text>
@@ -182,6 +201,7 @@ function HostsBody(props: {
               registry={registry}
               deviceKeyStore={deviceKeyStore}
               bridge={bridge}
+              openScanner={props.entryMode === "scan"}
               onPaired={() => {
                 void refreshHosts();
                 props.onPaired();
@@ -198,6 +218,13 @@ function HostsBody(props: {
                   connect to a real listener.
                 </Text>
               </View>
+            ) : null}
+            {props.notice !== undefined ? (
+              <Text style={styles.sectionBody}>{props.notice}</Text>
+            ) : null}
+            {hostsError !== undefined ? <Text style={styles.sectionBody}>{hostsError}</Text> : null}
+            {removeFailed ? (
+              <Text style={styles.sectionBody}>{"Couldn't remove that computer. Try again."}</Text>
             ) : null}
             {keyNotDeleted ? (
               <Text style={styles.sectionBody} testID="mobile-host-key-not-deleted">
@@ -219,10 +246,24 @@ function HostsBody(props: {
                     >
                       <Text style={styles.hostLabel}>{host.label}</Text>
                       <Text style={styles.hostOrigin}>{host.origin}</Text>
-                      <Text style={styles.hostHealth} testID={`mobile-host-health-${host.hostId}`}>
-                        {mobileHostHealthLabel(status?.kind ?? "idle")}
-                        {status?.detail !== undefined ? ` · ${status.detail}` : ""}
-                      </Text>
+                      <View style={styles.hostHealthRow}>
+                        <View
+                          style={[
+                            styles.hostHealthDot,
+                            { backgroundColor: healthTint[hostHealthTone(status?.kind ?? "idle")] },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.hostHealth,
+                            { color: healthTint[hostHealthTone(status?.kind ?? "idle")] },
+                          ]}
+                          testID={`mobile-host-health-${host.hostId}`}
+                        >
+                          {mobileHostHealthLabel(status?.kind ?? "idle")}
+                          {status?.detail !== undefined ? ` · ${status.detail}` : ""}
+                        </Text>
+                      </View>
                     </Pressable>
                     <Pressable
                       onPress={() => setPlacementHostId(host.hostId)}
@@ -233,7 +274,9 @@ function HostsBody(props: {
                       testID={`mobile-placement-${host.hostId}`}
                     >
                       <Text style={styles.chipLabel}>
-                        {placementHostId === host.hostId ? "Placement host" : "Use for new threads"}
+                        {placementHostId === host.hostId
+                          ? MOBILE_COPY.placementHere
+                          : MOBILE_COPY.placementMakeHere}
                       </Text>
                     </Pressable>
                     {environment.kind === "live" && status?.kind === "ready" ? (
@@ -304,9 +347,10 @@ export function RootNavigator(props: RootNavigatorProps) {
   const [selectedThread, setSelectedThread] = useState<MobileInboxRow | undefined>();
   const [threadReturnRoute, setThreadReturnRoute] = useState<"home" | "agents">("home");
   const [homeMode, setHomeMode] = useState<MobileHomeView>("inbox");
-  const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add">("manage");
+  const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add" | "scan">("manage");
   const [agentListView, setAgentListView] = useState<AgentListView>("all");
-  const { setInboxHostFilter } = useMobileSession();
+  const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
+  const { setInboxHostFilter, hosts, hostsLoaded } = useMobileSession();
   const onHomeBack = useCallback(() => {
     const previous = backMobileHomeView(homeMode);
     if (previous === undefined) return false;
@@ -317,6 +361,21 @@ export function RootNavigator(props: RootNavigatorProps) {
 
   useEffect(() => {
     if (props.pendingDeepLinkRow === undefined) return;
+    // On a cold open the paired list is still being read; deciding now would
+    // call every computer unpaired.
+    if (!hostsLoaded) return;
+    const refusal = deepLinkRefusal(
+      props.pendingDeepLinkRow,
+      hosts.map((host) => host.hostId),
+    );
+    if (refusal !== undefined) {
+      setDeepLinkNotice(refusal);
+      setHostEntryMode("manage");
+      props.onSelectRoute("hosts");
+      props.onDeepLinkConsumed?.();
+      return;
+    }
+    setDeepLinkNotice(undefined);
     setThreadReturnRoute(mobileThreadReturnRouteForDeepLink(props.activeRoute));
     setSelectedThread(props.pendingDeepLinkRow);
     setInboxHostFilter(props.pendingDeepLinkRow.hostId);
@@ -328,6 +387,8 @@ export function RootNavigator(props: RootNavigatorProps) {
     props.onDeepLinkConsumed,
     props.onSelectRoute,
     setInboxHostFilter,
+    hosts,
+    hostsLoaded,
   ]);
 
   return (
@@ -342,6 +403,10 @@ export function RootNavigator(props: RootNavigatorProps) {
           }}
           onAddWorkspace={() => {
             setHostEntryMode("add");
+            props.onSelectRoute("hosts");
+          }}
+          onScanToPair={() => {
+            setHostEntryMode("scan");
             props.onSelectRoute("hosts");
           }}
           onOpenHosts={() => {
@@ -382,6 +447,7 @@ export function RootNavigator(props: RootNavigatorProps) {
           entryMode={hostEntryMode}
           onBack={() => props.onSelectRoute("home")}
           onPaired={() => props.onSelectRoute("home")}
+          notice={deepLinkNotice}
         />
       ) : null}
     </View>

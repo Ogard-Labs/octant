@@ -1,8 +1,10 @@
 import { approvalOutsideContentLines } from "@octant/domain";
 import type { ApprovalOutsideContent } from "@octant/contracts";
-import { Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { StyleSheet, Text, View } from "react-native";
 import { useTheme } from "../../design-system";
-import { mobileTypography } from "../theme/tokens";
+import { MOBILE_COPY } from "../copy";
+import { mobileSpacing, mobileTypography } from "../theme/tokens";
 
 function readTime(at: string | undefined): string | undefined {
   if (at === undefined) return undefined;
@@ -15,7 +17,17 @@ export function OutsideContentNote(props: { readonly outsideContent: ApprovalOut
   const { colors } = useTheme();
   const { reason, rows, more } = approvalOutsideContentLines(props.outsideContent, readTime);
   return (
-    <View testID="mobile-native-harness-approval-outside-content">
+    <View
+      accessibilityRole="alert"
+      style={[styles.note, { borderLeftColor: colors.warning }]}
+      testID="mobile-native-harness-approval-outside-content"
+    >
+      <View style={styles.lead}>
+        <Ionicons color={colors.warning} name="warning-outline" size={16} />
+        <Text style={[mobileTypography.section, styles.leadText, { color: colors.textPrimary }]}>
+          {MOBILE_COPY.outsideContentLead}
+        </Text>
+      </View>
       <Text style={[mobileTypography.caption, { color: colors.textPrimary }]}>{reason}</Text>
       {rows.map((row) => (
         <Text
@@ -31,3 +43,20 @@ export function OutsideContentNote(props: { readonly outsideContent: ApprovalOut
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  note: {
+    borderLeftWidth: 3,
+    paddingLeft: mobileSpacing.sm,
+    gap: 2,
+  },
+  lead: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: mobileSpacing.xs,
+  },
+  leadText: {
+    flex: 1,
+    fontWeight: "700",
+  },
+});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   harnessRetryStatusText,
   nativeHarnessSessionHeld,
@@ -8,7 +8,7 @@ import {
   threadStatsLine,
 } from "@octant/domain";
 import * as Clipboard from "expo-clipboard";
-import { Pressable, StyleSheet, Text, TextInput, View, AppState } from "react-native";
+import { Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 import {
   activateMobileNativeHarnessFollowUp,
   answerMobileNativeHarnessQuestion,
@@ -20,6 +20,15 @@ import {
 } from "@octant/client-runtime";
 import type { NativeHarnessFollowUpPreview, NativeHarnessSessionView } from "@octant/contracts";
 import { GlassChip, useTheme } from "../../design-system";
+import { ApprovalDecisionButtons } from "../approvals/ApprovalDecisionButtons";
+import { MOBILE_COPY } from "../copy";
+import { usePolledResource } from "../runtime/usePolledResource";
+import {
+  decideWithConfirmation,
+  type BiometricAuthenticator,
+  type ConfirmedSendResult,
+} from "../security/BiometricGate";
+import { createExpoBiometricAuthenticator } from "../security/expoBiometricAuthenticator";
 import { OutsideContentNote } from "./OutsideContentNote";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 
@@ -27,6 +36,8 @@ export interface NativeHarnessSessionPanelProps {
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;
   readonly refreshIntervalMs?: number;
+  /** Confirms Allow on this phone; the device's own biometrics when absent. */
+  readonly authenticator?: BiometricAuthenticator;
 }
 
 /**
@@ -38,7 +49,8 @@ export interface NativeHarnessSessionPanelProps {
  */
 export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps) {
   const { colors } = useTheme();
-  const [view, setView] = useState<NativeHarnessSessionView | null>();
+  const deviceAuthenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
+  const authenticator = props.authenticator ?? deviceAuthenticator;
   const [preview, setPreview] = useState<NativeHarnessFollowUpPreview>();
   const [note, setNote] = useState<string>();
   const [answer, setAnswer] = useState("");
@@ -49,31 +61,47 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
     readonly keys: ReadonlySet<string>;
   }>();
 
+  const lastView = useRef<NativeHarnessSessionView>(undefined);
+  const [fast, setFast] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
+
   const load = useCallback(async () => {
-    try {
-      setView(
-        await loadMobileNativeHarnessSession({
-          transport: props.transport,
-          threadId: props.threadId,
-        }),
-      );
-    } catch {
-      setView(null);
-    }
+    const next = await loadMobileNativeHarnessSession({
+      transport: props.transport,
+      threadId: props.threadId,
+    });
+    // The host answering "no session" for a thread we already show means the
+    // read failed, not that the session ended; keep the last view.
+    if (next === null && lastView.current !== undefined) throw new Error("session unavailable");
+    lastView.current = next ?? undefined;
+    return next;
   }, [props.transport, props.threadId]);
 
-  useEffect(() => {
-    void load();
-    const interval = setInterval(
-      () => {
-        // A phone in a pocket does not need a session refresh. A running turn
-        // is read more often so a short retry is not missed.
-        if (AppState.currentState === "active") void load();
-      },
-      props.refreshIntervalMs ?? (view?.session.status === "running" ? 1_000 : 8_000),
-    );
-    return () => clearInterval(interval);
-  }, [load, props.refreshIntervalMs, view?.session.status]);
+  // A running turn is read more often so a short retry is not missed.
+  const resource = usePolledResource(load, {
+    intervalMs: props.refreshIntervalMs ?? (fast ? 1_000 : 8_000),
+  });
+  const view = resource.value;
+  const running = view?.session.status === "running";
+  useEffect(() => setFast(running), [running]);
+
+  // Every host action goes through here: one at a time, a failure becomes a
+  // note instead of a silent no-op, and the view is re-read either way.
+  const run = async (action: () => Promise<string | undefined>) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      setNote(await action());
+    } catch {
+      setNote(MOBILE_COPY.approvalSendFailed);
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+      void resource.reload();
+    }
+  };
 
   useEffect(() => {
     if (view?.retrying === undefined) return;
@@ -100,42 +128,47 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
   };
   const decide = (decision: "approve" | "approve-always" | "deny") => {
     if (pendingApproval === undefined) return;
-    void decideMobileNativeHarnessApproval({
-      transport: props.transport,
-      threadId: props.threadId,
-      approvalId: String(pendingApproval.id),
-      decision,
-      ...(listedHosts === undefined || decision !== "approve"
-        ? {}
-        : {
-            commandHosts: listedHosts
-              .filter((entry) => ticked.has(hostKey(entry)))
-              .map((entry) => ({ host: entry.host, port: entry.port })),
-          }),
-    }).then((result) => {
-      setNote(
-        result?.kind === "approval-decided"
-          ? undefined
-          : (result?.message ?? "The decision was refused."),
-      );
-      void load();
+    void run(async () => {
+      const send = () =>
+        decideMobileNativeHarnessApproval({
+          transport: props.transport,
+          threadId: props.threadId,
+          approvalId: String(pendingApproval.id),
+          decision,
+          ...(listedHosts === undefined || decision !== "approve"
+            ? {}
+            : {
+                commandHosts: listedHosts
+                  .filter((entry) => ticked.has(hostKey(entry)))
+                  .map((entry) => ({ host: entry.host, port: entry.port })),
+              }),
+        });
+      // Denying is the safe direction, so only the two Allow answers ask the
+      // person to confirm on this phone.
+      const outcome: ConfirmedSendResult<Awaited<ReturnType<typeof send>>> =
+        decision === "deny"
+          ? { status: "sent", value: await send() }
+          : await decideWithConfirmation({ authenticator, reason: "approve", send });
+      if (outcome.status === "blocked") return outcome.message;
+      const result = outcome.value;
+      return result?.kind === "approval-decided"
+        ? undefined
+        : (result?.message ?? "The decision was refused.");
     });
   };
   const sendAnswer = (text: string) => {
     if (pendingQuestion === undefined || text.trim().length === 0) return;
-    void answerMobileNativeHarnessQuestion({
-      transport: props.transport,
-      threadId: props.threadId,
-      questionId: String(pendingQuestion.id),
-      answer: text.trim(),
-    }).then((result) => {
-      setNote(
-        result?.kind === "question-answered"
-          ? undefined
-          : (result?.message ?? "The answer was refused."),
-      );
+    void run(async () => {
+      const result = await answerMobileNativeHarnessQuestion({
+        transport: props.transport,
+        threadId: props.threadId,
+        questionId: String(pendingQuestion.id),
+        answer: text.trim(),
+      });
       setAnswer("");
-      void load();
+      return result?.kind === "question-answered"
+        ? undefined
+        : (result?.message ?? "The answer was refused.");
     });
   };
   // The same words the desktop composer and the terminal footer use, read-only.
@@ -154,17 +187,19 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
         </Text>
         <Pressable
           accessibilityRole="button"
+          disabled={busy}
+          hitSlop={12}
           onPress={() => {
             const paused = nativeHarnessSessionHeld(view.session.status);
-            void commandMobileNativeHarnessSession({
-              transport: props.transport,
-              threadId: props.threadId,
-              kind: paused ? "resume-native-harness-session" : "pause-native-harness-session",
-              sessionId: String(view.session.id),
-              expectedVersion: view.session.version,
-            }).then((result) => {
-              setNote(result.ok ? undefined : (result.message ?? "The host refused that."));
-              void load();
+            void run(async () => {
+              const result = await commandMobileNativeHarnessSession({
+                transport: props.transport,
+                threadId: props.threadId,
+                kind: paused ? "resume-native-harness-session" : "pause-native-harness-session",
+                sessionId: String(view.session.id),
+                expectedVersion: view.session.version,
+              });
+              return result.ok ? undefined : (result.message ?? "The host refused that.");
             });
           }}
           testID="mobile-native-harness-pause"
@@ -215,8 +250,8 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           </Text>
           <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>
             {pendingApproval.source === undefined
-              ? `Needs your say-so (${pendingApproval.approvalClass}).`
-              : "Allow this request for this child."}
+              ? MOBILE_COPY.approvalAskedPlain
+              : MOBILE_COPY.approvalChildAsked}
           </Text>
           {pendingApproval.outsideContent === undefined ? null : (
             <OutsideContentNote outsideContent={pendingApproval.outsideContent} />
@@ -245,20 +280,19 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
               )}
             </>
           )}
-          <View style={styles.chips}>
-            <GlassChip active={false} label="Allow" onPress={() => decide("approve")} />
-            {/* A child request is never remembered, and neither is a call after
-                the thread took in outside content. Offering the session choice
-                there would describe a decision the host ignores. */}
-            {pendingApproval.source === undefined && pendingApproval.singleUse !== true ? (
-              <GlassChip
-                active={false}
-                label="Allow this session"
-                onPress={() => decide("approve-always")}
-              />
-            ) : null}
-            <GlassChip active={false} label="Deny" onPress={() => decide("deny")} />
-          </View>
+          {/* A child request is never remembered, and neither is a call after
+              the thread took in outside content. Offering the session choice
+              there would describe a decision the host ignores. */}
+          <ApprovalDecisionButtons
+            busy={busy}
+            onAllow={() => decide("approve")}
+            onAllowSession={
+              pendingApproval.source === undefined && pendingApproval.singleUse !== true
+                ? () => decide("approve-always")
+                : undefined
+            }
+            onDeny={() => decide("deny")}
+          />
         </View>
       )}
       {pendingQuestion === undefined ? null : (
@@ -293,6 +327,8 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
             />
             <Pressable
               accessibilityRole="button"
+              disabled={busy}
+              hitSlop={8}
               onPress={() => sendAnswer(answer)}
               style={[styles.button, { backgroundColor: colors.send }]}
               testID="mobile-native-harness-answer"
@@ -336,15 +372,16 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
               key={String(suggestion.id)}
               label={suggestion.title}
               onPress={() => {
-                void previewMobileNativeHarnessFollowUp({
-                  transport: props.transport,
-                  threadId: props.threadId,
-                  suggestionId: String(suggestion.id),
-                }).then((result) => {
+                void run(async () => {
+                  const result = await previewMobileNativeHarnessFollowUp({
+                    transport: props.transport,
+                    threadId: props.threadId,
+                    suggestionId: String(suggestion.id),
+                  });
                   setPreview(result);
-                  setNote(
-                    result === undefined ? "The host could not preview this follow-up." : undefined,
-                  );
+                  return result === undefined
+                    ? "The host could not preview this follow-up."
+                    : undefined;
                 });
               }}
               testID={`mobile-native-harness-follow-up-${String(suggestion.id)}`}
@@ -370,30 +407,30 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
           <View style={styles.row}>
             <Pressable
               accessibilityRole="button"
+              disabled={busy}
+              hitSlop={8}
               onPress={() => {
                 if (view.followUps === undefined) return;
-                void activateMobileNativeHarnessFollowUp({
-                  transport: props.transport,
-                  threadId: props.threadId,
-                  turnId: String(view.followUps.turnId),
-                  suggestionId: String(preview.suggestion.id),
-                }).then((result) => {
+                const followUps = view.followUps;
+                void run(async () => {
+                  const result = await activateMobileNativeHarnessFollowUp({
+                    transport: props.transport,
+                    threadId: props.threadId,
+                    turnId: String(followUps.turnId),
+                    suggestionId: String(preview.suggestion.id),
+                  });
                   if (result?.kind !== "follow-up-activated") {
-                    setNote(result?.message ?? "The host did not activate this follow-up.");
-                    return;
+                    return result?.message ?? "The host did not activate this follow-up.";
                   }
                   // No composer to seed from here: the prompt rides the clipboard.
                   void Clipboard.setStringAsync(preview.suggestion.prompt).catch(() => undefined);
                   const created = result.created;
-                  setNote(
-                    created.kind === "same-thread"
-                      ? "Activated. The prompt is on your clipboard for this thread."
-                      : created.threadId === undefined
-                        ? "Activated."
-                        : `Created "${created.title}". The prompt is on your clipboard; paste it there.`,
-                  );
                   setPreview(undefined);
-                  void load();
+                  return created.kind === "same-thread"
+                    ? "Activated. The prompt is on your clipboard for this thread."
+                    : created.threadId === undefined
+                      ? "Activated."
+                      : `Created "${created.title}". The prompt is on your clipboard; paste it there.`;
                 });
               }}
               style={[styles.button, { backgroundColor: colors.send }]}
@@ -403,6 +440,7 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
             </Pressable>
             <Pressable
               accessibilityRole="button"
+              hitSlop={8}
               onPress={() => setPreview(undefined)}
               style={styles.button}
             >
@@ -412,6 +450,14 @@ export function NativeHarnessSessionPanel(props: NativeHarnessSessionPanelProps)
             </Pressable>
           </View>
         </View>
+      )}
+      {resource.error === undefined ? null : (
+        <Text
+          style={[mobileTypography.caption, { color: colors.textSecondary }]}
+          testID="mobile-native-harness-reconnecting"
+        >
+          {MOBILE_COPY.approvalReconnecting}
+        </Text>
       )}
       {note === undefined ? null : (
         <Text style={[mobileTypography.caption, { color: colors.textSecondary }]}>{note}</Text>

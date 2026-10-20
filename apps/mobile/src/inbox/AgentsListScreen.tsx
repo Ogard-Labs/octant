@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -10,17 +10,13 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
-  createMobileChatWithFirstTurn,
-  decodeMobileModelOptionId,
   listAllHostsMobileInbox,
   MobileInboxFailure,
   type MobileInboxHostFailure,
   type MobileInboxRow,
 } from "@octant/client-runtime";
-import { presentStaleHostSecurity } from "@octant/domain";
-import { MOBILE_COPY, mobileModelLabel } from "../copy";
+import { MOBILE_COPY } from "../copy";
 import { useMobileSession } from "../session/MobileSessionContext";
-import { usePlacementHostModels } from "../session/usePlacementHostModels";
 import { formatScreenshotSafeLabel } from "../security/screenshotSafeLabel";
 import { mobileSpacing, mobileTypography } from "../theme/tokens";
 import { useTheme, type ThemeColors } from "../../design-system";
@@ -29,6 +25,8 @@ import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { HomeComposerSheet } from "./HomeComposerSheet";
 import { InboxComposerDock } from "./InboxComposerDock";
 import { sectionForAgentRow } from "./agentsListPresentation";
+import { createRequestGuard } from "./requestGuard";
+import { usePlacement } from "./usePlacement";
 
 export type AgentListView = "all" | "attention" | "working" | "review";
 
@@ -50,16 +48,8 @@ function statusTone(status: string, colors: ThemeColors): string {
 
 export function AgentsListScreen(props: AgentsListScreenProps) {
   const { colors } = useTheme();
-  const {
-    transports,
-    hosts,
-    inboxHostFilter,
-    setInboxHostFilter,
-    placementHostId,
-    transportForHost,
-    health,
-    refreshHosts,
-  } = useMobileSession();
+  const { transports, hosts, inboxHostFilter, setInboxHostFilter, refreshHosts } =
+    useMobileSession();
   const [rows, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
   const [failures, setFailures] = useState<ReadonlyArray<MobileInboxHostFailure>>([]);
   const [error, setError] = useState<string | undefined>();
@@ -68,36 +58,23 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
   const [creating, setCreating] = useState(false);
   const [composerError, setComposerError] = useState<string | undefined>();
   const [modelOpen, setModelOpen] = useState(false);
-  const [modelOptionId, setModelOptionId] = useState<string | undefined>();
   const [composerOpen, setComposerOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
 
-  const placementTransport = useMemo(() => {
-    if (placementHostId !== undefined) {
-      const selected = transportForHost(placementHostId);
-      if (selected !== undefined) return selected;
-    }
-    return transports[0];
-  }, [placementHostId, transportForHost, transports]);
-
-  const placementHealth = useMemo(() => {
-    if (placementTransport === undefined) return "idle" as const;
-    return health.find((entry) => entry.hostId === placementTransport.hostId)?.kind ?? "idle";
-  }, [health, placementTransport]);
-  const placementHealthDetail = useMemo(() => {
-    if (placementTransport === undefined) return undefined;
-    return health.find((entry) => entry.hostId === placementTransport.hostId)?.detail;
-  }, [health, placementTransport]);
-  const staleGate = useMemo(() => presentStaleHostSecurity(placementHealth), [placementHealth]);
-  const models = usePlacementHostModels(placementTransport);
-
-  useEffect(() => {
-    if (modelOptionId === undefined && models.options[0] !== undefined) {
-      setModelOptionId(models.options[0].id);
-    }
-  }, [modelOptionId, models.options]);
+  const requestGuard = useRef(createRequestGuard()).current;
+  const {
+    placementTransport,
+    placementLabel,
+    placementDisabledReason,
+    staleGate,
+    models,
+    modelOptionId,
+    setModelOptionId,
+    modelLabel,
+    createChat,
+  } = usePlacement({ fallbackToFirstHost: true });
 
   const hostLabel = useMemo(() => {
     const labels = new Map(hosts.map((host) => [host.hostId, host.label]));
@@ -110,38 +87,38 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
   }, [inboxHostFilter, transports]);
 
   const refresh = useCallback(async () => {
+    // A slower, older fetch must not overwrite what a newer one already showed.
+    const request = requestGuard.begin();
     if (visibleTransports.length === 0) {
       setRows([]);
       setFailures([]);
+      setLoading(false);
       return;
     }
     setLoading(true);
     setError(undefined);
     try {
       const result = await listAllHostsMobileInbox(visibleTransports);
+      if (!requestGuard.isCurrent(request)) return;
       setRows(result.rows);
       setFailures(result.failures);
     } catch (cause) {
+      if (!requestGuard.isCurrent(request)) return;
       setError(
         cause instanceof MobileInboxFailure
           ? cause.message
           : "Could not load threads from the host.",
       );
     } finally {
-      setLoading(false);
+      if (requestGuard.isCurrent(request)) setLoading(false);
     }
-  }, [visibleTransports]);
+  }, [requestGuard, visibleTransports]);
 
   useEffect(() => {
     void refresh();
   }, [refresh]);
 
-  const selectedModel = useMemo(
-    () => models.options.find((option) => option.id === modelOptionId),
-    [modelOptionId, models.options],
-  );
-
-  const createChat = async () => {
+  const createChatThread = async () => {
     if (placementTransport === undefined) {
       setComposerError("Pair a host before starting a Chat thread.");
       return;
@@ -153,18 +130,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
     setCreating(true);
     setComposerError(undefined);
     try {
-      const decoded =
-        modelOptionId === undefined ? undefined : decodeMobileModelOptionId(modelOptionId);
-      const row = await createMobileChatWithFirstTurn({
-        transport: placementTransport,
-        prompt,
-        ...(decoded === undefined
-          ? {}
-          : {
-              providerInstanceId: decoded.providerInstanceId,
-              modelId: decoded.modelId,
-            }),
-      });
+      const row = await createChat(prompt);
       setPrompt("");
       setComposerOpen(false);
       await refresh();
@@ -234,17 +200,6 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         : props.view === "working"
           ? MOBILE_COPY.working
           : MOBILE_COPY.inReview;
-
-  const placementLabel = useMemo(() => {
-    if (placementTransport === undefined) return undefined;
-    return hosts.find((host) => host.hostId === placementTransport.hostId)?.label;
-  }, [hosts, placementTransport]);
-
-  const modelLabel =
-    selectedModel?.label ??
-    (models.options.length === 0
-      ? MOBILE_COPY.modelUnavailable
-      : mobileModelLabel(models.options, models.options[0]?.modelId ?? MOBILE_COPY.modelHostOnly));
 
   const styles = useMemo(
     () =>
@@ -543,19 +498,10 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
         onClose={() => setComposerOpen(false)}
         onPressModel={() => setModelOpen(true)}
         onSelectMode={() => undefined}
-        onSubmit={() => void createChat()}
+        onSubmit={() => void createChatThread()}
         onRefreshHost={() => void refreshHosts()}
         placementLabel={placementLabel}
-        placementDisabledReason={
-          placementHealth === "stale"
-            ? `${placementLabel ?? "This host"} is stale — ${
-                placementHealthDetail?.replace(/^Last host refresh was /i, "last refresh ") ??
-                "last refresh is unknown"
-              }. Refresh the host to send.`
-            : placementHealth === "unavailable"
-              ? `${placementLabel ?? "This host"} is unavailable.`
-              : undefined
-        }
+        placementDisabledReason={placementDisabledReason}
         prompt={prompt}
         visible={composerOpen}
       />
