@@ -141,7 +141,7 @@ near-black (`#141414`) in light, and the monochrome accent follows it.
 
 Appearance › Accent offers a one-click accent colour: Mono (the preset's own)
 or Clay, Amber, Green, Blue, Purple. A swatch overrides the accent fill and
-puts dark ink on it (`accent-foreground`), and leaves accent text on the
+puts dark ink on it (`accent-foreground` and `primary-foreground`), and leaves accent text on the
 preset's ink, because no swatch clears normal-text contrast on the light page.
 The accent colours switches, the send button, selected states, and sliders;
 status colours stay their own. Hairlines separate; fills select. Selected and expanded fills carry

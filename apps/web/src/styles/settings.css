@@ -3612,3 +3612,11 @@ html[data-octant-increased-contrast="true"]
     0 0 0 2px var(--oct-bg),
     0 0 0 4px var(--oct-fg);
 }
+
+/* Touch keeps the 16px dot but widens the hit area to the 44px target. */
+@media (pointer: coarse), (max-width: 560px) {
+  .settings-accent__swatch {
+    width: 44px;
+    height: 44px;
+  }
+}

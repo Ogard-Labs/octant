@@ -179,7 +179,12 @@ export function ThemeAppearanceEditor(props: {
             scope="app"
             settingId="appearance.scheme.accent"
           >
-            <div aria-label="Accent colour" className="settings-accent" role="radiogroup">
+            <div
+              aria-label="Accent colour"
+              className="settings-accent"
+              onKeyDown={moveWithinRadioGroup}
+              role="radiogroup"
+            >
               {ACCENT_SWATCHES.map((swatch) => {
                 const checked = currentAccentSwatch(draft) === swatch.id;
                 return (

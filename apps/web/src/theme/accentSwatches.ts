@@ -23,7 +23,10 @@ export const ACCENT_SWATCHES = [
 
 export type AccentSwatchId = (typeof ACCENT_SWATCHES)[number]["id"];
 
-const ACCENT_ROLES = new Set(["accent", "accent-text", "accent-foreground"]);
+// Primary controls (the send button among them) put `primary-foreground` on
+// the accent, so it takes the dark ink too: white on these colours measured
+// 2.2–3.1:1 in the light theme.
+const ACCENT_ROLES = new Set(["accent", "accent-text", "accent-foreground", "primary-foreground"]);
 const ON_ACCENT_INK = "#141414";
 
 /** Which swatch the saved overrides match, or `custom` for an accent set elsewhere. */
@@ -48,5 +51,6 @@ export function overridesForAccent(
     ...kept,
     { role: "accent", color },
     { role: "accent-foreground", color: ON_ACCENT_INK },
+    { role: "primary-foreground", color: ON_ACCENT_INK },
   ]);
 }

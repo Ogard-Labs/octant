@@ -38,6 +38,7 @@ describe("ThemeAppearanceEditor", () => {
       semanticOverrides: [
         { role: "accent", color: "#d97757" },
         { role: "accent-foreground", color: "#141414" },
+        { role: "primary-foreground", color: "#141414" },
       ],
     });
 
