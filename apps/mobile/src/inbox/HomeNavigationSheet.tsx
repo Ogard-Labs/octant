@@ -16,7 +16,7 @@ const VIEW_ITEMS: ReadonlyArray<{
   {
     id: "chat",
     label: "Chat",
-    detail: "Conversations with your hosts",
+    detail: "Conversations with your computers",
     icon: "chatbubble-outline",
   },
   { id: "work", label: "Work", detail: "Tasks in your folders", icon: "folder-outline" },
@@ -111,7 +111,7 @@ export function HomeNavigationSheet(props: {
         })}
         <View style={styles.divider} />
         <Pressable
-          accessibilityLabel="Open hosts and settings"
+          accessibilityLabel="Open computers and settings"
           accessibilityRole="button"
           onPress={() => {
             props.onClose();

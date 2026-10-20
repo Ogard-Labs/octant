@@ -22,6 +22,10 @@ export interface ScreenCanvasProps {
  * as it is, pixelated or dithered. It is drawn once and never moves. A custom
  * photo stays dimmed for readability; the plain page keeps a whisper of wash.
  */
+// A pixelated or dithered print is all edges, so it steps back under the
+// canvas colour the way the atmosphere does; a plain print keeps its full depth.
+const PRINTED_PICTURE_OPACITY = 0.72;
+
 export function ScreenCanvas(props: ScreenCanvasProps) {
   const { colors, scheme } = useTheme();
   const picture = props.picture ?? "plain";
@@ -63,7 +67,11 @@ export function ScreenCanvas(props: ScreenCanvasProps) {
           <View
             style={[
               StyleSheet.absoluteFill,
-              picture === "atmosphere" ? { opacity: atmosphereOpacity } : null,
+              picture === "atmosphere"
+                ? { opacity: atmosphereOpacity }
+                : effect.kind === "none"
+                  ? null
+                  : { opacity: PRINTED_PICTURE_OPACITY },
             ]}
           >
             <PrintedGround
@@ -72,15 +80,13 @@ export function ScreenCanvas(props: ScreenCanvasProps) {
               testID={`mobile-canvas-picture-${picture}`}
             />
           </View>
-          {picture === "atmosphere" ? (
-            <LinearGradient
-              colors={[colors.atmosphereScrimStart, "transparent", colors.atmosphereScrimEnd]}
-              end={{ x: 0.5, y: 1 }}
-              start={{ x: 0.2, y: 0 }}
-              style={StyleSheet.absoluteFill}
-              testID="mobile-canvas-gradient"
-            />
-          ) : null}
+          <LinearGradient
+            colors={[colors.atmosphereScrimStart, "transparent", colors.atmosphereScrimEnd]}
+            end={{ x: 0.5, y: 1 }}
+            start={{ x: 0.2, y: 0 }}
+            style={StyleSheet.absoluteFill}
+            testID="mobile-canvas-gradient"
+          />
         </>
       ) : (
         <LinearGradient
