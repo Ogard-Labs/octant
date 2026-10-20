@@ -3871,6 +3871,7 @@ input.switch:checked::after {
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
+  font-weight: var(--oct-weight-medium);
   text-align: left;
   text-decoration: none;
   white-space: nowrap;
