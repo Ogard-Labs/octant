@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { useMemo, useState } from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { GlassSurface, radii, space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
@@ -36,6 +36,11 @@ function statusIcon(status: ToolPartCardProps["status"]): keyof typeof Ionicons.
 /** Tool-call step card on Distilled glass or flat surfaces. */
 export function ToolPartCard(props: ToolPartCardProps) {
   const { colors } = useTheme();
+  // A finished call collapses to one line so a long run stays scannable; a
+  // running or failed call keeps its detail in view.
+  const collapsible = props.status === "done" && props.summary.length > 0;
+  const [open, setOpen] = useState(false);
+  const showSummary = props.summary.length > 0 && (!collapsible || open);
   const tone =
     props.status === "failed"
       ? colors.danger
@@ -81,14 +86,28 @@ export function ToolPartCard(props: ToolPartCardProps) {
   return (
     <View style={styles.wrap} testID={props.testID ?? "mobile-tool-part"}>
       <GlassSurface contentStyle={styles.pad} material="thin" radius={radii.sm}>
-        <View style={styles.top}>
+        <Pressable
+          accessibilityRole={collapsible ? "button" : "text"}
+          accessibilityState={collapsible ? { expanded: open } : {}}
+          disabled={!collapsible}
+          onPress={() => setOpen((value) => !value)}
+          style={styles.top}
+          testID="mobile-tool-part-toggle"
+        >
           <Ionicons color={tone} name={statusIcon(props.status)} size={16} />
           <Text style={styles.name} numberOfLines={1}>
             {props.name}
           </Text>
           <Text style={styles.badge}>{statusLabel(props.status)}</Text>
-        </View>
-        {props.summary.length > 0 ? <Text style={styles.summary}>{props.summary}</Text> : null}
+          {collapsible ? (
+            <Ionicons
+              color={colors.textTertiary}
+              name={open ? "chevron-up" : "chevron-down"}
+              size={16}
+            />
+          ) : null}
+        </Pressable>
+        {showSummary ? <Text style={styles.summary}>{props.summary}</Text> : null}
       </GlassSurface>
     </View>
   );

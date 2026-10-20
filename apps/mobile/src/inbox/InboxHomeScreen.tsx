@@ -567,7 +567,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         />
         <View style={styles.topActions}>
           <IconButton
-            accessibilityLabel="Search all work"
+            accessibilityLabel="Search threads"
             iconSize={20}
             name="search-outline"
             onPress={() => props.onOpenAgents("all")}
@@ -576,7 +576,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           />
           {props.homeMode === "inbox" ? (
             <IconButton
-              accessibilityLabel="Add workspace"
+              accessibilityLabel="Add computer"
               iconSize={20}
               name="folder-open-outline"
               onPress={props.onAddWorkspace}

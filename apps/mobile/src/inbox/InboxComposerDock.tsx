@@ -51,13 +51,6 @@ export function InboxComposerDock(props: { readonly onOpen: () => void }) {
           <Text numberOfLines={1} style={styles.prompt}>
             Plan, ask, build…
           </Text>
-          <View
-            accessibilityElementsHidden
-            importantForAccessibility="no-hide-descendants"
-            style={styles.roundAction}
-          >
-            <Ionicons color={colors.textSecondary} name="mic" size={21} />
-          </View>
         </GlassSurface>
       </Pressable>
     </View>

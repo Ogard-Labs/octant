@@ -11,13 +11,15 @@ import {
 } from "./unlockAttemptGuard";
 import { isMobileHighRiskPromptActive } from "./mobileAuthPromptState";
 
+const UNLOCK_MESSAGE = "Unlock to open Octant.";
+
 export function AppVaultGate(props: {
   readonly authenticator: DeviceAuthenticator;
   readonly children: ReactNode;
 }) {
   const { colors } = useTheme();
   const [state, setState] = useState<"locked" | "unlocking" | "unlocked">("locked");
-  const [message, setMessage] = useState("Authenticate to load paired hosts and thread data.");
+  const [message, setMessage] = useState(UNLOCK_MESSAGE);
   const unlockGuard = useRef(createUnlockAttemptGuard()).current;
   const unlockInFlight = useRef(false);
   const suppressNextActiveUnlock = useRef(false);
@@ -43,11 +45,7 @@ export function AppVaultGate(props: {
         setState("unlocked");
         return;
       }
-      setMessage(
-        result.status === "locked"
-          ? result.reason
-          : "Authenticate to load paired hosts and thread data.",
-      );
+      setMessage(result.status === "locked" ? result.reason : UNLOCK_MESSAGE);
       setState("locked");
     },
     [unlockGuard],
@@ -103,7 +101,7 @@ export function AppVaultGate(props: {
       );
       pendingCompletion.current = undefined;
       unlockGuard.invalidate();
-      setMessage("Authenticate to load paired hosts and thread data.");
+      setMessage(UNLOCK_MESSAGE);
       setState("locked");
     });
     return () => {
@@ -128,12 +126,6 @@ export function AppVaultGate(props: {
           maxWidth: 420,
           gap: space.md,
           padding: space.lg,
-        },
-        eyebrow: {
-          color: colors.accent,
-          fontSize: typography.caption.fontSize,
-          fontWeight: "500",
-          letterSpacing: 1,
         },
         title: {
           color: colors.textPrimary,
@@ -168,7 +160,6 @@ export function AppVaultGate(props: {
   return (
     <View style={styles.shell} testID="mobile-vault-locked">
       <GlassSurface contentStyle={styles.card} material="regular">
-        <Text style={styles.eyebrow}>Private workspace</Text>
         <Text style={styles.title}>Unlock Octant</Text>
         <Text selectable style={styles.body}>
           {message}

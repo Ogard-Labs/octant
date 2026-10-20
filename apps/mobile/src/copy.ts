@@ -2,7 +2,7 @@ import type { MobileHostHealthKind } from "./session/MobileHostSessionHub";
 
 /** User-facing mobile copy. Keep Octant-owned; no third-party product names. */
 export const MOBILE_PRODUCT_NAME = "Octant";
-export const MOBILE_PRODUCT_TAGLINE = "Remote control for your hosts";
+export const MOBILE_PRODUCT_TAGLINE = "Your computers, from your phone";
 
 export const MOBILE_ROUTE_IDS = ["home", "agents", "thread", "hosts"] as const;
 export type MobileRouteId = (typeof MOBILE_ROUTE_IDS)[number];
@@ -38,7 +38,7 @@ export function mobileModelLabel(
 
 export const MOBILE_COPY = {
   inboxEmpty: "Pair a host to see Chat, Work, and Code threads.",
-  inboxWelcome: "Direct your hosts from anywhere.",
+  inboxWelcome: "Pick up your threads from anywhere.",
   inboxTitle: "Inbox",
   inboxNoThreads: "No threads yet. Start one from the composer below.",
   threadEmpty: "Select a thread from Inbox.",
@@ -50,8 +50,7 @@ export const MOBILE_COPY = {
   toolStatusFailed: "Failed",
   hostsEmpty: "No hosts paired yet.",
   removeHostAction: "Remove from this phone",
-  removeHostHint:
-    "Removing works without a connection. It deletes this phone's key for the host and does not tell the host.",
+  removeHostHint: "Works offline. The computer keeps listing this phone until you revoke it there.",
   removeHostConfirm:
     "Remove this host from this phone? The host is not told, so it still lists this device until you revoke it from the desktop.",
   removeHostConfirmAction: "Remove",
@@ -79,18 +78,16 @@ export const MOBILE_COPY = {
   pairRevokeNote: "Other paired devices stay connected if you revoke later.",
   allHosts: "All hosts",
   allAgents: "Agents",
-  workspaces: "Hosts",
-  addWorkspace: "Add host",
+  workspaces: "Computers",
+  addWorkspace: "Add computer",
   composerHome: "Plan, ask, build…",
   composerChat: "Ask your host…",
   composerWork: "Plan work in this project…",
   composerCode: "Describe a Code task…",
-  composerFollowUp: "Message your host…",
-  composerDisclaimer: "Threads live on your paired host — not on this phone.",
-  composerDisclaimerShort: "Threads live on your host.",
+  composerFollowUp: "Reply…",
+  composerDisclaimerShort: "Threads live on your computer.",
   newThreadsUse: "New threads use",
-  hostOwnedThread: "Host-owned thread",
-  voiceLater: "Voice input comes later.",
+  hostOwnedThread: "Lives on your computer",
   modelHostOnly: "Host models",
   modelUnavailable: "No host models",
   working: "Working",
@@ -124,13 +121,12 @@ export const MOBILE_COPY = {
     "Runs approval-gated on the host. Approve tool use and edit files on the desktop.",
   codeReviewTitle: "Review Code on mobile",
   codeReviewEntryBody:
-    "Inspect host-owned changes and checks here. Start and follow up on Code from here; approvals and edits stay on the desktop.",
+    "Read changes and checks, start tasks, and follow up here. Approvals and edits happen on your computer.",
   codeBrowseThreads: "Browse Code threads",
   codeFollowUpPlaceholder: "Follow up on this Code thread…",
   transcriptEmpty: "No turns yet.",
   codeEarlierTurns: "Showing the newest turns. Open the thread on the desktop for earlier ones.",
   turnRunning: "Working on the host…",
-  hostsUnavailable: "hosts unavailable",
   approvalDesktopOnly:
     "Approve or reject on the desktop host. High-risk approval challenges stay local-host-only.",
   revokeDeviceHint:

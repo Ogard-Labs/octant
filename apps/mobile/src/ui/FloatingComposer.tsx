@@ -14,7 +14,6 @@ export interface FloatingComposerProps {
   readonly modelLabel?: string;
   readonly onPressModel?: () => void;
   readonly onPressAttach?: () => void;
-  readonly voiceEnabled?: boolean;
   readonly busy?: boolean;
   readonly editable?: boolean;
   readonly testID?: string;
@@ -118,14 +117,16 @@ export function FloatingComposer(props: FloatingComposerProps) {
           <Text style={styles.placeholder}>{props.placeholder}</Text>
         )}
         <View style={styles.toolbar}>
-          <IconButton
-            accessibilityLabel="Add attachment"
-            name="add"
-            onPress={props.onPressAttach}
-            size={34}
-            testID="mobile-composer-attach"
-            variant="ghost"
-          />
+          {props.onPressAttach !== undefined ? (
+            <IconButton
+              accessibilityLabel="Add attachment"
+              name="add"
+              onPress={props.onPressAttach}
+              size={34}
+              testID="mobile-composer-attach"
+              variant="ghost"
+            />
+          ) : null}
           {props.modelLabel !== undefined && props.onPressModel !== undefined ? (
             <Pressable
               accessibilityRole="button"
@@ -149,21 +150,7 @@ export function FloatingComposer(props: FloatingComposerProps) {
             <Text style={styles.busyHint} testID="mobile-composer-busy">
               {props.busyLabel ?? "Working"}
             </Text>
-          ) : (
-            <IconButton
-              accessibilityLabel={
-                props.voiceEnabled === true ? "Voice input" : "Voice input unavailable"
-              }
-              name="mic-outline"
-              size={34}
-              testID={
-                props.voiceEnabled === true
-                  ? "mobile-composer-voice"
-                  : "mobile-composer-voice-disabled"
-              }
-              variant="ghost"
-            />
-          )}
+          ) : null}
           {props.busy === true && props.onStop !== undefined ? (
             <IconButton
               accessibilityLabel="Stop"

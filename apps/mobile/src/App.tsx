@@ -1,16 +1,12 @@
 import { useMemo, useState } from "react";
-import { ActivityIndicator, StatusBar, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Appearance, StatusBar, StyleSheet, Text, View } from "react-native";
 import Constants from "expo-constants";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import type { MobileInboxRow } from "@octant/client-runtime";
-import { ScreenCanvas, lightColors, useTheme } from "../design-system";
+import { ScreenCanvas, colorsForScheme, resolveThemeScheme, useTheme } from "../design-system";
 import { AppearanceProvider, useAppearance } from "./appearance/AppearanceContext";
 import type { MobileRouteId } from "./copy";
-import {
-  createMobileMockScenario,
-  resolveMobileMockScenario,
-  type MobileMockScenario,
-} from "./dev/mobileMockScenario";
+import { resolveMobileMockScenario, type MobileMockScenario } from "./dev/mobileMockScenario";
 import { MobileDeepLinkCapture } from "./navigation/mobileDeepLinkCapture";
 import { RootNavigator } from "./navigation/RootNavigator";
 import { createInitialNavigationState, selectMobileRoute } from "./navigation/navigationState";
@@ -90,14 +86,20 @@ export default function App() {
     const configured = Constants.expoConfig?.extra?.mobileMockScenario;
     const isDevelopment = typeof __DEV__ !== "undefined" && __DEV__;
     const id = resolveMobileMockScenario(configured, isDevelopment);
-    return id === undefined ? undefined : createMobileMockScenario(id);
+    if (id === undefined || !isDevelopment) return undefined;
+    // Guarded require keeps the scenario fixtures out of production bundles.
+    const dev: typeof import("./dev/mobileMockScenario") = require("./dev/mobileMockScenario");
+    return dev.createMobileMockScenario(id);
   }, []);
+  // Fonts load before the theme provider mounts, so follow the system setting
+  // to avoid a light flash on dark phones.
+  const bootColors = colorsForScheme(resolveThemeScheme("system", Appearance.getColorScheme()));
   const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
 
   if (!fonts.ready) {
     return (
-      <View style={bootStyles.boot}>
-        <ActivityIndicator color={lightColors.primary} />
+      <View style={[bootStyles.boot, { backgroundColor: bootColors.canvas }]}>
+        <ActivityIndicator color={bootColors.primary} />
       </View>
     );
   }
@@ -133,6 +135,5 @@ const bootStyles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: lightColors.canvas,
   },
 });

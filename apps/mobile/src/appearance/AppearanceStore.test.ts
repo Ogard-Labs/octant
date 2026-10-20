@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createAppearanceStore,
   DEFAULT_APPEARANCE,
+  keepsWallpaper,
   parseAppearancePreferences,
 } from "./AppearanceStore";
 
@@ -134,5 +135,31 @@ describe("AppearanceStore", () => {
       surfaceStyle: "flat",
     });
     expect(await store.load()).toEqual(cleared);
+  });
+});
+
+describe("wallpaper survival", () => {
+  it("falls back to the Octant canvas when the stored photo file is gone", async () => {
+    const storage = memoryStorage();
+    const present = createAppearanceStore(storage, { fileExists: async () => true });
+    await present.saveCustomImage("file:///docs/background.jpg");
+    expect((await present.load()).customImageUri).toBe("file:///docs/background.jpg");
+
+    const missing = createAppearanceStore(storage, { fileExists: async () => false });
+    expect(await missing.load()).toEqual({
+      backgroundMode: "code-gradient",
+      colorSchemePreference: "system",
+      surfaceStyle: "flat",
+    });
+  });
+
+  it("keeps inline photos without asking the file system", async () => {
+    const fileExists = async () => false;
+    expect(await keepsWallpaper("data:image/png;base64,AAAA", { fileExists })).toBe(true);
+    expect(
+      await keepsWallpaper("file:///x.jpg", {
+        fileExists: async () => Promise.reject(new Error("io")),
+      }),
+    ).toBe(false);
   });
 });

@@ -13,6 +13,7 @@ import {
   type SurfaceStylePreference,
 } from "../../design-system";
 import { createExpoSecureStringStorage } from "../hosts/expoSecureStorage";
+import { wallpaperFileExists } from "./wallpaperFile";
 import {
   createAppearanceStore,
   DEFAULT_APPEARANCE,
@@ -38,7 +39,11 @@ export function AppearanceProvider(props: {
   readonly store?: AppearanceStore;
 }) {
   const store = useMemo(
-    () => props.store ?? createAppearanceStore(createExpoSecureStringStorage({ persistWeb: true })),
+    () =>
+      props.store ??
+      createAppearanceStore(createExpoSecureStringStorage({ persistWeb: true }), {
+        fileExists: wallpaperFileExists,
+      }),
     [props.store],
   );
   const [preferences, setPreferences] = useState<AppearancePreferences>(DEFAULT_APPEARANCE);
