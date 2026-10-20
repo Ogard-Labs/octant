@@ -1493,6 +1493,9 @@ describe("SettingsView", () => {
       })),
       execute: vi.fn(),
       importLocalPluginReceipt: vi.fn(),
+      addUserMcpServer: vi.fn() as never,
+      listDiscoveredTooling: vi.fn() as never,
+      applyDiscoveredTooling: vi.fn() as never,
     };
     renderSettings({ extensionClient: extensionClient as never });
     navigateTo("Skills & Extensions");

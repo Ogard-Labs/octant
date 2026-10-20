@@ -11,7 +11,9 @@ import {
   decodeExtensionCommand,
   decodeExtensionToolApprovalDecision,
   decodeExtensionToolGrantRequest,
+  decodeDiscoveredAgentToolingRequest,
   decodeUserAddedMcpServerRequest,
+  type DiscoveredAgentToolingListing,
   type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { isAbsolute } from "node:path";
@@ -44,6 +46,12 @@ export function createExtensionRouteHandler(options: {
   /** Writes the package for an MCP server a person adds by hand. */
   readonly userAddedMcpServers?: {
     add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }>;
+  };
+  /** Lists what other agent tools on this computer know, for the person to add. */
+  readonly agentToolingDiscovery?: {
+    list(): Promise<DiscoveredAgentToolingListing>;
+    server(id: string): UserAddedMcpServerRequest | undefined;
+    pluginPath(id: string): string | undefined;
   };
   /**
    * MCP tool prompts, listed and answered by a local window or a paired
@@ -300,75 +308,99 @@ export function createExtensionRouteHandler(options: {
       } catch {
         return response(failure("invalid", "The server details are invalid."), 400, origin);
       }
-      let source: ExtensionSource;
-      try {
-        source = (await options.userAddedMcpServers.add(added)).source;
-      } catch (error) {
-        if (error instanceof UserAddedMcpServerError) {
-          // A name already in use is answered as a conflict (409) in the
-          // route's own words; the failure vocabulary has no such category.
-          const status =
-            error.category === "conflict" ? 409 : error.category === "unavailable" ? 503 : 400;
-          const category =
-            error.category === "unavailable"
-              ? "unavailable"
-              : error.category === "failed"
-                ? "failed"
-                : "invalid";
-          return response(failure(category, error.message), status, origin);
-        }
-        return response(failure("invalid", "The server could not be added."), 400, origin);
-      }
-      const inspected = await options.service.execute(
-        { kind: "inspect-package", source },
+      return addUserMcpServer(
+        options.service,
+        options.userAddedMcpServers,
+        added,
         request.signal,
+        origin,
       );
-      if (inspected.kind !== "package-inspected") return response(inspected, 200, origin);
-      const entry = inspected.preview.entry;
-      const installed = await options.service.execute(
-        {
-          kind: "install-package",
-          extensionId: entry.extensionId,
-          packageId: entry.packageId,
-          version: entry.version,
-          digest: entry.digest,
-        },
-        request.signal,
-      );
-      if (installed.kind !== "extension-state-updated") return response(installed, 200, origin);
-      // The person just typed this server in, so trusting and switching it on
-      // is what they asked for; the ladder still records each step.
-      let current = installed;
-      const enable = async (command: Readonly<Record<string, unknown>>) => {
-        const state = current.snapshot.packages.find(
-          (candidate) => candidate.extensionId === entry.extensionId,
+    }
+    if (url.pathname === "/api/extensions/discovered") {
+      // What another tool on this computer knows is read for a local window
+      // only, like the folder import it leads to; a paired device sees none
+      // of it. Adding a found server is the same act as adding one by hand.
+      if (principalContext.principal.kind !== "local-window") {
+        return response(
+          failure(
+            "unauthorized",
+            "Finding servers on this computer requires the Octant window on it.",
+          ),
+          401,
+          origin,
         );
-        if (state === undefined) return;
-        const result = await options.service.execute(
-          decodeExtensionCommand({
-            ...command,
-            commandVersion: 1,
-            extensionId: String(entry.extensionId),
-            expectedStateVersion: Number(state.stateVersion),
-          }),
+      }
+      if (options.agentToolingDiscovery === undefined) {
+        return response(
+          failure("unavailable", "Finding servers on this computer is unavailable."),
+          503,
+          origin,
+        );
+      }
+      const body = await readBody(request, maximumBodySize);
+      if (body.kind === "too-large") {
+        return response(failure("invalid", "Extension request is too large."), 413, origin);
+      }
+      let discovered;
+      try {
+        if (body.kind !== "ok") throw new Error("invalid");
+        discovered = decodeDiscoveredAgentToolingRequest(body.value);
+      } catch {
+        return response(failure("invalid", "The request is invalid."), 400, origin);
+      }
+      if (discovered.kind === "list") {
+        try {
+          return response(await options.agentToolingDiscovery.list(), 200, origin);
+        } catch {
+          return response(
+            failure("failed", "The other tools' files could not be read."),
+            500,
+            origin,
+          );
+        }
+      }
+      if (discovered.kind === "add-server") {
+        const found = options.agentToolingDiscovery.server(discovered.id);
+        if (found === undefined || options.userAddedMcpServers === undefined) {
+          return response(
+            failure("stale", "That server is no longer listed. Look again."),
+            404,
+            origin,
+          );
+        }
+        return addUserMcpServer(
+          options.service,
+          options.userAddedMcpServers,
+          found,
+          request.signal,
+          origin,
+        );
+      }
+      const path = options.agentToolingDiscovery.pluginPath(discovered.id);
+      if (path === undefined || options.localPluginFolderRegistry === undefined) {
+        return response(
+          failure("stale", "That plugin is no longer listed. Look again."),
+          404,
+          origin,
+        );
+      }
+      try {
+        const registered = await options.localPluginFolderRegistry.register(path);
+        const inspected = await options.service.execute(
+          { kind: "inspect-package", source: registered.source },
           request.signal,
         );
-        if (result.kind === "extension-state-updated") current = result;
-      };
-      await enable({ kind: "set-source-trust", trusted: true });
-      await enable({ kind: "set-plugin-desired", desired: true });
-      const installedState = current.snapshot.packages.find(
-        (candidate) => candidate.extensionId === entry.extensionId,
-      );
-      for (const component of installedState?.components ?? []) {
-        if (component.component.kind !== "mcp-server") continue;
-        await enable({
-          kind: "set-component-desired",
-          componentId: component.component.id,
-          desired: true,
-        });
+        return response(inspected, 200, origin);
+      } catch (error) {
+        if (error instanceof AgentPluginsError) {
+          return response(failure("invalid", error.message), 400, origin);
+        }
+        return response(
+          failure("invalid", "The plugin folder could not be imported."),
+          400,
+          origin,
+        );
       }
-      return response(current, 200, origin);
     }
     if (
       url.pathname !== "/api/extensions/inspect" &&
@@ -490,7 +522,8 @@ function response(
     | ReadonlyArray<ExtensionToolApproval>
     | ReadonlyArray<ExtensionToolGrant>
     | { readonly accepted: boolean }
-    | { readonly revoked: boolean },
+    | { readonly revoked: boolean }
+    | DiscoveredAgentToolingListing,
   status: number,
   origin: string | null,
 ) {
@@ -525,4 +558,82 @@ function hasExactKeys(
     actual.length === sortedExpected.length &&
     actual.every((key, index) => key === sortedExpected[index])
   );
+}
+
+/**
+ * Adds a server the person named: the host writes its package, then installs,
+ * trusts and switches it on as one act, because the person just asked for
+ * exactly that; the ladder still records each step.
+ */
+async function addUserMcpServer(
+  service: ExtensionRouteService,
+  store: { add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }> },
+  added: UserAddedMcpServerRequest,
+  signal: AbortSignal,
+  origin: string | null,
+): Promise<Response> {
+  let source: ExtensionSource;
+  try {
+    source = (await store.add(added)).source;
+  } catch (error) {
+    if (error instanceof UserAddedMcpServerError) {
+      // A name already in use is answered as a conflict (409) in the
+      // route's own words; the failure vocabulary has no such category.
+      const status =
+        error.category === "conflict" ? 409 : error.category === "unavailable" ? 503 : 400;
+      const category =
+        error.category === "unavailable"
+          ? "unavailable"
+          : error.category === "failed"
+            ? "failed"
+            : "invalid";
+      return response(failure(category, error.message), status, origin);
+    }
+    return response(failure("invalid", "The server could not be added."), 400, origin);
+  }
+  const inspected = await service.execute({ kind: "inspect-package", source }, signal);
+  if (inspected.kind !== "package-inspected") return response(inspected, 200, origin);
+  const entry = inspected.preview.entry;
+  const installed = await service.execute(
+    {
+      kind: "install-package",
+      extensionId: entry.extensionId,
+      packageId: entry.packageId,
+      version: entry.version,
+      digest: entry.digest,
+    },
+    signal,
+  );
+  if (installed.kind !== "extension-state-updated") return response(installed, 200, origin);
+  let current = installed;
+  const enable = async (command: Readonly<Record<string, unknown>>) => {
+    const state = current.snapshot.packages.find(
+      (candidate) => candidate.extensionId === entry.extensionId,
+    );
+    if (state === undefined) return;
+    const result = await service.execute(
+      decodeExtensionCommand({
+        ...command,
+        commandVersion: 1,
+        extensionId: String(entry.extensionId),
+        expectedStateVersion: Number(state.stateVersion),
+      }),
+      signal,
+    );
+    if (result.kind === "extension-state-updated") current = result;
+  };
+  await enable({ kind: "set-source-trust", trusted: true });
+  await enable({ kind: "set-plugin-desired", desired: true });
+  const installedState = current.snapshot.packages.find(
+    (candidate) => candidate.extensionId === entry.extensionId,
+  );
+  for (const component of installedState?.components ?? []) {
+    if (component.component.kind !== "mcp-server") continue;
+    await enable({
+      kind: "set-component-desired",
+      componentId: component.component.id,
+      desired: true,
+    });
+  }
+  return response(current, 200, origin);
 }

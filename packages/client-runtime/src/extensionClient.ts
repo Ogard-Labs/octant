@@ -13,6 +13,8 @@ import {
   ExtensionToolGrantList,
   type ExtensionToolGrantRequest,
   type UserAddedMcpServerRequest,
+  DiscoveredAgentToolingListing,
+  type DiscoveredAgentToolingRequest,
 } from "@octant/contracts/extension-rpc";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -43,6 +45,12 @@ export interface ExtensionClient {
   importLocalPluginReceipt(receiptId: string): Promise<ExtensionCommandResult>;
   /** Adds an MCP server by hand; the host installs, trusts and enables its package. */
   addUserMcpServer(request: UserAddedMcpServerRequest): Promise<ExtensionCommandResult>;
+  /** What other agent tools on this computer know: servers and plugins the person may add. */
+  listDiscoveredTooling(): Promise<DiscoveredAgentToolingListing>;
+  /** Adds a found server, or imports a found plugin for preview, by its listed id. */
+  applyDiscoveredTooling(
+    request: Exclude<DiscoveredAgentToolingRequest, { readonly kind: "list" }>,
+  ): Promise<ExtensionCommandResult>;
 }
 
 export class ExtensionClientFailure extends Error {
@@ -200,6 +208,30 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           }
           return value.revoked;
         },
+      );
+    },
+    listDiscoveredTooling() {
+      return request(
+        fetch,
+        new URL("/api/extensions/discovered", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ kind: "list" }),
+        },
+        decodeHostAnswer(DiscoveredAgentToolingListing),
+      );
+    },
+    applyDiscoveredTooling(discovered) {
+      return request(
+        fetch,
+        new URL("/api/extensions/discovered", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(discovered),
+        },
+        decodeHostAnswer(ExtensionCommandResult),
       );
     },
     addUserMcpServer(server) {

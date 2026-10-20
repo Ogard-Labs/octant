@@ -213,6 +213,22 @@ package and its secrets. Adding a server works only from the Octant window on
 this host, not from a paired device, and a browser-hosted Settings cannot keep
 secrets.
 
+### Found on this Mac
+
+Below the extension packages, **Found on this Mac** lists the MCP servers
+and plugins Claude Code and Codex already use on this computer: the servers
+in Claude Code's configuration (yours, and the ones kept for a Project folder
+Octant knows), a Project's `.mcp.json`, Codex's configured servers, and the
+plugins each tool has installed. Looking changes nothing. **Add to Octant**
+copies one server in, the same way Add MCP server does: a value whose name
+reads like a credential goes to the credential store, and a variable the
+other tool reads from its environment is filled in when this Mac has it, or
+named on the row when it does not. **Review and import** reads one plugin for
+the usual review and Install; a Claude Code plugin keeps its skills and MCP
+servers, and its commands, agents and hooks are left out, which the review
+says. Octant never writes to the other tools' files. The section appears
+only in the Octant window on this host.
+
 ### Structured references
 
 In a composer, typing `@` opens a searchable plugin palette. Selections

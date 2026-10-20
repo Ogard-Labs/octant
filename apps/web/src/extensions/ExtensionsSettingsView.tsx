@@ -21,6 +21,7 @@ import type { ExtensionPackagePreview } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { AddMcpServerDialog } from "./AddMcpServerDialog";
+import { DiscoveredToolingSection } from "./DiscoveredToolingSection";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -293,6 +294,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [installingSkill, setInstallingSkill] = useState(false);
   const [importingLocal, setImportingLocal] = useState(false);
   const [addingServer, setAddingServer] = useState(false);
+  const [discoveredRevision, setDiscoveredRevision] = useState(0);
   const [installedSkillQuery, setInstalledSkillQuery] = useState("");
   const [showAllInstalledSkills, setShowAllInstalledSkills] = useState(false);
   const installedSkillSearch = useRef<HTMLInputElement>(null);
@@ -794,6 +796,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                 client={props.client}
                 onAdded={() => {
                   setAddingServer(false);
+                  setDiscoveredRevision((revision) => revision + 1);
                   void reload();
                 }}
                 onClose={() => setAddingServer(false)}
@@ -802,6 +805,23 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
               />
             </div>
           </SettingsSection>
+
+          {props.client.toolGrantsAvailable ? (
+            <DiscoveredToolingSection
+              client={props.client}
+              disabled={installing || importingLocal}
+              onPluginInspected={(found) => {
+                setLocalPreview(found);
+                setPreview(undefined);
+                setView("marketplace");
+              }}
+              onServerAdded={() => {
+                setDiscoveredRevision((revision) => revision + 1);
+                void reload();
+              }}
+              revision={discoveredRevision}
+            />
+          ) : null}
 
           <SettingsSection className="extensions-settings__section" title="Standalone skills">
             <div className="extensions-settings__body">

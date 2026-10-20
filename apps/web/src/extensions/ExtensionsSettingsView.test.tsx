@@ -188,6 +188,21 @@ function client(
     results,
     snapshot: vi.fn(async () => snapshot),
     effectiveState: vi.fn(async () => effective),
+    addUserMcpServer: vi.fn(async () => {
+      const result: ExtensionCommandResult = {
+        kind: "extension-command-failed",
+        failure: { category: "unavailable", message: "Not configured in this test." },
+      };
+      return result;
+    }),
+    listDiscoveredTooling: vi.fn(async () => ({ servers: [], plugins: [], notes: [] })),
+    applyDiscoveredTooling: vi.fn(async () => {
+      const result: ExtensionCommandResult = {
+        kind: "extension-command-failed",
+        failure: { category: "unavailable", message: "Not configured in this test." },
+      };
+      return result;
+    }),
     importLocalPluginReceipt: vi.fn(async () => {
       const result: ExtensionCommandResult = {
         kind: "extension-command-failed",

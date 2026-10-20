@@ -5426,11 +5426,29 @@ third-party package can never name a secret; a reference the broker cannot
 answer fails the launch rather than starting the server with a blank.
 Uninstalling the package removes its folder and every secret it referenced.
 On a host without a broker the add is refused when it carries a secret, with
-the Octant app named as the way to do it. This is the base the connector work
-builds on: discovery of servers and plugins other tools already know on this
-Mac, sign-in to a hosted server through the MCP authorization flow, a
-first-party connectors catalog, and Project pins each arrive as their own
-change on these same seams. The release-boundary hold on a connector
+the Octant app named as the way to do it. **Found on this Mac.** The same Settings section lists what Claude Code and
+Codex already know on this computer, read-only: the MCP servers in Claude
+Code's `~/.claude.json` (the person's own and the ones kept for a Project
+folder Octant knows), a Project's `.mcp.json`, and Codex's `[mcp_servers.*]`
+in `~/.codex/config.toml`; and the plugins each has installed (Claude Code's
+cache and claude.ai-synced folders under `~/.claude/plugins`, Codex's
+`~/.codex/plugins/cache`). Listing changes nothing: no server or plugin is
+imported, trusted or enabled until the person clicks that one item, and
+Octant never writes to the other tools' files. The listing names each item
+by an opaque id and shows a command line or address, never a path or a
+value. Adding a found server is the same act as Add MCP server: `${VAR}`
+and the tools' token variables are filled from the host environment where
+present, a value whose name reads like a credential is marked secret so it
+goes to the broker, and a variable the environment lacks is named on the
+row rather than invented. A found plugin goes through the ordinary folder
+import for review and install; the folder loader reads all three layouts
+(Agent Plugins, Codex, Claude Code) and turns a Claude Code plugin into an
+Agent Plugins package in memory, keeping its skills and MCP servers and
+leaving its commands, agents and hooks behind, with a note saying so. This
+is the one place the home folder's `.claude` is read, and only for this
+explicit listing; it is still never a skill root. Sign-in to a hosted server
+through the MCP authorization flow, a first-party connectors catalog, and
+Project pins each arrive as their own change on these same seams. The release-boundary hold on a connector
 marketplace was lifted by the maintainer on 2026-10-20; the start gates in
 [release-boundary holds](release-boundary-holds.md) are met by this section
 and the rules above.

@@ -468,3 +468,44 @@
 .remembered-tool-approvals > .settings-state--error {
   margin-bottom: var(--oct-space-3);
 }
+
+/* Found on this Mac: one row per server or plugin another tool knows. */
+.discovered-tooling {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.discovered-tooling__row {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-2) 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.discovered-tooling__text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.discovered-tooling__name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.discovered-tooling__detail {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.discovered-tooling__notes {
+  margin: var(--oct-space-2) 0 0;
+  padding-left: var(--oct-space-4);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}

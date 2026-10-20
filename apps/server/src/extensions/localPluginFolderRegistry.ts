@@ -1,9 +1,10 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ExtensionSource } from "@octant/contracts/extensions";
-import { loadAgentPluginDirectory, localPluginSourceRefForPath } from "./agentPluginFilesystem";
-import type { AgentPluginPackageInput } from "./agentPluginIngestion";
+import { localPluginSourceRefForPath } from "./agentPluginFilesystem";
+import type { PluginPackageInput } from "./codexPluginResolver";
 import type { ExtensionArchiveEntry } from "./packageInspector";
+import { loadPluginDirectory, type PluginDirectoryFormat } from "./pluginDirectoryLoader";
 
 /** The source kinds a folder registry may hand out: a folder the person picked, or one the host wrote for a server they added. */
 export type LocalPluginFolderSourceKind = "local-folder" | "user-added";
@@ -11,7 +12,11 @@ export type LocalPluginFolderSourceKind = "local-folder" | "user-added";
 export interface RegisteredLocalPluginFolder {
   readonly source: Extract<ExtensionSource, { readonly kind: LocalPluginFolderSourceKind }>;
   readonly absolutePath: string;
-  readonly packageInput: AgentPluginPackageInput;
+  readonly packageInput: PluginPackageInput;
+  /** The layout the folder was read as. */
+  readonly format: PluginDirectoryFormat;
+  /** What the loader left out of another tool's plugin, in plain words. */
+  readonly notes: ReadonlyArray<string>;
 }
 
 interface PersistedLocalPluginFolders {
@@ -51,7 +56,7 @@ export class LocalPluginFolderRegistry {
     return this.#folders.get(sourceRef);
   }
 
-  snapshot(): ReadonlyMap<string, AgentPluginPackageInput> {
+  snapshot(): ReadonlyMap<string, PluginPackageInput> {
     return new Map(
       [...this.#folders.entries()].map(([sourceRef, folder]) => [sourceRef, folder.packageInput]),
     );
@@ -93,7 +98,7 @@ export class LocalPluginFolderRegistry {
     absolutePath: string,
     options: { readonly persist?: boolean } = {},
   ): Promise<RegisteredLocalPluginFolder> {
-    const loaded = await loadAgentPluginDirectory(absolutePath);
+    const loaded = await loadPluginDirectory(absolutePath);
     const sourceRef = localPluginSourceRefForPath(loaded.pluginRoot);
     const source = {
       kind: this.#sourceKind,
@@ -104,18 +109,31 @@ export class LocalPluginFolderRegistry {
       kind: entry.kind === "directory" ? "directory" : "file",
       ...(entry.content === undefined ? {} : { content: entry.content }),
     }));
-    const packageInput: AgentPluginPackageInput = {
-      source,
-      format: "directory",
-      archiveBytes: loaded.archiveBytes,
-      entries,
-      appVersion: this.#appVersion,
-      platform: this.#platform,
-    };
+    const packageInput: PluginPackageInput =
+      loaded.format === "codex-plugin"
+        ? {
+            source,
+            format: "directory",
+            archiveBytes: loaded.archiveBytes,
+            manifest: loaded.codexManifest,
+            entries,
+            appVersion: this.#appVersion,
+            platform: this.#platform,
+          }
+        : {
+            source,
+            format: "directory",
+            archiveBytes: loaded.archiveBytes,
+            entries,
+            appVersion: this.#appVersion,
+            platform: this.#platform,
+          };
     const registered: RegisteredLocalPluginFolder = {
       source,
       absolutePath: loaded.pluginRoot,
       packageInput,
+      format: loaded.format,
+      notes: loaded.notes,
     };
     this.#folders.set(sourceRef, registered);
     if (options.persist !== false) {
