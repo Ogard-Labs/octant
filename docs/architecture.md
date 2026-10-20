@@ -5894,9 +5894,11 @@ mechanisms are:
   both installed binaries carry it beside the first), the session-quality
   survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`), auto-memory, the SDK's
   built-in agents, and marketplace auto-install. The runtime's release-note,
-  PR-badge, and availability checks and its feature-flag fetch are therefore
-  its own traffic to Anthropic under the person's account; they carry no
-  Project content. A channel with no switch of its own is closed by the
+  PR-badge, and availability checks are therefore its own traffic to
+  Anthropic under the person's account; they carry no Project content.
+  Feature-flag fetching stays off: Anthropic's environment-variable reference
+  says `DISABLE_TELEMETRY` also disables it, so the runtime evaluates its
+  flags from the defaults it ships with. A channel with no switch of its own is closed by the
   launch shape instead: `/share`, like any slash command, runs only when the
   person types it, as in the runtime's own terminal (the model cannot invoke
   one, and Octant sends none but `/compact`); a plugin's background `command`

@@ -214,8 +214,9 @@ turns off in Claude Code, it turns off by name on every launch:
 - auto-memory, the SDK's built-in agents, and marketplace auto-install
 
 What the runtime may do on its own, under your Anthropic account: check
-for release notes, pull-request badges, and service availability, and fetch
-its feature flags. None of those carry Project content. Plugins, skills, and
+for release notes, pull-request badges, and service availability. None of
+those carry Project content. It does not fetch feature flags: turning
+telemetry off also turns that off. Plugins, skills, and
 Remote Control stay out because Octant starts the runtime without them. If
 you export `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` yourself, Octant
 passes it through.
