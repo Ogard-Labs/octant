@@ -17,13 +17,13 @@ describe("mobile package identity", () => {
     expect(collectMobileUserFacingCopy()).not.toContain(retiredProductName);
   });
 
-  it("exposes Inbox home, Agents, Thread, and Hosts routes", () => {
+  it("exposes Inbox home, Agents, Thread, and Computers routes", () => {
     expect([...MOBILE_ROUTE_IDS]).toEqual(["home", "agents", "thread", "hosts"]);
     expect(MOBILE_TAB_LABELS).toEqual({
       home: "Inbox",
       agents: "Agents",
       thread: "Thread",
-      hosts: "Hosts",
+      hosts: "Computers",
     });
   });
 

@@ -235,7 +235,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           return;
         }
         if (selectedModel === undefined) {
-          setComposerError("Select a host-advertised model before starting Code.");
+          setComposerError("Choose a model from your computer before starting Code.");
           return;
         }
         const row = await createMobileCodeFromPrompt({
@@ -260,7 +260,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           return;
         }
         if (selectedModel === undefined) {
-          setComposerError("Select a host-advertised model before creating Work.");
+          setComposerError("Choose a model from your computer before starting Work.");
           return;
         }
         const row = await createMobileWorkFromPrompt({

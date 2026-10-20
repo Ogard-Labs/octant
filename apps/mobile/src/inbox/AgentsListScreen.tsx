@@ -120,7 +120,7 @@ export function AgentsListScreen(props: AgentsListScreenProps) {
 
   const createChatThread = async () => {
     if (placementTransport === undefined) {
-      setComposerError("Pair a host before starting a Chat thread.");
+      setComposerError("Pair a computer before starting a Chat thread.");
       return;
     }
     if (!staleGate.allowProductMutations) {

@@ -183,7 +183,7 @@ function HostsBody(props: {
           variant="ghost"
         />
         <Text style={styles.hostsTitle}>
-          {props.entryMode === "manage" ? MOBILE_TAB_LABELS.hosts : "Add host"}
+          {props.entryMode === "manage" ? MOBILE_TAB_LABELS.hosts : "Add computer"}
         </Text>
         <View style={styles.hostsSpacer} />
       </View>
@@ -191,9 +191,9 @@ function HostsBody(props: {
         {props.entryMode !== "manage" ? (
           environment.kind === "mock" ? (
             <View style={styles.mockNotice} testID="mobile-hosts-mock-notice">
-              <Text style={styles.mockTitle}>Pair a host</Text>
+              <Text style={styles.mockTitle}>Pair a computer</Text>
               <Text selectable style={styles.sectionBody}>
-                Workspace pairing is disabled in mock mode. Switch to the live app to pair a host.
+                Pairing is off in mock mode. Use the live app to pair a computer.
               </Text>
             </View>
           ) : (

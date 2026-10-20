@@ -11,7 +11,7 @@ export const MOBILE_TAB_LABELS = {
   home: "Inbox",
   agents: "Agents",
   thread: "Thread",
-  hosts: "Hosts",
+  hosts: "Computers",
 } as const satisfies Record<MobileRouteId, string>;
 
 export const MOBILE_HOST_HEALTH_LABELS = {
@@ -37,7 +37,7 @@ export function mobileModelLabel(
 }
 
 export const MOBILE_COPY = {
-  inboxEmpty: "Pair a host to see Chat, Work, and Code threads.",
+  inboxEmpty: "Pair a computer to see your Chat, Work and Code threads.",
   inboxWelcome: "Pick up your threads from anywhere.",
   inboxTitle: "Inbox",
   inboxNoThreads: "No threads yet. Start one from the composer below.",
@@ -68,13 +68,13 @@ export const MOBILE_COPY = {
     "Octant needs the camera to scan the pairing QR code. You can paste the code instead.",
   pairScanCameraDenied:
     "Camera access is off for Octant. Turn it on in the system settings, or paste the pairing code instead.",
-  pairHostTitle: "Pair a host",
+  pairHostTitle: "Pair a computer",
   pairHostBody: "Connect your laptop to create and follow Chat, Work, and Code threads.",
   pairHostCta: "Pair host",
   pairHostScreenTitle: "Pair host",
   pairHostHeadline: "Connect this phone to your laptop.",
   pairHostSubhead: "Use the short-lived ticket from desktop Remote Access.",
-  pairBeforeCreate: "Pair a host before starting a thread.",
+  pairBeforeCreate: "Pair a computer before starting a thread.",
   pairEnterCode: "Enter a code instead",
   pairTypeDetails: "Type the details instead",
   pairCompareHint: "Check that this code matches the one on your computer, then approve there.",
