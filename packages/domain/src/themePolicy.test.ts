@@ -320,6 +320,24 @@ describe("application background policy", () => {
     });
   });
 
+  it("pulses the character field, holds it still under reduced motion, and drops it for increased contrast", () => {
+    const settings: ThemeSettings = {
+      ...baseSettings,
+      appBackground: { ...baseSettings.appBackground, kind: "characters", effect: "dither" },
+    };
+    expect(resolveAppBackground(settings)).toEqual({
+      ...resolvedDefaults,
+      kind: "characters",
+      backgroundId: null,
+      backgroundAnimated: true,
+    });
+    expect(resolveAppBackground(settings, true)).toMatchObject({
+      kind: "characters",
+      backgroundAnimated: false,
+    });
+    expect(resolveAppBackground({ ...settings, increasedContrast: true }).kind).toBe("none");
+  });
+
   it("hands a gradient its light-theme picture beside the dark one", () => {
     const settings: ThemeSettings = {
       ...baseSettings,

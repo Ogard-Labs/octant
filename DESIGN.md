@@ -491,8 +491,8 @@ Model choices and settings wait for an asynchronous model change to finish befor
 accepting another edit, so the next configuration choice uses the confirmed pairing.
 
 The screen sits on the application ground (0091, 0129), set as two plain
-choices. What: one of the first-party Zen pictures, a person's photo, or the
-plain page. A fresh install starts on Soft glow, one of three Gradient
+choices. What: one of the first-party Zen pictures, a person's photo, a field
+of pulsing characters, or the plain page. A fresh install starts on Soft glow, one of three Gradient
 pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
 print, so the ground follows the window's scheme; the stylesheet swaps them
 by `data-octant-theme-mode`. A settings row written before the ground
@@ -500,7 +500,15 @@ existed replays as the plain page it showed. Effect: the picture is shown as it 
 dithered, at a chosen pixel size and colour count; an animated picture is
 printed from its still frame. Nothing is drawn over the picture and nothing
 moves across it; a ground saved with the retired dot pattern resolves to the
-plain page. Behind a
+plain page. Pulsing characters is the one drawn ground, and only when a person
+picks it: a grid of monospace letters and digits in the theme's primary ink,
+at most half opaque, whose brightness drifts in slow patches and breathes as
+a whole at twelve frames a second while a few glyphs swap. A click over it
+sends out a ring of glyphs in the theme's accent that fades within two
+seconds; on the monochrome default the accent is the ink, so the ring is only
+brighter. It carries no picture, so the effect controls do not apply, and it
+pauses while the window is hidden. Reduced motion holds it on one still frame
+and takes no rings. Behind a
 start screen the ground is masked away behind the composer and fades out below
 it, so the prompt and the recent-thread list read on the plain page; in the
 light theme it fades out sooner, because dark text over a pale picture has
