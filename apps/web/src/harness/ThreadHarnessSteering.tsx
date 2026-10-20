@@ -107,15 +107,19 @@ export function ThreadHarnessSteering(props: ThreadHarnessSteeringProps) {
   // the session is still running then; keep reading while it says so, or a turn
   // that settles between list refreshes would leave the input showing.
   const live = running || view?.session.status === "running";
+  // A separate session control can resume a held turn without changing the
+  // thread-list props. Keep observing until its unreached notes are claimed.
+  const hasPendingFollowUp =
+    queue !== undefined && view?.steering?.some((note) => note.status === "queued") === true;
   // One read when the thread opens and when a turn starts or ends, so notes
   // the lead never reached show up at the turn's end.
   useEffect(() => {
     void load();
   }, [load, running]);
   useEffect(() => {
-    if (!live || !hasSession) return;
+    if ((!live && !hasPendingFollowUp) || !hasSession) return;
     return scheduleVisibleInterval(() => void load(), props.refreshIntervalMs ?? 2_000);
-  }, [load, live, hasSession, props.refreshIntervalMs]);
+  }, [load, live, hasPendingFollowUp, hasSession, props.refreshIntervalMs]);
 
   const send = useCallback(
     async (text: string) => {

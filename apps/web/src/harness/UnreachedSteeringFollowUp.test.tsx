@@ -117,6 +117,19 @@ describe("unreached steering follow-up", () => {
     expect(props.client.takeSteering).not.toHaveBeenCalled();
   });
 
+  it("claims untouched notes after the person resumes the message queue and sends the follow-up", async () => {
+    const props = fixture();
+    const snapshot = await props.queue.read();
+    props.queue.read.mockResolvedValue({ ...snapshot, paused: true });
+    render(<UnreachedSteeringFollowUp {...props} />);
+    const send = await screen.findByRole("button", { name: "Send as next message" });
+    expect(props.client.takeSteering).not.toHaveBeenCalled();
+    props.queue.read.mockResolvedValue(snapshot);
+    await userEvent.click(send);
+    await waitFor(() => expect(props.queue.execute).toHaveBeenCalledTimes(1));
+    expect(props.client.takeSteering).toHaveBeenCalledTimes(1);
+  });
+
   it("sends only the winner of the host's single-consumer take", async () => {
     const props = fixture();
     props.client.takeSteering

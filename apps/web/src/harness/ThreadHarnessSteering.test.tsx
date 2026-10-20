@@ -18,7 +18,13 @@ const queued = {
 };
 
 function view(
-  status: "idle" | "running" | "paused-by-user" | "failed" = "running",
+  status:
+    | "idle"
+    | "running"
+    | "paused-by-user"
+    | "budget-limited"
+    | "recovery-required"
+    | "failed" = "running",
   steering: ReadonlyArray<unknown> = [],
 ): NativeHarnessSessionView {
   return {
@@ -190,6 +196,55 @@ describe("ThreadHarnessSteering", () => {
     expect(steer.mock.calls[1]?.[1]).toMatchObject({ text: "Use sqlite instead" });
     expect(steer.mock.calls[1]?.[1].noteId).not.toEqual(steer.mock.calls[0]?.[1].noteId);
   });
+
+  it.each(["paused-by-user", "budget-limited", "recovery-required"] as const)(
+    "observes a %s session resuming elsewhere before forwarding its unreached notes",
+    async (heldStatus) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        let current = view(heldStatus, [queued]);
+        const client = {
+          session: vi.fn(async () => current),
+          steer: vi.fn(),
+          takeSteering: vi.fn(async () => {
+            current = view("idle", []);
+            return { taken: [] };
+          }),
+        };
+        const queue = {
+          read: vi.fn(async () => ({
+            scope: decodeThreadMessageQueueScope({ mode: "chat", threadId }),
+            version: decodeAggregateVersion(0),
+            paused: false,
+            items: [],
+          })),
+          execute: vi.fn(),
+        };
+        render(
+          <ThreadHarnessSteering
+            client={client}
+            queueClient={queue}
+            threadId={threadId}
+            running={false}
+            refreshIntervalMs={50}
+          />,
+        );
+        await screen.findByText("not reached");
+        await vi.advanceTimersByTimeAsync(100);
+        expect(client.takeSteering).not.toHaveBeenCalled();
+        // The independent session control resumes the host; no component prop changes.
+        current = view("idle", [queued]);
+        await vi.advanceTimersByTimeAsync(100);
+        await waitFor(() => expect(client.takeSteering).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(screen.queryByText("not reached")).toBeNull());
+        const reads = client.session.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(200);
+        expect(client.session).toHaveBeenCalledTimes(reads);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("keeps reading while the session runs even when the thread list says the turn is parked", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
