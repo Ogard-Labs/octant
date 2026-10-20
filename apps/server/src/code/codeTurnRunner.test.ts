@@ -886,6 +886,22 @@ describe("CodeTurnRunner", () => {
       return observed.find((entry) => entry.category === "usage");
     }
 
+    it("journals the supplied request estimate without pricing the aggregate again", async () => {
+      const usage = await usageOf(
+        event({
+          kind: "usage",
+          inputTokens: 308010,
+          outputTokens: 171,
+          estimatedCostUsd: 0.0618072,
+        }),
+      );
+      expect(usage?.cost).toEqual({ kind: "api-estimate", usdMicros: 61807 });
+      const unknown = await usageOf(
+        event({ kind: "usage", inputTokens: 308010, outputTokens: 171, estimatedCostUsd: null }),
+      );
+      expect(unknown?.cost).toBeUndefined();
+    });
+
     it("counts the tool definitions Octant registered when the runtime reported no categories", async () => {
       const usage = await usageOf(
         event({ kind: "usage", inputTokens: 10, outputTokens: 20, contextTokens: 5_000 }),

@@ -195,7 +195,8 @@ export function turnCost(
 ): { readonly amountUsd: number; readonly estimated: boolean } | undefined {
   if (usage === undefined) return undefined;
   if (usage.costUsd !== undefined) return { amountUsd: usage.costUsd, estimated: false };
-  const amountUsd = estimateTurnCostUsd(modelId, usage);
+  if (usage.estimatedCostUsd === null) return undefined;
+  const amountUsd = usage.estimatedCostUsd ?? estimateTurnCostUsd(modelId, usage);
   return amountUsd === undefined ? undefined : { amountUsd, estimated: true };
 }
 

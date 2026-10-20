@@ -762,7 +762,11 @@ describe("ContextHarnessService integration", () => {
           explicitSelections: [],
         },
       });
-    const reconcile = (planId: ReturnType<typeof plan>["next"]["plan"]["id"], costUsd?: number) =>
+    const reconcile = (
+      planId: ReturnType<typeof plan>["next"]["plan"]["id"],
+      costUsd?: number,
+      estimatedCostUsd?: number | null,
+    ) =>
       fixture.service.reconcileUsage({
         subject,
         planId,
@@ -772,6 +776,7 @@ describe("ContextHarnessService integration", () => {
         currentVarianceReserve: 20,
         maxAdjustmentTokens: 50,
         ...(costUsd === undefined ? {} : { costUsd }),
+        ...(estimatedCostUsd === undefined ? {} : { estimatedCostUsd }),
       });
 
     const priced = reconcile(plan().next.plan.id, 0.0421);
@@ -781,6 +786,13 @@ describe("ContextHarnessService integration", () => {
     });
     // "model-a" has no standard rate, so without the provider's figure the
     // request is unpriced rather than free.
+    const estimated = reconcile(plan().next.plan.id, undefined, 0.0618072);
+    expect(estimated.snapshot.latestUsage?.cost).toEqual({
+      kind: "api-estimate",
+      usdMicros: 61807,
+    });
+    const incomplete = reconcile(plan().next.plan.id, undefined, null);
+    expect(incomplete.snapshot.latestUsage?.cost).toBeUndefined();
     const unpriced = reconcile(plan().next.plan.id);
     expect(unpriced.snapshot.latestUsage?.cost).toBeUndefined();
     expect(
@@ -791,6 +803,8 @@ describe("ContextHarnessService integration", () => {
         .all(),
     ).toEqual([
       { cost_usd_micros: 42_100, cost_kind: "provider-recorded" },
+      { cost_usd_micros: 61807, cost_kind: "api-estimate" },
+      { cost_usd_micros: null, cost_kind: null },
       { cost_usd_micros: null, cost_kind: null },
     ]);
     fixture.connection.close();

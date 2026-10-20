@@ -3858,6 +3858,18 @@ reconciliation, and Code carries it in the turn's `usage` operation frame
 reproduces the ledger exactly: a later price-table revision does not re-price
 history, and usage journaled before it carried a cost stays unpriced.
 
+The native harness estimates each completed request on that request's model and
+input size before summing a multi-request turn. A turn's summed input must not
+select a long-context price tier that none of its requests used. Normalized
+usage carries this host estimate separately as `estimatedCostUsd`, in US dollars;
+`costUsd` remains exclusively the provider's figure and takes precedence. The
+ledger rounds the summed estimate once to the nearest integer micro-dollar.
+An explicit null estimate means that request usage, pricing, or retry boundaries
+were incomplete; it stays unpriced rather than falling back to pricing the
+aggregate or treating the missing amount as zero. An absent estimate retains the
+existing single-report pricing rule for other runtimes. This does not rewrite
+historical usage or change token totals.
+
 A turn's usage is accumulated as the runtime contract defines it
 (`accumulateTurnUsage`): reports that name their request add up, a whole-turn
 report replaces them, and the sum has a cost only when every request in it

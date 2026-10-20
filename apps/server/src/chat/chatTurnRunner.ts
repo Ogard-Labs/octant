@@ -358,6 +358,7 @@ export class ChatTurnRunner {
       // (`accumulateTurnUsage`); cost stays a total only while every request
       // in it reported one.
       let costUsd: number | undefined;
+      let estimatedCostUsd: number | null | undefined;
       let turnUsage: TurnUsage | undefined;
       let sawUsage = false;
       // Set once the prompt has gone to the provider: from then on the turn
@@ -735,6 +736,7 @@ export class ChatTurnRunner {
                   ? {}
                   : { providerExecutionDurationMs }),
                 ...(costUsd === undefined ? {} : { costUsd }),
+                ...(estimatedCostUsd === undefined ? {} : { estimatedCostUsd }),
                 ...(sawUsage ? {} : { providerReported: false }),
                 currentVarianceReserve: input.varianceReserve,
                 maxAdjustmentTokens: input.varianceReserve,
@@ -1031,6 +1033,7 @@ export class ChatTurnRunner {
                     cacheReadInputTokens = turnUsage.cacheReadInputTokens;
                     cacheWriteInputTokens = turnUsage.cacheWriteInputTokens;
                     costUsd = turnUsage.costUsd;
+                    estimatedCostUsd = turnUsage.estimatedCostUsd;
                     providerExecutionDurationMs =
                       observation.providerExecutionDurationMs ?? providerExecutionDurationMs;
                   }

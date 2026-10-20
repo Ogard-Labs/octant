@@ -2582,6 +2582,39 @@ describe("ChatTurnRunner", () => {
       expect(ended[0]?.stopReason).toBe("max-tokens");
     });
 
+    it("reconciles one turn with its summed request estimates", async () => {
+      const { harness } = await runTurn(
+        [
+          {
+            kind: "usage",
+            occurredAt: at(2000),
+            requestStartedAt: at(1000),
+            inputTokens: 148099,
+            outputTokens: 165,
+            estimatedCostUsd: 0.0298178,
+          },
+          {
+            kind: "usage",
+            occurredAt: at(4000),
+            requestStartedAt: at(3000),
+            inputTokens: 159911,
+            outputTokens: 6,
+            estimatedCostUsd: 0.0319894,
+          },
+          { kind: "completed" },
+        ],
+        { finishedAtMs: 4000 },
+      );
+      expect(harness.reconcileUsage).toHaveBeenCalledOnce();
+      expect(harness.reconcileUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actualInputTokens: 308010,
+          actualOutputTokens: 171,
+          estimatedCostUsd: expect.closeTo(0.0618072, 12),
+        }),
+      );
+    });
+
     it("records every request of a failed harness turn in the usage ledger", async () => {
       const { exit, harness } = await runTurn(
         [
