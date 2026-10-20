@@ -1,7 +1,9 @@
 import { PassThrough, Readable } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import * as agentThreads from "./agentThread";
+import * as siteApprovals from "./agentSiteApprovals";
 import type { LocalControlRequest, OpenedLocalControlSession } from "./localControl";
-import { NativeHarnessApproval, decodeHostAnswer } from "@octant/contracts";
+import { NativeHarnessApproval, WORK_TURN_CAPABILITIES, decodeHostAnswer } from "@octant/contracts";
 import {
   decidePendingApproval,
   lineSource,
@@ -100,6 +102,275 @@ describe("octant agent command line", () => {
       expect(code).toBe(1);
       expect(stderr.text()).toContain("--model selects a new thread");
       expect(seen).toEqual([]);
+    },
+  );
+
+  it.each(
+    [false, true].flatMap((json) =>
+      (["refused", "accepted", "delayed", "unavailable"] as const).map((outcome) => ({
+        json,
+        outcome,
+      })),
+    ),
+  )(
+    "follows only the new turn when send resolves $outcome during polling (json=$json)",
+    async ({ json, outcome }) => {
+      const threadId = "60000000-0000-4000-8000-000000000001";
+      const stdout = sink();
+      const stderr = sink();
+      const send =
+        Promise.withResolvers<Awaited<ReturnType<agentThreads.AgentThreadPort["send"]>>>();
+      let resolvedDuringPoll = false;
+      let reads = 0;
+      const sendPrompt = vi.fn(() => send.promise);
+      const port = vi.spyOn(agentThreads, "agentThreadPort").mockReturnValue({
+        mode: "chat",
+        threadId,
+        send: sendPrompt,
+        interrupt: async () => ({ kind: "nothing-running" }),
+        read: async () => {
+          reads += 1;
+          if (outcome === "unavailable" && reads === 1) return undefined;
+          if (reads === 2) {
+            resolvedDuringPoll = true;
+            if (outcome === "refused")
+              send.resolve({ kind: "refused", message: "Request body is too large." });
+            if (outcome === "accepted" || outcome === "unavailable") send.resolve({ kind: "sent" });
+          }
+          if (outcome === "delayed" && reads === 4) {
+            expect(stdout.text()).toContain("New");
+            send.resolve({ kind: "sent" });
+          }
+          return {
+            id: threadId,
+            mode: "chat",
+            title: "Earlier conversation",
+            providerInstanceId: "profile",
+            modelId: "model",
+            version: 1,
+            workItems: [],
+            turns: [
+              {
+                id: reads <= 2 ? "earlier" : "new",
+                at: "now",
+                prompt: reads <= 2 ? "old" : "new",
+                reply:
+                  reads <= 2
+                    ? "Earlier reply"
+                    : outcome === "delayed" && reads === 3
+                      ? "New"
+                      : "New reply",
+                replyAt: "now",
+                outcome: outcome === "delayed" && reads === 3 ? "streaming" : "completed",
+              },
+            ],
+          };
+        },
+      });
+      try {
+        const code = await runAgentCliCommand({
+          command: {
+            action: "agent",
+            mode: "chat",
+            threadId,
+            prompt: "new",
+            json,
+            plain: true,
+            quiet: true,
+            last: false,
+          },
+          session: session((request) => {
+            if (request.path.startsWith("/api/native-harness/sessions/")) {
+              return { status: 200, body: { view: null } };
+            }
+            return chatThreadOpening(threadId, request) ?? { status: 200, body: [] };
+          }),
+          stdin: Readable.from([]),
+          stdout,
+          stderr,
+          pollIntervalMs: 1,
+        });
+        expect(resolvedDuringPoll).toBe(outcome !== "unavailable");
+        expect(code).toBe(outcome === "refused" || outcome === "unavailable" ? 1 : 0);
+        if (outcome === "unavailable") {
+          expect(sendPrompt).not.toHaveBeenCalled();
+          expect(stdout.text()).not.toContain("Earlier reply");
+          expect(stderr.text()).toContain("could not be read before sending");
+          return;
+        }
+        expect(stdout.text()).not.toContain("Earlier reply");
+        if (outcome === "refused") {
+          expect(stdout.text()).not.toContain('"kind":"outcome"');
+          expect(stderr.text()).toBe("Request body is too large.\n");
+        } else {
+          expect(stdout.text()).toContain("New");
+          expect(stdout.text()).toContain("reply");
+          expect(stderr.text()).toBe("");
+        }
+      } finally {
+        port.mockRestore();
+      }
+    },
+  );
+
+  it.each(["session", "sites", "thread", "pending", "missing"] as const)(
+    "does not answer, deny or interrupt an earlier interaction when send is refused during %s polling",
+    async (stage) => {
+      const threadId = "60000000-0000-4000-8000-000000000001";
+      const now = "2026-10-19T12:00:00.000Z";
+      const send =
+        Promise.withResolvers<Awaited<ReturnType<agentThreads.AgentThreadPort["send"]>>>();
+      const refuse = () => send.resolve({ kind: "refused", message: "New prompt refused." });
+      const stdout = sink();
+      const stderr = sink();
+      const interrupt = vi.fn(async () => ({ kind: "interrupted" as const }));
+      const answer = vi.fn(async () => ({ kind: "answered" as const }));
+      const mutations: LocalControlRequest[] = [];
+      let reads = 0;
+      const port = vi.spyOn(agentThreads, "agentThreadPort").mockReturnValue({
+        threadId,
+        mode: "chat",
+        send: () => send.promise,
+        interrupt,
+        answerQuestion: answer,
+        read: async () => {
+          reads += 1;
+          if (
+            (stage === "thread" && reads === 2) ||
+            ((stage === "pending" || stage === "missing") && reads === 3)
+          )
+            refuse();
+          return {
+            id: threadId,
+            mode: "chat",
+            title: "Earlier conversation",
+            providerInstanceId: "profile",
+            modelId: "model",
+            version: 1,
+            workItems: [],
+            turns:
+              stage === "missing" && reads === 2
+                ? []
+                : [
+                    {
+                      id: reads === 1 || stage === "pending" ? "earlier" : "new",
+                      at: now,
+                      prompt: "old",
+                      reply: "",
+                      replyAt: now,
+                      outcome: "waiting",
+                    },
+                  ],
+            pendingQuestion: { id: "old-question", prompt: "Earlier question?", options: [] },
+          };
+        },
+      });
+      const sites = vi
+        .spyOn(siteApprovals, "listAgentSiteApprovals")
+        .mockImplementation(async () => {
+          if (stage === "sites") refuse();
+          return stage === "sites" || stage === "pending"
+            ? [
+                {
+                  mode: "work",
+                  id: "40000000-0000-4000-8000-000000000001",
+                  threadId,
+                  origin: "https://docs.example.com",
+                },
+              ]
+            : [];
+        });
+      try {
+        const code = await runAgentCliCommand({
+          command: {
+            action: "agent",
+            mode: "chat",
+            threadId,
+            prompt: "new",
+            json: false,
+            plain: true,
+            quiet: true,
+            last: false,
+          },
+          session: session((request) => {
+            const opening = chatThreadOpening(threadId, request);
+            if (opening !== undefined) return opening;
+            if (request.path === `/api/native-harness/sessions/${threadId}`) {
+              if (stage === "session") refuse();
+              return {
+                status: 200,
+                body: {
+                  view: {
+                    session: {
+                      id: "00000000-0000-4000-8000-000000000010",
+                      threadId,
+                      mode: "chat",
+                      leadSlotId: "default",
+                      lead: {
+                        hostId: "00000000-0000-4000-8000-0000000000aa",
+                        providerInstanceId: "00000000-0000-4000-8000-000000000001",
+                        modelId: "model",
+                      },
+                      status: "idle",
+                      turnsRun: 1,
+                      cutovers: 0,
+                      startedAt: now,
+                      updatedAt: now,
+                      version: 1,
+                    },
+                    routes: [],
+                    turns: [],
+                    reductions: [],
+                    interventions: [],
+                    activatedFollowUpIds: [],
+                    questions:
+                      stage === "session" || stage === "pending"
+                        ? [
+                            {
+                              id: "00000000-0000-4000-8000-000000000080",
+                              prompt: "Earlier harness question?",
+                              options: [],
+                              status: "pending",
+                              askedAt: now,
+                            },
+                          ]
+                        : [],
+                    approvals:
+                      stage === "session" || stage === "pending"
+                        ? [
+                            {
+                              id: "00000000-0000-4000-8000-000000000081",
+                              toolName: "bash",
+                              summary: "Earlier approval",
+                              approvalClass: "shell-commands",
+                              status: "pending",
+                              askedAt: now,
+                            },
+                          ]
+                        : [],
+                  },
+                },
+              };
+            }
+            if (request.method === "POST") mutations.push(request);
+            return { status: 200, body: {} };
+          }),
+          stdin: Readable.from([]),
+          stdout,
+          stderr,
+          pollIntervalMs: 1,
+        });
+        expect(code).toBe(1);
+        expect(stderr.text()).toBe("New prompt refused.\n");
+        expect(mutations).toEqual([]);
+        expect(interrupt).not.toHaveBeenCalled();
+        expect(answer).not.toHaveBeenCalled();
+        expect(stdout.text()).not.toContain("Earlier");
+        expect(stdout.text()).not.toContain("Browser wants");
+      } finally {
+        port.mockRestore();
+        sites.mockRestore();
+      }
     },
   );
 
@@ -457,11 +728,12 @@ describe("octant agent command line", () => {
     expect(stderr.text()).toContain("Goal (active): Ship the lexer · 1 of 2 criteria met");
   });
   it.each([
-    ["sends the answer", false],
-    ["asks again when the host could not take the first answer", true],
+    ["sends the answer", false, false],
+    ["asks again when the host could not take the first answer", true, false],
+    ["refuses before sending when its transcript is unavailable", false, true],
   ] as const)(
     "asks about the site a Work turn's Browser call is waiting on and %s",
-    async (_outcome, unavailableFirst) => {
+    async (_outcome, unavailableFirst, unavailableTranscript) => {
       const threadId = "00000000-0000-4000-8000-000000000101";
       const projectId = "20000000-0000-4000-8000-000000000001";
       const approvalId = "40000000-0000-4000-8000-000000000001";
@@ -469,6 +741,7 @@ describe("octant agent command line", () => {
       const stopped = new AbortController();
       const decisions: unknown[] = [];
       let settled = false;
+      let started = false;
       const code = await runAgentCliCommand({
         command: {
           action: "agent",
@@ -529,6 +802,42 @@ describe("octant agent command line", () => {
               },
             };
           }
+          if (request.path === `/api/work/turns/transcript/${threadId}`) {
+            return unavailableTranscript
+              ? { status: 503, body: {} }
+              : {
+                  status: 200,
+                  body: {
+                    threadId,
+                    turns: started
+                      ? [
+                          {
+                            requestId: "70000000-0000-4000-8000-000000000001",
+                            turnId: "80000000-0000-4000-8000-000000000001",
+                            threadId,
+                            projectId,
+                            authority: {
+                              hostId: "local",
+                              projectId,
+                              bindingRevisionId: "66666666-6666-4666-8666-666666666666",
+                              workingDirectory: ".",
+                              confinementPosture: "project-root-confined",
+                              providerInstanceId: "10000000-0000-4000-8000-000000000001",
+                              modelId: "frontier-large",
+                            },
+                            status: "running",
+                            prompt: "Check the docs site",
+                            transcript: [],
+                            capabilities: WORK_TURN_CAPABILITIES,
+                            version: 1,
+                            acceptedAt: "2026-10-09T12:00:00.000Z",
+                            updatedAt: "2026-10-09T12:00:00.000Z",
+                          },
+                        ]
+                      : [],
+                  },
+                };
+          }
           if (request.path === "/api/browser/approvals") {
             if ((request.body as { kind?: unknown }).kind === "decide") {
               decisions.push(request.body);
@@ -558,6 +867,7 @@ describe("octant agent command line", () => {
             return { status: 200, body: { view: null } };
           }
           if (request.path === "/api/shell/commands" || request.path === "/api/work/turns") {
+            if (request.path === "/api/work/turns") started = true;
             return { status: 200, body: {} };
           }
           return { status: 404, body: {} };
@@ -569,6 +879,11 @@ describe("octant agent command line", () => {
         signal: stopped.signal,
       });
       expect(code).toBe(1);
+      if (unavailableTranscript) {
+        expect(started).toBe(false);
+        expect(decisions).toEqual([]);
+        return;
+      }
       expect(stdout.text()).toContain("! Browser wants to open https://docs.example.com");
       expect(decisions).toEqual(
         Array.from({ length: unavailableFirst ? 2 : 1 }, () => ({
@@ -813,6 +1128,7 @@ describe("octant agent Chat lead question", () => {
     const stderr = sink();
     const posted: Array<{ readonly kind?: string; readonly [key: string]: unknown }> = [];
     let answered = false;
+    let sent = false;
     const code = await runAgentCliCommand({
       command: {
         action: "agent",
@@ -825,7 +1141,7 @@ describe("octant agent Chat lead question", () => {
         mode: "chat",
       },
       session: session((request) => {
-        if (request.path === `/api/chat/threads/${threadId}`) {
+        if (request.path === `/api/chat/threads/${threadId}` && sent) {
           return { status: 200, body: chatView(answered ? "answered" : "parked") };
         }
         const opened = chatThreadOpening(threadId, request);
@@ -833,6 +1149,7 @@ describe("octant agent Chat lead question", () => {
         if (request.path === "/api/chat/commands") {
           const body = request.body as { kind?: string };
           posted.push(body);
+          if (body.kind === "send-chat-turn") sent = true;
           if (body.kind === "answer-chat-turn-question" || body.kind === "interrupt-chat-turn") {
             answered = true;
           }

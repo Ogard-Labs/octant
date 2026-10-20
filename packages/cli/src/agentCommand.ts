@@ -1125,7 +1125,12 @@ async function followTurn(
   // A Chat send answers only once its turn has ended, so waiting on it would
   // hold the whole reply back. Send alongside the reads instead, and ignore
   // the thread's earlier turn until this one shows up.
-  const before = (await port.read())?.turns.at(-1)?.id;
+  const baseline = await port.read();
+  if (baseline === undefined) {
+    input.stderr.write("The thread could not be read before sending. Try again.\n");
+    return false;
+  }
+  const before = baseline.turns.at(-1)?.id;
   let sent: Awaited<ReturnType<AgentThreadPort["send"]>> | undefined;
   void port
     .send(prompt)
@@ -1134,6 +1139,11 @@ async function followTurn(
       sent = result;
       wake.notify();
     });
+  const reportSendRefusal = (): boolean => {
+    if (sent?.kind !== "refused") return false;
+    input.stderr.write(`${sent.message}\n`);
+    return true;
+  };
   let printed = "";
   // Harness questions and approvals have no stream; this is how long one can
   // wait unseen while the reply itself is quiet.
@@ -1143,11 +1153,14 @@ async function followTurn(
     if (input.signal?.aborted) return false;
     await wake.next(fallback, signal);
     if (input.signal?.aborted) return false;
-    if (sent?.kind === "refused") {
-      input.stderr.write(`${sent.message}\n`);
-      return false;
-    }
+    if (reportSendRefusal()) return false;
+    let current = await port.read();
+    if (reportSendRefusal()) return false;
+    // Until a new turn appears, questions and approvals belong to earlier work.
+    const observedTurn = current?.turns.at(-1);
+    if (current === undefined || observedTurn === undefined || observedTurn.id === before) continue;
     const session = await readSession(input, threadId, true);
+    if (reportSendRefusal()) return false;
     const pending =
       session === null || session === "unavailable"
         ? undefined
@@ -1157,6 +1170,7 @@ async function followTurn(
     if (pending !== undefined) {
       answered.add(String(pending.id));
       await answerPendingQuestion(input, threadId, pending, lines);
+      if (reportSendRefusal()) return false;
     }
     const approval =
       session === null || session === "unavailable"
@@ -1167,8 +1181,10 @@ async function followTurn(
     if (approval !== undefined) {
       answered.add(String(approval.id));
       await decidePendingApproval(input, threadId, approval, lines);
+      if (reportSendRefusal()) return false;
     }
     const sites = await listAgentSiteApprovals(input.session, port.mode, threadId).catch(() => []);
+    if (reportSendRefusal()) return false;
     const site = sites.find((entry) => !answered.has(entry.id));
     if (site !== undefined) {
       answered.add(site.id);
@@ -1180,6 +1196,7 @@ async function followTurn(
         stdout: input.stdout,
         stderr: input.stderr,
       });
+      if (reportSendRefusal()) return false;
       if (outcome.kind === "refused") {
         input.stderr.write(`${outcome.message}\n`);
         // The ask may still be waiting (a transient host failure): ask again
@@ -1188,18 +1205,18 @@ async function followTurn(
         answered.delete(site.id);
       }
     }
-    let current = await port.read();
-    if (current === undefined) continue;
     const asked = current.pendingQuestion;
     if (asked !== undefined && port.answerQuestion !== undefined && !answered.has(asked.id)) {
       answered.add(asked.id);
       if ((await answerThreadQuestion(input, port, asked, lines)) === "ask-again") {
         answered.delete(asked.id);
       }
+      if (reportSendRefusal()) return false;
       current = (await port.read()) ?? current;
+      if (reportSendRefusal()) return false;
     }
     const turn = current.turns.at(-1);
-    if (turn?.id === before && sent === undefined) continue;
+    if (turn?.id === before) continue;
     const reply = turn?.reply ?? "";
     // The suggested follow-ups are offered as their own list, as the app does,
     // so the block that carries them is not printed with the reply. A script

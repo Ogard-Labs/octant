@@ -407,6 +407,11 @@ journaled with the session.
 octant agent --prompt "Summarize the open pull requests"
 ```
 
+A refused prompt prints the host's reason. With `--prompt`, the command exits
+with a nonzero status; it never repeats an earlier reply as the new result.
+If the earlier conversation cannot be read, the command stops before sending
+and asks you to try again.
+
 `octant agent` without `--prompt` opens the terminal UI on a new Chat thread:
 the conversation as you / lead turns with timestamps; under each lead turn
 its actions as a tree — the last few calls in full with what they touched and
