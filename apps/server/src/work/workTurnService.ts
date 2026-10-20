@@ -1728,7 +1728,7 @@ export class WorkTurnService {
       if (reachedProvider && published !== undefined) {
         this.#reconcileWorkUsage(published.snapshot, turnUsage, usageFacts);
       }
-      // A completed turn closed itself above; this closes one that did not.
+      // Record the final outcome after completion, cancellation and cleanup settle.
       if (harnessScope !== undefined) this.#nativeHarness?.turnEnded?.(harnessScope, endedTurn);
     }
   }
