@@ -150,13 +150,16 @@ export function nestFollowUpThreads(
     if (siblings === undefined) childrenOf.set(parent, [thread]);
     else siblings.push(thread);
   }
-  // Each thread is emitted once, so a cycle of links cannot repeat a row.
+  // Each row is emitted once, so a cycle of links cannot repeat it. Rows are
+  // keyed as the list keys them: two hosts can list the same thread id, and both
+  // rows stay.
   const expand = (list: ReadonlyArray<ChatThreadNavigationItem>) => {
     const out: ChatThreadNavigationItem[] = [];
     const emitted = new Set<string>();
     const visit = (thread: ChatThreadNavigationItem) => {
-      if (emitted.has(thread.threadId)) return;
-      emitted.add(thread.threadId);
+      const key = thread.navigationId ?? thread.threadId;
+      if (emitted.has(key)) return;
+      emitted.add(key);
       out.push(thread);
       for (const child of childrenOf.get(thread.threadId) ?? []) visit(child);
     };

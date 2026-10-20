@@ -539,6 +539,7 @@ export interface WorkspaceViewProps {
 
 export function WorkspaceView(props: WorkspaceViewProps) {
   const newTaskDrafts = useContext(NewTaskDraftsContext);
+  const followUpOffersFor = useStableFollowUpOffers(props.followUpSuggestions);
   const previousProjectOverviews = useRef<ReadonlyArray<ProjectOverviewDraftRef>>([]);
   const previousPaneDrafts = useRef<ReadonlyArray<PaneDraftRef>>([]);
   const previousWorkspaceVersion = useRef<ShellBootstrap["workspaceVersion"] | undefined>(
@@ -764,9 +765,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           activePaneId={props.workspace.activePaneIds[props.mode]}
           {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
           renderSurface={(surface, paneId) => (
-            <FollowUpSuggestionContext
-              value={followUpSuggestionsFor(surface, props.followUpSuggestions)}
-            >
+            <FollowUpSuggestionContext value={followUpOffersFor(surface)}>
               <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
                 <ComposerNoticeProvider
                   value={paneId === activePaneId && inlineNotice ? contextNotice : null}
@@ -885,6 +884,37 @@ function SurfaceLinkActionsProvider(props: {
  * A thread's suggestions come from the host that runs it; a pane showing a
  * thread on another host has no local offer to show.
  */
+/**
+ * The follow-up offers each thread's surfaces read, kept the same object across
+ * renders. A fresh object every render re-rendered every reader of the context,
+ * and with Environment's Suggested tasks open that put a commit in the thread
+ * pane on streamed events. The latest `onCreated` is always the one called.
+ */
+function useStableFollowUpOffers(host: WorkspaceViewProps["followUpSuggestions"]) {
+  const latestHost = useRef(host);
+  latestHost.current = host;
+  const cache = useRef(new Map<string, ComposerOffers>());
+  return (surface: WorkspaceTab): ComposerOffers | undefined => {
+    const fresh = followUpSuggestionsFor(surface, host);
+    if (fresh === undefined) return undefined;
+    const key = `${fresh.threadId}:${fresh.mode}`;
+    const cached = cache.current.get(key);
+    if (
+      cached !== undefined &&
+      cached.client === fresh.client &&
+      cached.sideTaskClient === fresh.sideTaskClient
+    ) {
+      return cached;
+    }
+    const offers: ComposerOffers = {
+      ...fresh,
+      onCreated: (input) => latestHost.current?.onCreated(input),
+    };
+    cache.current.set(key, offers);
+    return offers;
+  };
+}
+
 function followUpSuggestionsFor(
   surface: WorkspaceTab,
   host: WorkspaceViewProps["followUpSuggestions"],

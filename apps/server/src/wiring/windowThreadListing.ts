@@ -40,6 +40,9 @@ export function createThreadIsListed(deps: {
       return work.lifecycle === "active" && projectService.hasActiveProject(work.projectId, "work");
     }
     const chat = read(() => persistence.readChatThread(decodeChatThreadId(threadId)));
-    return chat !== undefined && chat.lifecycle === "active";
+    if (chat === undefined || chat.lifecycle !== "active") return false;
+    // A Chat in an archived Project keeps its own lifecycle, but the sidebar
+    // shows an archived Project's name without its threads.
+    return chat.projectId === undefined || projectService.hasActiveProject(chat.projectId, "chat");
   };
 }
