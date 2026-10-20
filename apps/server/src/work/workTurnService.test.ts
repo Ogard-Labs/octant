@@ -930,6 +930,33 @@ describe("WorkTurnService", () => {
       failure: { category: "failed" as const, message: "Provider failed." },
     };
 
+    it("records one row with the summed request estimates after a failure", async () => {
+      const rows = await ledgerAfterTurn(async (input, report) => {
+        input.onPromptSent?.();
+        report({
+          requestStartedAt: now,
+          inputTokens: 148099,
+          outputTokens: 165,
+          estimatedCostUsd: 0.0298178,
+        });
+        report({
+          requestStartedAt: now,
+          inputTokens: 159911,
+          outputTokens: 6,
+          estimatedCostUsd: 0.0319894,
+        });
+        return failed;
+      });
+      expect(rows).toEqual([
+        expect.objectContaining({
+          input_tokens: 308010,
+          output_tokens: 171,
+          cost_usd_micros: 61807,
+          cost_kind: "api-estimate",
+        }),
+      ]);
+    });
+
     it("counts every request of a harness turn that failed before its total", async () => {
       const rows = await ledgerAfterTurn(async (input, report) => {
         input.onPromptSent?.();

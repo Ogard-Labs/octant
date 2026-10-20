@@ -50,9 +50,7 @@ export interface TurnMetricsState {
   readonly retryResumeMs: number | undefined;
   readonly retries: number;
   readonly calls: ReadonlyArray<ModelCall>;
-  /** What the request-scoped reports added up to. */
-  readonly requestUsage: TurnUsage | undefined;
-  /** The latest report that covered the whole turn; a later one replaces it. */
+  /** Request totals, replaced by a later report covering the whole turn. */
   readonly turnUsage: TurnUsage | undefined;
   readonly lastUsageMs: number | undefined;
   readonly openTools: Readonly<Record<string, number>>;
@@ -87,7 +85,6 @@ export function startTurnMetrics(startedAt: string): TurnMetricsState {
     retryResumeMs: undefined,
     retries: 0,
     calls: [],
-    requestUsage: undefined,
     turnUsage: undefined,
     lastUsageMs: undefined,
     openTools: {},
@@ -186,7 +183,7 @@ function observeUsage(
   return {
     ...state,
     calls: [...state.calls, { startMs, firstDeltaMs, endMs: at, outputTokens: usage.outputTokens }],
-    requestUsage: addTurnUsage(state.requestUsage, usage),
+    turnUsage: accumulateTurnUsage(state.turnUsage, event),
     requestFirstDeltaMs: undefined,
     retryResumeMs: undefined,
     lastUsageMs: at,
@@ -205,13 +202,14 @@ function usageOf(event: Extract<ProviderRuntimeEvent, { kind: "usage" }>): TurnU
       ? {}
       : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
     ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+    ...(event.estimatedCostUsd === undefined ? {} : { estimatedCostUsd: event.estimatedCostUsd }),
   };
 }
 
 export function finishTurnMetrics(state: TurnMetricsState, endedAt: string): TurnMetricsOutcome {
   const endedAtMs = Math.max(state.startedAtMs, Date.parse(endedAt));
   const wallMs = Math.max(0, Math.round(endedAtMs - state.startedAtMs));
-  const usage = state.calls.length > 0 ? state.requestUsage : state.turnUsage;
+  const usage = state.turnUsage;
   const retries = state.retries > 0 ? { retries: state.retries } : {};
   const unavailable = { precision: "unavailable", wallMs, ...retries } as const;
   const measured =
@@ -395,6 +393,14 @@ export function addTurnUsage(total: TurnUsage | undefined, turn: TurnUsage): Tur
   const cacheRead = sum(total?.cacheReadInputTokens, turn.cacheReadInputTokens);
   const cacheWrite = sum(total?.cacheWriteInputTokens, turn.cacheWriteInputTokens);
   const cost = sum(total?.costUsd, turn.costUsd);
+  const estimatedCost =
+    total === undefined
+      ? turn.estimatedCostUsd
+      : total.estimatedCostUsd === undefined && turn.estimatedCostUsd === undefined
+        ? undefined
+        : typeof total.estimatedCostUsd === "number" && typeof turn.estimatedCostUsd === "number"
+          ? total.estimatedCostUsd + turn.estimatedCostUsd
+          : null;
   return {
     inputTokens: (total?.inputTokens ?? 0) + turn.inputTokens,
     outputTokens: (total?.outputTokens ?? 0) + turn.outputTokens,
@@ -402,6 +408,7 @@ export function addTurnUsage(total: TurnUsage | undefined, turn: TurnUsage): Tur
     ...(cacheRead === undefined ? {} : { cacheReadInputTokens: cacheRead }),
     ...(cacheWrite === undefined ? {} : { cacheWriteInputTokens: cacheWrite }),
     ...(cost === undefined ? {} : { costUsd: cost }),
+    ...(estimatedCost === undefined ? {} : { estimatedCostUsd: estimatedCost }),
   };
 }
 

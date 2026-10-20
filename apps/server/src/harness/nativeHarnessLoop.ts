@@ -18,6 +18,7 @@ import {
   type UtcTimestamp,
 } from "@octant/contracts";
 import type { ProviderConnection, ProviderSessionCompaction } from "@octant/provider-sdk/driver";
+import { estimateTurnCostUsd } from "@octant/domain/turn-metrics-display";
 import { renderProviderTurnPrompt } from "@octant/provider-sdk/chat-conformance";
 import { Effect, PubSub, Stream, type Scope } from "effect";
 import { isContextOverflowFailure, isEndpointRetriesExhausted } from "../providers/endpointRetry";
@@ -161,6 +162,9 @@ interface SessionState {
   selfCorrections: number;
   /** Everything this turn's requests have cost so far; a figure no request reported stays absent. */
   usage: NativeHarnessUsage;
+  latestReportedUsage: NativeHarnessUsage | undefined;
+  estimatedCostUsd: number | null;
+  pricingBoundariesKnown: boolean;
   /** When the request now in flight was sent, which dates the usage it reports. */
   requestStartedAt: string | undefined;
   /**
@@ -286,6 +290,9 @@ export function createNativeHarnessConnection(
       steps: 0,
       selfCorrections: 0,
       usage: { inputTokens: 0, outputTokens: 0, costUsd: 0 },
+      latestReportedUsage: undefined,
+      estimatedCostUsd: 0,
+      pricingBoundariesKnown: true,
       requestStartedAt: undefined,
       compaction: input.compaction,
     });
@@ -336,6 +343,11 @@ export function createNativeHarnessConnection(
       const step = sendOnLead(state, request, controller.signal)
         .then((response) => settleResponse(state, response))
         .catch((error: unknown) => {
+          if (state.latestReportedUsage !== undefined) {
+            // Replace the partial request reports so an unfinished retry cannot
+            // leave a whole-turn estimate, without adding the known tokens twice.
+            emit(state, { kind: "usage", ...state.latestReportedUsage, estimatedCostUsd: null });
+          }
           state.pending = undefined;
           state.acceptingSteering = false;
           for (const note of state.steering.splice(0)) note.resolve("unsupported");
@@ -378,13 +390,25 @@ export function createNativeHarnessConnection(
         signal,
         // A request's own usage says when that request was sent, which is what
         // lets its timing leave out the tool time between requests.
-        onEvent: (event: NativeHarnessStreamEvent) =>
+        onEvent: (event: NativeHarnessStreamEvent) => {
+          if (event.kind === "retrying") state.pricingBoundariesKnown = false;
+          if (event.kind === "usage")
+            state.latestReportedUsage = addNativeHarnessUsage(state.usage, event);
           emit(
             state,
-            event.kind === "usage" && state.requestStartedAt !== undefined
-              ? { ...event, requestStartedAt: state.requestStartedAt }
+            event.kind === "usage"
+              ? {
+                  ...event,
+                  ...(state.requestStartedAt === undefined
+                    ? {}
+                    : { requestStartedAt: state.requestStartedAt }),
+                  estimatedCostUsd: state.pricingBoundariesKnown
+                    ? (estimateTurnCostUsd(String(leadTarget(state).modelId), event) ?? null)
+                    : null,
+                }
               : { ...event },
-          ),
+          );
+        },
       };
       let current = request;
       if (state.fallback !== undefined) {
@@ -409,6 +433,7 @@ export function createNativeHarnessConnection(
           state.requestStartedAt = options.clock();
           return await (state.fallback?.endpoint ?? state.endpoint).send(current, stream);
         } catch (error) {
+          state.pricingBoundariesKnown = false;
           if (!signal.aborted && !recoveredFromOverflow) {
             const refused = sanitizeFailure(error);
             if (isContextOverflowFailure(refused)) {
@@ -568,13 +593,23 @@ export function createNativeHarnessConnection(
       // Header buckets describe the account after this response; they go
       // first so a consumer that stops at the terminal still sees them.
       for (const bucket of response.rateLimitBuckets ?? []) emitBucket(state, bucket);
+      const requestCost =
+        response.usage === undefined || !state.pricingBoundariesKnown
+          ? undefined
+          : estimateTurnCostUsd(String(leadTarget(state).modelId), response.usage);
+      state.estimatedCostUsd =
+        state.estimatedCostUsd === null || requestCost === undefined
+          ? null
+          : state.estimatedCostUsd + requestCost;
       if (response.usage !== undefined) {
         state.usage = addNativeHarnessUsage(state.usage, response.usage);
+        state.latestReportedUsage = state.usage;
       } else if (state.usage.costUsd !== undefined) {
         // A request that reported nothing may still have been charged, so the
         // turn no longer has a whole cost.
         const { costUsd: _unknown, ...withoutCost } = state.usage;
         state.usage = withoutCost;
+        if (state.latestReportedUsage !== undefined) state.latestReportedUsage = state.usage;
       }
       if (response.toolCalls.length > 0) {
         const calls = response.toolCalls;
@@ -671,7 +706,7 @@ export function createNativeHarnessConnection(
       // A turn that took several requests reports its whole cost once more
       // before it ends; consumers keep the latest usage they saw.
       if (state.steps > 1 && (state.usage.inputTokens > 0 || state.usage.outputTokens > 0)) {
-        emit(state, { kind: "usage", ...state.usage });
+        emit(state, { kind: "usage", ...state.usage, estimatedCostUsd: state.estimatedCostUsd });
       }
       state.acceptingSteering = false;
       emit(state, {
@@ -924,6 +959,9 @@ export function createNativeHarnessConnection(
             state.steps = 0;
             state.selfCorrections = 0;
             state.usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
+            state.latestReportedUsage = undefined;
+            state.estimatedCostUsd = 0;
+            state.pricingBoundariesKnown = true;
             state.acceptingSteering = true;
             void runStep(state, request);
           },
@@ -977,6 +1015,13 @@ export function createNativeHarnessConnection(
               } catch (error) {
                 release(state);
                 throw error;
+              }
+              if (state.estimatedCostUsd === null && state.latestReportedUsage !== undefined) {
+                emit(state, {
+                  kind: "usage",
+                  ...state.latestReportedUsage,
+                  estimatedCostUsd: null,
+                });
               }
               emit(state, { kind: "interrupted", message: "The provider request was cancelled." });
             }

@@ -150,6 +150,7 @@ export interface ReconcileContextUsageInput {
   readonly providerReported?: boolean;
   /** The provider's own figure for the request, in US dollars. */
   readonly costUsd?: number;
+  readonly estimatedCostUsd?: number | null;
 }
 
 export interface RestoreContextSubjectInput {
@@ -531,6 +532,9 @@ export class ContextHarnessService {
               ? {}
               : { cacheWriteInputTokens: input.cacheWriteInputTokens }),
             ...(input.costUsd === undefined ? {} : { costUsd: input.costUsd }),
+            ...(input.estimatedCostUsd === undefined
+              ? {}
+              : { estimatedCostUsd: input.estimatedCostUsd }),
           });
     const reconciliation = decodeUsageReconciliation({
       id: this.#uuid(),

@@ -294,6 +294,18 @@ describe("ledger cost", () => {
     });
   });
 
+  it("uses the request-boundary estimate without repricing the turn total", () => {
+    const usage = { inputTokens: 308010, outputTokens: 171, estimatedCostUsd: 0.0618072 };
+    expect(ledgerUsageCost("gpt-5.6-luna", usage)).toEqual({
+      kind: "api-estimate",
+      usdMicros: 61807,
+    });
+    expect(ledgerUsageCost("gpt-5.6-luna", { ...usage, estimatedCostUsd: null })).toBeUndefined();
+    expect(
+      ledgerUsageCost("gpt-5.6-luna", { ...usage, estimatedCostUsd: null, costUsd: 0.1 }),
+    ).toEqual({ kind: "provider-recorded", usdMicros: 100000 });
+  });
+
   it("leaves usage unpriced when the model has no price and the provider reported none", () => {
     expect(
       ledgerUsageCost("some-local-model", { inputTokens: 5, outputTokens: 5 }),

@@ -1760,6 +1760,9 @@ export class WorkTurnService {
           ? {}
           : { providerExecutionDurationMs: facts.providerExecutionDurationMs }),
         ...(usage?.costUsd === undefined ? {} : { costUsd: usage.costUsd }),
+        ...(usage?.estimatedCostUsd === undefined
+          ? {}
+          : { estimatedCostUsd: usage.estimatedCostUsd }),
         currentVarianceReserve: snapshot.next.plan.reserves.variance,
         maxAdjustmentTokens: Math.ceil(snapshot.modelLimits.contextWindow * 0.1),
       });

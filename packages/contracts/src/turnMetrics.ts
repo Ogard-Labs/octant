@@ -13,7 +13,7 @@ const PositiveInt = Schema.Int.pipe(Schema.positive());
  * cached or not; `cacheReadInputTokens` and `cacheWriteInputTokens` are the
  * parts of it read from or written to the prompt cache, and `reasoningTokens`
  * is the part of `outputTokens` spent thinking. A figure the provider did not
- * report is absent rather than zero, and Octant holds no price list.
+ * report is absent rather than zero. Host API estimates remain separate from provider costs.
  */
 export const TurnUsage = Schema.Struct({
   inputTokens: NonNegativeInt,
@@ -22,6 +22,10 @@ export const TurnUsage = Schema.Struct({
   cacheReadInputTokens: Schema.optional(NonNegativeInt),
   cacheWriteInputTokens: Schema.optional(NonNegativeInt),
   costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+  /** Host estimate across known request boundaries; null means incomplete/unpriced. */
+  estimatedCostUsd: Schema.optional(
+    Schema.NullOr(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+  ),
 }).annotations(strict);
 export type TurnUsage = typeof TurnUsage.Type;
 

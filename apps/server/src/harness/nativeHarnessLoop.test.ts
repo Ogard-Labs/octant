@@ -11,7 +11,7 @@ import {
   type ProviderToolDefinition,
 } from "@octant/contracts";
 import type { ProviderConnection } from "@octant/provider-sdk/driver";
-import { deriveTurnMetrics } from "@octant/domain";
+import { deriveTurnMetrics, ledgerUsageCost } from "@octant/domain";
 import { Effect, Fiber, Stream, type Scope } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
 import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
@@ -54,6 +54,7 @@ afterEach(() => {
 function scriptedTransport(
   script: NativeHarnessResponse[],
   fits: (request: NativeHarnessRequest) => boolean = () => true,
+  retried = false,
 ): {
   readonly transport: NativeHarnessTransport;
   readonly requests: NativeHarnessRequest[];
@@ -64,8 +65,16 @@ function scriptedTransport(
     transport: {
       open: async () => ({
         fits,
-        send: async (request) => {
+        send: async (request, stream) => {
           requests.push(request);
+          if (retried)
+            stream.onEvent({
+              kind: "retrying",
+              attempt: 2,
+              maxAttempts: 5,
+              delayMs: 500,
+              reason: "unavailable",
+            });
           const next = script.shift();
           if (next === undefined) throw new Error("The script ran out of responses.");
           return next;
@@ -764,20 +773,30 @@ describe("fitting a request to the endpoint", () => {
     const twoRequestTurn = (
       first: NativeHarnessResponse["usage"],
       second: NativeHarnessResponse["usage"],
+      selectedModel = modelId,
+      retried = false,
     ) => {
-      const { transport } = scriptedTransport([
-        {
-          text: "",
-          toolCalls: [{ toolCallId: "call", toolName: "read", argumentsJson: "{}" }],
-          ...(first === undefined ? {} : { usage: first }),
-        },
-        { text: "done", toolCalls: [], ...(second === undefined ? {} : { usage: second }) },
-      ]);
+      const { transport } = scriptedTransport(
+        [
+          {
+            text: "",
+            toolCalls: [{ toolCallId: "call", toolName: "read", argumentsJson: "{}" }],
+            ...(first === undefined ? {} : { usage: first }),
+          },
+          { text: "done", toolCalls: [], ...(second === undefined ? {} : { usage: second }) },
+        ],
+        () => true,
+        retried,
+      );
       return Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
             const connection = yield* connect(transport, new MemoryNativeHarnessTranscriptStore());
-            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            yield* connection.start({
+              sessionId,
+              modelId: selectedModel,
+              executionPolicy: "approval-gated",
+            });
             yield* sendAndCollect(connection, "look", (event) => event.kind === "tool-request");
             const finished = yield* Effect.fork(
               Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
@@ -793,6 +812,133 @@ describe("fitting a request to the endpoint", () => {
         ),
       );
     };
+
+    it("prices two short requests without charging the long-context rate on their sum", async () => {
+      const model = "gpt-5.6-luna" as ProviderModelId;
+      const events = await twoRequestTurn(
+        {
+          inputTokens: 148099,
+          outputTokens: 165,
+          cacheReadInputTokens: 0,
+          cacheWriteInputTokens: 0,
+        },
+        { inputTokens: 159911, outputTokens: 6, cacheReadInputTokens: 0, cacheWriteInputTokens: 0 },
+        model,
+      );
+      const usage = events.find((event) => event.kind === "usage");
+      expect(usage).toMatchObject({ inputTokens: 308010, outputTokens: 171 });
+      if (usage?.kind !== "usage") throw new Error("Expected usage");
+      expect(ledgerUsageCost(model, usage)).toEqual({ kind: "api-estimate", usdMicros: 61807 });
+      expect(usage).not.toHaveProperty("costUsd");
+    });
+
+    it("keeps a genuinely long request at its own rate", async () => {
+      const model = "gpt-5.6-luna" as ProviderModelId;
+      const events = await twoRequestTurn(
+        { inputTokens: 300_000, outputTokens: 100 },
+        { inputTokens: 100, outputTokens: 10 },
+        model,
+      );
+      const usage = events.find((event) => event.kind === "usage");
+      if (usage?.kind !== "usage") throw new Error("Expected usage");
+      expect(ledgerUsageCost(model, usage)).toEqual({ kind: "api-estimate", usdMicros: 120212 });
+    });
+
+    it("keeps an incomplete or unpriced request sum unavailable", async () => {
+      for (const [first, model] of [
+        [undefined, "gpt-5.6-luna"],
+        [{ inputTokens: 100, outputTokens: 10 }, "unpriced-model"],
+      ] as const) {
+        const events = await twoRequestTurn(
+          first,
+          { inputTokens: 100, outputTokens: 10 },
+          model as ProviderModelId,
+        );
+        const usage = events.find((event) => event.kind === "usage");
+        expect(usage).toMatchObject({ estimatedCostUsd: null });
+        if (usage?.kind !== "usage") throw new Error("Expected usage");
+        expect(ledgerUsageCost(model, usage)).toBeUndefined();
+      }
+    });
+
+    it("does not estimate a retried request from its combined attempt usage", async () => {
+      const model = "gpt-5.6-luna" as ProviderModelId;
+      const events = await twoRequestTurn(
+        { inputTokens: 300_000, outputTokens: 100 },
+        { inputTokens: 100, outputTokens: 10 },
+        model,
+        true,
+      );
+      const usage = events.find((event) => event.kind === "usage");
+      expect(usage).toMatchObject({
+        inputTokens: 300100,
+        outputTokens: 110,
+        estimatedCostUsd: null,
+      });
+      if (usage?.kind !== "usage") throw new Error("Expected usage");
+      expect(ledgerUsageCost(model, usage)).toBeUndefined();
+    });
+
+    it.each([false, true])(
+      "leaves the estimate unavailable after usage, retry, and interruption=%s",
+      async (cancelled) => {
+        const model = "gpt-5.6-luna" as ProviderModelId;
+        const transport: NativeHarnessTransport = {
+          open: async () => ({
+            fits: () => true,
+            send: async (_request, stream) => {
+              stream.onEvent({
+                kind: "usage",
+                inputTokens: 148099,
+                outputTokens: 165,
+                cacheReadInputTokens: 0,
+                reasoningTokens: 5,
+              });
+              stream.onEvent({
+                kind: "retrying",
+                attempt: 2,
+                maxAttempts: 5,
+                delayMs: 500,
+                reason: "empty-completion",
+              });
+              throw {
+                category: cancelled ? "interrupted" : "unavailable",
+                message: "Request stopped.",
+              };
+            },
+            release: () => undefined,
+          }),
+        };
+        const events = await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* connect(
+                transport,
+                new MemoryNativeHarnessTranscriptStore(),
+              );
+              yield* connection.start({
+                sessionId,
+                modelId: model,
+                executionPolicy: "approval-gated",
+              });
+              return yield* sendAndCollect(connection, "look", isTerminal);
+            }),
+          ),
+        );
+        expect(events.at(-1)?.kind).toBe(cancelled ? "interrupted" : "failed");
+        const { usage } = deriveTurnMetrics({ startedAt: now, endedAt: now, events });
+        expect(usage).toEqual({
+          inputTokens: 148099,
+          outputTokens: 165,
+          cacheReadInputTokens: 0,
+          reasoningTokens: 5,
+          estimatedCostUsd: null,
+        });
+        expect(
+          ledgerUsageCost(model, usage ?? { inputTokens: 0, outputTokens: 0 }),
+        ).toBeUndefined();
+      },
+    );
 
     it("reports the turn's cache and reasoning tokens once, summed over its requests", async () => {
       const events = await twoRequestTurn(
@@ -974,6 +1120,7 @@ describe("fitting a request to the endpoint", () => {
         inputTokens: 260,
         outputTokens: 140,
         cacheReadInputTokens: 200,
+        estimatedCostUsd: null,
       });
     });
   });

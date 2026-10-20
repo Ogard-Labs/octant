@@ -2205,6 +2205,10 @@ export const ProviderRuntimeEvent = Schema.Union(
      * from it, as an `api-estimate`, never in this field.
      */
     costUsd: Schema.optional(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+    /** Host estimate across known request boundaries; null means incomplete/unpriced. */
+    estimatedCostUsd: Schema.optional(
+      Schema.NullOr(Schema.Number.pipe(Schema.nonNegative(), Schema.finite())),
+    ),
     /**
      * The model's context window and how much of it the last request occupied,
      * when the provider reports them alongside usage. A runtime the host does

@@ -873,6 +873,9 @@ function normalizeProviderEvent(
           ? {}
           : { cacheWriteInputTokens: event.cacheWriteInputTokens }),
         ...(event.costUsd === undefined ? {} : { costUsd: event.costUsd }),
+        ...(event.estimatedCostUsd === undefined
+          ? {}
+          : { estimatedCostUsd: event.estimatedCostUsd }),
       });
       return Effect.succeed({
         ...base,

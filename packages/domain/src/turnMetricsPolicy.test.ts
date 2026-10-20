@@ -506,6 +506,37 @@ describe("a turn's usage for the ledger", () => {
     ).toEqual({ inputTokens: 300, outputTokens: 20, costUsd: 0.05 });
   });
 
+  it("preserves complete estimates and refuses incomplete request estimates", () => {
+    const first = request(2, {
+      inputTokens: 148099,
+      outputTokens: 165,
+      estimatedCostUsd: 0.0298178,
+    });
+    const second = request(5, {
+      inputTokens: 159911,
+      outputTokens: 6,
+      estimatedCostUsd: 0.0319894,
+    });
+    expect(fold([first, second])).toMatchObject({
+      inputTokens: 308010,
+      outputTokens: 171,
+    });
+    expect(fold([first, second])?.estimatedCostUsd).toBeCloseTo(0.0618072, 12);
+    expect(fold([first, { ...second, estimatedCostUsd: null }])).toMatchObject({
+      estimatedCostUsd: null,
+    });
+    expect(fold([first, request(5, { inputTokens: 159911, outputTokens: 6 })])).toMatchObject({
+      estimatedCostUsd: null,
+    });
+    expect(
+      fold([
+        first,
+        second,
+        whole(6, { inputTokens: 308010, outputTokens: 171, estimatedCostUsd: 0.0618072 }),
+      ]),
+    ).toMatchObject({ estimatedCostUsd: 0.0618072 });
+  });
+
   it("has no cost once any request in the sum reported none", () => {
     expect(
       fold([
