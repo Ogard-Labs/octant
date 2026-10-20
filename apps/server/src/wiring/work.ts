@@ -141,7 +141,7 @@ export type WorkDependencies = Pick<ServerStart, "persistence"> &
     | "probeProviderForThreads"
     | "refreshStandaloneSkills"
     | "resolveSelectedExtensions"
-    | "pinnedExtensionSelections"
+    | "pinnedExtensionIds"
   > &
   Pick<
     BrowserWiring,
@@ -212,7 +212,7 @@ export function wireWork(deps: WorkDependencies) {
     refreshStandaloneSkills,
     resolveCanvasWorkspace,
     resolveSelectedExtensions,
-    pinnedExtensionSelections,
+    pinnedExtensionIds,
     roots,
     routeCodeService,
     runningWorkTurns,
@@ -312,7 +312,7 @@ export function wireWork(deps: WorkDependencies) {
       agentRuns: agentRunPersistence,
       contextHarness,
       resolveSelectedExtensions,
-      pinnedExtensionSelections,
+      pinnedExtensionIds,
       spendCeiling,
       onTurnRequested: (threadId) => workThreadService.noteTurnRequested(threadId),
       onRequestSettled: (input, release) => workRequestService.onSettled(input, release),

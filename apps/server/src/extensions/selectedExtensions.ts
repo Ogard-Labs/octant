@@ -21,12 +21,19 @@ import type {
   WorkThread,
 } from "@octant/contracts";
 import type { ExtensionSelection } from "@octant/contracts/extensions";
+import type { ExtensionAddressingCatalog } from "@octant/plugin-host";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 
 export type SelectedExtensionResolver = (input: {
   readonly mode: "work" | "code";
   readonly thread: WorkThread | CodeThread;
   readonly selections: ReadonlyArray<ExtensionSelection>;
+  /**
+   * The plugins pinned to the thread's Project. Each is offered as if named
+   * this turn, once; a pin whose package is not in the Project's current
+   * catalog, or not fully effective there, is skipped rather than refused.
+   */
+  readonly pinnedExtensionIds?: ReadonlyArray<string>;
   /** The window a person answers this turn's tool approvals in. */
   readonly windowId: WindowId;
 }) => Promise<
@@ -67,7 +74,7 @@ export function createSelectedExtensionResolver(options: {
    */
   readonly carriesAppManagedTools?: (thread: WorkThread | CodeThread) => boolean;
 }): SelectedExtensionResolver {
-  return async ({ mode, thread, selections, windowId }) => {
+  return async ({ mode, thread, selections, pinnedExtensionIds, windowId }) => {
     const unavailable = (message: string) => ({ kind: "unavailable" as const, message });
     try {
       const providerFamily = options.providerFamily(thread);
@@ -128,6 +135,18 @@ export function createSelectedExtensionResolver(options: {
         }
         scopedSelections = rebound;
       }
+      // A pin is resolved here, against the same catalog the turn's own
+      // selections are checked against, so it carries the package identity
+      // and epoch a selection needs (observed: a pin built from the id alone
+      // was refused as stale on every turn).
+      const pinned = pinnedSelections(
+        pinnedExtensionIds ?? [],
+        scopedSelections,
+        catalogs.addressing,
+        String(thread.projectId),
+      );
+      scopedSelections = [...scopedSelections, ...pinned];
+      if (scopedSelections.length === 0) return { kind: "resolved", context: [] };
       const composed = await composeSelectedExtensionCapabilities({
         phase: "provider-handoff",
         selections: scopedSelections,
@@ -192,4 +211,41 @@ function selectedToolSet(input: {
         ? execution.execute({ thread, windowId, ...call })
         : Promise.resolve({ result: { error: "extension-tool-not-selected" }, isError: true }),
   };
+}
+
+function pinnedSelections(
+  pinnedExtensionIds: ReadonlyArray<string>,
+  explicit: ReadonlyArray<ExtensionSelection>,
+  catalog: ExtensionAddressingCatalog,
+  projectId: string,
+): ReadonlyArray<ExtensionSelection> {
+  const named = new Set(
+    explicit.flatMap((selection) =>
+      selection.kind === "plugin" ? [String(selection.extensionId)] : [],
+    ),
+  );
+  // A pin means the whole plugin, so it becomes one selection per component,
+  // the way a person naming each would; a plugin the person named this turn
+  // keeps exactly the components they chose.
+  return pinnedExtensionIds.flatMap((extensionId) => {
+    if (named.has(extensionId)) return [];
+    const plugin = catalog.plugins.find((entry) => String(entry.extensionId) === extensionId);
+    if (
+      plugin === undefined ||
+      plugin.components.length === 0 ||
+      plugin.components.some((component) => component.effectiveState.kind !== "effective")
+    ) {
+      return [];
+    }
+    return plugin.components.map((component) => ({
+      kind: "plugin" as const,
+      extensionId: plugin.extensionId,
+      packageId: plugin.packageId,
+      componentId: component.componentId,
+      packageVersion: plugin.packageVersion,
+      packageDigest: plugin.packageDigest,
+      catalogEpoch: catalog.epoch,
+      origin: { kind: "turn" as const, reference: `pin:${projectId}` },
+    }));
+  });
 }

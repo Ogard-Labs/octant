@@ -568,7 +568,7 @@ export interface CodeOperationRuntimeOptions {
   }) => Promise<ProviderResumeCursor | undefined>;
   readonly resolveProfileSkills?: CodeOperationServiceOptions["resolveProfileSkills"];
   readonly resolveSelectedExtensions?: CodeOperationServiceOptions["resolveSelectedExtensions"];
-  readonly pinnedExtensionSelections?: CodeOperationServiceOptions["pinnedExtensionSelections"];
+  readonly pinnedExtensionIds?: CodeOperationServiceOptions["pinnedExtensionIds"];
   /**
    * Where a curated scaffold runs. Absent on a host that offers none, which
    * refuses the operation rather than running a generator nobody configured.
@@ -1033,9 +1033,9 @@ export function createCodeOperationRuntime(
     ...(options.resolveSelectedExtensions === undefined
       ? {}
       : { resolveSelectedExtensions: options.resolveSelectedExtensions }),
-    ...(options.pinnedExtensionSelections === undefined
+    ...(options.pinnedExtensionIds === undefined
       ? {}
-      : { pinnedExtensionSelections: options.pinnedExtensionSelections }),
+      : { pinnedExtensionIds: options.pinnedExtensionIds }),
     ...(options.resolveProfileSkills === undefined
       ? {}
       : { resolveProfileSkills: options.resolveProfileSkills }),
