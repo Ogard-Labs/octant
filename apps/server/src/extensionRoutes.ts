@@ -47,6 +47,7 @@ export function createExtensionRouteHandler(options: {
   /** Writes the package for an MCP server a person adds by hand. */
   readonly userAddedMcpServers?: {
     add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }>;
+    remove(sourceRef: string): Promise<void>;
   };
   /** Lists what other agent tools on this computer know, for the person to add. */
   readonly agentToolingDiscovery?: {
@@ -605,7 +606,10 @@ function withLoaderNotes(
 
 async function addUserMcpServer(
   service: ExtensionRouteService,
-  store: { add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }> },
+  store: {
+    add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }>;
+    remove(sourceRef: string): Promise<void>;
+  },
   added: UserAddedMcpServerRequest,
   signal: AbortSignal,
   origin: string | null,
@@ -614,35 +618,54 @@ async function addUserMcpServer(
   try {
     source = (await store.add(added)).source;
   } catch (error) {
+    // Like every other extension command, a refusal is a typed result the
+    // client decodes, so it travels as a 200 and the dialog can show the
+    // host's own words. The failure vocabulary has no "conflict", so a taken
+    // name is an invalid request.
     if (error instanceof UserAddedMcpServerError) {
-      // A name already in use is answered as a conflict (409) in the
-      // route's own words; the failure vocabulary has no such category.
-      const status =
-        error.category === "conflict" ? 409 : error.category === "unavailable" ? 503 : 400;
       const category =
         error.category === "unavailable"
           ? "unavailable"
           : error.category === "failed"
             ? "failed"
             : "invalid";
-      return response(failure(category, error.message), status, origin);
+      return response(failure(category, error.message), 200, origin);
     }
-    return response(failure("invalid", "The server could not be added."), 400, origin);
+    return response(failure("invalid", "The server could not be added."), 200, origin);
   }
-  const inspected = await service.execute({ kind: "inspect-package", source }, signal);
-  if (inspected.kind !== "package-inspected") return response(inspected, 200, origin);
+  // `add` wrote and registered the package, so any refusal or failure before
+  // it is installed removes it again; otherwise the same name would report a
+  // conflict on every retry.
+  const abandon = async (result: ExtensionCommandResult) => {
+    if ("sourceRef" in source) await store.remove(source.sourceRef).catch(() => undefined);
+    return response(result, 200, origin);
+  };
+  let inspected: ExtensionCommandResult;
+  try {
+    inspected = await service.execute({ kind: "inspect-package", source }, signal);
+  } catch {
+    return await abandon(failure("failed", "The server could not be inspected."));
+  }
+  if (inspected.kind !== "package-inspected") return await abandon(inspected);
   const entry = inspected.preview.entry;
-  const installed = await service.execute(
-    {
-      kind: "install-package",
-      extensionId: entry.extensionId,
-      packageId: entry.packageId,
-      version: entry.version,
-      digest: entry.digest,
-    },
-    signal,
-  );
-  if (installed.kind !== "extension-state-updated") return response(installed, 200, origin);
+  let installed: ExtensionCommandResult;
+  try {
+    installed = await service.execute(
+      {
+        kind: "install-package",
+        extensionId: entry.extensionId,
+        packageId: entry.packageId,
+        version: entry.version,
+        digest: entry.digest,
+      },
+      signal,
+    );
+  } catch {
+    return await abandon(failure("failed", "The server could not be installed."));
+  }
+  if (installed.kind !== "extension-state-updated") return await abandon(installed);
+  // The person just typed this server in, so trusting and switching it on is
+  // what they asked for; the ladder still records each step.
   let current = installed;
   const enable = async (command: Readonly<Record<string, unknown>>) => {
     const state = current.snapshot.packages.find(

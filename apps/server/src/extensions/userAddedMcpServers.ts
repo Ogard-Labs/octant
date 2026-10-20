@@ -162,6 +162,16 @@ export class UserAddedMcpServerStore {
     }
   }
 
+  /**
+   * Whether the host wrote the package with this source reference for a server
+   * the person added. Installing a package rewrites its manifest source to a
+   * generic kind, so the manifest cannot vouch for itself: only this host's
+   * own registry of generated folders can.
+   */
+  owns(sourceRef: string): boolean {
+    return this.#registry.get(sourceRef) !== undefined;
+  }
+
   /** Removes the generated folder and every secret its package referenced. */
   async remove(sourceRef: string): Promise<void> {
     const registered = this.#registry.get(sourceRef);

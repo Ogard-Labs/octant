@@ -598,6 +598,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             readApprovalOutsideContent(persistence.connection, threadId),
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
         resolveUserAddedSecrets: (launch) => userAddedMcpServers.resolveLaunchSecrets(launch),
         ...(extensionSupervisor instanceof ExtensionSupervisor
           ? { stdioSupervisor: extensionSupervisor }

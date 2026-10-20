@@ -99,9 +99,12 @@ export interface AgentPluginMcpSessionManagerOptions {
   readonly uuid?: () => string;
   /**
    * Fills in the secret references in a launch for a package the host wrote
-   * for a server the person added by hand. Only that source kind is offered
-   * the broker: a third-party package never gets to name a secret.
+   * for a server the person added by hand. Only a package the host's own
+   * store vouches for (`isUserAddedSource`, by source reference, since an
+   * installed manifest's source kind is not trustworthy) is offered the
+   * broker: a third-party package never gets to name a secret.
    */
+  readonly isUserAddedSource?: (sourceRef: string) => boolean;
   readonly resolveUserAddedSecrets?: (
     launch: AgentPluginsMcpLaunchSpec,
   ) => Promise<AgentPluginsMcpLaunchSpec>;
@@ -123,6 +126,7 @@ export class AgentPluginMcpSessionManager {
   readonly #authorizeToolCall: AgentPluginMcpSessionManagerOptions["authorizeToolCall"];
   readonly #recordExternalContentIngestion: AgentPluginMcpSessionManagerOptions["recordExternalContentIngestion"];
   readonly #uuid: () => string;
+  readonly #isUserAddedSource: AgentPluginMcpSessionManagerOptions["isUserAddedSource"];
   readonly #resolveUserAddedSecrets: AgentPluginMcpSessionManagerOptions["resolveUserAddedSecrets"];
   readonly #sessions = new Map<string, AgentPluginMcpSessionRecord>();
   readonly #desired = new Map<string, AgentPluginMcpSessionTarget>();
@@ -152,6 +156,7 @@ export class AgentPluginMcpSessionManager {
     this.#authorizeToolCall = options.authorizeToolCall;
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#uuid = options.uuid ?? randomUUID;
+    this.#isUserAddedSource = options.isUserAddedSource;
     this.#resolveUserAddedSecrets = options.resolveUserAddedSecrets;
   }
 
@@ -375,7 +380,9 @@ export class AgentPluginMcpSessionManager {
           configurationEntryPoint: componentState.component.entryPoint ?? "mcp.json",
           scope: effective.scope,
           serverNameHint: componentState.component.displayName,
-          userAdded: packageState.source.kind === "user-added",
+          userAdded:
+            "sourceRef" in packageState.source &&
+            this.#isUserAddedSource?.(packageState.source.sourceRef) === true,
         };
         desired.set(sessionKey(key), key);
       }
