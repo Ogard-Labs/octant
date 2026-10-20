@@ -504,8 +504,9 @@ plain page. Pulsing characters is the one drawn ground, and only when a person
 picks it: a grid of monospace letters and digits in the theme's primary ink,
 at most half opaque, whose brightness drifts in slow patches and breathes as
 a whole at twelve frames a second while a few glyphs swap. A click over it
-sends out a ring of glyphs in the theme's accent that fades within two
-seconds; on the monochrome default the accent is the ink, so the ring is only
+sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
+it grows, trailed by a fainter echo, and about one click in six draws a heart
+instead; it fades within two seconds; on the monochrome default the accent is the ink, so the ring is only
 brighter. It carries no picture, so the effect controls do not apply, and it
 pauses while the window is hidden. Reduced motion holds it on one still frame
 and takes no rings. Behind a

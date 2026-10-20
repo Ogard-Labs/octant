@@ -152,7 +152,8 @@ or pick one already on this host, and **Photo strength** sets how strongly it
 shows. The sidebar and the background share one photo library, and a photo in
 use cannot be deleted. **Pulsing characters** fills the ground with faint
 letters and digits that slowly brighten and fade in patches, and a click sends
-a ring of letters in your theme's accent colour across it; it has no picture,
+a wobbly ring of letters in your theme's accent colour across it (now and then a
+heart); it has no picture,
 so **Effect** does not apply. **None** keeps the plain page.
 
 **Effect** prints a picture: **Off** shows it as it is, **Pixelate** draws it in
