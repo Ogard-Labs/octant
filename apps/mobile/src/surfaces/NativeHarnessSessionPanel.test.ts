@@ -5,12 +5,15 @@ import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decodeNativeHarnessSessionView, type NativeHarnessSessionView } from "@octant/contracts";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
+import type { BiometricAuthenticator } from "../security/BiometricGate";
 import { ThemeProvider } from "../../design-system/theme";
 import { NativeHarnessSessionPanel } from "./NativeHarnessSessionPanel";
 
 vi.mock("react-native", () => vi.importActual("react-native-web"));
 vi.mock("expo-clipboard", () => ({ setStringAsync: vi.fn(async () => undefined) }));
 vi.mock("expo-blur", () => ({ BlurView: () => null }));
+vi.mock("expo-local-authentication", () => ({}));
+vi.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 vi.mock("../../design-system", async () => ({
   ...(await import("../../design-system/theme")),
   ...(await import("../../design-system/tokens")),
@@ -106,6 +109,34 @@ function sessionView(approval: {
   });
 }
 
+function confirming(
+  outcome: "confirmed" | "denied" | "unavailable" = "confirmed",
+): BiometricAuthenticator {
+  return {
+    hasDeviceCredential: vi.fn(async () => true),
+    authenticate: vi.fn(async () => outcome),
+  };
+}
+
+function pendingLeadApproval() {
+  return sessionView({
+    id: "00000000-0000-4000-8000-000000000091",
+    toolName: "bash",
+    summary: "bash: bun run test",
+    approvalClass: "shell-commands",
+    status: "pending",
+    askedAt: "2026-09-05T12:06:00.000Z",
+  });
+}
+
+function pressChoice(container: ParentNode, label: string) {
+  return act(async () => {
+    [...container.querySelectorAll<HTMLElement>('[role="button"]')]
+      .find((node) => node.textContent?.trim() === label)
+      ?.click();
+  });
+}
+
 function approvalChoices(container: ParentNode): readonly string[] {
   return [...container.querySelectorAll('[role="button"]')]
     .map((node) => node.textContent?.replace(/\s+/g, " ").trim() ?? "")
@@ -115,6 +146,7 @@ function approvalChoices(container: ParentNode): readonly string[] {
 async function renderPanel(
   view: NativeHarnessSessionView,
   panelTransport: MobileRemoteTransport = transport,
+  authenticator: BiometricAuthenticator = confirming(),
 ): Promise<HTMLElement> {
   vi.mocked(loadMobileNativeHarnessSession).mockResolvedValue(view);
   const container = document.createElement("div");
@@ -128,6 +160,7 @@ async function renderPanel(
         surfaceStyle: "flat",
         children: createElement(NativeHarnessSessionPanel, {
           transport: panelTransport,
+          authenticator,
           threadId,
           refreshIntervalMs: 60_000,
         }),
@@ -173,8 +206,8 @@ describe("phone harness approvals", () => {
       }),
     );
 
-    expect(approvalChoices(container)).toEqual(["Allow", "Allow this session", "Deny"]);
-    expect(container.textContent).toContain("Needs your say-so (shell-commands).");
+    expect(approvalChoices(container)).toEqual(["Allow", "Deny", "Allow this session"]);
+    expect(container.textContent).toContain("This is waiting for your answer before it runs.");
   });
 
   it("offers no session-wide choice after the thread took in outside content", async () => {
@@ -191,7 +224,7 @@ describe("phone harness approvals", () => {
     );
 
     expect(approvalChoices(container)).toEqual(["Allow", "Deny"]);
-    expect(container.textContent).toContain("Needs your say-so (shell-commands).");
+    expect(container.textContent).toContain("This is waiting for your answer before it runs.");
   });
   it("lists a marked thread's command hosts and sends only the ones left selected", async () => {
     const bodies: unknown[] = [];
@@ -293,5 +326,64 @@ describe("phone harness approvals", () => {
       }),
     );
     expect(container.textContent).not.toContain("outside content");
+  });
+
+  it("sends no Allow when the person does not confirm on the phone", async () => {
+    const bodies: unknown[] = [];
+    const recording: MobileRemoteTransport = {
+      hostId: transport.hostId,
+      authenticatedFetch: async (request) => {
+        bodies.push(request.body);
+        return new Response(null, { status: 500 });
+      },
+    };
+    const container = await renderPanel(
+      pendingLeadApproval(),
+      recording,
+      confirming("unavailable"),
+    );
+    await pressChoice(container, "Allow");
+    expect(bodies).toEqual([]);
+    expect(container.textContent).toContain(
+      "Set up Face ID, Touch ID or a passcode to allow from this phone.",
+    );
+  });
+
+  it("denies without asking for confirmation", async () => {
+    const bodies: unknown[] = [];
+    const authenticator = confirming("denied");
+    const recording: MobileRemoteTransport = {
+      hostId: transport.hostId,
+      authenticatedFetch: async (request) => {
+        bodies.push(JSON.parse(String(request.body)));
+        return new Response(JSON.stringify({ kind: "approval-decided" }), { status: 200 });
+      },
+    };
+    const container = await renderPanel(pendingLeadApproval(), recording, authenticator);
+    await pressChoice(container, "Deny");
+    expect(bodies).toHaveLength(1);
+    expect(authenticator.authenticate).not.toHaveBeenCalled();
+  });
+
+  it("says the answer could not be sent when the connection fails", async () => {
+    const failing: MobileRemoteTransport = {
+      hostId: transport.hostId,
+      authenticatedFetch: async () => {
+        throw new Error("offline");
+      },
+    };
+    const container = await renderPanel(pendingLeadApproval(), failing);
+    await pressChoice(container, "Deny");
+    expect(container.textContent).toContain(
+      "Couldn't send that. Check the connection and try again.",
+    );
+  });
+
+  it("keeps the pending approval on screen when a later read fails", async () => {
+    const container = await renderPanel(pendingLeadApproval());
+    vi.mocked(loadMobileNativeHarnessSession).mockRejectedValue(new Error("offline"));
+    await pressChoice(container, "Deny");
+    expect(approvalChoices(container)).toContain("Allow");
+    expect(container.textContent).toContain("Reconnecting…");
   });
 });

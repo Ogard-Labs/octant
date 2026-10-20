@@ -4,11 +4,14 @@ import { createRoot, type Root } from "react-dom/client";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MobileRemoteTransport } from "@octant/client-runtime";
+import type { BiometricAuthenticator } from "../security/BiometricGate";
 import { ThemeProvider } from "../../design-system/theme";
 import { ExtensionToolApprovalCard } from "./ExtensionToolApprovalCard";
 
 vi.mock("react-native", () => vi.importActual("react-native-web"));
 vi.mock("expo-blur", () => ({ BlurView: () => null }));
+vi.mock("expo-local-authentication", () => ({}));
+vi.mock("@expo/vector-icons", () => ({ Ionicons: () => null }));
 vi.mock("../../design-system", async () => ({
   ...(await import("../../design-system/theme")),
   ...(await import("../../design-system/tokens")),
@@ -69,6 +72,13 @@ function hostWithOnePrompt(outsideContent?: unknown) {
   return { transport, answers };
 }
 
+function confirming(): BiometricAuthenticator {
+  return {
+    hasDeviceCredential: vi.fn(async () => true),
+    authenticate: vi.fn(async () => "confirmed" as const),
+  };
+}
+
 function choices(container: ParentNode): readonly string[] {
   return [...container.querySelectorAll('[role="button"]')].map(
     (node) => node.textContent?.replace(/\s+/g, " ").trim() ?? "",
@@ -76,7 +86,7 @@ function choices(container: ParentNode): readonly string[] {
 }
 
 describe("MCP tool prompt on the phone", () => {
-  it("offers Approve once and Deny only, and approves the call once", async () => {
+  it("offers Allow and Deny only, and approves the call once", async () => {
     const { transport, answers } = hostWithOnePrompt();
     const container = document.createElement("div");
     document.body.appendChild(container);
@@ -89,6 +99,7 @@ describe("MCP tool prompt on the phone", () => {
           surfaceStyle: "flat",
           children: createElement(ExtensionToolApprovalCard, {
             transport,
+            authenticator: confirming(),
             threadId,
             refreshIntervalMs: 60_000,
           }),
@@ -98,13 +109,13 @@ describe("MCP tool prompt on the phone", () => {
 
     expect(container.textContent).toContain("Allow search?");
     expect(container.textContent).toContain('{"q":"plan"}');
-    expect(choices(container)).toEqual(["Approve once", "Deny"]);
+    expect(choices(container)).toEqual(["Allow", "Deny"]);
     expect(
       container.querySelector('[data-testid="mobile-extension-tool-approval"]'),
     ).not.toBeNull();
 
     const approve = [...container.querySelectorAll('[role="button"]')].find(
-      (node) => node.textContent?.trim() === "Approve once",
+      (node) => node.textContent?.trim() === "Allow",
     );
     await act(async () => {
       (approve as HTMLElement | undefined)?.click();
@@ -114,7 +125,7 @@ describe("MCP tool prompt on the phone", () => {
     expect(container.querySelector('[data-testid="mobile-extension-tool-approval"]')).toBeNull();
   });
 
-  it("shows why a marked thread asks and what marked it before Approve once", async () => {
+  it("shows why a marked thread asks and what marked it before Allow", async () => {
     const { transport } = hostWithOnePrompt({
       sourceCount: 2,
       sources: [
@@ -137,6 +148,7 @@ describe("MCP tool prompt on the phone", () => {
           surfaceStyle: "flat",
           children: createElement(ExtensionToolApprovalCard, {
             transport,
+            authenticator: confirming(),
             threadId,
             refreshIntervalMs: 60_000,
           }),
@@ -151,7 +163,7 @@ describe("MCP tool prompt on the phone", () => {
     expect(note?.textContent).toContain("Web pages · Read 2 times");
     expect(note?.textContent).toContain("and 1 more source");
     const approve = [...container.querySelectorAll('[role="button"]')].find(
-      (node) => node.textContent?.trim() === "Approve once",
+      (node) => node.textContent?.trim() === "Allow",
     );
     expect(
       note !== null &&
@@ -173,6 +185,7 @@ describe("MCP tool prompt on the phone", () => {
           surfaceStyle: "flat",
           children: createElement(ExtensionToolApprovalCard, {
             transport,
+            authenticator: confirming(),
             threadId,
             refreshIntervalMs: 60_000,
           }),

@@ -6796,7 +6796,10 @@ mechanisms are:
       cleared.
     - **Phone.** The pairing screen reads a code from the app's own QR
       scanner or its paste field; typing the origin and ticket stays for a
-      listener with a pasted certificate. The scanner takes only text that
+      listener with a pasted certificate. Once a claim is pending the
+      screen checks its status every two seconds while the app is active (five
+      after the host rate-limits the check), and keeps the claim through a
+      transient failure. The scanner takes only text that
       starts `octant-pair-1.` and ignores any other QR code; the camera
       permission names that one use. Every request to an origin whose
       pairing record holds a pin, the pairing flow's included, goes through

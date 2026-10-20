@@ -20,6 +20,8 @@ import {
   type RemoteSessionBridgeState,
 } from "@octant/client-runtime";
 import { MOBILE_PRODUCT_NAME } from "../copy";
+import { mobileBuildVersion } from "./mobileBuildVersion";
+import { createStableTransports } from "./stableTransports";
 import {
   createExpoSecureStringStorage,
   removeLegacyWebDeviceKeyCatalog,
@@ -54,6 +56,10 @@ export interface MobileSessionContextValue {
   readonly bridge: RemoteSessionBridge;
   readonly bridgeState: RemoteSessionBridgeState;
   readonly hosts: ReadonlyArray<MobileHostRegistration>;
+  /** False until the first read of the stored host list has finished. */
+  readonly hostsLoaded: boolean;
+  /** Set when the stored host list could not be read; cleared by the next good read. */
+  readonly hostsError: string | undefined;
   readonly health: ReadonlyArray<MobileHostHealth>;
   readonly transports: ReadonlyArray<MobileRemoteTransport>;
   readonly transport: MobileRemoteTransport | undefined;
@@ -67,21 +73,10 @@ export interface MobileSessionContextValue {
   readonly hub: MobileHostSessionHub;
 }
 
-const MobileSessionContext = createContext<MobileSessionContextValue | undefined>(undefined);
+// Defined here because the shared copy file is owned elsewhere in this change.
+const HOSTS_UNREADABLE = "Couldn't read your paired computers. Pair again to continue.";
 
-function transportFromSlot(input: {
-  readonly hostId: string;
-  readonly bridge: RemoteSessionBridge;
-  readonly state: RemoteSessionBridgeState;
-}): MobileRemoteTransport | undefined {
-  if (input.state.kind !== "ready" && input.state.kind !== "stale") return undefined;
-  const connection = input.bridge.connection();
-  if (connection === undefined) return undefined;
-  return {
-    hostId: input.hostId,
-    authenticatedFetch: (request) => connection.authenticatedFetch(request),
-  };
-}
+const MobileSessionContext = createContext<MobileSessionContextValue | undefined>(undefined);
 
 function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
   // Earlier web builds persisted device signing keys in localStorage; run the
@@ -110,7 +105,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     () =>
       createMobileHostSessionHub({
         fetch: listenerFetch,
-        webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
+        webBuildVersion: mobileBuildVersion(),
         deviceKeyStore,
       }),
     [deviceKeyStore, listenerFetch],
@@ -120,7 +115,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     () =>
       createRemoteSessionBridge({
         fetch: listenerFetch,
-        webBuildVersion: `${MOBILE_PRODUCT_NAME}-mobile/0.1.0`,
+        webBuildVersion: mobileBuildVersion(),
         deviceKeyStore,
       }),
     [deviceKeyStore, listenerFetch],
@@ -128,6 +123,8 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
   const lifetime = useRef(new AbortController());
   const [bridgeState, setBridgeState] = useState<RemoteSessionBridgeState>(bridge.getState);
   const [hosts, setHosts] = useState<ReadonlyArray<MobileHostRegistration>>([]);
+  const [hostsLoaded, setHostsLoaded] = useState(false);
+  const [hostsError, setHostsError] = useState<string | undefined>();
   const [health, setHealth] = useState<ReadonlyArray<MobileHostHealth>>([]);
   const [hubEpoch, setHubEpoch] = useState(0);
   const [inboxHostFilter, setInboxHostFilter] = useState<MobileInboxHostFilter>("all");
@@ -148,8 +145,23 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
 
   const refreshHosts = useCallback(async () => {
     const signal = lifetime.current.signal;
-    const listed = await refreshLiveMobileSession({ registry, hub, signal });
-    if (listed === undefined || signal.aborted) return;
+    let read: Awaited<ReturnType<typeof refreshLiveMobileSession>>;
+    try {
+      read = await refreshLiveMobileSession({ registry, hub, signal });
+    } catch {
+      if (signal.aborted) return;
+      setHostsError(HOSTS_UNREADABLE);
+      setHostsLoaded(true);
+      return;
+    }
+    if (read === undefined || signal.aborted) return;
+    setHostsLoaded(true);
+    if (read.kind === "unreadable") {
+      setHostsError(HOSTS_UNREADABLE);
+      return;
+    }
+    setHostsError(undefined);
+    const listed = read.hosts;
     setHosts(listed);
     setHealth(hub.health());
     if (placementHostId !== undefined && !listed.some((host) => host.hostId === placementHostId)) {
@@ -167,19 +179,11 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     setHealth(hub.health());
   }, [hub, hubEpoch]);
 
+  const buildTransports = useRef(createStableTransports()).current;
   const transports = useMemo(() => {
     void hubEpoch;
-    const next: MobileRemoteTransport[] = [];
-    for (const slot of hub.slots()) {
-      const transport = transportFromSlot({
-        hostId: slot.registration.hostId,
-        bridge: slot.bridge,
-        state: slot.state,
-      });
-      if (transport !== undefined) next.push(transport);
-    }
-    return next;
-  }, [hub, hubEpoch]);
+    return buildTransports(hub.slots());
+  }, [buildTransports, hub, hubEpoch]);
 
   const transport = useMemo(() => {
     if (inboxHostFilter !== "all") {
@@ -200,6 +204,8 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     bridge,
     bridgeState,
     hosts,
+    hostsLoaded,
+    hostsError,
     health,
     transports,
     transport,
@@ -274,6 +280,8 @@ function MockMobileSessionProvider(props: {
     bridge,
     bridgeState: bridge.getState(),
     hosts: props.scenario.hosts,
+    hostsLoaded: true,
+    hostsError: undefined,
     health: props.scenario.health,
     transports: props.scenario.transports,
     transport,

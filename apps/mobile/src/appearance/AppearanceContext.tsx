@@ -51,11 +51,19 @@ export function AppearanceProvider(props: {
 
   useEffect(() => {
     let cancelled = false;
-    void store.load().then((prefs) => {
-      if (cancelled) return;
-      setPreferences(prefs);
-      setReady(true);
-    });
+    // A failed read of secure storage must not leave the app waiting on
+    // `ready` forever; it falls back to the defaults already in state.
+    void store
+      .load()
+      .then(
+        (prefs) => {
+          if (!cancelled) setPreferences(prefs);
+        },
+        () => undefined,
+      )
+      .then(() => {
+        if (!cancelled) setReady(true);
+      });
     return () => {
       cancelled = true;
     };
