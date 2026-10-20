@@ -154,6 +154,12 @@ describe("createCanvasAgentTools", () => {
     expect(recipeGuide).toContain('"write a plan" uses implementation-plan');
     expect(recipeGuide).toContain('"review this PR" uses code-review');
     expect(recipeGuide).toContain('"summarise research" uses research-brief');
+    // The deliverables people ask an assistant for most each map to a recipe.
+    expect(recipeGuide).toContain('"write a memo or a one-page report" uses memo');
+    expect(recipeGuide).toContain('"make slides" uses slide-deck');
+    expect(recipeGuide).toContain('"show the key numbers" uses dashboard');
+    expect(recipeGuide).toContain('"design a website or landing page" uses design-prototype');
+    expect(recipeGuide).toContain('"a prototype I can try" uses clickable-prototype');
     expect(set.definitions[0]?.description).toContain("document recipe");
     const recipes = (
       outcome.result as {
@@ -1385,11 +1391,29 @@ describe("createCanvasAgentTools", () => {
       }
     });
 
-    it("tells the agent to deliver substantial work as a Canvas bound to the thread's checkout", () => {
+    it("tells the agent to deliver what the user will keep, share, or iterate on as a Canvas bound to the thread's checkout, and to keep one-off answers in the reply", () => {
       const description = boundTools("code").set.definitions[0]?.description ?? "";
-      expect(description).toContain("deliver it as a Canvas rather than as a long reply");
-      expect(description).toContain("design or mockup, diagram, report, review, audit");
-      expect(description).toContain("Keep short answers");
+      expect(description).toContain("Deliver work as a Canvas rather than as a long reply");
+      expect(description).toContain("keep, share, present, or come back to");
+      for (const deliverable of [
+        "report",
+        "memo",
+        "plan",
+        "slide deck",
+        "dashboard",
+        "web page",
+        "design or mockup",
+        "prototype",
+      ]) {
+        expect(description).toContain(deliverable);
+      }
+      expect(description).toContain("runs past a few paragraphs");
+      expect(description).toContain("short answers, a one-off snippet or command");
+      // The old description let the agent ask first; a deliverable the user
+      // then had to request twice is the behaviour this replaces.
+      expect(description).toContain("When in doubt, make the Canvas");
+      expect(description).not.toContain("ask whether they want it as a Canvas");
+      expect(description).toContain("make it look finished");
       expect(description).toContain("Text renders as plain text, not Markdown");
       expect(description).toContain("call describe");
       expect(description).toContain(

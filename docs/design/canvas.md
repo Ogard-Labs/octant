@@ -18,7 +18,20 @@ its first call: what a Canvas is and when to deliver work as one instead of a
 long reply, the operations, the authoring and safety rules (structured blocks,
 markup only in a design's frames, no file, shell, Git, or network authority,
 no invented references), where the thread shows it, and to call `describe`
-before authoring. Per-block guidance is answered by `describe`. Unscoped
+before authoring. The delivery rule is a test of the answer, not of the verb
+the person used: anything the person will keep, share, present, or come back
+to (a report, memo, plan, spec, review, audit, comparison, article, slide
+deck, dashboard, web page, design or mockup, diagram, or prototype), and any
+reply that needs headings, tables, or charts or runs past a few paragraphs, is
+a Canvas with a one- or two-sentence reply pointing at it; what is read once
+(a short answer, a one-off snippet or command, a clarifying question,
+conversation) stays in the reply. When in doubt the agent makes the Canvas
+rather than asking, because a person who wanted the document otherwise had to
+ask twice, and one who wanted text can say so once. The description also asks
+for a finished look: typed blocks for data, a design frame only for the look.
+The description serialises with its input schema inside a 6,000-byte budget
+that `canvasAgentTools.test.ts` holds, so a rule added here is paid for by a
+rule trimmed. Per-block guidance is answered by `describe`. Unscoped
 describe names the three tiers (typed blocks carry data, a static design frame
 carries the look, a running design frame carries behaviour) and the rule to
 use the lowest tier that delivers the result, then lists the closed block
@@ -35,13 +48,17 @@ runs, one finished example of each frame tier. Unscoped
 describe also lists document recipes: an id, a title, when to use one, and a
 skeleton of block kinds that already exist, where a `design` slot may name
 the `size` it is drawn at. The
-host offers an implementation plan, a design spec, an architecture review (its
-options in a comparison matrix), a code review, an audit or test report, a
-postmortem, a research brief, a dashboard, a repository map, a design
-prototype, a slide deck, a data model, an article (one themed document), a
+host offers an implementation plan, a memo (a one-page report from typed
+blocks alone: summary, facts, detail, and the ask), a design spec, an
+architecture review (its options in a comparison matrix), a code review, an
+audit or test report, a postmortem, a research brief, a dashboard, a
+repository map, a design prototype (screens, a website, or a landing page at a
+device size), a slide deck, a data model, an article (one themed document), a
 product or game design brief (a themed pitch, then typed blocks in tabs), a
 design system (a themed document and a token table), and a clickable
-prototype (a design that runs). A trusted, enabled, unscoped skill
+prototype (a design that runs). Together they cover the deliverables people
+ask an assistant for most: a web page, a one-page document, a deck, a
+dashboard, and a prototype or small app. A trusted, enabled, unscoped skill
 may add recipes through its Canvas contribution; a skill that is not enabled
 contributes none, and a contributed recipe cannot replace an in-tree id. A
 recipe is a starting shape, not a document and not authority. Describe reads no
