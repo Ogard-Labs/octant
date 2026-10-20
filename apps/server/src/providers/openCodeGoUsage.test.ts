@@ -58,9 +58,10 @@ function recordingFetch(response: () => Response) {
   };
 }
 
-function observe(facts: ReturnType<typeof makeOpenCodeGoUsageFacts>) {
+// A person's refresh is the reading that waits on the endpoint.
+function observe(facts: ReturnType<typeof makeOpenCodeGoUsageFacts>, onDemand = true) {
   return Effect.runPromise(
-    Effect.scoped(Effect.either(facts.observeServiceLimits({ instanceId }))),
+    Effect.scoped(Effect.either(facts.observeServiceLimits({ instanceId, onDemand }))),
   );
 }
 
@@ -78,7 +79,13 @@ describe("OpenCode Go plan usage", () => {
     const http = recordingFetch(() => Response.json(usageAnswer));
 
     const outcome = await observe(
-      makeOpenCodeGoUsageFacts({ instanceId, dataDirectory: directory, clock, fetch: http.fetch }),
+      makeOpenCodeGoUsageFacts({
+        readings: new Map(),
+        instanceId,
+        dataDirectory: directory,
+        clock,
+        fetch: http.fetch,
+      }),
     );
 
     expect(outcome._tag).toBe("Right");
@@ -113,6 +120,32 @@ describe("OpenCode Go plan usage", () => {
     );
   });
 
+  it("finds a Go sign-in made only on another release channel", async () => {
+    const directory = dataDirectory();
+    writeCredentialDatabase(join(directory, "opencode.db"), [
+      { integration: "anthropic", key: "other-provider-key" },
+    ]);
+    writeCredentialDatabase(join(directory, "opencode-beta.db"), [
+      { integration: "opencode-go", key: "go-key-beta" },
+    ]);
+    const http = recordingFetch(() => Response.json(usageAnswer));
+
+    const outcome = await observe(
+      makeOpenCodeGoUsageFacts({
+        readings: new Map(),
+        instanceId,
+        dataDirectory: directory,
+        clock,
+        fetch: http.fetch,
+      }),
+    );
+
+    expect(outcome._tag).toBe("Right");
+    expect(new Headers(http.requests[0]?.init.headers).get("authorization")).toBe(
+      "Bearer go-key-beta",
+    );
+  });
+
   it("falls back to auth.json only when no database keeps sign-ins", async () => {
     const directory = dataDirectory();
     writeFileSync(
@@ -122,7 +155,13 @@ describe("OpenCode Go plan usage", () => {
     const http = recordingFetch(() => Response.json(usageAnswer));
 
     await observe(
-      makeOpenCodeGoUsageFacts({ instanceId, dataDirectory: directory, clock, fetch: http.fetch }),
+      makeOpenCodeGoUsageFacts({
+        readings: new Map(),
+        instanceId,
+        dataDirectory: directory,
+        clock,
+        fetch: http.fetch,
+      }),
     );
 
     expect(new Headers(http.requests[0]?.init.headers).get("authorization")).toBe(
@@ -142,7 +181,13 @@ describe("OpenCode Go plan usage", () => {
     const http = recordingFetch(() => Response.json(usageAnswer));
 
     const outcome = await observe(
-      makeOpenCodeGoUsageFacts({ instanceId, dataDirectory: directory, clock, fetch: http.fetch }),
+      makeOpenCodeGoUsageFacts({
+        readings: new Map(),
+        instanceId,
+        dataDirectory: directory,
+        clock,
+        fetch: http.fetch,
+      }),
     );
 
     expect(outcome).toMatchObject({ _tag: "Left", left: { category: "unsupported" } });
@@ -154,6 +199,7 @@ describe("OpenCode Go plan usage", () => {
 
     const outcome = await observe(
       makeOpenCodeGoUsageFacts({
+        readings: new Map(),
         instanceId,
         dataDirectory: join(dataDirectory(), "missing"),
         clock,
@@ -174,7 +220,13 @@ describe("OpenCode Go plan usage", () => {
     const http = recordingFetch(() => Response.json({ usage: { rolling: { percent: 250 } } }));
 
     const outcome = await observe(
-      makeOpenCodeGoUsageFacts({ instanceId, dataDirectory: directory, clock, fetch: http.fetch }),
+      makeOpenCodeGoUsageFacts({
+        readings: new Map(),
+        instanceId,
+        dataDirectory: directory,
+        clock,
+        fetch: http.fetch,
+      }),
     );
 
     expect(outcome).toMatchObject({ _tag: "Left", left: { category: "protocol" } });

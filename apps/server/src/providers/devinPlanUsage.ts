@@ -5,11 +5,14 @@ import { Effect } from "effect";
 import {
   accountUsageFailure,
   accountWindowLimits,
+  type AccountUsageReadings,
   type AccountUsageFetch,
   isRecord,
   numberField,
+  readAccountUsage,
   requestAccountUsage,
   resetTimestamp,
+  sharedAccountUsageReadings,
   usedPercentWindow,
 } from "./accountUsageEndpoint";
 
@@ -23,6 +26,8 @@ export interface DevinPlanUsageOptions {
   readonly fetch?: AccountUsageFetch;
   readonly readText?: (path: string) => Promise<string>;
   readonly clock?: () => string;
+  /** Where the last reading of each account is kept; shared across drivers by default. */
+  readonly readings?: AccountUsageReadings;
 }
 
 interface DevinCredential {
@@ -93,57 +98,64 @@ export function makeDevinPlanUsageFacts(
   const fetch = options.fetch ?? globalThis.fetch;
   const readText = options.readText ?? ((path: string) => readFile(path, "utf8"));
   const clock = options.clock ?? (() => new Date().toISOString());
+  const readings = options.readings ?? sharedAccountUsageReadings;
+  const readUsage = Effect.gen(function* () {
+    const text = yield* Effect.tryPromise({
+      try: () => readText(options.credentialPath),
+      catch: () => accountUsageFailure("unavailable", "Devin is not signed in."),
+    });
+    const credential = parseDevinCredential(text);
+    if (credential === undefined) {
+      return yield* Effect.fail(accountUsageFailure("unavailable", "Devin is not signed in."));
+    }
+    const body = yield* requestAccountUsage(
+      fetch,
+      "Devin",
+      `${credential.server}${STATUS_PATH}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "Connect-Protocol-Version": "1",
+        },
+        body: JSON.stringify({
+          metadata: {
+            apiKey: credential.apiKey,
+            ideName: "devin",
+            ideVersion: "1.108.2",
+            extensionName: "devin",
+            extensionVersion: "1.108.2",
+            locale: "en",
+          },
+        }),
+      },
+      () => Date.parse(clock()),
+    );
+    const observedAt = new Date(clock()).toISOString() as UtcTimestamp;
+    const windows = devinUsageWindows(body, observedAt);
+    // This status call is not a published interface. When its answer
+    // stops matching, the reading fails instead of guessing at a shape.
+    if (windows === undefined || windows.length === 0) {
+      return yield* Effect.fail(
+        accountUsageFailure("protocol", "Devin returned usage Octant cannot read."),
+      );
+    }
+    return accountWindowLimits(options.instanceId, windows, observedAt);
+  });
   return {
     observeModelLimits: () => Effect.succeed([]),
-    observeServiceLimits: ({ instanceId }) =>
-      Effect.gen(function* () {
-        if (String(instanceId) !== String(options.instanceId)) {
-          return yield* Effect.fail(
+    observeServiceLimits: ({ instanceId, onDemand }) =>
+      String(instanceId) !== String(options.instanceId)
+        ? Effect.fail(
             accountUsageFailure("invalid-configuration", "Provider instance does not match."),
-          );
-        }
-        const text = yield* Effect.tryPromise({
-          try: () => readText(options.credentialPath),
-          catch: () => accountUsageFailure("unavailable", "Devin is not signed in."),
-        });
-        const credential = parseDevinCredential(text);
-        if (credential === undefined) {
-          return yield* Effect.fail(accountUsageFailure("unavailable", "Devin is not signed in."));
-        }
-        const body = yield* requestAccountUsage(
-          fetch,
-          "Devin",
-          `${credential.server}${STATUS_PATH}`,
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
-              "Connect-Protocol-Version": "1",
-            },
-            body: JSON.stringify({
-              metadata: {
-                apiKey: credential.apiKey,
-                ideName: "devin",
-                ideVersion: "1.108.2",
-                extensionName: "devin",
-                extensionVersion: "1.108.2",
-                locale: "en",
-              },
-            }),
-          },
-          () => Date.parse(clock()),
-        );
-        const observedAt = new Date(clock()).toISOString() as UtcTimestamp;
-        const windows = devinUsageWindows(body, observedAt);
-        // This status call is not a published interface. When its answer
-        // stops matching, the reading fails instead of guessing at a shape.
-        if (windows === undefined || windows.length === 0) {
-          return yield* Effect.fail(
-            accountUsageFailure("protocol", "Devin returned usage Octant cannot read."),
-          );
-        }
-        return accountWindowLimits(options.instanceId, windows, observedAt);
-      }),
+          )
+        : readAccountUsage(
+            readings,
+            `devin:${String(options.instanceId)}:${options.credentialPath}`,
+            readUsage,
+            onDemand === true,
+            () => Date.parse(clock()),
+          ),
   };
 }

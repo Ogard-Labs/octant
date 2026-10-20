@@ -7,11 +7,14 @@ import { openReadOnlySqlite } from "../persistence/sqlitePort";
 import {
   accountUsageFailure,
   accountWindowLimits,
+  type AccountUsageReadings,
   type AccountUsageFetch,
   isRecord,
   numberField,
+  readAccountUsage,
   requestAccountUsage,
   resetTimestamp,
+  sharedAccountUsageReadings,
   usedPercentWindow,
 } from "./accountUsageEndpoint";
 
@@ -30,6 +33,8 @@ export interface OpenCodeGoUsageOptions {
   readonly dataDirectory: string;
   readonly fetch?: AccountUsageFetch;
   readonly clock?: () => string;
+  /** Where the last reading of each account is kept; shared across drivers by default. */
+  readonly readings?: AccountUsageReadings;
   readonly readDatabase?: (path: string, sql: string) => ReadonlyArray<unknown>;
 }
 
@@ -52,7 +57,8 @@ function readOnlyRows(path: string, sql: string): ReadonlyArray<unknown> {
  * OpenCode 2 keeps sign-ins in each release channel's database `credential`
  * table and leaves the `auth.json` it imported from behind, so that file is
  * stale once any database has the table. `opencode.db` is the default channel
- * and answers first; the others follow in name order.
+ * and answers first; the others follow in name order, so a Go sign-in made
+ * only on another channel still counts.
  */
 export async function readOpenCodeGoKey(
   dataDirectory: string,
@@ -88,7 +94,6 @@ export async function readOpenCodeGoKey(
     if (isRecord(row) && typeof row.key === "string" && row.key.length > 0) {
       return { status: "found", key: row.key };
     }
-    if (name === "opencode.db") return { status: "no-plan" };
   }
   if (anyCredentialTable) return { status: "no-plan" };
   let auth: unknown;
@@ -139,48 +144,53 @@ export function makeOpenCodeGoUsageFacts(
 ): ProviderContextFactsSource {
   const fetch = options.fetch ?? globalThis.fetch;
   const clock = options.clock ?? (() => new Date().toISOString());
+  const readings = options.readings ?? sharedAccountUsageReadings;
+  const readUsage = Effect.gen(function* () {
+    const found = yield* Effect.promise(() =>
+      readOpenCodeGoKey(options.dataDirectory, options.readDatabase),
+    );
+    // Plan windows belong to an OpenCode Go subscription. A sign-in to
+    // any other OpenCode provider has none to show.
+    if (found.status === "no-plan") {
+      return yield* Effect.fail(
+        accountUsageFailure("unsupported", "No OpenCode Go plan is signed in."),
+      );
+    }
+    if (found.status === "not-signed-in") {
+      return yield* Effect.fail(accountUsageFailure("unavailable", "OpenCode is not signed in."));
+    }
+    const body = yield* requestAccountUsage(
+      fetch,
+      "OpenCode Go",
+      USAGE_URL,
+      {
+        method: "GET",
+        headers: { Authorization: `Bearer ${found.key}`, Accept: "application/json" },
+      },
+      () => Date.parse(clock()),
+    );
+    const observedAt = new Date(clock()).toISOString() as UtcTimestamp;
+    const windows = openCodeGoUsageWindows(body, observedAt);
+    if (windows === undefined || windows.length === 0) {
+      return yield* Effect.fail(
+        accountUsageFailure("protocol", "OpenCode Go returned usage Octant cannot read."),
+      );
+    }
+    return accountWindowLimits(options.instanceId, windows, observedAt);
+  });
   return {
     observeModelLimits: () => Effect.succeed([]),
-    observeServiceLimits: ({ instanceId }) =>
-      Effect.gen(function* () {
-        if (String(instanceId) !== String(options.instanceId)) {
-          return yield* Effect.fail(
+    observeServiceLimits: ({ instanceId, onDemand }) =>
+      String(instanceId) !== String(options.instanceId)
+        ? Effect.fail(
             accountUsageFailure("invalid-configuration", "Provider instance does not match."),
-          );
-        }
-        const found = yield* Effect.promise(() =>
-          readOpenCodeGoKey(options.dataDirectory, options.readDatabase),
-        );
-        // Plan windows belong to an OpenCode Go subscription. A sign-in to
-        // any other OpenCode provider has none to show.
-        if (found.status === "no-plan") {
-          return yield* Effect.fail(
-            accountUsageFailure("unsupported", "No OpenCode Go plan is signed in."),
-          );
-        }
-        if (found.status === "not-signed-in") {
-          return yield* Effect.fail(
-            accountUsageFailure("unavailable", "OpenCode is not signed in."),
-          );
-        }
-        const body = yield* requestAccountUsage(
-          fetch,
-          "OpenCode Go",
-          USAGE_URL,
-          {
-            method: "GET",
-            headers: { Authorization: `Bearer ${found.key}`, Accept: "application/json" },
-          },
-          () => Date.parse(clock()),
-        );
-        const observedAt = new Date(clock()).toISOString() as UtcTimestamp;
-        const windows = openCodeGoUsageWindows(body, observedAt);
-        if (windows === undefined || windows.length === 0) {
-          return yield* Effect.fail(
-            accountUsageFailure("protocol", "OpenCode Go returned usage Octant cannot read."),
-          );
-        }
-        return accountWindowLimits(options.instanceId, windows, observedAt);
-      }),
+          )
+        : readAccountUsage(
+            readings,
+            `opencode-go:${String(options.instanceId)}:${options.dataDirectory}`,
+            readUsage,
+            onDemand === true,
+            () => Date.parse(clock()),
+          ),
   };
 }

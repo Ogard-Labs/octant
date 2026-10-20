@@ -7288,9 +7288,13 @@ mechanisms are:
   `auth.json` when no database keeps sign-ins; sent as a bearer token to
   `GET opencode.ai/zen/go/v1/usage`, whose 5-hour, weekly, and monthly
   used percentages become windows. The reads run in the host process, only
-  for an enabled instance of that provider, on the limits service's existing
-  five-minute schedule and on refresh; the request sends nothing else and
-  follows no redirect. Octant never writes, copies, or stores either key. It
+  for an enabled instance of that provider. Only a refresh a person asks for
+  waits on the endpoint. Every other caller, the limits service's
+  five-minute schedule and the service-limits read before each Chat turn,
+  gets the last reading at once and starts at most one background read per
+  five minutes, so a turn never waits on the endpoint and frequent turns
+  never multiply the calls. The request sends nothing else and follows no
+  redirect. Octant never writes, copies, or stores either key. It
   stays out of logs, the journal, snapshots, and errors: every failure carries
   a fixed message. A missing sign-in reads as not ready, an OpenCode sign-in
   without Go as plan limits not applying, a refused key as unauthenticated,

@@ -33,9 +33,10 @@ function recordingFetch(response: () => Response) {
   };
 }
 
-function observe(facts: ReturnType<typeof makeDevinPlanUsageFacts>) {
+// A person's refresh is the reading that waits on the endpoint.
+function observe(facts: ReturnType<typeof makeDevinPlanUsageFacts>, onDemand = true) {
   return Effect.runPromise(
-    Effect.scoped(Effect.either(facts.observeServiceLimits({ instanceId }))),
+    Effect.scoped(Effect.either(facts.observeServiceLimits({ instanceId, onDemand }))),
   );
 }
 
@@ -44,6 +45,7 @@ describe("Devin plan usage", () => {
     const http = recordingFetch(() => Response.json(statusAnswer));
     const outcome = await observe(
       makeDevinPlanUsageFacts({
+        readings: new Map(),
         instanceId,
         credentialPath,
         clock,
@@ -82,6 +84,35 @@ describe("Devin plan usage", () => {
     });
   });
 
+  it("answers a Chat turn from the last reading and reads again at most every five minutes", async () => {
+    const http = recordingFetch(() => Response.json(statusAnswer));
+    let now = Date.parse(clock());
+    const facts = makeDevinPlanUsageFacts({
+      readings: new Map(),
+      instanceId,
+      credentialPath,
+      clock: () => new Date(now).toISOString(),
+      fetch: http.fetch,
+      readText: async () => 'windsurf_api_key = "devin-key-1"\n',
+    });
+
+    // The first turn has no reading yet and does not wait for one.
+    expect(await observe(facts, false)).toMatchObject({
+      _tag: "Left",
+      left: { category: "unavailable" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(http.requests).toHaveLength(1);
+
+    expect((await observe(facts, false))._tag).toBe("Right");
+    expect((await observe(facts, false))._tag).toBe("Right");
+    expect(http.requests).toHaveLength(1);
+
+    now += 5 * 60_000;
+    expect((await observe(facts, false))._tag).toBe("Right");
+    expect(http.requests).toHaveLength(2);
+  });
+
   it("reads a window the answer left without a figure as used up", async () => {
     const http = recordingFetch(() =>
       Response.json({
@@ -92,6 +123,7 @@ describe("Devin plan usage", () => {
     );
     const outcome = await observe(
       makeDevinPlanUsageFacts({
+        readings: new Map(),
         instanceId,
         credentialPath,
         clock,
@@ -111,6 +143,7 @@ describe("Devin plan usage", () => {
     const http = recordingFetch(() => Response.json(statusAnswer));
     const outcome = await observe(
       makeDevinPlanUsageFacts({
+        readings: new Map(),
         instanceId,
         credentialPath,
         clock,
@@ -129,6 +162,7 @@ describe("Devin plan usage", () => {
     const http = recordingFetch(() => Response.json({ userStatus: { renamed: true } }));
     const outcome = await observe(
       makeDevinPlanUsageFacts({
+        readings: new Map(),
         instanceId,
         credentialPath,
         clock,
@@ -145,6 +179,7 @@ describe("Devin plan usage", () => {
     const http = recordingFetch(() => new Response("denied", { status: 401 }));
     const outcome = await observe(
       makeDevinPlanUsageFacts({
+        readings: new Map(),
         instanceId,
         credentialPath,
         clock,
