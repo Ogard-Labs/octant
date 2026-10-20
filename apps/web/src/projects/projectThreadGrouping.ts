@@ -122,3 +122,50 @@ export function orderThreadsByRecency(
     return left.title.localeCompare(right.title, undefined, { sensitivity: "base" });
   });
 }
+
+/**
+ * A list with each follow-up-created thread moved directly under the thread
+ * that suggested it, depth first. A thread whose parent is not in the list
+ * stays where it was. `topLevel` is the list without the nested threads, so a
+ * caller can group by checkout first and then re-attach each thread's
+ * children, keeping a worktree child under its primary-checkout parent.
+ */
+export function nestFollowUpThreads(
+  threads: ReadonlyArray<ChatThreadNavigationItem>,
+  parentOf: ReadonlyMap<string, string>,
+): {
+  readonly topLevel: ReadonlyArray<ChatThreadNavigationItem>;
+  readonly expand: (
+    list: ReadonlyArray<ChatThreadNavigationItem>,
+  ) => ReadonlyArray<ChatThreadNavigationItem>;
+} {
+  const present = new Set(threads.map((thread) => thread.threadId));
+  const childrenOf = new Map<string, ChatThreadNavigationItem[]>();
+  const nested = new Set<string>();
+  for (const thread of threads) {
+    const parent = parentOf.get(thread.threadId);
+    if (parent === undefined || !present.has(parent) || parent === thread.threadId) continue;
+    nested.add(thread.threadId);
+    const siblings = childrenOf.get(parent);
+    if (siblings === undefined) childrenOf.set(parent, [thread]);
+    else siblings.push(thread);
+  }
+  // Each thread is emitted once, so a cycle of links cannot repeat a row.
+  const expand = (list: ReadonlyArray<ChatThreadNavigationItem>) => {
+    const out: ChatThreadNavigationItem[] = [];
+    const emitted = new Set<string>();
+    const visit = (thread: ChatThreadNavigationItem) => {
+      if (emitted.has(thread.threadId)) return;
+      emitted.add(thread.threadId);
+      out.push(thread);
+      for (const child of childrenOf.get(thread.threadId) ?? []) visit(child);
+    };
+    for (const thread of list) visit(thread);
+    return out;
+  };
+  // A cycle of links has no root; its threads stay in place rather than vanish.
+  const topLevel = threads.filter((thread) => !nested.has(thread.threadId));
+  const reachable = new Set(expand(topLevel).map((thread) => thread.threadId));
+  const orphaned = threads.filter((thread) => !reachable.has(thread.threadId));
+  return { topLevel: [...topLevel, ...orphaned], expand };
+}

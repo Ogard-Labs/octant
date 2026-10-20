@@ -62,6 +62,12 @@ export class ThreadFollowUpSuggestionStore {
   readonly #actor: typeof EventActor.Type;
   readonly #clock: () => string;
   readonly #records = new Map<string, SuggestionRecord>();
+  /**
+   * The thread each started follow-up came from, by the thread it created.
+   * Unlike the offer itself this outlives later replies: it is what lets the
+   * sidebar nest a task under the thread that suggested it.
+   */
+  readonly #parents = new Map<string, string>();
 
   constructor(options: {
     readonly journal: JournalPort;
@@ -74,6 +80,14 @@ export class ThreadFollowUpSuggestionStore {
     this.#actor = decodeActor(options.actor);
     this.#clock = options.clock;
     this.#hydrate();
+  }
+
+  /** Every remembered follow-up link, newest first. */
+  links(): ReadonlyArray<{ readonly threadId: string; readonly parentThreadId: string }> {
+    return [...this.#parents].reverse().map(([threadId, parentThreadId]) => ({
+      threadId,
+      parentThreadId,
+    }));
   }
 
   /** What activating this suggestion of the current set created, if it was activated. */
@@ -156,6 +170,7 @@ export class ThreadFollowUpSuggestionStore {
     record.version += 1;
     record.activated.push(suggestion.id);
     record.created.set(String(suggestion.id), created);
+    this.#rememberParent(threadId, created);
     return "activated";
   }
 
@@ -212,8 +227,14 @@ export class ThreadFollowUpSuggestionStore {
       record !== undefined
     ) {
       record.version += 1;
-      applyActivation(record, payload);
+      this.#rememberParent(threadId, applyActivation(record, payload));
     }
+  }
+
+  #rememberParent(parentThreadId: string, created: NativeHarnessFollowUpCreation): void {
+    if (created.kind === "same-thread" || created.threadId === undefined) return;
+    if (String(created.threadId) === parentThreadId) return;
+    this.#parents.set(String(created.threadId), parentThreadId);
   }
 
   #applyHarnessFrame(
@@ -247,16 +268,20 @@ export class ThreadFollowUpSuggestionStore {
       });
     } else if (eventName === names.followUpActivated) {
       const record = this.#records.get(threadId);
-      if (record !== undefined) applyActivation(record, payload);
+      if (record !== undefined) this.#rememberParent(threadId, applyActivation(record, payload));
     }
   }
 }
 
-function applyActivation(record: SuggestionRecord, payload: unknown): void {
+function applyActivation(
+  record: SuggestionRecord,
+  payload: unknown,
+): NativeHarnessFollowUpCreation {
   const activation = payload as {
     readonly suggestionId: NativeHarnessFollowUpId;
     readonly created: NativeHarnessFollowUpCreation;
   };
   record.activated.push(activation.suggestionId);
   record.created.set(String(activation.suggestionId), activation.created);
+  return activation.created;
 }

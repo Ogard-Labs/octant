@@ -409,7 +409,12 @@ create, with Cancel and **Start** (or **Use prompt**); nothing is created
 before that. The same open suggestions also stand in a "Suggested tasks" card
 at the top of the thread's Environment panel, without a second border, so an
 offer the conversation has scrolled past stays in reach; it shows only while a
-suggestion is open. Side-task offers stack above them as hairline cards: a target icon
+suggestion is open. A thread started from a suggested task nests one step in
+under the thread that suggested it in the sidebar, joined by a thin hairline
+elbow, even when it runs on its own worktree; the host remembers that link
+past later replies and restarts, and answers it to a window only for threads
+its sidebar already lists. A task whose parent is not in the same list stays
+where it is. Side-task offers stack above them as hairline cards: a target icon
 (branch for a worktree, new-message otherwise), the title, a dismiss control,
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
