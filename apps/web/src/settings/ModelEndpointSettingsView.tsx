@@ -16,6 +16,7 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 import { SettingsSection } from "./primitives";
 import type { AddEndpointFlowProps, AddedEndpoint } from "./harness/AddEndpointFlow";
+import type { EndpointPreset } from "./harness/addEndpointSteps";
 import { AddEndpointDialog, EndpointChoices, SIGN_IN_ENDPOINTS } from "./harness/AddModelEndpoint";
 import {
   endpointModelCount,
@@ -66,6 +67,7 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
   const [detail, setDetail] = useState<OpenDetail>();
   const [returnFocusTo, setReturnFocusTo] = useState<ProviderInstanceId>();
   const [adding, setAdding] = useState(false);
+  const [addPreset, setAddPreset] = useState<EndpointPreset>();
   // Set once the add form has submitted; the endpoint it made, if any, is the
   // one the registry lists that it did not list when the dialog opened.
   const [addSubmitted, setAddSubmitted] = useState(false);
@@ -334,10 +336,11 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
     const { status, observed, checking } = describe(instance);
     return { instance, status, observed, checking };
   };
-  const openAdd = () => {
+  const openAdd = (preset?: EndpointPreset) => {
     idsWhenAddOpened.current = new Set(endpoints.map((instance) => String(instance.id)));
     probedAdded.current = undefined;
     setAddSubmitted(false);
+    setAddPreset(preset);
     setAdding(true);
   };
   // A keyed endpoint can exist even when its create reports failure, because
@@ -359,6 +362,7 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       busy={busy}
       onClose={() => {
         setAdding(false);
+        setAddPreset(undefined);
         setAddSubmitted(false);
       }}
       onCreateAnthropicCompatible={afterSubmit(props.onCreateAnthropicCompatible)}
@@ -372,6 +376,7 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       }}
       onSignIn={(offer) => void addSignInEndpoint(offer)}
       open={adding}
+      {...(addPreset === undefined ? {} : { initialPreset: addPreset })}
     />
   );
 
@@ -388,7 +393,8 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
           <EndpointChoices
             credentialManagementAvailable={props.credentialManagementAvailable}
             disabled={busy}
-            onAddEndpoint={openAdd}
+            onAddEndpoint={() => openAdd()}
+            onAddWithKey={openAdd}
             onSignIn={(offer) => void addSignInEndpoint(offer)}
           />
         </SettingsSection>
@@ -405,7 +411,13 @@ export function ModelEndpointSettingsView(props: ModelEndpointSettingsViewProps)
       </div>
       <SettingsSection
         actions={
-          <OctantButton disabled={busy} onClick={openAdd} size="sm" type="button" variant="ghost">
+          <OctantButton
+            disabled={busy}
+            onClick={() => openAdd()}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
             <Plus aria-hidden="true" size={14} />
             Add endpoint
           </OctantButton>
