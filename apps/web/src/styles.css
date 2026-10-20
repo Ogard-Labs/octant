@@ -72,8 +72,8 @@
   --octant-success-border: color-mix(in srgb, var(--octant-success-text) 55%, transparent);
   --octant-card: var(--octant-floating);
   --octant-tray: color-mix(in srgb, var(--octant-control) 75%, var(--octant-workspace));
-  --octant-text-primary: #f0f0f0;
-  --octant-text-secondary: #a9a9a9;
+  --octant-text-primary: #f5f5f7;
+  --octant-text-secondary: #bcbcc2;
   --octant-text-muted: #949494;
   --octant-text-primary-high-contrast: #ffffff;
   --octant-text-secondary-high-contrast: #c9c8c3;
@@ -132,8 +132,7 @@
   --octant-palette-pink: #f4809a;
   /* The same faces the settings default to, so the first paint before
      settings load is not a different font that swaps a moment later. */
-  --octant-ui-font-family:
-    "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --octant-ui-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --octant-ui-font-size: 13px;
   --octant-ui-font-weight: 400;
   --octant-editor-font-family:
@@ -175,8 +174,8 @@ html[data-octant-theme-mode="light"] {
   --octant-border-subtle: #e0e0de;
   --octant-border-strong: #bdbdbb;
   --octant-divider-strong: #6f6f6d;
-  --octant-text-primary: #1b1b1b;
-  --octant-text-secondary: #4f4f4f;
+  --octant-text-primary: #141414;
+  --octant-text-secondary: #45454a;
   --octant-text-muted: #666666;
   --octant-primary-foreground: #ffffff;
   --octant-focus-ring: #1f6f96;

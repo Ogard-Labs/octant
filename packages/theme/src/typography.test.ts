@@ -1,6 +1,7 @@
 import { DEFAULT_THEME_SETTINGS, type ThemeTypography } from "@octant/contracts/theme";
 import { describe, expect, it } from "vitest";
 import {
+  GEIST_UI_FAMILY,
   DEFAULT_EDITOR_TYPOGRAPHY,
   DEFAULT_TERMINAL_TYPOGRAPHY,
   DEFAULT_UI_TYPOGRAPHY,
@@ -10,10 +11,9 @@ import {
 } from "./typography";
 
 describe("typography projections", () => {
-  it("ships Geist at the compact size as the default interface face", () => {
+  it("ships the platform face at the compact size as the default interface face", () => {
     expect(DEFAULT_UI_TYPOGRAPHY).toEqual({
-      fontFamily:
-        "'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       fontSize: 13,
       fontWeight: 400,
     });
@@ -138,7 +138,15 @@ describe("interface face migration", () => {
     const projection = resolveTypographyProjection(legacy, []);
 
     expect(projection.ui.fontFamily).toBe(DEFAULT_THEME_SETTINGS.typography.ui.family);
-    expect(projection.ui.fontFamily).toContain("Geist Variable");
+  });
+
+  it("moves people still on the old Geist default to the platform face, and keeps a Geist pick", () => {
+    expect(
+      savedUiFamily(
+        "'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      ),
+    ).toBe(DEFAULT_THEME_SETTINGS.typography.ui.family);
+    expect(savedUiFamily(GEIST_UI_FAMILY)).toBe(GEIST_UI_FAMILY);
   });
 
   it("keeps the system face for someone who picks System interface", () => {

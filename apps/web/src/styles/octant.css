@@ -24,9 +24,9 @@
   --oct-bg: light-dark(#ffffff, #1a1a1a);
   --oct-surface: light-dark(#fdfdfc, #232323);
   --oct-surface-warm: light-dark(#f0f0ef, #2b2b2b);
-  --oct-fg: light-dark(#1b1b1b, #f0f0f0);
+  --oct-fg: light-dark(#141414, #f5f5f7);
   --oct-fg-2: color-mix(in oklab, var(--oct-fg) 90%, transparent);
-  --oct-muted: light-dark(#4f4f4f, #a9a9a9);
+  --oct-muted: light-dark(#45454a, #bcbcc2);
   --oct-meta: light-dark(#666666, #949494);
   --oct-border: light-dark(#e0e0de, #303030);
   --oct-border-soft: color-mix(in oklab, var(--oct-fg) 7%, transparent);
@@ -99,13 +99,13 @@
   --oct-focus-ring: 0 0 0 1px var(--oct-bg), 0 0 0 3px var(--oct-muted);
 
   /* ── type ── */
-  /* One family. Geist sets the interface, headings, and transcript, and Geist
-     Mono sets code; the theme bridge points every role at the interface
-     setting, so these are only the first paint before settings load. The
+  /* One family. The platform face sets the interface, headings, and
+     transcript, and Geist Mono sets code; the theme bridge points every role
+     at the interface setting, so these are only the first paint before
+     settings load. The
      earlier display face and body serif were never shown once the bridge
      mapped every role to the interface face, and have been removed. */
-  --oct-font-display:
-    "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --oct-font-display: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --oct-font-body: var(--oct-font-display);
   --oct-font-transcript: var(--oct-font-display);
   --oct-font-mono:
@@ -399,7 +399,8 @@ body {
   font-size: var(--oct-text-base);
   line-height: var(--oct-leading-body);
   text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
+  /* No antialiased smoothing: on macOS it thins light text on a dark ground,
+     which read as washed out next to native apps. */
   font-synthesis: none;
   font-optical-sizing: auto;
   overflow-x: hidden;

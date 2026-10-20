@@ -86,12 +86,15 @@ but they do not own a second palette or visual language.
 
 ### Face
 
-Interface text uses the bundled Geist variable face by default, with the
-platform stack behind it: `'Geist Variable', -apple-system, BlinkMacSystemFont,
-'Segoe UI', system-ui, sans-serif` (0161). The platform face remains an explicit
-Appearance choice, System interface. Code, paths, branches,
-identifiers, and terminal text use the monospace stack. Antialiased,
-`text-rendering: optimizeLegibility`, no synthetic bold.
+Interface text uses the platform face by default (SF Pro on a Mac):
+`system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. It is
+what makes Octant read as a native app; with bundled Geist and antialiased
+smoothing the interface read as a web page, thin and grey beside the apps
+around it. Geist stays bundled as an explicit Appearance choice. Code, paths,
+branches, identifiers, and terminal text use the monospace stack. Default
+subpixel-style smoothing (no `-webkit-font-smoothing: antialiased`, which thins
+light text on a dark ground), `text-rendering: optimizeLegibility`, no synthetic
+bold.
 
 ### Scale
 
@@ -714,8 +717,8 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 | Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                                        |
 | Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                             |
 | Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                                    |
-| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                                      |
-| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                            |
+| Primary text           | `--octant-text-primary`                             | `#f5f5f7` | `#141414`   | Body and control text                                      |
+| Secondary text         | `--octant-text-secondary`                           | `#bcbcc2` | `#45454a`   | Supporting copy                                            |
 | Muted text             | `--octant-text-muted`                               | `#949494` | `#666666`   | Metadata and hints at 12px; AA on the control fill         |
 | Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                                       |
 | Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme compatibility and accent tints                       |
@@ -784,29 +787,30 @@ Typography has distinct jobs:
 
 | Job        | Default                                                                                             | Usage                                                                              |
 | ---------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interface  | `'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`            | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Interface  | `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`                              | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
 | Display    | inherits Interface                                                                                  | Wordmark, section headings, selected navigation labels                             |
 | Transcript | inherits Interface                                                                                  | Long-running conversation and composer; readable at 13–16px, 13px by default       |
 | Editor     | `'Geist Mono Variable', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |
 | Terminal   | Geist Mono, SF Mono, Nerd Font fallbacks, monospace                                                 | Terminal output and prompt glyphs                                                  |
 
-The default interface is Geist at 13px and weight 400; transcript text defaults
-to 13px. Geist and Geist Mono are one family, both bundled
-(`@fontsource-variable/geist` and `geist-mono`), and the only faces Octant
-ships, so text, code, and paths share one set of proportions on every
-platform; the stylesheet's own first-paint defaults are the same faces, so
-nothing swaps when settings load. The editor defaults to 13px, line height
+The default interface is the platform face at 13px and weight 400; transcript
+text defaults to 13px. Geist and Geist Mono are bundled
+(`@fontsource-variable/geist` and `geist-mono`): Geist Mono sets code by
+default and Geist is an Appearance choice. The stylesheet's own first-paint
+defaults are the same faces as the settings defaults, so nothing swaps when
+settings load. The editor defaults to 13px, line height
 1.5, and enabled ligatures. The terminal defaults to 12px, line height 1.4,
 and disabled ligatures.
 
 A saved stack that only ever meant "the default" reads as today's default
 (`savedUiFamily` in `packages/theme/src/typography.ts`): the old system
 interface stack beginning `-apple-system, BlinkMacSystemFont`, the unbundled
-`Geist, system-ui, sans-serif`, and the JetBrains code and terminal stacks. The
-explicit System interface choice therefore saves a different spelling,
-`system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`, so it
-stays distinct; an old System choice saved under the default's identical string
-cannot be told apart and needs reselecting.
+`Geist, system-ui, sans-serif`, the bundled-Geist default stack that began
+`'Geist Variable', -apple-system`, and the JetBrains code and terminal stacks.
+The Geist entry now saves `'Geist Variable', system-ui, sans-serif`, so a Geist
+pick made from here on stays distinct; a Geist pick saved under the old
+default's identical string cannot be told apart and moves to the platform face.
+System interface saves the default's own stack.
 
 The persisted typography schema supports independent UI, editor, and terminal
 family, size, weight, line height, and ligatures. Families are sanitized: no
