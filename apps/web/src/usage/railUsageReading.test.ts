@@ -56,6 +56,39 @@ describe("rail usage rings", () => {
     expect(resetPhrase(reading?.resetsAt.get("five_hour"), now)).toBe("Resets in 2h 52m");
   });
 
+  it("picks the arcs by window length when the provider scopes its window ids", () => {
+    const window = (id: string, utilization: number) => ({
+      window: id,
+      status: "allowed",
+      utilization,
+      observedAt: "2026-10-20T12:00:00.000Z",
+    });
+    const [reading] = railUsageReadings(
+      entries({
+        providerInstanceId,
+        status: "available",
+        source: "provider-runtime",
+        observedAt: "2026-10-20T12:00:00.000Z",
+        limits: {
+          providerInstanceId,
+          scope: "account",
+          requests: { status: "unavailable" },
+          tokens: { status: "unavailable" },
+          concurrency: { status: "unavailable" },
+          retry: { status: "inactive" },
+          quota: "available",
+          source: "observed-evidence",
+          confidence: "high",
+          updatedAt: "2026-10-20T12:00:00.000Z",
+          rateLimitWindows: [window("codex:secondary_7d", 0.2), window("codex:primary_5h", 0.1)],
+        },
+      }),
+      now,
+    );
+    expect(reading?.outer).toMatchObject({ window: "codex:secondary_7d", percent: 80 });
+    expect(reading?.inner).toMatchObject({ window: "codex:primary_5h", percent: 90 });
+  });
+
   it("gives no ring to a provider that reported no window figure", () => {
     expect(
       railUsageReadings(

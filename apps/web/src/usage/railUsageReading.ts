@@ -33,15 +33,21 @@ export function railUsageReadings(
           : undefined;
     if (limits === undefined) return [];
     const windows = composerLimitWindows({ now, snapshot: { serviceLimits: limits } });
-    const first = windows[0];
-    if (first === undefined) return [];
-    const last = windows.find((window, index) => index > 0 && !window.name.includes(","));
+    // Arcs are chosen by how long each window is, not by its name: Codex
+    // scopes its ids ("codex:secondary_7d"), Claude adds per-model weeks
+    // ("seven_day_opus"). The first window of a length wins a tie, which keeps
+    // the plain week ahead of a per-model one.
+    const byLength = [...windows].sort((a, b) => windowHours(a.window) - windowHours(b.window));
+    const shortest = byLength[0];
+    const longestHours = windowHours(byLength[byLength.length - 1]?.window ?? "");
+    const longest = windows.find((window) => windowHours(window.window) === longestHours);
+    if (shortest === undefined || longest === undefined) return [];
     return [
       {
         providerInstanceId: String(entry.providerInstanceId),
         windows,
-        outer: last ?? first,
-        ...(last === undefined ? {} : { inner: first }),
+        outer: longest,
+        ...(windowHours(shortest.window) < longestHours ? { inner: shortest } : {}),
         resetsAt: new Map(
           (limits.rateLimitWindows ?? []).flatMap((window) =>
             window.resetsAt === undefined ? [] : [[window.window, window.resetsAt] as const],
@@ -50,6 +56,30 @@ export function railUsageReadings(
       },
     ];
   });
+}
+
+const NAMED_WINDOW_HOURS: Readonly<Record<string, number>> = {
+  one_hour: 1,
+  five_hour: 5,
+  one_day: 24,
+  seven_day: 168,
+};
+
+const UNIT_HOURS: Readonly<Record<string, number>> = { m: 1 / 60, h: 1, d: 24, w: 168 };
+
+/**
+ * How many hours a window id covers: "five_hour", "seven_day_opus",
+ * "codex:primary_5h", "secondary_7d". An id with no readable length sorts as
+ * the shortest, so it never claims the outer arc.
+ */
+export function windowHours(window: string): number {
+  const id = window.slice(window.lastIndexOf(":") + 1).toLowerCase();
+  for (const [name, hours] of Object.entries(NAMED_WINDOW_HOURS)) {
+    if (id === name || id.startsWith(`${name}_`)) return hours;
+  }
+  const match = /(\d+)\s*([mhdw])\b/.exec(id.replaceAll("_", " "));
+  const unit = match?.[2] === undefined ? undefined : UNIT_HOURS[match[2]];
+  return match?.[1] === undefined || unit === undefined ? 0 : Number(match[1]) * unit;
 }
 
 /** "Resets in 2h 52m", "Resets in 1d 4h", or nothing when the reset is unknown or past. */
