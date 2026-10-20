@@ -25,6 +25,7 @@ import {
   buildSurfaceCatalog,
   classifyPreviewTabAuthority,
   classifyCanvasTabRestore,
+  classifyThreadOwnedCanvasTab,
   defaultShellSettings,
   defaultWindowWorkspace,
   enabledModes,
@@ -354,14 +355,13 @@ export class ShellService implements ShellServiceApi {
       if (introduced !== undefined && introduced.kind === "canvas") {
         const canvas = this.#persistence.canvasProjection.getById(introduced.canvasId);
         // A tab naming no Project opens only a Canvas that belongs to a Chat
-        // thread outside every Project; the Canvas routes decide whether the
-        // thread still holds it.
+        // thread outside every Project, and only while that thread still
+        // holds it, as the Canvas routes judge it.
         if (introduced.projectId === null) {
           if (
             introduced.mode !== "chat" ||
             command.operation.mode !== "chat" ||
-            canvas === undefined ||
-            canvas.currentVersion.definition.provenance.projectId !== null
+            threadOwnedCanvasTabAuthority(canvas, "chat", this.#persistence) !== "bound"
           ) {
             throw new ShellServiceError({
               category: "invalid",
@@ -578,9 +578,10 @@ function reconcileCanvasTabs(
     if (surface.kind !== "canvas") return { ...layout, surface: { ...surface } };
     const projection = persistence.canvasProjection.getById(surface.canvasId);
     // A tab for a Canvas owned by its thread restores while that Canvas is
-    // still one; it has no Project for the context to match.
+    // still one and its thread still holds it; it has no Project for the
+    // context to match.
     if (surface.projectId === null) {
-      return projection?.currentVersion.definition.provenance.projectId === null && mode === "chat"
+      return threadOwnedCanvasTabAuthority(projection, mode, persistence) === "bound"
         ? { ...layout, surface: { ...surface } }
         : { ...layout, surface: workspaceWelcomeSurface(mode, surface.id) };
     }
@@ -602,6 +603,24 @@ function reconcileCanvasTabs(
       code: visit(workspace.layouts.code, "code", workspace.contextByMode.code.projectId),
     },
   };
+}
+
+/**
+ * The owning thread is read from the Canvas's own provenance, never from the
+ * tab, so a tab cannot name a thread the Canvas does not belong to.
+ */
+function threadOwnedCanvasTabAuthority(
+  canvas: ReturnType<PersistenceService["canvasProjection"]["getById"]>,
+  mode: "chat" | "work" | "code",
+  persistence: PersistenceService,
+): ReturnType<typeof classifyThreadOwnedCanvasTab> {
+  const provenance = canvas?.currentVersion.definition.provenance;
+  return classifyThreadOwnedCanvasTab({
+    mode,
+    canvas: provenance === undefined ? undefined : { projectId: provenance.projectId },
+    thread:
+      provenance?.mode === "chat" ? persistence.readChatThread(provenance.threadId) : undefined,
+  });
 }
 
 function reconcileContextWithProjects(

@@ -74,7 +74,11 @@ import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
 } from "../canvas/canvasExportTargets";
-import { authorizeCanvasInventoryAccess, defaultShellSettings } from "@octant/domain";
+import {
+  authorizeCanvasInventoryAccess,
+  chatThreadHoldsCanvas as threadLifecycleHoldsCanvas,
+  defaultShellSettings,
+} from "@octant/domain";
 import { type CanvasAgentToolPort, createChildCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { loadChildCanvasWorkspace } from "../canvas/childCanvasWorkspace";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
@@ -192,7 +196,8 @@ export function wireCanvas(deps: CanvasDependencies) {
   // Project the window shows, because the thread itself has no Project
   // authority to match; an agent reaches it only from the thread that owns
   // it, since no Project makes it a neighbour's. Deleting the thread takes
-  // the Canvas out of reach; the purge erases it with the thread.
+  // the Canvas out of reach; the purge erases it with the thread. The shell
+  // restores and opens such a Canvas's tab under the same lifecycle rule.
   const chatThreadHoldsCanvas = (threadId: string): boolean => {
     let thread;
     try {
@@ -200,9 +205,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     } catch {
       return false;
     }
-    return (
-      thread !== undefined && thread.lifecycle !== "deleted" && thread.lifecycle !== "deleting"
-    );
+    return threadLifecycleHoldsCanvas(thread);
   };
   const authorizeCanvas: CanvasServiceDependencies["authorize"] = (entry, context, project) => {
     const provenance = entry.currentVersion.definition.provenance;

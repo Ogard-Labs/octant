@@ -2114,7 +2114,8 @@ flowchart LR
   journal are listed as omissions. The thread's generated images and retained
   Browser captures appear as attachment records without bytes. A local owner
   can also take one `octant.host-export/1` cut of what this host holds: a thread bundle for
-  every thread of every mode, Projects, Project memory, Canvases, a
+  every thread of every mode, Projects, Project memory, every Canvas (one a
+  Chat thread owns outside every Project names no Project), a
   non-secret settings summary, usage export rows, and retention windows
   with purge tombstones. That call is a host-control read on the loopback
   route chain. A remote principal and a paired device are refused, and the

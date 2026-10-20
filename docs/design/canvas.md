@@ -115,13 +115,20 @@ thread's purge erases it with the thread, as it erases every Canvas the
 thread authored. A thread export carries it beside the Project's Canvases
 the thread shows. It exports to the host's export folder, the one chosen for
 everything without a Project of its own, so the export-folder view reports
-scope `host` and refuses a `project` choice. It is never mirrored (the
+scope `host` and refuses a `project` choice, and a host export carries it
+whole with no Project named, its owner being the thread in its provenance
+(the host-export Canvas record once required a Project, which left every
+such Canvas out of the cut). It is never mirrored (the
 mirror files artifacts by Project; the receipt says so and journals
 `skipped`), never published to an artifact replica, absent from the
 Project-grouped artifact library, and not shared (see [Shares](#shares)). A
 Canvas tab that opens it names no Project and rests in the Chat layout
-whatever Project the pane's context binds, restored while the Canvas still
-belongs to its thread.
+whatever Project the pane's context binds. The shell opens and restores that
+tab under the rule the Canvas routes authorize by: the Canvas still belongs
+to its thread, and the thread, read from the Canvas's own provenance, exists
+and is not deleted or deleting; otherwise the pane shows the welcome surface,
+because a tab restored past that rule opened to a refusal once the thread was
+deleted but not yet purged.
 
 The delivery rule also reaches the model as an instruction, not only as the
 tool description. Every turn that offers `octant_canvas` (Work, Code, and
