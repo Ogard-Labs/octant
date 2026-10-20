@@ -197,7 +197,9 @@ it from source when absent: renderer edits hot-reload, server edits take effect
 on the next app relaunch when Electron started the host — an already-running
 host that Electron attached to must be restarted separately — and
 `apps/desktop/src` edits are rebuilt automatically
-the next time you start `bun run dev`.
+the next time you start `bun run dev`. The Canvas preview page an agent's
+preview screenshots is built the same way, whenever `apps/web` is newer than
+it, so previews return a picture on a development host too.
 
 Computer use requires the packaged macOS Octant application with its own bundle
 identity and permissions. The source-run Electron shell is not that identity and
@@ -227,7 +229,9 @@ bun --cwd packages/cli src/bin.ts web --dev --no-open
 
 It starts the Vite renderer and attaches it to the canonical host, starting that
 host from source when none is running; a running host that does not admit the
-renderer's origin is refused with an explanation. Renderer
+renderer's origin is refused with an explanation. It also builds the Canvas
+preview page when `apps/web` is newer than it and points the host it starts at
+`apps/web/dist`, so an agent's preview returns a picture. Renderer
 mode never selects another data directory: browser QA, Electron, and Vite show
 the same Projects and threads. Tests that need an isolated store must set an
 explicit `OCTANT_DATA_DIR`.

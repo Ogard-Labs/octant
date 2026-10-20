@@ -71,6 +71,7 @@ function baseOptions(overrides: Partial<WebCommandOptions> = {}): WebCommandOpti
     openBrowser: vi.fn(),
     fetch: hostFetch(),
     startDevServer: vi.fn(async () => "http://127.0.0.1:5173"),
+    ensureCanvasPreviewPage: vi.fn(async () => ({ status: "current" as const })),
     stdout: { write: vi.fn((chunk: string) => chunk.length > 0) },
     stderr: { write: vi.fn((chunk: string) => chunk.length > 0) },
     bridgeSecretInput: ownerInput,
@@ -236,10 +237,59 @@ describe("runWebCommand", () => {
       expect.objectContaining({
         environment: {
           OCTANT_WEB_URL: "http://127.0.0.1:5173",
+          OCTANT_WEB_DIST_PATH: expect.stringMatching(/\/apps\/web\/dist$/),
           OCTANT_CODE_FILE_HELPER_PATH: "/repo/dist/octant-code-file-helper",
         },
       }),
     );
+  });
+
+  it("builds the Canvas preview page before the host starts and points the host at the web build when --dev is set", async () => {
+    const order: string[] = [];
+    const ensureCanvasPreviewPage = vi.fn(async () => {
+      order.push("preview-page");
+      return { status: "built" as const };
+    });
+    const attachOrCreateHost = vi.fn(async () => {
+      order.push("host");
+      return {
+        kind: "attached" as const,
+        url: new URL("http://127.0.0.1:13773"),
+        instanceId: "instance-1",
+        version: "0.0.0-dev",
+      };
+    });
+    await runWebCommand(baseOptions({ dev: true, ensureCanvasPreviewPage, attachOrCreateHost }));
+    expect(order).toEqual(["preview-page", "host"]);
+    expect(ensureCanvasPreviewPage).toHaveBeenCalledWith({
+      webRoot: expect.stringMatching(/\/apps\/web$/),
+    });
+    expect(attachOrCreateHost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        environment: expect.objectContaining({
+          OCTANT_WEB_DIST_PATH: expect.stringMatching(/\/apps\/web\/dist$/),
+        }),
+      }),
+    );
+  });
+
+  it("starts the host without a preview page and says so when the page cannot be built", async () => {
+    const stderr = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const result = await runWebCommand(
+      baseOptions({
+        dev: true,
+        stderr,
+        ensureCanvasPreviewPage: vi.fn(async () => ({ status: "failed" as const, exitCode: 1 })),
+      }),
+    );
+    expect(result.kind).toBe("dev");
+    expect(stderr.write).toHaveBeenCalledWith(expect.stringContaining("Canvas preview page"));
+  });
+
+  it("builds no preview page when the renderer is not in development mode", async () => {
+    const ensureCanvasPreviewPage = vi.fn(async () => ({ status: "current" as const }));
+    await runWebCommand(baseOptions({ ensureCanvasPreviewPage }));
+    expect(ensureCanvasPreviewPage).not.toHaveBeenCalled();
   });
 
   it("keeps an explicit process data directory visible in development mode", async () => {

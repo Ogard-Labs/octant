@@ -1,5 +1,7 @@
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureCanvasPreviewPage, type CanvasPreviewPageOutcome } from "./canvasPreviewPage";
 import {
   attachOrCreateHost,
   buildWebClientUrl,
@@ -27,6 +29,9 @@ export interface WebCommandOptions {
   readonly openBrowser?: (url: URL) => void | Promise<void>;
   readonly fetch?: (input: URL, init: RequestInit) => Promise<Response>;
   readonly startDevServer?: (options: DevServerOptions) => Promise<string>;
+  readonly ensureCanvasPreviewPage?: (options: {
+    readonly webRoot: string;
+  }) => Promise<CanvasPreviewPageOutcome>;
   readonly resolveDevelopmentCodeFileHelperPath?: () => string | undefined;
   readonly generateBridgeSecret?: () => string;
   readonly bridgeSecretInput?: BridgeSecretFileInput;
@@ -71,12 +76,29 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
       : undefined;
   const devHostname = process.env.OCTANT_VITE_HOSTNAME ?? "127.0.0.1";
   const devPort = process.env.OCTANT_VITE_PORT ?? "5173";
+  const webRoot = resolveWebRoot();
+  if (options.dev === true) {
+    // Vite serves the renderer, but the host screenshots a Canvas from the
+    // preview page built beside the web app; without this build every preview
+    // on a development host reports no renderer.
+    const previewPage = await (options.ensureCanvasPreviewPage ?? ensureCanvasPreviewPage)({
+      webRoot,
+    });
+    if (previewPage.status === "failed") {
+      stderr.write(
+        `Octant could not build the Canvas preview page (exit code ${String(previewPage.exitCode)}); previews on this host report no renderer until \`bun run --cwd apps/web build:canvas-preview\` succeeds.\n`,
+      );
+    }
+  }
   // A host started here admits the Vite renderer's exact origin; any other
-  // loopback page is refused local authority.
+  // loopback page is refused local authority. It also reads the web build the
+  // preview page was built into, which a host run from source does not find
+  // on its own.
   const developmentEnvironment =
     options.dev === true
       ? {
           OCTANT_WEB_URL: `http://${devHostname}:${devPort}`,
+          OCTANT_WEB_DIST_PATH: join(webRoot, "dist"),
           ...(developmentDataDirectory === undefined
             ? {}
             : { OCTANT_DATA_DIR: developmentDataDirectory }),
