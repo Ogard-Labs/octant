@@ -1,3 +1,5 @@
+import { displayPixelRatio, watchDisplayPixelRatio } from "./appBackdropPhoto";
+
 /**
  * The character ground: a grid of monospace letters and digits whose
  * brightness rolls through slow overlapping waves and breathes as a whole,
@@ -91,11 +93,6 @@ export function rippleBrightness(ripple: Ripple, x: number, y: number, t: number
   const fromEdge = Math.abs(distance - age * RIPPLE_SPEED);
   if (fromEdge > RIPPLE_BAND) return 0;
   return (1 - fromEdge / RIPPLE_BAND) * (1 - age / RIPPLE_SECONDS);
-}
-
-function displayPixelRatio(): number {
-  const ratio = typeof window === "undefined" ? 1 : window.devicePixelRatio;
-  return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
 }
 
 /**
@@ -206,17 +203,30 @@ export function runCharacterField(canvas: HTMLCanvasElement, animated: boolean):
     frame = requestAnimationFrame(tick);
     window.addEventListener("pointerdown", ripple, { passive: true });
   }
-  const observer =
-    typeof ResizeObserver === "undefined"
-      ? undefined
-      : new ResizeObserver(() => {
-          fit();
-          draw(performance.now());
-        });
+  const refit = () => {
+    fit();
+    draw(performance.now());
+  };
+  const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(refit);
   observer?.observe(canvas);
+  // Moving to a display with another scale keeps the CSS box, so the resize
+  // observer stays quiet and the old bitmap would be stretched blurry.
+  const stopPixelRatio = watchDisplayPixelRatio(refit);
+  // The ink and accent are copied into pixels. A theme switch rewrites them
+  // on the root element; a still field has no next frame to pick that up.
+  const themeObserver =
+    typeof MutationObserver === "undefined"
+      ? undefined
+      : new MutationObserver(() => draw(performance.now()));
+  themeObserver?.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["style", "class", "data-octant-theme-mode"],
+  });
   return () => {
     if (frame !== undefined) cancelAnimationFrame(frame);
     window.removeEventListener("pointerdown", ripple);
     observer?.disconnect();
+    stopPixelRatio();
+    themeObserver?.disconnect();
   };
 }

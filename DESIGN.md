@@ -1653,8 +1653,9 @@ interfaces. Revealing them must not move the transcript.
 
 Functional feedback uses 120–160ms transitions; the base system duration is
 200ms. Use standard easing and no decorative entrance animation. There is no
-ambient motion behind the work; an animated built-in picture is the one
-moving ground, and reduced motion shows its still frame. Running state
+ambient motion behind the work by default; an animated built-in picture and
+the Pulsing characters ground are the moving grounds a person may choose, and
+reduced motion holds each on a still frame. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-
 motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.
