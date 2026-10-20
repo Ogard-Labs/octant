@@ -82,6 +82,10 @@ const IGNORED_DIRECTORIES = new Set([
  * as its island is wired or deleted is the intended direction of travel.
  */
 export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
+  [
+    "apps/share/src/takedown.ts",
+    "Operator command for the public Canvas share service, run as `bun run takedown <id>` (and declared as the package's bin); nothing imports it because the operator runs it by hand. Remove once the checker treats package.json bin entries as entry points.",
+  ],
   // ── Remaining ──
   [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",
@@ -637,7 +641,12 @@ export function findUnregisteredRouteModules(
  * states a dated reason and the caller it is waiting on. Empty means every
  * served endpoint has a caller (or is a routing prefix).
  */
-export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map();
+export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
+  [
+    "/api/v1/shares",
+    "Served by the public Canvas share service (apps/share) and called by the host's share-service port in apps/server, which builds the address from the configured service URL; no window or device calls it. Remove when the checker counts apps/server as a caller of an external service's routes.",
+  ],
+]);
 
 const API_PATH_PATTERN = /"(\/api\/[a-z0-9/_-]+)"/g;
 const PREFIX_GUARD_PATTERN = /startsWith\(\s*"(\/api\/[a-z0-9/_-]+)"/g;
