@@ -2,6 +2,7 @@ import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ExtensionCommandFailure, ExtensionSnapshot } from "@octant/contracts/extension-rpc";
 import {
   CONNECTOR_CATEGORY_LABEL,
+  connectorPackageName,
   searchConnectorCatalog,
   type ConnectorCatalogEntry,
   type ConnectorCategory,
@@ -60,7 +61,7 @@ export function ConnectorsView(props: ConnectorsViewProps) {
       (candidate) =>
         candidate.source.kind === "user-added" &&
         candidate.activation.installed &&
-        candidate.displayName === entry.displayName.toLowerCase().replace(/[^a-z0-9.-]+/g, "-"),
+        candidate.slug === connectorPackageName(entry.id),
     );
     if (pkg === undefined) return undefined;
     return {
@@ -73,10 +74,10 @@ export function ConnectorsView(props: ConnectorsViewProps) {
     async (entry: ConnectorCatalogEntry, secret?: string) => {
       setBusyId(entry.id);
       setFailure(undefined);
-      const before = new Set((snapshot?.packages ?? []).map((pkg) => String(pkg.extensionId)));
       try {
         const result = await client.addUserMcpServer({
           name: entry.displayName,
+          connectorId: entry.id,
           server: {
             type: "streamable-http",
             url: entry.url,
@@ -97,19 +98,15 @@ export function ConnectorsView(props: ConnectorsViewProps) {
           setFailure(result.failure);
           return;
         }
-        if (result.kind === "extension-state-updated") {
-          const added = result.snapshot.packages.find(
-            (pkg) => pkg.source.kind === "user-added" && !before.has(String(pkg.extensionId)),
-          );
-          if (added !== undefined) {
-            setConnected((current) => ({
-              ...current,
-              [entry.id]: {
-                extensionId: String(added.extensionId),
-                componentId: mcpComponentId(added),
-              },
-            }));
-          }
+        if (result.kind === "extension-state-updated" && result.addedPackage !== undefined) {
+          const added = result.addedPackage;
+          setConnected((current) => ({
+            ...current,
+            [entry.id]: {
+              extensionId: String(added.extensionId),
+              componentId: added.componentId === undefined ? undefined : String(added.componentId),
+            },
+          }));
         }
         setKeyFor(undefined);
         setKey("");
@@ -123,7 +120,7 @@ export function ConnectorsView(props: ConnectorsViewProps) {
         setBusyId(undefined);
       }
     },
-    [client, props, snapshot],
+    [client, props],
   );
 
   const hide = (id: string) => {

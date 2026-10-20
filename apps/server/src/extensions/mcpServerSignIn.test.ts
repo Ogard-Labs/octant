@@ -28,7 +28,14 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
 
 /** A hosted server with its own authorization server, both answering as the MCP flow lays out. */
 function issuerFetch(
-  options: { readonly registration?: boolean; readonly scopes?: string[] } = {},
+  options: {
+    readonly registration?: boolean;
+    readonly scopes?: string[];
+    /** What the protected-resource metadata claims to be; the server itself by default. */
+    readonly resource?: string;
+    /** What the authorization-server metadata calls its issuer; the real one by default. */
+    readonly issuerClaim?: string;
+  } = {},
 ) {
   const calls: Array<{ url: string; body?: unknown }> = [];
   const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -44,14 +51,14 @@ function issuerFetch(
     }
     if (url === "https://mcp.example/.well-known/oauth-protected-resource/mcp") {
       return json({
-        resource: SERVER,
+        resource: options.resource ?? SERVER,
         authorization_servers: [ISSUER],
         ...(options.scopes === undefined ? {} : { scopes_supported: options.scopes }),
       });
     }
     if (url === `${ISSUER}/.well-known/oauth-authorization-server`) {
       return json({
-        issuer: ISSUER,
+        issuer: options.issuerClaim ?? ISSUER,
         authorization_endpoint: `${ISSUER}/authorize`,
         token_endpoint: `${ISSUER}/token`,
         code_challenge_methods_supported: ["S256"],
@@ -173,7 +180,7 @@ describe("signing in to a hosted MCP server", () => {
       kind: "signed-in",
       issuer: "auth.example",
     });
-    expect(await service.status(EXTENSION, COMPONENT)).toEqual({
+    expect(await service.status(EXTENSION, COMPONENT, "local-window")).toEqual({
       kind: "signed-in",
       issuer: "auth.example",
     });
@@ -197,7 +204,9 @@ describe("signing in to a hosted MCP server", () => {
       kind: "signed-out",
     });
     expect(signedOut).toEqual([CREDENTIAL]);
-    expect(await service.status(EXTENSION, COMPONENT)).toEqual({ kind: "signed-out" });
+    expect(await service.status(EXTENSION, COMPONENT, "local-window")).toEqual({
+      kind: "signed-out",
+    });
   });
 
   it("says plainly when the issuer offers no client registration, and when the server asks for no sign-in", async () => {
@@ -228,13 +237,15 @@ describe("signing in to a hosted MCP server", () => {
     expect(oauth.begin).not.toHaveBeenCalled();
 
     const { service: command } = await signIn({ fetchImpl, oauth, serverUrl: undefined });
-    expect(await command.status(EXTENSION, COMPONENT)).toEqual({ kind: "not-applicable" });
+    expect(await command.status(EXTENSION, COMPONENT, "local-window")).toEqual({
+      kind: "not-applicable",
+    });
   });
 
-  it("leaves the launch alone when the broker can no longer honour the grant", async () => {
+  it("sends the launch out bare and says Sign in again once the broker reports the grant gone", async () => {
     const { fetchImpl } = issuerFetch();
     const { oauth } = fakeOauth();
-    const { service } = await signIn({
+    const { service, statePath } = await signIn({
       fetchImpl,
       oauth,
       access: async () => ({ kind: "sign-in-again", reason: "revoked" }),
@@ -248,5 +259,78 @@ describe("signing in to a hosted MCP server", () => {
       headers: {},
     };
     expect(await service.attachBearer(EXTENSION, COMPONENT, launch)).toEqual(launch);
+    expect(await service.status(EXTENSION, COMPONENT, "local-window")).toEqual({
+      kind: "sign-in-again",
+      reason: "revoked",
+    });
+    expect(
+      JSON.parse(await readFile(statePath, "utf8")).signIns[`${EXTENSION}:${COMPONENT}`],
+    ).toMatchObject({ signInAgain: "revoked" });
+
+    const { service: flaky } = await signIn({
+      fetchImpl,
+      oauth,
+      access: async () => ({ kind: "unavailable" }),
+    });
+    await flaky.begin(EXTENSION, COMPONENT, "local-window");
+    await flaky.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window");
+    expect(await flaky.attachBearer(EXTENSION, COMPONENT, launch)).toEqual(launch);
+    expect(await flaky.status(EXTENSION, COMPONENT, "local-window")).toEqual({
+      kind: "signed-in",
+      issuer: "auth.example",
+    });
+  });
+
+  it("refuses a server whose metadata names another resource, and an issuer document that names another issuer", async () => {
+    const { oauth } = fakeOauth();
+    const { service: impostor } = await signIn({
+      fetchImpl: issuerFetch({ resource: "https://api.example/v1" }).fetchImpl,
+      oauth,
+    });
+    expect(await impostor.begin(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "refused",
+      reason: "issuer-unsupported",
+      message: "The server's metadata names a different resource than its own address.",
+    });
+
+    const { service: mixedUp } = await signIn({
+      fetchImpl: issuerFetch({ issuerClaim: "https://other.example" }).fetchImpl,
+      oauth,
+    });
+    expect(await mixedUp.begin(EXTENSION, COMPONENT, "local-window")).toMatchObject({
+      kind: "refused",
+      reason: "issuer-unsupported",
+    });
+    expect(oauth.begin).not.toHaveBeenCalled();
+  });
+
+  it("lets a paired device read a pending sign-in without finishing it", async () => {
+    const { fetchImpl } = issuerFetch();
+    const { oauth } = fakeOauth();
+    const { service } = await signIn({ fetchImpl, oauth });
+    const begun = await service.begin(EXTENSION, COMPONENT, "local-window");
+
+    expect(await service.status(EXTENSION, COMPONENT, "remote-device")).toEqual(begun);
+    expect(await service.poll(EXTENSION, COMPONENT, ATTEMPT, "remote-device")).toMatchObject({
+      kind: "refused",
+      reason: "local-host-required",
+    });
+    expect(oauth.status).not.toHaveBeenCalled();
+
+    expect(await service.poll(EXTENSION, COMPONENT, ATTEMPT, "local-window")).toEqual({
+      kind: "signed-in",
+      issuer: "auth.example",
+    });
+  });
+
+  it("keeps a URL-shaped scope the resource advertises", async () => {
+    const scope = "https://www.googleapis.com/auth/drive.readonly";
+    const { fetchImpl, calls } = issuerFetch({ scopes: [scope, "bad scope", "mcp:tools"] });
+    const { oauth, begun } = fakeOauth();
+    const { service } = await signIn({ fetchImpl, oauth });
+    await service.begin(EXTENSION, COMPONENT, "local-window");
+    expect(begun[0]?.scopes).toEqual([scope, "mcp:tools"]);
+    const registration = calls.find((call) => call.url === `${ISSUER}/register`);
+    expect(registration?.body).toMatchObject({ scope: `${scope} mcp:tools` });
   });
 });

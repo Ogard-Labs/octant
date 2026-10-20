@@ -1,5 +1,6 @@
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { CONNECTOR_PACKAGE_PREFIX, connectorById, connectorPackageName } from "@octant/domain";
 import type { UserAddedMcpServerRequest } from "@octant/contracts/extension-rpc";
 import type { ExtensionSource } from "@octant/contracts/extensions";
 import {
@@ -17,6 +18,8 @@ import type { LocalPluginFolderRegistry } from "./localPluginFolderRegistry";
  * could echo in part.
  */
 const SECRET_REFERENCE = /^\$\{OCTANT_SECRET:([0-9a-f-]{36})\}$/;
+/** A `${NAME}` left in a secret, which would be kept as that literal text. */
+const UNRESOLVED_PLACEHOLDER = /\$\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\}/;
 const RESERVED_ENV = new Set(["PLUGIN_ROOT", "PLUGIN_DATA"]);
 
 export type UserAddedMcpServerSource = Extract<ExtensionSource, { readonly kind: "user-added" }>;
@@ -63,7 +66,13 @@ export class UserAddedMcpServerStore {
   }
 
   async add(request: UserAddedMcpServerRequest): Promise<{ source: UserAddedMcpServerSource }> {
-    const slug = packageSlug(request.name);
+    const slug = connectorSlug(request) ?? packageSlug(request.name);
+    if (request.connectorId === undefined && slug.startsWith(CONNECTOR_PACKAGE_PREFIX)) {
+      throw new UserAddedMcpServerError(
+        "invalid",
+        `Names starting with ${CONNECTOR_PACKAGE_PREFIX} are kept for Connectors. Pick another name.`,
+      );
+    }
     const folder = join(this.#directory, slug);
     if (await exists(folder)) {
       throw new UserAddedMcpServerError("conflict", "A server with this name is already added.");
@@ -97,6 +106,12 @@ export class UserAddedMcpServerStore {
         }
         if (value.value.length === 0) {
           throw new UserAddedMcpServerError("invalid", `${value.name} is marked secret but empty.`);
+        }
+        if (UNRESOLVED_PLACEHOLDER.test(value.value)) {
+          throw new UserAddedMcpServerError(
+            "invalid",
+            `${value.name} still holds a placeholder instead of its value.`,
+          );
         }
         const secretId = this.#uuid();
         await this.#secrets?.set(secretId, value.value);
@@ -152,6 +167,16 @@ export class UserAddedMcpServerStore {
         error instanceof Error ? error.message : "The server could not be added.",
       );
     }
+  }
+
+  /**
+   * Whether the host wrote the package with this source reference for a server
+   * the person added. Installing a package rewrites its manifest source to a
+   * generic kind, so the manifest cannot vouch for itself: only this host's
+   * own registry of generated folders can.
+   */
+  owns(sourceRef: string): boolean {
+    return this.#registry.get(sourceRef) !== undefined;
   }
 
   /** Removes the generated folder and every secret its package referenced. */
@@ -256,6 +281,23 @@ export function packageSlug(name: string): string {
     );
   }
   return slug;
+}
+
+/**
+ * The reserved package name for a connector add, or undefined for a hand add.
+ * The id must be in the bundled catalog and the address must be the entry's
+ * own, so the reserved name cannot be put on any other server.
+ */
+function connectorSlug(request: UserAddedMcpServerRequest): string | undefined {
+  if (request.connectorId === undefined) return undefined;
+  const entry = connectorById(request.connectorId);
+  if (entry === undefined) {
+    throw new UserAddedMcpServerError("invalid", "This connector is not in the catalog.");
+  }
+  if (request.server.type !== "streamable-http" || request.server.url !== entry.url) {
+    throw new UserAddedMcpServerError("invalid", "This address is not the connector's own.");
+  }
+  return connectorPackageName(entry.id);
 }
 
 function validateRemoteUrl(url: string): void {

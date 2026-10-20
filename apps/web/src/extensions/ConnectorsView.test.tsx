@@ -15,11 +15,15 @@ function snapshotWith(packages: ExtensionSnapshot["packages"] = []): ExtensionSn
   };
 }
 
-function addedPackage(displayName: string): ExtensionSnapshot["packages"][number] {
+function addedPackage(
+  slug: string,
+  extensionId = EXTENSION,
+): ExtensionSnapshot["packages"][number] {
   return {
-    extensionId: EXTENSION,
+    extensionId,
     packageId: "44000000-0000-4000-8000-000000000003",
-    displayName,
+    slug,
+    displayName: slug,
     version: "1.0.0",
     digest: `sha256:${"a".repeat(64)}`,
     source: { kind: "user-added", sourceRef: "user-linear" },
@@ -44,7 +48,8 @@ describe("Connectors", () => {
     const user = userEvent.setup();
     const addUserMcpServer = vi.fn(async () => ({
       kind: "extension-state-updated",
-      snapshot: snapshotWith([addedPackage("linear")]),
+      snapshot: snapshotWith([addedPackage("connector-linear")]),
+      addedPackage: { extensionId: EXTENSION, componentId: "mcp-linear" },
     })) as never;
     const mcpServerSignIn = vi
       .fn()
@@ -72,6 +77,7 @@ describe("Connectors", () => {
     await waitFor(() => expect(onConnected).toHaveBeenCalled());
     expect(addUserMcpServer).toHaveBeenCalledWith({
       name: "Linear",
+      connectorId: "linear",
       server: { type: "streamable-http", url: "https://mcp.linear.app/mcp", headers: [] },
     });
     expect(await screen.findByRole("link", { name: "Open the sign-in page" })).toHaveAttribute(
@@ -112,6 +118,7 @@ describe("Connectors", () => {
     await waitFor(() =>
       expect(addUserMcpServer).toHaveBeenCalledWith({
         name: "GitHub",
+        connectorId: "github",
         server: {
           type: "streamable-http",
           url: "https://api.githubcopilot.com/mcp/",
@@ -136,7 +143,7 @@ describe("Connectors", () => {
         disabled={false}
         localHost
         onConnected={vi.fn()}
-        snapshot={snapshotWith([addedPackage("linear")])}
+        snapshot={snapshotWith([addedPackage("connector-linear")])}
       />,
     );
     expect(screen.getByRole("button", { name: "Connect Notion" })).toBeInTheDocument();
@@ -164,6 +171,56 @@ describe("Connectors", () => {
     expect(
       within(popular).queryByRole("button", { name: "Connect Linear" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("does not show a server the person named like a connector as Connected", () => {
+    render(
+      <ConnectorsView
+        actions={null}
+        client={{ addUserMcpServer: vi.fn() as never, mcpServerSignIn: vi.fn() as never }}
+        disabled={false}
+        localHost
+        onConnected={vi.fn()}
+        snapshot={snapshotWith([addedPackage("linear")])}
+      />,
+    );
+    const popular = screen.getByRole("region", { name: "Popular" });
+    expect(within(popular).getByRole("button", { name: "Connect Linear" })).toBeEnabled();
+  });
+
+  it("signs in to the package the add reports, not another one that appeared meanwhile", async () => {
+    const user = userEvent.setup();
+    const other = "44000000-0000-4000-8000-000000000009";
+    const addUserMcpServer = vi.fn(async () => ({
+      kind: "extension-state-updated",
+      snapshot: snapshotWith([
+        addedPackage("other-server", other),
+        addedPackage("connector-linear"),
+      ]),
+      addedPackage: { extensionId: EXTENSION, componentId: "mcp-linear" },
+    })) as never;
+    const mcpServerSignIn = vi.fn(async () => ({ kind: "signed-out" }));
+    render(
+      <ConnectorsView
+        actions={null}
+        client={{ addUserMcpServer, mcpServerSignIn: mcpServerSignIn as never }}
+        disabled={false}
+        localHost
+        onConnected={vi.fn()}
+        snapshot={snapshotWith()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Connect Linear" }));
+    await waitFor(() =>
+      expect(mcpServerSignIn).toHaveBeenCalledWith({
+        kind: "begin",
+        extensionId: EXTENSION,
+        componentId: "mcp-linear",
+      }),
+    );
+    expect(mcpServerSignIn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ extensionId: other }),
+    );
   });
 
   it("explains that a browser-hosted Settings cannot connect", () => {

@@ -3,13 +3,20 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname } from "node:path";
 import type { McpServerSignInView } from "@octant/contracts/extension-rpc";
-import type { HostOAuthDescriptor, HostOAuthSignInState } from "@octant/contracts/host-oauth";
+import type {
+  HostOAuthDescriptor,
+  HostOAuthSignInAgainReason,
+  HostOAuthSignInState,
+} from "@octant/contracts/host-oauth";
 import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
 import type { HostOAuthService } from "../providers/oauth/hostOAuthService";
 
 const TERMS_ID = "mcp-sign-in-terms-1";
 const METADATA_BYTES = 64 * 1_024;
 const REQUEST_TIMEOUT_MS = 10_000;
+// RFC 6749 §3.3 scope-token: a resource may advertise URL-shaped scopes, and
+// dropping one silently would register and authorize without it.
+const SCOPE_TOKEN_PATTERN = /^[\x21\x23-\x5B\x5D-\x7E]{1,256}$/;
 
 type PrincipalKind = "local-window" | "remote-device";
 
@@ -17,7 +24,11 @@ export interface McpServerSignInRecord {
   readonly credentialRef: string;
   readonly descriptor: HostOAuthDescriptor;
   readonly issuer: string;
+  /** Set once the broker answered that the grant is gone; Settings then says Sign in again. */
+  readonly signInAgain?: HostOAuthSignInAgainReason;
 }
+
+type AwaitingConsent = Extract<McpServerSignInView, { kind: "awaiting-consent" }>;
 
 interface PersistedSignIns {
   readonly schemaVersion: 1;
@@ -72,6 +83,8 @@ export class McpServerSignIn {
       readonly attemptId: string;
       readonly discovered: Extract<Discovered, { kind: "discovered" }>;
       readonly descriptor: HostOAuthDescriptor;
+      /** The last state shown, so a paired device can read it without polling. */
+      readonly view: AwaitingConsent;
     }
   >();
   #loaded = false;
@@ -81,15 +94,27 @@ export class McpServerSignIn {
     this.#fetch = options.fetch ?? globalThis.fetch;
   }
 
-  async status(extensionId: string, componentId: string): Promise<McpServerSignInView> {
+  /**
+   * The state as of now. A local window polls a pending attempt, which may
+   * finish it; a paired device only reads what is known, since finishing a
+   * sign-in is a host action (observed: a remote status read used to poll
+   * as the local window and could persist the grant).
+   */
+  async status(
+    extensionId: string,
+    componentId: string,
+    principalKind: PrincipalKind,
+  ): Promise<McpServerSignInView> {
     await this.#load();
     const key = signInKey(extensionId, componentId);
     const pending = this.#attempts.get(key);
     if (pending !== undefined) {
-      return this.#poll(key, pending.attemptId, "local-window");
+      return principalKind === "local-window"
+        ? this.#poll(key, pending.attemptId, principalKind)
+        : pending.view;
     }
     const record = this.#signIns.get(key);
-    if (record !== undefined) return { kind: "signed-in", issuer: record.issuer };
+    if (record !== undefined) return recordView(record);
     const url = await this.#options.serverUrl(extensionId, componentId);
     if (url === undefined) return { kind: "not-applicable" };
     return { kind: "signed-out" };
@@ -161,13 +186,14 @@ export class McpServerSignIn {
       descriptor,
     });
     if (state.kind === "awaiting-consent" && state.flow === "authorization-code-pkce") {
-      this.#attempts.set(key, { attemptId: state.attemptId, discovered, descriptor });
-      return {
+      const view: AwaitingConsent = {
         kind: "awaiting-consent",
         attemptId: state.attemptId,
         authorizationUrl: state.authorizationUrl,
         expiresAt: state.expiresAt,
       };
+      this.#attempts.set(key, { attemptId: state.attemptId, discovered, descriptor, view });
+      return view;
     }
     return viewOf(state, discovered.issuer);
   }
@@ -190,9 +216,12 @@ export class McpServerSignIn {
     const pending = this.#attempts.get(key);
     if (pending === undefined || pending.attemptId !== attemptId) {
       const record = this.#signIns.get(key);
-      return record === undefined
-        ? { kind: "signed-out" }
-        : { kind: "signed-in", issuer: record.issuer };
+      return record === undefined ? { kind: "signed-out" } : recordView(record);
+    }
+    // Polling can finish the attempt and store the grant; a paired device
+    // may neither, and the broker's own refusal must not end the attempt.
+    if (principalKind !== "local-window") {
+      return refused("local-host-required", "Sign in from the Octant window on this host.");
     }
     const state = await this.#options.oauth.status({
       principalKind,
@@ -211,12 +240,14 @@ export class McpServerSignIn {
     }
     if (state.kind === "refused") this.#attempts.delete(key);
     if (state.kind === "awaiting-consent" && state.flow === "authorization-code-pkce") {
-      return {
+      const view: AwaitingConsent = {
         kind: "awaiting-consent",
         attemptId: state.attemptId,
         authorizationUrl: state.authorizationUrl,
         expiresAt: state.expiresAt,
       };
+      this.#attempts.set(key, { ...pending, view });
+      return view;
     }
     return viewOf(state, pending.discovered.issuer);
   }
@@ -268,8 +299,9 @@ export class McpServerSignIn {
 
   /**
    * Attaches the signed-in bearer to a launch, when there is one. A sign-in
-   * whose grant the broker can no longer honour leaves the launch alone and
-   * the server answers 401, which Settings shows as Sign in again.
+   * whose grant the broker says is gone (revoked, expired, refresh reused) is
+   * marked so Settings shows Sign in again; the launch goes out bare and the
+   * server answers 401. A broker that is merely unavailable changes nothing.
    */
   async attachBearer(
     extensionId: string,
@@ -278,7 +310,8 @@ export class McpServerSignIn {
   ): Promise<AgentPluginsMcpLaunchSpec> {
     await this.#load();
     if (launch.transport === "stdio") return launch;
-    const record = this.#signIns.get(signInKey(extensionId, componentId));
+    const key = signInKey(extensionId, componentId);
+    const record = this.#signIns.get(key);
     if (record === undefined) return launch;
     let answer: unknown;
     try {
@@ -286,9 +319,16 @@ export class McpServerSignIn {
     } catch {
       return launch;
     }
-    if (!isRecord(answer) || answer.kind !== "granted" || typeof answer.accessToken !== "string") {
+    if (!isRecord(answer)) return launch;
+    if (answer.kind === "sign-in-again") {
+      const reason = signInAgainReason(answer.reason);
+      if (reason !== undefined && record.signInAgain !== reason) {
+        this.#signIns.set(key, { ...record, signInAgain: reason });
+        await this.#persist();
+      }
       return launch;
     }
+    if (answer.kind !== "granted" || typeof answer.accessToken !== "string") return launch;
     const tokenType = typeof answer.tokenType === "string" ? answer.tokenType : "Bearer";
     return {
       ...launch,
@@ -350,10 +390,20 @@ export class McpServerSignIn {
         message: "The server's metadata names no https authorization server.",
       };
     }
-    const resource =
-      typeof metadata.resource === "string" && isAbsoluteUrl(metadata.resource)
-        ? metadata.resource
-        : canonicalResource(serverUrl);
+    // RFC 9728 §3.3: the metadata must name this very server. Accepting
+    // another resource would let a server obtain a bearer meant for a
+    // different API and then receive it on connect.
+    const resource = canonicalResource(serverUrl);
+    if (
+      typeof metadata.resource !== "string" ||
+      !isAbsoluteUrl(metadata.resource) ||
+      canonicalResource(metadata.resource) !== resource
+    ) {
+      return {
+        kind: "issuer-unsupported",
+        message: "The server's metadata names a different resource than its own address.",
+      };
+    }
     const issuerUrl = new URL(issuer);
     const path = issuerUrl.pathname === "/" ? "" : issuerUrl.pathname.replace(/\/$/, "");
     let issuerMetadata: Record<string, unknown> | undefined;
@@ -369,6 +419,9 @@ export class McpServerSignIn {
     const tokenEndpoint = issuerMetadata?.token_endpoint;
     if (
       issuerMetadata === undefined ||
+      // RFC 8414 §3.3: the document must name the issuer it was fetched for,
+      // or its endpoints may belong to another tenant (issuer mix-up).
+      issuerMetadata.issuer !== issuer ||
       typeof authorizationEndpoint !== "string" ||
       typeof tokenEndpoint !== "string" ||
       !isHttps(authorizationEndpoint) ||
@@ -390,7 +443,7 @@ export class McpServerSignIn {
     const scopes = Array.isArray(metadata.scopes_supported)
       ? metadata.scopes_supported
           .filter((entry): entry is string => typeof entry === "string")
-          .filter((entry) => /^[A-Za-z0-9._:-]{1,128}$/.test(entry))
+          .filter((entry) => SCOPE_TOKEN_PATTERN.test(entry))
           .slice(0, 16)
       : [];
     return {
@@ -507,6 +560,18 @@ function refused(
   message: string,
 ): McpServerSignInView {
   return { kind: "refused", reason, message };
+}
+
+function recordView(record: McpServerSignInRecord): McpServerSignInView {
+  return record.signInAgain === undefined
+    ? { kind: "signed-in", issuer: record.issuer }
+    : { kind: "sign-in-again", reason: record.signInAgain };
+}
+
+function signInAgainReason(value: unknown): HostOAuthSignInAgainReason | undefined {
+  return value === "revoked" || value === "expired" || value === "refresh-reused"
+    ? value
+    : undefined;
 }
 
 function fromRefusal(reason: string): McpServerSignInView {

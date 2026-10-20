@@ -141,7 +141,6 @@ import type {
   ExtensionProjectPinListing,
   McpServerSignInView,
 } from "@octant/contracts/extension-rpc";
-import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { validateAgentPluginsMcpDocument } from "@octant/plugin-host/agent-plugins";
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import { createExtensionToolCallAuthorizer } from "../extensions/extensionToolCallAuthorizer";
@@ -598,9 +597,10 @@ export function wireProviders(deps: ProvidersDependencies) {
           isMarketplaceFetchAllowed,
         }),
       });
-    // A pin offers a plugin on every Work or Code turn in one Project. Only a
-    // package that is installed, trusted and switched on rides along: a pin
-    // to anything else is skipped rather than failing the turn.
+    // A pin offers a plugin on every Work or Code turn in one Project. The
+    // turn's extension resolver turns each pinned id into a selection against
+    // the Project's current catalog, so a pin to a package that is not
+    // installed, trusted and switched on is skipped rather than failing the turn.
     const extensionProjectPinStore = new ExtensionProjectPinStore({
       journal: persistence.journal,
       connection: persistence.connection,
@@ -608,20 +608,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       clock: () => new Date().toISOString(),
       actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
     });
-    const pinnedExtensionSelections = (projectId: string): ReadonlyArray<ExtensionSelection> => {
-      const pinned = extensionProjectPinStore.list(projectId);
-      if (pinned.length === 0) return [];
-      const packages = extensionLifecycleService.snapshot().packages;
-      return pinned.flatMap((extensionId) => {
-        const pkg = packages.find((candidate) => String(candidate.extensionId) === extensionId);
-        return pkg !== undefined &&
-          pkg.activation.installed &&
-          pkg.activation.trusted &&
-          pkg.activation.pluginDesired
-          ? [{ kind: "plugin", extensionId: pkg.extensionId } as ExtensionSelection]
-          : [];
-      });
-    };
+    const pinnedExtensionIds = (projectId: string): ReadonlyArray<string> =>
+      extensionProjectPinStore.list(projectId);
     const extensionToolGrantStore = new ExtensionToolGrantStore({
       journal: persistence.journal,
       connection: persistence.connection,
@@ -645,6 +633,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             readApprovalOutsideContent(persistence.connection, threadId),
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
         resolveUserAddedSecrets: async (launch, target) => {
           const withSecrets = await userAddedMcpServers.resolveLaunchSecrets(launch);
           const signIn = mcpServerSignInHolder.current;
@@ -695,6 +684,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
       },
       userAddedMcpServers: {
+        owns: (sourceRef) => userAddedMcpServers.owns(sourceRef),
         remove: async (sourceRef, extensionId) => {
           await mcpServerSignInHolder.current?.forgetPackage(extensionId);
           await userAddedMcpServers.remove(sourceRef);
@@ -770,8 +760,8 @@ export function wireProviders(deps: ProvidersDependencies) {
         },
       },
       mcpServerSignIn: {
-        status: (extensionId, componentId) =>
-          signInOrUnavailable((signIn) => signIn.status(extensionId, componentId)),
+        status: (extensionId, componentId, principalKind) =>
+          signInOrUnavailable((signIn) => signIn.status(extensionId, componentId, principalKind)),
         begin: (extensionId, componentId, principalKind) =>
           signInOrUnavailable((signIn) => signIn.begin(extensionId, componentId, principalKind)),
         poll: (extensionId, componentId, attemptId, principalKind) =>
@@ -1439,7 +1429,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerUsageLimitsService,
       refreshStandaloneSkills,
       resolveSelectedExtensions,
-      pinnedExtensionSelections,
+      pinnedExtensionIds,
       reviewedModelManifest,
       skillDiscoveryService,
     };

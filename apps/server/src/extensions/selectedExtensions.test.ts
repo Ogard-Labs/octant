@@ -489,6 +489,49 @@ describe("selected MCP servers in Work and Code", () => {
     },
   );
 
+  it.each(["work", "code"] as const)(
+    "offers a Project's pinned plugin to a %s turn as if it were named, once, and skips a pin it cannot place",
+    async (mode) => {
+      const test = mcpFixture(mode);
+      const pinnedOnly = await test.resolve({
+        mode,
+        thread,
+        selections: [],
+        pinnedExtensionIds: [extensionId],
+        windowId,
+      });
+      if (pinnedOnly.kind !== "resolved" || pinnedOnly.tools === undefined) {
+        throw new Error(`Expected tools, got ${JSON.stringify(pinnedOnly)}`);
+      }
+      expect(pinnedOnly.tools.definitions.map((definition) => definition.name)).toEqual([
+        "notes_search",
+      ]);
+
+      const doubled = await test.resolve({
+        mode,
+        thread,
+        selections: [test.selection],
+        pinnedExtensionIds: [extensionId],
+        windowId,
+      });
+      if (doubled.kind !== "resolved" || doubled.tools === undefined) {
+        throw new Error(`Expected tools, got ${JSON.stringify(doubled)}`);
+      }
+      expect(doubled.tools.definitions.map((definition) => definition.name)).toEqual([
+        "notes_search",
+      ]);
+
+      const unplaceable = await test.resolve({
+        mode,
+        thread,
+        selections: [],
+        pinnedExtensionIds: ["94000000-0000-4000-8000-000000000099"],
+        windowId,
+      });
+      expect(unplaceable).toEqual({ kind: "resolved", context: [] });
+    },
+  );
+
   it("refuses a tool the turn did not select", async () => {
     const test = mcpFixture("work");
     const result = await test.resolve({
