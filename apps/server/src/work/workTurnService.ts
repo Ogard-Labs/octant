@@ -1661,6 +1661,21 @@ export class WorkTurnService {
       });
       runOutcome = outcome;
       const wroteFiles = observation?.finish();
+      if (
+        outcome.kind === "completed" &&
+        harnessScope !== undefined &&
+        this.#nativeHarness !== undefined
+      ) {
+        await this.#nativeHarness
+          .turnCompleted({
+            ...harnessScope,
+            text: outcome.response,
+            toolCalls: 0,
+            ...(endedTurn === undefined ? {} : { turn: endedTurn }),
+          })
+          .catch(() => undefined);
+      }
+      // Completion observers can yield; cancellation committed meanwhile wins.
       const latest = this.#projection.lookup(input.command.requestId);
       if (latest === undefined) return;
       if (latest.status === "cancelled") {
@@ -1685,20 +1700,6 @@ export class WorkTurnService {
           }
         }
         return;
-      }
-      if (
-        outcome.kind === "completed" &&
-        harnessScope !== undefined &&
-        this.#nativeHarness !== undefined
-      ) {
-        await this.#nativeHarness
-          .turnCompleted({
-            ...harnessScope,
-            text: outcome.response,
-            toolCalls: 0,
-            ...(endedTurn === undefined ? {} : { turn: endedTurn }),
-          })
-          .catch(() => undefined);
       }
       const live = this.#liveResponses.get(String(input.command.requestId));
       this.#persistOutcome(
@@ -1729,7 +1730,14 @@ export class WorkTurnService {
         this.#reconcileWorkUsage(published.snapshot, turnUsage, usageFacts);
       }
       // Record the final outcome after completion, cancellation and cleanup settle.
-      if (harnessScope !== undefined) this.#nativeHarness?.turnEnded?.(harnessScope, endedTurn);
+      if (harnessScope !== undefined) {
+        const settled = this.#projection.lookup(input.command.requestId);
+        const finalTurn =
+          endedTurn !== undefined && settled?.status === "cancelled"
+            ? { ...endedTurn, stopReason: "cancelled" as const }
+            : endedTurn;
+        this.#nativeHarness?.turnEnded?.(harnessScope, finalTurn);
+      }
     }
   }
 
