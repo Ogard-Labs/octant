@@ -201,10 +201,22 @@ function DesignBoard({
   const [playing, setPlaying] = useState<string | undefined>(undefined);
   const playButton = useRef<HTMLButtonElement>(null);
   const [boardRef, board] = useSize();
-  const boardWidth = board?.width;
   const viewport = CANVAS_DESIGN_VIEWPORT[size];
-  const frameWidth = Math.min(BOARD_FRAME_WIDTH[size], boardWidth ?? Infinity);
-  const scale = frameWidth / viewport.width;
+  const cap = BOARD_FRAME_WIDTH[size];
+  // The stylesheet draws each box as wide as the board allows, up to its cap,
+  // from the first paint. The page inside is scaled to the same width once the
+  // board is measured, and waits until then: a page scaled for the cap in a
+  // narrower column was clipped on the right. Where nothing can measure, the
+  // cap stands.
+  const frameWidth =
+    board === undefined
+      ? typeof ResizeObserver === "undefined"
+        ? cap
+        : undefined
+      : Math.min(cap, board.width);
+  const scale = frameWidth === undefined ? undefined : frameWidth / viewport.width;
+  const frameStyle = { "--canvas-design-frame-cap": `${String(cap)}px` } as CSSProperties;
+  const [watchFrame, frameIsNear] = useFramesNearView(block.frames.map((f) => String(f.frameId)));
   const count = block.frames.length;
   const noun = slides ? (count === 1 ? "slide" : "slides") : count === 1 ? "screen" : "screens";
   const first = String(block.frames[0]?.frameId ?? "");
@@ -236,7 +248,13 @@ function DesignBoard({
       </header>
       <div className="canvas-design__board" ref={boardRef}>
         {block.frames.map((frame, index) => (
-          <figure className="canvas-design__frame" key={String(frame.frameId)}>
+          <figure
+            className="canvas-design__frame"
+            data-canvas-design-frame={String(frame.frameId)}
+            key={String(frame.frameId)}
+            ref={watchFrame}
+            style={frameStyle}
+          >
             <figcaption className="canvas-design__caption">
               <span className="canvas-design__index">{String(index + 1)}</span>
               <span className="canvas-design__frame-title">{frame.title}</span>
@@ -245,17 +263,19 @@ function DesignBoard({
                 button lies over the picture instead of holding it. */}
             <div
               className="canvas-design__preview"
-              style={{ width: frameWidth, height: viewport.height * scale }}
+              style={{ aspectRatio: `${String(viewport.width)} / ${String(viewport.height)}` }}
             >
-              <FrameView
-                block={block}
-                frameIds={[String(frame.frameId)]}
-                size={size}
-                still
-                scale={scale}
-                frame={inputs}
-                title={`${frame.title}, ${SIZE_NAME[block.size]} ${slides ? "slide" : "screen"}`}
-              />
+              {scale === undefined || !frameIsNear(index) ? null : (
+                <FrameView
+                  block={block}
+                  frameIds={[String(frame.frameId)]}
+                  size={size}
+                  still
+                  scale={scale}
+                  frame={inputs}
+                  title={`${frame.title}, ${SIZE_NAME[block.size]} ${slides ? "slide" : "screen"}`}
+                />
+              )}
               <OctantButton
                 aria-label={`${slides ? "Present from" : "Play from"} ${frame.title}`}
                 className="canvas-design__open"
@@ -311,7 +331,6 @@ function DesignPlayer({
     stage === undefined
       ? 1
       : Math.min(1, stage.width / viewport.width, stage.height / viewport.height);
-  const current = block.frames[index];
   const last = block.frames.length - 1;
 
   const step = (by: number) => setIndex((value) => Math.min(last, Math.max(0, value + by)));
@@ -397,21 +416,27 @@ function DesignPlayer({
             style={{ width: viewport.width * scale, height: viewport.height * scale }}
           >
             {slides ? (
-              current === undefined ? null : (
-                <>
-                  <FrameView
-                    block={block}
-                    frameIds={[String(current.frameId)]}
-                    key={String(current.frameId)}
-                    scale={scale}
-                    size={size}
-                    still
-                    frame={inputs}
-                    title={`${current.title}, slide ${String(index + 1)}`}
-                  />
-                  <div aria-hidden="true" className="canvas-design__cover" />
-                </>
-              )
+              <>
+                {/* The slides either side are loaded but hidden, so a step
+                    shows a page that is already drawn; the rest of the deck
+                    waits, so a long deck opens as fast as a short one. */}
+                {block.frames.map((slide, at) =>
+                  Math.abs(at - index) > 1 ? null : (
+                    <FrameView
+                      block={block}
+                      frameIds={[String(slide.frameId)]}
+                      hidden={at !== index}
+                      key={String(slide.frameId)}
+                      scale={scale}
+                      size={size}
+                      still
+                      frame={inputs}
+                      title={`${slide.title}, slide ${String(at + 1)}`}
+                    />
+                  ),
+                )}
+                <div aria-hidden="true" className="canvas-design__cover" />
+              </>
             ) : (
               <FrameView
                 block={block}
@@ -446,6 +471,7 @@ function FrameView({
   scale,
   title,
   still = false,
+  hidden = false,
 }: {
   readonly block: CanvasDesignBlock;
   readonly size: CanvasDesignDeviceSize;
@@ -455,6 +481,8 @@ function FrameView({
   readonly scale: number;
   readonly title: string;
   readonly still?: boolean;
+  /** Loaded but not shown: a hidden frame still loads its page. */
+  readonly hidden?: boolean;
 }) {
   const viewport = CANVAS_DESIGN_VIEWPORT[size];
   // Keyed by the ids, not the array, so a parent's new array of the same ids
@@ -474,6 +502,7 @@ function FrameView({
   return (
     <iframe
       className="canvas-design__page"
+      hidden={hidden}
       onLoad={themed ? (event) => installFrameFonts(event.currentTarget) : undefined}
       referrerPolicy="no-referrer"
       sandbox={designFrameSandbox(block)}
@@ -1005,6 +1034,68 @@ function useWorkspaceFrameTheme(enabled: boolean): DesignFrameThemeValues | unde
     };
   }, [enabled]);
   return theme;
+}
+
+/**
+ * Which frames of a board load their page: those that have come into view and
+ * their neighbours, so the next slide is drawn before a reader scrolls to it. A
+ * frame once loaded stays loaded, so scrolling back reloads nothing. The viewport
+ * is watched, not the panel that scrolls, because a frame clipped by a scrolling
+ * ancestor does not intersect the viewport either; the neighbour rule is what
+ * loads ahead. Where nothing can watch the viewport, every page loads at once.
+ * (A six-slide deck took seconds to paint when every slide loaded on mount.)
+ */
+function useFramesNearView(
+  frameIds: ReadonlyArray<string>,
+): readonly [
+  watch: (element: HTMLElement | null) => (() => void) | undefined,
+  near: (index: number) => boolean,
+] {
+  const lazy = typeof IntersectionObserver !== "undefined";
+  const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set());
+  const observer = useRef<IntersectionObserver | null>(null);
+  const watched = useRef(new Set<Element>());
+  useEffect(() => {
+    if (!lazy) return;
+    const next = new IntersectionObserver((entries) => {
+      const shown = entries.flatMap((entry) => {
+        const id = entry.isIntersecting
+          ? entry.target.getAttribute("data-canvas-design-frame")
+          : null;
+        return id === null ? [] : [id];
+      });
+      if (shown.length === 0) return;
+      setSeen((current) => {
+        if (shown.every((id) => current.has(id))) return current;
+        return new Set([...current, ...shown]);
+      });
+    });
+    for (const element of watched.current) next.observe(element);
+    observer.current = next;
+    return () => {
+      next.disconnect();
+      observer.current = null;
+    };
+  }, [lazy]);
+  const watch = useCallback((element: HTMLElement | null) => {
+    if (element === null) return undefined;
+    watched.current.add(element);
+    observer.current?.observe(element);
+    return () => {
+      watched.current.delete(element);
+      observer.current?.unobserve(element);
+    };
+  }, []);
+  const near = useCallback(
+    (index: number) =>
+      !lazy ||
+      [index - 1, index, index + 1].some((at) => {
+        const id = frameIds[at];
+        return id !== undefined && seen.has(id);
+      }),
+    [frameIds, lazy, seen],
+  );
+  return [watch, near];
 }
 
 /**
