@@ -145,6 +145,32 @@ describe("FollowUpSuggestionChips", () => {
     expect(screen.queryByRole("group", { name: "Suggested tasks" })).toBeNull();
   });
 
+  it("hides the Environment copy too when the person dismisses the cards in the thread", async () => {
+    const otherThread = "00000000-0000-4000-8000-000000000021";
+    const client = {
+      suggestions: vi.fn(async () => ({ ...suggestions(), threadId: otherThread })),
+      preview: vi.fn(),
+      activate: vi.fn(),
+    };
+    const value = {
+      client: client as never,
+      mode: "code" as const,
+      onCreated: vi.fn(),
+      threadId: otherThread,
+    };
+    render(
+      <FollowUpSuggestionContext value={value}>
+        <FollowUpSuggestionChips {...value} />
+        <EnvironmentSuggestedTasks />
+      </FollowUpSuggestionContext>,
+    );
+    expect(await screen.findByRole("group", { name: "Suggested tasks" })).toBeVisible();
+    const [dismiss] = await screen.findAllByRole("button", { name: "Dismiss Add tests" });
+    await userEvent.click(dismiss!);
+    expect(screen.queryByRole("group", { name: "Suggested tasks" })).toBeNull();
+    expect(screen.queryAllByRole("region", { name: "Suggested follow-ups" })).toHaveLength(0);
+  });
+
   it("stays out of the composer when the latest reply suggested nothing", async () => {
     const client = {
       suggestions: vi.fn(async () => null),

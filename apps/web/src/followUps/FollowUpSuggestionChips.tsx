@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { X } from "lucide-react";
@@ -90,6 +91,30 @@ export function ComposerFollowUpSuggestions() {
   );
 }
 
+/**
+ * Which suggestion set the person dismissed on each thread, shared by every
+ * surface that shows it: dismissing at the foot of the thread also hides the
+ * Environment copy, and a remount does not bring it back. It lives for the
+ * window; a later reply's new set shows again.
+ */
+const dismissedTurnByThread = new Map<string, string>();
+const dismissalListeners = new Set<() => void>();
+
+function dismissFollowUps(threadId: string, turnId: string): void {
+  dismissedTurnByThread.set(threadId, turnId);
+  for (const listener of dismissalListeners) listener();
+}
+
+function useDismissedTurn(threadId: string): string | undefined {
+  return useSyncExternalStore(
+    (listener) => {
+      dismissalListeners.add(listener);
+      return () => dismissalListeners.delete(listener);
+    },
+    () => dismissedTurnByThread.get(threadId),
+  );
+}
+
 function describeCreation(creation: NativeHarnessFollowUpCreation): string {
   if (creation.kind === "same-thread") return "goes in this composer for you to send";
   if (creation.kind === "new-worktree") return "starts a new Code thread on its own worktree";
@@ -108,9 +133,9 @@ export function FollowUpSuggestionChips(props: FollowUpSuggestionChipsProps) {
   const [preview, setPreview] = useState<NativeHarnessFollowUpPreview>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const [dismissedTurnId, setDismissedTurnId] = useState<string>();
   const requestGeneration = useRef(0);
   const { client, threadId } = props;
+  const dismissedTurnId = useDismissedTurn(threadId);
   // The pane can move to another thread while a preview is on its way.
   const currentThread = useRef(threadId);
   currentThread.current = threadId;
@@ -233,7 +258,7 @@ export function FollowUpSuggestionChips(props: FollowUpSuggestionChipsProps) {
               <span className="follow-up-card__kind">{targetLabel(suggestion)}</span>
               <OctantIconButton
                 label={`Dismiss ${suggestion.title}`}
-                onClick={() => setDismissedTurnId(String(turnId))}
+                onClick={() => dismissFollowUps(threadId, String(turnId))}
                 size="icon-xs"
                 type="button"
               >
