@@ -228,6 +228,7 @@ function detachCallerSignal(
 
 function isLongLivedRead(url: URL): boolean {
   return (
+    url.pathname === "/api/code/terminals/live" ||
     url.pathname.endsWith("/events") ||
     url.pathname.includes("/stream/") ||
     url.pathname.endsWith("/changes") ||

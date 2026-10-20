@@ -2,6 +2,51 @@ import { describe, expect, it, vi } from "vitest";
 import { createRequestCoordinator } from "./requestCoordinator";
 
 describe("createRequestCoordinator", () => {
+  it("delivers each terminal reader live output before the shell stops", async () => {
+    const streams: ReadableStreamDefaultController<Uint8Array>[] = [];
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      signals.push(init?.signal);
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            streams.push(controller);
+            controller.enqueue(new TextEncoder().encode("prompt\n"));
+          },
+        }),
+        { headers: { "content-type": "application/x-ndjson" } },
+      );
+    });
+    const coordinated = createRequestCoordinator({ fetch: fetch as typeof globalThis.fetch });
+    const first = new AbortController();
+    const second = new AbortController();
+    const output: string[] = [];
+    const url = "http://127.0.0.1/api/code/terminals/live?terminalId=shell";
+    const reads = [first, second].map(async (controller) => {
+      const response = await coordinated(url, { signal: controller.signal });
+      const reader = response.body!.getReader();
+      try {
+        const frame = await reader.read();
+        output.push(new TextDecoder().decode(frame.value));
+      } finally {
+        reader.releaseLock();
+      }
+    });
+    try {
+      await vi.waitFor(() => expect(output).toEqual(["prompt\n", "prompt\n"]));
+      expect(fetch).toHaveBeenCalledTimes(2);
+      expect(signals).toEqual([first.signal, second.signal]);
+      first.abort();
+      expect(signals[0]?.aborted).toBe(true);
+      expect(signals[1]?.aborted).toBe(false);
+    } finally {
+      // Closing here lets a buffering regression settle instead of leaking
+      // pending reads after the assertion that output arrived while open.
+      for (const stream of streams) stream.close();
+      await Promise.all(reads);
+    }
+  });
+
   it("keeps the live browser fetch bound to its realm", async () => {
     const original = globalThis.fetch;
     try {

@@ -5,6 +5,8 @@ description: The Monaco editor, external-editor handoff, dirty-state protection,
 # Editor and Terminals
 
 Code mode provides a first-class editing surface and server-owned terminals.
+Terminal output appears while the shell is running; stopping the terminal is
+not required to see its prompt or command results.
 All authority lives server-side; the interface renders opaque file and
 checkout identities, never raw host paths.
 
