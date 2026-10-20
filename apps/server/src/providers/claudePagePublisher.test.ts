@@ -19,6 +19,7 @@ import type { ClaudeEnvironmentScope } from "./claudeEnvironment";
 import {
   CLAUDE_PAGE_API_KEY_REFUSAL,
   claudePagePublishDecision,
+  claudePagePublishOnce,
   makeClaudePagePublisher,
 } from "./claudePagePublisher";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
@@ -306,8 +307,9 @@ describe("publishing a Canvas page through the Claude runtime", () => {
           behavior: "allow",
           updatedInput: { file_path: filePath, title: "Launch plan" },
         });
+        // One approval is one page: a second publish of the same file is denied.
         await expect(hook("Artifact", { file_path: filePath })).resolves.toMatchObject({
-          behavior: "allow",
+          behavior: "deny",
         });
         await expect(hook("Artifact", { action: "list" })).resolves.toMatchObject({
           behavior: "deny",
@@ -477,6 +479,23 @@ describe("the one-shot publish decision", () => {
     expect(
       claudePagePublishDecision(hookRequest("Artifact", { file_path: "  " }), approved),
     ).toMatchObject({ behavior: "deny" });
+  });
+
+  it("allows one publish per approval and denies every call after it", () => {
+    const hook = claudePagePublishOnce(approved);
+    const call = hookRequest("Artifact", { file_path: "Launch plan.html" });
+    expect(hook(call)).toEqual({ behavior: "allow", updatedInput: approved_input() });
+    expect(hook(call)).toMatchObject({ behavior: "deny" });
+  });
+
+  it("still allows the approved publish after a refused call", () => {
+    const hook = claudePagePublishOnce(approved);
+    expect(hook(hookRequest("Artifact", { file_path: "other.html" }))).toMatchObject({
+      behavior: "deny",
+    });
+    expect(hook(hookRequest("Artifact", { file_path: "Launch plan.html" }))).toMatchObject({
+      behavior: "allow",
+    });
   });
 
   function approved_input() {

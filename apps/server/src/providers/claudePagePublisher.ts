@@ -154,6 +154,25 @@ export function claudePagePublishDecision(
   };
 }
 
+/**
+ * The one-shot's hook: the first approved publish is allowed and every call
+ * after it is denied, so one approval makes at most one page. A session that
+ * asked twice would otherwise publish twice while only the first address was
+ * reported.
+ */
+export function claudePagePublishOnce(approved: {
+  readonly filePath: string;
+  readonly title: string;
+}): (request: ClaudePreToolRequest) => ClaudePreToolDecision {
+  let published = false;
+  return (request) => {
+    if (published) return { behavior: "deny", message: "The approved page was already published." };
+    const decision = claudePagePublishDecision(request, approved);
+    if (decision.behavior === "allow") published = true;
+    return decision;
+  };
+}
+
 interface PublishTally {
   readonly artifactCalls: Set<string>;
   publishedUrl?: string;
@@ -263,6 +282,7 @@ export function makeClaudePagePublisher(options: ClaudePagePublisherOptions): Cl
           catch: () => failure("provider-failed", "Claude page publish could not write the page."),
         });
         const approved = { filePath, title: request.title };
+        const publishOnce = claudePagePublishOnce(approved);
         const query = yield* options.sdk.openQuery({
           binaryPath: instance.configuration.binaryPath,
           projectRoot: folder,
@@ -289,7 +309,7 @@ export function makeClaudePagePublisher(options: ClaudePagePublisherOptions): Cl
             behavior: "deny",
             message: "Only the approved page may be published.",
           }),
-          preToolUse: async (hookRequest) => claudePagePublishDecision(hookRequest, approved),
+          preToolUse: async (hookRequest) => publishOnce(hookRequest),
         });
         yield* query.send({ text: prompt(request.fileName, request.title) });
         const initial: PublishTally = {
