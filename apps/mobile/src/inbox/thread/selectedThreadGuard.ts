@@ -1,4 +1,4 @@
-import { createProjectRequestGuard } from "../projectRequestGuard";
+import { createRequestGuard } from "../requestGuard";
 
 /**
  * Outcome of work that started for one thread. `stale` means the selection
@@ -22,7 +22,7 @@ export interface SelectedThreadGuard {
 }
 
 export function createSelectedThreadGuard(): SelectedThreadGuard {
-  const generations = createProjectRequestGuard();
+  const generations = createRequestGuard();
   let selected: string | undefined;
   let generation = generations.begin();
 
