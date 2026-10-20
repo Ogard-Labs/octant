@@ -1,3 +1,5 @@
+import { createTabActivationRegistry, TabActivationProvider } from "./shell/TabActivation";
+import { workspaceDockTabId } from "./dockModules/workspaceDockTab";
 import { useMenuBarThread } from "./shell/useMenuBarThread";
 import {
   MODEL_CHOICE_CHANGED,
@@ -1296,6 +1298,8 @@ function LaunchedShell(
   const projectPullRequestReviewOpen = selectedProjectPullRequest !== undefined;
   const dockThreadKey =
     dockThreadId === undefined ? undefined : threadUtilityDockKey(activeMode, String(dockThreadId));
+  // Dock tab ids can repeat across threads; activation never crosses that scope.
+  const dockTabActivation = useMemo(() => createTabActivationRegistry(), [dockThreadKey]);
   // A saved comparison is a navigation request, not a remembered tool for a
   // thread. Leaving its scope must not restore that request on a later visit.
   useEffect(() => {
@@ -3472,6 +3476,9 @@ function LaunchedShell(
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
     if (surface === "review") setRequestedAgentReview(undefined);
+    if (surface === "terminal") {
+      dockTabActivation.noteActivated(workspaceDockTabId(undefined, "terminal"));
+    }
     markInteraction("renderer", "dock-open-requested");
     markInteractionAfterPaint("dock-open");
     if (bottomPanelPresentation.open) {
@@ -3493,6 +3500,9 @@ function LaunchedShell(
       persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
     }
     const instanceId = crypto.randomUUID();
+    if (surface === "terminal") {
+      dockTabActivation.noteActivated(workspaceDockTabId(instanceId, "terminal"));
+    }
     setDockVisible(true);
     if (dockThreadKey === undefined) {
       setFallbackDockState((current) => addUtilityTabState(current, surface, instanceId));
@@ -3555,6 +3565,9 @@ function LaunchedShell(
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "review"));
   }
   function selectDockTab(tabId: string) {
+    if (dockState.tabs.some((tab) => tab.id === tabId && tab.surface === "terminal")) {
+      dockTabActivation.noteActivated(workspaceDockTabId(tabId, "terminal"));
+    }
     if (dockThreadKey === undefined) {
       setFallbackDockState((current) => selectUtilityTabState(current, tabId));
     } else {
@@ -3777,6 +3790,9 @@ function LaunchedShell(
     if (!bottomPanelAvailable) return;
     const nextSurface = activeBottomSurface ?? bottomPanelSurfaces[0];
     if (nextSurface === undefined) return;
+    if (nextSurface.id === "terminal") {
+      dockTabActivation.noteActivated(workspaceDockTabId(undefined, "terminal"));
+    }
     const nextBottomState = openUtilityTabState(renderedBottomPanelState, nextSurface.id);
     if (dockThreadKey === undefined) {
       setFallbackBottomPanelState(nextBottomState);
@@ -3793,6 +3809,9 @@ function LaunchedShell(
   function openBottomTool(surface: RightUtilityDockSurfaceId) {
     if (!bottomPanelSurfaces.some((candidate) => candidate.id === surface)) return;
     if (surface === "review") setRequestedAgentReview(undefined);
+    if (surface === "terminal") {
+      dockTabActivation.noteActivated(workspaceDockTabId(undefined, "terminal"));
+    }
     const nextBottomState = openUtilityTabState(renderedBottomPanelState, surface);
     if (dockThreadKey === undefined) {
       setFallbackBottomPanelState(nextBottomState);
@@ -6525,66 +6544,72 @@ function LaunchedShell(
               open={navigatorOpen}
               restoreFocus={navigatorOpener}
             />
-            <DockContainer
-              actions={actions}
-              {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
-              activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
-              activeMode={activeMode}
-              {...(activeProjectId === undefined ? {} : { activeProjectId })}
-              {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
-              bottomPanelHeight={bottomPanelHeight}
-              bottomPanelOpen={bottomPanelOpen}
-              bottomPanelPresentation={bottomPanelPresentation}
-              bottomPanelPresentedOpen={bottomPanelPresentedOpen}
-              bottomPanelSurfaces={bottomPanelSurfaces}
-              bottomPanelTabs={bottomPanelTabs}
-              canvasRevisionsByThread={canvasRevisionsByThread}
-              chatReadCursorStore={chatReadCursorStore}
-              clients={launchedClients}
-              codeNavigationRevision={machineChanges.codeNavigation}
-              codeProviderGroups={codeProviderGroups}
-              {...(toolsReadCodeController && activeCodeThreadController !== undefined
-                ? { codeThreadController: activeCodeThreadController }
-                : {})}
-              {...(toolsReadCodeThreadView && activeCodeThreadView !== undefined
-                ? { codeThreadView: activeCodeThreadView }
-                : {})}
-              {...(codeDiffLayout === undefined ? {} : { codeDiffLayout })}
-              {...(contextController.snapshot === undefined
-                ? {}
-                : { contextSnapshot: contextController.snapshot })}
-              displayedDockState={displayedDockState}
-              dockPresentationWidth={dockPresentationWidth}
-              dockPresentedOpen={dockPresentedOpen}
-              dockPullRequests={dockPullRequests}
-              dockResolution={dockResolution}
-              dockSidecarsByThread={dockSidecarsByThread}
-              dockTabs={dockTabs}
-              {...(dockThread === undefined ? {} : { dockThread })}
-              {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
-              {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
-              {...(dockThreadProjectId === undefined ? {} : { dockThreadProjectId })}
-              {...(dockThreadRepository === undefined ? {} : { dockThreadRepository })}
-              {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-              isNarrow={isNarrow}
-              launchableDockSurfaces={launchableDockSurfaces}
-              navigation={navigationModel}
-              now={minuteNow.getTime()}
-              observedByInstance={providerController.observedByInstance}
-              {...(dockOverviewThread === undefined ? {} : { overviewThread: dockOverviewThread })}
-              projectNames={workingNowProjectNames}
-              projectPullRequestReviewOpen={projectPullRequestReviewOpen}
-              {...(toolsPresented ? { providerController } : {})}
-              {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}
-              {...(requestedAgentView === undefined ? {} : { requestedAgentView })}
-              {...(selectedProjectPullRequest === undefined ? {} : { selectedProjectPullRequest })}
-              {...(selectedProjectPullRequestKey === undefined
-                ? {}
-                : { selectedProjectPullRequestKey })}
-              serverUrl={props.launch.serverUrl}
-              windowCapability={props.projectWindowCapability}
-              writtenDocumentsByThread={writtenDocumentsByThread}
-            />
+            <TabActivationProvider registry={dockTabActivation}>
+              <DockContainer
+                actions={actions}
+                {...(activeBottomSurface === undefined ? {} : { activeBottomSurface })}
+                activeCodeThreadUsageFallback={activeCodeThreadUsageFallback}
+                activeMode={activeMode}
+                {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                {...(appleProjectPath === undefined ? {} : { appleProjectPath })}
+                bottomPanelHeight={bottomPanelHeight}
+                bottomPanelOpen={bottomPanelOpen}
+                bottomPanelPresentation={bottomPanelPresentation}
+                bottomPanelPresentedOpen={bottomPanelPresentedOpen}
+                bottomPanelSurfaces={bottomPanelSurfaces}
+                bottomPanelTabs={bottomPanelTabs}
+                canvasRevisionsByThread={canvasRevisionsByThread}
+                chatReadCursorStore={chatReadCursorStore}
+                clients={launchedClients}
+                codeNavigationRevision={machineChanges.codeNavigation}
+                codeProviderGroups={codeProviderGroups}
+                {...(toolsReadCodeController && activeCodeThreadController !== undefined
+                  ? { codeThreadController: activeCodeThreadController }
+                  : {})}
+                {...(toolsReadCodeThreadView && activeCodeThreadView !== undefined
+                  ? { codeThreadView: activeCodeThreadView }
+                  : {})}
+                {...(codeDiffLayout === undefined ? {} : { codeDiffLayout })}
+                {...(contextController.snapshot === undefined
+                  ? {}
+                  : { contextSnapshot: contextController.snapshot })}
+                displayedDockState={displayedDockState}
+                dockPresentationWidth={dockPresentationWidth}
+                dockPresentedOpen={dockPresentedOpen}
+                dockPullRequests={dockPullRequests}
+                dockResolution={dockResolution}
+                dockSidecarsByThread={dockSidecarsByThread}
+                dockTabs={dockTabs}
+                {...(dockThread === undefined ? {} : { dockThread })}
+                {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
+                {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
+                {...(dockThreadProjectId === undefined ? {} : { dockThreadProjectId })}
+                {...(dockThreadRepository === undefined ? {} : { dockThreadRepository })}
+                {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+                isNarrow={isNarrow}
+                launchableDockSurfaces={launchableDockSurfaces}
+                navigation={navigationModel}
+                now={minuteNow.getTime()}
+                observedByInstance={providerController.observedByInstance}
+                {...(dockOverviewThread === undefined
+                  ? {}
+                  : { overviewThread: dockOverviewThread })}
+                projectNames={workingNowProjectNames}
+                projectPullRequestReviewOpen={projectPullRequestReviewOpen}
+                {...(toolsPresented ? { providerController } : {})}
+                {...(requestedAgentReview === undefined ? {} : { requestedAgentReview })}
+                {...(requestedAgentView === undefined ? {} : { requestedAgentView })}
+                {...(selectedProjectPullRequest === undefined
+                  ? {}
+                  : { selectedProjectPullRequest })}
+                {...(selectedProjectPullRequestKey === undefined
+                  ? {}
+                  : { selectedProjectPullRequestKey })}
+                serverUrl={props.launch.serverUrl}
+                windowCapability={props.projectWindowCapability}
+                writtenDocumentsByThread={writtenDocumentsByThread}
+              />
+            </TabActivationProvider>
           </>
         }
       >
