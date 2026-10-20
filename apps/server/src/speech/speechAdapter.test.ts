@@ -133,6 +133,53 @@ describe("OpenAI-compatible speech adapter", () => {
     ).toMatchObject({ status: "failed", providerFailure: { category: "unauthenticated" } });
   });
 
+  it("speaks Mistral's dialect: voice_id in the body and base64 audio_data in the reply", async () => {
+    const audio = Uint8Array.from([9, 8, 7]);
+    const fetch: FetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ audio_data: Buffer.from(audio).toString("base64") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    const adapter = makeOpenAiCompatibleSpeechAdapter({
+      instance: instance({ baseUrl: "https://api.mistral.ai/v1" }),
+      credentialResolver,
+      fetch,
+    });
+    const result = await adapter.synthesize({
+      text: "Hei",
+      modelId: "voxtral-mini-tts-2603" as never,
+      voice: "f1c2a3d4-0000-4000-8000-000000000001" as never,
+      format: "mp3",
+    });
+    expect(result.status).toBe("completed");
+    if (result.status !== "completed") throw new Error("expected completed");
+    expect([...result.bytes]).toEqual([9, 8, 7]);
+    expect(result.mediaType).toBe("audio/mpeg");
+    const { url, init } = firstCall(fetch);
+    expect(url).toBe("https://api.mistral.ai/v1/audio/speech");
+    expect(JSON.parse(String(init.body))).toEqual({
+      model: "voxtral-mini-tts-2603",
+      input: "Hei",
+      voice_id: "f1c2a3d4-0000-4000-8000-000000000001",
+      response_format: "mp3",
+    });
+
+    const noAudio = makeOpenAiCompatibleSpeechAdapter({
+      instance: instance({ baseUrl: "https://api.mistral.ai/v1" }),
+      credentialResolver,
+      fetch: async () => new Response(JSON.stringify({ unexpected: true }), { status: 200 }),
+    });
+    const refused = await noAudio.synthesize({
+      text: "Hei",
+      modelId: "voxtral-mini-tts-2603" as never,
+      voice: "x" as never,
+      format: "mp3",
+    });
+    expect(refused.status).toBe("failed");
+  });
+
   it("returns synthesized bytes in the requested format and refuses an empty body", async () => {
     const audio = Uint8Array.from([1, 2, 3, 4]);
     const fetch: FetchMock = vi.fn(

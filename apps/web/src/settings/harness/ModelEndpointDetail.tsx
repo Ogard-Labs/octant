@@ -23,6 +23,9 @@ import { ChatOnlyVerify } from "../../providers/ChatOnlyVerify";
 import { ModelContextWindowField } from "../../providers/ModelContextWindowField";
 import type { ProviderOAuthSignInState } from "../../providers/ProviderOAuthSignIn";
 import type { ProviderSettingsViewProps } from "../../providers/ProviderSettingsView";
+import { endpointPresetForUrl } from "./addEndpointSteps";
+import { voiceModelsOf } from "./voiceModels";
+import { VoiceTip, type VoiceLinks } from "./VoiceTip";
 import {
   capabilityLabels,
   driverLabel,
@@ -83,6 +86,8 @@ export type ModelEndpointDetailProps = Pick<
   readonly signIn: EndpointSignIn | undefined;
   readonly signInOffer: { readonly accountLabel: string; readonly action: string } | undefined;
   readonly hiddenModels: ReadonlyArray<HiddenProviderModelRef>;
+  /** Voice settings, so an endpoint with voice models can offer them. */
+  readonly voice?: VoiceLinks;
   readonly busy: boolean;
   readonly checking: boolean;
   readonly startSignIn: boolean;
@@ -271,6 +276,7 @@ export function ModelEndpointDetail(props: ModelEndpointDetailProps) {
         signInEndpoint={signInEndpoint}
       />
       <ModelsSection {...props} disabled={disabled} />
+      <VoiceSection {...props} disabled={disabled} />
       <DataSection {...props} disabled={disabled} />
       <NameAndAddressSection {...props} credential={credential} disabled={disabled} />
       <DiagnosticsSection {...props} failing={failing} />
@@ -527,6 +533,31 @@ const DATA_TAG_COPY: Readonly<
 
 function toggleTag(tags: ReadonlyArray<ProviderDataTag>, tag: ProviderDataTag): ProviderDataTags {
   return tags.includes(tag) ? tags.filter((candidate) => candidate !== tag) : [...tags, tag];
+}
+
+/**
+ * Voice: shown only when the endpoint lists a model that turns speech into
+ * text or text into speech, so Voice settings can be set from here in one
+ * click instead of by typing a model id there.
+ */
+function VoiceSection(props: ModelEndpointDetailProps & { readonly disabled: boolean }) {
+  if (props.voice === undefined) return null;
+  const voiceModels = voiceModelsOf(
+    props.observed?.models,
+    endpointPresetForUrl(props.instance.configuration.baseUrl)?.voice,
+  );
+  if (voiceModels.transcription === undefined && voiceModels.speech === undefined) return null;
+  return (
+    <SettingsSection description="Models here that Voice can use." title="Voice">
+      <VoiceTip
+        disabled={props.disabled}
+        instanceId={props.instance.id}
+        instanceName={props.instance.displayName}
+        links={props.voice}
+        voiceModels={voiceModels}
+      />
+    </SettingsSection>
+  );
 }
 
 function DataSection(props: ModelEndpointDetailProps & { readonly disabled: boolean }) {

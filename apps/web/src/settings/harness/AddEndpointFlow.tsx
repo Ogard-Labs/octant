@@ -49,6 +49,8 @@ import {
   type EndpointPreset,
   type ToolCheck,
 } from "./addEndpointSteps";
+import { voiceModelsOf } from "./voiceModels";
+import { VoiceTip, type VoiceLinks } from "./VoiceTip";
 import { NEEDS_KEY_LABEL, type EndpointStatus, type ModelEndpointInstance } from "./endpointStatus";
 import type { EndpointDetailFocus } from "./ModelEndpointDetail";
 import { EndpointState } from "./ModelEndpointRow";
@@ -111,6 +113,8 @@ export type AddEndpointFlowProps = Pick<
   }) => ReactNode;
   /** Opens the flow on Connect for this preset instead of on the kinds. */
   readonly initialPreset?: EndpointPreset;
+  /** Voice settings, so an endpoint with voice models can offer them when it is added. */
+  readonly voice?: VoiceLinks;
   readonly onStepChange?: (step: AddEndpointStep) => void;
   readonly onOpenAdded: (focus?: EndpointDetailFocus) => void;
   readonly onClose: () => void;
@@ -223,6 +227,8 @@ export function AddEndpointFlow(props: AddEndpointFlowProps) {
         headingRef={headingRef}
         onClose={props.onClose}
         onOpenAdded={props.onOpenAdded}
+        {...(props.voice === undefined ? {} : { voice: props.voice })}
+        voiceModels={voiceModelsOf(added.observed?.models, preset?.voice)}
       />
     );
   }
@@ -1608,6 +1614,8 @@ function DoneStep(props: {
   readonly checks: Readonly<Record<string, ToolCheck>>;
   readonly onOpenAdded: (focus?: EndpointDetailFocus) => void;
   readonly onClose: () => void;
+  readonly voice?: VoiceLinks;
+  readonly voiceModels: ReturnType<typeof voiceModelsOf>;
 }) {
   const verified = props.chosen.filter((modelId) =>
     mayTakeAgentWork(props.checks[String(modelId)]),
@@ -1635,6 +1643,14 @@ function DoneStep(props: {
           </p>
         )}
       </div>
+      {props.voice === undefined ? null : (
+        <VoiceTip
+          instanceId={props.added.instance.id}
+          instanceName={props.added.instance.displayName}
+          links={props.voice}
+          voiceModels={props.voiceModels}
+        />
+      )}
       <div className="endpoint-flow__actions">
         <OctantButton onClick={() => props.onOpenAdded()} size="sm" type="button" variant="outline">
           Open details
