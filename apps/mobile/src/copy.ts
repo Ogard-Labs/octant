@@ -52,12 +52,13 @@ export const MOBILE_COPY = {
   removeHostAction: "Remove from this phone",
   removeHostHint: "Works offline. The computer keeps listing this phone until you revoke it there.",
   removeHostConfirm:
-    "Remove this host from this phone? The host is not told, so it still lists this device until you revoke it from the desktop.",
+    "Remove this computer from your phone? The computer is not told, so it keeps listing this phone until you revoke it there.",
   removeHostConfirmAction: "Remove",
   removeHostCancel: "Cancel",
   hostKeyNotDeleted:
     "A host was removed, but its device key could not be deleted from this phone's secure storage.",
-  hostsHint: "Enter the host HTTPS origin and pairing ticket from the desktop host.",
+  hostsHint:
+    "Scan the QR code from Settings → Remote access on your computer, or paste its pairing code.",
   pairCodeHint:
     "On your computer, open Settings → Remote access and scan the QR code shown there, or paste the code.",
   pairScanTitle: "Scan pairing code",
@@ -101,7 +102,7 @@ export const MOBILE_COPY = {
   modelHostOnly: "Host models",
   modelUnavailable: "No host models",
   working: "Working",
-  handoffWarning: "Some attachments were omitted when handing off providers on the host.",
+  handoffWarning: "Some attachments were left out when the computer switched providers.",
   attachmentLabel: "Attachment",
   citationLabel: "Source",
   workListLabel: "Work",
@@ -117,18 +118,18 @@ export const MOBILE_COPY = {
   needsAttention: "Needs you",
   inReview: "In review",
   read: "Read",
-  placementHint: "New threads go to the host marked “New threads go here”.",
+  placementHint: "New threads go to the computer marked “New threads go here”.",
   createModeChat: "Chat",
   createModeWork: "Work",
   createModeCode: "Code",
   createModeCodeHelp: "Start approval-gated Code tasks on a bound repository.",
-  codeNoProject: "No available Code project on this host. Bind a repository on the host first.",
+  codeNoProject: "No Code project is open on this computer. Open a repository there first.",
   workNoProject: "No active Work project on this host. Create one on the desktop first.",
   workFollowUpHint:
-    "Runs on the host in this thread's bound folder. Files and shell stay on the desktop.",
+    "Runs on your computer in this thread's folder. Files and the shell stay there.",
   workFollowUpPlaceholder: "Follow up on this Work thread…",
   codeFollowUpHint:
-    "Runs approval-gated on the host. Approve tool use and edit files on the desktop.",
+    "Runs on your computer and asks before tools run. Approve and edit files there.",
   codeReviewTitle: "Review Code on mobile",
   codeReviewEntryBody:
     "Read changes and checks, start tasks, and follow up here. Approvals and edits happen on your computer.",
@@ -136,7 +137,7 @@ export const MOBILE_COPY = {
   codeFollowUpPlaceholder: "Follow up on this Code thread…",
   transcriptEmpty: "No turns yet.",
   codeEarlierTurns: "Showing the newest turns. Open the thread on the desktop for earlier ones.",
-  turnRunning: "Working on the host…",
+  turnRunning: "Working on your computer…",
   approvalDesktopOnly:
     "Approve or reject on the desktop host. High-risk approval challenges stay local-host-only.",
   approvalAllow: "Allow",
