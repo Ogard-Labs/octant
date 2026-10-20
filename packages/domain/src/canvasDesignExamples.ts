@@ -37,6 +37,12 @@ export const onboardingFlowExample = {
   ],
 };
 
+/**
+ * A deck laid out in fixed pixels at the slide size. A slide is drawn in a
+ * 1920x1080 viewport and scaled as a picture, so `vh` and `vw` would track
+ * whatever draws it rather than the slide; the type scale keeps body text at
+ * 32px or above, and every slide carries the same header and footer.
+ */
 export const launchDeckExample = {
   blockId: "launch-deck",
   schemaVersion: CANVAS_SCHEMA_VERSION,
@@ -45,21 +51,25 @@ export const launchDeckExample = {
   size: "slide" as const,
   styles: [
     "body { margin: 0; font-family: system-ui, sans-serif; background: #0c0a09; color: #fafaf9; }",
-    ".slide { width: 100vw; height: 100vh; box-sizing: border-box; padding: 120px 160px; display: flex; flex-direction: column; justify-content: center; gap: 32px; }",
-    "h1 { font-size: 96px; margin: 0; }",
-    "h2 { font-size: 64px; margin: 0; }",
-    "li { font-size: 40px; line-height: 1.5; }",
+    ".slide { width: 1920px; height: 1080px; box-sizing: border-box; padding: 96px 160px; display: flex; flex-direction: column; }",
+    ".eyebrow { font-size: 32px; color: #a8a29e; margin: 0; }",
+    ".content { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 32px; }",
+    "h1 { font-size: 96px; line-height: 1.1; margin: 0; }",
+    "h2 { font-size: 64px; line-height: 1.15; margin: 0; }",
+    "p, li { font-size: 40px; line-height: 1.5; margin: 0; }",
+    "ul { margin: 0; padding-left: 48px; }",
+    ".footer { display: flex; justify-content: space-between; font-size: 32px; color: #a8a29e; }",
   ].join("\n"),
   frames: [
     {
       frameId: "title",
       title: "Title",
-      html: '<section class="slide"><h1>Launch plan</h1><p style="font-size:40px;color:#a8a29e">Spring release</p></section>',
+      html: '<section class="slide"><p class="eyebrow">Spring release</p><div class="content"><h1>Launch plan</h1><p>Every region, half the wait.</p></div><footer class="footer"><span>Launch plan</span><span>1 / 2</span></footer></section>',
     },
     {
       frameId: "goals",
       title: "Goals",
-      html: '<section class="slide"><h2>Goals</h2><ul><li>Ship to every region</li><li>Halve first-order time</li></ul></section>',
+      html: '<section class="slide"><p class="eyebrow">Spring release</p><div class="content"><h2>Goals</h2><ul><li>Ship to every region</li><li>Halve first-order time</li></ul></div><footer class="footer"><span>Launch plan</span><span>2 / 2</span></footer></section>',
     },
   ],
 };

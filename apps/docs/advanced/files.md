@@ -93,8 +93,9 @@ use the simplest one that does the job. It then lists the
 supported kinds and when to use the structured ones, the document recipes an agent should
 start from, and a creation example. Asking to write a plan or a memo, review a
 pull request, summarise research, write an article, make slides, show the key
-numbers, design a website, pitch a product, show a design system, or build a
-prototype you can try starts from the matching recipe. Requesting up
+numbers, design a website, diagram the architecture, pitch a product, show a
+design system, make a UI kit, or build a prototype you can try starts from the
+matching recipe. Requesting up
 to three `blockKinds` returns their exact schemas from the host's block
 contracts, plus how to author and worked examples for the kinds that carry
 them (plain kinds such as `rich-text` return their schema alone):
@@ -114,8 +115,9 @@ appear only in a design's frames.
 In a Chat thread, choose **Show canvas** from the **Thread actions** menu. Under
 **Start from**, pick **Blank** or a recipe: an implementation plan, a memo, a
 design spec, an architecture review, a code review, an audit or test report, a
-postmortem, a research brief, a dashboard, an article, a design brief, a
-design system, a clickable prototype, and the others the host offers,
+postmortem, a research brief, a dashboard, an architecture diagram, an
+article, a design brief, a design system, a UI kit, a clickable prototype, and
+the others the host offers,
 including any an enabled skill adds. Each shows one line about what it holds
 and a small outline of its sections. Use the arrow keys to move between them.
 
@@ -346,7 +348,9 @@ formulas inline.
 Ask for an app, a screen, a website, a landing page, or a presentation, and the
 agent builds a design: real screens or slides that look finished. A design has
 one size, phone, tablet, desktop, or slide, and its screens sit side by side
-in the Canvas, numbered in order.
+in the Canvas, numbered in order. A website or landing page is drawn at
+desktop size with its real sections, and a slide keeps one idea, large text,
+and the same header and footer throughout.
 
 Ask for an article, a spec, or a design system, and the agent can write it as
 a design document instead. A document is as wide as the Canvas and grows to
