@@ -5458,7 +5458,14 @@ catalog relates to the plugin marketplace only in that both end in an
 installed package under the one activation ladder. Connect makes an
 ordinary user-added server for the entry's address and then starts the
 sign-in, or takes the key (kept in the broker like any user-added secret),
-or just connects. An entry is listed only after a probe showed the address
+or just connects. The add request carries the entry's id; the host accepts it
+only for an id in the bundled catalog at that entry's own address, and names
+the package `connector-<id>`, a name it refuses to a hand-added server. The
+view recognizes a connected entry by that package name, never by a display
+name, so a server a person happened to call "Linear" neither shows as
+Connected nor receives its sign-in. The add's answer names the package it
+created (`addedPackage`), and the sign-in starts on that package rather than
+on whichever one a snapshot diff shows. An entry is listed only after a probe showed the address
 behaving as its kind claims (a sign-in server: 401 with resource metadata,
 an authorization server with PKCE S256 and dynamic client registration); a
 vendor whose issuer offers no registration is listed as a key entry or not

@@ -720,5 +720,18 @@ async function addUserMcpServer(
       desired: true,
     });
   }
-  return response(current, 200, origin);
+  const addedComponent = installedState?.components.find(
+    (component) => component.component.kind === "mcp-server",
+  );
+  return response(
+    {
+      ...current,
+      addedPackage: {
+        extensionId: entry.extensionId,
+        ...(addedComponent === undefined ? {} : { componentId: addedComponent.component.id }),
+      },
+    },
+    200,
+    origin,
+  );
 }

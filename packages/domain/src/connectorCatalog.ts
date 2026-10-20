@@ -292,6 +292,21 @@ const ENTRIES: ReadonlyArray<ConnectorCatalogEntry> = [
   },
 ];
 
+/**
+ * The package name a connector's server is added under. It is reserved: the
+ * host refuses a hand-added server this name, so a package carrying it is the
+ * catalog connector and nothing a person merely called by the same words.
+ */
+export function connectorPackageName(id: string): string {
+  return `connector-${id}`;
+}
+
+export const CONNECTOR_PACKAGE_PREFIX = "connector-";
+
+export function connectorById(id: string): ConnectorCatalogEntry | undefined {
+  return ENTRIES.find((entry) => entry.id === id);
+}
+
 export function connectorCatalog(): ReadonlyArray<ConnectorCatalogEntry> {
   return ENTRIES;
 }

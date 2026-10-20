@@ -872,7 +872,10 @@ describe("MCP servers added by hand", () => {
       desired: true,
       expectedStateVersion: 3,
     });
-    expect(await answered?.json()).toMatchObject({ kind: "extension-state-updated" });
+    expect(await answered?.json()).toMatchObject({
+      kind: "extension-state-updated",
+      addedPackage: { extensionId, componentId: "mcp-docs-search" },
+    });
   });
 
   it("answers a refusal from the store with its own sentence", async () => {

@@ -1,5 +1,6 @@
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { CONNECTOR_PACKAGE_PREFIX, connectorById, connectorPackageName } from "@octant/domain";
 import type { UserAddedMcpServerRequest } from "@octant/contracts/extension-rpc";
 import type { ExtensionSource } from "@octant/contracts/extensions";
 import {
@@ -63,7 +64,13 @@ export class UserAddedMcpServerStore {
   }
 
   async add(request: UserAddedMcpServerRequest): Promise<{ source: UserAddedMcpServerSource }> {
-    const slug = packageSlug(request.name);
+    const slug = connectorSlug(request) ?? packageSlug(request.name);
+    if (request.connectorId === undefined && slug.startsWith(CONNECTOR_PACKAGE_PREFIX)) {
+      throw new UserAddedMcpServerError(
+        "invalid",
+        `Names starting with ${CONNECTOR_PACKAGE_PREFIX} are kept for Connectors. Pick another name.`,
+      );
+    }
     const folder = join(this.#directory, slug);
     if (await exists(folder)) {
       throw new UserAddedMcpServerError("conflict", "A server with this name is already added.");
@@ -256,6 +263,23 @@ export function packageSlug(name: string): string {
     );
   }
   return slug;
+}
+
+/**
+ * The reserved package name for a connector add, or undefined for a hand add.
+ * The id must be in the bundled catalog and the address must be the entry's
+ * own, so the reserved name cannot be put on any other server.
+ */
+function connectorSlug(request: UserAddedMcpServerRequest): string | undefined {
+  if (request.connectorId === undefined) return undefined;
+  const entry = connectorById(request.connectorId);
+  if (entry === undefined) {
+    throw new UserAddedMcpServerError("invalid", "This connector is not in the catalog.");
+  }
+  if (request.server.type !== "streamable-http" || request.server.url !== entry.url) {
+    throw new UserAddedMcpServerError("invalid", "This address is not the connector's own.");
+  }
+  return connectorPackageName(entry.id);
 }
 
 function validateRemoteUrl(url: string): void {
