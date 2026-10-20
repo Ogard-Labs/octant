@@ -185,7 +185,9 @@ in [Browser captures](browser-captures.md).
 A Code thread terminal's live output is `GET /api/code/terminals/live` with
 `threadId`, `checkoutId`, `terminalId`, and an optional `afterCharacters`
 resume offset. It is a held stream of newline-delimited frames that never
-touches the journal; the journal read stays `GET
+touches the journal. The window's request coordinator passes this route through
+without buffering or coalescing, so each reader receives output while the shell
+is running and retains its own cancellation signal. The journal read stays `GET
 /api/code/threads/:threadId/operations/:operationId/events`. The rule is in
 [Architecture: security and authority](../architecture.md#security-and-authority)
 under Terminal output paths.
