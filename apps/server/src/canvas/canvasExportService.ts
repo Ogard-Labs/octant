@@ -270,6 +270,9 @@ export class CanvasExportService {
         : {
             destinationPath: destination.path,
             replacesExisting: destination.replacesExisting ?? false,
+            ...(destination.alsoReplaces === undefined || destination.alsoReplaces.length === 0
+              ? {}
+              : { alsoReplaces: destination.alsoReplaces }),
           }),
       ...(destination?.account === undefined ? {} : { destinationAccount: destination.account }),
       ...(destination?.visibility === undefined

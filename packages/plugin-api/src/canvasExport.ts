@@ -67,6 +67,12 @@ export interface CanvasExportDestination {
   readonly path?: string;
   /** Whether a file is already at `path` and will be replaced. */
   readonly replacesExisting?: boolean;
+  /**
+   * The other files of a set that are already there and will be replaced.
+   * Only a file named by `path` or here may replace one; any other existing
+   * file gets a copy beside it.
+   */
+  readonly alsoReplaces?: ReadonlyArray<string>;
   /** The account this export will act as, when the destination acts as one. */
   readonly account?: string;
   /** Whether the result is visible to anyone, or only to `account`. */

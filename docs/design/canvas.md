@@ -646,8 +646,9 @@ on (padded to the count), or one PDF with a page per frame at that size. A
 running design is drawn as a single sheet after the preview's settle wait. A
 Canvas with no such frames is drawn as the thread draws it: one PNG (cut off at
 a fixed height) or an A4 PDF the browser paginates. A set is placed like a
-single file: approving a card that said a file was already there replaces each
-file at its name, and an unconfirmed write numbers every file already taken.
+single file: the card names which files of the set are already there, approving
+it replaces exactly those, and any other file already taken, including one that
+appeared after the card, is numbered.
 The Gist destination declares Markdown only, so it is never offered either
 form. Pictures of design frames are as unreadable to the share filter as the
 markup, so their card sets `drawsDesignFrames` for the person to acknowledge,

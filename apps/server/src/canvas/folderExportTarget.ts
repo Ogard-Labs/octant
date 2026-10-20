@@ -22,10 +22,10 @@ import type { CanvasExportFilePort } from "./canvasExportFilePort";
  * without that confirmation it writes beside the file instead.
  *
  * A picture export is a set of files. The card names the first and lists the
- * rest, and approving a card that said one was already there confirms the
- * whole set: each file is written at its own name, so a deck exported again
- * replaces its slides in place. Without that confirmation every file that is
- * already there gets a numbered copy beside it, as a single file would.
+ * rest, and says which of them are already there. Approving it confirms
+ * exactly those: a deck exported again replaces its slides in place, while a
+ * file that is there but was not named on the card, or that appeared after it,
+ * gets a numbered copy beside it, as a single file would.
  */
 
 export const FOLDER_EXPORT_TARGET_ID = "folder-on-this-mac";
@@ -65,12 +65,14 @@ export function createFolderExportTarget(
       // The names this document wants, not the next free ones: naming the file
       // that is already there is what puts the replacement in front of the
       // person instead of quietly writing a copy they never asked about.
-      const files = plannedFiles(output);
+      const [first, ...rest] = plannedFiles(output);
+      const alsoReplaces = rest
+        .filter((file) => dependencies.files.existsIn(availability.folder, file.name))
+        .map((file) => join(availability.folder, file.name));
       return {
-        path: join(availability.folder, files[0].name),
-        replacesExisting: files.some((file) =>
-          dependencies.files.existsIn(availability.folder, file.name),
-        ),
+        path: join(availability.folder, first.name),
+        replacesExisting: dependencies.files.existsIn(availability.folder, first.name),
+        ...(alsoReplaces.length === 0 ? {} : { alsoReplaces }),
       };
     },
 
@@ -89,14 +91,20 @@ export function createFolderExportTarget(
       if (confirmed?.path !== undefined && confirmed.path !== plannedPath) {
         return refused("refused", "The export folder changed after this export was approved.");
       }
-      // Only a card that said a file was already there counts as confirmed:
-      // the person approved a replacement, not just a path. A file that
-      // appeared at the name after the card was built was never named to the
+      // Only a file the card named as already there counts as confirmed: the
+      // person approved those replacements, not just a path. A file that
+      // appeared at a name after the card was built was never named to the
       // person, so it gets the numbered copy instead. A call with no
       // confirmation — a destination reached outside a card — writes a
       // numbered copy beside an existing file too.
-      const replacesConfirmed =
-        confirmed?.path === plannedPath && confirmed.replacesExisting === true;
+      const confirmedReplacements = new Set<string>(
+        confirmed?.path === plannedPath
+          ? [
+              ...(confirmed.replacesExisting === true ? [plannedPath] : []),
+              ...(confirmed.alsoReplaces ?? []),
+            ]
+          : [],
+      );
       const placed: Array<{ readonly fileName: string; readonly contents: string | Uint8Array }> =
         [];
       for (const file of files) {
@@ -105,7 +113,7 @@ export function createFolderExportTarget(
           (candidate) =>
             dependencies.files.existsIn(availability.folder, candidate) ||
             placed.some((entry) => entry.fileName === candidate),
-          replacesConfirmed,
+          confirmedReplacements.has(join(availability.folder, file.name)),
         );
         if (fileName === undefined) {
           return refused("refused", "There is no free name to write this export to.");

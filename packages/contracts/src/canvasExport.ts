@@ -403,6 +403,14 @@ export const CanvasExportApprovalCard = Schema.Struct({
   /** Whether a file is already at `destinationPath` and will be replaced. */
   replacesExisting: Schema.optional(Schema.Boolean),
   /**
+   * The other files of a picture set that are already there and will be
+   * replaced. Approving the card confirms exactly these and `destinationPath`;
+   * a file that exists and is not named here is never overwritten.
+   */
+  alsoReplaces: Schema.optional(
+    Schema.Array(CanvasExportFilePath).pipe(Schema.maxItems(CANVAS_EXPORT_PICTURE_FILES_MAX)),
+  ),
+  /**
    * The account this export will act as, when the destination acts as one.
    * Shown verbatim so the person knows whose name it goes out under.
    */
@@ -460,7 +468,9 @@ export const CanvasExportApprovalCard = Schema.Struct({
   // confirmation nobody can give.
   .pipe(
     Schema.filter(
-      (card) => card.replacesExisting === undefined || card.destinationPath !== undefined,
+      (card) =>
+        (card.replacesExisting === undefined && card.alsoReplaces === undefined) ||
+        card.destinationPath !== undefined,
       {
         message: () => "Only a card that names a destination path can say it replaces one.",
       },

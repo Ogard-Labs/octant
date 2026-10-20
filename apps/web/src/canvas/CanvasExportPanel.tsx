@@ -261,6 +261,9 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
               {card.replacesExisting === true
                 ? `Replaces ${card.destinationPath}`
                 : `Writes ${card.destinationPath}`}
+              {card.alsoReplaces === undefined || card.alsoReplaces.length === 0
+                ? null
+                : ` and replaces ${card.alsoReplaces.join(", ")}`}
             </p>
           )}
           {card.writesDesignMarkup === true ? (
