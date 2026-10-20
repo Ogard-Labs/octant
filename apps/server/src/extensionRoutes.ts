@@ -11,6 +11,8 @@ import {
   decodeExtensionCommand,
   decodeExtensionToolApprovalDecision,
   decodeExtensionToolGrantRequest,
+  decodeUserAddedMcpServerRequest,
+  type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { isAbsolute } from "node:path";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -20,9 +22,11 @@ import { ClientPrincipalError } from "./clientPrincipal";
 import { resolvePrincipalRouteContext, type PrincipalRouteContext } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
 import type { WindowAuthorityStore } from "./windowAuthorityStore";
+import type { ExtensionSource } from "@octant/contracts/extensions";
 import type { LocalPluginFolderRegistry } from "./extensions/localPluginFolderRegistry";
 import type { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
 import type { ExtensionToolApprovalAnswerer } from "./extensions/extensionToolApprovalService";
+import { UserAddedMcpServerError } from "./extensions/userAddedMcpServers";
 
 export interface ExtensionRouteService {
   snapshot(): ExtensionSnapshot;
@@ -37,6 +41,10 @@ export function createExtensionRouteHandler(options: {
   readonly desktopBridgeSecret?: string;
   readonly localPluginFolderRegistry?: LocalPluginFolderRegistry;
   readonly localPluginImportReceipts?: LocalPluginImportReceiptStore;
+  /** Writes the package for an MCP server a person adds by hand. */
+  readonly userAddedMcpServers?: {
+    add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }>;
+  };
   /**
    * MCP tool prompts, listed and answered by a local window or a paired
    * device. The service decides which prompts each may see and answer, and
@@ -261,6 +269,106 @@ export function createExtensionRouteHandler(options: {
           origin,
         );
       }
+    }
+    if (url.pathname === "/api/extensions/user-servers") {
+      // Adding a server names a command this host will run or an address it
+      // will send a key to, so only a local window may do it, never a paired
+      // device, and the whole add is one local act: the package is written,
+      // installed, trusted and enabled without a second prompt.
+      if (principalContext.principal.kind !== "local-window") {
+        return response(
+          failure("unauthorized", "Adding an MCP server requires the Octant window on this host."),
+          401,
+          origin,
+        );
+      }
+      if (options.userAddedMcpServers === undefined) {
+        return response(
+          failure("unavailable", "Adding an MCP server is unavailable."),
+          503,
+          origin,
+        );
+      }
+      const body = await readBody(request, maximumBodySize);
+      if (body.kind === "too-large") {
+        return response(failure("invalid", "Extension request is too large."), 413, origin);
+      }
+      let added: UserAddedMcpServerRequest;
+      try {
+        if (body.kind !== "ok") throw new Error("invalid");
+        added = decodeUserAddedMcpServerRequest(body.value);
+      } catch {
+        return response(failure("invalid", "The server details are invalid."), 400, origin);
+      }
+      let source: ExtensionSource;
+      try {
+        source = (await options.userAddedMcpServers.add(added)).source;
+      } catch (error) {
+        if (error instanceof UserAddedMcpServerError) {
+          // A name already in use is answered as a conflict (409) in the
+          // route's own words; the failure vocabulary has no such category.
+          const status =
+            error.category === "conflict" ? 409 : error.category === "unavailable" ? 503 : 400;
+          const category =
+            error.category === "unavailable"
+              ? "unavailable"
+              : error.category === "failed"
+                ? "failed"
+                : "invalid";
+          return response(failure(category, error.message), status, origin);
+        }
+        return response(failure("invalid", "The server could not be added."), 400, origin);
+      }
+      const inspected = await options.service.execute(
+        { kind: "inspect-package", source },
+        request.signal,
+      );
+      if (inspected.kind !== "package-inspected") return response(inspected, 200, origin);
+      const entry = inspected.preview.entry;
+      const installed = await options.service.execute(
+        {
+          kind: "install-package",
+          extensionId: entry.extensionId,
+          packageId: entry.packageId,
+          version: entry.version,
+          digest: entry.digest,
+        },
+        request.signal,
+      );
+      if (installed.kind !== "extension-state-updated") return response(installed, 200, origin);
+      // The person just typed this server in, so trusting and switching it on
+      // is what they asked for; the ladder still records each step.
+      let current = installed;
+      const enable = async (command: Readonly<Record<string, unknown>>) => {
+        const state = current.snapshot.packages.find(
+          (candidate) => candidate.extensionId === entry.extensionId,
+        );
+        if (state === undefined) return;
+        const result = await options.service.execute(
+          decodeExtensionCommand({
+            ...command,
+            commandVersion: 1,
+            extensionId: String(entry.extensionId),
+            expectedStateVersion: Number(state.stateVersion),
+          }),
+          request.signal,
+        );
+        if (result.kind === "extension-state-updated") current = result;
+      };
+      await enable({ kind: "set-source-trust", trusted: true });
+      await enable({ kind: "set-plugin-desired", desired: true });
+      const installedState = current.snapshot.packages.find(
+        (candidate) => candidate.extensionId === entry.extensionId,
+      );
+      for (const component of installedState?.components ?? []) {
+        if (component.component.kind !== "mcp-server") continue;
+        await enable({
+          kind: "set-component-desired",
+          componentId: component.component.id,
+          desired: true,
+        });
+      }
+      return response(current, 200, origin);
     }
     if (
       url.pathname !== "/api/extensions/inspect" &&

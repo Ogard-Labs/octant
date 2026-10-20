@@ -195,6 +195,24 @@ and set `"command": "${PLUGIN_ROOT}/.venv/bin/python"` with the package's script
 or `["-m", "<module>"]` as `args`. A virtual environment built from Homebrew
 Python runs under the sandbox.
 
+### Add an MCP server by hand
+
+**Settings → Skills & Extensions → Add MCP server…** connects a server
+without a package. Give it a name and choose how Octant reaches it:
+
+- **Command**: a program on this computer, by name or full path, its
+  arguments one per line, and environment variables. Octant starts it
+  confined, the way it starts a plugin's own server.
+- **Address**: an `https` address (or `http` on this computer) and headers.
+
+Mark a value **Secret** to keep it in this Mac's credential store instead of
+the package; Octant cannot show it again. The server appears under Extension
+packages as **Added by you**, installed, trusted and switched on, and its tools
+ask for approval on every call like any plugin's. Removing it deletes the
+package and its secrets. Adding a server works only from the Octant window on
+this host, not from a paired device, and a browser-hosted Settings cannot keep
+secrets.
+
 ### Structured references
 
 In a composer, typing `@` opens a searchable plugin palette. Selections

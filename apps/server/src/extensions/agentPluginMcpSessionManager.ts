@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { access, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, join, relative } from "node:path";
+import type { AgentPluginsMcpLaunchSpec } from "@octant/plugin-host/agent-plugins";
 import type {
   ExtensionEffectiveSnapshot,
   ExtensionSnapshot,
@@ -71,6 +72,13 @@ export interface ExtensionToolCall {
   readonly signal?: AbortSignal;
 }
 
+/** A component the manager should keep connected, with the server name its mcp.json uses. */
+type AgentPluginMcpSessionTarget = AgentPluginMcpSessionKey & {
+  readonly serverNameHint: string;
+  /** True for a package the host wrote for a server the person added by hand. */
+  readonly userAdded: boolean;
+};
+
 export interface AgentPluginMcpSessionManagerOptions {
   readonly store: Pick<
     ExtensionPackageStore,
@@ -89,6 +97,14 @@ export interface AgentPluginMcpSessionManagerOptions {
     input: RecordExternalContentIngestionInput,
   ) => ExternalContentIngestionResult;
   readonly uuid?: () => string;
+  /**
+   * Fills in the secret references in a launch for a package the host wrote
+   * for a server the person added by hand. Only that source kind is offered
+   * the broker: a third-party package never gets to name a secret.
+   */
+  readonly resolveUserAddedSecrets?: (
+    launch: AgentPluginsMcpLaunchSpec,
+  ) => Promise<AgentPluginsMcpLaunchSpec>;
 }
 
 /**
@@ -107,11 +123,9 @@ export class AgentPluginMcpSessionManager {
   readonly #authorizeToolCall: AgentPluginMcpSessionManagerOptions["authorizeToolCall"];
   readonly #recordExternalContentIngestion: AgentPluginMcpSessionManagerOptions["recordExternalContentIngestion"];
   readonly #uuid: () => string;
+  readonly #resolveUserAddedSecrets: AgentPluginMcpSessionManagerOptions["resolveUserAddedSecrets"];
   readonly #sessions = new Map<string, AgentPluginMcpSessionRecord>();
-  readonly #desired = new Map<
-    string,
-    AgentPluginMcpSessionKey & { readonly serverNameHint: string }
-  >();
+  readonly #desired = new Map<string, AgentPluginMcpSessionTarget>();
   readonly #connections = new Map<string, Promise<void>>();
   readonly #idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
   readonly #toolIndex = new Map<
@@ -138,6 +152,7 @@ export class AgentPluginMcpSessionManager {
     this.#authorizeToolCall = options.authorizeToolCall;
     this.#recordExternalContentIngestion = options.recordExternalContentIngestion;
     this.#uuid = options.uuid ?? randomUUID;
+    this.#resolveUserAddedSecrets = options.resolveUserAddedSecrets;
   }
 
   sessions(): ReadonlyArray<AgentPluginMcpSessionRecord> {
@@ -346,7 +361,7 @@ export class AgentPluginMcpSessionManager {
 
   async reconcile(effective: ExtensionEffectiveSnapshot): Promise<void> {
     const currentScope = authorityScopeKey(effective.scope);
-    const desired = new Map<string, AgentPluginMcpSessionKey & { serverNameHint: string }>();
+    const desired = new Map<string, AgentPluginMcpSessionTarget>();
     for (const packageState of effective.packages) {
       for (const componentState of packageState.components) {
         if (componentState.effectiveState.kind !== "effective") continue;
@@ -360,6 +375,7 @@ export class AgentPluginMcpSessionManager {
           configurationEntryPoint: componentState.component.entryPoint ?? "mcp.json",
           scope: effective.scope,
           serverNameHint: componentState.component.displayName,
+          userAdded: packageState.source.kind === "user-added",
         };
         desired.set(sessionKey(key), key);
       }
@@ -451,7 +467,7 @@ export class AgentPluginMcpSessionManager {
     }
   }
 
-  async #connect(target: AgentPluginMcpSessionKey & { serverNameHint: string }): Promise<void> {
+  async #connect(target: AgentPluginMcpSessionTarget): Promise<void> {
     const versionRef = {
       extensionId: target.extensionId,
       packageId: target.packageId,
@@ -475,13 +491,17 @@ export class AgentPluginMcpSessionManager {
     if (selectedLaunch === undefined) {
       throw new Error(`MCP server for ${target.componentId} is unavailable.`);
     }
-    const launch =
-      selectedLaunch.transport === "stdio" && !isAbsolute(selectedLaunch.command)
-        ? {
-            ...selectedLaunch,
-            command: await resolveApprovedExecutable(selectedLaunch.command, this.#baseEnv.PATH),
-          }
+    const withSecrets =
+      target.userAdded && this.#resolveUserAddedSecrets !== undefined
+        ? await this.#resolveUserAddedSecrets(selectedLaunch)
         : selectedLaunch;
+    const launch =
+      withSecrets.transport === "stdio" && !isAbsolute(withSecrets.command)
+        ? {
+            ...withSecrets,
+            command: await resolveApprovedExecutable(withSecrets.command, this.#baseEnv.PATH),
+          }
+        : withSecrets;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#connectionTimeoutMs);
     timeout.unref?.();
@@ -532,9 +552,7 @@ export class AgentPluginMcpSessionManager {
     this.#reindex();
   }
 
-  #connectOnce(
-    target: AgentPluginMcpSessionKey & { readonly serverNameHint: string },
-  ): Promise<void> {
+  #connectOnce(target: AgentPluginMcpSessionTarget): Promise<void> {
     const key = sessionKey(target);
     const existing = this.#connections.get(key);
     if (existing !== undefined) return existing;
@@ -545,10 +563,7 @@ export class AgentPluginMcpSessionManager {
     return pending;
   }
 
-  #handleTransportClosed(
-    key: string,
-    target: AgentPluginMcpSessionKey & { readonly serverNameHint: string },
-  ): void {
+  #handleTransportClosed(key: string, target: AgentPluginMcpSessionTarget): void {
     const idleTimer = this.#idleTimers.get(key);
     if (idleTimer !== undefined) clearTimeout(idleTimer);
     this.#idleTimers.delete(key);

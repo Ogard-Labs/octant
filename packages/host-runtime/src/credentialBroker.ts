@@ -35,6 +35,10 @@ const ROUTES = new Set([
   "/v1/replica-store-credentials/resolve",
   "/v1/replica-store-credentials/set",
   "/v1/replica-store-credentials/delete",
+  "/v1/mcp-server-credentials/has",
+  "/v1/mcp-server-credentials/resolve",
+  "/v1/mcp-server-credentials/set",
+  "/v1/mcp-server-credentials/delete",
   "/v1/oauth/begin",
   "/v1/oauth/status",
   "/v1/oauth/refresh",
@@ -43,7 +47,8 @@ const ROUTES = new Set([
 ]);
 const REPLICA_DEVICE_KEY_PREFIX = "/v1/replica-device-keys/";
 const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
-type NamespacedIdField = "instanceId" | "credentialRef";
+const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
+type NamespacedIdField = "instanceId" | "credentialRef" | "secretId";
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
 const PURGE_FAILURE_STATUS: Readonly<Record<CredentialPurgeFailure["category"], number>> = {
   locked: 423,
@@ -83,6 +88,14 @@ export async function startCredentialBroker(
    * a key pair can be replaced when a person enters a new one.
    */
   replicaStoreCredentials?: CredentialStore,
+  /**
+   * The secret values a person gives an MCP server they added by hand (a
+   * header, an environment variable), in a credential namespace of their own.
+   * They are served only on `/v1/mcp-server-credentials/*`, keyed by the secret id
+   * the package references, so no provider instance, device key, or bucket
+   * key pair with the same UUID can reach one.
+   */
+  mcpServerCredentials?: CredentialStore,
 ): Promise<CredentialBroker> {
   const token = randomBytes(32).toString("base64url");
   const runtime = createHostOAuthRuntime({
@@ -103,6 +116,7 @@ export async function startCredentialBroker(
       runtime,
       replicaDeviceKeys,
       replicaStoreCredentials,
+      mcpServerCredentials,
     ).then(
       ({ destroyIncoming, response }) => {
         const headers: Record<string, string> = {};
@@ -172,6 +186,7 @@ export async function startCredentialBroker(
         runtime,
         replicaDeviceKeys,
         replicaStoreCredentials,
+        mcpServerCredentials,
       ),
   });
 }
@@ -185,6 +200,7 @@ async function handleIncoming(
   runtime: HostOAuthRuntime,
   replicaDeviceKeys: CredentialStore | undefined,
   replicaStoreCredentials: CredentialStore | undefined,
+  mcpServerCredentials: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
   const headers = requestHeaders(incoming.headers);
@@ -216,6 +232,7 @@ async function handleIncoming(
         runtime,
         replicaDeviceKeys,
         replicaStoreCredentials,
+        mcpServerCredentials,
       ),
     ),
   };
@@ -230,6 +247,7 @@ async function handleBrokerRequest(
   runtime: HostOAuthRuntime,
   replicaDeviceKeys: CredentialStore | undefined,
   replicaStoreCredentials: CredentialStore | undefined,
+  mcpServerCredentials: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
   if (!isAuthorized(peerAddress, request.headers, token)) {
@@ -266,6 +284,16 @@ async function handleBrokerRequest(
       "credentialRef",
       request,
       replicaStoreCredentials,
+    );
+  }
+
+  if (url.pathname.startsWith(MCP_SERVER_CREDENTIAL_PREFIX)) {
+    if (mcpServerCredentials === undefined) return failure("not-found", 404);
+    return handleNamespacedRoute(
+      url.pathname.slice(MCP_SERVER_CREDENTIAL_PREFIX.length),
+      "secretId",
+      request,
+      mcpServerCredentials,
     );
   }
 

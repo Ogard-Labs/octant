@@ -406,9 +406,13 @@ code-delivery channel and macOS refuses the replacement anyway. A local package
 built without maintainer signing credentials is unsigned. Cross-platform
 desktop (macOS, Linux, Windows) remains authorized: Linux desktop shell next, Windows Work/Code only after an
 explicitly approved Windows confinement design is documented. Do not add native mobile store distribution, hosted
-relay, connector/OAuth marketplace, or full LSP/extension host unless an explicit
+relay, or full LSP/extension host unless an explicit
 request authorizes that scope and the current specification documents its
-authority and release boundaries. The person's confirmed pull-request merge from
+authority and release boundaries. Connectors (MCP servers added by hand, imported
+from other tools on this Mac, signed in to, or chosen from the bundled catalog)
+are in scope under the architecture's
+[connector rules](docs/architecture.md#extensions-and-skills): user-added packages
+through the published seams and the credential broker, never a hosted service. The person's confirmed pull-request merge from
 a local window and host-local routines (Automation Center) are in scope under the
 [architecture's rules](docs/architecture.md#modes-chat-work-and-code); other
 pull-request mutation, agent-initiated merge, cloud scheduling, and a hosted

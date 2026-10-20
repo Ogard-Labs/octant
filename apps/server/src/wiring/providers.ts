@@ -44,6 +44,7 @@ import { makeAnthropicCompatibleDriver } from "../providers/anthropicCompatibleD
 import { makeAzureFoundryDriver } from "../providers/azureFoundryDriver";
 import {
   makeCredentialBrokerClient,
+  makeMcpServerCredentialBrokerClient,
   type ProviderCredentialResolver,
 } from "../providers/credentialBrokerClient";
 import { makeProviderApiKeyPool } from "../providers/providerApiKeyPool";
@@ -131,6 +132,7 @@ import { NpmAgentPluginMarketplace } from "../extensions/npmAgentPluginMarketpla
 import { createDefaultCodexPluginPackageSources } from "../extensions/curatedBuildIosAppsCatalog";
 import { AgentPluginMcpSessionManager } from "../extensions/agentPluginMcpSessionManager";
 import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegistry";
+import { UserAddedMcpServerStore } from "../extensions/userAddedMcpServers";
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import { createExtensionToolCallAuthorizer } from "../extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "../extensions/extensionToolGrantStore";
@@ -518,11 +520,34 @@ export function wireProviders(deps: ProvidersDependencies) {
         statePath: join(providerDataDirectory, "extensions", "local-plugin-folders.json"),
       });
     yield* Effect.promise(() => localPluginFolderRegistry.initialize());
+    // The packages the host writes for MCP servers a person adds by hand live
+    // in the host's own folder, registered under their own source kind, with
+    // their secret values in the broker's namespace for them.
+    const userAddedPluginRegistry = new LocalPluginFolderRegistry({
+      appVersion: version,
+      platform: process.platform,
+      statePath: join(providerDataDirectory, "extensions", "user-added-servers.json"),
+      sourceKind: "user-added",
+    });
+    yield* Effect.promise(() => userAddedPluginRegistry.initialize());
+    const userAddedMcpServers = new UserAddedMcpServerStore({
+      directory: join(providerDataDirectory, "extensions", "user-added"),
+      registry: userAddedPluginRegistry,
+      ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? {}
+        : {
+            secrets: makeMcpServerCredentialBrokerClient({
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            }),
+          }),
+    });
     const extensionPackageResolver =
       options.extensionPackageResolver ??
       new CodexPluginPackageResolver({
         ...(options.codexPluginPackageSources ?? createDefaultCodexPluginPackageSources()),
         localFolderRegistry: localPluginFolderRegistry,
+        userAddedRegistry: userAddedPluginRegistry,
         isMarketplaceFetchAllowed,
         agentPluginCatalog: new NpmAgentPluginMarketplace({
           appVersion: version,
@@ -553,6 +578,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             readApprovalOutsideContent(persistence.connection, threadId),
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        resolveUserAddedSecrets: (launch) => userAddedMcpServers.resolveLaunchSecrets(launch),
         ...(extensionSupervisor instanceof ExtensionSupervisor
           ? { stdioSupervisor: extensionSupervisor }
           : {}),
@@ -589,6 +615,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         // lifecycle state changed; unrelated in-flight MCP calls remain intact.
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
       },
+      userAddedMcpServers,
     });
     const resolveSelectedExtensions = createSelectedExtensionResolver({
       snapshot: async () => {
@@ -633,6 +660,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         : { desktopBridgeSecret: options.desktopBridgeSecret }),
       localPluginFolderRegistry,
       localPluginImportReceipts: new LocalPluginImportReceiptStore(),
+      userAddedMcpServers,
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,
     });

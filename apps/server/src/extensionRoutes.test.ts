@@ -12,6 +12,7 @@ import type { ResolvedExtensionPackage } from "./extensions/packageInspector";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
 import { ExtensionToolApprovalService } from "./extensions/extensionToolApprovalService";
+import { UserAddedMcpServerError } from "./extensions/userAddedMcpServers";
 
 const now = Date.parse("2026-07-28T12:00:00.000Z");
 const capability = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0";
@@ -792,6 +793,111 @@ describe("extension route request abort propagation", () => {
     }
   });
 });
+
+describe("MCP servers added by hand", () => {
+  const body = {
+    name: "Docs search",
+    server: { type: "stdio", command: "npx", args: ["-y", "docs-search-mcp"], env: [] },
+  };
+
+  it("refuses a paired device and a host that cannot add one", async () => {
+    const add = vi.fn();
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      userAddedMcpServers: { add } as never,
+      now: () => now,
+    });
+    const denied = await handler(pairedDeviceRequest("/api/extensions/user-servers", body));
+    expect(denied?.status).toBe(401);
+    expect(add).not.toHaveBeenCalled();
+
+    const without = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      now: () => now,
+    });
+    expect((await without(request("/api/extensions/user-servers", body)))?.status).toBe(503);
+  });
+
+  it("writes the package, then installs, trusts and switches it on as one act", async () => {
+    const source = { kind: "user-added", sourceRef: "user-docs-search" } as const;
+    const add = vi.fn(async () => ({ source }));
+    const observed: Array<ExtensionCommand> = [];
+    let stateVersion = 1;
+    const packageState = (components: ReadonlyArray<string>) => ({
+      extensionId,
+      packageId,
+      stateVersion: stateVersion++,
+      version: "1.0.0",
+      digest,
+      source,
+      components: components.map((id) => ({
+        component: { id, kind: "mcp-server", displayName: "Docs search" },
+      })),
+    });
+    const execute = vi.fn(async (command: ExtensionCommand) => {
+      observed.push(command);
+      if (command.kind === "inspect-package") {
+        return {
+          kind: "package-inspected",
+          preview: { entry: { extensionId, packageId, version: "1.0.0", digest, source } },
+        } as never;
+      }
+      return {
+        kind: "extension-state-updated",
+        snapshot: { ...setupSnapshot(), packages: [packageState(["mcp-docs-search"])] },
+      } as never;
+    });
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      userAddedMcpServers: { add } as never,
+      now: () => now,
+    });
+    const answered = await handler(request("/api/extensions/user-servers", body));
+    expect(answered?.status).toBe(200);
+    expect(add).toHaveBeenCalledWith(body);
+    expect(observed.map((command) => command.kind)).toEqual([
+      "inspect-package",
+      "install-package",
+      "set-source-trust",
+      "set-plugin-desired",
+      "set-component-desired",
+    ]);
+    expect(observed[2]).toMatchObject({ trusted: true, expectedStateVersion: 1 });
+    expect(observed[3]).toMatchObject({ desired: true, expectedStateVersion: 2 });
+    expect(observed[4]).toMatchObject({
+      componentId: "mcp-docs-search",
+      desired: true,
+      expectedStateVersion: 3,
+    });
+    expect(await answered?.json()).toMatchObject({ kind: "extension-state-updated" });
+  });
+
+  it("answers a refusal from the store with its own sentence", async () => {
+    const add = vi.fn(async () => {
+      throw new UserAddedMcpServerError("conflict", "A server with this name is already added.");
+    });
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      userAddedMcpServers: { add } as never,
+      now: () => now,
+    });
+    const answered = await handler(request("/api/extensions/user-servers", body));
+    expect(answered?.status).toBe(409);
+    expect(await answered?.json()).toMatchObject({
+      failure: { category: "invalid", message: "A server with this name is already added." },
+    });
+  });
+});
+
+function registeredWindowStore(): WindowAuthorityStore {
+  const windowAuthorityStore = new WindowAuthorityStore();
+  windowAuthorityStore.register({ windowId: windowId as never, capability, now });
+  return windowAuthorityStore;
+}
 
 function setupSnapshot(): ExtensionSnapshot {
   return {

@@ -17,6 +17,11 @@ private let replicaDeviceKeyNamespace = "replica-device-key"
 // when a person enters a new key pair.
 private let replicaStoreCredentialService = "app.octant.replica-store-credentials.v1"
 private let replicaStoreCredentialNamespace = "replica-store-credential"
+// The secret values a person gives an MCP server they added by hand (a header,
+// an environment variable) live in a service of their own, keyed by the secret
+// id the server's package references. A person may replace one.
+private let mcpServerCredentialService = "app.octant.mcp-server-credentials.v1"
+private let mcpServerCredentialNamespace = "mcp-server-credential"
 private let hostIdentityNamespace = "app.octant.host-identity.v1"
 private let hostIdentityKeyId = "host-identity"
 private let maximumPurgeProviderInstances = 128
@@ -50,6 +55,7 @@ private let octantOwnedServices = [
     hostIdentityService,
     replicaDeviceKeyService,
     replicaStoreCredentialService,
+    mcpServerCredentialService,
 ]
 
 // A credential namespace of its own: the Keychain service it reaches, the
@@ -69,6 +75,11 @@ private let separateNamespaces: [String: SeparateNamespace] = [
     replicaStoreCredentialNamespace: SeparateNamespace(
         service: replicaStoreCredentialService,
         idField: "credentialRef",
+        replaceable: true
+    ),
+    mcpServerCredentialNamespace: SeparateNamespace(
+        service: mcpServerCredentialService,
+        idField: "secretId",
         replaceable: true
     ),
 ]
