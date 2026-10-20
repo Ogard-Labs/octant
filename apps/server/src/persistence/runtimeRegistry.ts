@@ -123,6 +123,8 @@ import {
   EXTENSION_TOOL_GRANT_EVENT_NAMES,
   ExtensionToolGrantRecorded,
   ExtensionToolGrantRevoked,
+  EXTENSION_PROJECT_PIN_EVENT_NAMES,
+  ExtensionProjectPinChanged,
   ProductFeedbackCaptured,
   ProductFeedbackDelivered,
   PROJECT_TERMINAL_EVENT_NAMES,
@@ -204,6 +206,7 @@ import { ValidationEvidenceProjection } from "../validation/validationEvidencePr
 import { ThemeProjection } from "./themeProjection";
 import { ExtensionProjection, EXTENSION_LIFECYCLE_EVENT } from "./extensionProjection";
 import { ExtensionToolGrantProjection } from "./extensionToolGrantProjection";
+import { ExtensionProjectPinProjection } from "./extensionProjectPinProjection";
 import { RemoteAccessProjection } from "./remoteAccessProjection";
 import {
   PRODUCT_FEEDBACK_CAPTURED,
@@ -427,6 +430,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(EXTENSION_LIFECYCLE_EVENT, 1, ExtensionLifecycleEvent)
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.recorded, 1, ExtensionToolGrantRecorded)
     .register(EXTENSION_TOOL_GRANT_EVENT_NAMES.revoked, 1, ExtensionToolGrantRevoked)
+    .register(EXTENSION_PROJECT_PIN_EVENT_NAMES.changed, 1, ExtensionProjectPinChanged)
     .register(REMOTE_ACCESS_EVENT_NAMES.hostIdentityInitialized, 1, HostIdentityInitializedV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceRegistered, 1, DeviceRegisteredV1)
     .register(REMOTE_ACCESS_EVENT_NAMES.deviceKeyRotated, 1, DeviceKeyRotatedV1)
@@ -524,6 +528,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
       .register(new ThemeProjection())
       .register(new ExtensionProjection())
       .register(new ExtensionToolGrantProjection())
+      .register(new ExtensionProjectPinProjection())
       .register(new RemoteAccessProjection())
       .register(new ThreadCheckpointProjection())
       .register(new ProductFeedbackProjection())

@@ -583,3 +583,28 @@
   flex-wrap: wrap;
   gap: var(--oct-space-2);
 }
+
+/* Use in a Project: one switch per Project a plugin can be pinned to. */
+.extensions-settings__pins {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin: var(--oct-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.extensions-settings__pin {
+  display: flex;
+  align-items: center;
+  gap: var(--oct-space-2);
+}
+
+.extensions-settings__pin-name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+}
+
+.extensions-settings__pin-type {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}

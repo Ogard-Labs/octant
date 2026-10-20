@@ -273,6 +273,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
     | "probeProviderForThreads"
     | "providerDataDirectory"
     | "resolveSelectedExtensions"
+    | "pinnedExtensionSelections"
   > &
   Pick<
     BrowserWiring,
@@ -359,6 +360,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     providerRuntimeRegistry,
     recordAppleEvidence,
     resolveSelectedExtensions,
+    pinnedExtensionSelections,
     roots,
     runtimeOutsideContentMarks,
     selectCodeConversation,
@@ -494,6 +496,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         gitMutationPort,
         agentRuns: agentRunPersistence,
         resolveSelectedExtensions,
+        pinnedExtensionSelections,
         computerUseTools: ({ windowId, thread, selection }) =>
           computerToolsFor(
             decodeComputerUseOwner({

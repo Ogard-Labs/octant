@@ -1,3 +1,4 @@
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import {
   coveredAgentResultDeliveryMembers,
@@ -208,6 +209,8 @@ export interface WorkTurnStartOptions {
 
 export interface WorkTurnServiceDependencies {
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
+  /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
+  readonly pinnedExtensionSelections?: (projectId: string) => ReadonlyArray<ExtensionSelection>;
   readonly persistence: {
     readonly status: () => { readonly state: string; readonly integrity: string };
     readonly readProject: (projectId: ProjectId) => Project | undefined;
@@ -425,6 +428,7 @@ export class WorkTurnService {
    */
   readonly #runningAccess: RunningWorkTurnAccess;
   readonly #resolveSelectedExtensions: SelectedExtensionResolver | undefined;
+  readonly #pinnedExtensionSelections: WorkTurnServiceDependencies["pinnedExtensionSelections"];
   readonly #persistence: WorkTurnServiceDependencies["persistence"];
   readonly #threads: WorkTurnServiceDependencies["threads"];
   readonly #projects: WorkTurnServiceDependencies["projects"];
@@ -473,6 +477,7 @@ export class WorkTurnService {
     this.#runningAccess = dependencies.runningAccess ?? new Map();
     this.#contextHarness = dependencies.contextHarness;
     this.#resolveSelectedExtensions = dependencies.resolveSelectedExtensions;
+    this.#pinnedExtensionSelections = dependencies.pinnedExtensionSelections;
     this.#persistence = dependencies.persistence;
     this.#threads = dependencies.threads;
     this.#projects = dependencies.projects;
@@ -821,8 +826,12 @@ export class WorkTurnService {
       throw this.#failure("unavailable", "An image attached to this turn is unavailable.");
     }
 
-    const selections =
-      command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
+    const selections = withPinnedSelections(
+      command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [],
+      thread === undefined
+        ? undefined
+        : this.#pinnedExtensionSelections?.(String(thread.projectId)),
+    );
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
     let extensionTools: AppManagedToolSet | undefined;
     if (selections.length > 0) {
@@ -2427,4 +2436,27 @@ function workTurnThreadFacts(
         workingDirectory:
           thread.workingDirectory === undefined ? undefined : String(thread.workingDirectory),
       };
+}
+
+/**
+ * The turn's selections plus the Project's pinned plugins, each once. A pin
+ * the person also named explicitly is not doubled, and a pin never widens an
+ * explicit component selection of the same plugin.
+ */
+function withPinnedSelections(
+  explicit: ReadonlyArray<ExtensionSelection>,
+  pinned: ReadonlyArray<ExtensionSelection> | undefined,
+): ReadonlyArray<ExtensionSelection> {
+  if (pinned === undefined || pinned.length === 0) return explicit;
+  const named = new Set(
+    explicit.flatMap((selection) =>
+      selection.kind === "plugin" ? [String(selection.extensionId)] : [],
+    ),
+  );
+  return [
+    ...explicit,
+    ...pinned.filter(
+      (selection) => selection.kind === "plugin" && !named.has(String(selection.extensionId)),
+    ),
+  ];
 }

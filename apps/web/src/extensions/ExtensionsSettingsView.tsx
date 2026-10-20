@@ -17,7 +17,10 @@ import type {
   ExtensionSource,
   StandaloneSkillRecord,
 } from "@octant/contracts/extensions";
-import type { ExtensionPackagePreview } from "@octant/contracts/extension-rpc";
+import type {
+  ExtensionPackagePreview,
+  ExtensionProjectPinListing,
+} from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { AddMcpServerDialog } from "./AddMcpServerDialog";
@@ -298,6 +301,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [importingLocal, setImportingLocal] = useState(false);
   const [addingServer, setAddingServer] = useState(false);
   const [discoveredRevision, setDiscoveredRevision] = useState(0);
+  const [projectPins, setProjectPins] = useState<ExtensionProjectPinListing>();
   const [installedSkillQuery, setInstalledSkillQuery] = useState("");
   const [showAllInstalledSkills, setShowAllInstalledSkills] = useState(false);
   const installedSkillSearch = useRef<HTMLInputElement>(null);
@@ -327,6 +331,22 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     },
     [props.client],
   );
+
+  useEffect(() => {
+    if (!props.client.toolGrantsAvailable) return;
+    let cancelled = false;
+    props.client
+      .projectPins({ kind: "list" })
+      .then((listing) => {
+        if (!cancelled) setProjectPins(listing);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectPins(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.client, discoveredRevision]);
 
   const reload = useCallback(async () => {
     setStatus("loading");
@@ -735,6 +755,28 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                       packageState={pkg}
                       busy={busyPackageId === `${pkg.extensionId}:${pkg.packageId}`}
                       {...(props.client.toolGrantsAvailable ? { signIn: props.client } : {})}
+                      {...(projectPins === undefined
+                        ? {}
+                        : {
+                            projectPins,
+                            onPin: async (projectId: string, pinned: boolean) => {
+                              try {
+                                setProjectPins(
+                                  await props.client.projectPins({
+                                    kind: "set",
+                                    projectId: projectId as never,
+                                    extensionId: pkg.extensionId,
+                                    pinned,
+                                  }),
+                                );
+                              } catch {
+                                setFailure({
+                                  category: "unavailable",
+                                  message: "The pin could not be changed.",
+                                });
+                              }
+                            },
+                          })}
                       onTrust={(trusted) =>
                         runLifecycle(
                           {
@@ -1654,6 +1696,9 @@ interface InstalledPackageCardProps {
   readonly busy: boolean;
   /** Present in the Octant window on this host, where a hosted server can be signed in to. */
   readonly signIn?: Pick<ExtensionClient, "mcpServerSignIn">;
+  /** The Projects a plugin can be pinned to, and the pins that exist; absent off the host. */
+  readonly projectPins?: ExtensionProjectPinListing;
+  readonly onPin?: (projectId: string, pinned: boolean) => Promise<void>;
   readonly onTrust: (trusted: boolean) => Promise<boolean>;
   readonly onPluginDesired: (desired: boolean) => Promise<boolean>;
   readonly onComponentDesired: (
@@ -1795,6 +1840,44 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
             );
           })}
         </div>
+      ) : null}
+      {props.projectPins !== undefined &&
+      props.onPin !== undefined &&
+      props.projectPins.projects.length > 0 &&
+      pkg.activation.installed ? (
+        <SettingsDisclosure title="Use in a Project" variant="inline">
+          <p className="extensions-settings__effective">
+            A pinned plugin is offered on every Work and Code turn in that Project without typing @.
+            Each tool call still asks for approval.
+          </p>
+          <ul aria-label="Projects" className="extensions-settings__pins">
+            {props.projectPins.projects.map((project) => {
+              const pinned = props.projectPins?.pins.some(
+                (pin) =>
+                  String(pin.projectId) === String(project.projectId) &&
+                  String(pin.extensionId) === String(pkg.extensionId),
+              );
+              return (
+                <li className="extensions-settings__pin" key={String(project.projectId)}>
+                  <OctantSwitch
+                    checked={pinned === true}
+                    disabled={
+                      props.busy || !pkg.activation.trusted || !pkg.activation.pluginDesired
+                    }
+                    label={`Use in ${project.name}`}
+                    onCheckedChange={(next) => void props.onPin?.(String(project.projectId), next)}
+                  />
+                  <span className="extensions-settings__pin-name">
+                    {project.name}
+                    <span className="extensions-settings__pin-type">
+                      {project.type === "work" ? " · Work" : " · Code"}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </SettingsDisclosure>
       ) : null}
       {pkg.diagnostics.length > 0 ? (
         <ul className="extensions-settings__diagnostics">

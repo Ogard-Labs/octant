@@ -1496,6 +1496,7 @@ describe("SettingsView", () => {
       addUserMcpServer: vi.fn() as never,
       listDiscoveredTooling: vi.fn() as never,
       mcpServerSignIn: vi.fn() as never,
+      projectPins: vi.fn() as never,
       applyDiscoveredTooling: vi.fn() as never,
     };
     renderSettings({ extensionClient: extensionClient as never });

@@ -12,9 +12,11 @@ import {
   decodeExtensionToolApprovalDecision,
   decodeExtensionToolGrantRequest,
   decodeDiscoveredAgentToolingRequest,
+  decodeExtensionProjectPinRequest,
   decodeMcpServerSignInRequest,
   decodeUserAddedMcpServerRequest,
   type DiscoveredAgentToolingListing,
+  type ExtensionProjectPinListing,
   type McpServerSignInView,
   type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
@@ -48,6 +50,11 @@ export function createExtensionRouteHandler(options: {
   /** Writes the package for an MCP server a person adds by hand. */
   readonly userAddedMcpServers?: {
     add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }>;
+  };
+  /** Plugins pinned to Projects, and the Projects a local window may pin to. */
+  readonly extensionProjectPins?: {
+    list(): ExtensionProjectPinListing;
+    set(projectId: string, extensionId: string, pinned: boolean): "recorded" | "refused";
   };
   /** Sign-in to a hosted server a person added, through the host OAuth runner. */
   readonly mcpServerSignIn?: {
@@ -338,6 +345,50 @@ export function createExtensionRouteHandler(options: {
         origin,
       );
     }
+    if (url.pathname === "/api/extensions/project-pins") {
+      // A pin changes what every turn in a Project carries, so only a local
+      // window sets one; a paired device may read the list.
+      if (options.extensionProjectPins === undefined) {
+        return response(
+          failure("unavailable", "Pinning plugins to a Project is unavailable."),
+          503,
+          origin,
+        );
+      }
+      const body = await readBody(request, maximumBodySize);
+      if (body.kind === "too-large") {
+        return response(failure("invalid", "Extension request is too large."), 413, origin);
+      }
+      let pin;
+      try {
+        if (body.kind !== "ok") throw new Error("invalid");
+        pin = decodeExtensionProjectPinRequest(body.value);
+      } catch {
+        return response(failure("invalid", "The pin request is invalid."), 400, origin);
+      }
+      if (pin.kind === "set") {
+        if (principalContext.principal.kind !== "local-window") {
+          return response(
+            failure("unauthorized", "Pinning a plugin requires the Octant window on this host."),
+            401,
+            origin,
+          );
+        }
+        const outcome = options.extensionProjectPins.set(
+          String(pin.projectId),
+          String(pin.extensionId),
+          pin.pinned,
+        );
+        if (outcome === "refused") {
+          return response(
+            failure("invalid", "That plugin cannot be pinned to that Project."),
+            400,
+            origin,
+          );
+        }
+      }
+      return response(options.extensionProjectPins.list(), 200, origin);
+    }
     if (url.pathname === "/api/extensions/sign-in") {
       // A sign-in opens the system browser on this host and stores a grant
       // in its broker; a paired device may read the state but never start,
@@ -608,7 +659,8 @@ function response(
     | { readonly accepted: boolean }
     | { readonly revoked: boolean }
     | DiscoveredAgentToolingListing
-    | McpServerSignInView,
+    | McpServerSignInView
+    | ExtensionProjectPinListing,
   status: number,
   origin: string | null,
 ) {

@@ -20,6 +20,7 @@ import {
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type UtcTimestamp,
+  decodeProjectId,
 } from "@octant/contracts";
 import { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import type { ProviderDriver, ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
@@ -135,7 +136,12 @@ import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegist
 import { UserAddedMcpServerStore } from "../extensions/userAddedMcpServers";
 import { AgentToolingDiscovery } from "../extensions/agentToolingDiscovery";
 import { McpServerSignIn } from "../extensions/mcpServerSignIn";
-import type { McpServerSignInView } from "@octant/contracts/extension-rpc";
+import { ExtensionProjectPinStore } from "../extensions/extensionProjectPinStore";
+import type {
+  ExtensionProjectPinListing,
+  McpServerSignInView,
+} from "@octant/contracts/extension-rpc";
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { validateAgentPluginsMcpDocument } from "@octant/plugin-host/agent-plugins";
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import { createExtensionToolCallAuthorizer } from "../extensions/extensionToolCallAuthorizer";
@@ -592,6 +598,30 @@ export function wireProviders(deps: ProvidersDependencies) {
           isMarketplaceFetchAllowed,
         }),
       });
+    // A pin offers a plugin on every Work or Code turn in one Project. Only a
+    // package that is installed, trusted and switched on rides along: a pin
+    // to anything else is skipped rather than failing the turn.
+    const extensionProjectPinStore = new ExtensionProjectPinStore({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const pinnedExtensionSelections = (projectId: string): ReadonlyArray<ExtensionSelection> => {
+      const pinned = extensionProjectPinStore.list(projectId);
+      if (pinned.length === 0) return [];
+      const packages = extensionLifecycleService.snapshot().packages;
+      return pinned.flatMap((extensionId) => {
+        const pkg = packages.find((candidate) => String(candidate.extensionId) === extensionId);
+        return pkg !== undefined &&
+          pkg.activation.installed &&
+          pkg.activation.trusted &&
+          pkg.activation.pluginDesired
+          ? [{ kind: "plugin", extensionId: pkg.extensionId } as ExtensionSelection]
+          : [];
+      });
+    };
     const extensionToolGrantStore = new ExtensionToolGrantStore({
       journal: persistence.journal,
       connection: persistence.connection,
@@ -654,6 +684,12 @@ export function wireProviders(deps: ProvidersDependencies) {
         // Uninstall, rollback, and withdrawn trust end the package's remembered
         // tool approvals, so bringing it back restores none of them.
         extensionToolGrantStore.revokeForLifecycleChange(command);
+        if (
+          command.kind === "uninstall-package" &&
+          !snapshot.packages.some((candidate) => candidate.extensionId === command.extensionId)
+        ) {
+          extensionProjectPinStore.forgetExtension(String(command.extensionId));
+        }
         // Settings has no thread authority. Drain only package/components whose
         // lifecycle state changed; unrelated in-flight MCP calls remain intact.
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
@@ -710,6 +746,29 @@ export function wireProviders(deps: ProvidersDependencies) {
       localPluginImportReceipts: new LocalPluginImportReceiptStore(),
       userAddedMcpServers,
       agentToolingDiscovery,
+      extensionProjectPins: {
+        list: () => ({
+          projects: persistence
+            .readProjects({ lifecycle: "active" })
+            .flatMap((project) =>
+              project.type === "work" || project.type === "code"
+                ? [{ projectId: project.id, name: project.name, type: project.type }]
+                : [],
+            ),
+          pins: extensionProjectPinStore.listAll().map((pin) => ({
+            projectId: pin.projectId as ExtensionProjectPinListing["pins"][number]["projectId"],
+            extensionId:
+              pin.extensionId as ExtensionProjectPinListing["pins"][number]["extensionId"],
+          })),
+        }),
+        set: (projectId, extensionId, pinned) => {
+          const project = persistence.readProject(decodeProjectId(projectId));
+          if (project === undefined || project.lifecycle !== "active" || project.type === "chat") {
+            return "refused";
+          }
+          return extensionProjectPinStore.set(projectId, extensionId, pinned);
+        },
+      },
       mcpServerSignIn: {
         status: (extensionId, componentId) =>
           signInOrUnavailable((signIn) => signIn.status(extensionId, componentId)),
@@ -1380,6 +1439,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerUsageLimitsService,
       refreshStandaloneSkills,
       resolveSelectedExtensions,
+      pinnedExtensionSelections,
       reviewedModelManifest,
       skillDiscoveryService,
     };

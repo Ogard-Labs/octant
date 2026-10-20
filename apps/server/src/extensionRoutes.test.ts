@@ -1103,6 +1103,67 @@ describe("signing in to a hosted server from Settings", () => {
   });
 });
 
+describe("plugins pinned to a Project", () => {
+  const projectId = "72000000-0000-4000-8000-00000000000a";
+  const listing = {
+    projects: [{ projectId, name: "Studio", type: "code" }],
+    pins: [{ projectId, extensionId }],
+  };
+  const pins = { list: vi.fn(() => listing), set: vi.fn(() => "recorded" as const) };
+
+  it("lets a local window pin and unpin, lists for a paired device, and refuses its pin", async () => {
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      extensionProjectPins: pins as never,
+      now: () => now,
+    });
+    const set = await handler(
+      request("/api/extensions/project-pins", {
+        kind: "set",
+        projectId,
+        extensionId,
+        pinned: true,
+      }),
+    );
+    expect(set?.status).toBe(200);
+    expect(pins.set).toHaveBeenCalledWith(projectId, extensionId, true);
+    expect(await set?.json()).toEqual(listing);
+    const listed = await handler(
+      pairedDeviceRequest("/api/extensions/project-pins", { kind: "list" }),
+    );
+    expect(listed?.status).toBe(200);
+    const denied = await handler(
+      pairedDeviceRequest("/api/extensions/project-pins", {
+        kind: "set",
+        projectId,
+        extensionId,
+        pinned: false,
+      }),
+    );
+    expect(denied?.status).toBe(401);
+    expect(pins.set).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers 400 when the store refuses the pin", async () => {
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      extensionProjectPins: { ...pins, set: vi.fn(() => "refused" as const) } as never,
+      now: () => now,
+    });
+    const refused = await handler(
+      request("/api/extensions/project-pins", {
+        kind: "set",
+        projectId,
+        extensionId,
+        pinned: true,
+      }),
+    );
+    expect(refused?.status).toBe(400);
+  });
+});
+
 function registeredWindowStore(): WindowAuthorityStore {
   const windowAuthorityStore = new WindowAuthorityStore();
   windowAuthorityStore.register({ windowId: windowId as never, capability, now });

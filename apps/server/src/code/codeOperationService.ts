@@ -1,3 +1,4 @@
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import {
   coveredAgentResultDeliveryMembers,
   validateAgentResultDelivery,
@@ -833,6 +834,8 @@ export interface CodeOperationExecuteOptions {
 
 export interface CodeOperationServiceOptions {
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
+  /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
+  readonly pinnedExtensionSelections?: (projectId: string) => ReadonlyArray<ExtensionSelection>;
   readonly authority: CodeOperationAuthorityPort;
   /**
    * Runs after the command has passed thread, checkout, lifecycle, and Project
@@ -3553,8 +3556,21 @@ export class CodeOperationService {
         "Provider prompt evidence is unavailable.",
         "refused",
       );
-    const selections =
+    const explicitSelections =
       command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
+    // A Project's pinned plugins ride along with what the person named this
+    // turn, each once; a pin never doubles an explicit selection.
+    const pinned = (
+      this.#options.pinnedExtensionSelections?.(String(thread.projectId)) ?? []
+    ).filter(
+      (selection) =>
+        selection.kind === "plugin" &&
+        !explicitSelections.some(
+          (named) =>
+            named.kind === "plugin" && String(named.extensionId) === String(selection.extensionId),
+        ),
+    );
+    const selections = [...explicitSelections, ...pinned];
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
     let extensionTools: AppManagedToolSet | undefined;
     if (selections.length > 0) {
