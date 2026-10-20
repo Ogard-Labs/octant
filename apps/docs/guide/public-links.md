@@ -98,7 +98,8 @@ Canvas** and shows neither.
 
 A link expires after 30 days by default. You can pick 1 to 365 days on the
 approval card. **No expiry** is offered only as an explicit choice. An expired
-link answers that it is gone, and the service deletes its content.
+link answers that it is gone, and the service deletes its content. Your Mac
+deletes the link's owner secret within an hour of the expiry.
 
 ## Password
 
@@ -178,6 +179,11 @@ then live wherever you run it.
 
 The service uses two web addresses: one for pages and one for design frames. It
 refuses to start if they are the same.
+
+To take a link down, set `OCTANT_SHARE_OPERATOR_TOKEN` (at least 32
+characters) when you start the service. Then, on the same server, with the same
+token in your shell, run `bun run takedown <id>` in `apps/share`. The command
+asks the running service to remove the link, so the service must be running.
 
 ## Related
 

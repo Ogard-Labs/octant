@@ -82,10 +82,6 @@ const IGNORED_DIRECTORIES = new Set([
  * as its island is wired or deleted is the intended direction of travel.
  */
 export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
-  [
-    "apps/share/src/takedown.ts",
-    "Operator command for the public Canvas share service, run as `bun run takedown <id>` (and declared as the package's bin); nothing imports it because the operator runs it by hand. Remove once the checker treats package.json bin entries as entry points.",
-  ],
   // ── Remaining ──
   [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",

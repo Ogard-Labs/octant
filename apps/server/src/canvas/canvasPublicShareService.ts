@@ -6,6 +6,7 @@ import {
   CANVAS_PUBLIC_LINK_SETTINGS_CHANGED,
   CANVAS_PUBLIC_SHARE_AGGREGATE_TYPE,
   CANVAS_PUBLIC_SHARE_DEFAULT_SERVICE_URL,
+  CANVAS_PUBLIC_SHARE_EXPIRED,
   CANVAS_PUBLIC_SHARE_PUBLISHED,
   CANVAS_PUBLIC_SHARE_REVOCATION_AGGREGATE_TYPE,
   CANVAS_PUBLIC_SHARE_REVOCATION_PENDING,
@@ -15,6 +16,7 @@ import {
   CANVAS_PUBLIC_SHARE_WIRE_VERSION,
   CanvasPublicLinkSettingsChanged,
   CanvasPublicSharePublished,
+  CanvasPublicShareRecordExpired,
   CanvasPublicShareRecordRevoked,
   CanvasPublicShareRecordUpdated,
   CanvasPublicShareRevocationPending,
@@ -95,10 +97,13 @@ interface PendingRevocation {
 const SETTINGS_AGGREGATE_ID = "00000000-0000-4000-8000-0000000000c6";
 /** A listing retries pending revocations at most this often. */
 const RETRY_INTERVAL_MS = 60_000;
+/** Expired links are settled, and owed revokes retried, at start and this often. */
+const SWEEP_INTERVAL_MS = 3_600_000;
 
 const decodePublished = Schema.decodeUnknownSync(CanvasPublicSharePublished);
 const decodeUpdated = Schema.decodeUnknownSync(CanvasPublicShareRecordUpdated);
 const decodeRevoked = Schema.decodeUnknownSync(CanvasPublicShareRecordRevoked);
+const decodeExpired = Schema.decodeUnknownSync(CanvasPublicShareRecordExpired);
 const decodePending = Schema.decodeUnknownSync(CanvasPublicShareRevocationPending);
 const decodeSettled = Schema.decodeUnknownSync(CanvasPublicShareRevocationSettled);
 const decodeSettingsChanged = Schema.decodeUnknownSync(CanvasPublicLinkSettingsChanged);
@@ -108,6 +113,7 @@ export function registerCanvasPublicShareEvents(registry: EventRegistry): EventR
     .register(CANVAS_PUBLIC_SHARE_PUBLISHED, 1, CanvasPublicSharePublished)
     .register(CANVAS_PUBLIC_SHARE_UPDATED, 1, CanvasPublicShareRecordUpdated)
     .register(CANVAS_PUBLIC_SHARE_REVOKED, 1, CanvasPublicShareRecordRevoked)
+    .register(CANVAS_PUBLIC_SHARE_EXPIRED, 1, CanvasPublicShareRecordExpired)
     .register(CANVAS_PUBLIC_SHARE_REVOCATION_PENDING, 1, CanvasPublicShareRevocationPending)
     .register(CANVAS_PUBLIC_SHARE_REVOCATION_SETTLED, 1, CanvasPublicShareRevocationSettled)
     .register(CANVAS_PUBLIC_LINK_SETTINGS_CHANGED, 1, CanvasPublicLinkSettingsChanged);
@@ -120,7 +126,14 @@ export class CanvasPublicShareService {
   readonly #shares = new Map<string, HeldShare>();
   /** Keyed by credential reference; outlives the Canvas it came from. */
   readonly #pending = new Map<string, PendingRevocation>();
+  /** 0 marks a revoke owed only in memory, because the journal refused it. */
   readonly #pendingVersions = new Map<string, number>();
+  /**
+   * Per Canvas, the publish, update, revoke, or expiry in flight. Each awaits
+   * the service, so two approved publishes could otherwise both find no active
+   * link and both create one.
+   */
+  readonly #inFlight = new Map<string, Promise<void>>();
   #lastRetryMs = Number.NEGATIVE_INFINITY;
   #retrying: Promise<void> | undefined;
 
@@ -211,13 +224,19 @@ export class CanvasPublicShareService {
    * this Canvas's active one. Called only by the export destination, after the
    * person approved the card that showed this exact document.
    */
-  async publish(input: {
+  publish(input: {
     readonly canvasId: CanvasId;
     readonly versionId: CanvasVersionId;
     readonly sequence: number;
     readonly document: CanvasPublicShareDocument;
     readonly choice: CanvasExportLinkChoice;
   }): Promise<CanvasPublicSharePublishOutcome> {
+    return this.#serialized(input.canvasId, () => this.#publishNow(input));
+  }
+
+  async #publishNow(
+    input: Parameters<CanvasPublicShareService["publish"]>[0],
+  ): Promise<CanvasPublicSharePublishOutcome> {
     if (!this.#settings.enabled) {
       return {
         kind: "refused",
@@ -275,16 +294,34 @@ export class CanvasPublicShareService {
       passwordProtected: input.choice.password !== undefined,
       status: "active",
     });
-    this.#append(
-      CANVAS_PUBLIC_SHARE_AGGREGATE_TYPE,
-      credentialRef,
-      0,
-      CANVAS_PUBLIC_SHARE_PUBLISHED,
-      {
-        record,
+    try {
+      this.#append(
+        CANVAS_PUBLIC_SHARE_AGGREGATE_TYPE,
         credentialRef,
-      },
-    );
+        0,
+        CANVAS_PUBLIC_SHARE_PUBLISHED,
+        {
+          record,
+          credentialRef,
+        },
+      );
+    } catch {
+      // A live link the journal does not hold could never be listed or
+      // revoked from here (a full disk refuses the append after the service
+      // has the payload), so it is withdrawn rather than left unowned.
+      const withdrawn = await this.#withdrawUnrecorded(
+        { publicShareId: created.value.shareId, serviceUrl, credentialRef },
+        ownerSecret,
+        secrets,
+      );
+      return {
+        kind: "refused",
+        code: "unavailable",
+        message: withdrawn
+          ? "This Mac could not record the link, so the link was withdrawn."
+          : "This Mac could not record the link. It keeps trying to withdraw it.",
+      };
+    }
     this.#shares.set(credentialRef, { record, credentialRef, version: 1 });
     return { kind: "published", record };
   }
@@ -293,7 +330,66 @@ export class CanvasPublicShareService {
    * Withdraw a link. The service deletes its copy and the link answers 410;
    * a service that cannot be reached leaves the revoke owed and retried.
    */
-  async revoke(
+  revoke(
+    canvasId: CanvasId,
+    publicShareId: CanvasPublicShareId,
+  ): Promise<CanvasPublicShareRevokeResult> {
+    return this.#serialized(canvasId, () => this.#revokeNow(canvasId, publicShareId));
+  }
+
+  /**
+   * Settle every link past its expiry: delete its owner secret, then record it
+   * expired, so the secret does not outlive the link in the credential store.
+   * A pass that cannot delete or record leaves the link for the next one.
+   */
+  async settleExpired(): Promise<void> {
+    const secrets = this.#dependencies.secrets;
+    if (secrets === undefined) return;
+    const due = [...this.#shares.values()].filter((held) => this.#expiredUnsettled(held));
+    for (const { credentialRef, record } of due) {
+      await this.#serialized(record.canvasId, async () => {
+        const held = this.#shares.get(credentialRef);
+        if (held === undefined || !this.#expiredUnsettled(held)) return;
+        try {
+          // Secret first: a record settled before a failed delete would leave
+          // the secret behind with nothing left to retry it.
+          await secrets.delete(credentialRef);
+          const expiredAt = this.#dependencies.clock();
+          this.#append(
+            CANVAS_PUBLIC_SHARE_AGGREGATE_TYPE,
+            credentialRef,
+            held.version,
+            CANVAS_PUBLIC_SHARE_EXPIRED,
+            { publicShareId: held.record.publicShareId, canvasId: held.record.canvasId, expiredAt },
+          );
+          this.#shares.set(credentialRef, {
+            ...held,
+            version: held.version + 1,
+            record: { ...held.record, status: "expired" },
+          });
+        } catch {
+          // Deleting a deleted secret is harmless, so the next pass retries both.
+        }
+      });
+    }
+  }
+
+  /**
+   * Settles expired links and retries owed revokes now and hourly. The host
+   * calls it once it is serving and calls the returned stop on shutdown.
+   */
+  start(): () => void {
+    const pass = () => {
+      void this.settleExpired();
+      void this.retryPendingRevocations();
+    };
+    pass();
+    const timer = setInterval(pass, SWEEP_INTERVAL_MS);
+    timer.unref();
+    return () => clearInterval(timer);
+  }
+
+  async #revokeNow(
     canvasId: CanvasId,
     publicShareId: CanvasPublicShareId,
   ): Promise<CanvasPublicShareRevokeResult> {
@@ -420,6 +516,59 @@ export class CanvasPublicShareService {
     return { kind: "published", record };
   }
 
+  /**
+   * Withdraw a link the journal never recorded. True once the service has let
+   * it go and its secret is deleted; otherwise the revoke is owed, journaled
+   * when the journal takes it and held in memory when it does not.
+   */
+  async #withdrawUnrecorded(
+    pending: PendingRevocation,
+    ownerSecret: string,
+    secrets: CanvasPublicShareSecretStore,
+  ): Promise<boolean> {
+    const outcome = await this.#dependencies.service
+      .revoke({ serviceUrl: pending.serviceUrl, shareId: pending.publicShareId, ownerSecret })
+      .catch(() => ({ kind: "unreachable" }) as const);
+    if (revokeConfirmsGone(outcome)) {
+      await secrets.delete(pending.credentialRef).catch(() => undefined);
+      return true;
+    }
+    try {
+      this.#append(
+        CANVAS_PUBLIC_SHARE_REVOCATION_AGGREGATE_TYPE,
+        pending.credentialRef,
+        0,
+        CANVAS_PUBLIC_SHARE_REVOCATION_PENDING,
+        pending,
+      );
+      this.#pendingVersions.set(pending.credentialRef, 1);
+    } catch {
+      this.#pendingVersions.set(pending.credentialRef, 0);
+    }
+    this.#pending.set(pending.credentialRef, pending);
+    return false;
+  }
+
+  /** Run one Canvas's link operation after the one before it has finished. */
+  #serialized<T>(canvasId: CanvasId, run: () => Promise<T>): Promise<T> {
+    const key = String(canvasId);
+    const result = (this.#inFlight.get(key) ?? Promise.resolve()).then(run);
+    const done = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.#inFlight.set(key, done);
+    void done.then(() => {
+      if (this.#inFlight.get(key) === done) this.#inFlight.delete(key);
+    });
+    return result;
+  }
+
+  /** Past its expiry by the clock, and not yet settled, revoked, or owed a revoke. */
+  #expiredUnsettled(held: HeldShare): boolean {
+    return held.record.status === "active" && this.#withStatus(held).status === "expired";
+  }
+
   /** Record that a revoke is owed, once, before any attempt is made. */
   #owe(held: HeldShare): void {
     if (this.#pending.has(held.credentialRef)) return;
@@ -456,15 +605,7 @@ export class CanvasPublicShareService {
       shareId: pending.publicShareId,
       ownerSecret,
     });
-    // The service answers an unknown id as it answers a wrong secret, and a
-    // link past its tombstone is unknown, so either refusal means it is gone.
-    const gone =
-      outcome.kind === "ok" ||
-      (outcome.kind === "refused" &&
-        (outcome.code === "gone" ||
-          outcome.code === "not-found" ||
-          outcome.code === "unauthorized"));
-    if (!gone) return false;
+    if (!revokeConfirmsGone(outcome)) return false;
     if (!this.#pending.has(credentialRef)) return true;
     const revokedAt = this.#dependencies.clock();
     const held = this.#shares.get(credentialRef);
@@ -482,13 +623,16 @@ export class CanvasPublicShareService {
         record: { ...held.record, status: "revoked", revokedAt },
       });
     }
-    this.#append(
-      CANVAS_PUBLIC_SHARE_REVOCATION_AGGREGATE_TYPE,
-      credentialRef,
-      this.#pendingVersions.get(credentialRef) ?? 1,
-      CANVAS_PUBLIC_SHARE_REVOCATION_SETTLED,
-      { publicShareId: pending.publicShareId },
-    );
+    const pendingVersion = this.#pendingVersions.get(credentialRef) ?? 1;
+    if (pendingVersion > 0) {
+      this.#append(
+        CANVAS_PUBLIC_SHARE_REVOCATION_AGGREGATE_TYPE,
+        credentialRef,
+        pendingVersion,
+        CANVAS_PUBLIC_SHARE_REVOCATION_SETTLED,
+        { publicShareId: pending.publicShareId },
+      );
+    }
     this.#pending.delete(credentialRef);
     this.#pendingVersions.delete(credentialRef);
     await secrets.delete(credentialRef).catch(() => undefined);
@@ -505,7 +649,7 @@ export class CanvasPublicShareService {
 
   /** A record's status now: revoked and owed revokes first, then expiry by the clock. */
   #withStatus(held: HeldShare): CanvasPublicShareRecord {
-    if (held.record.status === "revoked") return held.record;
+    if (held.record.status === "revoked" || held.record.status === "expired") return held.record;
     if (this.#pending.has(held.credentialRef)) return { ...held.record, status: "revoking" };
     const expiresAt = held.record.expiresAt;
     if (expiresAt !== null && Date.parse(expiresAt) <= Date.parse(this.#dependencies.clock())) {
@@ -585,6 +729,17 @@ export class CanvasPublicShareService {
             });
             break;
           }
+          case CANVAS_PUBLIC_SHARE_EXPIRED: {
+            const held = this.#shares.get(key);
+            if (held === undefined) break;
+            decodeExpired(envelope.payload);
+            this.#shares.set(key, {
+              ...held,
+              record: { ...held.record, status: "expired" },
+              version: envelope.aggregateVersion,
+            });
+            break;
+          }
           case CANVAS_PUBLIC_SHARE_REVOCATION_PENDING: {
             const pending = decodePending(envelope.payload);
             this.#pending.set(key, pending);
@@ -617,6 +772,20 @@ function refusedSettings(
     reason,
     message,
   });
+}
+
+/**
+ * The service answers an unknown id as it answers a wrong secret, and a link
+ * past its tombstone is unknown, so either refusal means it is gone.
+ */
+function revokeConfirmsGone(
+  outcome: Awaited<ReturnType<CanvasPublicShareServicePort["revoke"]>>,
+): boolean {
+  return (
+    outcome.kind === "ok" ||
+    (outcome.kind === "refused" &&
+      (outcome.code === "gone" || outcome.code === "not-found" || outcome.code === "unauthorized"))
+  );
 }
 
 function serviceRefusal(

@@ -932,7 +932,8 @@ export function wireCanvas(deps: CanvasDependencies) {
   });
   // Public links: off until the person turns them on, published only through
   // the export card, and the owner secrets kept in the broker's own namespace.
-  // The only call made unprompted finishes a revoke the host already owes.
+  // The only calls made unprompted finish a revoke the host already owes and
+  // delete an expired link's secret; both run from the host's start.
   const canvasPublicShareService = new CanvasPublicShareService({
     journal: persistence.journal,
     service: createHttpCanvasPublicShareServicePort(),
@@ -947,7 +948,6 @@ export function wireCanvas(deps: CanvasDependencies) {
     clock: () => new Date().toISOString() as never,
     actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
   });
-  void canvasPublicShareService.retryPendingRevocations();
   const canvasExportRegistration: CanvasExportTargetRegistration = {
     folderFor: (canvasId) => {
       const entry = persistence.canvasProjection.getById(canvasId);

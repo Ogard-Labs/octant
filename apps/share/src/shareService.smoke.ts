@@ -18,6 +18,8 @@ const service = startShareService({
   maxTotalBytes: 1_000_000_000,
   abuseContact: undefined,
   trustProxy: false,
+  operatorPort: 0,
+  operatorToken: undefined,
 });
 
 const title = "Smoke test Canvas";

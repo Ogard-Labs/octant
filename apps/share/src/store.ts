@@ -135,7 +135,8 @@ function readTombstone(text: string): Tombstone | undefined {
 /**
  * File-system storage for the service. Synchronous on purpose: the service is
  * one Bun process, and a read-modify-write that cannot be interleaved needs
- * no lock.
+ * no lock. That holds only while the serving process is the one writer, so
+ * operator takedown goes through its loopback listener, not a second store.
  */
 export class ShareStore {
   readonly #root: string;
@@ -218,7 +219,7 @@ export class ShareStore {
 
   replace(id: string, change: (current: StoredShare) => StoredShare): ReplaceOutcome {
     const current = this.#readShare(id);
-    if (current === undefined) return { status: "missing" };
+    if (current === undefined || this.#hasTombstone(id)) return { status: "missing" };
     const next = change(current);
     if (this.#totalBytes - current.byteLength + next.byteLength > this.#maxTotalBytes) {
       return { status: "unavailable" };
@@ -230,7 +231,7 @@ export class ShareStore {
 
   recordView(id: string): void {
     const current = this.#readShare(id);
-    if (current === undefined) return;
+    if (current === undefined || this.#hasTombstone(id)) return;
     this.#writeShare(id, { ...current, viewCount: current.viewCount + 1 });
   }
 
@@ -316,6 +317,11 @@ export class ShareStore {
     } catch {
       return undefined;
     }
+  }
+
+  /** A tombstone is final: no later view or update writes the payload it replaced. */
+  #hasTombstone(id: string): boolean {
+    return existsSync(this.#tombstonePath(id));
   }
 
   #readTombstoneFile(id: string): Tombstone | undefined {

@@ -328,6 +328,7 @@ export const CANVAS_PUBLIC_SHARE_AGGREGATE_TYPE = "canvas-public-share";
 export const CANVAS_PUBLIC_SHARE_PUBLISHED = "canvas.public-share-published@1";
 export const CANVAS_PUBLIC_SHARE_UPDATED = "canvas.public-share-updated@1";
 export const CANVAS_PUBLIC_SHARE_REVOKED = "canvas.public-share-revoked@1";
+export const CANVAS_PUBLIC_SHARE_EXPIRED = "canvas.public-share-expired@1";
 export const CANVAS_PUBLIC_SHARE_REVOCATION_AGGREGATE_TYPE = "canvas-public-share-revocation";
 export const CANVAS_PUBLIC_SHARE_REVOCATION_PENDING = "canvas.public-share-revocation-pending@1";
 export const CANVAS_PUBLIC_SHARE_REVOCATION_SETTLED = "canvas.public-share-revocation-settled@1";
@@ -356,6 +357,14 @@ export const CanvasPublicShareRecordRevoked = Schema.Struct({
   revokedAt: UtcTimestamp,
 }).annotations(strict);
 export type CanvasPublicShareRecordRevoked = typeof CanvasPublicShareRecordRevoked.Type;
+
+/** The host settled a link past its expiry: the owner secret is already deleted. */
+export const CanvasPublicShareRecordExpired = Schema.Struct({
+  publicShareId: CanvasPublicShareId,
+  canvasId: CanvasId,
+  expiredAt: UtcTimestamp,
+}).annotations(strict);
+export type CanvasPublicShareRecordExpired = typeof CanvasPublicShareRecordExpired.Type;
 
 export const CanvasPublicShareRevocationPending = Schema.Struct({
   publicShareId: CanvasPublicShareId,

@@ -23,7 +23,17 @@ export interface ShareConfig {
   readonly abuseContact: string | undefined;
   /** Whether `X-Forwarded-For` names the client; only behind a proxy the operator controls. */
   readonly trustProxy: boolean;
+  /**
+   * The operator listener, always on 127.0.0.1 and only when a token is set.
+   * Takedown runs inside the serving process through it, because a second
+   * process writing the store races the server's own writes.
+   */
+  readonly operatorPort: number;
+  readonly operatorToken: string | undefined;
 }
+
+/** At least 32 characters, so the operator token cannot be guessed. */
+const MIN_OPERATOR_TOKEN_LENGTH = 32;
 
 export type ShareConfigResult =
   | { readonly status: "ok"; readonly config: ShareConfig }
@@ -66,6 +76,8 @@ export function readShareConfig(env: Environment): ShareConfigResult {
   const host = env["OCTANT_SHARE_HOST"] ?? "127.0.0.1";
   const port = integer(env, "OCTANT_SHARE_PORT", 4100, 0, 65_535);
   const usercontentPort = integer(env, "OCTANT_SHARE_USERCONTENT_PORT", 4101, 0, 65_535);
+  const operatorPort = integer(env, "OCTANT_SHARE_OPERATOR_PORT", 4102, 0, 65_535);
+  const operatorToken = env["OCTANT_SHARE_OPERATOR_TOKEN"];
   const maxDocumentBytes = integer(
     env,
     "OCTANT_SHARE_MAX_DOCUMENT_BYTES",
@@ -83,6 +95,16 @@ export function readShareConfig(env: Environment): ShareConfigResult {
   if (port === undefined) return refuse("OCTANT_SHARE_PORT is not a port number.");
   if (usercontentPort === undefined) {
     return refuse("OCTANT_SHARE_USERCONTENT_PORT is not a port number.");
+  }
+  if (operatorPort === undefined) return refuse("OCTANT_SHARE_OPERATOR_PORT is not a port number.");
+  if (
+    operatorToken !== undefined &&
+    operatorToken !== "" &&
+    operatorToken.length < MIN_OPERATOR_TOKEN_LENGTH
+  ) {
+    return refuse(
+      `OCTANT_SHARE_OPERATOR_TOKEN must be at least ${String(MIN_OPERATOR_TOKEN_LENGTH)} characters.`,
+    );
   }
   if (maxDocumentBytes === undefined) {
     return refuse("OCTANT_SHARE_MAX_DOCUMENT_BYTES is not a usable byte count.");
@@ -132,6 +154,9 @@ export function readShareConfig(env: Environment): ShareConfigResult {
       maxTotalBytes,
       abuseContact: abuseContact === undefined || abuseContact === "" ? undefined : abuseContact,
       trustProxy: env["OCTANT_SHARE_TRUST_PROXY"] === "1",
+      operatorPort,
+      operatorToken:
+        operatorToken === undefined || operatorToken === "" ? undefined : operatorToken,
     },
   };
 }

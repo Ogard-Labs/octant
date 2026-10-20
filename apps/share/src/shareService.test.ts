@@ -1,11 +1,19 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES } from "@octant/contracts/canvas-public-share";
 import { readShareConfig, type ShareConfig } from "./config.ts";
 import { startShareService, type ShareService } from "./server.ts";
-import { takeDown } from "./takedown.ts";
+import { runTakedown } from "./takedown.ts";
 
 const DAY_MS = 86_400_000;
 const START = Date.parse("2026-10-21T00:00:00.000Z");
@@ -35,6 +43,8 @@ function start(overrides: Partial<ShareConfig> = {}): ShareService {
     maxTotalBytes: 1_000_000_000,
     abuseContact: undefined,
     trustProxy: false,
+    operatorPort: 0,
+    operatorToken: undefined,
     ...overrides,
   };
   service = startShareService(config, { clock: () => now });
@@ -97,6 +107,13 @@ async function create(body: unknown = createBody()): Promise<Created> {
 }
 
 const owner = (secret: string) => ({ authorization: `Bearer ${secret}` });
+
+const OPERATOR_TOKEN = "t".repeat(40);
+/** What the operator's shell holds to reach the running service's operator listener. */
+function operatorEnv(): Record<string, string> {
+  const port = new URL(service?.operatorUrl ?? "http://127.0.0.1:0").port;
+  return { OCTANT_SHARE_OPERATOR_TOKEN: OPERATOR_TOKEN, OCTANT_SHARE_OPERATOR_PORT: port };
+}
 
 describe("share service", () => {
   test("mints a 22-character URL-safe id from 16 bytes and a 43-character owner secret", async () => {
@@ -548,15 +565,55 @@ describe("share service", () => {
     }
   });
 
-  test("answers 410 removed after an operator takedown", async () => {
-    start();
+  test("answers 410 removed after an operator takedown, and frees the link's bytes", async () => {
+    // Room for one link and not two, so a second create passes only if the
+    // running service counted the takedown.
+    const oneLink = Buffer.byteLength(JSON.stringify(createBody().document), "utf8");
+    start({ maxTotalBytes: Math.floor(oneLink * 1.5), operatorToken: OPERATOR_TOKEN });
     const created = await create();
-    expect(takeDown(dataDir, created.shareId)).toEqual({ status: "taken-down" });
+    const operator = operatorEnv();
+    expect(await runTakedown([created.shareId], operator)).toMatchObject({ code: 0 });
     const response = await fetch(created.url);
     expect(response.status).toBe(410);
     expect(await response.text()).toContain("This Canvas was removed.");
-    expect(takeDown(dataDir, created.shareId)).toEqual({ status: "already-gone" });
-    expect(takeDown(dataDir, "C".repeat(22))).toEqual({ status: "not-found" });
+    await create();
+    expect((await runTakedown([created.shareId], operator)).message).toContain("already gone");
+    expect(await runTakedown(["C".repeat(22)], operator)).toMatchObject({ code: 1 });
+  });
+
+  test("refuses a takedown with the wrong operator token and keeps the link", async () => {
+    start({ operatorToken: OPERATOR_TOKEN });
+    const created = await create();
+    const outcome = await runTakedown([created.shareId], {
+      ...operatorEnv(),
+      OCTANT_SHARE_OPERATOR_TOKEN: "w".repeat(40),
+    });
+    expect(outcome).toEqual({ code: 1, message: "The service refused the operator token." });
+    expect((await fetch(created.url)).status).toBe(200);
+  });
+
+  test("writes no view or update over a link that has a tombstone", async () => {
+    start();
+    const created = await create();
+    const payload = join(dataDir, "shares", `${created.shareId}.json`);
+    const before = readFileSync(payload, "utf8");
+    writeFileSync(
+      join(dataDir, "tombstones", `${created.shareId}.json`),
+      JSON.stringify({ goneAt: new Date(now).toISOString(), reason: "taken-down" }),
+    );
+    await fetch(created.url);
+    const update = await fetch(`${service?.publicUrl}/api/v1/shares/${created.shareId}`, {
+      method: "PUT",
+      headers: owner(created.ownerSecret),
+      body: JSON.stringify({
+        schemaVersion: 1,
+        kind: "canvas-public-share-update",
+        document: documentWith([heading], "Back again"),
+        expiry: { kind: "never" },
+      }),
+    });
+    expect(update.status).not.toBe(200);
+    expect(readFileSync(payload, "utf8")).toBe(before);
   });
 
   test("answers the health check with ok and nothing else", async () => {

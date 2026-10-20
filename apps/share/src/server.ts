@@ -4,6 +4,7 @@ import { PRIVATE_HEADERS, type ServiceContext } from "./context.ts";
 import { handleFrame } from "./frames.ts";
 import { RateLimiter, clientAddress } from "./rateLimit.ts";
 import { ShareStore, type Clock, type RandomBytes } from "./store.ts";
+import { handleOperator } from "./takedown.ts";
 import { handleViewer } from "./viewer.ts";
 
 export interface ShareServiceDependencies {
@@ -14,6 +15,8 @@ export interface ShareServiceDependencies {
 export interface ShareService {
   readonly publicUrl: string;
   readonly usercontentUrl: string;
+  /** Absent when no operator token is configured, so takedown is unavailable. */
+  readonly operatorUrl: string | undefined;
   stop(): void;
 }
 
@@ -78,14 +81,28 @@ export function startShareService(
   }
   context = { config, store, limiter, publicOrigin, usercontentOrigin };
   store.startSweeping();
+  // Loopback only, whatever OCTANT_SHARE_HOST says: the operator reaches it
+  // from the same machine, and nothing public can.
+  const operatorToken = config.operatorToken;
+  const operatorServer =
+    operatorToken === undefined
+      ? undefined
+      : Bun.serve({
+          hostname: "127.0.0.1",
+          port: config.operatorPort,
+          fetch: (request) => handleOperator(request, store, operatorToken),
+        });
 
   return {
     publicUrl: publicOrigin,
     usercontentUrl: usercontentOrigin,
+    operatorUrl:
+      operatorServer === undefined ? undefined : `http://127.0.0.1:${String(operatorServer.port)}`,
     stop: () => {
       store.stopSweeping();
       void publicServer.stop(true);
       void usercontentServer.stop(true);
+      void operatorServer?.stop(true);
     },
   };
 }

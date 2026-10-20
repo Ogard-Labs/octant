@@ -157,22 +157,35 @@ function harness(options?: {
   readonly service?: ReturnType<typeof fakeService>;
   readonly secrets?: ReturnType<typeof memorySecrets>;
   readonly doc?: CanvasExportDocument;
+  readonly clock?: () => string;
 }) {
   const connection = options?.connection ?? openConnection();
   const service = options?.service ?? fakeService();
   const secrets = options?.secrets ?? memorySecrets();
+  const clock = options?.clock ?? (() => now);
   const journal = new Journal({
     connection,
     registry: registerCanvasPublicShareEvents(registerCanvasExportEvents(new EventRegistry())),
     projections: new ProjectionRegistry().register(new AggregateHeadsProjection()),
-    clock: () => now,
+    clock,
   });
+  /** Event names the links' journal refuses to append, as a full disk would. */
+  const refusedEvents = new Set<string>();
   const links = new CanvasPublicShareService({
-    journal,
+    journal: {
+      append: (input) => {
+        const appended = JSON.stringify(input);
+        if ([...refusedEvents].some((name) => appended.includes(`"eventName":"${name}"`))) {
+          throw new Error("database or disk is full");
+        }
+        return journal.append(input);
+      },
+      replayAggregateType: (...args) => journal.replayAggregateType(...args),
+    },
     service: service.port,
     secrets,
     uuid: () => crypto.randomUUID(),
-    clock: () => decodeUtcTimestamp(now),
+    clock: () => decodeUtcTimestamp(clock()),
     actor: localActor,
   });
   const home = tmpdir();
@@ -206,7 +219,20 @@ function harness(options?: {
     JSON.stringify(
       journal.replay(Schema.decodeUnknownSync(ReplayCursor)({ afterSequence: 0, limit: 500 })),
     );
-  return { connection, service, secrets, links, exports, turnOn, journalText };
+  return { connection, service, secrets, links, exports, turnOn, journalText, refusedEvents };
+}
+
+/** The publish input an approved card carries, for driving the links service directly. */
+function approvedInput(h: ReturnType<typeof harness>) {
+  const prepared = h.exports.prepare(prepare(), true, "local-window");
+  if (prepared.kind !== "approval") throw new Error("Expected an approval card.");
+  return {
+    canvasId,
+    versionId,
+    sequence: 1,
+    document: decodeCanvasPublicShareDocument(JSON.parse(prepared.card.payload)),
+    choice: { expiry: { kind: "days" as const, days: 30 } },
+  };
 }
 
 const prepare = (format: "share-document" | "markdown" = "share-document") =>
@@ -419,6 +445,65 @@ describe("public links", () => {
     const restarted = harness({ connection, service, secrets });
     await restarted.links.retryPendingRevocations();
     expect(secrets.held.size).toBe(0);
+  });
+
+  it("withdraws a new link and forgets its secret when the journal cannot record it", async () => {
+    const h = harness();
+    h.turnOn();
+    h.refusedEvents.add("canvas.public-share-published@1");
+    const outcome = await h.links.publish(approvedInput(h));
+    expect(outcome).toMatchObject({ kind: "refused", code: "unavailable" });
+    expect(h.service.calls.map((call) => call.kind)).toEqual(["create", "revoke"]);
+    expect(h.service.calls[1]?.input).toMatchObject({ shareId, ownerSecret });
+    expect(h.secrets.held.size).toBe(0);
+  });
+
+  it("keeps withdrawing an unrecorded link the service could not be reached for", async () => {
+    const h = harness();
+    h.turnOn();
+    h.refusedEvents.add("canvas.public-share-published@1");
+    h.service.answerRevokeWith({ kind: "unreachable" });
+    const outcome = await h.links.publish(approvedInput(h));
+    expect(outcome).toMatchObject({ kind: "refused", code: "unavailable" });
+    expect(h.secrets.held.size).toBe(1);
+
+    h.service.answerRevokeWith({ kind: "ok", value: { shareId } });
+    await h.links.retryPendingRevocations();
+    expect(h.service.calls.filter((call) => call.kind === "revoke")).toHaveLength(2);
+    expect(h.secrets.held.size).toBe(0);
+  });
+
+  it("keeps one active link when two approved publishes of a Canvas arrive together", async () => {
+    const h = harness();
+    h.turnOn();
+    const outcomes = await Promise.all([
+      h.links.publish(approvedInput(h)),
+      h.links.publish(approvedInput(h)),
+    ]);
+    expect(outcomes.map((outcome) => outcome.kind)).toEqual(["published", "published"]);
+    expect(h.service.calls.map((call) => call.kind)).toEqual(["create", "update"]);
+    expect(h.links.list(canvasId).shares).toHaveLength(1);
+    expect(h.secrets.held.size).toBe(1);
+  });
+
+  it("deletes an expired link's owner secret and keeps it expired after a restart", async () => {
+    const connection = openConnection();
+    const service = fakeService();
+    const secrets = memorySecrets();
+    let clock = now;
+    const first = harness({ connection, service, secrets, clock: () => clock });
+    first.turnOn();
+    await publish(first);
+    expect(secrets.held.size).toBe(1);
+
+    clock = "2026-11-20T10:00:00.000Z";
+    await first.links.settleExpired();
+    expect(secrets.held.size).toBe(0);
+    expect(first.journalText()).toContain("canvas.public-share-expired@1");
+
+    const restarted = harness({ connection, service, secrets, clock: () => clock });
+    expect(restarted.links.list(canvasId).shares[0]?.status).toBe("expired");
+    expect(service.calls.map((call) => call.kind)).toEqual(["create"]);
   });
 
   it("refuses a stale settings change instead of overwriting another window's", () => {

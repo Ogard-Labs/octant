@@ -1113,6 +1113,7 @@ export function startOctantServer(
     // runtime alive on its idle lease with nothing left to close it.
     let warmingProviders: Promise<void> = Promise.resolve();
     let stopArtifactSync: () => void = () => undefined;
+    let stopPublicShareSweep: () => void = () => undefined;
     return yield* Effect.acquireRelease(
       Effect.tryPromise({
         try: async () => {
@@ -1206,6 +1207,9 @@ export function startOctantServer(
           // only once the host is serving; with sync off each pass returns
           // before any store call.
           stopArtifactSync = artifactSyncService.start();
+          // Public links past their expiry give up their owner secrets, and
+          // revokes still owed are retried, now and hourly.
+          stopPublicShareSweep = canvasPublicShareService.start();
           // A leave the host stopped in the middle of finishes its cleanup:
           // sync off and the device key deleted.
           void replicaMembershipService.finishLeaving().catch(() => undefined);
@@ -1280,6 +1284,7 @@ export function startOctantServer(
           }
           completedThreadArchiveSweep.stop();
           stopArtifactSync();
+          stopPublicShareSweep();
           providerUsageLimitsService.stop();
           try {
             managedCloneService.close();

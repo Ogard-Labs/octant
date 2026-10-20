@@ -121,12 +121,24 @@ and status present it as `Authorization: Bearer`; the service compares hashes
 in constant time and answers a wrong or missing secret with 403, the same
 answer for an id that does not exist, so the secret cannot be used to probe
 ids. The host deletes the secret once the service confirms revocation or the
-link has expired.
+link has expired. Expiry is settled by a host sweep that runs once the host is
+serving and hourly after that: it deletes the secret first, then journals
+`canvas.public-share-expired@1`, so a failed delete is retried on the next pass
+and a settled link is not visited again.
+
+A link the service created but the journal could not record (a full disk
+refuses the append) would be live, unlisted, and unrevocable, so the host
+withdraws it at once with the secret it still holds and then deletes the
+secret. If the service cannot be reached the revoke is owed and retried like
+any other; when the journal refuses that too, it is owed in memory until the
+host stops. Publishes, updates, revokes, and expiry for one Canvas run one at
+a time on the host, so two approved publishes cannot both create a link; the
+journal's version check is the backstop.
 
 ## The host's record
 
 Each link is journaled (`canvas.public-share-published@1`, `-updated@1`,
-`-revoked@1`, in the `canvas-public-share` aggregate) and projected per Canvas as its id, URL, service origin, the
+`-revoked@1`, `-expired@1`, in the `canvas-public-share` aggregate) and projected per Canvas as its id, URL, service origin, the
 Canvas version it carries, publish and update times, expiry, whether it has a
 password, and status (`active`, `expired`, `revoking`, `revoked`). The Canvas
 share panel lists them with **Copy link**, **Update**, and **Revoke**.
@@ -208,8 +220,14 @@ frame-ancestors 'none'`. The page loads one first-party stylesheet and
 - **Abuse.** Every page links to a report form (`POST /api/v1/shares/<id>/reports`,
   a reason from a closed list and an optional note of at most 1,000
   characters), stored without the reporter's address. The operator takes a
-  link down with `bun run takedown <id>` in `apps/share`, which deletes the
-  payload and leaves a tombstone that answers 410 "removed". The viewer names
+  link down with `bun run takedown <id>` in `apps/share`, which asks the
+  running service to delete the payload and leave a tombstone that answers 410
+  "removed". The request goes to an operator listener bound to 127.0.0.1 and
+  started only when `OCTANT_SHARE_OPERATOR_TOKEN` (at least 32 characters) is
+  set, with that token as `Authorization: Bearer`. Takedown runs in the serving
+  process because the store relies on being the only writer: a second process
+  would race a view's write and leave the storage total uncounted. No view or
+  update writes a payload that has a tombstone. The viewer names
   the operator's abuse contact when `OCTANT_SHARE_ABUSE_CONTACT` is set.
 - **Link previews.** Open Graph and card tags carry the title and summary. A
   password-protected link previews as "Password-protected Canvas" and shows
@@ -221,8 +239,10 @@ frame-ancestors 'none'`. The page loads one first-party stylesheet and
 `OCTANT_SHARE_HOST` (default `127.0.0.1`), `OCTANT_SHARE_PORT`,
 `OCTANT_SHARE_USERCONTENT_PORT`, `OCTANT_SHARE_PUBLIC_ORIGIN`,
 `OCTANT_SHARE_USERCONTENT_ORIGIN`, `OCTANT_SHARE_DATA_DIR`,
-`OCTANT_SHARE_MAX_DOCUMENT_BYTES`, `OCTANT_SHARE_MAX_TOTAL_BYTES`, and
-`OCTANT_SHARE_ABUSE_CONTACT`. The frame-token key is generated into the data
+`OCTANT_SHARE_MAX_DOCUMENT_BYTES`, `OCTANT_SHARE_MAX_TOTAL_BYTES`,
+`OCTANT_SHARE_ABUSE_CONTACT`, `OCTANT_SHARE_OPERATOR_TOKEN`, and
+`OCTANT_SHARE_OPERATOR_PORT` (default `4102`, always on 127.0.0.1). The
+frame-token key is generated into the data
 directory (mode 0600) when it is first needed.
 
 ## Rationale
