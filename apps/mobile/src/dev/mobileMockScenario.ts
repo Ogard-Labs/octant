@@ -20,15 +20,14 @@ import type { MobileRemoteTransport } from "@octant/client-runtime";
 import type { MobileHostRegistration } from "../hosts/HostRegistry";
 import type { MobileHostHealth } from "../session/MobileHostSessionHub";
 
-export type MobileMockScenarioId = "full" | "stale" | "empty";
+import {
+  resolveMobileMockScenario,
+  type MobileMockScenario,
+  type MobileMockScenarioId,
+} from "./mobileMockScenarioId";
 
-export interface MobileMockScenario {
-  readonly id: MobileMockScenarioId;
-  readonly label: string;
-  readonly hosts: ReadonlyArray<MobileHostRegistration>;
-  readonly health: ReadonlyArray<MobileHostHealth>;
-  readonly transports: ReadonlyArray<MobileRemoteTransport>;
-}
+export { resolveMobileMockScenario };
+export type { MobileMockScenario, MobileMockScenarioId };
 
 const NOW = "2026-08-10T09:30:00.000Z";
 const EARLIER = "2026-08-10T08:45:00.000Z";
@@ -959,16 +958,6 @@ function registration(input: {
     credentialGeneration: 1,
     hostKeyFingerprint: "mock-fingerprint",
   };
-}
-
-export function resolveMobileMockScenario(
-  configured: unknown,
-  isDevelopment: boolean,
-): MobileMockScenarioId | undefined {
-  if (!isDevelopment) return undefined;
-  return configured === "full" || configured === "stale" || configured === "empty"
-    ? configured
-    : undefined;
 }
 
 export function createMobileMockScenario(id: MobileMockScenarioId): MobileMockScenario {

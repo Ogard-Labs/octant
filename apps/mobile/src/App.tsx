@@ -6,7 +6,7 @@ import type { MobileInboxRow } from "@octant/client-runtime";
 import { ScreenCanvas, colorsForScheme, resolveThemeScheme, useTheme } from "../design-system";
 import { AppearanceProvider, useAppearance } from "./appearance/AppearanceContext";
 import type { MobileRouteId } from "./copy";
-import { resolveMobileMockScenario, type MobileMockScenario } from "./dev/mobileMockScenario";
+import { resolveMobileMockScenario, type MobileMockScenario } from "./dev/mobileMockScenarioId";
 import { MobileDeepLinkCapture } from "./navigation/mobileDeepLinkCapture";
 import { RootNavigator } from "./navigation/RootNavigator";
 import { createInitialNavigationState, selectMobileRoute } from "./navigation/navigationState";
