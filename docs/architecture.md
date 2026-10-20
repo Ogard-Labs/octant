@@ -5421,10 +5421,16 @@ marks secret never enters the package: the host stores it in the credential
 broker's own namespace for these secrets (`/v1/mcp-server-credentials/*`, the
 `mcp-server-credential` Keychain service or Secret Service attribute) and the
 package carries `${OCTANT_SECRET:<id>}` in its place. The session manager
-fills references in at launch, only for a `user-added` package, so a
-third-party package can never name a secret; a reference the broker cannot
-answer fails the launch rather than starting the server with a blank.
-Uninstalling the package removes its folder and every secret it referenced.
+fills references in at launch, only for a package the host's own store of
+generated folders vouches for by source reference (the installed manifest's
+source kind is rewritten to `plugin-package`, so it cannot be the authority),
+so a third-party package can never name a secret; a reference the broker
+cannot answer fails the launch rather than starting the server with a blank.
+Uninstalling the package removes its folder and every secret it referenced,
+and an add that fails before the package is installed removes them too, so a
+retry with the same name is not blocked. Refusals travel as typed results
+(HTTP 200) like every other extension command, so the dialog shows the host's
+own sentence.
 On a host without a broker the add is refused when it carries a secret, with
 the Octant app named as the way to do it. **Found on this Mac.** The same Settings section lists what Claude Code and
 Codex already know on this computer, read-only: the MCP servers in Claude
@@ -5437,10 +5443,16 @@ imported, trusted or enabled until the person clicks that one item, and
 Octant never writes to the other tools' files. The listing names each item
 by an opaque id and shows a command line or address, never a path or a
 value. Adding a found server is the same act as Add MCP server: `${VAR}`
-and the tools' token variables are filled from the host environment where
-present, a value whose name reads like a credential is marked secret so it
-goes to the broker, and a variable the environment lacks is named on the
-row rather than invented. A found plugin goes through the ordinary folder
+and the tools' token variables are filled from the host environment only in
+a value the broker can hold (an environment value or a header), and that
+value is marked secret so it goes to the broker. A variable in the command,
+an argument or the address is never expanded, so no host value reaches the
+listing or the saved package; the row names it (`unsupportedPlaceholders`).
+A variable the environment lacks is named on the row rather than invented
+(`needsValues`). The server refuses to add either kind before writing
+anything, and the row's button is off with the reason; the person adds such
+a server by hand. The folder import returns what the loader left out of a
+plugin as diagnostics on its inspection, so the review shows them. A found plugin goes through the ordinary folder
 import for review and install; the folder loader reads all three layouts
 (Agent Plugins, Codex, Claude Code) and turns a Claude Code plugin into an
 Agent Plugins package in memory, keeping its skills and MCP servers and

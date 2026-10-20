@@ -99,7 +99,7 @@ function claudePluginAsAgentPlugins(read: ReadPluginDirectory): LoadedPluginDire
     const mapped = mapClaudeMcpServer(serverName, value, notes);
     if (mapped !== undefined) servers[serverName] = mapped;
   }
-  for (const dropped of ["commands", "agents", "hooks"] as const) {
+  for (const dropped of LEFT_OUT_FOLDERS) {
     if (
       manifest[dropped] !== undefined ||
       read.entries.some((entry) => entry.path === dropped && entry.kind === "directory") ||
@@ -136,6 +136,9 @@ function claudePluginAsAgentPlugins(read: ReadPluginDirectory): LoadedPluginDire
       entry.path !== "plugin.json" &&
       entry.path !== "mcp.json" &&
       entry.path !== ".mcp.json" &&
+      !LEFT_OUT_FOLDERS.some(
+        (folder) => entry.path === folder || entry.path.startsWith(`${folder}/`),
+      ) &&
       entry.path !== ".claude-plugin" &&
       !entry.path.startsWith(".claude-plugin/"),
   );
@@ -148,6 +151,9 @@ function claudePluginAsAgentPlugins(read: ReadPluginDirectory): LoadedPluginDire
   );
   return { pluginRoot: read.pluginRoot, entries, archiveBytes, format: "claude-plugin", notes };
 }
+
+/** Claude Code folders Octant does not run; their files are not copied into the package. */
+const LEFT_OUT_FOLDERS = ["commands", "agents", "hooks"] as const;
 
 /**
  * A Claude Code server entry in Agent Plugins terms: its `http` (and the

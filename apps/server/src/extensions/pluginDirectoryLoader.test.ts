@@ -54,6 +54,9 @@ describe("loading a plugin folder in another tool's layout", () => {
       }),
       "skills/deploy/SKILL.md": "---\nname: deploy\ndescription: Deploys\n---\nDeploy it.",
       "commands/status.md": "Show status",
+      "agents/reviewer.md": "Review it",
+      "hooks/hooks.json": "{}",
+      "hooks/scripts/run.sh": "echo hi",
     });
     const loaded = await loadPluginDirectory(root);
     expect(loaded.format).toBe("claude-plugin");
@@ -83,9 +86,14 @@ describe("loading a plugin folder in another tool's layout", () => {
     });
     expect(loaded.entries.some((entry) => entry.path === "skills/deploy/SKILL.md")).toBe(true);
     expect(loaded.entries.some((entry) => entry.path.startsWith(".claude-plugin"))).toBe(false);
+    expect(
+      loaded.entries.filter((entry) => /^(commands|agents|hooks)(\/|$)/.test(entry.path)),
+    ).toEqual([]);
     expect(loaded.notes).toEqual([
       "api: needs values Claude Code asks for (user_config); left out.",
       "deploy-tools: its commands are left out; Octant runs its skills and MCP servers.",
+      "deploy-tools: its agents are left out; Octant runs its skills and MCP servers.",
+      "deploy-tools: its hooks are left out; Octant runs its skills and MCP servers.",
     ]);
   });
 

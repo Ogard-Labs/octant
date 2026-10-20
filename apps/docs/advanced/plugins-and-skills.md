@@ -233,9 +233,12 @@ in Claude Code's configuration (yours, and the ones kept for a Project folder
 Octant knows), a Project's `.mcp.json`, Codex's configured servers, and the
 plugins each tool has installed. Looking changes nothing. **Add to Octant**
 copies one server in, the same way Add MCP server does: a value whose name
-reads like a credential goes to the credential store, and a variable the
-other tool reads from its environment is filled in when this Mac has it, or
-named on the row when it does not. **Review and import** reads one plugin for
+reads like a credential goes to the credential store. A variable the other
+tool reads from its environment is filled in, into a variable or header
+value only, when this Mac has it. A server that uses a variable in its
+command, arguments or address, or needs one this Mac lacks, cannot be added
+from here: its row says which, and you add it by hand with the value
+entered. **Review and import** reads one plugin for
 the usual review and Install; a Claude Code plugin keeps its skills and MCP
 servers, and its commands, agents and hooks are left out, which the review
 says. Octant never writes to the other tools' files. The section appears

@@ -95,6 +95,22 @@ describe("MCP servers added by hand", () => {
     });
   });
 
+  it("refuses a secret that is still an unfilled placeholder, and stores nothing", async () => {
+    const secrets = secretsStore();
+    const { store: servers } = await store({ secrets });
+    await expect(
+      servers.add({
+        name: "Remote",
+        server: {
+          type: "streamable-http",
+          url: "https://mcp.example/mcp",
+          headers: [{ name: "Authorization", value: "Bearer ${MCP_TOKEN}", secret: true }],
+        },
+      }),
+    ).rejects.toMatchObject({ category: "invalid" });
+    expect(secrets.values.size).toBe(0);
+  });
+
   it("refuses a secret value on a host that has no credential store", async () => {
     const { store: servers, directory } = await store();
     await expect(
