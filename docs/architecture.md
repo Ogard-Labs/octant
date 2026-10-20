@@ -3988,7 +3988,11 @@ native harness in `apps/server/src/harness`:
   session and its conversation stay live, so the next `send` continues it
   without a resume or a journal rebuild, and a cancel during a tool step first
   closes the calls its runner never answered with the same interrupted results
-  a resume would write. Only `stop` releases the session. Chat and Work still
+  a resume would write. Only `stop` or connection teardown releases the session.
+  Opening an endpoint belongs to the pending start or resume: if that operation
+  is cancelled or its connection closes before opening finishes, the late
+  endpoint is released without admitting a session or changing its transcript.
+  It cannot restore an active-session count after cleanup. Chat and Work still
   rebuild their history on the host and
   start a fresh session each turn.
 - **Forks.** A Code fork on a harness model starts its first session from a
