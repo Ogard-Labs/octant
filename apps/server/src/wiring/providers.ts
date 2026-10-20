@@ -615,6 +615,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             readApprovalOutsideContent(persistence.connection, threadId),
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
         resolveUserAddedSecrets: async (launch, target) => {
           const withSecrets = await userAddedMcpServers.resolveLaunchSecrets(launch);
           const signIn = mcpServerSignInHolder.current;
@@ -659,6 +660,7 @@ export function wireProviders(deps: ProvidersDependencies) {
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
       },
       userAddedMcpServers: {
+        owns: (sourceRef) => userAddedMcpServers.owns(sourceRef),
         remove: async (sourceRef, extensionId) => {
           await mcpServerSignInHolder.current?.forgetPackage(extensionId);
           await userAddedMcpServers.remove(sourceRef);
@@ -711,8 +713,8 @@ export function wireProviders(deps: ProvidersDependencies) {
       userAddedMcpServers,
       agentToolingDiscovery,
       mcpServerSignIn: {
-        status: (extensionId, componentId) =>
-          signInOrUnavailable((signIn) => signIn.status(extensionId, componentId)),
+        status: (extensionId, componentId, principalKind) =>
+          signInOrUnavailable((signIn) => signIn.status(extensionId, componentId, principalKind)),
         begin: (extensionId, componentId, principalKind) =>
           signInOrUnavailable((signIn) => signIn.begin(extensionId, componentId, principalKind)),
         poll: (extensionId, componentId, attemptId, principalKind) =>

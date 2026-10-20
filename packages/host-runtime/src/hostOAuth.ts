@@ -16,6 +16,10 @@ const CALLBACK_PATH = "/oauth/callback";
 const OPENROUTER_DIALECT = "openrouter-pkce";
 const CHATGPT_PLAN_DIALECT = "chatgpt-plan-siwc";
 const MCP_DIALECT = "mcp-authorization";
+// RFC 6749 §3.3 scope-token: printable ASCII without space, quote, or
+// backslash. A resource may advertise a URL-shaped scope; the authorize URL
+// and the token form encode it, so the wider grammar leaks nowhere.
+const SCOPE_TOKEN_PATTERN = /^[\x21\x23-\x5B\x5D-\x7E]{1,256}$/;
 // The ChatGPT plan flow registers a user-defined agent on the first sign-in:
 // the authorize request sends this placeholder client id, and the callback
 // returns the issued client id (oaiapp_...) that the exchange and every later
@@ -201,7 +205,11 @@ interface StoredGrant {
   readonly kind: typeof GRANT_KIND;
   readonly version: 1;
   readonly accessToken: string;
-  readonly refreshToken: string;
+  /**
+   * Absent when the issuer granted no refresh token (RFC 6749 §5.1 lets it):
+   * the access token is the whole grant and expiry means signing in again.
+   */
+  readonly refreshToken?: string;
   readonly tokenType: string;
   /**
    * Epoch millis of expiry. Absent means the credential never expires:
@@ -356,6 +364,7 @@ export async function exchangeAuthorizationCode(input: {
     generation: 0,
     codeExchange: true,
     ...(input.resource === undefined ? {} : { resource: input.resource }),
+    ...(input.dialect === MCP_DIALECT ? { refreshTokenOptional: true } : {}),
   });
   if (exchanged.kind === "tokens") return exchanged;
   if (exchanged.kind === "transient") return exchanged;
@@ -1443,6 +1452,19 @@ export function createHostOAuthRuntime(options: {
     // A dialect grant whose credential never rotates (an OpenRouter key)
     // needs no token exchange: while the grant is stored, it is valid.
     if (current.dialect === OPENROUTER_DIALECT) return { kind: "refreshed" };
+    // A grant issued without a refresh token lasts exactly as long as its
+    // access token; when that passes, the person signs in again.
+    if (current.refreshToken === undefined) {
+      if (current.expiresAt === undefined || current.expiresAt > now())
+        return { kind: "refreshed" };
+      try {
+        await options.store.delete(credentialRef);
+      } catch {
+        return { kind: "unavailable" };
+      }
+      return { kind: "sign-in-again", reason: "expired" };
+    }
+    const refreshToken = current.refreshToken;
     // The ChatGPT plan dialect refreshes with the issued client id and the
     // resource, and stores the rotating replacement refresh token. A new
     // identity token is checked without a nonce: refresh does not send one,
@@ -1456,7 +1478,7 @@ export function createHostOAuthRuntime(options: {
         extAgentHostId: current.extAgentHostId ?? "",
         jwks: siwcJwks,
         issuer: siwcIssuer,
-        refreshToken: current.refreshToken,
+        refreshToken,
         generation,
         ...(current.idToken === undefined ? {} : { priorIdToken: current.idToken }),
         ...(current.subject === undefined ? {} : { priorSubject: current.subject }),
@@ -1491,13 +1513,13 @@ export function createHostOAuthRuntime(options: {
       endpoint: current.tokenEndpoint,
       form: {
         grant_type: "refresh_token",
-        refresh_token: current.refreshToken,
+        refresh_token: refreshToken,
         client_id: current.clientId,
         ...(current.resource === undefined ? {} : { resource: current.resource }),
       },
       clientId: current.clientId,
       tokenEndpoint: current.tokenEndpoint,
-      previousRefresh: current.refreshToken,
+      previousRefresh: refreshToken,
       generation,
       codeExchange: false,
       ...(current.resource === undefined ? {} : { resource: current.resource }),
@@ -1574,7 +1596,7 @@ export function createHostOAuthRuntime(options: {
       // Only the ChatGPT plan dialect has a revocation endpoint: the refresh
       // token is revoked at the issuer's discovery revocation_endpoint before
       // the local grant is dropped. Other dialects have nothing to revoke.
-      if (grant.dialect === CHATGPT_PLAN_DIALECT) {
+      if (grant.dialect === CHATGPT_PLAN_DIALECT && grant.refreshToken !== undefined) {
         const revoked = await revokeSiwcRefreshToken({
           fetch: fetchImpl,
           issuer: siwcIssuer,
@@ -1778,6 +1800,8 @@ async function requestTokens(input: {
   readonly codeExchange: boolean;
   /** MCP authorization dialect: kept on the grant so a refresh names it again. */
   readonly resource?: string;
+  /** MCP authorization dialect: an issuer may grant an access token alone. */
+  readonly refreshTokenOptional?: boolean;
 }): Promise<TokenRequestResult> {
   let response: Response;
   try {
@@ -1811,9 +1835,9 @@ async function requestTokens(input: {
   const idToken = stringField(body, "id_token");
   if (
     accessToken === undefined ||
-    refreshToken === undefined ||
+    (refreshToken === undefined && input.refreshTokenOptional !== true) ||
     accessToken.length > MAX_TOKEN_CHARS ||
-    refreshToken.length > MAX_TOKEN_CHARS ||
+    (refreshToken !== undefined && refreshToken.length > MAX_TOKEN_CHARS) ||
     (idToken !== undefined && idToken.length > MAX_TOKEN_CHARS)
   ) {
     return { kind: "refused", reason: "exchange-refused" };
@@ -1824,7 +1848,7 @@ async function requestTokens(input: {
       kind: GRANT_KIND,
       version: 1,
       accessToken,
-      refreshToken,
+      ...(refreshToken === undefined ? {} : { refreshToken }),
       tokenType: tokenType.slice(0, 32),
       expiresAt: input.now() + expiresIn * 1_000,
       scope: (stringField(body, "scope") ?? "").slice(0, 512),
@@ -1908,7 +1932,7 @@ function decodeGrant(raw: string): StoredGrant {
   if (
     (resource !== undefined && typeof resource !== "string") ||
     typeof accessToken !== "string" ||
-    typeof refreshToken !== "string" ||
+    (refreshToken !== undefined && typeof refreshToken !== "string") ||
     typeof tokenType !== "string" ||
     (expiresAt !== undefined && typeof expiresAt !== "number") ||
     typeof scope !== "string" ||
@@ -1928,7 +1952,7 @@ function decodeGrant(raw: string): StoredGrant {
     kind: GRANT_KIND,
     version: 1,
     accessToken,
-    refreshToken,
+    ...(refreshToken === undefined ? {} : { refreshToken }),
     tokenType,
     ...(expiresAt === undefined ? {} : { expiresAt }),
     scope,
@@ -2013,7 +2037,7 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
   if (dialect !== undefined && descriptor.flow !== "authorization-code-pkce") return undefined;
   if (!allowedEndpoint(descriptor.tokenEndpoint)) return undefined;
   if (descriptor.scopes.length > 16) return undefined;
-  if (!descriptor.scopes.every((scope) => /^[A-Za-z0-9._:-]{1,128}$/.test(scope))) return undefined;
+  if (!descriptor.scopes.every((scope) => SCOPE_TOKEN_PATTERN.test(scope))) return undefined;
   if (descriptor.flow === "authorization-code-pkce") {
     if (
       descriptor.authorizationEndpoint === undefined ||
@@ -2054,14 +2078,23 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
   const authorizationEndpoint = value.authorizationEndpoint;
   const deviceAuthorizationEndpoint = value.deviceAuthorizationEndpoint;
   const dialect = value.dialect;
-  if (dialect !== undefined && dialect !== OPENROUTER_DIALECT && dialect !== CHATGPT_PLAN_DIALECT) {
+  if (
+    dialect !== undefined &&
+    dialect !== OPENROUTER_DIALECT &&
+    dialect !== CHATGPT_PLAN_DIALECT &&
+    dialect !== MCP_DIALECT
+  ) {
     return undefined;
   }
   const extAgentHostId = value.extAgentHostId;
   const agentNameHint = value.agentNameHint;
+  const resource = value.resource;
+  const redirectPort = value.redirectPort;
   if (
     (extAgentHostId !== undefined && typeof extAgentHostId !== "string") ||
-    (agentNameHint !== undefined && typeof agentNameHint !== "string")
+    (agentNameHint !== undefined && typeof agentNameHint !== "string") ||
+    (resource !== undefined && typeof resource !== "string") ||
+    (redirectPort !== undefined && typeof redirectPort !== "number")
   ) {
     return undefined;
   }
@@ -2077,6 +2110,8 @@ function descriptorFromRecord(value: Record<string, unknown>): HostOAuthDescript
     ...(typeof deviceAuthorizationEndpoint === "string" ? { deviceAuthorizationEndpoint } : {}),
     ...(typeof extAgentHostId === "string" ? { extAgentHostId } : {}),
     ...(typeof agentNameHint === "string" ? { agentNameHint } : {}),
+    ...(typeof resource === "string" ? { resource } : {}),
+    ...(typeof redirectPort === "number" ? { redirectPort } : {}),
   });
 }
 
