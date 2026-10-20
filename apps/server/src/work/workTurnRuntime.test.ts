@@ -1047,19 +1047,20 @@ describe("WorkTurnRuntime", () => {
       resume: () => Effect.die("unused"),
       send: () =>
         Effect.sync(() => {
-          // Eight ticks 20 ms apart outlast the 60 ms idle window several times over.
+          // Eight ticks 60 ms apart outlast the 200 ms idle window, and each
+          // gap stays well inside it so a loaded machine cannot expire it early.
           for (let tick = 1; tick <= 8; tick += 1) {
             setTimeout(() => {
               void Effect.runPromise(
                 Queue.offer(queue, { ...event, sequence: tick, kind: "liveness" }),
               );
-            }, tick * 20);
+            }, tick * 60);
           }
           setTimeout(() => {
             void Effect.runPromise(
               Queue.offer(queue, { ...event, sequence: 9, kind: "completed" }),
             );
-          }, 180);
+          }, 540);
         }),
       interrupt: () => Effect.void,
       stop: () => Effect.void,
@@ -1068,7 +1069,7 @@ describe("WorkTurnRuntime", () => {
       answerTool: () => Effect.void,
     };
     const deltas: string[] = [];
-    const outcome = await new WorkTurnRuntime({ timeoutMs: 60 }).run({
+    const outcome = await new WorkTurnRuntime({ timeoutMs: 200 }).run({
       command: decodeStartWorkThreadTurnCommand({
         kind: "start-work-thread-turn",
         requestId: ids.request,

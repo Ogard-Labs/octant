@@ -1635,9 +1635,9 @@ describe("CodeTurnRunner", () => {
       subscribe: Effect.succeed(Stream.fromQueue(queue)),
       send: vi.fn(() =>
         Effect.gen(function* () {
-          // ~90ms of liveness outlasts the 40ms idle window twice over.
-          for (let index = 0; index < 6; index += 1) {
-            yield* Effect.sleep(15);
+          // ~400ms of liveness outlasts the 150ms idle window; each gap stays well inside it.
+          for (let index = 0; index < 8; index += 1) {
+            yield* Effect.sleep(50);
             yield* Queue.offer(queue, event({ kind: "liveness" }));
           }
           yield* Queue.offer(queue, event({ kind: "completed" }));
@@ -1649,7 +1649,7 @@ describe("CodeTurnRunner", () => {
 
     await Effect.runPromise(
       Effect.scoped(
-        new CodeTurnRunner({ timeoutMs: 40 }).run(
+        new CodeTurnRunner({ timeoutMs: 150 }).run(
           input({
             provider: { acquire: () => Effect.succeed(connection) },
             persistEvent: (next) => Effect.sync(() => observed.push(next)),

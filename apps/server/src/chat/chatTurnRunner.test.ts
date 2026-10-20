@@ -957,9 +957,10 @@ describe("ChatTurnRunner", () => {
       start: () => Effect.succeed({ sessionId }),
       send: () =>
         Effect.gen(function* () {
-          // ~90ms of liveness outlasts the 25ms idle window several times over.
-          for (let index = 0; index < 6; index += 1) {
-            yield* Effect.sleep(15);
+          // ~400ms of liveness outlasts the 150ms idle window, and each gap
+          // stays well inside it so a loaded machine cannot expire it early.
+          for (let index = 0; index < 8; index += 1) {
+            yield* Effect.sleep(50);
             yield* Queue.offer(queue, { kind: "liveness", sessionId } as never);
           }
           yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Hello" } as never);
@@ -978,7 +979,7 @@ describe("ChatTurnRunner", () => {
       researchRouter: new ResearchRouter({
         searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
       }),
-      timeoutMs: 25,
+      timeoutMs: 150,
     });
 
     await Effect.runPromise(
