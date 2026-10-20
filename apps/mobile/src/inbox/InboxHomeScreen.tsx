@@ -31,6 +31,7 @@ import { inboxStatusCounts, inboxWorkStatus } from "./inboxWorkPresentation";
 import { HomeComposerSheet } from "./HomeComposerSheet";
 import { HomeNavigationSheet } from "./HomeNavigationSheet";
 import { InboxComposerDock } from "./InboxComposerDock";
+import { inboxEmptyState } from "./inboxEmptyState";
 import { FloatingComposer } from "../ui/FloatingComposer";
 import { IconButton } from "../ui/IconButton";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
@@ -48,6 +49,8 @@ export interface InboxHomeScreenProps {
   readonly onOpenHosts: () => void;
   readonly onOpenWorkspace: (hostId: string) => void;
   readonly onAddWorkspace: () => void;
+  /** Opens the pairing screen with the QR scanner already open. */
+  readonly onScanToPair: () => void;
   readonly onOpenThread: (row: MobileInboxRow) => void;
 }
 
@@ -67,8 +70,17 @@ function modeIcon(
 
 export function InboxHomeScreen(props: InboxHomeScreenProps) {
   const { colors } = useTheme();
-  const { transports, hosts, placementHostId, transportForHost, health, refreshHosts } =
-    useMobileSession();
+  const {
+    transports,
+    hosts,
+    hostsLoaded,
+    placementHostId,
+    transportForHost,
+    health,
+    refreshHosts,
+  } = useMobileSession();
+  const emptyState =
+    props.homeMode === "inbox" ? inboxEmptyState({ hosts, hostsLoaded }) : undefined;
   const [rows, setRows] = useState<ReadonlyArray<MobileInboxRow>>([]);
   const [transportError, setTransportError] = useState<string | undefined>();
   const [failures, setFailures] = useState<ReadonlyArray<MobileInboxHostFailure>>([]);
@@ -498,6 +510,35 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           textAlign: "right",
         },
         empty: { color: colors.textSecondary, lineHeight: 20, paddingVertical: space.md },
+        firstRun: {
+          gap: space.md,
+          padding: space.lg,
+          borderRadius: radii.lg,
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: colors.glassStroke,
+          backgroundColor: colors.glassFillThin,
+        },
+        firstRunTitle: {
+          color: colors.textPrimary,
+          fontSize: typography.title.fontSize,
+          fontWeight: typography.title.fontWeight,
+        },
+        firstRunBody: {
+          color: colors.textSecondary,
+          fontSize: typography.body.fontSize,
+          lineHeight: 22,
+        },
+        firstRunButton: {
+          backgroundColor: colors.accent,
+          paddingVertical: 14,
+          alignItems: "center",
+          borderRadius: radii.pill,
+        },
+        firstRunButtonLabel: {
+          color: colors.sendLabel,
+          fontWeight: "500",
+          fontSize: typography.body.fontSize,
+        },
         loader: { marginTop: space.md },
         composerError: {
           color: colors.danger,
@@ -673,7 +714,20 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           </View>
         ) : null}
 
-        {props.homeMode === "inbox" ? (
+        {emptyState !== undefined ? (
+          <View style={styles.firstRun} testID="mobile-home-first-run">
+            <Text style={styles.firstRunTitle}>{emptyState.title}</Text>
+            <Text style={styles.firstRunBody}>{emptyState.body}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={props.onScanToPair}
+              style={styles.firstRunButton}
+              testID="mobile-home-scan-to-pair"
+            >
+              <Text style={styles.firstRunButtonLabel}>{emptyState.actionLabel}</Text>
+            </Pressable>
+          </View>
+        ) : props.homeMode === "inbox" ? (
           <View>
             <View style={styles.grid} testID="mobile-home-status-grid">
               <View style={styles.gridRow}>
@@ -775,14 +829,16 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
       </ScrollView>
 
       {props.homeMode === "inbox" ? (
-        <InboxComposerDock
-          onOpen={() => {
-            setComposerMode("chat");
-            setComposerError(undefined);
-            setCodeRetry(undefined);
-            setComposerSheetOpen(true);
-          }}
-        />
+        emptyState === undefined ? (
+          <InboxComposerDock
+            onOpen={() => {
+              setComposerMode("chat");
+              setComposerError(undefined);
+              setCodeRetry(undefined);
+              setComposerSheetOpen(true);
+            }}
+          />
+        ) : null
       ) : (
         <>
           {composerError !== undefined ? (

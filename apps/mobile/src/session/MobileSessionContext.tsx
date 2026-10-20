@@ -54,6 +54,8 @@ export interface MobileSessionContextValue {
   readonly bridge: RemoteSessionBridge;
   readonly bridgeState: RemoteSessionBridgeState;
   readonly hosts: ReadonlyArray<MobileHostRegistration>;
+  /** False until the first registry read finishes, so an empty list is not mistaken for no hosts. */
+  readonly hostsLoaded: boolean;
   readonly health: ReadonlyArray<MobileHostHealth>;
   readonly transports: ReadonlyArray<MobileRemoteTransport>;
   readonly transport: MobileRemoteTransport | undefined;
@@ -128,6 +130,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
   const lifetime = useRef(new AbortController());
   const [bridgeState, setBridgeState] = useState<RemoteSessionBridgeState>(bridge.getState);
   const [hosts, setHosts] = useState<ReadonlyArray<MobileHostRegistration>>([]);
+  const [hostsLoaded, setHostsLoaded] = useState(false);
   const [health, setHealth] = useState<ReadonlyArray<MobileHostHealth>>([]);
   const [hubEpoch, setHubEpoch] = useState(0);
   const [inboxHostFilter, setInboxHostFilter] = useState<MobileInboxHostFilter>("all");
@@ -151,6 +154,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     const listed = await refreshLiveMobileSession({ registry, hub, signal });
     if (listed === undefined || signal.aborted) return;
     setHosts(listed);
+    setHostsLoaded(true);
     setHealth(hub.health());
     if (placementHostId !== undefined && !listed.some((host) => host.hostId === placementHostId)) {
       setPlacementHostId(listed[0]?.hostId);
@@ -200,6 +204,7 @@ function LiveMobileSessionProvider(props: { readonly children: ReactNode }) {
     bridge,
     bridgeState,
     hosts,
+    hostsLoaded,
     health,
     transports,
     transport,
@@ -274,6 +279,7 @@ function MockMobileSessionProvider(props: {
     bridge,
     bridgeState: bridge.getState(),
     hosts: props.scenario.hosts,
+    hostsLoaded: true,
     health: props.scenario.health,
     transports: props.scenario.transports,
     transport,
