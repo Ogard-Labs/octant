@@ -177,6 +177,7 @@ export * from "./nativeHarnessRoutingPolicy";
 export * from "./nativeHarnessSessionPolicy";
 export * from "./projectProviderPolicy";
 export * from "./subscriptionOAuthCatalog";
+export * from "./connectorCatalog";
 export * from "./turnMetricsPolicy";
 export * from "./liveTurnPolicy";
 export * from "./threadToolSteps";

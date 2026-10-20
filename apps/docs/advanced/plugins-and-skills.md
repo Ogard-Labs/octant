@@ -213,6 +213,20 @@ package and its secrets. Adding a server works only from the Octant window on
 this host, not from a paired device, and a browser-hosted Settings cannot keep
 secrets.
 
+### Connectors
+
+**Settings → Skills & Extensions → Connectors** lists hosted services an
+agent can use once you connect them: issue trackers, docs, databases,
+deployment platforms, payments, and more, by category, with a search box.
+The list ships with the app; nothing is fetched to show it. **Connect** adds
+the service's server to this host the way Add MCP server does, then opens
+its sign-in page, or asks for a key the service issues (kept in this Mac's
+credential store), or simply connects when the service asks for nothing. A
+connected entry reads **Connected**, and its server appears under Extension
+packages like any other. **Hide** keeps an entry out of sight on this
+computer; **Show hidden** brings them back. Connecting works only from the
+Octant window on this host.
+
 ### Sign in to a hosted server
 
 A server you added by its address can ask you to sign in instead of taking a
