@@ -104,6 +104,15 @@ export interface CanvasCommentServiceDependencies {
   ) => boolean;
 }
 
+function answeredByAgent(
+  requestSequence: number,
+  versions: ReadonlyArray<{ readonly sequence: number; readonly createdBy: CanvasActor }>,
+): boolean {
+  return versions.some(
+    (version) => version.sequence > requestSequence && version.createdBy.kind === "agent",
+  );
+}
+
 function eventNameOf(event: CanvasCommentEvent): string {
   switch (event.kind) {
     case "added":
@@ -303,11 +312,16 @@ export class CanvasCommentService {
    * The open comments a person sent to the agent, for the Canvas tool. It
    * does not pass through `authorize`: the tool has already read the Canvas
    * under the thread's own scope, and a request is about that Canvas alone.
+   * A request stays listed until an agent-authored version lands after the one
+   * it was sent against: a person's own edit in between does not answer it.
    */
   agentRequests(canvasId: CanvasId): ReadonlyArray<CanvasCommentAgentRequestView> {
     const state = this.#stateFor(canvasId);
+    const versions = this.#projection.getById(canvasId)?.versions ?? [];
     return state.comments.flatMap((comment) =>
-      comment.sentToAgent === undefined || comment.resolvedAt !== undefined
+      comment.sentToAgent === undefined ||
+      comment.resolvedAt !== undefined ||
+      answeredByAgent(comment.sentToAgent.canvasSequence, versions)
         ? []
         : [
             {

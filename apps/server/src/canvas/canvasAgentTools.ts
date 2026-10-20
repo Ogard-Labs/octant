@@ -11,6 +11,7 @@ import {
   type CanvasDocumentRecipe,
   type CanvasId,
   type CanvasPresentation,
+  type CanvasProvenance,
   type ChatThread,
   type HostId,
   type PermissionPersistence,
@@ -1077,7 +1078,12 @@ function canvasToolSet(options: {
         if (!readerMarked(options, canvasId)) {
           return { result: { error: CANVAS_READER_UNMARKED }, isError: true };
         }
-        const requested = pendingCommentRequests(options.port, canvasId, outcome.version.sequence);
+        const requested = pendingCommentRequests(
+          options.port,
+          canvasId,
+          outcome.version.definition.provenance,
+          options.originThreadId,
+        );
         return {
           result: {
             canvasId: input.canvasId,
@@ -1199,7 +1205,7 @@ function canvasToolSet(options: {
         options.author ?? decodeCanvasActor({ kind: "agent", actorId: options.port.uuid() });
       // What the person asked to change, and the blocks as they stand, read
       // before the revision so the result can say whether it stayed inside.
-      const focus = revisionFocus(options.port, input, target);
+      const focus = revisionFocus(options.port, input, target, options.originThreadId);
       const revision = {
         schemaVersion: 1,
         kind: "canvas-revise",
@@ -1270,19 +1276,20 @@ const REQUESTED_CHANGES_GUIDANCE =
   "A person sent these comments to you. Revise only the block each anchor names (and within it only the named node, edge, row, or region) and keep every other block identical, including block ids and order; the revise result warns when other blocks changed.";
 
 /**
- * The comments a person sent to the agent that no later version has answered:
- * a request made at the Canvas's current sequence. One made at an earlier
- * sequence has had a version land since and is no longer shown, so an agent
- * is not told to redo a change it already made.
+ * The comments a person sent to the agent that no agent version has answered
+ * yet (the port drops an answered one), and only to the Canvas's owning
+ * thread. Another thread's agent can read the same Canvas under the Project's
+ * authorization, but the request was sent to the owner, so it neither sees it
+ * nor is held to it.
  */
 function pendingCommentRequests(
   port: CanvasAgentToolPort,
   canvasId: CanvasId,
-  sequence: number,
+  provenance: CanvasProvenance,
+  originThreadId: string,
 ): ReadonlyArray<CanvasCommentAgentRequestView> {
-  return (port.commentRequests?.(canvasId) ?? []).filter(
-    (request) => request.canvasSequence === sequence,
-  );
+  const requests = port.commentRequests?.(canvasId) ?? [];
+  return requests.length > 0 && String(provenance.threadId) === originThreadId ? requests : [];
 }
 
 interface RevisionFocus {
@@ -1295,6 +1302,7 @@ function revisionFocus(
   port: CanvasAgentToolPort,
   input: { readonly canvasId?: string; readonly expectedSequence?: number },
   target: Extract<ResolvedCanvasTarget, { readonly kind: "ready" }>,
+  originThreadId: string,
 ): RevisionFocus | undefined {
   if (input.canvasId === undefined || input.expectedSequence === undefined) return undefined;
   let canvasId: CanvasId;
@@ -1303,12 +1311,17 @@ function revisionFocus(
   } catch {
     return undefined;
   }
-  const requests = pendingCommentRequests(port, canvasId, input.expectedSequence);
-  if (requests.length === 0) return undefined;
   const current = port.canvas.get(canvasId, target.context, target.project);
   if (current.kind !== "ready" || current.version.sequence !== input.expectedSequence) {
     return undefined;
   }
+  const requests = pendingCommentRequests(
+    port,
+    canvasId,
+    current.version.definition.provenance,
+    originThreadId,
+  );
+  if (requests.length === 0) return undefined;
   return { requests, before: current.version.definition.blocks };
 }
 

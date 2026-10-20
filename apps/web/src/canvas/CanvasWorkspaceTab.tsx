@@ -18,10 +18,7 @@ import type {
   CanvasVersionHistoryEntry,
 } from "@octant/contracts/canvas-revision";
 import type { CanvasCommentCommand, CanvasCommentThread } from "@octant/contracts/canvas-board";
-import type {
-  CanvasContextSelection,
-  CanvasContextSelectionId,
-} from "@octant/contracts/canvasContext";
+import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
 import type {
   CanvasRefreshCancelRequest,
   CanvasRefreshRequest,
@@ -46,7 +43,11 @@ import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
 import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
-import { canvasCommentAgentPrompt, enqueueCanvasCommentTurn } from "./canvasCommentAgentTurn";
+import {
+  canvasCommentAgentPrompt,
+  canvasCommentAttemptKey,
+  enqueueCanvasCommentTurn,
+} from "./canvasCommentAgentTurn";
 import type {
   CanvasExportOfferList,
   CanvasExportPrepareRequest,
@@ -686,8 +687,8 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               thread,
               anchorLabel,
             }),
+            attemptKey: canvasCommentAttemptKey(thread.comment),
             canvasSelection: {
-              id: crypto.randomUUID() as CanvasContextSelectionId,
               canvasId: props.tab.canvasId,
               versionId: selectedVersionId,
               sequence: expectedSequence,

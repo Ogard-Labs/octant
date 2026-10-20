@@ -5,7 +5,10 @@ import type {
   CanvasCommentThread,
 } from "@octant/contracts/canvas-board";
 import type { CanvasVersionHistoryEntry } from "@octant/contracts/canvas-revision";
-import type { CanvasContextSelection } from "@octant/contracts/canvasContext";
+import {
+  decodeCanvasContextSelectionId,
+  type CanvasContextSelection,
+} from "@octant/contracts/canvasContext";
 import type { OctantMode } from "@octant/contracts/modes";
 import {
   decodeMentionableThreadId,
@@ -25,12 +28,49 @@ export interface CanvasCommentAgentTurn {
   readonly mode: OctantMode;
   readonly threadId: string;
   readonly prompt: string;
-  readonly canvasSelection: CanvasContextSelection;
+  /**
+   * Names this send, so a retry of it is the same send. The queue answers a
+   * repeated request or message id with the turn it already holds, which
+   * only works when every id of the turn is derived from this key.
+   */
+  readonly attemptKey: string;
+  readonly canvasSelection: Omit<CanvasContextSelection, "id">;
 }
 
 export type CanvasCommentAgentSendResult =
   | { readonly status: "sent" }
   | { readonly status: "refused"; readonly message: string };
+
+/**
+ * The key of one send of a comment: the comment, and the send it replaces. A
+ * retry after the host refused the sent marker sees the same earlier send, so
+ * it names the same turn and cannot queue a second; a send after a revision
+ * answered the first sees a new earlier send and names a new turn.
+ */
+export function canvasCommentAttemptKey(
+  comment: Pick<CanvasComment, "commentId" | "sentToAgent">,
+): string {
+  return [String(comment.commentId), comment.sentToAgent?.sentAt ?? "first-send"].join(":");
+}
+
+/** A UUID that is the same for the same key and purpose, so a repeated send repeats its ids. */
+async function stableUuid(key: string, purpose: string): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode([purpose, key].join("\n")),
+  );
+  const bytes = new Uint8Array(digest).slice(0, 16);
+  bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join("-");
+}
 
 /** Where a comment stands with the agent, read off the comment and the version history. */
 export type CanvasCommentAgentState =
@@ -117,7 +157,6 @@ export async function enqueueCanvasCommentTurn(
     readonly execute: (command: ThreadMessageQueueCommand) => Promise<ThreadMessageQueueResult>;
   },
   turn: CanvasCommentAgentTurn,
-  uuid: () => string = () => globalThis.crypto.randomUUID(),
 ): Promise<CanvasCommentAgentSendResult> {
   const scope: ThreadMessageQueueScope = {
     mode: turn.mode,
@@ -133,11 +172,20 @@ export async function enqueueCanvasCommentTurn(
     kind: "enqueue",
     scope,
     expectedVersion: snapshot.version,
-    requestId: uuid(),
-    messageId: uuid(),
+    requestId: await stableUuid(turn.attemptKey, "request"),
+    messageId: await stableUuid(turn.attemptKey, "message"),
     payload:
       turn.mode === "chat"
-        ? { mode: "chat", prompt: turn.prompt, canvasSelections: [turn.canvasSelection] }
+        ? {
+            mode: "chat",
+            prompt: turn.prompt,
+            canvasSelections: [
+              {
+                ...turn.canvasSelection,
+                id: decodeCanvasContextSelectionId(await stableUuid(turn.attemptKey, "selection")),
+              },
+            ],
+          }
         : { mode: turn.mode, prompt: turn.prompt },
   });
   let result: ThreadMessageQueueResult;

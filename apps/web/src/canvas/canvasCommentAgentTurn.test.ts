@@ -4,6 +4,7 @@ import type { ThreadMessageQueueSnapshot } from "@octant/contracts";
 import {
   canvasCommentAgentPrompt,
   canvasCommentAgentState,
+  canvasCommentAttemptKey,
   enqueueCanvasCommentTurn,
 } from "./canvasCommentAgentTurn";
 import { canvasFixture } from "./test-fixtures";
@@ -95,7 +96,6 @@ describe("canvasCommentAgentState", () => {
 
 describe("enqueueCanvasCommentTurn", () => {
   const selection = {
-    id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" as never,
     canvasId: canvasId as never,
     versionId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" as never,
     sequence: 3,
@@ -115,21 +115,58 @@ describe("enqueueCanvasCommentTurn", () => {
       requestId: command.requestId,
       snapshot: snapshot("chat"),
     }));
-    const ids = ["f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1", "f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2"];
     const outcome = await enqueueCanvasCommentTurn(
       { read: async () => snapshot("chat"), execute },
-      { mode: "chat", threadId, prompt: "Change only node b", canvasSelection: selection },
-      () => ids.shift() ?? "",
+      {
+        mode: "chat",
+        threadId,
+        prompt: "Change only node b",
+        attemptKey: "first",
+        canvasSelection: selection,
+      },
     );
     expect(outcome).toEqual({ status: "sent" });
     expect(execute).toHaveBeenCalledWith({
       kind: "enqueue",
       scope: { mode: "chat", threadId },
       expectedVersion: 4,
-      requestId: "f1f1f1f1-f1f1-4f1f-8f1f-f1f1f1f1f1f1",
-      messageId: "f2f2f2f2-f2f2-4f2f-8f2f-f2f2f2f2f2f2",
-      payload: { mode: "chat", prompt: "Change only node b", canvasSelections: [selection] },
+      requestId: expect.any(String),
+      messageId: expect.any(String),
+      payload: {
+        mode: "chat",
+        prompt: "Change only node b",
+        canvasSelections: [{ ...selection, id: expect.any(String) }],
+      },
     });
+  });
+
+  it("queues a retried send under the same ids so the thread cannot take the turn twice", async () => {
+    const execute = vi.fn(async (command) => ({
+      status: "applied" as const,
+      requestId: command.requestId,
+      snapshot: snapshot("chat"),
+    }));
+    const turn = {
+      mode: "chat" as const,
+      threadId,
+      prompt: "Change only node b",
+      attemptKey: canvasCommentAttemptKey(thread.comment),
+      canvasSelection: selection,
+    };
+    const client = { read: async () => snapshot("chat"), execute };
+    await enqueueCanvasCommentTurn(client, turn);
+    await enqueueCanvasCommentTurn(client, turn);
+    await enqueueCanvasCommentTurn(client, {
+      ...turn,
+      attemptKey: canvasCommentAttemptKey({
+        ...thread.comment,
+        sentToAgent: { canvasSequence: 3, sentAt: "2026-08-02T10:00:00.000Z" as never },
+      }),
+    });
+    const [first, retry, later] = execute.mock.calls.map(([command]) => command);
+    expect(retry).toEqual(first);
+    expect(later?.messageId).not.toBe(first?.messageId);
+    expect(later?.requestId).not.toBe(first?.requestId);
   });
 
   it("names the Canvas in the prompt alone for a Work thread, whose turn carries no Canvas selection", async () => {
@@ -140,7 +177,13 @@ describe("enqueueCanvasCommentTurn", () => {
     }));
     await enqueueCanvasCommentTurn(
       { read: async () => snapshot("work"), execute },
-      { mode: "work", threadId, prompt: "Change only node b", canvasSelection: selection },
+      {
+        attemptKey: "first",
+        mode: "work",
+        threadId,
+        prompt: "Change only node b",
+        canvasSelection: selection,
+      },
     );
     expect(execute.mock.calls[0]?.[0].payload).toEqual({
       mode: "work",
@@ -158,7 +201,7 @@ describe("enqueueCanvasCommentTurn", () => {
           reason: "thread-unavailable" as const,
         }),
       },
-      { mode: "chat", threadId, prompt: "Change", canvasSelection: selection },
+      { mode: "chat", threadId, prompt: "Change", attemptKey: "first", canvasSelection: selection },
     );
     expect(refused).toEqual({
       status: "refused",
@@ -171,7 +214,7 @@ describe("enqueueCanvasCommentTurn", () => {
         },
         execute: vi.fn(),
       },
-      { mode: "chat", threadId, prompt: "Change", canvasSelection: selection },
+      { mode: "chat", threadId, prompt: "Change", attemptKey: "first", canvasSelection: selection },
     );
     expect(unreachable.status).toBe("refused");
   });

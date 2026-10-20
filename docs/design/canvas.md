@@ -541,12 +541,19 @@ identical. A Chat thread also carries the Canvas as a context selection. The
 action is absent when the Canvas has no thread the person can reach, when a
 version older than the head is on screen, and while a request is already with
 the agent. The host marks the comment sent only after the thread took the
-turn, stamping the Canvas head it holds. The Canvas tool's read lists open
-requests as `requestedChanges`, and a revise result carries a `warning`
+turn, stamping the Canvas head it holds. The turn's request, message and
+selection ids are derived from the comment and the send it replaces, so a
+retry after the host refused the sent marker (a concurrent comment change) is
+the same send: the queue answers it as a duplicate and no second turn runs.
+The Canvas tool's read lists open requests as `requestedChanges` to the
+Canvas's owning thread only (and its managed children), never to another
+thread that can read the same Canvas, and a revise result carries a `warning`
 when blocks outside every requested anchor changed; the warning does not refuse
-the revision. A comment reads "Addressed in vN" once an agent-authored version
-after the one it was sent against exists; a person's own layout edit does not
-answer it. A send stays on this computer and is not carried by artifact sync.
+the revision. A request stays open, and the warning stays on, across a
+person's own edit made after the send and before the agent ran. A comment reads
+"Addressed in vN" once an agent-authored version after the one it was sent
+against exists; a person's own layout edit does not answer it, and only that
+agent version closes the request in the tool as well. A send stays on this computer and is not carried by artifact sync.
 A table row is either a list of cells or `{ id, cells }`; the id is the
 author's, unique within the table (the domain policy refuses a repeat as
 `duplicate-table-row-id`), and arrives with Canvas schema version 13. A `row`
