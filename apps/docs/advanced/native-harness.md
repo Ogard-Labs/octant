@@ -366,9 +366,22 @@ Octant restarts still reaches the lead on the next turn. `/steer <note>` queues
 one explicitly. Left-over notes are sent once, even with the thread open in
 more than one terminal. The app has the same
 note box beside the composer, shown only while the lead works: a note is queued the same way and
-marked queued, then delivered. A note the lead never reached is marked not
-reached and can be discarded there; only the terminal sends it as the next
-prompt. `Esc` stops the
+marked queued, then delivered. After the turn ends, the app sends notes the lead
+never reached as the next message in the same thread, preserving your unsent
+composer draft. Paused sessions and queues, pending approvals, budget limits,
+and restart recovery still need attention before work continues.
+
+If the next message is refused, the app keeps the claimed notes in the current
+window and offers **Retry next message** after you resolve the refusal. If the send response
+is lost, **Check submission** checks the same message without creating a
+second copy. If the host does not confirm which client took the notes, the app
+keeps their text visible and does not resend them automatically: another
+window or terminal may have taken them. Check the conversation before copying
+that text into a new message, and keep the window open while resolving it.
+This handoff does not guarantee recovery after closing or reloading a window
+with a pending follow-up. Notes still in the steering list can also be discarded.
+
+`Esc` stops the
 running turn; `Ctrl+C` stops it too, and a second press right after quits.
 
 `/side <question>` asks the thread's Side Chat — the same one the app's Side

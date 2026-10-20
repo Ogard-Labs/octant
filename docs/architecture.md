@@ -4235,8 +4235,22 @@ native harness in `apps/server/src/harness`:
   the composer in every mode, only while a turn runs (a note reaches the lead inside a tool result,
   so between turns the composer sends an ordinary message), mints each note's
   id once per send so a retry lands once, and labels a queued note the lead
-  never reached as not reached, with a way to discard them. Only the terminal
-  sends unreached notes as the next prompt; the route allows exactly the
+  never reached as not reached, with a way to discard them. After a turn
+  settles, the web takes unreached notes and enqueues their text, in order,
+  as the next ordinary message in that thread's mode. It leaves the composer
+  draft and attachment selections alone. Paused, approval-waiting,
+  budget-limited and recovery-required sessions do not auto-continue, and a
+  paused or held message queue must be resumed first. The queue rechecks the
+  current thread authority before dispatch. An explicit enqueue refusal
+  retains the claimed notes in the window for an explicit retry with a fresh
+  queue version and request id but the same message id and payload. It does
+  not requeue taken note ids: the host remembers them for deduplication.
+  An unknown enqueue response is retried only with its original command.
+  `take` itself is destructive and has no idempotent receipt: if its response
+  is lost, the web retains the displayed text with an ownership-unknown
+  notice, never requeues that unclaimed snapshot automatically. This is not
+  a crash-atomic transfer; a reload can lose a client-held uncertain claim.
+  The route allows exactly the
   windows and paired devices that may already answer the thread's questions,
   and the web adds no authority to it. A turn's start is journaled
   (`native-harness-turn-started`) and closed by its completed record or a

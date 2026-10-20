@@ -12,6 +12,27 @@ function client(handler: (input: RequestInfo | URL, init?: RequestInit) => Promi
 }
 
 describe("native harness client", () => {
+  it("takes only the steering notes the host assigned to this caller", async () => {
+    const note = {
+      id: "00000000-0000-4000-8000-000000000021",
+      text: "Check the small fix",
+      status: "queued",
+      at: "2026-10-16T12:06:00.000Z",
+    };
+    const subject = client(async (input, init) => {
+      expect(String(input)).toBe(`${baseUrl}/api/native-harness/sessions/thread/steering`);
+      expect(JSON.parse(String(init?.body))).toEqual({ kind: "take" });
+      expect(new Headers(init?.headers).get("x-octant-window-capability")).toBe("capability");
+      return Response.json({ view: null, taken: [note] });
+    });
+    expect(await subject.takeSteering("thread")).toEqual({ taken: [note] });
+  });
+
+  it("refuses a take response that does not identify the claimed notes", async () => {
+    const subject = client(async () => Response.json({ view: null }));
+    await expect(subject.takeSteering("thread")).rejects.toThrow();
+  });
+
   it("reads the routing table with the window capability and decodes it", async () => {
     const seen: string[] = [];
     const subject = client(async (input, init) => {

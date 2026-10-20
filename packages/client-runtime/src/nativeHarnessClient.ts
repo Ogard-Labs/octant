@@ -12,6 +12,7 @@ import {
   type NativeHarnessSessionCommand,
   NativeHarnessSessionCommandResult,
   NativeHarnessSessionView,
+  NativeHarnessSteeringTaken,
   type ToolEgressCommand,
   ToolEgressCommandResult,
   ToolEgressThreadView,
@@ -85,6 +86,7 @@ export interface NativeHarnessClient {
     command: SteerNativeHarnessSession,
     signal?: AbortSignal,
   ): Promise<NativeHarnessSessionView | null>;
+  takeSteering(threadId: string, signal?: AbortSignal): Promise<NativeHarnessSteeringTaken>;
   /** A Code thread's network rules, its Project's, and its open proposals; null for any other thread. */
   egress(threadId: string, signal?: AbortSignal): Promise<ToolEgressThreadView | null>;
   egressCommand(
@@ -216,6 +218,16 @@ export function createNativeHarnessClient(
           "POST",
           `${SESSIONS_PATH}/${encodeURIComponent(threadId)}/approvals`,
           input,
+          signal,
+        ),
+      );
+    },
+    async takeSteering(threadId, signal) {
+      return decodeHostAnswer(NativeHarnessSteeringTaken)(
+        await write(
+          "POST",
+          `${SESSIONS_PATH}/${encodeURIComponent(threadId)}/steering`,
+          { kind: "take" },
           signal,
         ),
       );

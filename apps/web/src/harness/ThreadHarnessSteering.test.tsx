@@ -1,7 +1,14 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { NativeHarnessSessionView } from "@octant/contracts";
+import {
+  decodeThreadMessageQueueScope,
+  decodeAggregateVersion,
+  decodeNativeHarnessSteeringTaken,
+  type ThreadMessageQueueCommand,
+  type ThreadMessageQueueResult,
+  type NativeHarnessSessionView,
+} from "@octant/contracts";
 import { NativeHarnessClientFailure } from "@octant/client-runtime/native-harness-client";
 import { ThreadHarnessSteering } from "./ThreadHarnessSteering";
 
@@ -14,7 +21,13 @@ const queued = {
 };
 
 function view(
-  status: "idle" | "running" | "paused-by-user" = "running",
+  status:
+    | "idle"
+    | "running"
+    | "paused-by-user"
+    | "budget-limited"
+    | "recovery-required"
+    | "failed" = "running",
   steering: ReadonlyArray<unknown> = [],
 ): NativeHarnessSessionView {
   return {
@@ -46,12 +59,87 @@ function view(
 }
 
 describe("ThreadHarnessSteering", () => {
+  it.each(["idle", "failed"] as const)(
+    "hands unreached notes to the next-message control after a %s turn",
+    async (status) => {
+      const takeSteering = vi.fn(async () => ({ taken: [] }));
+      const client = {
+        session: vi.fn(async () => view(status, [queued])),
+        steer: vi.fn(),
+        takeSteering,
+      };
+      const queue = {
+        read: vi.fn(async () => ({
+          scope: decodeThreadMessageQueueScope({ mode: "chat", threadId }),
+          version: decodeAggregateVersion(0),
+          paused: false,
+          items: [],
+        })),
+        execute: vi.fn(),
+      };
+      render(
+        <ThreadHarnessSteering
+          client={client}
+          queueClient={queue}
+          running={false}
+          threadId={threadId}
+        />,
+      );
+      await waitFor(() => expect(takeSteering).toHaveBeenCalledWith(threadId));
+    },
+  );
+
+  it("disables discard while the follow-up claim is in flight and retains an uncertain claim after refresh", async () => {
+    let reject: (reason: Error) => void = () => undefined;
+    let current = view("idle", [queued]);
+    const client = {
+      session: vi.fn(async () => current),
+      steer: vi.fn(),
+      takeSteering: vi.fn(
+        () =>
+          new Promise<{ taken: [] }>((_, fail) => {
+            reject = fail;
+          }),
+      ),
+    };
+    const queue = {
+      read: vi.fn(async () => ({
+        scope: decodeThreadMessageQueueScope({ mode: "chat", threadId }),
+        version: decodeAggregateVersion(0),
+        paused: false,
+        items: [],
+      })),
+      execute: vi.fn(),
+    };
+    render(
+      <ThreadHarnessSteering
+        client={client}
+        queueClient={queue}
+        running={false}
+        threadId={threadId}
+      />,
+    );
+    await waitFor(() => expect(client.takeSteering).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "Discard unsent notes" })).toBeDisabled();
+    current = view("idle", []);
+    reject(new Error("lost response"));
+    await screen.findByText(/Another client may have them/);
+    expect(
+      screen.getByRole("list", { name: "Notes awaiting follow-up confirmation" }),
+    ).toHaveTextContent(queued.text);
+    expect(client.steer).not.toHaveBeenCalled();
+  });
+
   it("queues the typed note once under its own id, even when the first send fails", async () => {
     const steer = vi
       .fn()
       .mockRejectedValueOnce(new NativeHarnessClientFailure("The steering queue is full.", 409))
       .mockResolvedValue(null);
-    const client = { session: vi.fn(async () => view()), steer };
+    const client = {
+      takeSteering: vi.fn(async () => ({ taken: [] })),
+      session: vi.fn(async () => view()),
+      steer,
+    };
     render(<ThreadHarnessSteering client={client} running threadId={threadId} />);
     const input = await screen.findByRole("textbox", { name: "Note for the lead" });
     await userEvent.type(input, "Use the smaller change");
@@ -77,7 +165,11 @@ describe("ThreadHarnessSteering", () => {
           release = resolve;
         }),
     );
-    const client = { session: vi.fn(async () => view()), steer };
+    const client = {
+      takeSteering: vi.fn(async () => ({ taken: [] })),
+      session: vi.fn(async () => view()),
+      steer,
+    };
     render(<ThreadHarnessSteering client={client} running threadId={threadId} />);
     const input = await screen.findByRole("textbox", { name: "Note for the lead" });
     await userEvent.type(input, "First note");
@@ -91,7 +183,11 @@ describe("ThreadHarnessSteering", () => {
 
   it("gives an edited draft a new note id after a send whose answer was lost", async () => {
     const steer = vi.fn().mockRejectedValueOnce(new Error("network")).mockResolvedValue(null);
-    const client = { session: vi.fn(async () => view()), steer };
+    const client = {
+      takeSteering: vi.fn(async () => ({ taken: [] })),
+      session: vi.fn(async () => view()),
+      steer,
+    };
     render(<ThreadHarnessSteering client={client} running threadId={threadId} />);
     const input = await screen.findByRole("textbox", { name: "Note for the lead" });
     await userEvent.type(input, "Use sqlite");
@@ -104,11 +200,125 @@ describe("ThreadHarnessSteering", () => {
     expect(steer.mock.calls[1]?.[1].noteId).not.toEqual(steer.mock.calls[0]?.[1].noteId);
   });
 
+  it.each(["paused-by-user", "budget-limited", "recovery-required"] as const)(
+    "observes a %s session resuming elsewhere before forwarding its unreached notes",
+    async (heldStatus) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        let current = view(heldStatus, [queued]);
+        const client = {
+          session: vi.fn(async () => current),
+          steer: vi.fn(),
+          takeSteering: vi.fn(async () => {
+            current = view("idle", []);
+            return { taken: [] };
+          }),
+        };
+        const queue = {
+          read: vi.fn(async () => ({
+            scope: decodeThreadMessageQueueScope({ mode: "chat", threadId }),
+            version: decodeAggregateVersion(0),
+            paused: false,
+            items: [],
+          })),
+          execute: vi.fn(),
+        };
+        render(
+          <ThreadHarnessSteering
+            client={client}
+            queueClient={queue}
+            threadId={threadId}
+            running={false}
+            refreshIntervalMs={50}
+          />,
+        );
+        await screen.findByText("not reached");
+        await vi.advanceTimersByTimeAsync(100);
+        expect(client.takeSteering).not.toHaveBeenCalled();
+        // The independent session control resumes the host; no component prop changes.
+        current = view("idle", [queued]);
+        await vi.advanceTimersByTimeAsync(100);
+        await waitFor(() => expect(client.takeSteering).toHaveBeenCalledTimes(1));
+        await waitFor(() => expect(screen.queryByText("not reached")).toBeNull());
+        const reads = client.session.mock.calls.length;
+        await vi.advanceTimersByTimeAsync(200);
+        expect(client.session).toHaveBeenCalledTimes(reads);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it("observes external resume for locally retained notes after the host queue is empty", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let current = view("idle", [queued]);
+      const client = {
+        session: vi.fn(async () => current),
+        steer: vi.fn(),
+        takeSteering: vi.fn(async () => {
+          current = view("paused-by-user", []);
+          return decodeNativeHarnessSteeringTaken({ taken: [queued] });
+        }),
+      };
+      const snapshot = {
+        scope: decodeThreadMessageQueueScope({ mode: "chat", threadId }),
+        version: decodeAggregateVersion(0),
+        paused: false,
+        items: [],
+      };
+      const queue = {
+        read: vi.fn(async () => snapshot),
+        execute: vi.fn(
+          async (command: ThreadMessageQueueCommand): Promise<ThreadMessageQueueResult> => ({
+            status: "refused",
+            reason: "queue-full",
+            requestId: command.requestId,
+          }),
+        ),
+      };
+      render(
+        <ThreadHarnessSteering
+          client={client}
+          queueClient={queue}
+          threadId={threadId}
+          running={false}
+          refreshIntervalMs={50}
+        />,
+      );
+      const retry = await screen.findByRole("button", { name: "Retry next message" });
+      await waitFor(() => expect(retry).toBeDisabled());
+      expect(screen.getByText(queued.text)).toBeVisible();
+      current = view("idle", []);
+      await vi.advanceTimersByTimeAsync(100);
+      await waitFor(() => expect(retry).toBeEnabled());
+      queue.execute.mockImplementationOnce(async (command) => ({
+        status: "applied",
+        requestId: command.requestId,
+        snapshot,
+      }));
+      await userEvent.click(retry);
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Retry next message" })).toBeNull(),
+      );
+      const reads = client.session.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(200);
+      expect(client.session).toHaveBeenCalledTimes(reads);
+      expect(client.takeSteering).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps reading while the session runs even when the thread list says the turn is parked", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
       let status: "running" | "idle" = "running";
-      const client = { session: vi.fn(async () => view(status)), steer: vi.fn() };
+      const client = {
+        takeSteering: vi.fn(async () => ({ taken: [] })),
+        session: vi.fn(async () => view(status)),
+        steer: vi.fn(),
+      };
       render(
         <ThreadHarnessSteering
           client={client}
@@ -137,6 +347,7 @@ describe("ThreadHarnessSteering", () => {
       status: "delivered",
     };
     const client = {
+      takeSteering: vi.fn(async () => ({ taken: [] })),
       session: vi.fn(async () => view("running", [queued, delivered])),
       steer: vi.fn(),
     };
@@ -149,7 +360,11 @@ describe("ThreadHarnessSteering", () => {
 
   it("offers no note input between turns and lets the person drop notes the lead never reached", async () => {
     const steer = vi.fn(async () => null);
-    const client = { session: vi.fn(async () => view("idle", [queued])), steer };
+    const client = {
+      takeSteering: vi.fn(async () => ({ taken: [] })),
+      session: vi.fn(async () => view("idle", [queued])),
+      steer,
+    };
     render(<ThreadHarnessSteering client={client} running={false} threadId={threadId} />);
     const list = await screen.findByRole("list", { name: "Notes for the running turn" });
     expect(within(list).getByText("not reached")).toBeVisible();
@@ -159,7 +374,11 @@ describe("ThreadHarnessSteering", () => {
   });
 
   it("offers nothing to an idle or paused session with no notes", async () => {
-    const client = { session: vi.fn(async () => view("paused-by-user")), steer: vi.fn() };
+    const client = {
+      takeSteering: vi.fn(async () => ({ taken: [] })),
+      session: vi.fn(async () => view("paused-by-user")),
+      steer: vi.fn(),
+    };
     const { container } = render(
       <ThreadHarnessSteering client={client} running={false} threadId={threadId} />,
     );
@@ -170,7 +389,11 @@ describe("ThreadHarnessSteering", () => {
   it("renders nothing, and stops polling, for a thread whose lead is not the harness", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      const client = { session: vi.fn(async () => null), steer: vi.fn() };
+      const client = {
+        takeSteering: vi.fn(async () => ({ taken: [] })),
+        session: vi.fn(async () => null),
+        steer: vi.fn(),
+      };
       const { container } = render(
         <ThreadHarnessSteering
           client={client}
