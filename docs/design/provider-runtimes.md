@@ -44,6 +44,18 @@ messages remain protocol failures. Recognition grants no tool authority: the
 launch tool list, permission hooks, OS confinement, and Keychain policy remain
 as specified in [Security and authority](../architecture.md#security-and-authority).
 
+A model writing one very large tool call streams its input for minutes with
+nothing a person can see (observed with a Canvas document on Opus). The stream
+still moves: `input_json_delta` chunks arrive, and the API interleaves `ping`
+keep-alives. The adapter turns both into the normalized `liveness` event, at
+most one every five seconds per turn. The Chat, Work, and Code runners count it
+as activity, so their idle timeout measures a session that stopped producing
+anything rather than one that is still writing. Every other consumer ignores
+it: it carries no content and reaches no transcript, journal, usage figure, or
+turn event budget. A session that goes fully silent still times out. Codex's
+app-server announces a tool call only once the item starts and sends no
+argument deltas the adapter decodes, so it emits no `liveness` today.
+
 ## OpenCode
 
 The installed OpenCode binary's

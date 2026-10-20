@@ -1629,6 +1629,40 @@ describe("CodeTurnRunner", () => {
     expect(connection.interrupt).toHaveBeenCalledWith(sessionId);
   });
 
+  it("keeps a turn alive through liveness alone without recording it as a turn event", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = fakeConnection({
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      send: vi.fn(() =>
+        Effect.gen(function* () {
+          // ~90ms of liveness outlasts the 40ms idle window twice over.
+          for (let index = 0; index < 6; index += 1) {
+            yield* Effect.sleep(15);
+            yield* Queue.offer(queue, event({ kind: "liveness" }));
+          }
+          yield* Queue.offer(queue, event({ kind: "completed" }));
+        }),
+      ),
+    });
+    const outcomes: CodeTurnOutcome[] = [];
+    const observed: CodeTurnEvent[] = [];
+
+    await Effect.runPromise(
+      Effect.scoped(
+        new CodeTurnRunner({ timeoutMs: 40 }).run(
+          input({
+            provider: { acquire: () => Effect.succeed(connection) },
+            persistEvent: (next) => Effect.sync(() => observed.push(next)),
+            persistOutcome: (next) => Effect.sync(() => outcomes.push(next)),
+          }),
+        ),
+      ),
+    );
+
+    expect(outcomes.at(-1)).toBe("completed");
+    expect(observed.map((next) => next.providerKind)).toEqual(["completed"]);
+  });
+
   it("records cancellation as interrupted", async () => {
     const controller = new AbortController();
     controller.abort();

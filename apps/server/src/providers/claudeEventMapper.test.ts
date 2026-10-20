@@ -8,7 +8,7 @@ import {
 import { Schema } from "effect";
 import { decodeMessage } from "./claudeAgentSdkDecoder";
 import type { ClaudeOpenQueryInput } from "./claudeAgentSdkPort";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   mapClaudeMessage,
@@ -244,6 +244,45 @@ describe("mapClaudeMessage", () => {
     expect(JSON.stringify(all)).not.toMatch(/private body|outside\/private|Private runtime/);
   });
 
+  it("reports a content-free liveness event for streamed tool input and pings, at most once every few seconds", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-21T10:00:00.000Z"));
+      const ctx = context();
+      const streamEvent = (
+        event: Extract<ClaudeDecodedMessage, { readonly kind: "stream-event" }>["event"],
+      ): ClaudeDecodedMessage => ({
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event,
+      });
+      const delta = streamEvent({ kind: "tool-input-delta", index: 0 });
+      const ping = streamEvent({ kind: "ping" });
+
+      const first = mapped(ctx, delta);
+      expect(eventValues(first)).toEqual([
+        expect.objectContaining({ kind: "liveness", sequence: 41 }),
+      ]);
+      expect(Object.keys(eventValues(first)[0] ?? {}).sort()).toEqual([
+        "correlationId",
+        "instanceId",
+        "kind",
+        "occurredAt",
+        "sequence",
+        "sessionId",
+      ]);
+      vi.advanceTimersByTime(4_999);
+      expect(mapped(ctx, ping)).toEqual([{ kind: "ignored" }]);
+      expect(mapped(ctx, delta)).toEqual([{ kind: "ignored" }]);
+      vi.advanceTimersByTime(1);
+      expect(eventValues(mapped(ctx, ping))).toEqual([
+        expect.objectContaining({ kind: "liveness", sequence: 42 }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("completes a tool call whose streamed input is interleaved with keep-alive pings", () => {
     const ctx = context();
     const toolName = "mcp__octant__octant_canvas";
@@ -330,6 +369,7 @@ describe("mapClaudeMessage", () => {
     expect(all.some((item) => item.kind === "failure")).toBe(false);
     expect(eventValues(all).map((item) => item.kind)).toEqual([
       "tool-start",
+      "liveness",
       "usage",
       "tool-success",
     ]);

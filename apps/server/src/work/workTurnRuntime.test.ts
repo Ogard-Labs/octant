@@ -1033,6 +1033,73 @@ describe("WorkTurnRuntime", () => {
     if (outcome.kind === "waiting") expect(outcome.failure?.message).toMatch(/timed out/i);
   });
 
+  it("keeps a turn alive while the provider streams only liveness past the idle window", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const event = {
+      instanceId: ids.provider,
+      correlationId: decodeCorrelationId(String(ids.project)),
+      occurredAt: decodeTimestamp("2026-08-11T12:00:00.000Z"),
+      sessionId: ids.session as never,
+    };
+    const connection: ProviderConnection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: (input) => Effect.succeed({ sessionId: input.sessionId }),
+      resume: () => Effect.die("unused"),
+      send: () =>
+        Effect.sync(() => {
+          // Eight ticks 20 ms apart outlast the 60 ms idle window several times over.
+          for (let tick = 1; tick <= 8; tick += 1) {
+            setTimeout(() => {
+              void Effect.runPromise(
+                Queue.offer(queue, { ...event, sequence: tick, kind: "liveness" }),
+              );
+            }, tick * 20);
+          }
+          setTimeout(() => {
+            void Effect.runPromise(
+              Queue.offer(queue, { ...event, sequence: 9, kind: "completed" }),
+            );
+          }, 180);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const deltas: string[] = [];
+    const outcome = await new WorkTurnRuntime({ timeoutMs: 60 }).run({
+      command: decodeStartWorkThreadTurnCommand({
+        kind: "start-work-thread-turn",
+        requestId: ids.request,
+        threadId: ids.thread,
+        turnId: ids.turn,
+        prompt: "Write a large document",
+        authority: decodeWorkTurnAuthority({
+          hostId: "local",
+          projectId: ids.project,
+          bindingRevisionId: ids.binding,
+          workingDirectory: ".",
+          confinementPosture: "project-root-confined",
+          providerInstanceId: ids.provider,
+          modelId: "gpt-5",
+        }),
+      }),
+      providerSessionId: ids.session as never,
+      projectRoot: "/tmp/work-project",
+      driver: {
+        kind: "openai-compatible",
+        probe: () => Effect.die("unused"),
+        acquire: () => Effect.succeed(connection),
+      },
+      signal: new AbortController().signal,
+      onDelta: (text) => deltas.push(text),
+    });
+
+    expect(outcome).toEqual({ kind: "completed", response: "" });
+    expect(deltas).toEqual([]);
+  });
+
   it("hands the provider the images the host already accepted", async () => {
     const sent: unknown[] = [];
     const events: ProviderRuntimeEvent[] = [
