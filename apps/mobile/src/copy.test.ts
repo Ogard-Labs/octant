@@ -35,7 +35,7 @@ describe("mobile package identity", () => {
       placeholder: expect.stringContaining("Code"),
     });
     expect(mobileThreadComposerCopy("code").footerHint).toMatch(/approve/i);
-    expect(mobileThreadComposerCopy("work").footerHint).toMatch(/desktop/i);
+    expect(mobileThreadComposerCopy("work").footerHint).toMatch(/stay there/i);
     expect(mobileThreadComposerCopy("code")).not.toEqual(mobileThreadComposerCopy("work"));
   });
 
