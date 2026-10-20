@@ -28,7 +28,7 @@ export function ThreadWorkShelf(props: {
   const [expanded, setExpanded] = useState(false);
   const currentItems = ordered(props.items.filter((item) => !isHistoryItem(item)));
   const blockedCount = currentItems.filter((item) => item.status === "blocked").length;
-  const showFollowUp = props.followUp?.state === "open";
+  const openFollowUp = props.followUp?.state === "open" ? props.followUp : undefined;
   const canMutate = props.onCompleteItem !== undefined || props.onCancelItem !== undefined;
   const styles = useMemo(
     () =>
@@ -90,7 +90,7 @@ export function ThreadWorkShelf(props: {
     [colors],
   );
 
-  if (currentItems.length === 0 && !showFollowUp) return null;
+  if (currentItems.length === 0 && openFollowUp === undefined) return null;
 
   return (
     <View style={styles.wrap} testID={props.testID ?? "mobile-thread-work-shelf"}>
@@ -107,15 +107,15 @@ export function ThreadWorkShelf(props: {
           </Text>
           <Text style={styles.chevron}>{expanded ? "−" : "+"}</Text>
         </Pressable>
-        {showFollowUp ? (
+        {openFollowUp !== undefined ? (
           <View style={styles.followUp} testID="mobile-thread-follow-up">
             <Text style={styles.followUpText}>
-              {MOBILE_COPY.followUpRequired}: {props.followUp!.reason}
+              {MOBILE_COPY.followUpRequired}: {openFollowUp.reason}
             </Text>
             {props.onCompleteFollowUp !== undefined ? (
               <Pressable
                 accessibilityRole="button"
-                onPress={() => props.onCompleteFollowUp?.(props.followUp!)}
+                onPress={() => props.onCompleteFollowUp?.(openFollowUp)}
                 style={styles.actionChip}
                 testID="mobile-thread-follow-up-complete"
               >

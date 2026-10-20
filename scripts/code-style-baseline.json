@@ -7,8 +7,6 @@
     "apps/desktop/src/openInApplications.ts": 2,
     "apps/desktop/src/previewHandoff.ts": 2,
     "apps/desktop/src/privateListenerControls.ts": 3,
-    "apps/mobile/src/inbox/ThreadScreen.tsx": 2,
-    "apps/mobile/src/ui/ThreadWorkShelf.tsx": 2,
     "apps/server/src/agentRun/nodeAgentRunProcessPort.ts": 1,
     "apps/server/src/apple/appleToolchainService.ts": 5,
     "apps/server/src/automation/automationDispatchService.ts": 1,
