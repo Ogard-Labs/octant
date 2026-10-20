@@ -11,14 +11,23 @@ afterEach(async () => {
 
 /** A web root with one renderer source and the preview page's own markup, both written at `sourceTime`. */
 async function webRoot(sourceTime: Date): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "octant-canvas-preview-page-"));
-  roots.push(root);
+  const repo = await mkdtemp(join(tmpdir(), "octant-canvas-preview-page-"));
+  roots.push(repo);
+  const root = join(repo, "apps", "web");
   await mkdir(join(root, "src", "canvas"), { recursive: true });
   for (const file of ["src/canvas/canvasPreviewPage.tsx", "canvas-preview.html"]) {
     await writeFile(join(root, file), "");
     await utimes(join(root, file), sourceTime, sourceTime);
   }
   return root;
+}
+
+/** A workspace package source the web app bundles, written at `at` beside the web root. */
+async function packageSource(root: string, name: string, at: Date): Promise<void> {
+  const file = join(root, "..", "..", "packages", name, "src", "index.ts");
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, "");
+  await utimes(file, at, at);
 }
 
 async function builtPage(root: string, at: Date): Promise<void> {
@@ -59,6 +68,20 @@ describe("ensureCanvasPreviewPage", () => {
       status: "built",
     });
   });
+
+  it.each(["contracts", "domain", "theme"])(
+    "rebuilds the page when the %s package changed after it was built",
+    async (name) => {
+      const root = await webRoot(earlier);
+      await builtPage(root, new Date("2026-10-20T10:30:00Z"));
+      await packageSource(root, name, later);
+      const build = vi.fn(async () => 0);
+      await expect(ensureCanvasPreviewPage({ webRoot: root, build })).resolves.toEqual({
+        status: "built",
+      });
+      expect(build).toHaveBeenCalledOnce();
+    },
+  );
 
   it("reports a build that failed with its exit code", async () => {
     const root = await webRoot(earlier);

@@ -147,6 +147,15 @@ export async function runWebCommand(options: WebCommandOptions): Promise<WebComm
       stderr.write(`${reason}\n`);
       return { kind: "renderer-refused", reason };
     }
+    // An attached host keeps the environment it started with, so one left
+    // running from an earlier session never received the web build path and
+    // reports no renderer for every preview. Starting it is not this
+    // command's call, so it says so and goes on.
+    if (host.kind === "attached" && host.canvasPreviewPage === false) {
+      stderr.write(
+        `The Octant host at ${host.url.toString()} was started without the web build, so Canvas previews on it report no renderer. Stop that host and run this command again to start it with OCTANT_WEB_DIST_PATH.\n`,
+      );
+    }
     const startDevServer = options.startDevServer ?? defaultStartDevServer;
     const devUrl = await startDevServer({ hostname: devHostname, port: devPort });
     const devUrlObject = new URL(devUrl);

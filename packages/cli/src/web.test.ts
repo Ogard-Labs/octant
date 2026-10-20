@@ -273,6 +273,45 @@ describe("runWebCommand", () => {
     );
   });
 
+  it("tells the person to restart an attached host that was started without the web build", async () => {
+    const stderr = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    const result = await runWebCommand(
+      baseOptions({
+        dev: true,
+        stderr,
+        attachOrCreateHost: vi.fn(async () => ({
+          kind: "attached" as const,
+          url: new URL("http://127.0.0.1:13773"),
+          instanceId: "instance-1",
+          version: "0.0.0-dev",
+          canvasPreviewPage: false,
+        })),
+      }),
+    );
+    expect(result.kind).toBe("dev");
+    expect(stderr.write).toHaveBeenCalledWith(
+      expect.stringContaining("Stop that host and run this command again"),
+    );
+  });
+
+  it("stays quiet about the preview page when the attached host finds it", async () => {
+    const stderr = { write: vi.fn((chunk: string) => chunk.length > 0) };
+    await runWebCommand(
+      baseOptions({
+        dev: true,
+        stderr,
+        attachOrCreateHost: vi.fn(async () => ({
+          kind: "attached" as const,
+          url: new URL("http://127.0.0.1:13773"),
+          instanceId: "instance-1",
+          version: "0.0.0-dev",
+          canvasPreviewPage: true,
+        })),
+      }),
+    );
+    expect(stderr.write).not.toHaveBeenCalled();
+  });
+
   it("starts the host without a preview page and says so when the page cannot be built", async () => {
     const stderr = { write: vi.fn((chunk: string) => chunk.length > 0) };
     const result = await runWebCommand(

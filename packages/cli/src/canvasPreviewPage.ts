@@ -12,9 +12,17 @@ import { join } from "node:path";
  */
 export const CANVAS_PREVIEW_PAGE_PATH = "dist/canvas-preview/canvas-preview.html";
 
-/** What the page is built from, relative to the web root; a newer one makes the page stale. */
+/**
+ * What the page is built from, relative to the web root; a newer one makes the
+ * page stale. The workspace packages are bundled from their sources, so an edit
+ * to a schema, a domain rule or a theme role changes the page as much as an
+ * edit under `src` does.
+ */
 const CANVAS_PREVIEW_SOURCES: ReadonlyArray<string> = [
   "src",
+  "../../packages/contracts/src",
+  "../../packages/domain/src",
+  "../../packages/theme/src",
   "canvas-preview.html",
   "vite.canvas-preview.config.ts",
   "vite.fonts.ts",

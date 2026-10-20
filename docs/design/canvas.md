@@ -130,9 +130,12 @@ the listed warnings are the whole reading. The code alone was not enough: shown
 a bare `no-renderer`, a live model reported "no picture" in one turn and
 described the picture it never saw in the next. A development host has the
 page too: `bun run dev` and `octant web --dev` build it before the host starts,
-again whenever the renderer's sources are newer, and point the host at
+again whenever the renderer's sources or the contracts, domain or theme
+packages it bundles are newer, and point the host at
 `apps/web/dist` through `OCTANT_WEB_DIST_PATH`, since a host run from source
-does not find the web build on its own. A `design` is markup, so how its frames read
+does not find the web build on its own. `/health` reports `canvasPreviewPage`,
+whether the host finds the page, so `octant web --dev` attaching to a host left
+running without the web build warns that it must be restarted. A `design` is markup, so how its frames read
 is measured in the drawn page rather than computed from the document: after
 the page settles the host reads each drawn frame and adds a
 `design-frame-overflow` warning for a frame whose content is wider than its
