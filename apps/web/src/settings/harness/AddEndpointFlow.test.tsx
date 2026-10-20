@@ -822,6 +822,15 @@ describe("Add endpoint presets", () => {
     );
     expect(screen.queryByRole("list", { name: "Kinds of endpoint" })).not.toBeInTheDocument();
   });
+
+  it("links to where a preset's key is made even where the browser cannot store keys", () => {
+    renderFlow({ credentialManagementAvailable: false, initialPreset: endpointPreset("mistral") });
+    const form = screen.getByRole("form", { name: "Connect Mistral" });
+    expect(within(form).getByTestId("endpoint-key-later")).toBeVisible();
+    expect(
+      within(form).getByRole("link", { name: endpointPreset("mistral").keyPage.label }),
+    ).toHaveAttribute("href", endpointPreset("mistral").keyPage.url);
+  });
 });
 
 describe("voice models on a new endpoint", () => {
