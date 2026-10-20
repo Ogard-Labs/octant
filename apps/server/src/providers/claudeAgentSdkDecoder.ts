@@ -378,6 +378,29 @@ function isInterruptionMarker(content: ReadonlyArray<unknown>): boolean {
   );
 }
 
+/**
+ * The address of a published page, as the runtime's Artifact tool names it in
+ * its result (`claude.ai/artifact/{id}` or `claude.ai/code/artifact/{uuid}`,
+ * per the runtime's own tool description). Only this address is read out of a
+ * tool result; the rest of the result never crosses the decoder.
+ */
+const ARTIFACT_URL = /https:\/\/claude\.ai\/(?:code\/)?artifact\/[A-Za-z0-9_-]{1,128}/;
+
+function toolResultText(content: unknown): string | undefined {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return undefined;
+  const texts = content.flatMap((value) => {
+    const block = object(value);
+    return block?.type === "text" && typeof block.text === "string" ? [block.text] : [];
+  });
+  return texts.length === 0 ? undefined : texts.join("\n");
+}
+
+function artifactUrl(content: unknown): string | undefined {
+  const text = toolResultText(content);
+  return text === undefined ? undefined : ARTIFACT_URL.exec(text)?.[0];
+}
+
 function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessage {
   const user = object(message.message);
   if (user === undefined || user.role !== "user" || message.parent_tool_use_id !== null) {
@@ -398,7 +421,12 @@ function decodeToolResults(message: Record<string, unknown>): ClaudeDecodedMessa
     ) {
       throw protocol("Claude returned an unsupported runtime message.");
     }
-    return { toolUseId: block.tool_use_id, isError: block.is_error === true };
+    const published = block.is_error === true ? undefined : artifactUrl(block.content);
+    return {
+      toolUseId: block.tool_use_id,
+      isError: block.is_error === true,
+      ...(published === undefined ? {} : { artifactUrl: published }),
+    };
   });
   if (results.length === 0) throw protocol("Claude returned an unsupported runtime message.");
   return { kind: "tool-results", sessionId: message.session_id, results };

@@ -1199,6 +1199,13 @@ export const ProviderCapabilities = Schema.Struct({
   ),
   citations: ProviderCapabilitySupport,
   harnessAutoReview: ProviderCapabilitySupport,
+  /**
+   * The runtime can publish a file from the Project as a private page on the
+   * person's own account with that provider, through a tool of its own that
+   * the driver gates. Absent reads as unsupported: no other provider offers
+   * such a tool, and the host never emulates one.
+   */
+  artifactPublish: Schema.optional(ProviderCapabilitySupport),
 }).annotations(strict);
 export type ProviderCapabilities = typeof ProviderCapabilities.Type;
 

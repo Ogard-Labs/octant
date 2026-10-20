@@ -165,6 +165,31 @@ reads that thread's conversation. Clearing one never clears the other. A running
 until the thread is idle. You can clear a mark only at a window on the computer
 that hosts the thread, not from a paired phone or browser.
 
+### Publishing a page
+
+In a Work or Code thread on Claude Code, the agent can publish an HTML or
+Markdown file from the Project as a private page on your Anthropic account,
+using the Claude runtime's own publishing tool. This is the one case where a
+provider's tool sends a file from your Project to an external service on
+purpose, so it works like this:
+
+- Octant asks you before every publish, in every access mode. Full access,
+  auto-accept edits, a remembered approval, and a "yes" you gave earlier for
+  the same file do not skip the question.
+- The prompt names the file, relative to the Project, and the title the page
+  is published under. Only a file inside the Project can be published.
+- If you say no, nothing is sent and the agent is told you refused.
+- When a publish succeeds, the thread shows the page's link in the tool's
+  result. The page is private to your Anthropic account; Octant keeps no copy
+  of it and no credential for it.
+- If the account cannot publish (an API-key sign-in, for example), the tool
+  fails and the agent tells you why. Nothing is shown as published that was
+  not.
+- Listing your own pages follows the thread's ordinary approval mode. The
+  agent cannot list pages other people shared with you, and cannot read a
+  page's content back into the thread.
+- Chat threads and Plan mode never get the tool.
+
 ## Confinement
 
 - **Work** uses OS-enforced macOS project confinement for one bound root.

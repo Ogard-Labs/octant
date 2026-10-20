@@ -267,6 +267,12 @@ export type ClaudeDecodedMessage =
       readonly results: readonly {
         readonly toolUseId: string;
         readonly isError: boolean;
+        /**
+         * The address of a page the runtime's Artifact tool published, when
+         * its result names one. It is the only part of any tool result that
+         * crosses the decoder; the mapper reports it on an Artifact call only.
+         */
+        readonly artifactUrl?: string;
       }[];
     }
   | {

@@ -587,6 +587,65 @@ describe("mapClaudeMessage", () => {
     expect(ctx.toolStates.get("sdk-tool-duplicate")?.lifecycle).toBe("active");
   });
 
+  it("reports where a published page landed, and a refused publish as a refusal", () => {
+    const ctx = context();
+    const publish = (toolUseId: string) =>
+      ({
+        kind: "tool-use",
+        toolUseId,
+        toolName: "Artifact",
+        input: {
+          file_path: "/repo/docs/report.html",
+          title: "Quarterly report private-title",
+          favicon: "📊",
+        },
+      }) as const;
+    mapped(ctx, {
+      kind: "assistant",
+      sessionId: claudeSessionId,
+      messageId: "sdk-message-private",
+      content: [
+        publish("sdk-publish-ok"),
+        publish("sdk-publish-refused"),
+        publish("sdk-publish-silent"),
+      ],
+      usage,
+    });
+
+    const completed = mapped(ctx, {
+      kind: "tool-results",
+      sessionId: claudeSessionId,
+      results: [
+        {
+          toolUseId: "sdk-publish-ok",
+          isError: false,
+          artifactUrl: "https://claude.ai/artifact/abc-123",
+        },
+        { toolUseId: "sdk-publish-refused", isError: true },
+        { toolUseId: "sdk-publish-silent", isError: false },
+      ],
+    });
+
+    expect(eventValues(completed)).toMatchObject([
+      {
+        kind: "tool-success",
+        toolCallId: "tool-1",
+        summary: "Published: https://claude.ai/artifact/abc-123",
+      },
+      {
+        kind: "tool-failure",
+        toolCallId: "tool-2",
+        message: "The Claude runtime refused to publish the page.",
+      },
+      {
+        kind: "tool-success",
+        toolCallId: "tool-3",
+        summary: "Published, but the runtime returned no link.",
+      },
+    ]);
+    expect(JSON.stringify(completed)).not.toMatch(/private-title|sdk-publish/);
+  });
+
   it("emits authoritative confined Edit and Write changes only after successful results", () => {
     const checkedPaths: string[] = [];
     const ctx = context({
@@ -2034,6 +2093,45 @@ describe("mapClaudeToolRequest", () => {
       request: { event: { description: "Claude requests permission to use Write." } },
     });
     expect(JSON.stringify(outside)).not.toContain("private-must-not-cross");
+  });
+
+  it("names the file a publish sends and the title it goes under, and says what a listing reads", () => {
+    const publish = mapClaudeToolRequest(
+      context(),
+      toolRequest({
+        toolName: "Artifact",
+        toolUseId: "sdk-artifact-publish",
+        input: {
+          file_path: `${projectRoot}/docs/report.html`,
+          title: "Quarterly report token=sk-ant-fixture-api-key-must-not-cross",
+          favicon: "📊",
+        },
+      }),
+    );
+    expect(publish).toMatchObject({
+      request: {
+        event: {
+          action: "Artifact",
+          description:
+            'Artifact · publish docs/report.html to your Anthropic account as "Quarterly report [redacted]"',
+        },
+      },
+    });
+    expect(JSON.stringify(publish)).not.toMatch(/sk-ant-fixture|\/repo\//);
+
+    const listing = mapClaudeToolRequest(
+      context(),
+      toolRequest({
+        toolName: "Artifact",
+        toolUseId: "sdk-artifact-list",
+        input: { action: "list" },
+      }),
+    );
+    expect(listing).toMatchObject({
+      request: {
+        event: { description: "Artifact · list the pages on your Anthropic account" },
+      },
+    });
   });
 
   it("keeps a token-shaped literal out of the prompt while still naming the command", () => {

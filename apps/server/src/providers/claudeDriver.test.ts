@@ -455,7 +455,20 @@ describe("Claude execution policy", () => {
       "Edit",
       "Write",
       "AskUserQuestion",
+      "Artifact",
     ]);
+    // Publishing a page is offered where there are Project files to publish
+    // and a person to ask: Work and Code, never Plan, Chat, or a session
+    // acquired without a mode.
+    for (const policy of ["full-access", "approval-gated", "auto-accept-edits"] as const) {
+      expect(claudeExecutionOptions(policy, false, "code").tools).toContain("Artifact");
+      expect(claudeExecutionOptions(policy, false, "work").tools).toContain("Artifact");
+      expect(claudeExecutionOptions(policy, false, "chat").tools).not.toContain("Artifact");
+      expect(claudeExecutionOptions(policy).tools).not.toContain("Artifact");
+    }
+    for (const mode of ["code", "work", "chat"] as const) {
+      expect(claudeExecutionOptions("plan", false, mode, "darwin").tools).not.toContain("Artifact");
+    }
     expect(claudeExecutionOptions("plan")).toEqual({
       permissionMode: "plan",
       allowDangerouslySkipPermissions: false,
@@ -1092,6 +1105,199 @@ describe("Claude execution policy", () => {
     );
     await expect(callback).resolves.toMatchObject({ behavior: "deny" });
     await acquired.close();
+  });
+
+  it("asks before every publish, even under Full access and after the same publish was approved", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "full-access" }),
+    );
+    const open = f.opens[0]!;
+    expect(open.tools).toContain("Artifact");
+    const signal = new AbortController().signal;
+    const input = {
+      file_path: `${projectRoot}/report.html`,
+      title: "Quarterly report",
+      favicon: "📊",
+    };
+    // The hook publishes the approval before its first await, so the
+    // subscription has to be attached before the hook is called. The pending
+    // promise is handed back inside an object: returned bare from an async
+    // function it would be awaited here, before anything had asked.
+    const nextApproval = async () => {
+      const event = Effect.runPromise(
+        Stream.runHead(
+          Stream.unwrapScoped(acquired.connection.subscribe).pipe(
+            Stream.filter((event) => event.kind === "approval-request"),
+          ),
+        ),
+      );
+      await Promise.resolve();
+      return { event };
+    };
+    const publish = (toolUseId: string) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Artifact",
+        input,
+        toolUseId,
+        signal,
+      });
+
+    // Full access runs the runtime in bypassPermissions, where the permission
+    // callback is consulted for nothing but questions, so the hook itself
+    // raises the approval and answers only once the person has.
+    const firstApproval = await nextApproval();
+    const first = publish("publish-1");
+    const raised = await Promise.race([
+      firstApproval.event.then((event) => ({ kind: "approval" as const, event })),
+      first.then((decision) => ({ kind: "decision" as const, decision })),
+    ]);
+    expect(raised.kind).toBe("approval");
+    expect(
+      raised.kind === "approval" && raised.event._tag === "Some" ? raised.event.value : {},
+    ).toMatchObject({
+      kind: "approval-request",
+      requestId: "request-1",
+      action: "Artifact",
+      description: 'Artifact · publish report.html to your Anthropic account as "Quarterly report"',
+    });
+    await Effect.runPromise(
+      acquired.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+    );
+    await expect(first).resolves.toEqual({ behavior: "allow" });
+    // The hook's answer is final; a permission callback that still arrives
+    // for the same call holds no grant and is refused, never granted twice.
+    await expect(
+      open.canUseTool({ toolName: "Artifact", input, toolUseId: "publish-1", signal }),
+    ).resolves.toMatchObject({ behavior: "deny" });
+
+    // The same file published again is a new decision: a "yes" is never
+    // reused for a publish, under any persistence setting.
+    const secondApproval = await nextApproval();
+    const second = publish("publish-2");
+    const raisedAgain = await Promise.race([
+      secondApproval.event.then((event) => ({ kind: "approval" as const, event })),
+      second.then((decision) => ({ kind: "decision" as const, decision })),
+    ]);
+    expect(raisedAgain.kind).toBe("approval");
+    await Effect.runPromise(
+      acquired.connection.answerApproval({ sessionId, requestId: "request-2", approved: false }),
+    );
+    await expect(second).resolves.toEqual({
+      behavior: "deny",
+      message: "Claude tool request was denied by the user.",
+    });
+    await acquired.close();
+  });
+
+  it("refuses to publish a file outside the Project or run an artifact action it does not offer, without asking", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver, "code");
+    await Effect.runPromise(
+      acquired.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = f.opens[0]!;
+    const approvals: ProviderRuntimeEvent[] = [];
+    const subscription = Effect.runFork(
+      Stream.runForEach(Stream.unwrapScoped(acquired.connection.subscribe), (event) =>
+        Effect.sync(() => {
+          if (event.kind === "approval-request") approvals.push(event);
+        }),
+      ),
+    );
+    const artifact = (toolUseId: string, input: Record<string, unknown>) =>
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Artifact",
+        input,
+        toolUseId,
+        signal: new AbortController().signal,
+      });
+    await expect(artifact("outside", { file_path: "/tmp/outside.html" })).resolves.toEqual({
+      behavior: "deny",
+      message: "Claude tool request is outside the Project.",
+    });
+    await expect(artifact("no-file", { title: "Untitled" })).resolves.toMatchObject({
+      behavior: "deny",
+    });
+    // A newer runtime offers `read`, which would bring a page's content into
+    // the thread; only publish and list are offered.
+    await expect(
+      artifact("read", { action: "read", url: "https://claude.ai/artifact/abc" }),
+    ).resolves.toEqual({ behavior: "deny", message: "Claude artifact action is not offered." });
+    await expect(artifact("shared", { action: "list", scope: "all" })).resolves.toEqual({
+      behavior: "deny",
+      message: "Claude may list only the person's own pages.",
+    });
+    expect(approvals).toEqual([]);
+    await Effect.runPromise(Fiber.interrupt(subscription));
+    await acquired.close();
+  });
+
+  it("lists the person's own pages under the ordinary posture: unasked on Full access, asked about otherwise", async () => {
+    const full = harness();
+    const fullAccess = await acquire(full.driver, "work");
+    await Effect.runPromise(
+      fullAccess.connection.start({ sessionId, modelId, executionPolicy: "full-access" }),
+    );
+    await expect(
+      full.opens[0]!.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Artifact",
+        input: { action: "list" },
+        toolUseId: "list-full",
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({ behavior: "allow" });
+    await fullAccess.close();
+
+    const gated = harness();
+    const gatedAccess = await acquire(gated.driver, "work");
+    await Effect.runPromise(
+      gatedAccess.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const open = gated.opens[0]!;
+    const signal = new AbortController().signal;
+    const input = { action: "list" };
+    const approvalEvent = Effect.runPromise(
+      Stream.runHead(
+        Stream.unwrapScoped(gatedAccess.connection.subscribe).pipe(
+          Stream.filter((event) => event.kind === "approval-request"),
+        ),
+      ),
+    );
+    await expect(
+      open.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "Artifact",
+        input,
+        toolUseId: "list-gated",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "ask" });
+    const callback = open.canUseTool({
+      toolName: "Artifact",
+      input,
+      toolUseId: "list-gated",
+      signal,
+    });
+    const raised = await approvalEvent;
+    expect(raised._tag === "Some" ? raised.value : {}).toMatchObject({
+      kind: "approval-request",
+      action: "Artifact",
+      description: "Artifact · list the pages on your Anthropic account",
+    });
+    await Effect.runPromise(
+      gatedAccess.connection.answerApproval({ sessionId, requestId: "request-1", approved: true }),
+    );
+    await expect(callback).resolves.toEqual({ behavior: "allow" });
+    await gatedAccess.close();
   });
 
   it("never offers a Work session a shell, and refuses one it asks for without raising an approval", async () => {

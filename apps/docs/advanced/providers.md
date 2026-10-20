@@ -137,20 +137,26 @@ get a feature in full first. Every other provider is listed here with what is
 weaker. Where a provider cannot do something, Octant turns that feature off for
 it instead of imitating it.
 
-| Feature                           | Claude Code | Codex                       | OpenCode             | Pi            | ACP agents            | Ollama                | Model endpoints                          |
-| --------------------------------- | ----------- | --------------------------- | -------------------- | ------------- | --------------------- | --------------------- | ---------------------------------------- |
-| Reopen the thread's own session   | Yes         | Yes                         | Yes                  | Yes           | Most                  | Replayed              | Replayed                                 |
-| Approval prompts from the runtime | Yes         | Yes                         | Yes                  | Yes           | Yes                   | No                    | No                                       |
-| Questions from the agent          | Yes         | No                          | Yes (not on 2.x)     | No            | Most                  | No                    | No                                       |
-| Reasoning shown                   | Yes         | Yes                         | Yes                  | Yes           | If the agent sends it | If the model sends it | If the endpoint sends it                 |
-| Token usage counted               | Yes         | Yes                         | Yes                  | Yes           | No                    | After a reply         | After a reply                            |
-| File changes and diffs            | Yes         | Yes                         | Diffs only           | No            | No                    | No                    | No                                       |
-| Attachments sent natively         | No          | Image models                | Non-text models      | No            | No                    | Vision models         | No                                       |
-| Octant tools (Browser, Computer)  | Yes         | Yes                         | macOS, some releases | After a check | macOS, some agents    | No                    | Verified models                          |
-| Change model inside a thread      | Yes         | Yes                         | No                   | No            | No                    | Yes                   | Yes                                      |
-| Compact session                   | Yes         | Yes, Codex 0.162.1 or newer | No                   | No            | No                    | Octant does it        | Octant does it; Code uses Octant Harness |
-| Auto-review of approvals in Code  | Yes         | Yes                         | No                   | No            | No                    | No                    | No                                       |
+| Feature                           | Claude Code          | Codex                       | OpenCode             | Pi            | ACP agents            | Ollama                | Model endpoints                          |
+| --------------------------------- | -------------------- | --------------------------- | -------------------- | ------------- | --------------------- | --------------------- | ---------------------------------------- |
+| Reopen the thread's own session   | Yes                  | Yes                         | Yes                  | Yes           | Most                  | Replayed              | Replayed                                 |
+| Approval prompts from the runtime | Yes                  | Yes                         | Yes                  | Yes           | Yes                   | No                    | No                                       |
+| Questions from the agent          | Yes                  | No                          | Yes (not on 2.x)     | No            | Most                  | No                    | No                                       |
+| Reasoning shown                   | Yes                  | Yes                         | Yes                  | Yes           | If the agent sends it | If the model sends it | If the endpoint sends it                 |
+| Token usage counted               | Yes                  | Yes                         | Yes                  | Yes           | No                    | After a reply         | After a reply                            |
+| File changes and diffs            | Yes                  | Yes                         | Diffs only           | No            | No                    | No                    | No                                       |
+| Attachments sent natively         | No                   | Image models                | Non-text models      | No            | No                    | Vision models         | No                                       |
+| Octant tools (Browser, Computer)  | Yes                  | Yes                         | macOS, some releases | After a check | macOS, some agents    | No                    | Verified models                          |
+| Change model inside a thread      | Yes                  | Yes                         | No                   | No            | No                    | Yes                   | Yes                                      |
+| Compact session                   | Yes                  | Yes, Codex 0.162.1 or newer | No                   | No            | No                    | Octant does it        | Octant does it; Code uses Octant Harness |
+| Auto-review of approvals in Code  | Yes                  | Yes                         | No                   | No            | No                    | No                    | No                                       |
+| Publish a page to your account    | Yes, asks every time | No                          | No                   | No            | No                    | No                    | No                                       |
 
+- **Publish a page**: in a Work or Code thread, Claude Code can publish an
+  HTML or Markdown file from the Project as a private page on your Anthropic
+  account and give you the link. It asks you first every time, even under
+  Full access, and names the file and the title. See
+  [Privacy and security](/advanced/privacy-and-security#publishing-a-page).
 - **Replayed** means the provider keeps no session of its own, so Octant sends
   the thread's history again, fitted to the model's context window. Changing
   the model is therefore fine.

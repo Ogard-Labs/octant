@@ -50,6 +50,7 @@ import {
   type ClaudePreToolDecision,
   type ClaudeSandboxSettings,
   type ClaudeToolDecision,
+  type ClaudeToolRequest,
 } from "./claudeAgentSdkPort";
 import {
   mapClaudeMessage,
@@ -74,6 +75,12 @@ import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./cl
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"];
+/**
+ * The runtime's own tool that publishes a file as a private page on the
+ * person's Anthropic account. Offered in Work and Code only: Chat has no files
+ * to publish and Plan is read-only, and the page leaves the machine.
+ */
+const CLAUDE_ARTIFACT_TOOL = "Artifact";
 const CLAUDE_PLAN_TOOLS = ["Read", "Glob", "Grep"] as const;
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
 const CLAUDE_INCOMPATIBLE_FALLBACK = "Claude runtime policy is incompatible with Octant.";
@@ -116,19 +123,69 @@ export function claudeExecutionOptions(
   platform: NodeJS.Platform = process.platform,
 ): ClaudeExecutionOptions {
   const options = claudePolicyOptions(policy, autoApprove);
+  if (policy === "plan") {
+    // A Code Plan turn may run read-only commands where its sandbox can hold
+    // the shell to them (see `claudePlanRunsCommands`). Plan has no
+    // approvals, so the sandbox, not a person, is what keeps those commands
+    // read-only; publishing has no read-only form, so Plan is never offered it.
+    if (mode === "code" && claudePlanRunsCommands(platform)) {
+      return { ...options, tools: [...options.tools, "Bash"] };
+    }
+    return options;
+  }
   // Work has no shell or Git authority, so Claude is never offered Bash there
   // rather than offered it and asked about each call: a person approving a
   // command would hand a Work thread authority its mode does not have.
   if (mode === "work") {
-    return { ...options, tools: options.tools.filter((tool) => tool !== "Bash") };
+    return {
+      ...options,
+      tools: [...options.tools.filter((tool) => tool !== "Bash"), CLAUDE_ARTIFACT_TOOL],
+    };
   }
-  // A Code Plan turn may run read-only commands where its sandbox can hold the
-  // shell to them (see `claudePlanRunsCommands`). Plan has no approvals, so
-  // the sandbox, not a person, is what keeps those commands read-only.
-  if (policy === "plan" && mode === "code" && claudePlanRunsCommands(platform)) {
-    return { ...options, tools: [...options.tools, "Bash"] };
+  // Chat, and a session acquired without a mode, publish nothing: the tool
+  // sends a file to an external service, and only Work and Code hold files.
+  if (mode === "code") {
+    return { ...options, tools: [...options.tools, CLAUDE_ARTIFACT_TOOL] };
   }
   return options;
+}
+
+type ClaudeArtifactAction =
+  | { readonly kind: "publish"; readonly filePath: string }
+  | { readonly kind: "list" }
+  | { readonly kind: "refused"; readonly message: string };
+
+/**
+ * What an Artifact call asks for, read from its input and nothing else. The
+ * SDK's tool takes `publish` (the default when `action` is absent) and `list`;
+ * a newer runtime also offers `read`, which would hand the model a page's
+ * content, so any action but those two is refused rather than passed through.
+ * A listing is limited to the person's own pages: pages shared by others are
+ * other people's text, which a listing must not bring into the thread.
+ */
+function claudeArtifactAction(
+  input: Readonly<Record<string, unknown>>,
+  projectRoot: string,
+): ClaudeArtifactAction {
+  const action = input.action ?? "publish";
+  if (action === "list") {
+    return input.scope === undefined || input.scope === "mine"
+      ? { kind: "list" }
+      : { kind: "refused", message: "Claude may list only the person's own pages." };
+  }
+  if (action !== "publish") {
+    return { kind: "refused", message: "Claude artifact action is not offered." };
+  }
+  const filePath = input.file_path;
+  if (typeof filePath !== "string" || filePath.trim().length === 0) {
+    return { kind: "refused", message: "Claude tool request has no authoritative confined path." };
+  }
+  // The runtime resolves a relative path against its working directory, which
+  // is the Project root, so the gate judges the same file the runtime reads.
+  return {
+    kind: "publish",
+    filePath: isAbsolute(filePath) ? filePath : resolve(projectRoot, filePath),
+  };
 }
 
 /** Whether this call is a Plan turn's shell command, which its sandbox confines. */
@@ -238,6 +295,7 @@ const availableCapabilities: ProviderCapabilities = {
   modelSwitch: "supported",
   ...unsupportedChatCapabilities,
   appManagedTools: "supported",
+  artifactPublish: "supported",
 };
 
 const unavailableCapabilities: ProviderCapabilities = {
@@ -333,6 +391,12 @@ interface ClaudePreToolGrant {
 interface ClaudePendingApprovalState extends ClaudePendingApproval {
   readonly decision: DeferredValue<ClaudeToolDecision>;
   readonly reuseKey: string;
+  /**
+   * Whether a "yes" may cover the same call later in this session. A publish
+   * is never reusable: each one sends Project content off the machine, so
+   * each one is the person's own decision.
+   */
+  readonly reusable: boolean;
 }
 
 interface ClaudePendingQuestionState extends ClaudePendingQuestion {
@@ -1481,6 +1545,69 @@ function makeConnection(
         );
         const sandbox = claudeSandboxSettings(input.executionPolicy, projectRoot);
         let callbackState: SessionState | undefined;
+        /** Whether a path the runtime named is the Project root or inside it. */
+        const confinedToProject = (candidate: string): boolean => {
+          try {
+            return (
+              candidate === projectRoot ||
+              options.isProjectConfinedPath(projectRoot, candidate) === true
+            );
+          } catch {
+            return false;
+          }
+        };
+        /**
+         * Raises one approval for a mapped tool request and holds the call
+         * until the person answers, the request is cancelled, or the session
+         * ends. `reusable` says whether a "yes" may cover the same call again
+         * this session under the current-session persistence.
+         */
+        const awaitApproval = (
+          activeState: SessionState,
+          request: ClaudeToolRequest,
+          mapped: ClaudePendingApproval,
+          reusable: boolean,
+        ): Promise<ClaudeToolDecision> => {
+          const reuseKey = approvalReuseKey(mapped.toolName, mapped.inputDigest);
+          if (activeState.pendingApprovals.has(mapped.requestId)) {
+            const existing = activeState.pendingApprovals.get(mapped.requestId)!;
+            activeState.pendingApprovals.delete(mapped.requestId);
+            existing.decision.resolve({
+              behavior: "deny",
+              message: "Claude approval correlation was duplicated.",
+            });
+            return Promise.resolve(
+              denyClaudeToolRequest(
+                activeState,
+                request.toolUseId,
+                "Claude approval request was duplicated.",
+              ),
+            );
+          }
+          const pending: ClaudePendingApprovalState = {
+            ...mapped,
+            decision: deferred<ClaudeToolDecision>(),
+            reuseKey,
+            reusable,
+          };
+          activeState.pendingApprovals.set(pending.requestId, pending);
+          publish(pending.event);
+          activeState.outputAccepted = true;
+          return waitForClaudeAuthorityValue({
+            promise: pending.decision.promise,
+            signal: request.signal,
+            cancelledValue: {
+              behavior: "deny",
+              message: "Claude tool request was cancelled.",
+            },
+            cancel: () => {
+              if (activeState.pendingApprovals.get(pending.requestId) === pending) {
+                activeState.pendingApprovals.delete(pending.requestId);
+              }
+              activeState.settledToolUseIds.add(pending.providerToolUseId);
+            },
+          });
+        };
         const canUseTool: ClaudeOpenQueryInput["canUseTool"] = async (request) => {
           const activeState = callbackState;
           const deny = (message: string) =>
@@ -1607,38 +1734,7 @@ function makeConnection(
             }
             return deny("Claude tool request was denied by Octant.");
           }
-          const reuseKey = approvalReuseKey(mapped.request.toolName, mapped.request.inputDigest);
-          if (activeState.pendingApprovals.has(mapped.request.requestId)) {
-            const existing = activeState.pendingApprovals.get(mapped.request.requestId)!;
-            activeState.pendingApprovals.delete(mapped.request.requestId);
-            existing.decision.resolve({
-              behavior: "deny",
-              message: "Claude approval correlation was duplicated.",
-            });
-            return deny("Claude approval request was duplicated.");
-          }
-          const pending: ClaudePendingApprovalState = {
-            ...mapped.request,
-            decision: deferred<ClaudeToolDecision>(),
-            reuseKey,
-          };
-          activeState.pendingApprovals.set(pending.requestId, pending);
-          publish(pending.event);
-          activeState.outputAccepted = true;
-          return waitForClaudeAuthorityValue({
-            promise: pending.decision.promise,
-            signal: request.signal,
-            cancelledValue: {
-              behavior: "deny",
-              message: "Claude tool request was cancelled.",
-            },
-            cancel: () => {
-              if (activeState.pendingApprovals.get(pending.requestId) === pending) {
-                activeState.pendingApprovals.delete(pending.requestId);
-              }
-              activeState.settledToolUseIds.add(pending.providerToolUseId);
-            },
-          });
+          return awaitApproval(activeState, request, mapped.request, true);
         };
         const preToolUse: ClaudeOpenQueryInput["preToolUse"] = async (request) => {
           const activeState = callbackState;
@@ -1726,6 +1822,49 @@ function makeConnection(
             isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
               ? settledUnasked()
               : askThroughGrant();
+          if (request.toolName === CLAUDE_ARTIFACT_TOOL) {
+            const artifact = claudeArtifactAction(requestInput, projectRoot);
+            if (artifact.kind === "refused") return deny(artifact.message);
+            // Listing reads the person's own account and follows the posture
+            // like any other non-file tool: unasked on Full access, asked
+            // about otherwise.
+            if (artifact.kind === "list") return decide();
+            if (!confinedToProject(artifact.filePath)) {
+              return deny("Claude tool request is outside the Project.");
+            }
+            // A publish sends Project content to an external service, so the
+            // person is asked every time, in every posture. The approval is
+            // raised here rather than through "ask": under Full access the
+            // runtime runs in `bypassPermissions`, which consults the
+            // permission callback for no tool but AskUserQuestion, so an
+            // "ask" from this hook would reach nobody and the file would be
+            // published unasked. A hook "allow" is final in every mode, so
+            // the answer is complete once this hook returns, and a permission
+            // callback that still arrives finds no grant and is refused.
+            if (activeState.context === undefined) {
+              return deny("Claude tool request did not pass the Octant authority gate.");
+            }
+            if (activeState.pendingApprovals.size >= MAX_PENDING_APPROVALS) {
+              terminal(activeState, {
+                kind: "failed",
+                failure: failure("protocol", "Claude exceeded its bounded tool authority state."),
+              });
+              return deny("Claude tool authority state was exhausted.");
+            }
+            const toolRequest: ClaudeToolRequest = {
+              toolName: request.toolName,
+              input: requestInput,
+              toolUseId: request.toolUseId,
+              signal: request.signal,
+            };
+            const mapped = mapClaudeToolRequest(activeState.context, toolRequest);
+            if (mapped.kind !== "approval") {
+              return deny("Claude tool request was denied by Octant.");
+            }
+            const decision = await awaitApproval(activeState, toolRequest, mapped.request, false);
+            if (decision.behavior !== "allow") return deny(decision.message);
+            return settledUnasked();
+          }
           if (input.executionPolicy === "full-access") {
             return decide();
           }
@@ -1755,15 +1894,7 @@ function makeConnection(
           ) {
             return deny("Claude tool request is outside the Project.");
           }
-          let confined = false;
-          try {
-            confined =
-              candidate === projectRoot ||
-              options.isProjectConfinedPath(projectRoot, candidate) === true;
-          } catch {
-            confined = false;
-          }
-          if (!confined) {
+          if (!confinedToProject(candidate)) {
             return deny("Claude tool request is outside the Project.");
           }
           return decide();
@@ -2226,7 +2357,7 @@ function makeConnection(
               } catch {
                 // An unreadable setting cannot broaden a one-shot answer into reuse.
               }
-              if (persistence === "current-session") {
+              if (persistence === "current-session" && pending.reusable) {
                 state.approvalReuse.add(pending.reuseKey);
               }
               pending.decision.resolve({ behavior: "allow" });

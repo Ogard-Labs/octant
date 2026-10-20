@@ -1,6 +1,7 @@
 import { ChatRichText } from "../chat/ChatRichText";
 import { Check, ChevronRight, Circle, CircleX, Clock3, LoaderCircle } from "lucide-react";
 import { useState, type KeyboardEvent, type ReactNode, type ToggleEvent } from "react";
+import { MarkdownLink } from "../markdown/Markdown";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   alwaysVisibleActivityRows,
@@ -287,6 +288,32 @@ function ActivityDisclosure(props: {
   );
 }
 
+/** An `https` address inside a summary; the characters a URL in prose never ends on are left out. */
+const HTTPS_URL = /https:\/\/[^\s<>"'`()[\]]+/g;
+
+/**
+ * A summary's text with each `https` address rendered as a link the person
+ * can open or copy. A tool that publishes a page reports where it went; a
+ * result the person cannot open is a result they would have to retype.
+ */
+function summaryWithLinks(text: string): ReactNode {
+  const parts: ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(HTTPS_URL)) {
+    const url = match[0].replace(/[.,;:!?]+$/, "");
+    if (match.index > last) parts.push(text.slice(last, match.index));
+    parts.push(
+      <MarkdownLink href={url} key={`${match.index}-${url}`}>
+        {url}
+      </MarkdownLink>,
+    );
+    last = match.index + url.length;
+  }
+  if (parts.length === 0) return text;
+  if (last < text.length) parts.push(text.slice(last));
+  return parts;
+}
+
 function activityDetail(
   row: TurnActivityRow,
   props: { readonly revealed: boolean; readonly onReveal: () => void },
@@ -298,7 +325,7 @@ function activityDetail(
   const clipped = clipSummary(summary, props.revealed);
   return (
     <>
-      <p className="turn-activity__pre">{clipped.text}</p>
+      <p className="turn-activity__pre">{summaryWithLinks(clipped.text)}</p>
       {clipped.clipped ? (
         <OctantButton onClick={props.onReveal} size="sm" type="button" variant="ghost">
           Show all

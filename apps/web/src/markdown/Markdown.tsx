@@ -236,7 +236,7 @@ function onlyHttpUrls(url: string): string {
  * the host's external open otherwise. Right-click offers both plus the URL
  * itself, because a link the agent wrote is also a thing the person copies.
  */
-function MarkdownLink(props: { readonly href: string; readonly children: ReactNode }) {
+export function MarkdownLink(props: { readonly href: string; readonly children: ReactNode }) {
   const actions = useContext(MarkdownLinkActionsContext);
   const [open, setOpen] = useState(false);
   const openExternal = () => {

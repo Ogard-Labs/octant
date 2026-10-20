@@ -79,6 +79,15 @@ export interface ClaudeToolState {
   readonly disabled?: true;
   lifecycle: "active" | "terminal";
   fileChange?: ClaudeFileChange;
+  /** An Artifact call that publishes a page, as its authoritative input said. */
+  artifactPublish?: true;
+}
+
+/** The runtime's own tool that publishes a Project file as a page on the person's account. */
+const ARTIFACT_TOOL = "Artifact";
+
+function isArtifactPublish(toolName: string, input: Readonly<Record<string, unknown>>): boolean {
+  return toolName === ARTIFACT_TOOL && (input.action === undefined || input.action === "publish");
 }
 
 export interface ClaudeRequestCorrelation {
@@ -427,6 +436,9 @@ function mapToolUse(
     }
     resolved.state.fileChange = authoritativeFileChange;
   }
+  if (authoritativeInput && isArtifactPublish(content.toolName, content.input)) {
+    resolved.state.artifactPublish = true;
+  }
   if (!resolved.created || !resolved.state.emitsActivity) return [{ kind: "ignored" }];
   const start = event(context, {
     kind: "tool-start",
@@ -596,7 +608,25 @@ function mapToolResults(
         event(context, {
           kind: "tool-failure",
           toolCallId: state.toolCallId,
-          message: "Tool failed.",
+          // The runtime's reason (an account that cannot publish, for one)
+          // reaches the model, which tells the person; it is not copied here.
+          message:
+            state.artifactPublish === true
+              ? "The Claude runtime refused to publish the page."
+              : "Tool failed.",
+        }),
+      );
+      continue;
+    }
+    if (state.artifactPublish === true) {
+      results.push(
+        event(context, {
+          kind: "tool-success",
+          toolCallId: state.toolCallId,
+          summary:
+            pair.result.artifactUrl === undefined
+              ? "Published, but the runtime returned no link."
+              : `Published: ${pair.result.artifactUrl}`,
         }),
       );
       continue;
@@ -1272,6 +1302,17 @@ function mapQuestion(
   };
 }
 
+/** One line of model-composed text with secret-shaped tokens redacted. */
+function redactedLine(value: string): string {
+  let line = value.replace(/\s+/g, " ");
+  for (let pass = 0; pass < 5; pass += 1) {
+    SECRET_SHAPED.lastIndex = 0;
+    if (!SECRET_SHAPED.test(line)) break;
+    line = line.replaceAll(SECRET_SHAPED, "[redacted]");
+  }
+  return line;
+}
+
 /**
  * What the prompt is about, from the tool's own input and nothing else: the
  * checkout-relative path a file tool names, or the command a shell tool would
@@ -1288,13 +1329,27 @@ function approvalTarget(
   if (request.toolName === "Bash") {
     const command = input.command;
     if (typeof command !== "string") return undefined;
-    let line = command.replace(/\s+/g, " ");
-    for (let pass = 0; pass < 5; pass += 1) {
-      SECRET_SHAPED.lastIndex = 0;
-      if (!SECRET_SHAPED.test(line)) break;
-      line = line.replaceAll(SECRET_SHAPED, "[redacted]");
+    return normalized(redactedLine(command), APPROVAL_TARGET_MAX_CHARACTERS);
+  }
+  if (request.toolName === ARTIFACT_TOOL) {
+    // A publish prompt names the file that leaves the machine and the title
+    // it is published under, so the person judges what is sent, not just that
+    // something is.
+    if (!isArtifactPublish(request.toolName, input)) {
+      return "list the pages on your Anthropic account";
     }
-    return normalized(line, APPROVAL_TARGET_MAX_CHARACTERS);
+    const filePath = typeof input.file_path === "string" ? input.file_path : undefined;
+    const relativePath =
+      filePath === undefined ? undefined : confinedRelativePath(context, filePath);
+    if (relativePath === undefined) return undefined;
+    const title =
+      typeof input.title === "string"
+        ? normalized(redactedLine(input.title), LABEL_MAX_CHARACTERS)
+        : undefined;
+    return normalized(
+      `publish ${relativePath} to your Anthropic account${title === undefined ? "" : ` as "${title}"`}`,
+      APPROVAL_TARGET_MAX_CHARACTERS,
+    );
   }
   const path =
     typeof input.file_path === "string"

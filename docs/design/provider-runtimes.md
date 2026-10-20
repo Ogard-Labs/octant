@@ -44,6 +44,30 @@ messages remain protocol failures. Recognition grants no tool authority: the
 launch tool list, permission hooks, OS confinement, and Keychain policy remain
 as specified in [Security and authority](../architecture.md#security-and-authority).
 
+The runtime's `Artifact` tool (declared in the Agent SDK's `sdk-tools.d.ts`,
+0.3.211: `action` `publish` or `list`, with `publish` the default when the
+field is absent; `file_path`, `title`, `description`, `favicon`, `label`,
+`url`, `force`, `scope`, `limit`) is named in the launch tool list for Work and
+Code sessions outside Plan, so the port's allowlist refuses it elsewhere. The
+driver reads the action from the hook's input: `publish` must name a file at
+or inside the Project root (a relative path is resolved against the root, which
+is the runtime's working directory), and its approval is raised from the
+`PreToolUse` hook and answered `allow` or `deny` only once the person has
+decided, with the approval never recorded for reuse; `list` is allowed only
+with no `scope` or `scope: "mine"` and follows the posture through "ask";
+every other action is denied, including `read`, which the installed runtime
+(Claude Code 2.1.304) offers beyond the SDK's declaration. The result the
+runtime returns to the model names the page's address as
+`claude.ai/artifact/{id}` or `claude.ai/code/artifact/{uuid}` (the runtime's
+own tool description names both shapes); the decoder reads that address out
+of the `tool_result` block's text and nothing else, and the mapper reports a
+successful publish as `Published: <address>`, a successful publish whose
+result names no address as published without a link, and an error result as
+a refusal in fixed words. The approval prompt reads
+`Artifact · publish <path> to your Anthropic account as "<title>"`, with the
+title redacted like a shell command, or
+`Artifact · list the pages on your Anthropic account`.
+
 ## OpenCode
 
 The installed OpenCode binary's
@@ -231,6 +255,12 @@ failing the check with their typed states.
 
 ## Verification
 
+- Claude Code: `apps/server/src/providers/claudeDriver.test.ts` (tool list by
+  mode and posture, the publish gate under Full access, the refused actions),
+  `claudeAgentSdkPort.test.ts` (allowlist and the address read out of a tool
+  result), and `claudeEventMapper.test.ts` (the prompt and result wording).
+  A publish against a real account has not been run from Octant; the result
+  wording the decoder reads is taken from the runtime's own tool description.
 - OpenCode: `apps/server/src/providers/openCodeDriver.test.ts`,
   `openCodeClient.test.ts`, `openCodeEventMapper.test.ts`,
   `openCodeProcess.test.ts`, `openCodeConformance.test.ts`, and the

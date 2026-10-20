@@ -2307,6 +2307,15 @@ describe("provider registry contracts", () => {
         capabilities: { ...observed.capabilities, modelSwitch: "supported" },
       }),
     ).toMatchObject({ capabilities: { modelSwitch: "supported" } });
+    // Only a runtime with a publishing tool of its own names this one; a
+    // driver that never mentions it still decodes and reads as unsupported.
+    expect(decodeProviderObservedState(observed).capabilities.artifactPublish).toBeUndefined();
+    expect(
+      decodeProviderObservedState({
+        ...observed,
+        capabilities: { ...observed.capabilities, artifactPublish: "supported" },
+      }),
+    ).toMatchObject({ capabilities: { artifactPublish: "supported" } });
     // Session compaction is reported for each mode, and absent reads as unsupported.
     expect(decodeProviderObservedState(observed).capabilities.sessionCompaction).toBeUndefined();
     const sessionCompaction = { chat: "unsupported", work: "unsupported", code: "supported" };

@@ -1066,66 +1066,71 @@ describe("Claude Agent SDK port", () => {
     );
   });
 
-  test("denies unlisted tools before either authority callback executes", async () => {
-    const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
-    const preToolUse = vi.fn(async () => ({ behavior: "allow" as const }));
-    const harness = makeHarness();
+  test.each([
+    ["Bash", { command: "pwd" }],
+    // A Plan or Chat session lists no Artifact tool, so a publish the model
+    // attempts anyway is refused before Octant's gate is even asked.
+    ["Artifact", { file_path: "/repo/page.html", title: "Page" }],
+  ] as const)(
+    "denies the unlisted %s tool before either authority callback executes",
+    async (toolName, toolInput) => {
+      const canUseTool = vi.fn(async () => ({ behavior: "allow" as const }));
+      const preToolUse = vi.fn(async () => ({ behavior: "allow" as const }));
+      const harness = makeHarness();
 
-    await Effect.runPromise(
-      Effect.scoped(
-        Effect.gen(function* () {
-          const query = yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
-          yield* Stream.runHead(query.messages);
-          const permission = harness.invocation?.options.canUseTool;
-          const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
-          if (permission === undefined || preTool === undefined) {
-            throw new Error("Expected injected callbacks.");
-          }
-          const signal = new AbortController().signal;
-          expect(
-            yield* Effect.promise(() =>
-              permission(
-                "Bash",
-                { command: "pwd" },
-                {
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const query = yield* harness.port.openQuery({ ...openInput, canUseTool, preToolUse });
+            yield* Stream.runHead(query.messages);
+            const permission = harness.invocation?.options.canUseTool;
+            const preTool = harness.invocation?.options.hooks.PreToolUse[0]?.hooks[0];
+            if (permission === undefined || preTool === undefined) {
+              throw new Error("Expected injected callbacks.");
+            }
+            const signal = new AbortController().signal;
+            expect(
+              yield* Effect.promise(() =>
+                permission(toolName, toolInput, {
                   signal,
                   toolUseID: "tool-unlisted",
                   requestId: "request-unlisted",
-                },
+                }),
               ),
-            ),
-          ).toEqual({
-            behavior: "deny",
-            message: "Claude requested a tool outside the configured allowlist.",
-          });
-          expect(
-            yield* Effect.promise(() =>
-              preTool(
-                {
-                  hook_event_name: "PreToolUse",
-                  session_id: "session-1",
-                  cwd: "/repo",
-                  tool_name: "Bash",
-                  tool_input: { command: "pwd" },
-                  tool_use_id: "tool-unlisted",
-                },
-                "tool-unlisted",
-                { signal },
+            ).toEqual({
+              behavior: "deny",
+              message: "Claude requested a tool outside the configured allowlist.",
+            });
+            expect(
+              yield* Effect.promise(() =>
+                preTool(
+                  {
+                    hook_event_name: "PreToolUse",
+                    session_id: "session-1",
+                    cwd: "/repo",
+                    tool_name: toolName,
+                    tool_input: toolInput,
+                    tool_use_id: "tool-unlisted",
+                  },
+                  "tool-unlisted",
+                  { signal },
+                ),
               ),
-            ),
-          ).toEqual({
-            hookSpecificOutput: {
-              hookEventName: "PreToolUse",
-              permissionDecision: "deny",
-              permissionDecisionReason: "Claude requested a tool outside the configured allowlist.",
-            },
-          });
-          expect(canUseTool).not.toHaveBeenCalled();
-          expect(preToolUse).not.toHaveBeenCalled();
-        }),
-      ),
-    );
-  });
+            ).toEqual({
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "deny",
+                permissionDecisionReason:
+                  "Claude requested a tool outside the configured allowlist.",
+              },
+            });
+            expect(canUseTool).not.toHaveBeenCalled();
+            expect(preToolUse).not.toHaveBeenCalled();
+          }),
+        ),
+      );
+    },
+  );
 
   test("protocol-fails tool progress for an unlisted tool", async () => {
     const failed = await failureOf(
@@ -1511,6 +1516,55 @@ describe("Claude Agent SDK port", () => {
     ]);
     expect(JSON.stringify(messages)).not.toContain("private replayed prompt");
     expect(JSON.stringify(messages)).not.toContain("private command output");
+  });
+
+  test("carries a published page's address out of a tool result and nothing else of it", async () => {
+    const messages = await collectMessages([
+      safeRuntimeInitialization,
+      {
+        type: "user",
+        session_id: "session-1",
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "tool-1",
+              is_error: false,
+              content: [
+                {
+                  type: "text",
+                  text: "Published private-title to https://claude.ai/artifact/abc-123 (version private-label)",
+                },
+              ],
+            },
+            {
+              type: "tool_result",
+              tool_use_id: "tool-2",
+              is_error: true,
+              content: "This account cannot publish: https://claude.ai/artifact/never-published",
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(messages.slice(1)).toEqual([
+      {
+        kind: "tool-results",
+        sessionId: "session-1",
+        results: [
+          {
+            toolUseId: "tool-1",
+            isError: false,
+            artifactUrl: "https://claude.ai/artifact/abc-123",
+          },
+          { toolUseId: "tool-2", isError: true },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(messages)).not.toMatch(/private-title|private-label|cannot publish/);
   });
 
   test("protocol-fails unsupported assistant payload variants without reflecting payload content", async () => {

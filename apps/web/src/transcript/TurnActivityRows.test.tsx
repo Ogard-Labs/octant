@@ -166,6 +166,32 @@ describe("TurnActivityRows", () => {
     expect(screen.getByText("Check the failing suite first.")).not.toBeVisible();
   });
 
+  it("renders a published page's address in a tool summary as a link the person can open", async () => {
+    const user = userEvent.setup();
+    render(
+      <TurnActivityRows
+        activity={{
+          reasoning: "",
+          rows: [
+            {
+              kind: "tool",
+              id: "call-1",
+              toolName: "Artifact",
+              state: "completed",
+              summary: "Published: https://claude.ai/artifact/abc-123.",
+            },
+          ],
+        }}
+        running={false}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Artifact, done" }));
+    const link = screen.getByRole("link", { name: "https://claude.ai/artifact/abc-123" });
+    expect(link).toHaveAttribute("href", "https://claude.ai/artifact/abc-123");
+    expect(screen.getByText(/^Published: /)).toBeVisible();
+  });
+
   it("does not present a provider progress message as tool arguments", async () => {
     const user = userEvent.setup();
     render(
