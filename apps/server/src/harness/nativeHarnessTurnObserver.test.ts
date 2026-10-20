@@ -121,6 +121,7 @@ describe("native harness turn observer", () => {
       text: 'Done.\n```octant-follow-ups\n{"suggestions":[{"title":"Tests","prompt":"Add tests.","target":"new-thread"}]}\n```',
       toolCalls: 4,
     });
+    subject.turnEnded(scope);
     expect(recorded.turns).toHaveLength(1);
     expect(recorded.turns[0]).toMatchObject({
       job: "lead",
@@ -159,6 +160,8 @@ describe("native harness turn observer", () => {
       const { subject, recorded } = observer();
 
       await subject.turnCompleted({ ...scope, text: "Done.", toolCalls: 3, turn: summary() });
+      expect(recorded.turns).toEqual([]);
+      subject.turnEnded(scope, summary());
 
       expect(recorded.turns).toEqual([
         expect.objectContaining({
@@ -210,6 +213,34 @@ describe("native harness turn observer", () => {
       expect(recorded.settled).toBe(1);
     });
 
+    it("counts a completed response once when cancellation wins final settlement", async () => {
+      const { subject, recorded } = observer();
+      subject.turnStarted(scope);
+      await subject.turnCompleted({ ...scope, text: "Done.", toolCalls: 3, turn: summary() });
+      subject.turnEnded(scope, summary({ stopReason: "cancelled" }));
+
+      expect(recorded.turns).toEqual([
+        expect.objectContaining({
+          stopReason: "user-interrupt",
+          toolCalls: 3,
+          usage: summary().usage,
+        }),
+      ]);
+      expect(recorded.settled).toBe(1);
+
+      subject.turnStarted(scope);
+      subject.turnEnded(
+        scope,
+        summary({ stopReason: "cancelled", usage: { inputTokens: 10, outputTokens: 2 } }),
+      );
+      expect(recorded.turns).toHaveLength(2);
+      expect(recorded.turns[1]).toMatchObject({
+        stopReason: "user-interrupt",
+        toolCalls: 0,
+        usage: { inputTokens: 10, outputTokens: 2 },
+      });
+    });
+
     it("records a turn cut off at the output limit", async () => {
       const { subject, recorded } = observer();
 
@@ -219,6 +250,7 @@ describe("native harness turn observer", () => {
         toolCalls: 0,
         turn: summary({ stopReason: "max-tokens" }),
       });
+      subject.turnEnded(scope, summary({ stopReason: "max-tokens" }));
 
       expect(recorded.turns).toEqual([expect.objectContaining({ stopReason: "max-tokens" })]);
     });

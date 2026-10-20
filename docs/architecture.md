@@ -3061,7 +3061,11 @@ only the ledger carries (request shape, category, host, quality). A harness
 turn record carries the same usage, timing, start and stop reason, and the
 session's `usage` and `metrics` totals fold them, so a Code turn on a direct
 endpoint no longer records zero tokens. Chat, Work and Code on every provider
-journal the frame; the harness additionally keeps its own record.
+journal the frame; the harness additionally keeps its own record. The native
+record is written at final host settlement, after provider completion and
+cleanup. If cancellation wins that interval, the record carries the final
+interrupted outcome and usage once; it does not also retain a successful record
+for the same turn. Advisor review starts only for a successfully settled turn.
 
 **Compacting a session on request.** Built so far: the host path for Chat and
 Work on a direct endpoint — the `compact-session` command, its receipt,
