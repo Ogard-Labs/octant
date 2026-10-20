@@ -469,11 +469,18 @@ describe("design block", () => {
         `Slide ${String(slide)}, slide ${String(slide)}`,
       );
       expect(shown).not.toHaveAttribute("hidden");
+      expect(shown).not.toHaveAttribute("aria-hidden");
       expect(shown.srcdoc).toContain(`<h2>Slide ${String(slide)}</h2>`);
       const mounted = frames(player);
       expect(mounted.length).toBeLessThanOrEqual(3);
       for (const page of mounted) {
-        if (page !== shown) expect(page).toHaveAttribute("hidden");
+        // A neighbour is drawn beneath the shown page, never display: none,
+        // so it is already painted when a step reveals it.
+        if (page !== shown) {
+          expect(page).not.toHaveAttribute("hidden");
+          expect(page).toHaveAttribute("aria-hidden", "true");
+          expect(page).toHaveClass("canvas-design__page--beneath");
+        }
       }
       if (slide < 12) {
         // The next slide is already loaded, so stepping shows it at once.

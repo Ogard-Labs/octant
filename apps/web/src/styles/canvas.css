@@ -4357,9 +4357,14 @@
 
 .canvas-design__page {
   position: absolute;
+  z-index: 1;
   inset: 0 auto auto 0;
   border: 0;
   transform-origin: 0 0;
+}
+
+.canvas-design__page--beneath {
+  z-index: 0;
 }
 
 .canvas-design__cover {

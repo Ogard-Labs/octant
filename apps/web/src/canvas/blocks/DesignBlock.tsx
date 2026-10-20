@@ -417,15 +417,16 @@ function DesignPlayer({
           >
             {slides ? (
               <>
-                {/* The slides either side are loaded but hidden, so a step
-                    shows a page that is already drawn; the rest of the deck
-                    waits, so a long deck opens as fast as a short one. */}
+                {/* The slides either side are loaded and drawn beneath the shown
+                    one, so a step shows a page that is already painted; the rest
+                    of the deck waits, so a long deck opens as fast as a short
+                    one. */}
                 {block.frames.map((slide, at) =>
                   Math.abs(at - index) > 1 ? null : (
                     <FrameView
                       block={block}
                       frameIds={[String(slide.frameId)]}
-                      hidden={at !== index}
+                      beneath={at !== index}
                       key={String(slide.frameId)}
                       scale={scale}
                       size={size}
@@ -471,7 +472,7 @@ function FrameView({
   scale,
   title,
   still = false,
-  hidden = false,
+  beneath = false,
 }: {
   readonly block: CanvasDesignBlock;
   readonly size: CanvasDesignDeviceSize;
@@ -481,8 +482,12 @@ function FrameView({
   readonly scale: number;
   readonly title: string;
   readonly still?: boolean;
-  /** Loaded but not shown: a hidden frame still loads its page. */
-  readonly hidden?: boolean;
+  /**
+   * Loaded and painted under the shown page, not hidden: `hidden` is
+   * `display: none`, which leaves the page unlaid and unpainted until it is
+   * revealed, so a step would still wait on rendering.
+   */
+  readonly beneath?: boolean;
 }) {
   const viewport = CANVAS_DESIGN_VIEWPORT[size];
   // Keyed by the ids, not the array, so a parent's new array of the same ids
@@ -501,8 +506,10 @@ function FrameView({
   const themed = designFrameTheme(block) === "workspace";
   return (
     <iframe
-      className="canvas-design__page"
-      hidden={hidden}
+      aria-hidden={beneath ? true : undefined}
+      className={
+        beneath ? "canvas-design__page canvas-design__page--beneath" : "canvas-design__page"
+      }
       onLoad={themed ? (event) => installFrameFonts(event.currentTarget) : undefined}
       referrerPolicy="no-referrer"
       sandbox={designFrameSandbox(block)}
