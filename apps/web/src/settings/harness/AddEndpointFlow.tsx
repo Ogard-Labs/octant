@@ -601,6 +601,16 @@ function ConnectStep(props: ConnectStepProps) {
           <p className="endpoint-flow__note" data-testid="endpoint-key-later">
             This browser can't store keys. Add it now and it shows Needs key; then add the key in
             the Octant desktop app on this Mac.
+            {preset !== undefined ? (
+              <>
+                {" "}
+                Create one in{" "}
+                <a href={preset.keyPage.url} rel="noreferrer" target="_blank">
+                  {preset.keyPage.label}
+                </a>
+                .
+              </>
+            ) : null}
             {presentation.key === "optional"
               ? " A server that takes no key works from here: choose that under Advanced."
               : null}
