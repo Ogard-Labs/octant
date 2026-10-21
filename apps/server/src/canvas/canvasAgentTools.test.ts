@@ -67,6 +67,22 @@ describe("createCanvasAgentTools", () => {
     ]);
   });
 
+  it("gives an agent no way to share, export, or publish a public link", () => {
+    const definitions = tools().set.definitions;
+    const schema = JSON.stringify(definitions.map((definition) => definition.inputSchema));
+    expect(JSON.parse(schema)[0].properties.operation.enum).toEqual([
+      "describe",
+      "list",
+      "read",
+      "create",
+      "revise",
+      "preview",
+    ]);
+    for (const word of ["export", "share", "publish", "public-link"]) {
+      expect(schema).not.toContain(`"${word}"`);
+    }
+  });
+
   it("lets an MCP agent discover the Canvas workflow and author the supplied example", async () => {
     const { create, set } = tools();
     const server = createManagedMcpTools(set.definitions, async (name, inputJson) => {
@@ -1183,6 +1199,110 @@ describe("createCanvasAgentTools", () => {
     const call = revise.mock.calls[0];
     expect(call?.[0]).toMatchObject({ kind: "canvas-revise", expectedSequence: 1 });
     expect(call?.[3]).toHaveLength(1);
+  });
+
+  it("hands the owning thread's agent the comments a person sent, even after a person's edit, and warns when a revision touches blocks they did not name", async () => {
+    const canvasId = "77777777-7777-4777-8777-777777777777";
+    const heading = {
+      blockId: "title",
+      schemaVersion: 1,
+      kind: "heading",
+      level: 1,
+      text: "How the host is put together",
+    };
+    const request = {
+      commentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+      anchor: { kind: "node", blockId: "authored-diagram", nodeId: "server" },
+      body: "Call this box Host",
+      replies: ["And make it a terminator"],
+      canvasSequence: 2,
+    };
+    // The head is 3: a person edited after sending at 2, before the agent ran.
+    const ownedCanvas = (owner: string) => ({
+      create: vi.fn(),
+      revise: vi.fn(() => ({ kind: "accepted", receipt: { versionId: "v4", sequence: 4 } })),
+      get: vi.fn(() => ({
+        kind: "ready",
+        version: {
+          sequence: 3,
+          definition: {
+            title: "Host",
+            blocks: [heading, diagram],
+            presentation: "sidebar",
+            provenance: { mode: "chat", threadId: owner },
+          },
+        },
+      })),
+    });
+    const { set } = tools({
+      canvas: ownedCanvas(threadId),
+      commentRequests: vi.fn(() => [request]),
+    });
+    const read = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read", canvasId }),
+    });
+    expect(read.result).toMatchObject({
+      sequence: 3,
+      requestedChanges: [
+        {
+          commentId: request.commentId,
+          anchor: request.anchor,
+          comment: "Call this box Host",
+          replies: ["And make it a terminator"],
+        },
+      ],
+      requestedChangesGuidance: expect.stringContaining("keep every other block identical"),
+    });
+
+    // A thread that can read the Canvas but does not own it is not the one the
+    // person asked.
+    const other = tools({
+      canvas: ownedCanvas("99999999-9999-4999-8999-999999999999"),
+      commentRequests: vi.fn(() => [request]),
+    });
+    const otherRead = await other.set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "read", canvasId }),
+    });
+    expect(otherRead.result).not.toHaveProperty("requestedChanges");
+    const otherStrayed = await other.set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId,
+        expectedSequence: 3,
+        blocks: [{ ...heading, text: "Host" }, diagram],
+      }),
+    });
+    expect(otherStrayed.result).not.toHaveProperty("warning");
+
+    const renamed = {
+      ...diagram,
+      nodes: [diagram.nodes[0], { nodeId: "server", label: "Host", role: "terminator" }],
+    };
+    const focused = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId,
+        expectedSequence: 3,
+        blocks: [heading, renamed],
+      }),
+    });
+    expect(focused.result).not.toHaveProperty("warning");
+
+    const strayed = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({
+        operation: "revise",
+        canvasId,
+        expectedSequence: 3,
+        blocks: [{ ...heading, text: "Host" }, renamed],
+      }),
+    });
+    expect(strayed.result).toMatchObject({ sequence: 4 });
+    expect((strayed.result as { warning: string }).warning).toContain("title");
   });
 
   it("refuses a revision that does not say which version it read", async () => {

@@ -41,9 +41,17 @@ export {
   isCanvasExportPictureFormat,
 } from "@octant/contracts/canvas-export";
 
+export type {
+  CanvasExportLinkChoice,
+  CanvasExportLinkExpiry,
+  CanvasExportLinkTerms,
+} from "@octant/contracts/canvas-export";
+
 import type {
   CanvasExportContribution,
   CanvasExportDelivery,
+  CanvasExportLinkChoice,
+  CanvasExportLinkTerms,
   CanvasExportRenderedOutput,
   CanvasExportVisibility,
 } from "@octant/contracts/canvas-export";
@@ -79,6 +87,18 @@ export interface CanvasExportDestination {
   readonly visibility?: CanvasExportVisibility;
   /** The destination's own plain note about this export, shown on the card. */
   readonly note?: string;
+  /**
+   * For a destination that publishes a link: its default expiry, whether it
+   * takes a password, and the link this export would update. The card offers
+   * the person these terms.
+   */
+  readonly linkTerms?: CanvasExportLinkTerms;
+  /**
+   * The expiry and password the person chose on the card. Set by the host on
+   * the confirmed destination only, and only for one that described
+   * `linkTerms`; a description never supplies it.
+   */
+  readonly link?: CanvasExportLinkChoice;
 }
 
 /**

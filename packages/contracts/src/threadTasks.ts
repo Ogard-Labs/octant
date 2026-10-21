@@ -47,5 +47,32 @@ export function upsertThreadTaskProgress(
   return next;
 }
 
+/**
+ * Applies a provider's restated plan: keeps only the listed tasks, in the
+ * listed order. The restatement's own items arrive first as single updates,
+ * and a full plan turns a new one away before the restatement can drop the
+ * tasks it replaces. `turnedAway` holds those items, latest report per id, so
+ * replacing a full plan, or renaming an item in one, keeps the new task.
+ */
+export function restateThreadTaskList(
+  tasks: ThreadTaskProgressList | undefined,
+  taskIds: ReadonlyArray<string>,
+  turnedAway: ReadonlyMap<string, ThreadTaskProgress> = new Map(),
+): ThreadTaskProgressList {
+  const previous = tasks ?? [];
+  const byId = new Map(previous.map((task) => [task.taskId, task]));
+  const next = taskIds
+    .flatMap((taskId) => {
+      const task = byId.get(taskId) ?? turnedAway.get(taskId);
+      if (task === undefined) return [];
+      byId.delete(taskId);
+      return [task];
+    })
+    .slice(0, MAX_THREAD_TASKS_PER_TURN);
+  const unchanged =
+    next.length === previous.length && next.every((task, index) => task === previous[index]);
+  return unchanged ? previous : next;
+}
+
 export const decodeThreadTaskProgress = Schema.decodeUnknownSync(ThreadTaskProgress);
 export const decodeThreadTaskProgressList = Schema.decodeUnknownSync(ThreadTaskProgressList);

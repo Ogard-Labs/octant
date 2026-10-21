@@ -256,6 +256,7 @@ import { registerShipEvents } from "../ship/shipEventStore";
 import { registerCanvasCommentEvents } from "../canvas/canvasCommentService";
 import { registerCanvasShareEvents } from "../canvas/canvasShareEventStore";
 import { registerCanvasExportEvents } from "../canvas/canvasExportEventStore";
+import { registerCanvasPublicShareEvents } from "../canvas/canvasPublicShareService";
 import { registerCanvasExportFolderEvents } from "../canvas/canvasExportFolderEventStore";
 import { registerCanvasOutsideContentEvents } from "../canvas/canvasOutsideContentMark";
 import type { HostIdentityMigrationRegistry } from "./hostIdentityMigration";
@@ -469,6 +470,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
   registerAutomationEvents(events);
   registerCanvasShareEvents(events);
   registerCanvasExportEvents(events);
+  registerCanvasPublicShareEvents(events);
   registerCanvasExportFolderEvents(events);
   registerCanvasOutsideContentEvents(events);
   registerCanvasCommentEvents(events);
