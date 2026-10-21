@@ -17,6 +17,7 @@ import { OctantButton } from "../ui/base/OctantButton";
 import { SettingsSection } from "./primitives";
 import type { AddEndpointFlowProps, AddedEndpoint } from "./harness/AddEndpointFlow";
 import type { EndpointPreset } from "./harness/addEndpointSteps";
+import type { VoiceLinks } from "./harness/VoiceTip";
 import { AddEndpointDialog, EndpointChoices, SIGN_IN_ENDPOINTS } from "./harness/AddModelEndpoint";
 import {
   endpointModelCount,
@@ -34,6 +35,8 @@ import { useEndpointSignIns } from "./harness/useEndpointSignIns";
 export type ModelEndpointSettingsViewProps = Omit<ProviderSettingsViewProps, "discovery"> & {
   /** A deep link landed on Model endpoints: the first way in takes focus. */
   readonly focused?: boolean;
+  /** Voice settings, so an endpoint with voice models can offer them. */
+  readonly voice?: VoiceLinks;
   /** The last failed check per endpoint, as the probe command answered it. */
   readonly probeFailures?: ReadonlyMap<ProviderInstanceId, ProviderProbeFailure>;
   /** The model roles that name an endpoint's models, for the Remove confirmation. */

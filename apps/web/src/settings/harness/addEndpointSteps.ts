@@ -8,6 +8,7 @@ import {
   type NativeHarnessSlotId,
   type ProviderModel,
 } from "@octant/contracts";
+import type { VoiceModelHint } from "./voiceModels";
 
 /** The kinds of endpoint Add endpoint connects by address, in the order it offers them. */
 export type EndpointKind =
@@ -93,6 +94,8 @@ export interface EndpointPreset {
   readonly protocol: "auto" | "responses" | "chat-completions";
   /** Where the person creates the key, named as a page they can open. */
   readonly keyPage: { readonly label: string; readonly url: string };
+  /** Voice models the service serves, so the endpoint can offer them to Voice settings. */
+  readonly voice?: VoiceModelHint;
 }
 
 /**
@@ -132,6 +135,9 @@ export const ENDPOINT_PRESETS: ReadonlyArray<EndpointPreset> = [
     baseUrl: "https://api.mistral.ai/v1",
     protocol: "chat-completions",
     keyPage: { label: "Mistral Studio", url: "https://console.mistral.ai/api-keys" },
+    // Voxtral: transcription over the OpenAI-shaped audio route; speech over
+    // Mistral's own dialect (voice_id, base64 reply), which the host speaks.
+    voice: { transcription: "voxtral-mini-latest", speech: "voxtral-mini-tts-2603" },
   },
   {
     id: "requesty",
@@ -144,6 +150,13 @@ export const ENDPOINT_PRESETS: ReadonlyArray<EndpointPreset> = [
     keyPage: { label: "the Requesty app", url: "https://app.requesty.ai" },
   },
 ];
+
+/** The preset whose address an endpoint uses, so its page can offer what the preset knows. */
+export function endpointPresetForUrl(baseUrl: string): EndpointPreset | undefined {
+  const normalize = (url: string) => url.trim().replace(/\/+$/, "").toLowerCase();
+  const wanted = normalize(baseUrl);
+  return ENDPOINT_PRESETS.find((entry) => normalize(entry.baseUrl) === wanted);
+}
 
 export function endpointPreset(id: string): EndpointPreset {
   const found = ENDPOINT_PRESETS.find((entry) => entry.id === id);
