@@ -223,14 +223,14 @@ function harness(options?: {
 }
 
 /** The publish input an approved card carries, for driving the links service directly. */
-function approvedInput(h: ReturnType<typeof harness>) {
-  const prepared = h.exports.prepare(prepare(), true, "local-window");
+async function approvedInput(h: ReturnType<typeof harness>) {
+  const prepared = await h.exports.prepare(prepare(), true, "local-window");
   if (prepared.kind !== "approval") throw new Error("Expected an approval card.");
   return {
     canvasId,
     versionId,
     sequence: 1,
-    document: decodeCanvasPublicShareDocument(JSON.parse(prepared.card.payload)),
+    document: decodeCanvasPublicShareDocument(JSON.parse(prepared.card.payload ?? "")),
     choice: { expiry: { kind: "days" as const, days: 30 } },
   };
 }
@@ -250,7 +250,7 @@ async function publish(
   h: ReturnType<typeof harness>,
   link?: Parameters<CanvasExportService["decide"]>[0]["link"],
 ) {
-  const prepared = h.exports.prepare(prepare(), true, "local-window");
+  const prepared = await h.exports.prepare(prepare(), true, "local-window");
   if (prepared.kind !== "approval") throw new Error(`Expected a card, got ${prepared.message}`);
   const decided = await h.exports.decide({
     canvasId,
@@ -264,13 +264,13 @@ async function publish(
 }
 
 describe("public links", () => {
-  it("offers no destination and sends nothing while Public links is off", () => {
+  it("offers no destination and sends nothing while Public links is off", async () => {
     const h = harness();
     const offers = h.exports.offers(canvasId);
     expect(offers?.targets.map((target) => String(target.targetId))).not.toContain(
       PUBLIC_LINK_EXPORT_TARGET_ID,
     );
-    const prepared = h.exports.prepare(prepare(), true, "local-window");
+    const prepared = await h.exports.prepare(prepare(), true, "local-window");
     expect(prepared.kind).toBe("refused");
     expect(h.service.calls).toEqual([]);
   });
@@ -278,7 +278,7 @@ describe("public links", () => {
   it("sends nothing until the person approves the card that names the service, audience, and expiry", async () => {
     const h = harness();
     h.turnOn();
-    const prepared = h.exports.prepare(prepare(), true, "local-window");
+    const prepared = await h.exports.prepare(prepare(), true, "local-window");
     if (prepared.kind !== "approval") throw new Error("Expected an approval card.");
     expect(prepared.card.destinationLabel).toBe("Public link");
     expect(prepared.card.destinationAccount).toBe("canvas.octant.sh");
@@ -305,7 +305,7 @@ describe("public links", () => {
     const { card, decided } = await publish(h);
     expect(decided.kind).toBe("exported");
     const sent = h.service.calls[0]?.input.document as CanvasPublicShareDocument;
-    expect(decodeCanvasPublicShareDocument(JSON.parse(card.payload))).toEqual(sent);
+    expect(decodeCanvasPublicShareDocument(JSON.parse(card.payload ?? ""))).toEqual(sent);
     const wire = JSON.stringify(sent);
     for (const id of [String(canvasId), String(versionId), projectId, sourceId]) {
       expect(wire).not.toContain(id);
@@ -324,7 +324,7 @@ describe("public links", () => {
     };
     const withDesign = harness({ doc: canvas([design]) });
     withDesign.turnOn();
-    const prepared = withDesign.exports.prepare(prepare(), true, "local-window");
+    const prepared = await withDesign.exports.prepare(prepare(), true, "local-window");
     if (prepared.kind !== "approval") throw new Error("Expected an approval card.");
     expect(prepared.card.writesDesignMarkup).toBe(true);
 
@@ -340,18 +340,20 @@ describe("public links", () => {
       ]),
     });
     withAction.turnOn();
-    expect(withAction.exports.prepare(prepare(), true, "local-window").kind).toBe("refused");
+    expect((await withAction.exports.prepare(prepare(), true, "local-window")).kind).toBe(
+      "refused",
+    );
     expect(withAction.service.calls).toEqual([]);
   });
 
   it("refuses to publish from a paired device, at prepare and at approval", async () => {
     const h = harness();
     h.turnOn();
-    expect(h.exports.prepare(prepare(), true, "remote-device")).toMatchObject({
+    expect(await h.exports.prepare(prepare(), true, "remote-device")).toMatchObject({
       kind: "refused",
       code: "unauthorized",
     });
-    const prepared = h.exports.prepare(prepare(), true, "local-window");
+    const prepared = await h.exports.prepare(prepare(), true, "local-window");
     if (prepared.kind !== "approval") throw new Error("Expected an approval card.");
     const decided = await h.exports.decide({
       canvasId,
@@ -451,7 +453,7 @@ describe("public links", () => {
     const h = harness();
     h.turnOn();
     h.refusedEvents.add("canvas.public-share-published@1");
-    const outcome = await h.links.publish(approvedInput(h));
+    const outcome = await h.links.publish(await approvedInput(h));
     expect(outcome).toMatchObject({ kind: "refused", code: "unavailable" });
     expect(h.service.calls.map((call) => call.kind)).toEqual(["create", "revoke"]);
     expect(h.service.calls[1]?.input).toMatchObject({ shareId, ownerSecret });
@@ -463,7 +465,7 @@ describe("public links", () => {
     h.turnOn();
     h.refusedEvents.add("canvas.public-share-published@1");
     h.service.answerRevokeWith({ kind: "unreachable" });
-    const outcome = await h.links.publish(approvedInput(h));
+    const outcome = await h.links.publish(await approvedInput(h));
     expect(outcome).toMatchObject({ kind: "refused", code: "unavailable" });
     expect(h.secrets.held.size).toBe(1);
 
@@ -476,10 +478,8 @@ describe("public links", () => {
   it("keeps one active link when two approved publishes of a Canvas arrive together", async () => {
     const h = harness();
     h.turnOn();
-    const outcomes = await Promise.all([
-      h.links.publish(approvedInput(h)),
-      h.links.publish(approvedInput(h)),
-    ]);
+    const inputs = [await approvedInput(h), await approvedInput(h)];
+    const outcomes = await Promise.all(inputs.map((input) => h.links.publish(input)));
     expect(outcomes.map((outcome) => outcome.kind)).toEqual(["published", "published"]);
     expect(h.service.calls.map((call) => call.kind)).toEqual(["create", "update"]);
     expect(h.links.list(canvasId).shares).toHaveLength(1);

@@ -1125,7 +1125,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           if (context.kind === "ok") await dependencies.refreshCanvasExportTargets?.();
           return jsonResponse(
             decodeCanvasExportPrepareResult(
-              exportService.prepare(requestBody, context.kind === "ok", principal.kind),
+              await exportService.prepare(requestBody, context.kind === "ok", principal.kind),
             ),
             200,
             origin,

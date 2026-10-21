@@ -200,6 +200,29 @@ that hosts the thread, not from a paired phone or browser.
 - Browser automation uses per-thread incognito contexts with an origin
   allowlist and credential-field protection.
 
+### What the Claude runtime does on its own
+
+Octant does not set Claude Code's blanket
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` switch: blocking every
+non-essential channel at once was stricter than Octant needs. What Octant
+turns off in Claude Code, it turns off by name on every launch:
+
+- usage metrics and error reports (`DISABLE_TELEMETRY`,
+  `DISABLE_ERROR_REPORTING`)
+- the runtime updating itself (`DISABLE_AUTOUPDATER`)
+- the `/bug` and `/feedback` commands, which upload the conversation
+  (`DISABLE_BUG_COMMAND`, `DISABLE_FEEDBACK_COMMAND`), and the session
+  survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`)
+- auto-memory, the SDK's built-in agents, and marketplace auto-install
+
+What the runtime may do on its own, under your Anthropic account: check
+for release notes, pull-request badges, and service availability. None of
+those carry Project content. It does not fetch feature flags: turning
+telemetry off also turns that off. Plugins, skills, and
+Remote Control stay out because Octant starts the runtime without them. If
+you export `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` yourself, Octant
+passes it through.
+
 ## Remote transport
 
 Remote access is HTTPS-only with browser-trusted certificates; certificate
