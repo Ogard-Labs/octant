@@ -120,9 +120,10 @@ export const CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION = 9;
 // draw a shared frame under the frame policy refuses version 10 as a future
 // version, so a frame never reaches a viewer that would draw it any other way.
 export const CANVAS_SHARE_FRAMES_SCHEMA_VERSION = 10;
-// Version 11 carries what Canvas version 21 added to a share: a design frame's
-// notes, a design's brand tokens, and a diagram node's icon and detail with a
-// group's parent. A captured-page asset is not carried, as no declared image is.
+// Version 11 carries what Canvas version 21 added to a share: a design's brand
+// tokens and a diagram node's icon and detail with a group's parent. A frame's
+// presenter notes and a captured-page asset are not carried; the schema still
+// accepts notes so a version-11 document stays decodable if that changes.
 export const CANVAS_SHARE_DESIGN_FIELDS_SCHEMA_VERSION = 11;
 export const CANVAS_SHARE_SCHEMA_VERSION = 11 as const;
 // The newest Canvas block version a share at this version names. Canvas
@@ -1117,7 +1118,7 @@ export const CanvasStaticExportDocument = Schema.Struct({
         ),
       {
         message: () =>
-          "Frame notes, brand tokens, and diagram icons, details, and nested groups require Canvas share version 11.",
+          "Brand tokens and diagram icons, details, and nested groups require Canvas share version 11.",
       },
     ),
   );

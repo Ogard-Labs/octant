@@ -432,7 +432,7 @@ describe("Canvas share policy", () => {
     expect(JSON.stringify(shared.document)).not.toContain("screens/home.png");
   });
 
-  it("shares frame notes, a validated brand, and richer diagram fields at share version 11, and leaves a captured page behind", () => {
+  it("shares a validated brand and richer diagram fields at share version 11, and leaves presenter notes and a captured page behind", () => {
     const captureId = "66666666-6666-4666-8666-666666666666";
     const design = {
       ...onboardingFlowExample,
@@ -475,11 +475,15 @@ describe("Canvas share policy", () => {
     expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(11);
     expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
     const { assets: _assets, ...withoutAssets } = design;
-    expect(receipt.document.blocks).toEqual([withoutAssets, diagram]);
+    expect(receipt.document.blocks).toEqual([
+      { ...withoutAssets, frames: [onboardingFlowExample.frames[0]] },
+      diagram,
+    ]);
     expect(JSON.stringify(receipt.document)).not.toContain(captureId);
+    expect(JSON.stringify(receipt.document)).not.toContain("Open with the demo.");
   });
 
-  it("refuses a brand value that could load something, and notes that read as a credential", () => {
+  it("refuses a brand value that could load something, and never lets private notes block or leave with a share", () => {
     const share = (design: unknown) =>
       shareDenial(() =>
         buildCanvasStaticExportReceipt({
@@ -506,17 +510,33 @@ describe("Canvas share policy", () => {
         brand: { "color-primary": "url(https://example.test/a.png)" },
       }),
     ).toBe("unsafe-payload");
-    expect(
-      share({
-        ...onboardingFlowExample,
-        frames: [
-          {
-            ...onboardingFlowExample.frames[0],
-            notes: "token ghp_abcdefghijklmnopqrstuvwxyz0123456789",
-          },
-        ],
-      }),
-    ).toBe("unsafe-payload");
+    const receipt = buildCanvasStaticExportReceipt({
+      request: {
+        ...request,
+        consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
+      },
+      current: {
+        ...current,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        definition: {
+          ...current.definition,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          blocks: [
+            {
+              ...onboardingFlowExample,
+              frames: [
+                {
+                  ...onboardingFlowExample.frames[0],
+                  notes: "token ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+                },
+              ],
+            },
+          ],
+        },
+      },
+      context,
+    });
+    expect(JSON.stringify(receipt.document)).not.toContain("ghp_");
   });
 
   it("refuses an acknowledged design whose own id or frame id reads as a credential", () => {

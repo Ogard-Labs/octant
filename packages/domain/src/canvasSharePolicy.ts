@@ -192,10 +192,16 @@ function sharedDesign(
   // block's, ids included, and the acknowledgement does not cover it.
   const { styles: _styles, frames, ...values } = design;
   assertNoSecretShape(
-    { ...values, frames: frames.map(({ html: _html, ...frame }) => frame) },
+    { ...values, frames: frames.map(({ html: _html, notes: _notes, ...frame }) => frame) },
     `block.${block.blockId}`,
   );
-  return design as CanvasStaticExportBlock;
+  // Presenter notes are the author's, like speaker notes in a deck: a share or
+  // public link carries the slides, never what the presenter meant to say.
+  const withoutNotes = {
+    ...design,
+    frames: design.frames.map(({ notes: _notes, ...frame }) => frame),
+  };
+  return withoutNotes as CanvasStaticExportBlock;
 }
 
 function sanitizeBlock(block: CanvasBlock, markupAcknowledged: boolean): CanvasStaticExportBlock {

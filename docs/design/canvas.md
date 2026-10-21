@@ -192,13 +192,13 @@ design is drawn as an unthemed page, notes and icons are not drawn, and a
 nested group draws as a top-level one. A `browser-capture` asset resolves as
 `refused` until captures resolve under the thread's authority.
 
-A share carries frame notes, a brand (validated again before it leaves), and
-the diagram fields, so share version 11 names blocks up to Canvas version 21
-and a share under version 10 that carries one is refused as a future version.
-Frame notes leave with the design under the same
-`acknowledgedMarkupSharedAsWritten` consent as the markup, and pass the secret
-filter as values. A captured-page asset is not shared, as no declared image
-is. The optional table column
+A share carries a brand (validated again before it leaves) and the diagram
+fields, so share version 11 names blocks up to Canvas version 21 and a share
+under version 10 that carries one is refused as a future version. Frame notes
+are the presenter's, like speaker notes in a deck: a share, a public link, and
+an export carry the slides and drop the notes, and what notes hold never blocks
+a share because it never leaves. A captured-page asset is not shared, as no
+declared image is. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
 version, but the strict definition schema refuses an unknown field, so a
@@ -515,8 +515,8 @@ mockup catalog with share version 6, the funnel, radar, and sankey charts
 with share version 7 (whose blocks may name Canvas version 14), the dashboard
 with share version 8, and tabs, columns, a diagram's edge styles and tones,
 its group tones, and a plan's `gantt` view with share version 9, and a
-design's frames with share version 10, and frame notes, a brand, and the
-richer diagram fields with share version 11, so a share
+design's frames with share version 10, and a brand and the richer diagram
+fields with share version 11 (frame notes never leave), so a share
 that declares an older version
 and carries one is refused as a future version.
 A `tabs` block has 2 to 12 panes, each a short label and the block ids it
