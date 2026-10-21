@@ -461,7 +461,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 sideTaskClient,
                 onCreated: openCreatedFollowUp,
               }}
-              greetingName={settings.userProfile.displayName}
               draftResetRevisions={draftResetRevisions}
               draftProjectSelection={draftProjectSelection}
               onDraftSelectProject={(mode, projectId) => {

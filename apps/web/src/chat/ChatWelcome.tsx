@@ -5,7 +5,7 @@ import {
 } from "../composer/useComposerSlashCommands";
 import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
-import { useCallback, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
@@ -27,11 +27,9 @@ import { ComposerAttachButton } from "../composer/ComposerAttachButton";
 import { ComposerModelPicker } from "../providers/ComposerModelPicker";
 import { ThreadComposer } from "../composer/ThreadComposer";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
-import { HomeComposerTabs, type HomeComposerTabsSlot } from "../home/HomeComposerTabs";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { DraftRecentThread } from "../shell/DraftThreadWorkspace";
-import { RecentThreadList } from "../shell/RecentThreadList";
 import {
   unattachedCapabilityMentionCopy,
   unattachedCapabilityMentions,
@@ -39,14 +37,11 @@ import {
 import { WorkKindSwitch } from "../shell/WorkKindSwitch";
 
 export interface ChatWelcomeProps {
-  /** The threads this mode already has, shown under the starter ideas. */
+  /**
+   * The threads this mode already has. The start screen lists none of them
+   * (the sidebar does); it offers starter ideas only while there are none.
+   */
   readonly recentThreads?: ReadonlyArray<DraftRecentThread>;
-  /** The person's name from their profile, for the greeting on the hero. */
-  readonly greetingName?: string | undefined;
-  /** The card area under the composer, ahead of the starter ideas. */
-  readonly homeStart?: ReactNode;
-  /** The Running tab above the composer; absent leaves the composer on its own. */
-  readonly composerTabs?: HomeComposerTabsSlot;
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly hosts?: ReadonlyArray<HostIdentity>;
@@ -144,116 +139,111 @@ export function ChatWelcome(props: ChatWelcomeProps) {
     <section aria-label="Chat welcome" className="draft-thread chat-welcome">
       <div className="welcome">
         <div className="welcome__heading">
-          <WelcomeHeading greetingName={props.greetingName} />
+          <WelcomeHeading />
         </div>
-
-        <HomeComposerTabs slot={props.composerTabs}>
-          <div className="composer-stack">
-            <ThreadComposer
-              startContext={
-                <div className="composer-tray composer-tray--inside" aria-label="Thread context">
-                  <div className="composer-tray__leading">
-                    <WorkKindSwitch />
-                    <HostSelector
-                      presentation="environment"
-                      {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
-                      {...(props.selectedHostId === undefined
-                        ? {}
-                        : { selectedHostId: props.selectedHostId })}
-                      {...(props.fixedHostId === undefined
-                        ? {}
-                        : { fixedHostId: props.fixedHostId })}
-                      {...(props.lastSelectedHealthyHostId === undefined
-                        ? {}
-                        : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
-                      {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
-                      {...(props.onSelectHost === undefined
-                        ? {}
-                        : { onSelectHost: props.onSelectHost })}
-                      requiredCapability="chat"
-                    />
-                  </div>
+        <div className="composer-stack">
+          <ThreadComposer
+            startContext={
+              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                <div className="composer-tray__leading">
+                  <WorkKindSwitch />
+                  <HostSelector
+                    presentation="environment"
+                    {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
+                    {...(props.selectedHostId === undefined
+                      ? {}
+                      : { selectedHostId: props.selectedHostId })}
+                    {...(props.fixedHostId === undefined ? {} : { fixedHostId: props.fixedHostId })}
+                    {...(props.lastSelectedHealthyHostId === undefined
+                      ? {}
+                      : { lastSelectedHealthyHostId: props.lastSelectedHealthyHostId })}
+                    {...(props.viewScope === undefined ? {} : { viewScope: props.viewScope })}
+                    {...(props.onSelectHost === undefined
+                      ? {}
+                      : { onSelectHost: props.onSelectHost })}
+                    requiredCapability="chat"
+                  />
                 </div>
-              }
-              input={
-                <OctantTextarea
-                  aria-activedescendant={
-                    slash.active === undefined ? undefined : `${slash.listId}-${slash.active.id}`
-                  }
-                  aria-autocomplete={slash.commandIds.length === 0 ? undefined : "list"}
-                  aria-controls={slash.open ? slash.listId : undefined}
-                  aria-expanded={slash.commandIds.length === 0 ? undefined : slash.open}
-                  aria-label="First message"
-                  autoFocus
-                  className="composer-input"
-                  disabled={!ready || props.creating}
-                  onChange={(event) => {
-                    setPrompt(event.target.value);
-                    setAttachmentNotice(undefined);
-                    slash.sync(event.target.value, event.currentTarget.selectionStart);
-                  }}
-                  onClick={(event) => {
-                    slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                  }}
-                  onKeyDown={handleKeyDown}
-                  placeholder={presentation.composerPlaceholder}
-                  ref={textareaRef}
-                  rows={3}
-                  value={prompt}
-                />
-              }
-              typeahead={slash.open ? <ComposerSlashTypeahead controller={slash} /> : undefined}
-              row={{
-                leading: (
-                  <>
-                    <ComposerAttachButton
-                      refusedReason="Attachments can be added once the chat starts."
-                      onRefused={setAttachmentNotice}
-                      onFileSelected={() => undefined}
-                    />
-                    <ComposerVoiceButton
-                      disabled={!ready || props.creating === true}
-                      onTranscript={(transcript) =>
-                        setPrompt((current) => appendTranscript(current, transcript))
-                      }
-                    />
-                    <span aria-hidden="true" className="composer-gap" />
-                    <ComposerModelPicker
-                      ariaLabel="Provider and model"
-                      disabled={!ready || props.creating === true}
-                      groups={props.providerGroups ?? []}
-                      menuSide="bottom"
-                      modelOptionValues={modelOptionValues}
-                      onModelOptionChange={(id, value) => {
-                        const rest = Object.fromEntries(
-                          Object.entries(modelOptionValues).filter(([key]) => key !== id),
-                        );
-                        setModelChoice({
-                          key: modelKey,
-                          values: value === undefined ? rest : { ...rest, [id]: value },
-                        });
-                      }}
-                      onSelect={props.onSelectProvider ?? (() => undefined)}
-                      {...(props.onOpenSettings === undefined
-                        ? {}
-                        : { onOpenSettings: props.onOpenSettings })}
-                      {...(props.selectedModelId === undefined
-                        ? {}
-                        : { selectedModelId: props.selectedModelId })}
-                      {...(props.selectedProviderInstanceId === undefined
-                        ? {}
-                        : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                    />
-                  </>
-                ),
-                actions: {
-                  kind: "send",
-                  send: { ariaLabel: "Start chat", disabled: !canSubmit, onSend: submit },
-                },
-              }}
-            />
-          </div>
-        </HomeComposerTabs>
+              </div>
+            }
+            input={
+              <OctantTextarea
+                aria-activedescendant={
+                  slash.active === undefined ? undefined : `${slash.listId}-${slash.active.id}`
+                }
+                aria-autocomplete={slash.commandIds.length === 0 ? undefined : "list"}
+                aria-controls={slash.open ? slash.listId : undefined}
+                aria-expanded={slash.commandIds.length === 0 ? undefined : slash.open}
+                aria-label="First message"
+                autoFocus
+                className="composer-input"
+                disabled={!ready || props.creating}
+                onChange={(event) => {
+                  setPrompt(event.target.value);
+                  setAttachmentNotice(undefined);
+                  slash.sync(event.target.value, event.currentTarget.selectionStart);
+                }}
+                onClick={(event) => {
+                  slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder={presentation.composerPlaceholder}
+                ref={textareaRef}
+                rows={3}
+                value={prompt}
+              />
+            }
+            typeahead={slash.open ? <ComposerSlashTypeahead controller={slash} /> : undefined}
+            row={{
+              leading: (
+                <>
+                  <ComposerAttachButton
+                    refusedReason="Attachments can be added once the chat starts."
+                    onRefused={setAttachmentNotice}
+                    onFileSelected={() => undefined}
+                  />
+                  <ComposerVoiceButton
+                    disabled={!ready || props.creating === true}
+                    onTranscript={(transcript) =>
+                      setPrompt((current) => appendTranscript(current, transcript))
+                    }
+                  />
+                  <span aria-hidden="true" className="composer-gap" />
+                  <ComposerModelPicker
+                    ariaLabel="Provider and model"
+                    disabled={!ready || props.creating === true}
+                    groups={props.providerGroups ?? []}
+                    menuSide="bottom"
+                    modelOptionValues={modelOptionValues}
+                    onModelOptionChange={(id, value) => {
+                      const rest = Object.fromEntries(
+                        Object.entries(modelOptionValues).filter(([key]) => key !== id),
+                      );
+                      setModelChoice({
+                        key: modelKey,
+                        values: value === undefined ? rest : { ...rest, [id]: value },
+                      });
+                    }}
+                    onSelect={props.onSelectProvider ?? (() => undefined)}
+                    {...(props.onOpenSettings === undefined
+                      ? {}
+                      : { onOpenSettings: props.onOpenSettings })}
+                    {...(props.selectedModelId === undefined
+                      ? {}
+                      : { selectedModelId: props.selectedModelId })}
+                    {...(props.selectedProviderInstanceId === undefined
+                      ? {}
+                      : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                  />
+                </>
+              ),
+              actions: {
+                kind: "send",
+                send: { ariaLabel: "Start chat", disabled: !canSubmit, onSend: submit },
+              },
+            }}
+          />
+        </div>
         {visibleStatusMessage === undefined ? null : (
           /* ui-boundary-exception: compact-status */
           <p
@@ -273,7 +263,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             Retry Chat
           </OctantButton>
         ) : null}
-        {props.homeStart}
         {(props.recentThreads?.length ?? 0) === 0 ? (
           <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
             {starterIdeas.map((idea) => {
@@ -294,7 +283,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             })}
           </div>
         ) : null}
-        <RecentThreadList threads={props.recentThreads ?? []} />
       </div>
     </section>
   );

@@ -140,11 +140,9 @@ import type { WorkPromotionController } from "../work/useWorkPromotionController
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
 import { ProjectCanvasInventory } from "../projects/ProjectCanvasInventory";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
-import type { DraftRecentThread } from "./DraftThreadWorkspace";
+import type { DraftRecentThread, DraftStartPresentation } from "./DraftThreadWorkspace";
 import type { OctantMode } from "@octant/contracts/modes";
 import { AgentModeWelcome } from "./AgentModeWelcome";
-import { HomeStart } from "./HomeStart";
-import { HomeDashboard } from "../home/HomeDashboard";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
@@ -423,8 +421,6 @@ export interface WorkspaceViewProps {
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
   readonly welcomeBackdrop?: ReactNode;
-  /** The person's name from their profile, for the greeting on every start screen. */
-  readonly greetingName?: string | undefined;
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
@@ -1462,6 +1458,7 @@ function renderNonCodeTab(
   },
   openProviderSettings: (() => void) | undefined,
   drafts: NewTaskDrafts | undefined,
+  startPresentation: DraftStartPresentation = "new-task",
 ): React.ReactNode {
   // Code's welcome tab is only a routing placeholder. Keep one start surface
   // so a split or restored fallback never sends the reader through a second
@@ -1484,6 +1481,10 @@ function renderNonCodeTab(
       canvasContext,
       openProviderSettings,
       drafts,
+      // Opening Code with nothing chosen lands on Code Home: the composer
+      // with what is next, what to continue, and the cards. New task is the
+      // question and the composer alone.
+      "home",
     );
   }
   if (tab.kind === "draft-thread") {
@@ -1492,10 +1493,10 @@ function renderNonCodeTab(
     return (
       <NewTaskDraftScopeContext.Provider value={`${tab.mode}:${String(paneId)}`}>
         <DraftThreadWorkspace
-          greetingName={props.greetingName}
           key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevisions?.[String(paneId)] ?? 0)}`}
           {...(recentThreads.length === 0 ? {} : { recentThreads })}
           mode={tab.mode}
+          startPresentation={startPresentation}
           {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
           {...(props.selectedCreateHostId === undefined
             ? {}
@@ -2234,28 +2235,9 @@ function renderNonCodeTab(
   }
   if (tab.mode === "chat") {
     const recentThreads = draftRecentThreads("chat", props);
-    const home = props.homeStart;
     return (
       <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
         <ChatWelcome
-          greetingName={props.greetingName}
-          {...(home?.composerTabs === undefined ? {} : { composerTabs: home.composerTabs })}
-          {...(home?.cards === undefined
-            ? {}
-            : {
-                homeStart: (
-                  <HomeStart
-                    actions={[]}
-                    dashboard={
-                      <HomeDashboard
-                        cards={home.cards}
-                        customization={home.cardCustomization}
-                        onCustomizationChange={home.onCardCustomizationChange}
-                      />
-                    }
-                  />
-                ),
-              })}
           {...(recentThreads.length === 0 ? {} : { recentThreads })}
           {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
           {...(props.selectedCreateHostId === undefined
@@ -2304,9 +2286,6 @@ function renderNonCodeTab(
         (project) => project.type === tab.mode && project.lifecycle === "active",
       )}
       mode={tab.mode === "code" ? "code" : "work"}
-      greetingName={props.greetingName}
-      reviewCount={props.homeStart?.reviewCount}
-      runningCount={props.homeStart?.runningCount}
       onAddFolder={props.onAttachFolder ?? (() => {})}
       {...(props.onOpenDraftThread === undefined
         ? {}

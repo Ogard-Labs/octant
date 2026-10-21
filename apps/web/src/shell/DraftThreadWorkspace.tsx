@@ -96,10 +96,9 @@ import { ThreadComposer } from "../composer/ThreadComposer";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import { HostSelector } from "./HostSelector";
-import { HomeStart, type HomeAction } from "./HomeStart";
+import { HomeStart } from "./HomeStart";
 import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { HomeDashboard } from "../home/HomeDashboard";
-import { HomeComposerTabs, type HomeComposerTabsSlot } from "../home/HomeComposerTabs";
 import type { HomeCardDefinition } from "../home/homeCards";
 import type { OctantHostBridge } from "./hostBridge";
 import { WorkKindSwitch } from "./WorkKindSwitch";
@@ -110,10 +109,17 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 /** One row of the start screen's recent-work list. */
 export type DraftRecentThread = RecentThreadListItem;
 
+/**
+ * Which start screen a draft is. **Home** is where Code lands with nothing
+ * chosen: the composer with what is next, what to continue, prompt
+ * suggestions, and the cards. **New task** is the question and the composer
+ * alone, in every mode.
+ */
+export type DraftStartPresentation = "home" | "new-task";
+
 export interface DraftThreadWorkspaceProps {
   readonly mode: OctantMode;
-  /** The person's name from their profile, for the greeting on the hero. */
-  readonly greetingName?: string | undefined;
+  readonly startPresentation?: DraftStartPresentation;
   /**
    * What this mode already has open, shown under the composer. A start screen
    * with nothing below the prompt left most of the pane empty and gave the
@@ -222,24 +228,14 @@ export interface DraftThreadWorkspaceProps {
   readonly pendingMessage?: string;
   readonly onCancelFirstTurn?: () => void;
   /**
-   * What a Work or Code start screen offers under the composer besides its
-   * own sections: tiles for the next likely actions and the card area. Each
-   * action appears only when its owner supplies a way to do it.
+   * What a start screen offers under the composer besides its own sections:
+   * the card area.
    */
   readonly homeStart?: {
-    /** Finished threads waiting to be opened; the Review tile needs more than none. */
-    readonly reviewCount: number;
-    /** Every thread executing now, which the composer's quiet line counts. */
-    readonly runningCount: number;
-    readonly onReview?: () => void;
     /** The card registry for this screen; absent leaves the card area out. */
     readonly cards?: ReadonlyArray<HomeCardDefinition>;
     readonly cardCustomization: HomeCardCustomization;
     readonly onCardCustomizationChange: (next: HomeCardCustomization) => void;
-    /** The Running tab above the composer; absent leaves the composer on its own. */
-    readonly composerTabs?: HomeComposerTabsSlot;
-    /** Code only: a shell at the selected Project's root. Work has no shell. */
-    readonly onOpenTerminal?: (projectId: ProjectId) => void;
   };
   /**
    * What the Code start screen shows under the composer: the threads to
@@ -574,60 +570,19 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     else props.onAttachFolder?.();
   }
 
-  const homeStartNode = (() => {
-    const home = props.homeStart;
-    if (home === undefined) return undefined;
-    // Chat has no folder, terminal, or review to offer: its start screen
-    // carries the card area alone.
-    const actions: HomeAction[] = [];
-    if (
-      props.mode !== "chat" &&
-      (props.onCreateProject !== undefined || props.onAttachFolder !== undefined)
-    ) {
-      actions.push({
-        id: "add-folder",
-        title: "Add a folder",
-        detail:
-          props.mode === "code" ? "Bind a repository as a Project" : "Bind a folder as a Project",
-        onSelect: addFolder,
-      });
-    }
-    const terminalProjectId = selectedProject?.id;
-    const openTerminal = home.onOpenTerminal;
-    if (props.mode === "code" && openTerminal !== undefined && terminalProjectId !== undefined) {
-      actions.push({
-        id: "open-terminal",
-        title: "Open terminal",
-        detail: "A shell on this computer, in Octant",
-        onSelect: () => openTerminal(terminalProjectId),
-      });
-    }
-    const review = home.onReview;
-    if (home.reviewCount > 0 && review !== undefined) {
-      actions.push({
-        id: "review",
-        title: `Review ${String(home.reviewCount)} ${home.reviewCount === 1 ? "change" : "changes"}`,
-        detail: "Finished threads that wait for you",
-        onSelect: review,
-      });
-    }
-    return (
+  const home = props.startPresentation === "home";
+  const homeStartNode =
+    !home || props.homeStart?.cards === undefined ? undefined : (
       <HomeStart
-        actions={actions}
-        {...(home.cards === undefined
-          ? {}
-          : {
-              dashboard: (
-                <HomeDashboard
-                  cards={home.cards}
-                  customization={home.cardCustomization}
-                  onCustomizationChange={home.onCardCustomizationChange}
-                />
-              ),
-            })}
+        dashboard={
+          <HomeDashboard
+            cards={props.homeStart.cards}
+            customization={props.homeStart.cardCustomization}
+            onCustomizationChange={props.homeStart.onCardCustomizationChange}
+          />
+        }
       />
     );
-  })();
 
   const folderControl =
     props.mode === "chat" || props.mode === "code" || props.mode === "work" ? (
@@ -698,79 +653,74 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       props.linearPluginEnabled === true ? props.codeHome?.loadOpenLinearIssues : undefined;
     const fillPrompt = (text: string) =>
       setPromptRequest((current) => ({ text, revision: (current?.revision ?? 0) + 1 }));
-    const beneath =
-      githubHomeClient === undefined && linearHome === undefined && props.codeHome === undefined ? (
-        (props.recentThreads?.length ?? 0) === 0 ? undefined : (
-          <div className="code-home">
-            <RecentThreadList threads={props.recentThreads ?? []} />
-          </div>
-        )
-      ) : (
-        <CodeHome
-          {...(githubHomeClient === undefined ? {} : { githubClient: githubHomeClient })}
-          {...(linearHome === undefined ? {} : { loadAssignedLinearIssues: linearHome })}
-          {...(linearFresh === undefined ? {} : { loadOpenLinearIssues: linearFresh })}
-          {...(props.codeHome?.continueCards === undefined
-            ? {}
-            : { continueCards: props.codeHome.continueCards })}
-          {...(props.codeHome?.projectNames === undefined
-            ? {}
-            : { projectNames: props.codeHome.projectNames })}
-          {...(props.codeHome?.providerLabels === undefined
-            ? {}
-            : { providerLabels: props.codeHome.providerLabels })}
-          {...(props.codeHome?.onOpenThread === undefined
-            ? {}
-            : { onOpenThread: props.codeHome.onOpenThread })}
-          {...(props.codeHome?.onOpenInbox === undefined
-            ? {}
-            : { onOpenInbox: props.codeHome.onOpenInbox })}
-          {...(props.codeHome?.onOpenIssues === undefined
-            ? {}
-            : { onOpenIssues: props.codeHome.onOpenIssues })}
-          onPickGithub={(item) => {
-            const reference = `${item.owner}/${item.name}#${String(item.number)}`;
-            // Only an issue can be attached to the new thread, so picking a
-            // pull request has to take the previous issue back off: leaving it
-            // sent a "Review pull request …" draft away carrying an unrelated
-            // issue as its context.
-            setCreateFromSelection(
-              item.category === "issue"
-                ? {
-                    kind: "github",
-                    request: { owner: item.owner, name: item.name, number: item.number },
-                    label: reference,
-                  }
-                : undefined,
-            );
-            fillPrompt(
-              item.category === "issue"
-                ? `Work on ${reference}: ${item.title}`
-                : `Review pull request ${reference}: ${item.title}`,
-            );
-          }}
-          onPickIssue={adoptIssue}
-          onPickLinear={(row) => {
-            setCreateFromSelection({
-              kind: "linear",
-              request: { id: row.id },
-              label: row.identifier,
-            });
-            fillPrompt(`Work on ${row.identifier}: ${row.title}`);
-          }}
-        />
-      );
+    const beneath = !home ? undefined : githubHomeClient === undefined &&
+      linearHome === undefined &&
+      props.codeHome === undefined ? (
+      (props.recentThreads?.length ?? 0) === 0 ? undefined : (
+        <div className="code-home">
+          <RecentThreadList threads={props.recentThreads ?? []} />
+        </div>
+      )
+    ) : (
+      <CodeHome
+        {...(githubHomeClient === undefined ? {} : { githubClient: githubHomeClient })}
+        {...(linearHome === undefined ? {} : { loadAssignedLinearIssues: linearHome })}
+        {...(linearFresh === undefined ? {} : { loadOpenLinearIssues: linearFresh })}
+        {...(props.codeHome?.continueCards === undefined
+          ? {}
+          : { continueCards: props.codeHome.continueCards })}
+        {...(props.codeHome?.projectNames === undefined
+          ? {}
+          : { projectNames: props.codeHome.projectNames })}
+        {...(props.codeHome?.providerLabels === undefined
+          ? {}
+          : { providerLabels: props.codeHome.providerLabels })}
+        {...(props.codeHome?.onOpenThread === undefined
+          ? {}
+          : { onOpenThread: props.codeHome.onOpenThread })}
+        {...(props.codeHome?.onOpenInbox === undefined
+          ? {}
+          : { onOpenInbox: props.codeHome.onOpenInbox })}
+        {...(props.codeHome?.onOpenIssues === undefined
+          ? {}
+          : { onOpenIssues: props.codeHome.onOpenIssues })}
+        onPickGithub={(item) => {
+          const reference = `${item.owner}/${item.name}#${String(item.number)}`;
+          // Only an issue can be attached to the new thread, so picking a
+          // pull request has to take the previous issue back off: leaving it
+          // sent a "Review pull request …" draft away carrying an unrelated
+          // issue as its context.
+          setCreateFromSelection(
+            item.category === "issue"
+              ? {
+                  kind: "github",
+                  request: { owner: item.owner, name: item.name, number: item.number },
+                  label: reference,
+                }
+              : undefined,
+          );
+          fillPrompt(
+            item.category === "issue"
+              ? `Work on ${reference}: ${item.title}`
+              : `Review pull request ${reference}: ${item.title}`,
+          );
+        }}
+        onPickIssue={adoptIssue}
+        onPickLinear={(row) => {
+          setCreateFromSelection({
+            kind: "linear",
+            request: { id: row.id },
+            label: row.identifier,
+          });
+          fillPrompt(`Work on ${row.identifier}: ${row.title}`);
+        }}
+      />
+    );
     return (
       <>
         <CodeComposerAdapter
-          greetingName={props.greetingName}
-          reviewCount={props.homeStart?.reviewCount}
-          runningCount={props.homeStart?.runningCount}
-          suggestions={CODE_SUGGESTIONS}
+          {...(home ? { suggestions: CODE_SUGGESTIONS } : {})}
           {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
-          {...(props.homeStart?.composerTabs === undefined
-            ? {}
-            : { composerTabs: props.homeStart.composerTabs })}
           {...(beneath === undefined ? {} : { beneath })}
           {...(promptRequest === undefined ? {} : { promptRequest })}
           {...hostSelectorBinding}
@@ -887,14 +837,8 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     return (
       <>
         <WorkComposerAdapter
-          greetingName={props.greetingName}
           {...(promptRequest === undefined ? {} : { promptRequest })}
-          reviewCount={props.homeStart?.reviewCount}
-          runningCount={props.homeStart?.runningCount}
           {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
-          {...(props.homeStart?.composerTabs === undefined
-            ? {}
-            : { composerTabs: props.homeStart.composerTabs })}
           {...hostSelectorBinding}
           {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
           {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
@@ -1128,137 +1072,130 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     <section aria-label={`New ${presentation.eyebrow} thread`} className="draft-thread">
       <div className="draft-thread__canvas">
         <div className="draft-thread__welcome">
-          <WelcomeHeading
-            greetingName={props.greetingName}
-            reviewCount={props.homeStart?.reviewCount}
-            runningCount={props.homeStart?.runningCount}
-          />
+          <WelcomeHeading />
         </div>
-
-        <HomeComposerTabs slot={props.homeStart?.composerTabs}>
-          <div className="draft-thread__composer composer-stack">
-            {createFromControl}
-            <ThreadComposer
-              startContext={
-                <div className="composer-tray composer-tray--inside" aria-label="Thread context">
-                  {props.mode === "chat" ? <WorkKindSwitch /> : null}
-                  <DraftContextStrip
-                    mode={props.mode}
-                    {...hostSelectorBinding}
-                    {...(props.approvalLabel === undefined
-                      ? {}
-                      : { approvalLabel: props.approvalLabel })}
-                    {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
-                    {...(props.mode === "chat" || props.projectName === undefined
-                      ? {}
-                      : { projectName: props.projectName })}
-                    {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
-                  />
-                </div>
-              }
-              chips={<ComputerUseMention controller={computer} surface="chips" />}
-              typeahead={
-                slash.open ? (
-                  <ComposerSlashTypeahead controller={slash} />
-                ) : (
-                  <ComputerUseMention controller={computer} surface="typeahead" />
-                )
-              }
-              input={
-                <OctantTextarea
-                  aria-label="First message"
-                  aria-autocomplete="list"
-                  aria-expanded={computer.open || slash.open}
-                  aria-controls={
-                    computer.open ? computer.listId : slash.open ? slash.listId : undefined
-                  }
-                  aria-activedescendant={
-                    computer.open
-                      ? `${computer.listId}-computer`
-                      : slash.active === undefined
-                        ? undefined
-                        : `${slash.listId}-${slash.active.id}`
-                  }
-                  autoFocus
-                  className="composer-input"
-                  disabled={props.creating}
-                  onChange={(event) => {
-                    setPrompt(event.target.value);
-                    computer.sync(event.target.value, event.currentTarget.selectionStart);
-                    slash.sync(event.target.value, event.currentTarget.selectionStart);
-                  }}
-                  onClick={(event) => {
-                    slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                  }}
-                  onSelect={(event) => {
-                    slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
-                  }}
-                  onKeyDown={handleKeyDown}
-                  placeholder={presentation.composerPlaceholder}
-                  ref={textareaRef}
-                  rows={3}
-                  value={prompt}
+        <div className="draft-thread__composer composer-stack">
+          {createFromControl}
+          <ThreadComposer
+            startContext={
+              <div className="composer-tray composer-tray--inside" aria-label="Thread context">
+                {props.mode === "chat" ? <WorkKindSwitch /> : null}
+                <DraftContextStrip
+                  mode={props.mode}
+                  {...hostSelectorBinding}
+                  {...(props.approvalLabel === undefined
+                    ? {}
+                    : { approvalLabel: props.approvalLabel })}
+                  {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
+                  {...(props.mode === "chat" || props.projectName === undefined
+                    ? {}
+                    : { projectName: props.projectName })}
+                  {...(props.projectRoot === undefined ? {} : { projectRoot: props.projectRoot })}
                 />
-              }
-              row={{
-                leading: (
-                  <>
-                    {folderControl}
-                    <ComposerVoiceButton
-                      disabled={props.creating}
-                      onTranscript={(transcript) =>
-                        setPrompt((current) => appendTranscript(current, transcript))
-                      }
-                    />
-                    <span className="composer-gap" aria-hidden="true" />
-                    <ComposerModelPicker
-                      ariaLabel="Provider and model"
-                      disabled={props.creating === true}
-                      menuSide="bottom"
-                      groups={props.providerGroups}
-                      modelOptionValues={modelOptionValues}
-                      onModelOptionChange={(id, value) => {
-                        const rest = Object.fromEntries(
-                          Object.entries(modelOptionValues).filter(([key]) => key !== id),
-                        );
-                        setModelChoice({
-                          key: modelKey,
-                          values: value === undefined ? rest : { ...rest, [id]: value },
-                        });
-                      }}
-                      onSelect={props.onSelectProvider}
-                      {...(props.onOpenSettings === undefined
-                        ? {}
-                        : { onOpenSettings: props.onOpenSettings })}
-                      {...(props.selectedModelId === undefined
-                        ? {}
-                        : { selectedModelId: props.selectedModelId })}
-                      {...(props.selectedProviderInstanceId === undefined
-                        ? {}
-                        : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-                    />
-                  </>
-                ),
-                actions: {
-                  kind: "send",
-                  send: { ariaLabel: "Create thread", disabled: !canSubmit, onSend: submit },
-                },
-              }}
-            />
-            {props.errorMessage === undefined ? null : (
-              <OctantAlert className="draft-thread__error" tone="danger">
-                {props.errorMessage}
-              </OctantAlert>
-            )}
-            <p className="draft-thread__hint">
-              Press Enter to start · Shift+Enter for a new line · Escape to close
-            </p>
-          </div>
-        </HomeComposerTabs>
+              </div>
+            }
+            chips={<ComputerUseMention controller={computer} surface="chips" />}
+            typeahead={
+              slash.open ? (
+                <ComposerSlashTypeahead controller={slash} />
+              ) : (
+                <ComputerUseMention controller={computer} surface="typeahead" />
+              )
+            }
+            input={
+              <OctantTextarea
+                aria-label="First message"
+                aria-autocomplete="list"
+                aria-expanded={computer.open || slash.open}
+                aria-controls={
+                  computer.open ? computer.listId : slash.open ? slash.listId : undefined
+                }
+                aria-activedescendant={
+                  computer.open
+                    ? `${computer.listId}-computer`
+                    : slash.active === undefined
+                      ? undefined
+                      : `${slash.listId}-${slash.active.id}`
+                }
+                autoFocus
+                className="composer-input"
+                disabled={props.creating}
+                onChange={(event) => {
+                  setPrompt(event.target.value);
+                  computer.sync(event.target.value, event.currentTarget.selectionStart);
+                  slash.sync(event.target.value, event.currentTarget.selectionStart);
+                }}
+                onClick={(event) => {
+                  slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                }}
+                onSelect={(event) => {
+                  slash.sync(event.currentTarget.value, event.currentTarget.selectionStart);
+                }}
+                onKeyDown={handleKeyDown}
+                placeholder={presentation.composerPlaceholder}
+                ref={textareaRef}
+                rows={3}
+                value={prompt}
+              />
+            }
+            row={{
+              leading: (
+                <>
+                  {folderControl}
+                  <ComposerVoiceButton
+                    disabled={props.creating}
+                    onTranscript={(transcript) =>
+                      setPrompt((current) => appendTranscript(current, transcript))
+                    }
+                  />
+                  <span className="composer-gap" aria-hidden="true" />
+                  <ComposerModelPicker
+                    ariaLabel="Provider and model"
+                    disabled={props.creating === true}
+                    menuSide="bottom"
+                    groups={props.providerGroups}
+                    modelOptionValues={modelOptionValues}
+                    onModelOptionChange={(id, value) => {
+                      const rest = Object.fromEntries(
+                        Object.entries(modelOptionValues).filter(([key]) => key !== id),
+                      );
+                      setModelChoice({
+                        key: modelKey,
+                        values: value === undefined ? rest : { ...rest, [id]: value },
+                      });
+                    }}
+                    onSelect={props.onSelectProvider}
+                    {...(props.onOpenSettings === undefined
+                      ? {}
+                      : { onOpenSettings: props.onOpenSettings })}
+                    {...(props.selectedModelId === undefined
+                      ? {}
+                      : { selectedModelId: props.selectedModelId })}
+                    {...(props.selectedProviderInstanceId === undefined
+                      ? {}
+                      : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                  />
+                </>
+              ),
+              actions: {
+                kind: "send",
+                send: { ariaLabel: "Create thread", disabled: !canSubmit, onSend: submit },
+              },
+            }}
+          />
+          {props.errorMessage === undefined ? null : (
+            <OctantAlert className="draft-thread__error" tone="danger">
+              {props.errorMessage}
+            </OctantAlert>
+          )}
+          <p className="draft-thread__hint">
+            Press Enter to start · Shift+Enter for a new line · Escape to close
+          </p>
+        </div>
 
         {homeStartNode}
 
-        {(props.recentThreads?.length ?? 0) === 0 ? (
+        {home && (props.recentThreads?.length ?? 0) === 0 ? (
           <div className="draft-thread__intent-cards" role="group" aria-label="Suggested actions">
             {presentation.intentCards.map((card) => (
               <OctantButton
@@ -1275,7 +1212,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           </div>
         ) : null}
 
-        <RecentThreadList threads={props.recentThreads ?? []} />
+        {home ? <RecentThreadList threads={props.recentThreads ?? []} /> : null}
       </div>
     </section>
   );

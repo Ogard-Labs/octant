@@ -31,7 +31,7 @@ connection details, have a Save button.
 ### Style
 
 **Style** sits under the color scheme. **Default** keeps the app monochrome.
-**Vivid** adds colour where something has a name: the welcome greeting, the
+**Vivid** adds colour where something has a name: the welcome question, the
 sidebar's count tiles, board columns, and each Project's colour. Vivid uses
 your preset's palette, so it changes with light and dark, and it never
 recolours a warning or an error. It looks best in the light theme.
@@ -45,7 +45,7 @@ so it stays readable in both light and dark.
 ### Style
 
 **Style** sits under the color scheme. **Default** keeps the app monochrome.
-**Vivid** adds colour where something has a name: the welcome greeting, the
+**Vivid** adds colour where something has a name: the welcome question, the
 sidebar's count tiles, board columns, and each Project's colour. Vivid uses
 your preset's palette, so it changes with light and dark, and it never
 recolours a warning or an error. It looks best in the light theme.

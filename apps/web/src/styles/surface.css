@@ -355,10 +355,11 @@
 }
 
 /* ── Welcome composer ──────────────────────────────────────────────────
-   Chat, Work, and Code start from the same geometry: one hero question and
-   the raised `.composer`, with `.composer-tray--above` carrying where the
-   thread runs in a quiet row above the card. The per-mode adapters only
-   decide which controls sit on that row. */
+   Chat, Work, and Code start from the same geometry: one question in the
+   middle of the page and the raised `.composer` docked at its foot, where it
+   sits once the thread starts, so the first message is typed where every
+   later one is. The per-mode adapters only decide which controls sit in the
+   composer's tray. */
 
 .welcome {
   display: flex;
@@ -368,16 +369,25 @@
   align-items: stretch;
   justify-content: flex-start;
   min-height: 100%;
-  padding-block: min(16vh, 148px) 48px;
+  padding-block: min(8vh, 64px) var(--oct-space-5);
   margin: 0 auto;
   gap: var(--oct-space-4);
 }
 
+/* The question takes the free height and centres in it, which is what docks
+   the composer at the foot of the page. */
 .welcome__heading {
   display: grid;
+  flex: 1 1 auto;
+  align-content: center;
   justify-items: center;
   gap: var(--oct-space-2);
   text-align: center;
+}
+
+.welcome__mark {
+  margin-bottom: var(--oct-space-2);
+  color: var(--octant-text-primary);
 }
 
 .welcome__heading > .oct-title--hero {
@@ -385,7 +395,7 @@
   margin: 0 auto;
 }
 
-/* The date and what is running sit under the greeting, quieter than it. */
+/* Where to begin sits under the question, quieter than it. */
 .welcome__status {
   margin: 0;
 }
@@ -590,9 +600,9 @@
   color: var(--octant-text-primary);
 }
 
-/* Under one start screen the ground clears a hole for the composer. The hole
-   is measured in pixels because the composer is: it sits under a capped top
-   padding, so its place does not scale with the pane.
+/* Under one start screen the ground softens behind the question, which sits
+   in the middle of the page, and fades out toward the foot, so the composer
+   docked there keeps a calm page to be read against.
 
    The ground stays at z-index 0 and the start screen's own content is lifted
    above it: at -1 the ground disappeared entirely behind the workspace fill,
@@ -601,16 +611,16 @@
 .app-backdrop[data-placement="welcome"] {
   mask-image:
     radial-gradient(
-      ellipse 680px 380px at 50% 290px,
+      ellipse 560px 240px at 50% 44%,
       transparent 42%,
       color-mix(in srgb, currentColor 40%, transparent) 70%,
       currentColor 100%
     ),
     linear-gradient(
       to bottom,
-      currentColor 30%,
-      color-mix(in srgb, currentColor 35%, transparent) 58%,
-      transparent 86%
+      currentColor 62%,
+      color-mix(in srgb, currentColor 35%, transparent) 80%,
+      transparent 94%
     );
   mask-size: 100% 100%;
   mask-repeat: no-repeat;
@@ -625,16 +635,16 @@
 :root[data-octant-theme-mode="light"] .app-backdrop[data-placement="welcome"] {
   mask-image:
     radial-gradient(
-      ellipse 680px 380px at 50% 290px,
+      ellipse 560px 240px at 50% 44%,
       transparent 42%,
       color-mix(in srgb, currentColor 40%, transparent) 70%,
       currentColor 100%
     ),
     linear-gradient(
       to bottom,
-      currentColor 22%,
-      color-mix(in srgb, currentColor 25%, transparent) 46%,
-      transparent 66%
+      currentColor 56%,
+      color-mix(in srgb, currentColor 25%, transparent) 74%,
+      transparent 90%
     );
 }
 

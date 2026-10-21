@@ -843,30 +843,6 @@ function LaunchedShell(
     if (!zen.active) return;
     void zen.refreshThreads();
   }, [zen.active, zen.refreshThreads]);
-  // A Project terminal lives only as a Zen card, so Open terminal on a start
-  // screen asks Zen to hold it. The card cannot be pinned until Zen is loaded
-  // and active, so the request waits here for that instead of racing the
-  // entry. A request Zen never honours expires rather than opening a shell
-  // the next time the person happens to enter Zen.
-  const [homeTerminalProjectId, setHomeTerminalProjectId] = useState<ProjectId>();
-  // Start screens stay up until Zen is active, so a second click can arrive
-  // while the first entry is pending; only the latest request may expire.
-  const homeTerminalRequest = useRef(0);
-  useEffect(() => {
-    if (homeTerminalProjectId === undefined || !zen.active || zen.space === null) return;
-    setHomeTerminalProjectId(undefined);
-    void addZenProjectTerminal(homeTerminalProjectId);
-  }, [homeTerminalProjectId, zen.active, zen.space]);
-  function openHomeTerminal(projectId: ProjectId): void {
-    const request = ++homeTerminalRequest.current;
-    setHomeTerminalProjectId(projectId);
-    if (zen.active) return;
-    void zen.enterZen().finally(() => {
-      window.setTimeout(() => {
-        if (homeTerminalRequest.current === request) setHomeTerminalProjectId(undefined);
-      }, 3_000);
-    });
-  }
   // A renderer older than the host-backed setting stored each sidebar view's
   // row choice in localStorage. Adopt it once, as soon as the host's settings
   // are in hand: after that a person may have changed the host record, and a
@@ -4436,7 +4412,6 @@ function LaunchedShell(
       openDraftInProject,
       openDraftThread: controller.openDraftThread,
       openGithubIssues,
-      openHomeTerminal,
       openImageLibrary,
       openInbox,
       openLinearIssues,
@@ -4577,7 +4552,6 @@ function LaunchedShell(
     codeCheckouts: codeController.bootstrap?.checkouts ?? NO_CODE_CHECKOUTS,
     codeClient,
     codeThreads: codeController.bootstrap?.threads ?? NO_CODE_THREADS,
-    continueCards,
     feedRevision: pendingRequestFeedRevision,
     computerSnapshots,
     githubPullRequestCapability,
@@ -4585,7 +4559,6 @@ function LaunchedShell(
     hostResourceClient,
     isDesktop: props.hostBridge !== undefined,
     loadHomePullRequests,
-    navigation: navigationModel,
     needsYouThreadProviders,
     now: minuteNow.getTime(),
     openRunningServiceLive,
@@ -4595,7 +4568,6 @@ function LaunchedShell(
     runningServicesRemoteHost,
     serverUrl: props.launch.serverUrl,
     settings: controller.settings,
-    sidebarRunningCount: sidebarTileCounts.running,
     workingNowBoardFacts,
     workingNowHost,
     workingNowModes,
