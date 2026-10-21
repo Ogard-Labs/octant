@@ -300,6 +300,13 @@ export function ShellSidebar(props: ShellSidebarProps) {
           },
         ];
   });
+  const customizeSidebar = () =>
+    props.onOpenSettings({ section: "appearance", setting: "sidebar-destinations" });
+  // Projects is a rail place like the others when the person keeps it shown;
+  // its own action stays out of the destination list so it sits after
+  // Activity, where the rail keeps its Project controls.
+  const projectsShown =
+    destinationRows.includes("projects") && navigationActions.projects !== undefined;
   const besideRail =
     props.railBeside === undefined ? null : (
       <SidebarRail
@@ -310,6 +317,26 @@ export function ShellSidebar(props: ShellSidebarProps) {
         {...(props.railBeside.onOpenActivity === undefined
           ? {}
           : { onOpenActivity: props.railBeside.onOpenActivity })}
+        {...(projectsShown && navigationActions.projects !== undefined
+          ? {
+              onOpenProjects: navigationActions.projects,
+              projectsActive: props.activeDestination === "projects",
+            }
+          : {})}
+        {...(moreActions.length === 0
+          ? {}
+          : {
+              more: (
+                <SidebarMore
+                  {...(props.activeDestination === undefined
+                    ? {}
+                    : { activeDestination: props.activeDestination })}
+                  items={moreActions}
+                  onCustomizeSidebar={customizeSidebar}
+                  presentation="rail"
+                />
+              ),
+            })}
         onOpenSettings={() => props.onOpenSettings()}
         usage={props.railUsage}
         onSelectMode={props.onSelectMode}
@@ -318,9 +345,10 @@ export function ShellSidebar(props: ShellSidebarProps) {
         tiles={tiles}
       />
     );
-  // Beside the rail the sidebar would repeat what the rail already shows.
+  // Beside the rail the sidebar would repeat what the rail already shows:
+  // the places, Projects, and More all live in the rail, and the sidebar keeps
+  // the threads and the Project list (which rides on the Projects entry).
   const sidebarTiles = besideRail === null ? tiles : [];
-  // Projects stays: its row heads the Project list the sidebar is left with.
   const sidebarRows =
     besideRail === null ? destinationRows : destinationRows.filter((id) => id === "projects");
   if (props.rail !== undefined) {
@@ -504,9 +532,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
                 ? {}
                 : { counts: { inbox: props.inboxCount } })}
               input={navigationInput}
-              // More stays in the sidebar beside the rail too: its menu ends in
-              // Customize sidebar, which the rail has no room to show.
-              {...(moreActions.length === 0
+              {...(moreActions.length === 0 || besideRail !== null
                 ? {}
                 : {
                     more: (
@@ -515,18 +541,14 @@ export function ShellSidebar(props: ShellSidebarProps) {
                           ? {}
                           : { activeDestination: props.activeDestination })}
                         items={moreActions}
-                        onCustomizeSidebar={() =>
-                          props.onOpenSettings({
-                            section: "appearance",
-                            setting: "sidebar-destinations",
-                          })
-                        }
+                        onCustomizeSidebar={customizeSidebar}
                       />
                     ),
                   })}
               projectSection={
                 props.projectsDirectory === undefined ? props.projectSection : undefined
               }
+              projectsRowInRail={besideRail !== null}
               rows={sidebarRows}
             />
             {chatStatusMessage === undefined ? null : (

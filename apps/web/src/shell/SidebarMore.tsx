@@ -17,6 +17,8 @@ export interface SidebarMoreProps {
   readonly items: ReadonlyArray<SidebarSecondaryAction>;
   readonly onCustomizeSidebar: () => void;
   readonly activeDestination?: SidebarNavigationDescriptorId;
+  /** A row in the sidebar, or one icon in the rail beside it. */
+  readonly presentation?: "row" | "rail";
 }
 
 /**
@@ -28,14 +30,27 @@ export function SidebarMore(props: SidebarMoreProps) {
   const holdsActive = props.items.some((item) => item.id === props.activeDestination);
   return (
     <OctantMenuRoot>
-      <OctantMenuTrigger
-        aria-current={holdsActive ? "page" : undefined}
-        aria-label="More destinations"
-        className="sidebar-item window-no-drag justify-start"
-      >
-        <Ellipsis aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
-        <span className="sidebar-label">More</span>
-      </OctantMenuTrigger>
+      {props.presentation === "rail" ? (
+        <OctantMenuTrigger
+          aria-current={holdsActive ? "page" : undefined}
+          aria-label="More destinations"
+          className="sidebar-rail__button window-no-drag"
+          title="More"
+        >
+          <span aria-hidden="true" className="sidebar-rail__face">
+            <Ellipsis size={16} strokeWidth={1.7} />
+          </span>
+        </OctantMenuTrigger>
+      ) : (
+        <OctantMenuTrigger
+          aria-current={holdsActive ? "page" : undefined}
+          aria-label="More destinations"
+          className="sidebar-item window-no-drag justify-start"
+        >
+          <Ellipsis aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+          <span className="sidebar-label">More</span>
+        </OctantMenuTrigger>
+      )}
       <OctantMenuPortal>
         <OctantMenuPositioner align="start" side="right">
           <OctantMenuPopup

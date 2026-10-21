@@ -205,7 +205,7 @@ html[data-octant-native-host="true"]
    column. The rail is one icon wide; in the desktop app it widens just
    enough to clear the native traffic lights that sit at its top. */
 .shell.shell-frame.shell--sidebar-rail {
-  --octant-rendered-sidebar-width: 56px;
+  --octant-rendered-sidebar-width: 48px;
   grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
 }
 
@@ -224,14 +224,21 @@ html[data-octant-native-host="true"]
    right by the rail's width; the sidebar column keeps its own width rules,
    including the Projects pane and the wide-context clamp. */
 .shell.shell-frame.shell--rail-beside {
-  --octant-rail-offset: 56px;
+  --octant-rail-offset: 48px;
   grid-template-columns:
     var(--octant-rail-offset) var(--octant-rendered-sidebar-width)
     minmax(0, 1fr);
 }
 
-.shell.shell-frame.shell--rail-beside:has(> .sidebar-rail[data-native-host]) {
-  --octant-rail-offset: 76px;
+/* Beside the open sidebar the rail stays one narrow icon column in the desktop
+   app too: the traffic lights sit in the title band, which runs on over the
+   sidebar's head, so that head keeps the rest of their width clear instead of
+   the whole rail widening for them. */
+.shell--rail-beside.shell-frame > .sidebar .sidebar__native-leading {
+  padding-left: max(
+    var(--oct-space-3),
+    calc(var(--octant-native-traffic-light-leading-width, 74px) - var(--octant-rail-offset))
+  );
 }
 
 .shell--rail-beside.shell-frame > .sidebar {
@@ -296,8 +303,8 @@ html[data-octant-native-host="true"]
   --sidebar-rail-fill: transparent;
   position: relative;
   display: flex;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   align-items: center;
   justify-content: center;
   border-radius: var(--oct-radius-sm);
@@ -306,10 +313,10 @@ html[data-octant-native-host="true"]
 }
 
 /* The shared button recipe sizes every glyph inside a button to 1rem, which
-   drew the rail's 20px icons at 13px; the rail keeps the size it asks for. */
+   drew the rail's icons at 13px; the rail keeps the size it asks for. */
 .sidebar-rail__face > svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 
 .sidebar-rail__button:hover .sidebar-rail__face,

@@ -1,11 +1,11 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import {
-  CircleCheck,
-  CirclePlay,
-  Eye,
-  Folder,
-  History,
+  Activity,
+  CheckCheck,
+  ClipboardCheck,
+  Folders,
   Inbox,
+  LoaderCircle,
   PanelLeftOpen,
   Search,
   Settings,
@@ -53,19 +53,23 @@ export interface SidebarRailProps {
   }>;
   readonly projects: ReadonlyArray<SidebarRailProject>;
   readonly onOpenProjects?: () => void;
+  /** Whether the Projects page is the one showing. */
+  readonly projectsActive?: boolean;
   readonly onOpenActivity?: () => void;
   readonly onOpenSettings: () => void;
   /** Plan usage rings, drawn at the foot above Settings. */
   readonly usage?: ReactNode;
+  /** The More menu: destinations the rail does not list, and Customize sidebar. */
+  readonly more?: ReactNode;
 }
 
 const TILE_RAIL: Readonly<
   Record<SidebarTileId, { readonly label: string; readonly icon: LucideIcon }>
 > = {
   inbox: { label: "Inbox", icon: Inbox },
-  running: { label: "Running", icon: CirclePlay },
-  review: { label: "To review", icon: Eye },
-  done: { label: "Done today", icon: CircleCheck },
+  running: { label: "Running", icon: LoaderCircle },
+  review: { label: "To review", icon: ClipboardCheck },
+  done: { label: "Done today", icon: CheckCheck },
 };
 
 /** Projects past this many wait behind the folder button rather than scroll the rail. */
@@ -170,12 +174,18 @@ export function SidebarRail(props: SidebarRailProps) {
             </span>
           </RailButton>
         ))}
-        {props.onOpenProjects === undefined ? null : (
-          <RailButton icon={Folder} label="Projects" onSelect={props.onOpenProjects} />
-        )}
         {props.onOpenActivity === undefined ? null : (
-          <RailButton icon={History} label="Activity feed" onSelect={props.onOpenActivity} />
+          <RailButton icon={Activity} label="Activity feed" onSelect={props.onOpenActivity} />
         )}
+        {props.onOpenProjects === undefined ? null : (
+          <RailButton
+            active={props.projectsActive === true}
+            icon={Folders}
+            label="Projects"
+            onSelect={props.onOpenProjects}
+          />
+        )}
+        {props.more}
         <span aria-hidden="true" className="sidebar-rail__spacer" />
         {props.usage}
         <RailButton icon={Settings} label="Settings" onSelect={props.onOpenSettings} />

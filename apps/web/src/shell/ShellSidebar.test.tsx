@@ -1029,7 +1029,7 @@ describe("ShellSidebar", () => {
     expect(onExpand).toHaveBeenCalledOnce();
   });
 
-  it("stands the rail beside the open sidebar, which keeps only its header, Projects, and threads", async () => {
+  it("stands the rail beside the open sidebar, with Projects and More, and leaves the sidebar its header, Project list, and threads", async () => {
     const user = userEvent.setup();
     const actions = {
       "new-code-thread": vi.fn(),
@@ -1037,6 +1037,7 @@ describe("ShellSidebar", () => {
       "thread-board": vi.fn(),
       "pull-requests": vi.fn(),
       projects: vi.fn(),
+      agents: vi.fn(),
     };
     render(
       <ShellSidebar
@@ -1066,6 +1067,12 @@ describe("ShellSidebar", () => {
     expect(within(sidebar).queryByRole("button", { name: "Pull requests" })).toBeNull();
     expect(within(sidebar).queryByRole("button", { name: /^Inbox/ })).toBeNull();
     expect(within(sidebar).getByRole("navigation", { name: "Projects" })).toBeInTheDocument();
+    // Projects and More are rail places now; the sidebar keeps the Project list.
+    await user.click(within(rail).getByRole("button", { name: "Projects" }));
+    expect(actions.projects).toHaveBeenCalledOnce();
+    expect(within(sidebar).queryByRole("button", { name: "Projects" })).toBeNull();
+    expect(within(rail).getByRole("button", { name: "More destinations" })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "More destinations" })).toBeNull();
   });
 
   it("renders the rows in the customized order", () => {
