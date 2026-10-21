@@ -150,7 +150,18 @@ export function FloatingComposer(props: FloatingComposerProps) {
             <Text style={styles.busyHint} testID="mobile-composer-busy">
               {props.busyLabel ?? "Working"}
             </Text>
-          ) : null}
+          ) : (
+            // Phone voice input is not wired; the spec keeps the affordance
+            // visible so the missing capability is stated, not hidden.
+            <IconButton
+              accessibilityLabel="Voice input unavailable"
+              disabled
+              name="mic-outline"
+              size={34}
+              testID="mobile-composer-voice-disabled"
+              variant="ghost"
+            />
+          )}
           {props.busy === true && props.onStop !== undefined ? (
             <IconButton
               accessibilityLabel="Stop"
