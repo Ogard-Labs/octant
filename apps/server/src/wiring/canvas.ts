@@ -77,7 +77,11 @@ import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
 } from "../canvas/canvasExportTargets";
-import { authorizeCanvasInventoryAccess, defaultShellSettings } from "@octant/domain";
+import {
+  authorizeCanvasInventoryAccess,
+  chatThreadHoldsCanvas as threadLifecycleHoldsCanvas,
+  defaultShellSettings,
+} from "@octant/domain";
 import { type CanvasAgentToolPort, createChildCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { loadChildCanvasWorkspace } from "../canvas/childCanvasWorkspace";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
@@ -189,11 +193,36 @@ export function wireCanvas(deps: CanvasDependencies) {
   // One server-owned Canvas authority, shared by every Canvas mutation
   // including sharing, so a share can never be admitted under weaker checks
   // than a revise or a refresh.
+  // A Chat thread in no Chat Project may own a Canvas of its own. Such a
+  // Canvas is read wherever its thread is: a person's window in Chat may
+  // reach it while the thread exists and is not being deleted, whatever
+  // Project the window shows, because the thread itself has no Project
+  // authority to match; an agent reaches it only from the thread that owns
+  // it, since no Project makes it a neighbour's. Deleting the thread takes
+  // the Canvas out of reach; the purge erases it with the thread. The shell
+  // restores and opens such a Canvas's tab under the same lifecycle rule.
+  const chatThreadHoldsCanvas = (threadId: string): boolean => {
+    let thread;
+    try {
+      thread = persistence.readChatThread(decodeChatThreadId(threadId));
+    } catch {
+      return false;
+    }
+    return threadLifecycleHoldsCanvas(thread);
+  };
   const authorizeCanvas: CanvasServiceDependencies["authorize"] = (entry, context, project) => {
+    const provenance = entry.currentVersion.definition.provenance;
+    if (provenance.projectId === null) {
+      return (
+        context.mode === "chat" &&
+        (context.originThreadId === undefined ||
+          context.originThreadId === String(provenance.threadId)) &&
+        chatThreadHoldsCanvas(String(provenance.threadId))
+      );
+    }
     if (context.projectId === null || project === undefined || project.lifecycle !== "active") {
       return false;
     }
-    const provenance = entry.currentVersion.definition.provenance;
     let activeProjectId: ProjectId;
     try {
       activeProjectId = decodeProjectId(context.projectId);
@@ -314,7 +343,7 @@ export function wireCanvas(deps: CanvasDependencies) {
    * current revision, and a Code file only under the thread's checkout.
    */
   const canvasDesignAssetPorts: CanvasDesignAssetPorts = {
-    generatedImage: async ({ imageId, projectId, maximumBytes }) => {
+    generatedImage: async ({ imageId, projectId, threadId, maximumBytes }) => {
       const job = imageJobService.completedJobFor(imageId);
       if (job === undefined) return { status: "unavailable", reason: "missing" };
       const artifact = job.artifacts.find(
@@ -335,7 +364,13 @@ export function wireCanvas(deps: CanvasDependencies) {
       if (owner.lifecycle === "deleted" || owner.lifecycle === "deleting") {
         return { status: "unavailable", reason: "missing" };
       }
-      if (owner.projectId === undefined || String(owner.projectId) !== projectId) {
+      // A Canvas owned by its thread reaches only images that thread made;
+      // a Project Canvas reaches those of any thread in its Project.
+      if (projectId === null) {
+        if (job.threadKind !== "chat-thread" || String(job.scopeId) !== threadId) {
+          return { status: "unavailable", reason: "refused" };
+        }
+      } else if (owner.projectId === undefined || String(owner.projectId) !== projectId) {
         return { status: "unavailable", reason: "refused" };
       }
       if (artifact.size > maximumBytes) return { status: "unavailable", reason: "too-large" };
@@ -459,7 +494,8 @@ export function wireCanvas(deps: CanvasDependencies) {
           message: "The Project or thread this artifact belongs to is no longer available.",
         };
       }
-      const project = persistence.readProject(provenance.projectId);
+      const project =
+        provenance.projectId === null ? undefined : persistence.readProject(provenance.projectId);
       const result = canvasService.revise(
         {
           schemaVersion: 1,
@@ -488,7 +524,7 @@ export function wireCanvas(deps: CanvasDependencies) {
         },
         {
           mode: provenance.mode,
-          projectId: String(provenance.projectId),
+          projectId: provenance.projectId === null ? null : String(provenance.projectId),
           hostId: String(LOCAL_HOST_ID),
           workspace,
           originThreadId: String(provenance.threadId),
@@ -782,6 +818,19 @@ export function wireCanvas(deps: CanvasDependencies) {
       },
       resolveWorkspace: resolveCanvasWorkspace,
       authorize: authorizeCanvas,
+      // Only an active Chat thread outside every Chat Project owns its own
+      // Canvas; a thread in a Project has that Project to hold it.
+      threadMayOwnCanvas: (threadId) => {
+        let thread;
+        try {
+          thread = persistence.readChatThread(decodeChatThreadId(threadId));
+        } catch {
+          return false;
+        }
+        return (
+          thread !== undefined && thread.lifecycle === "active" && thread.projectId === undefined
+        );
+      },
     },
   );
   // One browser seam draws both the agent's preview and a picture export.
@@ -972,8 +1021,11 @@ export function wireCanvas(deps: CanvasDependencies) {
     folderFor: (canvasId) => {
       const entry = persistence.canvasProjection.getById(canvasId);
       if (entry === undefined) return undefined;
+      // A Canvas owned by its thread exports to the host folder, the one
+      // chosen for everything without a Project of its own.
+      const projectId = entry.currentVersion.definition.provenance.projectId;
       return canvasExportFolderService.folderFor(
-        String(entry.currentVersion.definition.provenance.projectId),
+        projectId === null ? undefined : String(projectId),
       );
     },
     files: canvasExportFilePort,

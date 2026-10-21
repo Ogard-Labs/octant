@@ -50,11 +50,14 @@ export type HostExportProjectMemory = typeof HostExportProjectMemory.Type;
 
 /**
  * One Canvas the host holds, including the current definition an artifact
- * bundle would carry. Version history stays in the journal.
+ * bundle would carry. Version history stays in the journal. A Canvas a Chat
+ * thread owns outside every Project names no Project here; its owner is the
+ * thread in `definition.provenance`. Older cuts always named a Project and
+ * still decode.
  */
 export const HostExportCanvas = Schema.Struct({
   canvasId: CanvasId,
-  projectId: ProjectId,
+  projectId: Schema.NullOr(ProjectId),
   mode: OctantMode,
   title: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
   updatedAt: UtcTimestamp,

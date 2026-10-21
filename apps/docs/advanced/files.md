@@ -74,9 +74,16 @@ deep links, and recent items.
 Agents receive usage instructions with the tools available to their current
 task. In Chat, Work, and Code, and for a managed child run bound to its own
 workspace, `octant_canvas` creates and revises structured
-plans, designs, reports, reviews, diagrams, tables, and dashboards. A Chat thread
-outside a Chat Project, and a managed child run in Chat mode, are not offered the
-tool, because a Canvas there has no Project to belong to. When the answer is
+plans, designs, reports, reviews, diagrams, tables, and dashboards. A Chat
+thread in a Chat Project makes Canvases in that Project; a Chat thread filed
+under no Project makes Canvases that belong to the thread itself. Such a
+Canvas has the same limits as any Chat Canvas (no files, shell, Git, or
+network, and a design can show only images generated in that thread), stays
+with its thread even if you later move the thread into a Project, is erased
+when you purge the thread, exports to the host's export folder, and is not
+mirrored, synced, or shared, and does not appear in the Project-grouped
+library; open it from its thread. A managed child run in Chat mode is not
+offered the tool. When the answer is
 something you will keep, share, present, or come back to (a report, memo, plan,
 slide deck, dashboard, web page, design, or prototype, or any reply long enough
 to need headings, tables, or charts), the agent builds it as a Canvas and
@@ -146,7 +153,9 @@ read, such as a brief or an article, the agent can ask for it to be shown in
 the thread (`"presentation": "inline"`). The Canvas then appears at the end of
 the turn that made it, drawn with the same blocks it has in the sidebar. It is
 still one Canvas: it keeps its versions, it appears in your library, and you
-can share or export it. Any other Canvas appears there as a row that opens it.
+can share or export it (a Canvas made in a Chat thread filed under no Project
+exports but is not listed in the library or shared). Any other Canvas appears
+there as a row that opens it.
 
 - **Open in sidebar** (the panel icon) opens the same Canvas in the sidebar next to a Work or
   Code thread. There you can comment, edit a board or plan, and see its

@@ -198,18 +198,66 @@ describe("createCanvasAgentTools", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("offers no Canvas tool to a Chat thread that is outside a Chat Project", () => {
+  it("offers the Canvas tool to a Chat thread outside a Chat Project and binds its Canvas to the thread alone", async () => {
     const { projectId: _projectId, ...projectless } = thread as unknown as Record<string, unknown>;
+    const create = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+      kind: "accepted" as const,
+      card: { canvasId: "canvas-1", versionId: "version-1" },
+    }));
+    const threadReferenceCards = vi.fn(() => []);
+    // The window's Chat Project, if it has one, is not where this Canvas goes.
+    const activeContext = vi.fn(() => {
+      throw new Error("A thread outside a Project never reads the window's Project.");
+    });
     const set = createCanvasAgentTools({
       windowId,
       thread: projectless as never,
-      port: { activeContext: vi.fn(), project: vi.fn(), canvas: {} } as never,
+      port: {
+        activeContext,
+        project: vi.fn(),
+        canvas: { create, revise: vi.fn(), get: vi.fn(), threadReferenceCards },
+        markReader: vi.fn(() => ({ status: "nothing-to-mark" })),
+        uuid: vi.fn(() => "55555555-5555-4555-8555-555555555555"),
+        hostId: "66666666-6666-4666-8666-666666666666",
+      } as never,
     });
 
-    expect(set.definitions).toEqual([]);
-    expect(tools().set.definitions.map((definition) => definition.name)).toEqual([
-      CANVAS_TOOL_NAME,
-    ]);
+    expect(set.definitions.map((definition) => definition.name)).toEqual([CANVAS_TOOL_NAME]);
+    expect(set.definitions[0]?.description).toContain("bound to this Chat thread");
+
+    const created = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "create", title: "Memo", blocks: [diagram] }),
+    });
+    expect(created.isError).not.toBe(true);
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "chat",
+        workspace: { kind: "chat-virtual", projectId: null },
+        originThreadId: threadId,
+        requestedAuthority: expect.objectContaining({
+          filesystem: false,
+          shell: false,
+          git: false,
+          network: false,
+        }),
+      }),
+      { mode: "chat", projectId: null, originThreadId: threadId },
+      undefined,
+      [expect.objectContaining({ blockId: "authored-diagram" })],
+    );
+
+    const listed = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "list" }),
+    });
+    expect(listed.isError).not.toBe(true);
+    expect(threadReferenceCards).toHaveBeenCalledWith({
+      mode: "chat",
+      threadId,
+      projectId: null,
+    });
+    expect(activeContext).not.toHaveBeenCalled();
   });
 
   it("keeps the always-visible definition small in every mode and for a managed child", () => {

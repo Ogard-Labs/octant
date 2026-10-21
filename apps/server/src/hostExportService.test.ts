@@ -1,3 +1,4 @@
+import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
 import { decodeHostId } from "@octant/contracts/host";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { decodeProjectId } from "@octant/contracts/projects";
@@ -27,6 +28,39 @@ const THREADS = {
   work: ["00000000-0000-4000-8000-000000000903"],
   code: ["00000000-0000-4000-8000-000000000904"],
 } as const;
+
+/** A Canvas a Chat thread owns outside every Project, as the live wiring lists it. */
+const THREAD_OWNED_CANVAS = {
+  canvasId: "11111111-1111-4111-8111-111111111112",
+  projectId: null,
+  mode: "chat",
+  title: "Memo",
+  updatedAt: now,
+  definition: {
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    title: "Memo",
+    provenance: {
+      mode: "chat",
+      hostId: "local",
+      projectId: null,
+      threadId: THREADS.chat[0],
+      actor: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
+      providerInstanceId: "10000000-0000-4000-8000-000000000001",
+      modelId: "model-a",
+      createdAt: now,
+    },
+    sourceManifest: [],
+    blocks: [
+      {
+        blockId: "block-1",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "heading",
+        level: 1,
+        text: "Memo",
+      },
+    ],
+  },
+};
 
 function bundleFor(mode: "chat" | "work" | "code", threadId: string) {
   const source: ThreadExportSource = {
@@ -111,10 +145,12 @@ function service(
       }),
     },
     canvases: {
-      list: () => ({
-        items: [{ canvasId: "canvas", apiKey: SEEDED_CREDENTIAL }],
-        nextCursor: undefined,
-      }),
+      list: ({ cursor, limit }) =>
+        pageHostExportSlice(
+          [{ canvasId: "canvas", apiKey: SEEDED_CREDENTIAL }, THREAD_OWNED_CANVAS],
+          cursor,
+          limit,
+        ),
     },
     readSettings: () => ({
       chatEnabled: true,
@@ -158,7 +194,7 @@ describe("host export", () => {
     }
   });
 
-  it("exports one bundle per projected thread in every mode and never writes a seeded credential", async () => {
+  it("exports one bundle per projected thread in every mode, carries a Chat thread's own Canvas whole, and never writes a seeded credential", async () => {
     const resident: number[] = [];
     const fixture = service({
       pageSize: 1,
@@ -185,7 +221,9 @@ describe("host export", () => {
     expect(assembled.bundle.projects).toEqual([
       { projectId, name: "Notes", type: "work", lifecycle: "active" },
     ]);
-    expect(assembled.bundle.canvases).toEqual([]);
+    // The credential-carrying record is the one omission; the thread-owned
+    // Canvas, which names no Project, is carried with its definition.
+    expect(assembled.bundle.canvases).toEqual([THREAD_OWNED_CANVAS]);
     expect(assembled.bundle.retention.tombstones).toHaveLength(1);
     expect(assembled.bundle.omissions.map((omission) => omission.subject)).toContain(
       "unrepresentable-record",
