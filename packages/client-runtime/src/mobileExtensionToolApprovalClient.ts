@@ -10,7 +10,8 @@ const TOOL_APPROVALS_PATH = "/api/extensions/tool-approvals";
 /**
  * The MCP tool prompts this paired device's own turns raised in one thread.
  * The host lists only those, and only while the thread still stands in its
- * Project; an empty list is the answer whenever the host refuses.
+ * Project. A refused read throws, so a caller can tell "nothing is waiting"
+ * (an empty list) from "could not ask" and keep what it last showed.
  */
 export async function listMobileExtensionToolApprovals(input: {
   readonly transport: MobileRemoteTransport;
@@ -24,7 +25,7 @@ export async function listMobileExtensionToolApprovals(input: {
     contentType: "application/json",
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  if (!response.ok) return [];
+  if (!response.ok) throw new Error(`Listing tool approvals failed with ${response.status}.`);
   const listed = decodeHostAnswer(ExtensionToolApprovalList)(await response.json());
   return listed.filter((approval) => String(approval.threadId) === input.threadId);
 }
