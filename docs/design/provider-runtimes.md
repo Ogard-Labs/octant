@@ -44,6 +44,24 @@ messages remain protocol failures. Recognition grants no tool authority: the
 launch tool list, permission hooks, OS confinement, and Keychain policy remain
 as specified in [Security and authority](../architecture.md#security-and-authority).
 
+The launch environment sets no `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+umbrella and names each channel it keeps off, as
+[Architecture: security and authority](../architecture.md#security-and-authority)
+lists them (maintainer decision, 2026-10-20: the blanket block was stricter
+than Octant needs); a person's own `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+in the host environment still passes through. The decision changes no
+session's tool list. Measured with the Agent SDK (`query({ tools: ["Read",
+"Artifact"] })`, reading the `system/init` message's `tools`) on Claude Code
+2.1.211 (bundled) and 2.1.304 (on `PATH`), 2026-10-20, the runtime offers its
+`Artifact` tool only when launched by Anthropic's own desktop app (it keys on
+the launching entrypoint), so a query from Octant lists `["Read"]` with the
+umbrella and without it alike. The same probe showed that
+`strictMcpConfig: true`, which every Octant query sets, keeps the account's
+claude.ai connectors (listed by 2.1.304 with `settingSources: []` when the
+option is absent) out of the session. The decoder tolerates the narrower list
+(the runtime may drop a requested tool, never add one), so a launch that lacks
+a requested tool still runs.
+
 ## OpenCode
 
 The installed OpenCode binary's

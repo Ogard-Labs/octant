@@ -101,7 +101,7 @@ export const CANVAS_PREVIEW_MAX_IMAGE_HEIGHT = 4_096;
 export const CANVAS_PREVIEW_ORIGIN = "http://canvas-preview.octant.invalid";
 /** The preview page's folder inside the built web assets. */
 export const CANVAS_PREVIEW_ASSET_FOLDER = "canvas-preview";
-const CANVAS_PREVIEW_PAGE = "canvas-preview.html";
+export const CANVAS_PREVIEW_PAGE = "canvas-preview.html";
 /** Where the preview page finds a running design's page, by its position. */
 const CANVAS_PREVIEW_DESIGN_PAGE_PREFIX = "/design-page/";
 /** How long the page may take to load and settle before the look is abandoned. */

@@ -27,6 +27,7 @@ import type { ReaderMarking } from "../context/inheritedExternalContentMark";
 import type { CanvasService } from "./canvasService";
 import type { CanvasCommentAgentRequestView } from "./canvasCommentService";
 import type {
+  CanvasPreviewImageOmitted,
   CanvasPreviewOutcome,
   CanvasPreviewService,
   CanvasPreviewWidth,
@@ -1270,6 +1271,26 @@ function canvasToolSet(options: {
   };
 }
 
+/**
+ * One plain sentence beside the omission code. The code alone was not enough:
+ * with a bare `no-renderer`, a live model reported the preview "returned no
+ * picture" in one turn and described the picture it never saw in the next, so
+ * the sentence says what did not happen, why, and what to go on instead.
+ */
+function noPictureSentence(reason: CanvasPreviewImageOmitted | undefined): string {
+  const because =
+    reason === "no-browser"
+      ? "this host has no browser to draw the Canvas"
+      : reason === "no-renderer"
+        ? "this build carries no Canvas preview page"
+        : reason === "render-failed"
+          ? "the preview page did not settle or the screenshot failed"
+          : reason === "provider-cannot-take-images"
+            ? "the model driving this turn cannot be shown images in a tool result"
+            : "the preview could not draw it";
+  return `No picture was taken because ${because}, so rely on the listed warnings only.`;
+}
+
 // Carried on the read that shows the requests rather than in the tool's
 // always-visible definition, which is kept under a size budget.
 const REQUESTED_CHANGES_GUIDANCE =
@@ -1426,7 +1447,11 @@ function previewToolResult(
           warnings: outcome.warnings,
           imagesInToolResults,
           ...(outcome.image === undefined
-            ? { imageIncluded: false, imageOmitted: outcome.imageOmitted }
+            ? {
+                imageIncluded: false,
+                imageOmitted: outcome.imageOmitted,
+                imageOmittedNote: noPictureSentence(outcome.imageOmitted),
+              }
             : { imageIncluded: true }),
         },
       };
