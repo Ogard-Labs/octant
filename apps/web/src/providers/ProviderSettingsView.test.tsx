@@ -2804,7 +2804,13 @@ describe("ProviderSettingsView", () => {
           }),
           discoverySnapshot: discoverySnapshot({
             candidates: [scannedCodexCandidate()],
-            searchedDirectories: searchedDirectoriesFor("codex", "/Users/example/.local/bin"),
+            // The scan looked in the saved binary's own directory and found
+            // nothing there, so the saved binary is known to be gone.
+            searchedDirectories: searchedDirectoriesFor(
+              "codex",
+              "/Users/example/.local/bin",
+              "/Users/example/.local/lib/node_modules/@openai/codex/bin",
+            ),
           }),
         })}
         onUseScannedBinary={onUseScannedBinary}
@@ -2964,6 +2970,30 @@ describe("ProviderSettingsView", () => {
     );
     expect(screen.queryByRole("button", { name: /^Use the one found at/ })).toBeNull();
     expect(onUseScannedBinary).not.toHaveBeenCalled();
+  });
+
+  it("does not call an unprobed binary outside the searched directories missing just because the scan found another", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({
+            displayName: "Custom Codex",
+            driverKind: "codex",
+            enabled: false,
+            configuration: { kind: "codex-cli", binaryPath: "/opt/custom/bin/codex" },
+          }),
+          // The scan covered Codex, but only under ~/.local/bin: its silence
+          // says nothing about /opt/custom/bin.
+          discoverySnapshot: discoverySnapshot({
+            candidates: [scannedCodexCandidate()],
+            searchedDirectories: searchedDirectoriesFor("codex", "/Users/example/.local/bin"),
+          }),
+        })}
+        onUseScannedBinary={vi.fn(async () => ({ kind: "cancelled" }) as const)}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /^Use the one found at/ })).toBeNull();
   });
 
   it("makes no offer from a failed scan or without a way to use it", () => {

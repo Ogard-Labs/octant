@@ -1923,13 +1923,13 @@ function scannedBinaryOffer(
   ) {
     return undefined;
   }
-  const scanCoveredDriver =
-    snapshot.searchedDirectories?.some((entry) => entry.driverKind === instance.driverKind) ===
-    true;
+  // The scan's silence counts only for the directory it actually searched: a
+  // binary saved elsewhere (a custom prefix) may work, and the scan says
+  // nothing about it.
   const unusable =
     readiness === "unavailable" ||
     readiness === "incompatible" ||
-    (scanCoveredDriver && !detectedLocally);
+    (!detectedLocally && isAbsenceProven(savedPath, instance.driverKind, snapshot));
   if (!unusable) return undefined;
   let best: DiscoverySnapshot["candidates"][number] | undefined;
   for (const candidate of snapshot.candidates) {
