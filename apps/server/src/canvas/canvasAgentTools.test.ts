@@ -1,7 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { CANVAS_SCHEMA_VERSION, decodeCanvasBlock } from "@octant/contracts";
+import {
+  CANVAS_MAX_DESIGN_MARKUP_LENGTH,
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasBlock,
+} from "@octant/contracts";
+import { appWindowPrototypeExample } from "@octant/domain";
 import { validateCanvasDefinition } from "@octant/domain/canvas-policy";
 import { createManagedMcpTools } from "../providers/managedMcpTools";
 import {
@@ -264,8 +269,9 @@ describe("createCanvasAgentTools", () => {
       if (definition === undefined) throw new Error("Expected the Canvas definition.");
       // Every definition serialized to about 15,250 bytes while it carried each
       // block kind's guidance. That guidance is answered by describe now; the
-      // budget catches it growing back into every turn's tool prefix.
-      expect(JSON.stringify(definition).length).toBeLessThanOrEqual(6_000);
+      // budget catches it growing back into every turn's tool prefix. The
+      // designEdits input added about 250 bytes to it.
+      expect(JSON.stringify(definition).length).toBeLessThanOrEqual(6_300);
     }
   });
 
@@ -807,6 +813,7 @@ describe("createCanvasAgentTools", () => {
       "slide",
       "document",
       "phone",
+      "desktop",
     ]);
     // The schema an agent reads names the document size and the theme field.
     expect(JSON.stringify(result.blockSchema)).toContain('"document"');
@@ -1246,6 +1253,156 @@ describe("createCanvasAgentTools", () => {
 
     expect(outcome).toMatchObject({ isError: true });
     expect(revise).not.toHaveBeenCalled();
+  });
+
+  describe("revising a design with designEdits", () => {
+    const canvasId = "77777777-7777-4777-8777-777777777777";
+    const settings = { frameId: "settings", title: "Settings", html: "<p>Settings</p>" };
+
+    function editable(sequence = 3) {
+      const revise = vi.fn((..._args: ReadonlyArray<unknown>) => ({
+        kind: "accepted" as const,
+        receipt: { canvasId, versionId: "version-4", sequence: sequence + 1 },
+      }));
+      const get = vi.fn(() => ({
+        kind: "ready" as const,
+        version: {
+          sequence,
+          definition: {
+            title: "Prototype",
+            presentation: "sidebar",
+            blocks: [diagram, appWindowPrototypeExample],
+          },
+        },
+      }));
+      const markReader = vi.fn(() => ({ status: "nothing-to-mark" as const }));
+      const { set } = tools({ canvas: { create: vi.fn(), revise, get }, markReader });
+      const edit = (input: Record<string, unknown>) =>
+        set.execute({
+          name: CANVAS_TOOL_NAME,
+          inputJson: JSON.stringify({
+            operation: "revise",
+            canvasId,
+            expectedSequence: sequence,
+            ...input,
+          }),
+        });
+      return { edit, markReader, revise };
+    }
+
+    it("adds a screen to a running design and keeps every other block and frame as read", async () => {
+      const { edit, markReader, revise } = editable();
+
+      const outcome = await edit({
+        designEdits: [{ blockId: "app-window", frames: [settings] }],
+      });
+
+      expect(outcome.isError).toBeUndefined();
+      expect(markReader).toHaveBeenCalled();
+      const blocks = revise.mock.calls[0]?.[3] as ReadonlyArray<Record<string, unknown>>;
+      expect(blocks).toHaveLength(2);
+      expect(blocks[0]).toEqual(diagram);
+      const frames = blocks[1]?.frames as ReadonlyArray<{ frameId: string; html: string }>;
+      expect(frames.map((frame) => frame.frameId)).toEqual(["window", "settings"]);
+      expect(frames[0]?.html).toBe(appWindowPrototypeExample.frames[0]?.html);
+      expect(revise.mock.calls[0]?.[0]).toMatchObject({ expectedSequence: 3 });
+    });
+
+    it("replaces a frame with the same frameId, swaps the stylesheet, and removes a frame", async () => {
+      const { edit, revise } = editable();
+      await edit({
+        designEdits: [{ blockId: "app-window", frames: [settings], styles: "body { margin: 0; }" }],
+      });
+      const redone = { ...settings, html: "<p>Settings, again</p>" };
+      const second = editable();
+      await second.edit({
+        designEdits: [
+          { blockId: "app-window", frames: [settings] },
+          { blockId: "app-window", frames: [redone], removeFrameIds: ["window"] },
+        ],
+      });
+
+      const first = revise.mock.calls[0]?.[3] as ReadonlyArray<Record<string, unknown>>;
+      expect(first[1]?.styles).toBe("body { margin: 0; }");
+      const after = second.revise.mock.calls[0]?.[3] as ReadonlyArray<Record<string, unknown>>;
+      expect(after[1]?.frames).toEqual([redone]);
+    });
+
+    it("refuses edits against a version that has moved on, so a person's change is not overwritten", async () => {
+      const { edit, revise } = editable(5);
+      const outcome = await edit({
+        expectedSequence: 3,
+        designEdits: [{ blockId: "app-window", frames: [settings] }],
+      });
+
+      expect(outcome.isError).toBe(true);
+      expect(JSON.stringify(outcome.result)).toContain("sequence 5");
+      expect(revise).not.toHaveBeenCalled();
+    });
+
+    it("refuses an edit that names no design, a block that is not one, or a frame that is not valid", async () => {
+      const { edit, revise } = editable();
+      for (const designEdits of [
+        [{ blockId: "missing", frames: [settings] }],
+        [{ blockId: "authored-diagram", frames: [settings] }],
+        [{ blockId: "app-window", removeFrameIds: ["nope"] }],
+        [{ blockId: "app-window", frames: [{ frameId: "bad", title: "Bad" }] }],
+        [{ blockId: "app-window", removeFrameIds: ["window"] }],
+        [{ blockId: "app-window" }],
+        [{ blockId: "app-window", frames: [settings], extra: true }],
+      ]) {
+        expect((await edit({ designEdits })).isError, JSON.stringify(designEdits)).toBe(true);
+      }
+      expect(revise).not.toHaveBeenCalled();
+    });
+
+    it("refuses designEdits sent with blocks, or on a create", async () => {
+      const { edit, revise } = editable();
+      const designEdits = [{ blockId: "app-window", frames: [settings] }];
+      expect((await edit({ designEdits, blocks: [diagram] })).isError).toBe(true);
+      const { set, create } = tools();
+      const created = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "create", designEdits }),
+      });
+      expect(created.isError).toBe(true);
+      expect(revise).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it("withholds the edit when the thread could not be marked with the Canvas's outside content", async () => {
+      const { edit, markReader, revise } = editable();
+      markReader.mockReturnValue({ status: "refused" as never });
+
+      const outcome = await edit({ designEdits: [{ blockId: "app-window", frames: [settings] }] });
+
+      expect(outcome.isError).toBe(true);
+      expect(revise).not.toHaveBeenCalled();
+    });
+  });
+
+  it("teaches an agent to build a desktop app window in steps, with a window to start from", async () => {
+    const { set } = tools();
+    const described = await set.execute({
+      name: CANVAS_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+    });
+    const { examples, guidance } = described.result as {
+      examples: ReadonlyArray<Record<string, unknown>>;
+      guidance: Record<string, string>;
+    };
+
+    const window = examples.find((example) => example.blockId === "app-window");
+    expect(window).toMatchObject({ size: "desktop", runsScript: true });
+    expect(guidance.design).toContain("designEdits");
+    expect(guidance.design).toContain("1440x900");
+    expect(guidance.design).toContain(String(CANVAS_MAX_DESIGN_MARKUP_LENGTH));
+    expect(guidance.design).toContain("render()");
+    expect(guidance.design).toContain("--accent");
+    const definition = set.definitions[0]?.inputSchema as {
+      properties: Record<string, unknown>;
+    };
+    expect(definition.properties).toHaveProperty("designEdits");
   });
 
   it("reports a refusal from the Canvas service rather than a silent success", async () => {
@@ -1889,6 +2046,52 @@ describe("Canvas preview through the tool", () => {
       imageOmitted: "provider-cannot-take-images",
     });
   });
+
+  it.each([
+    [
+      "no-browser",
+      "No picture was taken because this host has no browser to draw the Canvas, so rely on the listed warnings only.",
+    ],
+    [
+      "no-renderer",
+      "No picture was taken because this build carries no Canvas preview page, so rely on the listed warnings only.",
+    ],
+    [
+      "render-failed",
+      "No picture was taken because the preview page did not settle or the screenshot failed, so rely on the listed warnings only.",
+    ],
+    [
+      "provider-cannot-take-images",
+      "No picture was taken because the model driving this turn cannot be shown images in a tool result, so rely on the listed warnings only.",
+    ],
+  ] as const)(
+    "says in one plain sentence that no picture was taken and why when the reason is %s",
+    async (imageOmitted, sentence) => {
+      const set = previewPort(
+        () => imageOmitted !== "provider-cannot-take-images",
+        () => ({
+          kind: "preview",
+          canvasId: previewCanvasId,
+          sequence: 1,
+          width: 720,
+          warnings: [{ kind: "empty-series", blockId: "revenue" }],
+          imageOmitted,
+        }),
+      );
+      const outcome = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "preview", canvasId: previewCanvasId }),
+      });
+      expect(outcome.isError).not.toBe(true);
+      expect(outcome.images).toBeUndefined();
+      expect(outcome.result).toMatchObject({
+        imageIncluded: false,
+        imageOmitted,
+        imageOmittedNote: sentence,
+        warnings: [{ kind: "empty-series", blockId: "revenue" }],
+      });
+    },
+  );
 
   it("attaches the picture to a model that takes images in a tool result", async () => {
     const set = previewPort(

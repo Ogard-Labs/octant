@@ -149,6 +149,91 @@ export const cartPrototypeExample = {
   ],
 };
 
+/**
+ * A whole app window at the desktop size, running: a thread list, tabs, and an
+ * accent colour picker that restyles it through one CSS variable. It shows the
+ * pattern a large prototype is built on without a framework: one `state`
+ * object, one `render()` that writes it to the page, and one delegated
+ * listener that changes the state. A larger prototype adds threads, panes, and
+ * frames to this shape one revision at a time.
+ */
+export const appWindowPrototypeExample = {
+  blockId: "app-window",
+  schemaVersion: CANVAS_SCHEMA_VERSION,
+  kind: "design" as const,
+  title: "Workspace window",
+  size: "desktop" as const,
+  runsScript: true as const,
+  styles: [
+    ":root { --accent: #4f46e5; --ink: #1c1917; --muted: #78716c; --line: #e7e5e4; --paper: #fafaf9; }",
+    "body { margin: 0; font-family: system-ui, sans-serif; color: var(--ink); background: var(--paper); }",
+    "[hidden] { display: none !important; }",
+    ".app { width: 100vw; height: 100vh; display: grid; grid-template-columns: 260px 1fr; }",
+    ".side { border-right: 1px solid var(--line); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px; background: white; }",
+    ".side h2 { font-size: 12px; font-weight: 600; color: var(--muted); margin: 8px 8px 4px; }",
+    ".thread { font: inherit; text-align: left; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: var(--ink); cursor: pointer; }",
+    '.thread[aria-current="true"] { background: color-mix(in srgb, var(--accent) 14%, white); color: var(--accent); font-weight: 600; }',
+    ".main { display: flex; flex-direction: column; min-width: 0; }",
+    ".bar { display: flex; align-items: center; gap: 16px; padding: 0 24px; height: 56px; border-bottom: 1px solid var(--line); background: white; }",
+    ".bar h1 { font-size: 16px; margin: 0; margin-right: auto; }",
+    ".tab { font: inherit; padding: 8px 4px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); cursor: pointer; }",
+    '.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }',
+    ".pane { padding: 32px 24px; max-width: 720px; display: flex; flex-direction: column; gap: 16px; }",
+    ".bubble { padding: 12px 16px; border-radius: 12px; background: white; border: 1px solid var(--line); }",
+    ".bubble.you { align-self: flex-end; background: var(--accent); border-color: var(--accent); color: white; }",
+    "label { display: flex; align-items: center; gap: 12px; }",
+  ].join("\n"),
+  frames: [
+    {
+      frameId: "window",
+      title: "Window",
+      html: [
+        '<div class="app"><nav class="side" aria-label="Threads"><h2>Threads</h2>',
+        '<button class="thread" data-thread="launch" type="button">Plan the launch</button>',
+        '<button class="thread" data-thread="bugs" type="button">Triage open bugs</button>',
+        '<button class="thread" data-thread="copy" type="button">Rewrite onboarding copy</button></nav>',
+        '<main class="main"><header class="bar"><h1 id="title"></h1>',
+        '<button class="tab" data-tab="chat" role="tab" type="button">Chat</button>',
+        '<button class="tab" data-tab="settings" role="tab" type="button">Settings</button></header>',
+        '<section class="pane" data-pane="chat"><div class="bubble you">What is left before we ship?</div><div class="bubble" id="reply"></div></section>',
+        '<section class="pane" data-pane="settings" hidden><label>Accent colour <input id="accent" type="color" value="#4f46e5"></label></section>',
+        "</main></div>",
+        "<script>",
+        'var threads = { launch: "Three tasks are open: copy, pricing page, and the release notes.", bugs: "Seven bugs are open, two of them block the release.", copy: "The onboarding copy has a new first screen, ready for review." };',
+        'var titles = { launch: "Plan the launch", bugs: "Triage open bugs", copy: "Rewrite onboarding copy" };',
+        'var state = { thread: "launch", tab: "chat", accent: "#4f46e5" };',
+        "function render() {",
+        '  document.documentElement.style.setProperty("--accent", state.accent);',
+        '  document.getElementById("title").textContent = titles[state.thread];',
+        '  document.getElementById("reply").textContent = threads[state.thread];',
+        '  document.querySelectorAll("[data-thread]").forEach(function (el) {',
+        '    el.setAttribute("aria-current", String(el.dataset.thread === state.thread));',
+        "  });",
+        '  document.querySelectorAll("[data-tab]").forEach(function (el) {',
+        '    el.setAttribute("aria-selected", String(el.dataset.tab === state.tab));',
+        "  });",
+        '  document.querySelectorAll("[data-pane]").forEach(function (el) {',
+        "    el.hidden = el.dataset.pane !== state.tab;",
+        "  });",
+        "}",
+        'document.addEventListener("click", function (event) {',
+        '  var target = event.target.closest("[data-thread], [data-tab]");',
+        "  if (target === null) return;",
+        "  if (target.dataset.thread) state.thread = target.dataset.thread;",
+        "  if (target.dataset.tab) state.tab = target.dataset.tab;",
+        "  render();",
+        "});",
+        'document.getElementById("accent").addEventListener("input", function (event) {',
+        "  state.accent = event.target.value;",
+        "  render();",
+        "});",
+        "render();",
+        "</script>",
+      ].join(""),
+    },
+  ],
+};
+
 function designBlock(value: unknown): CanvasDesignBlock {
   const block = decodeCanvasBlock(value);
   if (block.kind !== "design") {
@@ -161,3 +246,4 @@ export const onboardingFlowExampleBlock = designBlock(onboardingFlowExample);
 export const launchDeckExampleBlock = designBlock(launchDeckExample);
 export const searchSpecExampleBlock = designBlock(searchSpecExample);
 export const cartPrototypeExampleBlock = designBlock(cartPrototypeExample);
+export const appWindowPrototypeExampleBlock = designBlock(appWindowPrototypeExample);

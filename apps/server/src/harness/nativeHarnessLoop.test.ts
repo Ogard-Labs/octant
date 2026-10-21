@@ -12,8 +12,8 @@ import {
 } from "@octant/contracts";
 import type { ProviderConnection } from "@octant/provider-sdk/driver";
 import { deriveTurnMetrics, ledgerUsageCost } from "@octant/domain";
-import { Effect, Fiber, Stream, type Scope } from "effect";
-import { afterEach, describe, expect, it } from "vitest";
+import { Effect, Exit, Fiber, Scope, Stream } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -124,6 +124,76 @@ const isTerminal = (event: ProviderRuntimeEvent) =>
   event.kind === "completed" || event.kind === "failed" || event.kind === "interrupted";
 
 describe("native harness loop", () => {
+  it.each([
+    ["start", "cancel"],
+    ["resume", "cancel"],
+    ["start", "close"],
+    ["resume", "close"],
+  ] as const)(
+    "releases a late %s endpoint after %s without admitting or journaling a session",
+    async (operation, boundary) => {
+      let finishOpen: ((endpoint: NativeHarnessTransportSession) => void) | undefined;
+      let active = 0;
+      const release = vi.fn();
+      const send = vi.fn(async () => ({ text: "unused", toolCalls: [] }));
+      const transcripts = new MemoryNativeHarnessTranscriptStore();
+      if (operation === "resume") {
+        transcripts.open(sessionId, { instanceId, modelId, projectRoot, mode: "code" });
+      }
+      const before = transcripts.load(sessionId);
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        createNativeHarnessConnection({
+          instanceId,
+          driverKind: "openai-compatible",
+          projectRoot,
+          mode: "code",
+          transport: {
+            open: () =>
+              new Promise((resolve) => {
+                finishOpen = resolve;
+              }),
+          },
+          transcripts,
+          admitTurn: () => undefined,
+          clock: () => now,
+          correlationId: () => "80000000-0000-4000-8000-000000000903",
+          onSessionCountChange: (delta) => {
+            active += delta;
+          },
+        }).pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      const input = { sessionId, modelId, executionPolicy: "plan" as const, tools };
+      const start = Effect.runFork(
+        operation === "start"
+          ? connection.start(input)
+          : connection.resume({
+              ...input,
+              resumeCursor: { driverKind: "openai-compatible", value: sessionId },
+            }),
+      );
+      try {
+        await vi.waitFor(() => expect(finishOpen).toBeDefined());
+        if (boundary === "cancel") await Effect.runPromise(Fiber.interrupt(start));
+        else await Effect.runPromise(Scope.close(scope, Exit.void));
+        // Cancellation alone must discard the endpoint; closing the connection
+        // must also refuse a pending start whose caller has not been interrupted.
+        const resolve = finishOpen;
+        if (resolve === undefined) throw new Error("Endpoint opening did not start.");
+        resolve({ fits: () => true, send, release });
+        await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
+        expect(active).toBe(0);
+        expect(transcripts.load(sessionId)).toEqual(before);
+        expect(send).not.toHaveBeenCalled();
+        await Effect.runPromise(Fiber.await(start));
+      } finally {
+        await Effect.runPromise(Scope.close(scope, Exit.void));
+      }
+      expect(active).toBe(0);
+      expect(release).toHaveBeenCalledOnce();
+    },
+  );
+
   it("does not acknowledge a steering note that cancellation prevents from reaching the model", async () => {
     const scripted = scriptedTransport([
       {

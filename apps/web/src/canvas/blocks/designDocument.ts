@@ -6,6 +6,7 @@ import {
   type CanvasDesignBlock,
   type CanvasDesignTheme,
 } from "@octant/contracts/canvas";
+import type { CanvasExportPrepareRequest } from "@octant/contracts/canvas-export";
 import { getDefaultToken } from "@octant/theme";
 import {
   DESIGN_FRAME_KIT,
@@ -103,6 +104,19 @@ export function readWorkspaceFrameTheme(element: Element): DesignFrameThemeValue
     }
   }
   return { scheme: workspaceScheme(element.ownerDocument), tokens };
+}
+
+/**
+ * An export request with the theme this window draws designs in. Markdown has
+ * no frames to theme and is left alone; every other form carries the theme so
+ * a design that follows the workspace is drawn the way the person sees it.
+ */
+export function withWorkspaceFrameTheme(
+  request: CanvasExportPrepareRequest,
+): CanvasExportPrepareRequest {
+  return request.format === "markdown"
+    ? request
+    : { ...request, frameTheme: readWorkspaceFrameTheme(document.documentElement) };
 }
 
 function workspaceScheme(document: Document): "light" | "dark" {
