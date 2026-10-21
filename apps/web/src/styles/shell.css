@@ -3206,10 +3206,8 @@ form > .work-composer-adapter__attachments {
 
 /* Measured on the running row, this was the only border left on any control in
    it: every neighbour is borderless, so the one rule drawing a line made the
-   access control read as an outlined box sitting inside the prompt. Spacing
-   separates it from the model picker; a drawn edge is not needed for that. */
+   access control read as an outlined box sitting inside the prompt. */
 .code-composer-adapter__composer-bar .code-composer-choice__trigger {
-  margin-inline-start: var(--oct-space-1);
   padding-inline-start: 8px;
   border-inline-start: 0;
 }

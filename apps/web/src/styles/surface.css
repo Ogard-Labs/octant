@@ -507,12 +507,6 @@
   min-height: 24px;
   padding-inline: var(--oct-space-2);
 }
-/* The shared row already carries a gap before send. A surface that places
-   its own gap ahead of the model and access controls makes that first gap
-   the only stretch, so the pickers sit beside send instead of centred. */
-.composer-row > .composer-gap ~ .composer-gap {
-  flex: 0 0 0;
-}
 
 .welcome__hint {
   margin: 0;

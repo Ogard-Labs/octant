@@ -4760,6 +4760,12 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   white-space: nowrap;
 }
 
+.composer-model-picker__trigger-level {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
+  white-space: nowrap;
+}
+
 .composer-model-picker__chevron {
   flex: 0 0 auto;
   color: var(--octant-text-muted);

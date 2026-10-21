@@ -936,14 +936,23 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     onRefused={images.refuse}
                     onFileSelected={(file) => images.attach([file])}
                   />
-                  <ComposerVoiceButton
-                    disabled={props.creating === true}
-                    onTranscript={(transcript) =>
-                      setPrompt((current) => appendTranscript(current, transcript))
-                    }
+                  <CodeComposerAccessMenu
+                    onChange={(nextPolicy) => {
+                      setExecutionPolicy(nextPolicy);
+                      props.onExecutionPolicyChange?.(nextPolicy, permissionPersistence);
+                    }}
+                    onPersistenceChange={(nextPersistence) => {
+                      setPermissionPersistence(nextPersistence);
+                      props.onExecutionPolicyChange?.(executionPolicy, nextPersistence);
+                    }}
+                    persistence={permissionPersistence}
+                    value={executionPolicy}
+                    {...(props.creating === true ? { disabled: true } : {})}
                   />
-
-                  <span aria-hidden="true" className="composer-gap" />
+                </>
+              ),
+              trailing: (
+                <>
                   <span className="code-composer-adapter__context-picker">
                     <ComposerModelPicker
                       ariaLabel="Provider and model"
@@ -973,22 +982,13 @@ export function CodeComposerAdapter(props: CodeComposerAdapterProps) {
                     />
                   </span>
                   {props.poolControl}
+                  <ComposerVoiceButton
+                    disabled={props.creating === true}
+                    onTranscript={(transcript) =>
+                      setPrompt((current) => appendTranscript(current, transcript))
+                    }
+                  />
                 </>
-              ),
-              trailing: (
-                <CodeComposerAccessMenu
-                  onChange={(nextPolicy) => {
-                    setExecutionPolicy(nextPolicy);
-                    props.onExecutionPolicyChange?.(nextPolicy, permissionPersistence);
-                  }}
-                  onPersistenceChange={(nextPersistence) => {
-                    setPermissionPersistence(nextPersistence);
-                    props.onExecutionPolicyChange?.(executionPolicy, nextPersistence);
-                  }}
-                  persistence={permissionPersistence}
-                  value={executionPolicy}
-                  {...(props.creating === true ? { disabled: true } : {})}
-                />
               ),
               actions: {
                 kind: "send",

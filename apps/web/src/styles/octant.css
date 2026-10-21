@@ -4449,9 +4449,6 @@ input.switch:checked::after {
   padding: 0 var(--oct-composer-gutter) 12px calc(var(--oct-composer-gutter) - 8px);
   border-top: 0;
 }
-.composer-row .composer-gap {
-  flex: 1;
-}
 .composer-actions {
   display: inline-flex;
   flex: 0 0 auto;
@@ -4579,10 +4576,14 @@ input.switch:checked::after {
   margin: 24px auto 12px;
 }
 
-/* Existing conversations keep the message surface distinct from its binding.
-   Feedback appears only when there is something to act on. */
+/* Existing conversations keep the message surface distinct from its binding:
+   the strip above it (context and stats) sits on the page, and only the
+   surface where the person types is raised. Feedback appears only when there
+   is something to act on. */
 .composer.composer--follow-up {
-  background: var(--octant-tray);
+  display: grid;
+  gap: var(--oct-space-1);
+  background: transparent;
   border-radius: var(--oct-radius-md);
   box-shadow: none;
 }
@@ -4640,6 +4641,28 @@ input.switch:checked::after {
 }
 .thread-composer__context:empty {
   display: none;
+}
+/* The strip above a thread's composer: where it runs on the left, the plan's
+   windows and the thread's figures on the right. It reads as part of the
+   page, not the box, so it has no fill or edge of its own. */
+.thread-composer__strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 var(--oct-space-3);
+  min-width: 0;
+}
+.thread-composer__strip:empty {
+  display: none;
+}
+.thread-composer__strip > .thread-composer__context {
+  flex: 0 1 auto;
+}
+.thread-composer__strip > .thread-stats {
+  flex: 0 1 auto;
+  margin-left: auto;
+  padding: 0 var(--oct-space-2);
 }
 /* The quiet line under the composer's toolbar: the keyboard hint or a
    receipt on the left, spend and limits on the right. One recipe replaces
@@ -6097,7 +6120,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   @media (prefers-reduced-transparency: no-preference) {
     html:not([data-octant-reduced-transparency="true"])
       .shell--app-backdrop
-      :is(.turn-user .bubble, .composer) {
+      :is(.turn-user .bubble, .composer:not(.composer--follow-up)) {
       border-color: var(--oct-glass-stroke);
       background-color: var(--oct-glass-floor);
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
@@ -6107,27 +6130,27 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
     /* The composer draws no border, so a stroke colour alone never showed and
        the glass had no edge. Its stroke is an inset ring, which also keeps the
        ring inside the rounded corners and out of layout. */
-    html:not([data-octant-reduced-transparency="true"]) .shell--app-backdrop .composer {
+    html:not([data-octant-reduced-transparency="true"])
+      .shell--app-backdrop
+      .composer:not(.composer--follow-up) {
       box-shadow:
         inset 0 0 0 1px var(--oct-glass-stroke),
         var(--octant-shadow-md);
     }
-    /* A follow-up composer is a tray holding a message surface and the
-       checkout under it. The tray is the pane of glass, at the chrome step;
-       the surface where the person types is one more thick tint on it, not a
-       second pane, so the words being written sit on the most solid part. */
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop
-      .composer.composer--follow-up {
-      box-shadow: inset 0 0 0 1px var(--oct-glass-stroke);
-      background-image: linear-gradient(var(--oct-glass-chrome), var(--oct-glass-chrome));
-      backdrop-filter: blur(var(--oct-glass-blur-chrome)) saturate(150%);
-      -webkit-backdrop-filter: blur(var(--oct-glass-blur-chrome)) saturate(150%);
-    }
+    /* A follow-up composer's strip sits on the page, so its wrapper takes no
+       glass; the surface where the person types takes the whole material the
+       composer has elsewhere: floor, thick tint, blur, ring, and shadow. */
     html:not([data-octant-reduced-transparency="true"])
       .shell--app-backdrop
       .thread-composer__surface {
-      background: var(--oct-glass-thick);
+      border-color: var(--oct-glass-stroke);
+      background-color: var(--oct-glass-floor);
+      background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+      backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+      -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+      box-shadow:
+        inset 0 0 0 1px var(--oct-glass-stroke),
+        var(--octant-shadow-md);
     }
   }
 }

@@ -425,8 +425,10 @@ where it is. Side-task offers stack above them as hairline cards: a target icon
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
 
-A thread's stats line sits under the follow-up composer, below the context strip
-and inside the same tray: one row of figures at the 12px meta step in the meta ink,
+A thread's stats line sits above the follow-up composer, in one strip with the
+context: where the thread runs (Project and branch) on the left, the stats on the
+right, on the page rather than in the box, so the box holds only the message and
+its controls. The stats are one row of figures at the 12px meta step in the meta ink,
 separated by middle dots, with no hue on any number and no fill on the row. When the
 provider reported account limit windows, they lead the row as short bars (a name such
 as 5h or Week, a three-pixel bar, and the share left), filled in the same
@@ -455,8 +457,10 @@ and counts nothing: what is running and what waits for review live in the
 sidebar. Each mode's own prompt stays in the composer's placeholder ("Ask
 anything…", "Describe the work…", "Describe the change…"), and the message
 field keeps its accessible name. The composer is prompt first, four lines tall before it
-grows; its toolbar row holds how the thread runs (attach and image on the
-left; model and access on the right, next to send). Where the thread runs
+grows; its toolbar row holds how the thread runs (attach, image and access
+on the left; the context ring, model and microphone on the right, next to send).
+The model button names a chosen reasoning effort after the model in muted ink
+("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, base branch, checkout, Environment, repository) is the first row
 inside the card, above the prompt, as small bordered chips on a faint fill
 (the `--oct-radius-sm` step), so the composer stays a single object. Code's
@@ -1311,7 +1315,7 @@ Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
 input, output, and measurement quality. Its thread table uses the same figures
-as the line under the composer: cache, speed, and first token are columns,
+as the line above the composer: cache, speed, and first token are columns,
 omitted when unavailable, and opening a row lists that thread's turns. The
 table stays a hairline table, not a card. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay

@@ -546,14 +546,10 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                     onRefused={images.refuse}
                     onFileSelected={(file) => images.attach([file])}
                   />
-                  <ComposerVoiceButton
-                    disabled={props.creating === true}
-                    onTranscript={(transcript) =>
-                      setPrompt((current) => appendTranscript(current, transcript))
-                    }
-                  />
-
-                  <span aria-hidden="true" className="composer-gap" />
+                </>
+              ),
+              trailing: (
+                <>
                   <ComposerModelPicker
                     ariaLabel="Provider and model"
                     groups={props.providerGroups}
@@ -578,6 +574,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
                       : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
                   />
                   {props.poolControl}
+                  <ComposerVoiceButton
+                    disabled={props.creating === true}
+                    onTranscript={(transcript) =>
+                      setPrompt((current) => appendTranscript(current, transcript))
+                    }
+                  />
                 </>
               ),
               actions: {
