@@ -10,14 +10,15 @@ import { describe, expect, it } from "vitest";
 import { makeClaudeEnvironmentScope, sanitizeClaudeEnvironment } from "./claudeEnvironment";
 
 const requiredGuards = {
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-  CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
-  CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: "1",
-  CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: "1",
   DISABLE_TELEMETRY: "1",
   DISABLE_ERROR_REPORTING: "1",
   DISABLE_AUTOUPDATER: "1",
   DISABLE_BUG_COMMAND: "1",
+  DISABLE_FEEDBACK_COMMAND: "1",
+  CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1",
+  CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+  CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: "1",
+  CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: "1",
 } as const;
 
 const hostileHostEnvironment: NodeJS.ProcessEnv = {
@@ -112,6 +113,42 @@ describe("sanitizeClaudeEnvironment", () => {
     expect(JSON.stringify(environment)).not.toMatch(
       /ambient-|broker-token|desktop-token|smoke-|otel-sentinel|unrelated-secret|private\/injector/,
     );
+  });
+
+  it("leaves the runtime's non-essential traffic on, with each channel Octant keeps off switched off by name", () => {
+    const umbrella = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
+    const isolated = { configDirectory: "/Users/provider-user/.claude-accounts/work" };
+    for (const environment of [
+      sanitizeClaudeEnvironment("subscription", hostileHostEnvironment),
+      sanitizeClaudeEnvironment("subscription", hostileHostEnvironment, isolated),
+    ]) {
+      // Blanket-blocking every non-essential channel was stricter than Octant
+      // needs; each channel that matters has its own switch instead.
+      expect(environment).not.toHaveProperty(umbrella);
+      for (const [name, value] of Object.entries(requiredGuards)) {
+        expect(environment[name]).toBe(value);
+      }
+    }
+
+    // The person's own choice still crosses, and only in its disabling spelling.
+    for (const overrides of [undefined, isolated]) {
+      expect(
+        sanitizeClaudeEnvironment(
+          "subscription",
+          { ...hostileHostEnvironment, [umbrella]: "1" },
+          overrides,
+        )[umbrella],
+      ).toBe("1");
+      for (const value of ["0", "", "true"]) {
+        expect(
+          sanitizeClaudeEnvironment(
+            "subscription",
+            { ...hostileHostEnvironment, [umbrella]: value },
+            overrides,
+          ),
+        ).not.toHaveProperty(umbrella);
+      }
+    }
   });
 
   it("requires the broker-resolved key for API-key mode without accepting ambient credentials", async () => {

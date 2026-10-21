@@ -173,13 +173,13 @@ export const DEFAULT_SIDEBAR_BACKGROUND: SidebarBackground = Schema.decodeSync(S
   vibrancyMode: "subtle",
 });
 
-// The application ground: the theme's own animated pattern, a first-party
-// built-in image, a photo from the shared background image store, or the plain
+// The application ground: a first-party built-in image, a photo from the
+// shared background image store, a field of pulsing characters, or the plain
 // page. A photo reuses the sidebar background id because both point at one
 // image library on the host; the ground does not keep a second copy. The
 // tuning fields travel with every kind so switching away and back keeps what a
 // person dialled in; each is optional on the wire so old rows still decode.
-export const AppBackgroundKind = Schema.Literal("theme", "builtin", "photo", "none");
+export const AppBackgroundKind = Schema.Literal("theme", "builtin", "photo", "characters", "none");
 export type AppBackgroundKind = typeof AppBackgroundKind.Type;
 
 /** The first-party image catalog shared with Zen's Appearance panel. */
@@ -251,6 +251,15 @@ const BuiltinAppBackground = Schema.Struct({
   ...AppBackgroundTuning,
 }).annotations(strict);
 
+/**
+ * A field of monospace characters that slowly pulse in and out, drawn by the
+ * renderer in the theme's own ink. It carries no picture.
+ */
+const CharactersAppBackground = Schema.Struct({
+  kind: Schema.Literal("characters"),
+  ...AppBackgroundTuning,
+}).annotations(strict);
+
 const NoneAppBackground = Schema.Struct({
   kind: Schema.Literal("none"),
   ...AppBackgroundTuning,
@@ -260,6 +269,7 @@ export const AppBackground = Schema.Union(
   ThemeAppBackground,
   BuiltinAppBackground,
   PhotoAppBackground,
+  CharactersAppBackground,
   NoneAppBackground,
 );
 export type AppBackground = typeof AppBackground.Type;
