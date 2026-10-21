@@ -22,6 +22,11 @@ private let replicaStoreCredentialNamespace = "replica-store-credential"
 // provider purge never strands a link its owner can no longer revoke.
 private let canvasPublicShareSecretService = "app.octant.canvas-public-share-secrets.v1"
 private let canvasPublicShareSecretNamespace = "canvas-public-share-secret"
+// The secret values a person gives an MCP server they added by hand (a header,
+// an environment variable) live in a service of their own, keyed by the secret
+// id the server's package references. A person may replace one.
+private let mcpServerCredentialService = "app.octant.mcp-server-credentials.v1"
+private let mcpServerCredentialNamespace = "mcp-server-credential"
 private let hostIdentityNamespace = "app.octant.host-identity.v1"
 private let hostIdentityKeyId = "host-identity"
 private let maximumPurgeProviderInstances = 128
@@ -56,6 +61,7 @@ private let octantOwnedServices = [
     replicaDeviceKeyService,
     replicaStoreCredentialService,
     canvasPublicShareSecretService,
+    mcpServerCredentialService,
 ]
 
 // A credential namespace of its own: the Keychain service it reaches, the
@@ -81,6 +87,11 @@ private let separateNamespaces: [String: SeparateNamespace] = [
         service: canvasPublicShareSecretService,
         idField: "credentialRef",
         replaceable: false
+    ),
+    mcpServerCredentialNamespace: SeparateNamespace(
+        service: mcpServerCredentialService,
+        idField: "secretId",
+        replaceable: true
     ),
 ]
 

@@ -5491,6 +5491,41 @@ document does, and one that fails it is refused rather than published. The
 receipt is the gist URL and its id, journaled in `canvas.export@1` like any
 other destination's.
 
+**Connectors and user-added MCP servers.** A person connects an MCP server
+from Settings › Skills & Extensions without writing a package: Add MCP server
+takes a command Octant starts (with arguments and environment) or an address
+it connects to over Streamable HTTP (with headers). The host writes an
+ordinary Agent Plugins package for it (`plugin.json` and an `mcp.json` with
+the one server) into its own folder under the data directory and registers it
+under the `user-added` source kind, so the activation ladder, per-call
+approvals, remembered grants, taint rules, and the confined launch apply
+unchanged; the package is installed, trusted and switched on as one act,
+because the person just typed it in. Only a local window may add one
+(`/api/extensions/user-servers`); a paired device cannot. A value the person
+marks secret never enters the package: the host stores it in the credential
+broker's own namespace for these secrets (`/v1/mcp-server-credentials/*`, the
+`mcp-server-credential` Keychain service or Secret Service attribute) and the
+package carries `${OCTANT_SECRET:<id>}` in its place. The session manager
+fills references in at launch, only for a package the host's own store of
+generated folders vouches for by source reference (the installed manifest's
+source kind is rewritten to `plugin-package`, so it cannot be the authority),
+so a third-party package can never name a secret; a reference the broker
+cannot answer fails the launch rather than starting the server with a blank.
+Uninstalling the package removes its folder and every secret it referenced,
+and an add that fails before the package is installed removes them too, so a
+retry with the same name is not blocked. Refusals travel as typed results
+(HTTP 200) like every other extension command, so the dialog shows the host's
+own sentence.
+On a host without a broker the add is refused when it carries a secret, with
+the Octant app named as the way to do it. This is the base the connector work
+builds on: discovery of servers and plugins other tools already know on this
+Mac, sign-in to a hosted server through the MCP authorization flow, a
+first-party connectors catalog, and Project pins each arrive as their own
+change on these same seams. The release-boundary hold on a connector
+marketplace was lifted by the maintainer on 2026-10-20; the start gates in
+[release-boundary holds](release-boundary-holds.md) are met by this section
+and the rules above.
+
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured
 selection and supplies `octant_computer` through the provider's existing
@@ -5590,7 +5625,9 @@ credentials requires its own explicit confirmation.
 The rationale and original migration account remain in
 [0001](decisions/0001-plugin-architecture.md). This section owns the current
 boundary and approved direction; the archived proposal's status is not a delivery
-gate. The connector marketplace hold remains in force.
+gate. The connector marketplace hold was lifted on 2026-10-20; connectors are
+built as user-added MCP server packages on these seams, as the
+[Connectors and user-added MCP servers](#extensions-and-skills) rules describe.
 
 ## Security and authority
 
@@ -7591,10 +7628,14 @@ Public links on and approves a publish, and a self-hosted service URL is a
 Settings choice. Deploying it, its DNS and TLS, and its operator contact are
 release steps of their own.
 
-The start gates for the connector / OAuth marketplace and full LSP /
-extension host / debugger holds are in
-[release-boundary holds](release-boundary-holds.md). Neither hold is opened by
+The start gates for the full LSP / extension host / debugger hold are in
+[release-boundary holds](release-boundary-holds.md); that hold is not opened by
 plugin work, a first-party Integration, or Monaco and external-editor handoff.
+The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
+[Connectors and user-added MCP servers](#extensions-and-skills) rules: a
+bundled first-party catalog, sign-in through the MCP authorization flow, and
+servers imported from other tools' configuration on this Mac, all as
+user-added packages through the published seams and the credential broker.
 
 ## Development loop
 

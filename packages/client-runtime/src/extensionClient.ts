@@ -12,6 +12,7 @@ import {
   ExtensionToolApprovalList,
   ExtensionToolGrantList,
   type ExtensionToolGrantRequest,
+  type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -40,6 +41,8 @@ export interface ExtensionClient {
   revokeToolGrant(grantId: string): Promise<boolean>;
   /** Consume one native-picker receipt to register and inspect an Agent Plugins directory. */
   importLocalPluginReceipt(receiptId: string): Promise<ExtensionCommandResult>;
+  /** Adds an MCP server by hand; the host installs, trusts and enables its package. */
+  addUserMcpServer(request: UserAddedMcpServerRequest): Promise<ExtensionCommandResult>;
 }
 
 export class ExtensionClientFailure extends Error {
@@ -197,6 +200,18 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           }
           return value.revoked;
         },
+      );
+    },
+    addUserMcpServer(server) {
+      return request(
+        fetch,
+        new URL("/api/extensions/user-servers", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(server),
+        },
+        decodeHostAnswer(ExtensionCommandResult),
       );
     },
     importLocalPluginReceipt(receiptId) {

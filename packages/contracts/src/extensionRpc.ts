@@ -116,6 +116,35 @@ export const ExtensionToolGrantRequest = Schema.Union(
 );
 export type ExtensionToolGrantRequest = typeof ExtensionToolGrantRequest.Type;
 
+/**
+ * An MCP server the person adds by hand: a command to start, or an address to
+ * connect to. A value marked secret is kept in the host credential broker and
+ * never written into the package; the package carries a reference instead.
+ */
+const userAddedSecretValue = Schema.Struct({
+  name: boundedText(128).pipe(Schema.pattern(/^[A-Za-z_][A-Za-z0-9_-]*$/)),
+  value: Schema.String.pipe(Schema.maxLength(8192)),
+  secret: Schema.Boolean,
+}).annotations(strict);
+export const UserAddedMcpServerRequest = Schema.Struct({
+  name: boundedText(64),
+  server: Schema.Union(
+    Schema.Struct({
+      type: Schema.Literal("stdio"),
+      command: boundedText(1024),
+      args: Schema.Array(Schema.String.pipe(Schema.maxLength(1024))).pipe(Schema.maxItems(64)),
+      env: Schema.Array(userAddedSecretValue).pipe(Schema.maxItems(64)),
+    }).annotations(strict),
+    Schema.Struct({
+      type: Schema.Literal("streamable-http"),
+      url: boundedText(2048),
+      headers: Schema.Array(userAddedSecretValue).pipe(Schema.maxItems(32)),
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type UserAddedMcpServerRequest = typeof UserAddedMcpServerRequest.Type;
+export const decodeUserAddedMcpServerRequest = Schema.decodeUnknownSync(UserAddedMcpServerRequest);
+
 export const ExtensionCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("search-catalog"),

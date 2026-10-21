@@ -1674,6 +1674,7 @@ async function startDesktopCredentialBroker(): Promise<CredentialBroker | undefi
     backend.replicaDeviceKeys,
     backend.replicaStoreCredentials,
     backend.canvasPublicShareSecrets,
+    backend.mcpServerCredentials,
   );
 }
 

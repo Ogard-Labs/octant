@@ -5,6 +5,7 @@ const TOOLCHAIN_PREFIXES: ReadonlyArray<string> = [
   "/api/github/clone",
   "/api/scaffolds",
   "/api/extensions/import-local",
+  "/api/extensions/user-servers",
   "/api/apple/toolchain",
   "/api/apple/artifacts",
   "/api/providers/discovery/scan",
