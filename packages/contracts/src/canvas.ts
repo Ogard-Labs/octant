@@ -2252,9 +2252,8 @@ export type CanvasDesignAssetId = typeof CanvasDesignAssetId.Type;
  * Project has no folder, so it never resolves one. The definition holds only
  * the reference: the host resolves it under the thread's authority each time
  * the design is drawn, and the bytes are never journaled. A `browser-capture`
- * names a capture the Browser pane kept in the thread's own Project; like a
- * Project file it needs a thread with a folder to resolve under, so a Chat
- * Project refuses it.
+ * names a screenshot the Browser kept for the Canvas's own thread; the Browser
+ * is a Work and Code tool, so a Chat Canvas refuses it.
  */
 export const CanvasDesignAssetSource = Schema.Union(
   Schema.Struct({

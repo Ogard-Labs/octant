@@ -3,6 +3,7 @@ import {
   CANVAS_DESIGN_ASSETS_MAX_BYTES,
   type CanvasDesignAssetResolution,
   type CanvasDesignAssetUnavailableReason,
+  type BrowserCaptureId,
   type CanvasDesignBlock,
   type CanvasProvenance,
   type ImageArtifactId,
@@ -36,6 +37,16 @@ export interface CanvasDesignAssetPorts {
   readonly generatedImage: (input: {
     readonly imageId: ImageArtifactId;
     readonly projectId: string | null;
+    readonly threadId: string;
+    readonly maximumBytes: number;
+  }) => Promise<CanvasDesignAssetRead>;
+  /**
+   * A screenshot the Browser kept for `threadId` itself. Never called for
+   * Chat, and never answers another thread's capture: a capture belongs to the
+   * thread that took it, whatever Project the Canvas is in.
+   */
+  readonly browserCapture: (input: {
+    readonly captureId: BrowserCaptureId;
     readonly threadId: string;
     readonly maximumBytes: number;
   }) => Promise<CanvasDesignAssetRead>;
@@ -89,9 +100,15 @@ export async function resolveCanvasDesignAssets(
         maximumBytes,
       });
     } else if (asset.source.kind === "browser-capture") {
-      // The schema admits a captured page, but no port resolves one yet, so it
-      // fails closed as refused until a read under the thread's authority exists.
-      read = { status: "unavailable", reason: "refused" };
+      // Chat keeps no captures for a design: the Browser is a Work and Code tool.
+      read =
+        provenance.mode === "chat"
+          ? { status: "unavailable", reason: "refused" }
+          : await ports.browserCapture({
+              captureId: asset.source.captureId,
+              threadId: String(provenance.threadId),
+              maximumBytes,
+            });
     } else if (provenance.mode === "chat" || provenance.projectId === null) {
       // A Chat Project is virtual: it has no folder for a path to name.
       read = { status: "unavailable", reason: "refused" };

@@ -4322,7 +4322,17 @@ native harness in `apps/server/src/harness`:
   `take` itself is destructive and has no idempotent receipt: if its response
   is lost, the web retains the displayed text with an ownership-unknown
   notice, never requeues that unclaimed snapshot automatically. This is not
-  a crash-atomic transfer; a reload can lose a client-held uncertain claim.
+  a crash-atomic transfer; a reload can lose a client-held uncertain claim. The
+  terminal likewise retains confirmed-taken text locally when its next prompt
+  reports a refusal, scoped to its originating thread. It never requeues
+  consumed note ids. Its prompt ports also report server errors as refusals,
+  so the terminal does not infer non-submission from that result: it preserves
+  the error and asks the person to inspect the conversation and queue before
+  manually copying and resending. A lost take response retains the displayed
+  snapshot with an ownership-unknown warning, never sends it automatically.
+  `/notes copy` copies retained text; `/notes discard` removes only the local
+  recovery copy. Closing the terminal loses this copy. Retained notes do not
+  replace the composer draft or hide pending approvals.
   The route allows exactly the
   windows and paired devices that may already answer the thread's questions,
   and the web adds no authority to it. A turn's start is journaled

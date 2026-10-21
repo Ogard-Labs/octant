@@ -527,6 +527,7 @@ export function startOctantServer(
       snapshotCanvas,
     } = wireCanvas({
       agentRunPersistence,
+      browserCaptures,
       chatDataDirectory,
       contributeChildTools,
       extensionApiService,

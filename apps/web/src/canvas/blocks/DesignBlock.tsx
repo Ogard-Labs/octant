@@ -333,6 +333,15 @@ function DesignPlayer({
     block.frames.findIndex((frame) => String(frame.frameId) === startFrameId),
   );
   const [index, setIndex] = useState(startIndex);
+  const [notesShown, setNotesShown] = useState(readNotesShown);
+  // A deck without a single note offers no toggle, so a presenter sharing a
+  // screen is never shown a control that does nothing.
+  const hasNotes = slides && block.frames.some((frame) => frame.notes !== undefined);
+  const toggleNotes = () =>
+    setNotesShown((shown) => {
+      writeNotesShown(!shown);
+      return !shown;
+    });
   // A restart reloads the page, which is the only way back to the start frame
   // of a page that runs no script.
   const [restarts, setRestarts] = useState(0);
@@ -343,12 +352,22 @@ function DesignPlayer({
     stage === undefined
       ? 1
       : Math.min(1, stage.width / viewport.width, stage.height / viewport.height);
+  const current = block.frames[index];
   const last = block.frames.length - 1;
 
   const step = (by: number) => setIndex((value) => Math.min(last, Math.max(0, value + by)));
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!slides) return;
-    if (event.key === "ArrowRight" || event.key === "PageDown") {
+    if (
+      hasNotes &&
+      (event.key === "n" || event.key === "N") &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
+      event.preventDefault();
+      toggleNotes();
+    } else if (event.key === "ArrowRight" || event.key === "PageDown") {
       event.preventDefault();
       step(1);
     } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
@@ -379,6 +398,18 @@ function DesignPlayer({
           <div className="canvas-design-player__actions">
             {slides ? (
               <>
+                {hasNotes ? (
+                  <OctantButton
+                    aria-keyshortcuts="N"
+                    aria-pressed={notesShown}
+                    onClick={toggleNotes}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Notes
+                  </OctantButton>
+                ) : null}
                 <OctantButton
                   aria-label="Previous slide"
                   disabled={index === 0}
@@ -464,9 +495,38 @@ function DesignPlayer({
             )}
           </div>
         </div>
+        {hasNotes && notesShown ? (
+          <aside aria-label="Presenter notes" className="canvas-design-player__notes">
+            {current?.notes === undefined ? (
+              <p className="canvas-design-player__notes-empty">No notes for this slide.</p>
+            ) : (
+              <p>{current.notes}</p>
+            )}
+          </aside>
+        ) : null}
       </div>
     </OctantDialog>
   );
+}
+
+const NOTES_SHOWN_KEY = "octant.canvas.presenterNotes";
+
+// Remembered for the browser session only: whether the screen is shared is the
+// presenter's call each time, and storage can be blocked.
+function readNotesShown(): boolean {
+  try {
+    return window.sessionStorage.getItem(NOTES_SHOWN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeNotesShown(shown: boolean): void {
+  try {
+    window.sessionStorage.setItem(NOTES_SHOWN_KEY, shown ? "1" : "0");
+  } catch {
+    // The toggle still works for this open player.
+  }
 }
 
 /**

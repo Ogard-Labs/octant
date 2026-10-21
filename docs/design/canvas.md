@@ -202,15 +202,19 @@ drawn from a closed list of system faces and generic families (a brand never
 loads a font), and a radius or spacing step is a non-negative length in `px`,
 `rem`, `em`, or `%`. The renderers ignore these fields for now: a `brand`
 design is drawn as an unthemed page, notes and icons are not drawn, and a
-nested group draws as a top-level one. A `browser-capture` asset resolves as
-`refused` until captures resolve under the thread's authority.
+nested group draws as a top-level one. A `browser-capture` asset resolves
+under the owning thread's authority (see the design-asset rules below).
 
 A share carries a brand (validated again before it leaves) and the diagram
 fields, so share version 11 names blocks up to Canvas version 21 and a share
 under version 10 that carries one is refused as a future version. Frame notes
 are the presenter's, like speaker notes in a deck: a share, a public link, and
 an export carry the slides and drop the notes, and what notes hold never blocks
-a share because it never leaves. A captured-page asset is not shared, as no
+a share because it never leaves. Present shows the current slide's notes in a
+panel under the slide when the presenter turns on Notes (the `N` key does the
+same); the choice is remembered for the browser session, starts off, and the
+control is absent from a deck with no notes. Notes render as plain text. A
+PDF notes page is not offered, as this host renders no PDF. A captured-page asset is not shared, as no
 declared image is. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
@@ -758,8 +762,8 @@ link rule is part of it, because a link is the one way a page with no script
 can leave. Version 17 lets a design declare up to 12 image `assets`, each a
 `generated-image` (a completed image job's attachment id), a `project-file`
 (a path relative to the Work thread's folder or the Code thread's checkout),
-or, from version 21, a `browser-capture` (a kept capture's id, not yet
-resolved),
+or, from version 21, a `browser-capture` (the id of a screenshot the Browser
+kept; see below),
 and markup names one as `octant-asset:<id>` in `src`, `srcset`, a `url()`, or
 an `image-set()` candidate. The markup policy admits a reference only for a
 declared id spelled literally and refuses a Project file in a Chat Canvas or
@@ -771,7 +775,19 @@ resolves each asset under that version's provenance, with nothing cached: a
 generated image only when its job's thread belongs to the Canvas's Project
 (never the host-wide image library), a Work file through the Work confinement
 sequence under the Project root while the thread is bound to its current
-revision, and a Code file the same way under the thread's checkout. Bytes are
+revision, and a Code file the same way under the thread's checkout. A
+`browser-capture` resolves only for a Work or Code Canvas, and only to a
+capture the Canvas's own thread kept and its journal still retains
+([Browser captures](browser-captures.md)): another thread's capture id, a
+dropped capture, and any capture in Chat are not found or refused, and a
+missing one draws the usual placeholder with the `design-asset-unavailable`
+warning. The picture is the screenshot the capture already stores (the model
+envelope, about 40 KiB), so the 3 MiB asset cap needs no change and the
+capture size cap stays as it is. Website redesign is a document recipe
+(`website-redesign`): the agent opens the page in the Browser, takes a
+screenshot, declares the capture, shows it in a before frame, and draws the
+after frame as HTML and CSS; it never fetches the site's images, styles, or
+fonts into a frame. Bytes are
 sniffed as PNG, JPEG, GIF, or WebP; SVG is refused because an SVG file is
 markup a sniff cannot tell from other text, and inline SVG already serves
 vector art. Each image is capped at 3 MiB and a design at 5 MiB, which keeps
@@ -788,7 +804,7 @@ acknowledges that its markup is shared as written
 (`acknowledgedMarkupSharedAsWritten`); without it the share is refused as
 `consent-required`, and markup that holds a token or key in a recognisable
 shape is refused as `unsafe-payload` even then. A shared design carries no
-declared images: an asset names a Project file or an image job, which resolve
+declared images: an asset names a Project file, an image job, or a browser capture, which resolve
 only under this host's authority, so a frame that named one draws a
 placeholder. The snapshot viewer draws a shared design with the same block
 the live Canvas uses, so its frames get the same sandbox and page policy, and
