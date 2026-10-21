@@ -218,6 +218,35 @@ beside the column. Under forced colours every node is Canvas with a CanvasText
 rule, edges and heads are CanvasText, and dashes and shapes keep the
 distinctions.
 
+From Canvas schema version 21 a node may also carry an `icon` and a short
+`detail` subtitle, and a group a `parentGroupId`. The icon is one of sixteen
+generic infrastructure names (`client`, `browser`, `mobile`, `server`,
+`service`, `database`, `cache`, `queue`, `storage`, `cdn`, `gateway`, `auth`,
+`function`, `external`, `user`, `analytics`); the list is closed and names no
+product, so a renderer draws its own glyph. `detail` is at most 120 characters
+and sits under the label. A group nests inside another up to three levels; the
+domain policy refuses an unknown parent, a cycle, and a deeper chain. The share
+carries them (share version 11).
+
+The board, the preview, the HTML and sidecar exports, and a share draw them
+from one domain layout. The icon is a 16px outline in the secondary ink at the
+left of the node, drawn from stroke data held in the domain so an export needs
+no image; the label centres in the room beside it. The detail is a smaller
+second line in the muted ink, cut with an ellipsis where it would leave the box
+(the full text is the node's tooltip and the Markdown reading's "label —
+detail"). A decision draws its label alone: a diamond has no room at its
+corners. A nested group is framed around its own nodes and its child frames, so
+a child sits inside its parent however the nodes were placed; each level adds
+one padding and one label height, a parent is painted beneath its children, and
+sibling frames never overlap. A parent's own nodes take a band before its
+children's bands.
+
+Layout reduces crossings: nodes inside one group and rank are reordered by
+barycenter sweeps down and up the ranks (twelve at most, over at most 1,024
+edges), and the order with the fewest crossings is kept, so a diagram that
+already has none keeps the order it was written in. The groups themselves keep
+their declared order. The result is deterministic and pure.
+
 **Gantt.** A plan's Gantt view is bars on days in a horizontally scrolling
 frame: a 200px title gutter, week ticks (four-week ticks, or a multiple of four
 weeks, on a long plan, so ticks stay a label apart) in hairline ink, and 16px
@@ -312,8 +341,16 @@ callouts are ink marks on their node with the notes listed under the frame. In
 forced colours every hairline is the system frame and a filled mark is system
 text. A design is the author's own screens or slides: Octant draws
 only the frame around them (a hairline, the surface behind, and a numbered
-caption) and never restyles what is inside. Its player is a near-full-window
-dialog that scales the screen to fit with the stage padding around it. A
+caption) and never restyles what is inside. On the board each frame is as wide
+as its size allows (440px for a slide or desktop screen) and never wider than
+the column, so a deck in a narrow side panel is not clipped; the box keeps the
+page's aspect ratio from the first paint, and the page inside is scaled once
+the board is measured. A frame's page loads only when the frame, or the frame
+beside it, has come into view, and stays loaded after; a long deck therefore
+opens as fast as a short one. Its player is a near-full-window dialog that
+scales the screen to fit with the stage padding around it; a deck keeps the
+current slide and its two neighbours loaded, the neighbours hidden, so a step
+shows a page already drawn. A
 design of `document` size is read in place instead: no caption, no player, the
 full width of the Canvas column, and exactly as tall as its page, so it never
 scrolls inside itself below a 12,000px cap.

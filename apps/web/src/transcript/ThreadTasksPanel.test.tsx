@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ThreadTasksPanel } from "./ThreadTasksPanel";
 describe("ThreadTasksPanel", () => {
-  it("counts the finished tasks and discloses the ordered plan from the keyboard", async () => {
+  it("shows the ordered plan while the turn runs and folds it from the keyboard", async () => {
     const user = userEvent.setup();
     render(
       <ThreadTasksPanel
@@ -20,19 +20,19 @@ describe("ThreadTasksPanel", () => {
 
     expect(screen.getByText("1 of 3 tasks completed")).toBeVisible();
     const toggle = screen.getByRole("button", { name: /1 of 3 tasks completed/ });
-    expect(toggle).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByRole("list", { name: "Task list" })).not.toBeInTheDocument();
-    await user.tab();
-    expect(toggle).toHaveFocus();
-    await user.keyboard("{Enter}");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     const items = screen.getByRole("list", { name: "Task list" }).children;
     expect(items).toHaveLength(3);
     expect(items[0]).toHaveTextContent("Watch CI on the branch head");
     expect(items[1]).toHaveTextContent("Triage the review findings");
     expect(items[2]).toHaveTextContent("Commit the captured evidence");
+    await user.tab();
+    expect(toggle).toHaveFocus();
     await user.keyboard(" ");
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("list", { name: "Task list" })).not.toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("list", { name: "Task list" }).children).toHaveLength(3);
   });
 
   it("keeps failed and waiting tasks visible in the collapsed summary after the turn settles", () => {

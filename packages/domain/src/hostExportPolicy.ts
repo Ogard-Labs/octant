@@ -135,7 +135,10 @@ export function projectHostExportProject(source: HostExportProjectSource): HostE
 
 /**
  * Include a Canvas only when its definition decodes and carries no forbidden
- * key. A dropped Canvas is an omission, not a partial definition.
+ * key. A dropped Canvas is an omission, not a partial definition. A Canvas a
+ * Chat thread owns outside every Project (no Project in the record) is a
+ * Canvas the host holds like any other and is kept; the record once required
+ * a Project, which silently left every such Canvas out of the cut.
  */
 export function projectHostExportCanvas(source: unknown): HostExportCanvas | undefined {
   if (threadExportContainsForbiddenKey(source)) return undefined;

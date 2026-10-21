@@ -15,6 +15,7 @@ import {
   CodeConversationWindow,
   CodeEvidenceBatchResponse,
   CodeEvidenceReference,
+  CodeOperationResult,
   CodeThreadView,
   ProjectBootstrap,
   WorkThreadBootstrap,
@@ -538,12 +539,14 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
         (turn) => turn.status === "waiting" || turn.status === "incomplete",
       );
       if (current === undefined || running === undefined) return { kind: "nothing-running" };
+      // Reusing the start ID replays its cached result instead of executing Stop.
+      const operationId = randomUUID();
       const response = await session.send({
         path: "/api/code/commands",
         method: "POST",
         body: {
           kind: "cancel-provider-turn",
-          operationId: String(running.operationId),
+          operationId,
           threadId,
           checkoutId: String(current.checkout.id),
         },
@@ -554,7 +557,21 @@ function codeThreadPort(session: OpenedLocalControlSession, threadId: string): A
           message: refusalMessage(response, "The turn could not be stopped."),
         };
       }
-      return { kind: "interrupted" };
+      const result = decodeHostAnswer(CodeOperationResult)(response.body);
+      if (String(result.operationId) === operationId) {
+        if (result.kind === "operation-failed") {
+          return { kind: "refused", message: result.failure.message };
+        }
+        if (result.kind === "provider-turn-state") {
+          if (result.state === "interrupted") return { kind: "interrupted" };
+          if (result.failure !== undefined) {
+            return { kind: "refused", message: result.failure.message };
+          }
+          // A cancel with no owned active turn returns failed without a reason.
+          if (result.state === "failed") return { kind: "nothing-running" };
+        }
+      }
+      return { kind: "refused", message: "The host did not confirm that the turn stopped." };
     },
   };
 }

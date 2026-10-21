@@ -1,6 +1,7 @@
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ProjectClient } from "@octant/client-runtime/project-client";
 import type { ProjectAvailability, ProjectId, ProjectSummary } from "@octant/contracts/projects";
+import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { ProjectColor, ProjectProviderPolicy } from "@octant/contracts/projects";
 import type { ProviderInstance } from "@octant/contracts/providers";
 import { ChevronDown, SquarePen } from "lucide-react";
@@ -13,6 +14,7 @@ import { OctantSwitch } from "../ui/base/OctantSwitch";
 import { FolderPicker } from "./FolderPicker";
 import { ProjectMemorySection } from "./ProjectMemorySection";
 import { ProjectThreadsSection } from "./ProjectThreadsSection";
+import { ProjectBrandKitSection } from "./ProjectBrandKitSection";
 import { ProjectProviderPolicySection } from "./ProjectProviderPolicySection";
 import {
   PROJECT_COLOR_MENU_ITEMS,
@@ -46,6 +48,11 @@ export interface ProjectOverviewProps {
   readonly onProviderPolicyChange?: (
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
+  ) => Promise<boolean>;
+  /** Absent when the host cannot accept the change; the brand kit is then not shown. */
+  readonly onBrandKitChange?: (
+    projectId: ProjectId,
+    brandKit: CanvasDesignBrand,
   ) => Promise<boolean>;
   /** Absent when the host cannot accept the change; the setting is then not shown. */
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
@@ -341,6 +348,21 @@ export function ProjectOverview(props: ProjectOverviewProps) {
               />
             </ProjectOverviewInspector>
           ) : null}
+          {props.onBrandKitChange === undefined ? null : (
+            <ProjectOverviewInspector
+              key={`${String(props.project.id)}-brand-kit`}
+              label="Brand kit"
+              summary="Colours and fonts your designs can use"
+            >
+              <ProjectBrandKitSection
+                disabled={archived || connectionStale}
+                onChange={async (brandKit) =>
+                  (await props.onBrandKitChange?.(props.project.id, brandKit)) ?? false
+                }
+                project={props.project}
+              />
+            </ProjectOverviewInspector>
+          )}
           {props.project.type === "work" &&
           props.project.origin !== "default-folder" &&
           props.onWorkStatusFileChange !== undefined ? (

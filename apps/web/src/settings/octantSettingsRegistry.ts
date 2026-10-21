@@ -639,6 +639,19 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "thread retention window purge journal erase delete history",
         },
         {
+          id: settingId("public-links"),
+          label: "Public links",
+          scope: "host",
+          keywords:
+            "public links canvas publish share anyone with the link service stores can read switch off on",
+        },
+        {
+          id: settingId("public-link-service"),
+          label: "Service address",
+          scope: "host",
+          keywords: "public links service address url canvas.octant.sh self-hosted publish",
+        },
+        {
           id: settingId("browser-site-approvals"),
           label: "Remembered websites",
           scope: "host",

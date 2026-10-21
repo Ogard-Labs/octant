@@ -20,17 +20,38 @@ export interface SqliteConnection {
   close(): void;
 }
 
+/**
+ * A connection to a database another program owns. It opens read-only, sets
+ * no pragmas, and never changes the file's mode, so reading it leaves the
+ * owner's file exactly as it was.
+ */
+export interface ReadOnlySqliteConnection {
+  all(sql: string): ReadonlyArray<unknown>;
+  close(): void;
+}
+
 export function runtimeSqliteKind(
   versions: Readonly<Record<string, string | undefined>> = process.versions,
 ): "bun" | "node" {
   return versions.bun === undefined ? "node" : "bun";
 }
 
-const openRuntimeSqlite =
+const runtimeSqlite =
   runtimeSqliteKind() === "node"
-    ? (await import("./sqlitePort.node.ts")).openNodeSqlite
-    : (await import("./sqlitePort.bun.ts")).openBunSqlite;
+    ? await import("./sqlitePort.node.ts").then((module) => ({
+        open: module.openNodeSqlite,
+        openReadOnly: module.openNodeSqliteReadOnly,
+      }))
+    : await import("./sqlitePort.bun.ts").then((module) => ({
+        open: module.openBunSqlite,
+        openReadOnly: module.openBunSqliteReadOnly,
+      }));
+const openRuntimeSqlite = runtimeSqlite.open;
 
 export function openSqlite(path: string): SqliteConnection {
   return instrumentSqlite(openRuntimeSqlite(path));
+}
+
+export function openReadOnlySqlite(path: string): ReadOnlySqliteConnection {
+  return runtimeSqlite.openReadOnly(path);
 }
