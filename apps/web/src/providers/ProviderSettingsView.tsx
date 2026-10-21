@@ -392,7 +392,19 @@ function suggestedAccountName(
   instances: ReadonlyArray<ProviderInstance>,
   source: ProviderInstance,
 ): string {
-  const base = source.displayName.replace(/\s*\(\d+\)$/, "").trim();
+  // A trailing "(n)" is an account sequence only when an account of the same
+  // driver carries the name without it; otherwise the number is the person's
+  // own, as in "Claude Research (2024)", and stays part of the name.
+  const unnumbered = source.displayName.replace(/\s*\(\d+\)$/, "").trim();
+  const base =
+    unnumbered !== source.displayName &&
+    instances.some(
+      (instance) =>
+        instance.driverKind === source.driverKind &&
+        instance.displayName.toLowerCase() === unnumbered.toLowerCase(),
+    )
+      ? unnumbered
+      : source.displayName;
   const taken = new Set(instances.map((instance) => instance.displayName.toLowerCase()));
   let number = 2;
   while (taken.has(`${base} (${number})`.toLowerCase())) number += 1;

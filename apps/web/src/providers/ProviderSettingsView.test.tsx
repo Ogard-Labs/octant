@@ -712,6 +712,40 @@ describe("ProviderSettingsView", () => {
     expect(screen.getByLabelText("Provider name")).toHaveValue("Claude local (3)");
   });
 
+  it("keeps a number the person put in a card's name instead of reading it as an account sequence", async () => {
+    const user = userEvent.setup();
+    const research = decodeProviderInstance({
+      ...claudeProvider(),
+      displayName: "Claude Research (2024)",
+    });
+    renderProviderSettings(<ProviderSettingsView {...fixture({ instance: research })} />);
+
+    await user.click(screen.getByRole("button", { name: "Details for Claude Research (2024)" }));
+    await user.click(
+      screen.getByRole("button", { name: "Add account for Claude Research (2024)" }),
+    );
+
+    expect(screen.getByLabelText("Provider name")).toHaveValue("Claude Research (2024) (2)");
+  });
+
+  it("continues the sequence from a numbered account when its unnumbered sibling exists", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    const numbered = decodeProviderInstance({
+      ...claudeProvider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000093"),
+      displayName: "Claude local (2)",
+    });
+    renderProviderSettings(
+      <ProviderSettingsView {...props} instances={[...props.instances, numbered]} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Details for Claude local (2)" }));
+    await user.click(screen.getByRole("button", { name: "Add account for Claude local (2)" }));
+
+    expect(screen.getByLabelText("Provider name")).toHaveValue("Claude local (3)");
+  });
+
   it("offers Add account on Claude and Codex cards only", async () => {
     const user = userEvent.setup();
     renderProviderSettings(<ProviderSettingsView {...fixture()} />);
