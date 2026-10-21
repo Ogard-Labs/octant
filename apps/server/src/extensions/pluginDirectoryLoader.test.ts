@@ -120,6 +120,20 @@ describe("loading a plugin folder in another tool's layout", () => {
     expect(loaded.entries.map((entry) => entry.path)).toEqual(["plugin.json"]);
   });
 
+  it("imports a plugin installed as a git checkout without reading its git history", async () => {
+    // Observed in a rendered import: a Claude Code plugin cloned with git was
+    // refused because a pack file under .git exceeded the per-file limit.
+    const root = await folder({
+      ".claude-plugin/plugin.json": JSON.stringify({ name: "cloned", version: "1.0.0" }),
+      "skills/greet/SKILL.md": "---\nname: greet\ndescription: Greets\n---\nSay hi.",
+      ".git/HEAD": "ref: refs/heads/main",
+      ".git/objects/pack/pack-1.pack": "x".repeat(4_096),
+    });
+    const loaded = await loadPluginDirectory(root, { maximumFileBytes: 1_024 });
+    expect(loaded.entries.some((entry) => entry.path.startsWith(".git"))).toBe(false);
+    expect(text(loaded.entries, "skills/greet/SKILL.md")).toContain("Say hi.");
+  });
+
   it("refuses a folder that is not a plugin in any layout", async () => {
     const root = await folder({ "README.md": "nothing here" });
     await expect(loadPluginDirectory(root)).rejects.toThrow(/not a plugin/);

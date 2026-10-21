@@ -221,6 +221,10 @@ async function walk(
   const children = await readdir(current, { withFileTypes: true });
   for (const child of children.sort((left, right) => left.name.localeCompare(right.name))) {
     if (child.name === "." || child.name === "..") continue;
+    // A plugin installed as a git checkout carries its history beside its
+    // files; that history is never package content, and its pack files
+    // exceed the per-file limit (observed importing a cloned Claude plugin).
+    if (child.name === ".git") continue;
     const absolutePath = join(current, child.name);
     const relativePath = relative(root, absolutePath).split(sep).join("/");
     if (relativePath === "" || relativePath.startsWith("..")) {
