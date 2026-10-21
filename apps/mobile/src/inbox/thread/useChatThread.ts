@@ -208,12 +208,13 @@ export function useChatThread(
             if (!guard.isSelected(identity)) return;
             setPrompt("");
             dispatchAttachments({ type: "sent" });
-            setPendingPrompt(undefined);
           },
           reload: () => loadMobileChatThread(transport, view.thread.id),
         }),
       onDone: (next) => {
+        // The sent turn stays on screen until the reload shows it.
         if (next !== undefined) setLoaded(next);
+        setPendingPrompt(undefined);
       },
       onFailed: (message) => {
         setPendingPrompt(undefined);
