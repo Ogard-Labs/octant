@@ -255,6 +255,7 @@ describe("Code persistence restart", () => {
       { projection_name: "code-usage", reason: "unsupported-event-version" },
       { projection_name: "contexts", reason: "unsupported-event-version" },
       { projection_name: "diagnostics-exports", reason: "unsupported-event-version" },
+      { projection_name: "extension-project-pins", reason: "unsupported-event-version" },
       { projection_name: "extension-tool-grants", reason: "unsupported-event-version" },
       { projection_name: "extensions", reason: "unsupported-event-version" },
       { projection_name: "github-clones", reason: "unsupported-event-version" },

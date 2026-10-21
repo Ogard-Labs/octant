@@ -26,6 +26,7 @@ import {
 } from "./extensions";
 import { ExtensionToolGrantId, ExtensionToolGrantRecorded } from "./extensionEvents";
 import { ToolExtensionId } from "./toolActions";
+import { ProjectId } from "./projects";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const boundedText = (maximumLength: number) =>
@@ -257,6 +258,45 @@ export const McpServerSignInView = Schema.Union(
 );
 export type McpServerSignInView = typeof McpServerSignInView.Type;
 export const decodeMcpServerSignInView = Schema.decodeUnknownSync(McpServerSignInView);
+
+/**
+ * Plugins pinned to Projects: a pin offers the plugin on every Work or Code
+ * turn in that Project without a per-send selection. The listing names the
+ * Projects a local window may pin to, so Settings can show a switch per
+ * Project.
+ */
+export const ExtensionProjectPin = Schema.Struct({
+  projectId: ProjectId,
+  extensionId: ToolExtensionId,
+}).annotations(strict);
+export type ExtensionProjectPin = typeof ExtensionProjectPin.Type;
+export const ExtensionProjectPinListing = Schema.Struct({
+  projects: Schema.Array(
+    Schema.Struct({
+      projectId: ProjectId,
+      name: boundedText(256),
+      type: Schema.Literal("work", "code"),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(512)),
+  pins: Schema.Array(ExtensionProjectPin).pipe(Schema.maxItems(4096)),
+}).annotations(strict);
+export type ExtensionProjectPinListing = typeof ExtensionProjectPinListing.Type;
+export const decodeExtensionProjectPinListing = Schema.decodeUnknownSync(
+  ExtensionProjectPinListing,
+);
+export const ExtensionProjectPinRequest = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("set"),
+    projectId: ProjectId,
+    extensionId: ToolExtensionId,
+    pinned: Schema.Boolean,
+  }).annotations(strict),
+);
+export type ExtensionProjectPinRequest = typeof ExtensionProjectPinRequest.Type;
+export const decodeExtensionProjectPinRequest = Schema.decodeUnknownSync(
+  ExtensionProjectPinRequest,
+);
 
 export const DiscoveredAgentToolingRequest = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),

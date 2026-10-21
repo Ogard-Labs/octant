@@ -2236,6 +2236,22 @@ CREATE INDEX validation_evidence_authority_idx
   );
 `,
   },
+  {
+    version: 83,
+    name: "create_extension_project_pin_projection",
+    sql: `
+      CREATE TABLE extension_project_pin_projection (
+        project_id TEXT NOT NULL CHECK(length(trim(project_id)) > 0),
+        extension_id TEXT NOT NULL CHECK(length(trim(extension_id)) > 0),
+        pinned INTEGER NOT NULL CHECK(pinned IN (0, 1)),
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0),
+        PRIMARY KEY (project_id, extension_id)
+      ) STRICT;
+      CREATE INDEX extension_project_pin_extension_idx
+        ON extension_project_pin_projection(extension_id);
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

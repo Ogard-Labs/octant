@@ -258,6 +258,15 @@ servers, and its commands, agents and hooks are left out, which the review
 says. Octant never writes to the other tools' files. The section appears
 only in the Octant window on this host.
 
+### Use a plugin in a Project without typing @
+
+Open a plugin's card under **Extension packages** and expand **Use in a
+Project**: one switch per Work or Code Project. A pinned plugin is offered on
+every turn in that Project without naming it with `@`. It changes nothing
+about approval: each tool call still asks, or uses an answer you remembered in
+that Project. A plugin that is turned off or untrusted is skipped rather than
+stopping a turn. Pins can be set only from the Octant window on this host.
+
 ### Structured references
 
 In a composer, typing `@` opens a searchable plugin palette. Selections

@@ -5552,7 +5552,24 @@ import for review and install; the folder loader reads all three layouts
 Agent Plugins package in memory, keeping its skills and MCP servers and
 leaving its commands, agents and hooks behind, with a note saying so. This
 is the one place the home folder's `.claude` is read, and only for this
-explicit listing; it is still never a skill root. Project pins arrive as their own change on these same seams.
+explicit listing; it is still never a skill root. **Project pins.** A plugin can be pinned to a Work or Code Project from its
+card in Settings (Use in a Project, one switch per active Project). A pin is
+the person's standing choice to offer that plugin on every turn in that
+Project without naming it with `@` each time; it is journaled as its own
+aggregate per Project (`extension.project-pin-changed@1`) and projected like
+tool grants. At turn start the Work and Code services hand the Project's
+pinned ids to the turn's extension resolver, which places each pin against
+the same catalog the person's own selections are checked against: a pinned
+plugin becomes one selection per component, carrying the package identity
+and catalog epoch a selection needs, and a plugin the person also named this
+turn keeps exactly the components they chose. Only a package that is in that
+catalog with every component effective rides along: a pin to anything else
+is skipped rather than failing the turn, so a disabled or removed plugin
+never blocks work. A pin grants nothing: every tool call still
+asks, or uses a remembered approval in that Project, and the resolver's
+catalog, mode and provider checks apply as for an explicit selection. Chat
+has no Project and no pins. Only a local window sets a pin; a paired device
+may read the list. Uninstalling a package forgets its pins everywhere.
 
 **Connectors catalog.** Settings › Skills & Extensions has a Connectors view:
 a bundled, first-party list of hosted MCP servers (`connectorCatalog` in

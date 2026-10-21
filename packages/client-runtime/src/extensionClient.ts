@@ -17,6 +17,8 @@ import {
   type DiscoveredAgentToolingRequest,
   McpServerSignInView,
   type McpServerSignInRequest,
+  ExtensionProjectPinListing,
+  type ExtensionProjectPinRequest,
 } from "@octant/contracts/extension-rpc";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -55,6 +57,8 @@ export interface ExtensionClient {
   ): Promise<ExtensionCommandResult>;
   /** Sign-in state and actions for a hosted server a person added. */
   mcpServerSignIn(request: McpServerSignInRequest): Promise<McpServerSignInView>;
+  /** The plugins pinned to Projects; `set` changes one pin and answers with the whole list. */
+  projectPins(request: ExtensionProjectPinRequest): Promise<ExtensionProjectPinListing>;
 }
 
 export class ExtensionClientFailure extends Error {
@@ -212,6 +216,18 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           }
           return value.revoked;
         },
+      );
+    },
+    projectPins(pin) {
+      return request(
+        fetch,
+        new URL("/api/extensions/project-pins", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(pin),
+        },
+        decodeHostAnswer(ExtensionProjectPinListing),
       );
     },
     mcpServerSignIn(signIn) {
