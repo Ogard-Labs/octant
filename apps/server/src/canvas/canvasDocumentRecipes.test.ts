@@ -38,6 +38,16 @@ describe("in-tree Canvas document recipes", () => {
     expect(recipes.get("clickable-prototype")?.skeleton[0]?.role).toContain("runsScript");
   });
 
+  it("offers a website redesign that starts from a screenshot the Browser kept and fetches nothing remote", () => {
+    const redesign = inTreeCanvasDocumentRecipes().find(
+      (recipe) => String(recipe.id) === "website-redesign",
+    );
+    if (redesign === undefined) throw new Error("The website redesign recipe is not offered.");
+    expect(redesign.skeleton[0]).toMatchObject({ kind: "design" });
+    expect(redesign.skeleton[0]?.role).toContain("screenshot");
+    expect(redesign.skeleton[0]?.role).toContain("Never fetch");
+  });
+
   it("shapes a memo from typed blocks alone, so the reader can comment on and revise each part", () => {
     const memo = inTreeCanvasDocumentRecipes().find((recipe) => String(recipe.id) === "memo");
     if (memo === undefined) throw new Error("The memo recipe is not offered.");

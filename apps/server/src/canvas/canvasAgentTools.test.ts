@@ -160,6 +160,7 @@ describe("createCanvasAgentTools", () => {
     expect(recipeGuide).toContain('"show the key numbers" uses dashboard');
     expect(recipeGuide).toContain('"design a website or landing page" uses design-prototype');
     expect(recipeGuide).toContain('"a prototype I can try" uses clickable-prototype');
+    expect(recipeGuide).toContain('"redesign an existing website" uses website-redesign');
     expect(set.definitions[0]?.description).toContain("document recipe");
     const recipes = (
       outcome.result as {
@@ -1420,11 +1421,14 @@ describe("createCanvasAgentTools", () => {
         expect(guidance).toContain("octant-asset:home-shot");
         expect(guidance).toContain('"kind": "project-file"');
         expect(guidance).toContain('"kind": "generated-image"');
+        expect(guidance).toContain('"kind": "browser-capture"');
+        expect(guidance).toContain("never copy the page's remote images");
         expect(guidance).toContain("3 MB each and 5 MB per design");
       }
       const chat = await designGuidance(tools().set);
       expect(chat).toContain('"kind": "generated-image"');
       expect(chat).not.toContain('"kind": "project-file"');
+      expect(chat).not.toContain("browser-capture");
       expect(chat).toContain("a file path is refused");
     });
 

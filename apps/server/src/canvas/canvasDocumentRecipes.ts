@@ -147,6 +147,21 @@ const inTreeCanvasDocumentRecipeDocuments = [
     ],
   },
   {
+    id: "website-redesign",
+    title: "Website redesign",
+    summary: "The current page as captured, beside a redesigned version, with the reasons.",
+    whenToUse:
+      "When someone asks to redesign, restyle, or improve an existing website or page that the thread's Browser can open.",
+    skeleton: [
+      {
+        kind: "design",
+        role: "Before frame: the Browser screenshot as an asset. After frame: your redesign. Never fetch remote assets.",
+      },
+      { kind: "heading", role: "What changed" },
+      { kind: "rich-text", role: "What the redesign changes and why, and what is still open." },
+    ],
+  },
+  {
     id: "slide-deck",
     title: "Slide deck",
     summary: "One slide-size frame per slide, in order.",
