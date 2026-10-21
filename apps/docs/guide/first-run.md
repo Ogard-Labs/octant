@@ -129,6 +129,11 @@ capability — stay absent rather than advertised. Agents is available on an exi
 GitHub and Linear have separate pages in Settings. Selecting either page shows
 that integration's connection controls; opening a page does not connect an account.
 
+For GitHub, choose **Set up GitHub**. Octant displays the CLI's one-time code
+whether the CLI copied it to the clipboard or asks you to copy it. Open the
+displayed GitHub device-login link, complete authorization, then choose
+**Refresh status** in Octant.
+
 Choose the provider, model, and access posture in the new-thread composer.
 Execution profiles are no longer offered in Settings or the command palette
 and do not supply new-thread defaults. Existing saved profile records remain
