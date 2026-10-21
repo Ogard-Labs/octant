@@ -57,7 +57,7 @@ import {
 } from "./CanvasRefreshPanel";
 import { CanvasVersionHistoryPanel, ReviseCanvasDraft } from "./CanvasRevisionPanel";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
-import { readWorkspaceFrameTheme, type DesignAssetRuntime } from "./blocks/designDocument";
+import { withWorkspaceFrameTheme, type DesignAssetRuntime } from "./blocks/designDocument";
 import { designRunRuntimeFor } from "./blocks/designRunningFrame";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
 import { createCanvasActionRuntime } from "./canvasActionRuntime";
@@ -590,11 +590,7 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
       if (prepareExport === undefined) {
         return Promise.reject(new Error("Canvas export is unavailable on this host."));
       }
-      return prepareExport(
-        holdsDesign && request.format === "html"
-          ? { ...request, frameTheme: readWorkspaceFrameTheme(document.documentElement) }
-          : request,
-      );
+      return prepareExport(holdsDesign ? withWorkspaceFrameTheme(request) : request);
     },
     [holdsDesign, prepareExport],
   );

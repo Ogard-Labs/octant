@@ -67,12 +67,40 @@ describe("desktop quit guard", () => {
     expect(confirm).toHaveBeenCalledTimes(1);
   });
 
-  it("names the active work and keeps cancellation as the default", () => {
-    expect(buildQuitConfirmation(snapshot(2))).toEqual({
+  it("keeps a stale session count uncertain when refreshing activity fails", async () => {
+    const confirm = vi.fn(async () => false);
+    await expect(
+      evaluateQuitRequest({
+        refreshActivity: async () => {
+          throw new Error("Host is unavailable");
+        },
+        snapshot: () => snapshot(2),
+        confirm,
+      }),
+    ).resolves.toBe(false);
+    expect(confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ activeAgentCount: 2, activityUnconfirmed: true }),
+    );
+  });
+
+  it.each([
+    [1, "1 provider session is still open."],
+    [2, "2 provider sessions are still open."],
+  ])("describes %i open sessions without claiming they are running turns", (count, message) => {
+    expect(buildQuitConfirmation(snapshot(count))).toEqual({
       title: "Quit Octant?",
-      message: "2 active agent turns will be interrupted.",
-      detail: "Fully quitting stops the desktop-owned local host and its running work.",
+      message,
+      detail: "Quitting closes these sessions and stops any running work on this local host.",
       buttons: ["Cancel", "Quit and stop work"],
+      defaultId: 0,
+      cancelId: 0,
+    });
+  });
+
+  it.each([0, 2])("keeps an unconfirmed count of %i uncertain", (count) => {
+    expect(buildQuitConfirmation({ ...snapshot(count), activityUnconfirmed: true })).toMatchObject({
+      message: "Active Octant work may be interrupted.",
+      detail: "Fully quitting stops the desktop-owned local host and its running work.",
       defaultId: 0,
       cancelId: 0,
     });

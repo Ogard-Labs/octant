@@ -2326,6 +2326,18 @@ export const ProviderRuntimeEvent = Schema.Union(
     tokensBefore: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
     tokensAfter: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   }).annotations(strict),
+  /**
+   * The provider's stream is still moving but has nothing a person can see
+   * yet: a tool call's input is being written, or a keep-alive arrived. It
+   * carries no content. The turn runners count it as activity so a long tool
+   * call is not mistaken for silence; every other consumer ignores it, and it
+   * never reaches a transcript, the journal, usage, or a turn's event budget.
+   * An adapter sends it at most once every few seconds.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("liveness"),
+  }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("task-progress"),
