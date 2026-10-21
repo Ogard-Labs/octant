@@ -83,7 +83,7 @@ describe("Found on this Mac", () => {
     });
   });
 
-  it("hands a found plugin's preview to the page, and shows a refusal in its own words", async () => {
+  it("hands a found plugin's preview to the page, and shows a refusal in its own words beside it", async () => {
     const user = userEvent.setup();
     const preview = { entry: { displayName: "github" } };
     const applyDiscoveredTooling = vi
@@ -107,9 +107,11 @@ describe("Found on this Mac", () => {
     await user.click(within(plugins).getByRole("button", { name: "Review and import" }));
     await waitFor(() => expect(onPluginInspected).toHaveBeenCalledWith(preview));
     await user.click(within(plugins).getByRole("button", { name: "Review and import" }));
-    expect(
-      await screen.findByText("That plugin is no longer listed. Look again."),
-    ).toBeInTheDocument();
+    // The refusal sits in the clicked row: below a long list it was out of
+    // sight, and the click looked like it did nothing.
+    expect(await within(plugins).findByRole("alert")).toHaveTextContent(
+      "That plugin is no longer listed. Look again.",
+    );
   });
 
   it("shows nothing when the other tools know nothing", async () => {

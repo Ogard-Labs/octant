@@ -8,7 +8,6 @@ import type {
 } from "@octant/contracts/extension-rpc";
 import { useCallback, useEffect, useState } from "react";
 import { SettingsSection } from "../settings/primitives";
-import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface DiscoveredToolingSectionProps {
@@ -48,7 +47,11 @@ function blockedReason(server: DiscoveredMcpServer): string | undefined {
 export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
   const [listing, setListing] = useState<DiscoveredAgentToolingListing>();
   const [busyId, setBusyId] = useState<string>();
-  const [failure, setFailure] = useState<ExtensionCommandFailure>();
+  // The refusal is shown in the row that was clicked, so it is seen there.
+  const [failure, setFailure] = useState<{
+    readonly id: string;
+    readonly failure: ExtensionCommandFailure;
+  }>();
   const { client, revision } = props;
 
   useEffect(() => {
@@ -73,14 +76,17 @@ export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
       try {
         const result = await client.applyDiscoveredTooling({ kind: "add-server", id: server.id });
         if (result.kind === "extension-command-failed") {
-          setFailure(result.failure);
+          setFailure({ id: server.id, failure: result.failure });
           return;
         }
         props.onServerAdded();
       } catch (error) {
         setFailure({
-          category: "unavailable",
-          message: error instanceof Error ? error.message : "Extension service is unavailable.",
+          id: server.id,
+          failure: {
+            category: "unavailable",
+            message: error instanceof Error ? error.message : "Extension service is unavailable.",
+          },
         });
       } finally {
         setBusyId(undefined);
@@ -99,14 +105,17 @@ export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
           id: plugin.id,
         });
         if (result.kind === "extension-command-failed") {
-          setFailure(result.failure);
+          setFailure({ id: plugin.id, failure: result.failure });
           return;
         }
         if (result.kind === "package-inspected") props.onPluginInspected(result.preview);
       } catch (error) {
         setFailure({
-          category: "unavailable",
-          message: error instanceof Error ? error.message : "Extension service is unavailable.",
+          id: plugin.id,
+          failure: {
+            category: "unavailable",
+            message: error instanceof Error ? error.message : "Extension service is unavailable.",
+          },
         });
       } finally {
         setBusyId(undefined);
@@ -146,6 +155,11 @@ export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
                       {blockedReason(server)}
                     </span>
                   )}
+                  {failure?.id === server.id ? (
+                    <span className="discovered-tooling__detail" role="alert">
+                      {failure.failure.message}
+                    </span>
+                  ) : null}
                 </span>
                 <OctantButton
                   disabled={
@@ -173,6 +187,11 @@ export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
                     {plugin.version === undefined ? "" : ` · v${plugin.version}`}
                     {plugin.enabledThere ? "" : " · off there"}
                   </span>
+                  {failure?.id === plugin.id ? (
+                    <span className="discovered-tooling__detail" role="alert">
+                      {failure.failure.message}
+                    </span>
+                  ) : null}
                 </span>
                 <OctantButton
                   disabled={props.disabled || busyId !== undefined}
@@ -193,11 +212,6 @@ export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
               <li key={note}>{note}</li>
             ))}
           </ul>
-        )}
-        {failure === undefined ? null : (
-          <OctantAlert className="provider-settings__alert" tone="warning">
-            {failure.message}
-          </OctantAlert>
         )}
       </div>
     </SettingsSection>
