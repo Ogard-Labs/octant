@@ -2142,6 +2142,46 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("tells the model to deliver kept work as a Canvas only when Code offers the Canvas tool", async () => {
+    const sentContext = async (canvas: boolean) => {
+      const provider = providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()));
+      const fixture = runtimeFixture({
+        provider: providerDriver(provider),
+        supportsAppManagedTools: true,
+        ...(canvas
+          ? {
+              canvas: () => ({
+                definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+                execute: async () => ({ result: {} }),
+              }),
+            }
+          : {}),
+      });
+      try {
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(75),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+        return vi.mocked(provider.send).mock.calls[0]?.[0]?.context ?? [];
+      } finally {
+        fixture.close();
+      }
+    };
+    const withCanvas = await sentContext(true);
+    expect(withCanvas).toContainEqual({
+      kind: "instructions",
+      text: expect.stringContaining("as a Canvas with the octant_canvas"),
+    });
+    expect(withCanvas.filter((block) => block.text.includes("as a Canvas"))).toHaveLength(1);
+    const withoutCanvas = await sentContext(false);
+    expect(JSON.stringify(withoutCanvas)).not.toContain("octant_canvas");
+  });
+
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -5910,6 +5950,7 @@ function runtimeFixture(options: {
   >[0]["computerUseUnattachedTools"];
   agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
   siblingThreads?: Parameters<typeof createCodeOperationRuntime>[0]["siblingThreads"];
+  canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
   carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
   confirmAgentMessagesDelivered?: Parameters<
     typeof createCodeOperationRuntime
@@ -6213,6 +6254,7 @@ function runtimeFixture(options: {
       : { computerUseUnattachedTools: options.computerUseUnattachedTools }),
     ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
     ...(options.siblingThreads === undefined ? {} : { siblingThreads: options.siblingThreads }),
+    ...(options.canvas === undefined ? {} : { canvas: options.canvas }),
     ...(options.carryAgentMessages === undefined
       ? {}
       : { carryAgentMessages: options.carryAgentMessages }),
