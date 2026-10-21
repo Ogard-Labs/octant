@@ -2325,9 +2325,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   model picker, thread pinning, and usage history are written against
   that profile. Octant never reads, stores, or injects that provider's
   credentials ([0005](decisions/0005-provider-sdk-contract.md)).
-  Plan usage limits (rolling windows, per-model weekly, overage) come
-  only from the provider's own process: session `rate-limit-window`
-  events, or a process reading a person asks for. That reading starts
+  Claude and Codex plan usage limits (rolling windows, per-model weekly,
+  overage) come only from the provider's own process: session
+  `rate-limit-window` events, or a process reading a person asks for.
+  Devin and OpenCode Go have no such channel in their runtimes, so their
+  plan windows come from the account usage endpoint under the
+  account usage endpoint rule in
+  [Security and authority](#security-and-authority). The Claude
+  reading starts
   the provider's process, so it is made only on an explicit refresh
   (`onDemand` on the context-facts input), never on the schedule or
   before a turn. Observed with Claude Code 2.1.296, a process started
@@ -2337,8 +2342,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `rate_limits_available: false` in that cold process. For a subscription
   account this means unavailable usage, not that a plan does not apply.
   Only explicit API-key authentication establishes the no-plan state.
-  Octant never reads a token or credential file to
-  fetch those numbers, and never calls a vendor usage endpoint
+  For Claude and Codex, Octant never reads a token or credential file
+  to fetch those numbers, and never calls a vendor usage endpoint
   itself. Each account keeps its own snapshot, keyed by
   the instance and the state directory that session ran under. The
   snapshots live in `providers/plan-usage.json` in the host store,
@@ -7314,6 +7319,32 @@ mechanisms are:
   deleted, and a request the plan route's profile cannot express is refused
   before send. The wire details are in
   [Provider runtimes](design/provider-runtimes.md#subscription-sign-in-dialects).
+- **Account usage endpoints.** Devin and OpenCode Go report plan windows only from an account endpoint, so the
+  host reads the sign-in their own CLI saved and asks that endpoint. Devin:
+  `windsurf_api_key` (and an `https` `api_server_url`, else
+  `server.codeium.com`) from `~/.local/share/devin/credentials.toml`, sent in
+  the body of a Connect `POST` to
+  `SeatManagementService/GetUserStatus`; daily and weekly remaining
+  percentages become windows, and the overage balance is not shown. OpenCode
+  Go: the `opencode-go` key from the `credential` table of OpenCode 2's
+  `opencode*.db` in its data directory (`$XDG_DATA_HOME/opencode`, default
+  `~/.local/share/opencode`), opened read-only with no pragmas, else
+  `auth.json` when no database keeps sign-ins; sent as a bearer token to
+  `GET opencode.ai/zen/go/v1/usage`, whose 5-hour, weekly, and monthly
+  used percentages become windows. The reads run in the host process, only
+  for an enabled instance of that provider. Only a refresh a person asks for
+  waits on the endpoint. Every other caller, the limits service's
+  five-minute schedule and the service-limits read before each Chat turn,
+  gets the last reading at once and starts at most one background read per
+  five minutes, so a turn never waits on the endpoint and frequent turns
+  never multiply the calls. The request sends nothing else and follows no
+  redirect. Octant never writes, copies, or stores either key. It
+  stays out of logs, the journal, snapshots, and errors: every failure carries
+  a fixed message. A missing sign-in reads as not ready, an OpenCode sign-in
+  without Go as plan limits not applying, a refused key as unauthenticated,
+  and a 429 keeps its `Retry-After`. The Devin call is not a published
+  interface; an answer whose shape stops matching fails as a protocol change
+  and keeps the last reading rather than guessing.
 - **Update feed signing keys are per ring.** The desktop updater verifies a
   feed's Ed25519 signature against the compiled-in keys of the ring the signed
   release names, before any other field is believed. Stable trusts only the

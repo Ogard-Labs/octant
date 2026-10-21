@@ -19,6 +19,7 @@ const KNOWN_WINDOWS: Readonly<Record<string, string>> = {
   seven_day: "7-day limit",
   one_day: "24-hour limit",
   one_hour: "1-hour limit",
+  monthly: "Monthly limit",
 };
 
 export function providerLimitWindowName(window: string): ProviderLimitWindowName {
@@ -35,12 +36,13 @@ export function providerLimitWindowLabel(window: string): string {
 const UNIT_SUFFIX: Readonly<Record<string, string>> = { minute: "m", hour: "h", day: "d" };
 
 /**
- * The short name a narrow bar can carry: "5h", "Week". A seven-day window is
- * the provider's weekly limit, so it reads as "Week". A window whose length
+ * The short name a narrow bar can carry: "5h", "Week", "Month". A seven-day
+ * window is the provider's weekly limit, so it reads as "Week". A window whose length
  * is not a plain duration keeps its full label.
  */
 export function providerLimitWindowShortLabel(window: string): string {
   const { label } = providerLimitWindowName(window);
+  if (label === KNOWN_WINDOWS.monthly) return "Month";
   const duration = /^(\d+)-(minute|hour|day) limit$/.exec(label);
   if (duration === null) return label;
   const [, amount = "", unit = ""] = duration;
