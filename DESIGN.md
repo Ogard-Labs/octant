@@ -40,7 +40,8 @@ asks for it (Settings › Appearance › Style):
   repeats another pane's content.
 - Hierarchy comes from typography (size first, then weight), spacing, cards
   for discrete objects, and selection fills. In the Default style the chrome is
-  monochrome; colour names identity (a Project, a provider, a count tile under
+  monochrome apart from the accent a person picks (Mono by default); colour
+  names identity (a Project, a provider, a usage ring, a count tile under
   Vivid) and never stands in for status, which keeps its own warning, failure,
   and diff roles. Categorical data is the other exception: the context ring and
   the parts of the context window keep their hues in every style.
@@ -134,10 +135,18 @@ body and detail use none.
 ### Colour
 
 Neutral graphite, a monochrome accent, semantic statuses, and one neutral
-keyboard focus edge. That is the default preset; the bundled colour presets lean every
-surface toward one hue and keep the accent and focus role available for theme
-compatibility. Text is three greys (primary, secondary, muted) and never a
-fourth. Hairlines separate; fills select. Selected and expanded fills carry
+keyboard focus edge: that is the default preset. The bundled colour presets
+lean every surface toward one hue and keep the accent and focus role available
+for theme compatibility. Text is three greys (primary, secondary, muted) and
+never a fourth; the primary ink is near-white (`#f5f5f7`) in dark and
+near-black (`#141414`) in light, and the monochrome accent follows it.
+
+Appearance › Accent offers a one-click accent colour: Mono (the preset's own)
+or Clay, Amber, Green, Blue, Purple. A swatch overrides the accent fill and
+puts dark ink on it (`accent-foreground` and `primary-foreground`), and leaves accent text on the
+preset's ink, because no swatch clears normal-text contrast on the light page.
+The accent colours switches, the send button, selected states, and sliders;
+status colours stay their own. Hairlines separate; fills select. Selected and expanded fills carry
 state; keyboard focus follows the rule in "Accessibility and reliability". See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
@@ -917,37 +926,41 @@ focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
-rail clamp or drawer. The workspace sidebar supports resizing. By default
-(Settings › Sidebar › Icon rail: Always) the icon rail also stands beside the
-open sidebar, in its own column in front of it: there it carries only the
-places and counts (the count tiles as icons with badges, the destination rows
-including the More ones, Projects, the Activity feed, and Settings), and the
-sidebar beside it keeps its header, search, the Projects row with its list, and
-the profile, so nothing is offered twice. The traffic lights sit over the rail.
-Above Settings, at the foot of either rail, each provider that reports a plan
-window with a figure gets a usage ring in its identity colour: the outer arc is
-what is left of the longest window (the week), the inner arc what is left of
-the shortest (five hours), and a window near or at its limit takes the danger
-ink. Hovering or focusing a ring opens a card with every window, its share
-left, and when it resets; clicking opens Settings › Usage. A provider with no
-figure gets no ring, because an empty ring would claim a limit nobody reported.
-The rings read the host's last observation, never a fresh provider call.
-Mod+\ (rebindable, "Show or hide the sidebar") toggles the sidebar from
-anywhere, text fields included. Hide sidebar
-collapses it to a 56px icon rail (76px in the desktop app, where
-the native traffic lights sit at its top): Show sidebar, New thread, and
-Search at the top, then the modes, the count tiles as icons with their counts
-as badges, the remaining destination rows, up to six Project letter tiles with
-a Projects button for the rest, the Activity feed, and Settings at the foot.
-Rail icons are 20px on a 40px face. Every rail control names itself in
-its accessible name and in a label that opens beside the rail on hover or
-keyboard focus. Settings ›
-Sidebar › Icon rail can choose When hidden (no rail beside the open sidebar)
-or Never, which removes the sidebar completely when hidden and leaves Show
-sidebar and New thread in the native title rail.
-Neither rail appears below the narrow-window breakpoint (960px): there the
-width belongs to the page, and below the drawer breakpoint a collapsed sidebar
-is a closed drawer. The right dock defaults to 420px when open. A fresh window
+rail clamp or drawer. The workspace sidebar supports resizing.
+
+**Icon rail.** By default (Settings › Sidebar › Icon rail: Always) a 56px
+icon rail (76px in the desktop app, where the native traffic lights sit at its
+top) stands in its own column in front of the open sidebar. Beside the sidebar
+it carries only places and counts: the count tiles as icons with badges, the
+destination rows, the Activity feed, and Settings. The sidebar keeps its
+header (modes, search, new thread, hide), the Projects row with its list,
+More with Customize sidebar, and the profile, so nothing is offered twice.
+Rail icons are 20px on a 40px face; every rail control names itself in its
+accessible name and in a label that opens beside the rail on hover or keyboard
+focus.
+
+**Usage rings.** Above Settings, at the foot of either rail, each provider
+that reports a plan window with a figure gets a ring in its identity colour:
+the outer arc is what is left of the longest window (the week), the inner arc
+what is left of the shortest (five hours), chosen by each window's length, and
+a window near or at its limit takes the danger ink. Hovering or focusing a
+ring opens a card with every window, its share left, and when it resets;
+clicking opens Settings › Usage. A provider with no figure gets no ring,
+because an empty ring would claim a limit nobody reported. The rings read the
+host's last observation every few minutes, never a fresh provider call.
+
+**Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
+the sidebar", answered in text fields too and leaving focus where it was),
+collapses the sidebar to the rail alone, which then also shows Show sidebar,
+New thread, and Search at the top, the modes, and up to six Project letter
+tiles with a Projects button for the rest. Icon rail: When hidden shows the
+rail only in that state; Never removes the sidebar completely when hidden and
+leaves Show sidebar and New thread in the native title rail. Neither rail
+appears below the narrow-window breakpoint (960px): there the width belongs to
+the page, and below the drawer breakpoint a collapsed sidebar is a closed
+drawer.
+
+The right dock defaults to 420px when open. A fresh window
 starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is `--oct-title-rail-h` in the native host and the status
