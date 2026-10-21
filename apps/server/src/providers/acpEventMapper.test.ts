@@ -382,7 +382,7 @@ describe("ACP event normalization", () => {
           },
         },
       }).map((result) => (result.kind === "event" ? result.event.kind : result.kind)),
-    ).toEqual(["task-progress", "task-progress"]);
+    ).toEqual(["task-progress", "task-progress", "task-list"]);
     expect(
       mapAcpNotification(ctx, {
         kind: "notification",

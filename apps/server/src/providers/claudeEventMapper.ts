@@ -491,11 +491,9 @@ const CHECKLIST_STATUSES: Readonly<Record<string, "pending" | "in-progress" | "c
  * One `task-progress` event per item of a `TodoWrite` list, in its order. An
  * item without text or with a status Claude does not document is left out
  * rather than failing the turn: Claude validates the call itself and refuses
- * it, and the next list it writes replaces this one.
- *
- * `task-progress` has no way to remove a task, so a list that shrinks leaves
- * its old last rows in place until the turn ends; the same holds for every
- * provider that restates a whole plan.
+ * it, and the next list it writes replaces this one. A closing `task-list`
+ * names the positions still in the list, so a shorter list drops its old
+ * last rows; an empty list clears the panel.
  */
 function checklistEvents(
   context: ClaudeEventContext,
@@ -504,6 +502,7 @@ function checklistEvents(
   const todos = input.todos;
   if (!Array.isArray(todos)) return [{ kind: "ignored" }];
   const results: ClaudeMappedMessage[] = [];
+  const taskIds: string[] = [];
   let position = 0;
   for (const todo of todos) {
     if (typeof todo !== "object" || todo === null || Array.isArray(todo)) continue;
@@ -517,9 +516,12 @@ function checklistEvents(
       context.todoTaskIds.set(position, taskId);
     }
     position += 1;
+    taskIds.push(taskId);
     results.push(event(context, { kind: "task-progress", taskId, status, summary }));
   }
-  return results.length === 0 ? [{ kind: "ignored" }] : results;
+  // A list with items but none readable is one Claude refuses; keep the panel.
+  if (results.length === 0 && todos.length > 0) return [{ kind: "ignored" }];
+  return [...results, event(context, { kind: "task-list", taskIds })];
 }
 
 function withoutIgnored(

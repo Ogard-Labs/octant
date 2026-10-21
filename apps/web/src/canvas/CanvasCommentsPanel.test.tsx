@@ -318,6 +318,56 @@ describe("CanvasCommentsPanel", () => {
     expect(screen.getByLabelText("New comment")).toHaveValue("");
   });
 
+  it("offers Send to agent only when the Canvas's thread can be reached", async () => {
+    const { rerender } = render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={canvasFixture}
+        load={async () => ready([existing])}
+        send={vi.fn()}
+      />,
+    );
+    await screen.findByRole("list", { name: "Comment threads" });
+    expect(screen.queryByRole("button", { name: /to the agent/ })).toBeNull();
+    rerender(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={canvasFixture}
+        load={async () => ready([existing])}
+        onSendToAgent={async () => ({ status: "sent", canvasSequence: 1 })}
+        send={vi.fn()}
+      />,
+    );
+    expect(await screen.findByRole("button", { name: /to the agent/ })).toBeInTheDocument();
+  });
+
+  it("marks a comment sent to the agent only after the thread took the turn", async () => {
+    const user = userEvent.setup();
+    const send = vi.fn<(command: CanvasCommentCommand) => Promise<CanvasCommentCommandResult>>(
+      async () => ({ kind: "applied", sequence: 2 }) as never,
+    );
+    const onSendToAgent = vi.fn(async () => ({
+      status: "refused" as const,
+      message: "The thread cannot take a message right now.",
+    }));
+    render(
+      <CanvasCommentsPanel
+        author={author}
+        canvasId={canvasId}
+        definition={canvasFixture}
+        load={async () => ready([existing], 1)}
+        onSendToAgent={onSendToAgent}
+        send={send}
+      />,
+    );
+    await screen.findByRole("list", { name: "Comment threads" });
+    await user.click(screen.getByRole("button", { name: /to the agent/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/cannot take a message/);
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("explains a comment that lost the race and reloads instead of pretending it landed", async () => {
     const user = userEvent.setup();
     const load = vi.fn(async () => ready([existing], 1));

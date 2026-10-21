@@ -917,8 +917,16 @@ focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
-rail clamp or drawer. The workspace sidebar supports resizing. Hide sidebar
-collapses it to a 56px icon rail by default (76px in the desktop app, where
+rail clamp or drawer. The workspace sidebar supports resizing. By default
+(Settings › Sidebar › Icon rail: Always) the icon rail also stands beside the
+open sidebar, in its own column in front of it: there it carries only the
+places and counts (the count tiles as icons with badges, the destination rows
+including the More ones, Projects, the Activity feed, and Settings), and the
+sidebar beside it keeps its header, search, the Projects row with its list, and
+the profile, so nothing is offered twice. The traffic lights sit over the rail.
+Mod+\ (rebindable, "Show or hide the sidebar") toggles the sidebar from
+anywhere, text fields included. Hide sidebar
+collapses it to a 56px icon rail (76px in the desktop app, where
 the native traffic lights sit at its top): Show sidebar, New thread, and
 Search at the top, then the modes, the count tiles as icons with their counts
 as badges, the remaining destination rows, up to six Project letter tiles with
@@ -926,9 +934,11 @@ a Projects button for the rest, the Activity feed, and Settings at the foot.
 Rail icons are 20px on a 40px face. Every rail control names itself in
 its accessible name and in a label that opens beside the rail on hover or
 keyboard focus. Settings ›
-Sidebar › When collapsed can choose Hidden instead, which removes the sidebar
-completely and leaves Show sidebar and New thread in the native title rail.
-The rail never appears below the drawer breakpoint, where a collapsed sidebar
+Sidebar › Icon rail can choose When hidden (no rail beside the open sidebar)
+or Never, which removes the sidebar completely when hidden and leaves Show
+sidebar and New thread in the native title rail.
+Neither rail appears below the narrow-window breakpoint (960px): there the
+width belongs to the page, and below the drawer breakpoint a collapsed sidebar
 is a closed drawer. The right dock defaults to 420px when open. A fresh window
 starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The

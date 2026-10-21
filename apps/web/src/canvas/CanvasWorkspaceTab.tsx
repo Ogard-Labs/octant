@@ -42,6 +42,12 @@ import { OctantDialog } from "../ui/base/OctantDialog";
 import { OctantMenu } from "../ui/base/OctantMenu";
 import { OctantPopover } from "../ui/base/OctantPopover";
 import { CanvasCommentsPanel } from "./CanvasCommentsPanel";
+import type { ThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
+import {
+  canvasCommentAgentPrompt,
+  canvasCommentAttemptKey,
+  enqueueCanvasCommentTurn,
+} from "./canvasCommentAgentTurn";
 import type {
   CanvasExportOfferList,
   CanvasExportPrepareRequest,
@@ -49,6 +55,7 @@ import type {
 } from "@octant/contracts/canvas-export";
 import { CanvasExportPanel } from "./CanvasExportPanel";
 import { useCanvasExportFolder } from "./useCanvasExportFolder";
+import { CanvasPublicLinksSection } from "./CanvasPublicLinksSection";
 import { CanvasSharePanel } from "./CanvasSharePanel";
 import {
   CanvasRefreshPanel,
@@ -71,6 +78,12 @@ type CanvasToolDialog = (typeof CANVAS_TOOL_DIALOGS)[number];
 export interface CanvasWorkspaceTabProps {
   readonly client: CanvasClient | undefined;
   readonly onAttachContext?: (selection: CanvasContextSelection) => void;
+  /**
+   * The message queue of the Canvas's owning thread. Without it no comment
+   * offers Send to agent; with it the turn still runs under the thread's own
+   * authority, and the host refuses it when the person cannot reach the thread.
+   */
+  readonly queueClient?: ThreadMessageQueueClient;
   readonly tab: Extract<WorkspaceTab, { readonly kind: "canvas" }>;
   readonly onPinCanvasInFocusZone?: (request: {
     readonly canvasId: CanvasId;
@@ -111,6 +124,14 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
   const [commentThreads, setCommentThreads] = useState<ReadonlyArray<CanvasCommentThread>>([]);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [dialog, setDialog] = useState<CanvasToolDialog | undefined>(undefined);
+  // Update on a public link opens Export on that destination; the menu opens it
+  // on whichever destination is first ready. The revision re-reads the links
+  // each time the Share dialog opens, so an export made meanwhile shows up.
+  const [exportTargetId, setExportTargetId] = useState<string | undefined>(undefined);
+  const [publicLinksRevision, setPublicLinksRevision] = useState(0);
+  useEffect(() => {
+    if (dialog === "share") setPublicLinksRevision((value) => value + 1);
+  }, [dialog]);
   const [compare, setCompare] = useState<
     | {
         readonly kind: "ready";
@@ -650,6 +671,40 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             undefined,
           );
   const commentsAvailable = commentsClient !== undefined && reviseBase !== null;
+  // The agent works on the head, so a request made from an older version on
+  // screen could name blocks the head no longer has.
+  const headSequence = history.reduce((head, entry) => Math.max(head, entry.sequence), 0);
+  const queueClient = props.queueClient;
+  const onSendToAgent =
+    queueClient === undefined ||
+    reviseBase === null ||
+    selectedVersionId === undefined ||
+    expectedSequence < headSequence
+      ? undefined
+      : async (thread: CanvasCommentThread, anchorLabel: string) => {
+          const sent = await enqueueCanvasCommentTurn(queueClient, {
+            mode: reviseBase.mode,
+            threadId: String(reviseBase.originThreadId),
+            prompt: canvasCommentAgentPrompt({
+              definition,
+              canvasId: String(props.tab.canvasId),
+              sequence: expectedSequence,
+              thread,
+              anchorLabel,
+            }),
+            attemptKey: canvasCommentAttemptKey(thread.comment),
+            canvasSelection: {
+              canvasId: props.tab.canvasId,
+              versionId: selectedVersionId,
+              sequence: expectedSequence,
+              displayName: definition.title,
+              scope: "whole-canvas",
+            },
+          });
+          return sent.status === "sent"
+            ? ({ status: "sent", canvasSequence: expectedSequence } as const)
+            : sent;
+        };
   // Refine and Refresh write the next version on top of the head, and the host
   // refuses either from an older version as stale. Comments anchor to blocks of
   // the Canvas rather than to a version, so the host takes them from any
@@ -843,7 +898,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
             items={overflowItems}
             onValueChange={(value) => {
               const chosen = CANVAS_TOOL_DIALOGS.find((candidate) => candidate === value);
-              if (chosen !== undefined) setDialog(chosen);
+              if (chosen === undefined) return;
+              setExportTargetId(undefined);
+              setDialog(chosen);
             }}
             selectionMode="action"
             trigger={<MoreHorizontal aria-hidden="true" size={16} strokeWidth={1.8} />}
@@ -907,6 +964,8 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               }}
               onThreadsChange={setCommentThreads}
               send={commentsClient.send}
+              history={history}
+              {...(onSendToAgent === undefined ? {} : { onSendToAgent })}
               {...(focusedBlockId === undefined ? {} : { focusedBlockId })}
               {...(focusedRowId === undefined ? {} : { focusedRowId })}
             />
@@ -962,6 +1021,19 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
               : { resolveDesignPage: props.client.sharedDesignPageUrl })}
           />
         ) : null}
+        {props.client?.publicShares !== undefined &&
+        props.client.revokePublicShare !== undefined ? (
+          <CanvasPublicLinksSection
+            canvasId={props.tab.canvasId}
+            onList={props.client.publicShares}
+            onRevoke={props.client.revokePublicShare}
+            onUpdate={() => {
+              setExportTargetId("public-link");
+              setDialog("export");
+            }}
+            revision={publicLinksRevision}
+          />
+        ) : null}
       </OctantDialog>
       <OctantDialog
         className="canvas-workspace-tab__share-dialog"
@@ -975,8 +1047,9 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
         props.client?.prepareExport !== undefined &&
         props.client.decideExport !== undefined ? (
           <CanvasExportPanel
-            key={`${String(exportOffers.canvasId)}:${String(exportOffers.versionId)}`}
+            key={`${String(exportOffers.canvasId)}:${String(exportOffers.versionId)}:${exportTargetId ?? ""}`}
             folder={exportFolder}
+            {...(exportTargetId === undefined ? {} : { initialTargetId: exportTargetId })}
             offers={exportOffers}
             onDecide={props.client.decideExport}
             onExportFolderChosen={() => void loadExportOffers()}

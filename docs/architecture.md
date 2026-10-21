@@ -28,11 +28,14 @@ The design rests on a small set of invariants that every package obeys:
   Octant operates none of it; an S3-compatible store is contacted only at the
   endpoint the person configured and only while the Settings › Sync switch is
   on. Remote access is host-to-device over the user's
-  own network. Three host-initiated
+  own network. Four host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
-  device-tool update checks against the npm registry, and server marketplace
+  device-tool update checks against the npm registry, server marketplace
   fetches when the person searches, inspects, previews, or installs from the
-  catalog. All have a Settings off switch: marketplace off means no catalog
+  catalog, and calls to the public Canvas share service when the person
+  publishes, updates, or revokes a public link (and the host retries a revoke
+  it could not complete). All have a Settings off switch: Public links starts
+  off and off means no share-service request except finishing a revoke; marketplace off means no catalog
   request; Updates off disables automatic update checks (manual Check for
   updates may still contact the signed feed); device tools' automatic updates
   start off, and off means no registry request (a manual check may still
@@ -535,7 +538,13 @@ document as a future version. Frames follow the
   HTML export writes frames as sandboxed `srcdoc` pages with the policy
   inside, the approval card names the markup it writes, and a themed design
   is drawn in the theme the person's window hands over; this has shipped.
-  Markdown export writes the title. Public links stay out.
+  Markdown export writes the title. A public link is an export too: off until
+  the person turns on Settings › Data & privacy › Public links, published only from
+  the approval card in a local window and never by an agent, it carries the
+  share filter's blocks without host, Project, thread, or source identity to
+  the public Canvas share service, which can read it, draws design frames only
+  from a separate user-content origin, and deletes it on revoke or expiry (see
+  [Canvas public links](design/canvas-public-links.md)).
 
 _Rationale:_ a `srcdoc` frame inherits the app policy (`script-src 'self'`),
 so a running frame needs a page the host serves, and a frame sandboxed without
@@ -1673,10 +1682,21 @@ is its `TodoWrite` tool: the driver offers it in every posture, Plan included,
 and lets it run unasked, because it changes only Claude's own session state
 (no file, shell, network, or person). Each call restates the whole list, and
 a task id follows a list position, so the panel keeps Claude's latest order and
-wording. `task-progress` cannot remove a task, so a shrinking list leaves its
-old last rows until the turn ends, as it does for every whole-plan provider. Each thread surface
-shows the agent's restated plan as a live "N of M tasks completed" panel while
-any task is open or the turn is still writing: Code from its journaled
+wording.
+
+`task-progress` adds or updates one task. Because every one of these providers
+restates its whole plan, each restatement ends with a `task-list` event naming
+the ids the plan now holds, in order (at most 64, the per-turn task cap). Each
+surface keeps only those tasks, in that order, so a step the provider drops
+leaves the panel, a moved step moves, and an empty list clears it. `task-list`
+belongs to the `taskProgress` capability: a driver that reports it supported
+may send either kind. Code journals it as its own operation event; Chat and
+Work fold it into the list they already journal whole. A journal written before
+`task-list` existed holds only `task-progress` and replays exactly as it did,
+dropped steps included.
+
+Each thread surface shows the agent's restated plan as a live "N of M tasks
+completed" panel while any task is open or the turn is still writing: Code from its journaled
 operation events, Chat from `ChatAttempt.tasks` carried on
 `chat.attempt-updated@1`, and Work from `WorkTurnState.tasks` journaled on
 `work.turn-updated@1` with a live `turn-tasks` stream frame. The panel is a
@@ -7428,6 +7448,7 @@ in this document describe the build as it ships. The steps, the open questions, 
 | `apps/desktop`            | Electron shell: windows, menus, native credential-store integration, pickers, signed updates, server process lifecycle, packaging                       | contracts, domain, host-runtime                                   |
 | `apps/web`                | React renderer for desktop and paired browsers                                                                                                          | client-runtime, contracts, domain, plugin-host, theme             |
 | `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                                  | client-runtime, contracts, domain                                 |
+| `apps/share`              | Public Canvas share service: link API, viewer pages, user-content frames, storage, expiry, limits                                                       | contracts, domain                                                 |
 
 Dependencies point inward: no package imports an app, and `contracts` imports
 nothing first-party.
@@ -7524,6 +7545,15 @@ person owns — a synced folder or an S3-compatible bucket. Octant operates no
 storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account. See
 [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
+
+The public Canvas share service (`apps/share`, `https://canvas.octant.sh`) is
+in scope: an Octant-operated service that stores, and can read, the Canvases
+people publish as public links, under the rules in
+[Canvas public links](design/canvas-public-links.md). It is not an Octant
+account, a relay, or a sync store; nothing reaches it until the person turns
+Public links on and approves a publish, and a self-hosted service URL is a
+Settings choice. Deploying it, its DNS and TLS, and its operator contact are
+release steps of their own.
 
 The start gates for the connector / OAuth marketplace and full LSP /
 extension host / debugger holds are in
