@@ -476,6 +476,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
                 : {}),
               // The screenshot reached the model either way; this only tells
               // it the thread's Browser captures strip will not show it.
+              ...(observation.capture?.status === "kept"
+                ? { captureId: observation.capture.captureId }
+                : {}),
               ...(observation.capture?.status === "not-kept"
                 ? { captureNotKept: observation.capture.reason }
                 : {}),

@@ -44,6 +44,12 @@ the Browser pane
   thread is already tainted by `thread.external-content-ingested@1`. The capture
   adds only the origin it came from.
 
+## Tool result
+
+- A screenshot the thread kept returns `captureId` beside the image, so the agent
+  can declare it as a `browser-capture` asset in a Canvas design. Nothing else of
+  the capture is returned.
+
 ## Failure
 
 - Keeping is best effort. The screenshot succeeds either way.
