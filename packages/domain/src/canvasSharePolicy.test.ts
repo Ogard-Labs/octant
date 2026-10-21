@@ -1,4 +1,8 @@
-import { CANVAS_SCHEMA_VERSION, decodeCanvasVersion } from "@octant/contracts/canvas";
+import {
+  CANVAS_MAX_TEXT_LENGTH,
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasVersion,
+} from "@octant/contracts/canvas";
 import { decodeCanvasComment } from "@octant/contracts/canvas-board";
 import {
   CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION,
@@ -694,6 +698,30 @@ describe("Canvas share policy", () => {
         },
         context,
       }),
+    ).toThrowError(CanvasSharePolicyRejected);
+  });
+
+  it("scans a long run of scheme letters in linear time and still finds a URL after it", () => {
+    const rich = (text: string) => ({
+      request,
+      current: {
+        ...current,
+        definition: {
+          ...current.definition,
+          blocks: [{ blockId: "rich-long", schemaVersion: 1, kind: "rich-text" as const, text }],
+        },
+      },
+      context,
+    });
+    const started = performance.now();
+    expect(() =>
+      buildCanvasStaticExportReceipt(rich("A".repeat(CANVAS_MAX_TEXT_LENGTH))),
+    ).not.toThrow();
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(() =>
+      buildCanvasStaticExportReceipt(
+        rich(`${"A".repeat(20_000)} see 1https://example.test/file?token=opaque-secret`),
+      ),
     ).toThrowError(CanvasSharePolicyRejected);
   });
 

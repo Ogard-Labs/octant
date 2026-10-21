@@ -78,11 +78,36 @@ function extractCandidateUrls(value: string): string[] {
   const candidates = new Set<string>();
   const trimmed = value.trim();
   if (trimmed) candidates.add(trimmed);
-  const embedded = value.match(/[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`<>]+/g) ?? [];
-  for (const match of embedded) {
+  for (const match of embeddedUrls(value)) {
     candidates.add(trimTrailingUrlPunctuation(match));
   }
   return [...candidates];
+}
+
+const URL_SCHEME_CHAR = /^[A-Za-z0-9+.-]$/;
+const URL_SCHEME_START = /^[A-Za-z]$/;
+const URL_END_CHAR = /[\s"'`<>]/;
+
+/**
+ * Every `scheme://rest` run in the text, found by a linear scan from each
+ * `://`. A single regex over the whole text backtracked quadratically on a
+ * long run of scheme letters with no `://`, and public links now feed this
+ * text from outside the host.
+ */
+function embeddedUrls(value: string): string[] {
+  const found: string[] = [];
+  let from = 0;
+  for (;;) {
+    const separator = value.indexOf("://", from);
+    if (separator < 0) return found;
+    let start = separator;
+    while (start > 0 && URL_SCHEME_CHAR.test(value.charAt(start - 1))) start -= 1;
+    while (start < separator && !URL_SCHEME_START.test(value.charAt(start))) start += 1;
+    let end = separator + 3;
+    while (end < value.length && !URL_END_CHAR.test(value.charAt(end))) end += 1;
+    if (start < separator && end > separator + 3) found.push(value.slice(start, end));
+    from = Math.max(end, separator + 3);
+  }
 }
 
 function assertNoCredentialBearingUrl(value: string, path: string): void {
