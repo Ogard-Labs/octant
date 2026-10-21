@@ -37,6 +37,7 @@ import {
   changeCodeProjectPullRequestBackgroundRefresh,
   changeProjectColor,
   changeProjectProviderPolicy,
+  changeProjectBrandKit,
   changeWorkProjectStatusFile,
   createMemoryEntry,
   createProject,
@@ -699,6 +700,10 @@ export class ProjectService implements ProjectServiceApi {
           project = changeWorkProjectStatusFile(current, command.statusFile, timestamp);
           kind = "work-project-status-file-changed";
           eventName = "project.work-status-file-changed@1";
+        } else if (command.kind === "change-project-brand-kit") {
+          project = changeProjectBrandKit(current, command.brandKit, timestamp);
+          kind = "project-brand-kit-changed";
+          eventName = "project.brand-kit-changed@1";
         } else {
           if (current.type === "chat")
             throw new ProjectServiceError({

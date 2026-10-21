@@ -381,6 +381,16 @@ that text into a new message, and keep the window open while resolving it.
 This handoff does not guarantee recovery after closing or reloading a window
 with a pending follow-up. Notes still in the steering list can also be discarded.
 
+In the terminal, a refused next prompt leaves its text in **Retained steering
+notes**, without replacing your draft. The error may mean the host accepted
+the message but could not answer. Check the conversation and queue before
+using `/notes copy` to copy and resend the text manually. `/notes discard`
+removes this terminal's recovery copy. Notes stay with their original thread
+when you switch threads. If taking the notes loses its response, the terminal
+keeps the displayed text with a warning that another client may own it. Neither
+case retries automatically. Keep the terminal open until resolved; this recovery
+copy is not saved across terminal restarts.
+
 `Esc` stops the
 running turn; `Ctrl+C` stops it too, and a second press right after quits.
 

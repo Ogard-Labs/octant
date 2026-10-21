@@ -246,14 +246,16 @@ describe("ClaudeProcessPort probes", () => {
     const binaryPath = join(root, "claude-guards");
     writeFileSync(
       binaryPath,
-      `#!/bin/sh\nprintf '%s,%s' "\${DISABLE_AUTOUPDATER-unset}" "\${DISABLE_TELEMETRY-unset}" > '${recorded}'\nprintf '2.1.210\\n'\n`,
+      `#!/bin/sh\nprintf '%s,%s,%s' "\${DISABLE_AUTOUPDATER-unset}" "\${DISABLE_TELEMETRY-unset}" "\${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC-unset}" > '${recorded}'\nprintf '2.1.210\\n'\n`,
       { mode: 0o755 },
     );
     chmodSync(binaryPath, 0o755);
 
     await Effect.runPromise(makePort(target).probeVersion(binaryPath));
 
-    expect(readFileSync(recorded, "utf8")).toBe("1,1");
+    // The non-essential traffic umbrella is the person's to set, not Octant's,
+    // so no launch shape names it.
+    expect(readFileSync(recorded, "utf8")).toBe("1,1,unset");
   });
 
   it("preserves a fast version probe when receipt persistence loses the exit race", async () => {

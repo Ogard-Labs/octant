@@ -24,6 +24,8 @@ export interface HostHealth {
   readonly url?: URL;
   readonly instanceId?: string;
   readonly version?: string;
+  /** Whether the host finds the Canvas preview page; absent from a host that does not say. */
+  readonly canvasPreviewPage?: boolean;
 }
 
 export interface HostLauncherDependencies {
@@ -75,6 +77,7 @@ export type HostLauncherResult =
       readonly url: URL;
       readonly instanceId?: string;
       readonly version?: string;
+      readonly canvasPreviewPage?: boolean;
     }
   | {
       readonly kind: "started";
@@ -100,6 +103,9 @@ export async function attachOrCreateHost(
       url,
       ...(probe.instanceId === undefined ? {} : { instanceId: probe.instanceId }),
       ...(probe.version === undefined ? {} : { version: probe.version }),
+      ...(probe.canvasPreviewPage === undefined
+        ? {}
+        : { canvasPreviewPage: probe.canvasPreviewPage }),
     };
   }
   if (probe.status === "disabled") {
@@ -117,6 +123,9 @@ export async function attachOrCreateHost(
       url: attached.url,
       instanceId: attached.instanceId,
       ...(attached.version === undefined ? {} : { version: attached.version }),
+      ...(attached.canvasPreviewPage === undefined
+        ? {}
+        : { canvasPreviewPage: attached.canvasPreviewPage }),
     };
   }
 
@@ -198,7 +207,10 @@ export async function attachOrCreateHost(
 async function probeAttachedCandidate(
   resolveAttachedHost: (() => Promise<AttachedHostCandidate | undefined>) | undefined,
   fetch: typeof globalThis.fetch,
-): Promise<(AttachedHostCandidate & { readonly version?: string }) | undefined> {
+): Promise<
+  | (AttachedHostCandidate & { readonly version?: string; readonly canvasPreviewPage?: boolean })
+  | undefined
+> {
   if (resolveAttachedHost === undefined) return undefined;
   try {
     const candidate = await resolveAttachedHost();
@@ -208,6 +220,9 @@ async function probeAttachedCandidate(
     return {
       ...candidate,
       ...(probe.version === undefined ? {} : { version: probe.version }),
+      ...(probe.canvasPreviewPage === undefined
+        ? {}
+        : { canvasPreviewPage: probe.canvasPreviewPage }),
     };
   } catch {
     return undefined;
@@ -236,6 +251,7 @@ export async function probeHostHealth(options: {
       readonly storage?: string;
       readonly instanceId?: string;
       readonly version?: string;
+      readonly canvasPreviewPage?: unknown;
     };
     if (body.product !== "Octant" || body.status !== "ok") return { status: "timeout" };
     if (body.storage !== "ready") {
@@ -250,6 +266,9 @@ export async function probeHostHealth(options: {
       url: options.url,
       ...(body.instanceId === undefined ? {} : { instanceId: body.instanceId }),
       ...(body.version === undefined ? {} : { version: body.version }),
+      ...(typeof body.canvasPreviewPage === "boolean"
+        ? { canvasPreviewPage: body.canvasPreviewPage }
+        : {}),
     };
   } catch {
     return { status: "timeout" };

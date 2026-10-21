@@ -13,6 +13,7 @@ import {
   ProjectPolicyRejected,
   changeCodeProjectAccess,
   changeCodeProjectPullRequestBackgroundRefresh,
+  changeProjectBrandKit,
   changeProjectColor,
   changeProjectLifecycle,
   changeWorkProjectStatusFile,
@@ -210,6 +211,46 @@ describe("Project creation and lifecycle", () => {
         "enabled",
         updatedAt,
       ),
+    ).toThrow(ProjectPolicyRejected);
+  });
+
+  it("keeps a brand kit on any Project type and clears it with an empty kit", () => {
+    const kit = { "color-primary": "#0a7d5a", "font-heading": "georgia, serif" };
+    for (const [id, type] of [
+      [ids.chat, "chat"],
+      [ids.work, "work"],
+      [ids.code, "code"],
+    ] as const) {
+      const project = makeProject(id, "0/1", { type });
+      const withKit = changeProjectBrandKit(project, kit, updatedAt);
+      expect(withKit).toMatchObject({ brandKit: kit, version: 2 });
+      const cleared = changeProjectBrandKit(withKit, {}, updatedAt);
+      expect(cleared).not.toHaveProperty("brandKit");
+    }
+  });
+
+  it("refuses a brand kit value that could end a declaration or load something", () => {
+    const project = makeProject(ids.work, "0/1", { type: "work" });
+    for (const kit of [
+      { "color-primary": "red; } body { display: none" },
+      { "color-primary": "url(https://example.com/x.png)" },
+      { "font-body": "Some Web Font, sans-serif" },
+      { "radius-card": "10px; color: red" },
+    ]) {
+      expect(() => changeProjectBrandKit(project, kit, updatedAt)).toThrow(ProjectPolicyRejected);
+    }
+  });
+
+  it("refuses to save the brand kit a Project already has", () => {
+    const kit = { "color-primary": "#0a7d5a" };
+    const project = changeProjectBrandKit(
+      makeProject(ids.work, "0/1", { type: "work" }),
+      kit,
+      updatedAt,
+    );
+    expect(() => changeProjectBrandKit(project, kit, updatedAt)).toThrow(ProjectPolicyRejected);
+    expect(() =>
+      changeProjectBrandKit(makeProject(ids.work, "0/1", { type: "work" }), {}, updatedAt),
     ).toThrow(ProjectPolicyRejected);
   });
 

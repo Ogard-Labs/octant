@@ -276,6 +276,19 @@ export class ArtifactMirrorService {
    */
   async materialize(version: CanvasVersion): Promise<ArtifactMirrorReceipt> {
     const provenance = version.definition.provenance;
+    // The mirror files artifacts by Project: its destination is chosen per
+    // Project and its folder is named after one. A Canvas owned by a Chat
+    // thread outside every Project has neither, so it is not mirrored, and
+    // the receipt says so rather than filing it under a Project it lacks.
+    if (provenance.projectId === null) {
+      return this.#receipt(
+        version,
+        this.settings().fallback,
+        [],
+        "skipped",
+        "This Canvas belongs to a Chat thread outside a Project, so it is not mirrored.",
+      );
+    }
     const projectId = String(provenance.projectId);
     const destination = resolveArtifactDestination(this.settings(), projectId);
     const project = this.#dependencies.projects.read(projectId);

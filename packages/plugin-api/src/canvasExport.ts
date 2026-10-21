@@ -9,20 +9,26 @@ export type {
   CanvasExportDecideRequest,
   CanvasExportDecideResult,
   CanvasExportDelivery,
+  CanvasExportFileName,
   CanvasExportFilePath,
   CanvasExportFormat,
   CanvasExportImplementedFormat,
   CanvasExportOfferList,
+  CanvasExportPictureFormat,
   CanvasExportPrepareRequest,
   CanvasExportPrepareResult,
   CanvasExportReceipt,
   CanvasExportRecorded,
   CanvasExportRefusal,
   CanvasExportRefusalCode,
+  CanvasExportRenderedFile,
   CanvasExportRenderedOutput,
+  CanvasExportRenderedPictures,
+  CanvasExportRenderedText,
   CanvasExportTargetId,
   CanvasExportTargetOffer,
   CanvasExportTargetStatus,
+  CanvasExportTextFormat,
   CanvasExportVisibility,
 } from "@octant/contracts/canvas-export";
 
@@ -32,11 +38,20 @@ export {
   decodeCanvasExportDelivery,
   decodeCanvasExportRenderedOutput,
   isCanvasExportImplementedFormat,
+  isCanvasExportPictureFormat,
+} from "@octant/contracts/canvas-export";
+
+export type {
+  CanvasExportLinkChoice,
+  CanvasExportLinkExpiry,
+  CanvasExportLinkTerms,
 } from "@octant/contracts/canvas-export";
 
 import type {
   CanvasExportContribution,
   CanvasExportDelivery,
+  CanvasExportLinkChoice,
+  CanvasExportLinkTerms,
   CanvasExportRenderedOutput,
   CanvasExportVisibility,
 } from "@octant/contracts/canvas-export";
@@ -60,12 +75,30 @@ export interface CanvasExportDestination {
   readonly path?: string;
   /** Whether a file is already at `path` and will be replaced. */
   readonly replacesExisting?: boolean;
+  /**
+   * The other files of a set that are already there and will be replaced.
+   * Only a file named by `path` or here may replace one; any other existing
+   * file gets a copy beside it.
+   */
+  readonly alsoReplaces?: ReadonlyArray<string>;
   /** The account this export will act as, when the destination acts as one. */
   readonly account?: string;
   /** Whether the result is visible to anyone, or only to `account`. */
   readonly visibility?: CanvasExportVisibility;
   /** The destination's own plain note about this export, shown on the card. */
   readonly note?: string;
+  /**
+   * For a destination that publishes a link: its default expiry, whether it
+   * takes a password, and the link this export would update. The card offers
+   * the person these terms.
+   */
+  readonly linkTerms?: CanvasExportLinkTerms;
+  /**
+   * The expiry and password the person chose on the card. Set by the host on
+   * the confirmed destination only, and only for one that described
+   * `linkTerms`; a description never supplies it.
+   */
+  readonly link?: CanvasExportLinkChoice;
 }
 
 /**
@@ -93,7 +126,9 @@ export interface CanvasExportTarget {
    * Perform the export. `confirmed` is the destination the approval card named
    * — including the audience the person chose — and the person approved; when
    * it is absent the target has no confirmation and, for a local destination,
-   * writes alongside an existing file instead of over it.
+   * writes alongside an existing file instead of over it. A text form arrives
+   * as one body; a picture form arrives as named files, and only at a target
+   * that declared that format.
    */
   readonly exportDocument: (
     output: CanvasExportRenderedOutput,

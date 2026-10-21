@@ -2142,6 +2142,46 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("tells the model to deliver kept work as a Canvas only when Code offers the Canvas tool", async () => {
+    const sentContext = async (canvas: boolean) => {
+      const provider = providerConnection(Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>()));
+      const fixture = runtimeFixture({
+        provider: providerDriver(provider),
+        supportsAppManagedTools: true,
+        ...(canvas
+          ? {
+              canvas: () => ({
+                definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+                execute: async () => ({ result: {} }),
+              }),
+            }
+          : {}),
+      });
+      try {
+        await fixture.runtime.execute(windowId, {
+          kind: "start-provider-turn",
+          operationId: operationId(75),
+          threadId,
+          checkoutId,
+          sessionId,
+          prompt: fixture.prompt,
+        });
+        await vi.waitFor(() => expect(provider.send).toHaveBeenCalledOnce());
+        return vi.mocked(provider.send).mock.calls[0]?.[0]?.context ?? [];
+      } finally {
+        fixture.close();
+      }
+    };
+    const withCanvas = await sentContext(true);
+    expect(withCanvas).toContainEqual({
+      kind: "instructions",
+      text: expect.stringContaining("as a Canvas with the octant_canvas"),
+    });
+    expect(withCanvas.filter((block) => block.text.includes("as a Canvas"))).toHaveLength(1);
+    const withoutCanvas = await sentContext(false);
+    expect(JSON.stringify(withoutCanvas)).not.toContain("octant_canvas");
+  });
+
   it("runs a provider turn asynchronously and owns exact input, approval, and cancellation", async () => {
     const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
     const connection = providerConnection(queue);
@@ -3318,6 +3358,46 @@ describe("CodeOperationRuntime", () => {
       expect(page.version).toBe(3);
       const window = await fixture.runtime.conversationWindow(windowId, threadId, { limit: 20 });
       expect(window.status === "ok" ? window.window.turns : undefined).toEqual(page.turns);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("journals a restated task plan so a replayed turn drops the tasks the provider left out", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(1381);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      for (const event of [
+        { kind: "task-progress", taskId: "t1", status: "completed", summary: "Read" },
+        { kind: "task-progress", taskId: "t2", status: "in-progress", summary: "Write" },
+        { kind: "task-list", taskIds: ["t2"] },
+      ] as const)
+        await Effect.runPromise(Queue.offer(queue, providerEvent(event)));
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+        expect(
+          frames.flatMap((frame) =>
+            frame.event.kind === "task-progress" || frame.event.kind === "task-list"
+              ? [frame.event]
+              : [],
+          ),
+        ).toEqual([
+          { kind: "task-progress", taskId: "t1", state: "completed", summary: "Read" },
+          { kind: "task-progress", taskId: "t2", state: "running", summary: "Write" },
+          { kind: "task-list", taskIds: ["t2"] },
+        ]);
+      });
     } finally {
       fixture.close();
     }
@@ -5870,6 +5950,7 @@ function runtimeFixture(options: {
   >[0]["computerUseUnattachedTools"];
   agentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["agentMessages"];
   siblingThreads?: Parameters<typeof createCodeOperationRuntime>[0]["siblingThreads"];
+  canvas?: Parameters<typeof createCodeOperationRuntime>[0]["canvas"];
   carryAgentMessages?: Parameters<typeof createCodeOperationRuntime>[0]["carryAgentMessages"];
   confirmAgentMessagesDelivered?: Parameters<
     typeof createCodeOperationRuntime
@@ -6173,6 +6254,7 @@ function runtimeFixture(options: {
       : { computerUseUnattachedTools: options.computerUseUnattachedTools }),
     ...(options.agentMessages === undefined ? {} : { agentMessages: options.agentMessages }),
     ...(options.siblingThreads === undefined ? {} : { siblingThreads: options.siblingThreads }),
+    ...(options.canvas === undefined ? {} : { canvas: options.canvas }),
     ...(options.carryAgentMessages === undefined
       ? {}
       : { carryAgentMessages: options.carryAgentMessages }),

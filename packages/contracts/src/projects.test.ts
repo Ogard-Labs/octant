@@ -159,6 +159,16 @@ describe("Project read contracts", () => {
     },
   );
 
+  it.each([chatProject, workProject, codeProject])(
+    "decodes a $type Project with a brand kit and refuses a token name outside the brand vocabulary",
+    (project) => {
+      const brandKit = { "color-primary": "#0a7d5a", "font-heading": "georgia, serif" };
+      expect(decodeProject({ ...project, brandKit }).brandKit).toEqual(brandKit);
+      expect(() => decodeProject({ ...project, brandKit: { "x-evil": "#000000" } })).toThrow();
+      expect(() => decodeProject({ ...project, brandKit: { "color-primary": "" } })).toThrow();
+    },
+  );
+
   it("carries a Project colour into the compact summary", () => {
     const { bindingHistory: _history, ...summary } = codeProject;
     expect(
@@ -510,6 +520,7 @@ describe("Project and memory event payload contracts", () => {
       "project.code-pull-request-background-refresh-changed@1",
       "project.provider-policy-changed@1",
       "project.work-status-file-changed@1",
+      "project.brand-kit-changed@1",
       "memory.entry-created@1",
       "memory.entry-superseded@1",
       "memory.entry-retracted@1",

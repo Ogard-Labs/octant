@@ -341,6 +341,44 @@ describe("Canvas comment policy", () => {
     expect(deleted.kind).toBe("accepted");
   });
 
+  it("records that a comment was sent to the agent at the Canvas version it saw, and refuses one that does not exist", () => {
+    const state: CanvasCommentState = { comments: [comment()], replies: [], sequence: 1 };
+    const sent = admitCanvasCommentCommand(
+      {
+        kind: "canvas-comment-send-to-agent",
+        canvasId: ids.canvas,
+        commentId: ids.comment,
+        sentBy: actor,
+        canvasSequence: 4,
+        expectedSequence: 1,
+        issuedAt: "2026-08-01T21:00:01.000Z" as never,
+      },
+      state,
+    );
+    expect(sent.kind).toBe("accepted");
+    if (sent.kind !== "accepted" || !("sentBy" in sent.event)) throw new Error("expected sent");
+    const next = applyCanvasCommentEvent(state, { kind: "sent-to-agent", event: sent.event });
+    expect(next.sequence).toBe(2);
+    expect(next.comments[0]?.sentToAgent).toEqual({
+      canvasSequence: 4,
+      sentAt: "2026-08-01T21:00:01.000Z",
+    });
+
+    const missing = admitCanvasCommentCommand(
+      {
+        kind: "canvas-comment-send-to-agent",
+        canvasId: ids.canvas,
+        commentId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa9",
+        sentBy: actor,
+        canvasSequence: 4,
+        expectedSequence: 1,
+        issuedAt: now,
+      },
+      state,
+    );
+    expect(missing).toMatchObject({ kind: "rejected", code: "unknown-comment" });
+  });
+
   it("rejects resolving or deleting a comment that does not exist", () => {
     const resolve = admitCanvasCommentCommand(
       {

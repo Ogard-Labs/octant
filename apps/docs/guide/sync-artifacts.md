@@ -41,6 +41,8 @@ On a computer that belongs to a replica, with sync on:
   computer shows that computer's name beside it, such as **You · Studio
   Mac**, and replies always appear after the comment they answer. Comments
   on a Canvas that never left this computer stay here.
+- A Canvas made in a Chat thread filed under no Project belongs to that
+  thread and has no Project to file under, so it is never copied out.
 - A Code thread in Plan mode copies nothing out, and with sync off Octant
   neither writes to the store nor reads from it.
 

@@ -4,11 +4,14 @@ import {
   decodeProviderInstanceId,
   decodeProviderRuntimeEvent,
   decodeProviderSessionId,
+  restateThreadTaskList,
+  upsertThreadTaskProgress,
+  type ThreadTaskProgressList,
 } from "@octant/contracts";
 import { Schema } from "effect";
 import { decodeMessage } from "./claudeAgentSdkDecoder";
 import type { ClaudeOpenQueryInput } from "./claudeAgentSdkPort";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   mapClaudeMessage,
@@ -51,6 +54,7 @@ function context(overrides: Partial<ClaudeEventContext> = {}): ClaudeEventContex
     callUsage: new Map(),
     requestIds: new Map(),
     taskIds: new Map(),
+    todoTaskIds: new Map(),
     toolStates: new Map(),
     makeRequestId: () => `request-${++request}`,
     makeTaskId: () => `task-${++task}`,
@@ -242,6 +246,138 @@ describe("mapClaudeMessage", () => {
     expect(all.some((item) => item.kind === "failure")).toBe(false);
     expect(eventValues(all).some((item) => item.kind === "file-change")).toBe(false);
     expect(JSON.stringify(all)).not.toMatch(/private body|outside\/private|Private runtime/);
+  });
+
+  it("reports a content-free liveness event for streamed tool input and pings, at most once every few seconds", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-21T10:00:00.000Z"));
+      const ctx = context();
+      const streamEvent = (
+        event: Extract<ClaudeDecodedMessage, { readonly kind: "stream-event" }>["event"],
+      ): ClaudeDecodedMessage => ({
+        kind: "stream-event",
+        sessionId: claudeSessionId,
+        event,
+      });
+      const delta = streamEvent({ kind: "tool-input-delta", index: 0 });
+      const ping = streamEvent({ kind: "ping" });
+
+      const first = mapped(ctx, delta);
+      expect(eventValues(first)).toEqual([
+        expect.objectContaining({ kind: "liveness", sequence: 41 }),
+      ]);
+      expect(Object.keys(eventValues(first)[0] ?? {}).sort()).toEqual([
+        "correlationId",
+        "instanceId",
+        "kind",
+        "occurredAt",
+        "sequence",
+        "sessionId",
+      ]);
+      vi.advanceTimersByTime(4_999);
+      expect(mapped(ctx, ping)).toEqual([{ kind: "ignored" }]);
+      expect(mapped(ctx, delta)).toEqual([{ kind: "ignored" }]);
+      vi.advanceTimersByTime(1);
+      expect(eventValues(mapped(ctx, ping))).toEqual([
+        expect.objectContaining({ kind: "liveness", sequence: 42 }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("completes a tool call whose streamed input is interleaved with keep-alive pings", () => {
+    const ctx = context();
+    const toolName = "mcp__octant__octant_canvas";
+    const input: ClaudeOpenQueryInput = {
+      binaryPath: "/claude",
+      projectRoot,
+      authEnvironment: {},
+      model: "sonnet",
+      executionPolicy: "approval-gated",
+      tools: ["Read", toolName],
+      managedToolServer: true,
+      canUseTool: async () => ({ behavior: "allow" }),
+      preToolUse: async () => ({ behavior: "allow" }),
+    };
+    const decode = (raw: unknown) =>
+      decodeMessage(raw, input, { kind: "active", sessionId: claudeSessionId });
+    const streamed = (event: unknown) => ({
+      type: "stream_event",
+      session_id: claudeSessionId,
+      parent_tool_use_id: null,
+      event,
+    });
+    const inputDelta = (partial_json: string) =>
+      streamed({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "input_json_delta", partial_json },
+      });
+    const ping = streamed({ type: "ping" });
+    const content = {
+      type: "tool_use",
+      id: "canvas-1",
+      name: toolName,
+      input: { title: "Pitch deck" },
+      caller: { type: "direct" },
+    };
+    const all = [
+      streamed({ type: "content_block_start", index: 0, content_block: { ...content, input: {} } }),
+      inputDelta('{"title":'),
+      ping,
+      inputDelta('"Pitch deck"}'),
+      ping,
+      streamed({ type: "content_block_stop", index: 0 }),
+      {
+        type: "assistant",
+        session_id: claudeSessionId,
+        parent_tool_use_id: null,
+        message: {
+          id: "message-1",
+          type: "message",
+          role: "assistant",
+          model: "sonnet",
+          stop_reason: "tool_use",
+          stop_sequence: null,
+          content: [content],
+          usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+      },
+      {
+        type: "user",
+        session_id: claudeSessionId,
+        parent_tool_use_id: null,
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "canvas-1", content: "ok" }],
+        },
+      },
+    ].flatMap((raw) => mapped(ctx, decode(raw)));
+    expect(mapped(ctx, decode(ping))).toEqual([{ kind: "ignored" }]);
+    const completed = mapped(ctx, {
+      kind: "result",
+      sessionId: claudeSessionId,
+      outcome: "success",
+      subtype: "success",
+      stopReason: "end_turn",
+      permissionDenials: [],
+      usage,
+    });
+    expect(all.some((item) => item.kind === "failure")).toBe(false);
+    expect(eventValues(all).map((item) => item.kind)).toEqual([
+      "tool-start",
+      "liveness",
+      "usage",
+      "tool-success",
+    ]);
+    expect(eventValues(completed).map((item) => item.kind)).toEqual(["usage", "completed"]);
   });
 
   it.each(["success", "missing", "changed correlation"])(
@@ -457,6 +593,135 @@ describe("mapClaudeMessage", () => {
       { kind: "event", event: { kind: "usage", inputTokens: 17, outputTokens: 7 } },
     ]);
     expect(JSON.stringify([started, authoritative])).not.toContain("private-suffix");
+  });
+
+  it("shows Claude's checklist as task progress that keeps each item's id as it advances", () => {
+    const ctx = context();
+    const write = (toolUseId: string, statuses: ReadonlyArray<string>) =>
+      eventValues(
+        mapped(ctx, {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: `message-${toolUseId}`,
+          content: [
+            {
+              kind: "tool-use",
+              toolUseId,
+              toolName: "TodoWrite",
+              input: {
+                todos: ["Read the spec", "Write the test", "Read the spec"].map(
+                  (content, index) => ({
+                    content,
+                    status: statuses[index] ?? "pending",
+                    activeForm: content,
+                  }),
+                ),
+              },
+            },
+          ],
+          usage,
+        }),
+      ).filter((event) => event.kind !== "usage");
+
+    const first = write("sdk-todo-1", ["in_progress", "pending", "pending"]);
+    const second = write("sdk-todo-2", ["completed", "in_progress", "bogus"]);
+
+    expect(first).toMatchObject([
+      { kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "Read the spec" },
+      { kind: "task-progress", taskId: "task-2", status: "pending", summary: "Write the test" },
+      { kind: "task-progress", taskId: "task-3", status: "pending", summary: "Read the spec" },
+      { kind: "task-list", taskIds: ["task-1", "task-2", "task-3"] },
+    ]);
+    // The same items keep their ids; an item with an undocumented status is left out.
+    expect(second).toMatchObject([
+      { kind: "task-progress", taskId: "task-1", status: "completed" },
+      { kind: "task-progress", taskId: "task-2", status: "in-progress" },
+      { kind: "task-list", taskIds: ["task-1", "task-2"] },
+    ]);
+    expect(second).toHaveLength(3);
+    expect([...first, ...second].some((event) => event.kind === "tool-start")).toBe(false);
+  });
+
+  it("keeps the task panel in Claude's latest order when an item is renamed or inserted", () => {
+    const ctx = context();
+    const write = (toolUseId: string, items: ReadonlyArray<string>) =>
+      eventValues(
+        mapped(ctx, {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: `message-${toolUseId}`,
+          content: [
+            {
+              kind: "tool-use",
+              toolUseId,
+              toolName: "TodoWrite",
+              input: {
+                todos: items.map((content) => ({
+                  content,
+                  status: "pending",
+                  activeForm: content,
+                })),
+              },
+            },
+          ],
+          usage,
+        }),
+      ).flatMap((event) =>
+        event.kind === "task-progress" ? [`${event.taskId} ${event.summary}`] : [],
+      );
+
+    expect(write("sdk-todo-a", ["Read", "Test"])).toEqual(["task-1 Read", "task-2 Test"]);
+    expect(write("sdk-todo-b", ["Read the spec", "Write code", "Test"])).toEqual([
+      "task-1 Read the spec",
+      "task-2 Write code",
+      "task-3 Test",
+    ]);
+  });
+
+  it("drops checklist rows Claude removes and follows its latest order and wording", () => {
+    const ctx = context();
+    let panel: ThreadTaskProgressList = [];
+    const write = (toolUseId: string, items: ReadonlyArray<string>) => {
+      for (const event of eventValues(
+        mapped(ctx, {
+          kind: "assistant",
+          sessionId: claudeSessionId,
+          messageId: `message-${toolUseId}`,
+          content: [
+            {
+              kind: "tool-use",
+              toolUseId,
+              toolName: "TodoWrite",
+              input: {
+                todos: items.map((content) => ({
+                  content,
+                  status: "pending",
+                  activeForm: content,
+                })),
+              },
+            },
+          ],
+          usage,
+        }),
+      )) {
+        if (event.kind === "task-progress")
+          panel = upsertThreadTaskProgress(panel, {
+            taskId: event.taskId,
+            state: "pending",
+            summary: event.summary,
+          });
+        if (event.kind === "task-list") panel = restateThreadTaskList(panel, event.taskIds);
+      }
+      return panel.map((task) => task.summary);
+    };
+
+    expect(write("sdk-todo-a", ["Read", "Write", "Test"])).toEqual(["Read", "Write", "Test"]);
+    // Shrink: the dropped last row goes rather than lingering until the turn ends.
+    expect(write("sdk-todo-b", ["Read", "Test"])).toEqual(["Read", "Test"]);
+    // Rename and reorder.
+    expect(write("sdk-todo-c", ["Test it", "Read the spec"])).toEqual(["Test it", "Read the spec"]);
+    // An empty list clears the panel.
+    expect(write("sdk-todo-d", [])).toEqual([]);
   });
 
   it("ignores raw provider tool summaries regardless of Unicode length", () => {

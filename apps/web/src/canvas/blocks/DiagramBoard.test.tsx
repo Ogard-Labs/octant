@@ -32,6 +32,37 @@ function nodeRect(label: string): { readonly x: number; readonly y: number } {
 }
 
 describe("DiagramBoard", () => {
+  it("draws a node's icon and subtitle and a group inside a group", () => {
+    const block = decodeCanvasBlock({
+      schemaVersion: 21,
+      blockId: "architecture",
+      kind: "diagram",
+      nodes: [
+        { nodeId: "api", label: "API", icon: "service", detail: "Bun on port 3000" },
+        { nodeId: "db", label: "Orders", icon: "database", detail: "Postgres 16" },
+      ],
+      edges: [{ edgeId: "api-db", source: "api", target: "db" }],
+      groups: [
+        { groupId: "cloud", label: "Cloud", nodeIds: ["api"] },
+        { groupId: "data", label: "Data", nodeIds: ["db"], parentGroupId: "cloud" },
+      ],
+    });
+    if (block.kind !== "diagram") throw new Error("fixture is not a diagram");
+    const { container } = render(<DiagramBoard block={block} />);
+
+    const orders = nodeElement("Orders");
+    expect(orders.querySelector('[data-icon="database"] path')).not.toBeNull();
+    expect(screen.getByText("Postgres 16")).toBeTruthy();
+    expect(nodeElement("API").querySelector('[data-icon="service"]')).not.toBeNull();
+    const frames = [...container.querySelectorAll(".canvas-block__diagram-group")];
+    expect(frames.map((frame) => frame.getAttribute("data-depth"))).toEqual(["1", "2"]);
+    const [outer, inner] = frames.map((frame) => frame.querySelector("rect"));
+    expect(Number(inner?.getAttribute("x"))).toBeGreaterThan(Number(outer?.getAttribute("x")));
+    expect(Number(inner?.getAttribute("y")) + Number(inner?.getAttribute("height"))).toBeLessThan(
+      Number(outer?.getAttribute("y")) + Number(outer?.getAttribute("height")),
+    );
+  });
+
   it("zooms in, out, and fits from the controls and the keyboard", async () => {
     const user = userEvent.setup();
     render(<DiagramBoard block={diagram()} />);
