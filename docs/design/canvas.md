@@ -200,10 +200,10 @@ and the reader's renderer writes no tokens into it (`design-brand-refused`,
 value or an `rgb`, `hsl`, `oklch`, or `oklab` function, a font is a comma list
 drawn from a closed list of system faces and generic families (a brand never
 loads a font), and a radius or spacing step is a non-negative length in `px`,
-`rem`, `em`, or `%`. The renderers ignore these fields for now: a `brand`
-design is drawn as an unthemed page, notes and icons are not drawn, and a
-nested group draws as a top-level one. A `browser-capture` asset resolves
-under the owning thread's authority (see the design-asset rules below).
+`rem`, `em`, or `%`. A diagram's icons, details, and nested groups are drawn
+([Canvas visuals](canvas-visuals.md)), and Present shows a frame's notes. A
+`brand` design is drawn as an unthemed page for now. A `browser-capture` asset
+resolves under the owning thread's authority (see the design-asset rules below).
 
 A share carries a brand (validated again before it leaves) and the diagram
 fields, so share version 11 names blocks up to Canvas version 21 and a share
