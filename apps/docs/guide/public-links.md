@@ -173,7 +173,7 @@ takedown, are not final. The maintainer sets them before the service launches.
 ## Run your own service
 
 You do not have to use `canvas.octant.sh`. The share service is a small Bun app
-in this repository (`apps/share`). Run it on your own server, put TLS in front
+in the [octant-webapp](https://github.com/Ogard-Labs/octant-webapp) repository. Run it on your own server, put TLS in front
 of it, and enter its URL in **Settings › Data & privacy › Public links**. Your links
 then live wherever you run it.
 
@@ -182,7 +182,7 @@ refuses to start if they are the same.
 
 To take a link down, set `OCTANT_SHARE_OPERATOR_TOKEN` (at least 32
 characters) when you start the service. Then, on the same server, with the same
-token in your shell, run `bun run takedown <id>` in `apps/share`. The command
+token in your shell, run `bun run takedown <id>` in its `apps/share` folder. The command
 asks the running service to remove the link, so the service must be running.
 
 ## Related
