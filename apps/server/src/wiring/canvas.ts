@@ -781,6 +781,13 @@ export function wireCanvas(deps: CanvasDependencies) {
       authorize: authorizeCanvas,
     },
   );
+  // One browser seam draws both the agent's preview and a picture export.
+  // The preview page ships beside the web build, so it follows the same
+  // folder a host injects for the app; otherwise every preview would report
+  // no renderer on that host.
+  const canvasPreviewRenderer = createPlaywrightCanvasPreviewRenderer({
+    webAssetsPath: options.webAssetsPath ?? resolveWebAssetsPath(),
+  });
   // Comments are journaled facts of the Canvas, authored as the local user
   // with the originating device recorded beside the author; the service
   // rebuilds them from the journal and refuses reads a workspace may not make.
@@ -828,12 +835,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     preview: createCanvasPreviewService({
       canvas: canvasService,
       resolveDesignAssets,
-      renderer: createPlaywrightCanvasPreviewRenderer({
-        // The preview page ships beside the web build, so it follows the
-        // same folder a host injects for the app; otherwise every preview
-        // would report no renderer on that host.
-        webAssetsPath: options.webAssetsPath ?? resolveWebAssetsPath(),
-      }),
+      renderer: canvasPreviewRenderer,
     }),
     imagesInToolResults: ({ providerInstanceId, modelId }) => {
       const model = providerRuntimeRegistry
@@ -985,6 +987,7 @@ export function wireCanvas(deps: CanvasDependencies) {
         sequence: version.sequence,
         title: version.definition.title,
         blocks: version.definition.blocks,
+        definition: version.definition,
       };
     },
     targets: (canvasId) => canvasExportTargetBindings(canvasExportRegistration, canvasId),
@@ -994,6 +997,9 @@ export function wireCanvas(deps: CanvasDependencies) {
     }),
     uuid: randomUUID,
     clock: () => new Date().toISOString() as never,
+    // A picture export is drawn by the same browser, under the same no-route
+    // switches and interception, that the agent's preview uses.
+    renderer: canvasPreviewRenderer,
   });
   // The library is a host-wide read of the same journal-derived projection
   // the per-Project inventory reads. It is deliberately wider than a window's

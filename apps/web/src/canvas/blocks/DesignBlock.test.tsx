@@ -497,6 +497,34 @@ describe("design block", () => {
     expect(within(player).getByRole("button", { name: "Next slide" })).toBeDisabled();
   });
 
+  it("enters full screen from the player and keeps the arrow keys moving slides", () => {
+    const requestFullscreen = vi.fn(() => Promise.resolve());
+    Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
+      configurable: true,
+      value: requestFullscreen,
+    });
+    // The player offers the control only where the browser allows full screen.
+    Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: true });
+    try {
+      render(
+        <CanvasDocument definition={{ ...canvasFixture, blocks: [launchDeckExampleBlock] }} />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Present" }));
+      const player = screen.getByRole("dialog", { name: "Presenting Launch plan" });
+
+      fireEvent.click(within(player).getByRole("button", { name: "Full screen" }));
+
+      expect(requestFullscreen).toHaveBeenCalledTimes(1);
+      fireEvent.keyDown(within(player).getByRole("button", { name: "Next slide" }), {
+        key: "ArrowRight",
+      });
+      expect(within(player).getByText("2 / 2")).toBeVisible();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "requestFullscreen");
+      Reflect.deleteProperty(document, "fullscreenEnabled");
+    }
+  });
+
   it("draws every slide no wider than the column it sits in, and sizes its box before the column is measured", () => {
     const layout = stubLayoutObservers();
     render(<CanvasDocument definition={{ ...canvasFixture, blocks: [deck(3)] }} />);
