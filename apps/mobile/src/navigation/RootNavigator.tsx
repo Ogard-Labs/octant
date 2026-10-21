@@ -322,7 +322,7 @@ export function RootNavigator(props: RootNavigatorProps) {
   const [hostEntryMode, setHostEntryMode] = useState<"manage" | "add">("manage");
   const [agentListView, setAgentListView] = useState<AgentListView>("all");
   const [deepLinkNotice, setDeepLinkNotice] = useState<string | undefined>();
-  const { setInboxHostFilter, hosts, hostsLoaded } = useMobileSession();
+  const { setInboxHostFilter, hosts, hostsLoaded, hostsError } = useMobileSession();
   const onHomeBack = useCallback(() => {
     const previous = backMobileHomeView(homeMode);
     if (previous === undefined) return false;
@@ -339,6 +339,7 @@ export function RootNavigator(props: RootNavigatorProps) {
     const refusal = deepLinkRefusal(
       props.pendingDeepLinkRow,
       hosts.map((host) => host.hostId),
+      hostsError !== undefined,
     );
     if (refusal !== undefined) {
       setDeepLinkNotice(refusal);
@@ -361,6 +362,7 @@ export function RootNavigator(props: RootNavigatorProps) {
     setInboxHostFilter,
     hosts,
     hostsLoaded,
+    hostsError,
   ]);
 
   return (

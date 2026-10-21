@@ -41,6 +41,9 @@ export function inboxRowFromDeepLinkTarget(
 // Defined here because the shared copy file is owned elsewhere in this change.
 export const DEEP_LINK_HOST_NOT_PAIRED = "That computer isn't paired on this phone.";
 
+export const DEEP_LINK_HOSTS_UNREADABLE =
+  "Couldn't read the computers paired on this phone, so that link wasn't opened.";
+
 /**
  * A link to a computer this phone never paired would open a thread screen that
  * can only fail. The navigator shows this reason instead of opening it.
@@ -48,7 +51,10 @@ export const DEEP_LINK_HOST_NOT_PAIRED = "That computer isn't paired on this pho
 export function deepLinkRefusal(
   row: Pick<MobileInboxRow, "hostId">,
   pairedHostIds: ReadonlyArray<string>,
+  registryUnreadable = false,
 ): string | undefined {
+  // An unreadable registry looks like an empty one; saying "not paired" then is false.
+  if (registryUnreadable) return DEEP_LINK_HOSTS_UNREADABLE;
   return pairedHostIds.some((hostId) => hostId === row.hostId)
     ? undefined
     : DEEP_LINK_HOST_NOT_PAIRED;
