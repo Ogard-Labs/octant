@@ -577,6 +577,14 @@ OpenAI-compatible endpoint.
 - **Requesty** — `https://router.requesty.ai/v1` with a key from the Requesty
   app.
 
+When an endpoint lists voice models, the last step of Add endpoint and the
+endpoint's **Voice** section say so. **Use for Transcription** makes that
+model the one **Settings → Voice** uses for speech to text, in one click. A
+speech model is named too, with what it still needs: a voice from the
+provider, which you give in Voice settings. The Mistral preset knows its
+Voxtral models; for other endpoints Octant reads the model ids. Mistral's
+speech output works too: Octant speaks its own request shape there.
+
 While Octant checks your saved account, the Sign-in section says **Checking
 sign-in**. After you choose Sign in, it shows the browser progress and a link to
 reopen the sign-in page. You can leave Settings and return to the same pending
