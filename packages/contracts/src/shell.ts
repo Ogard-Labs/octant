@@ -175,7 +175,13 @@ export const SidebarSearchPresentation = Schema.Literal("icon", "field");
 export type SidebarSearchPresentation = typeof SidebarSearchPresentation.Type;
 
 /** What a collapsed sidebar becomes: an icon rail, or hidden outright. */
-export const SidebarCollapsedPresentation = Schema.Literal("rail", "hidden");
+/**
+ * Where the icon rail shows: beside the open sidebar and in its place when it
+ * is hidden (`always`), only in place of a hidden sidebar (`rail`), or never
+ * (`hidden`). The rail beside the sidebar carries the destinations and counts,
+ * so the sidebar itself is left to threads and Projects.
+ */
+export const SidebarCollapsedPresentation = Schema.Literal("always", "rail", "hidden");
 export type SidebarCollapsedPresentation = typeof SidebarCollapsedPresentation.Type;
 
 /**
@@ -547,7 +553,7 @@ export const ShellSettings = Schema.Struct({
    * rail shipped decodes to the rail.
    */
   sidebarCollapsedPresentation: Schema.optionalWith(SidebarCollapsedPresentation, {
-    default: () => "rail" as const,
+    default: () => "always" as const,
   }),
   environmentPresentationByMode: Schema.optionalWith(EnvironmentPresentationByMode, {
     default: () => DEFAULT_ENVIRONMENT_PRESENTATION_BY_MODE,

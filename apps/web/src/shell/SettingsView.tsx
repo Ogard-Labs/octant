@@ -2091,14 +2091,14 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
           ) : null}
           {isAvailable("sidebar-collapsed") ? (
             <SettingRow
-              description="What Hide sidebar leaves: a narrow rail of icons, or nothing."
+              description="A narrow column of destinations beside the sidebar, only when the sidebar is hidden, or never."
               focused={focusedSetting === settingId("sidebar-collapsed")}
-              label="When collapsed"
+              label="Icon rail"
               scope="app"
               settingId="sidebar-collapsed"
             >
               <OctantToggleGroup<ShellSettings["sidebarCollapsedPresentation"]>
-                aria-label="When collapsed"
+                aria-label="Icon rail"
                 onValueChange={(value) => {
                   const selected = value[0];
                   if (selected !== undefined) {
@@ -2107,8 +2107,9 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
                 }}
                 value={[props.settings.sidebarCollapsedPresentation]}
               >
-                <OctantToggleGroupItem value="rail">Icon rail</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="hidden">Hidden</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="always">Always</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="rail">When hidden</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="hidden">Never</OctantToggleGroupItem>
               </OctantToggleGroup>
             </SettingRow>
           ) : null}
