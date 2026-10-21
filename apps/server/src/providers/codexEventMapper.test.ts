@@ -9,7 +9,7 @@ import {
   type ThreadTaskProgressList,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   mapCodexMessage,
   type CodexEventContext,
@@ -152,6 +152,53 @@ describe("mapCodexMessage", () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain("provider-");
+  });
+
+  it("reports content-free liveness for running tool output, at most once every few seconds", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-21T10:00:00.000Z"));
+      const ctx = context();
+      const params = {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "provider-command-1",
+      };
+      const output = notification("item/commandExecution/outputDelta", params);
+      const progress = notification("item/mcpToolCall/progress", params);
+      const patch = notification("item/fileChange/patchUpdated", params);
+
+      const first = map(ctx, output);
+      expect(first).toHaveLength(1);
+      expect(first[0]).toMatchObject({
+        kind: "event",
+        event: { kind: "liveness", sequence: 41 },
+      });
+      expect(JSON.stringify(first)).not.toContain("provider-");
+      vi.advanceTimersByTime(4_999);
+      expect(map(ctx, progress)).toEqual([{ kind: "ignored" }]);
+      expect(map(ctx, patch)).toEqual([{ kind: "ignored" }]);
+      vi.advanceTimersByTime(1);
+      expect(map(ctx, progress)[0]).toMatchObject({
+        kind: "event",
+        event: { kind: "liveness", sequence: 42 },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails a tool progress notification that belongs to another turn", () => {
+    const [result] = map(
+      context(),
+      notification("item/mcpToolCall/progress", {
+        threadId: "thread-1",
+        turnId: "other-turn",
+        itemId: "item-1",
+      }),
+    );
+
+    expect(result).toMatchObject({ kind: "protocol-failure" });
   });
 
   it("preserves meaningful streamed whitespace, ignores empty deltas, and bounds large deltas", () => {

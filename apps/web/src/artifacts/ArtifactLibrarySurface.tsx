@@ -3,6 +3,7 @@ import type { CanvasExportOfferList } from "@octant/contracts/canvas-export";
 import { createCanvasClient, type CanvasClient } from "@octant/client-runtime/canvas-client";
 import { useMemo, useRef, useState } from "react";
 import { CanvasExportPanel } from "../canvas/CanvasExportPanel";
+import { withWorkspaceFrameTheme } from "../canvas/blocks/designDocument";
 import { useCanvasExportFolder } from "../canvas/useCanvasExportFolder";
 import { OctantDialog } from "../ui/base/OctantDialog";
 import { Surface } from "../surface/SurfaceHeader";
@@ -46,6 +47,7 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
     () => exportClientFor(props),
     [props.serverUrl, props.windowCapability],
   );
+  const prepareExport = exportClient?.prepareExport;
   const [exportOffers, setExportOffers] = useState<CanvasExportOfferList | undefined>(undefined);
   const [exportMessage, setExportMessage] = useState<string | undefined>(undefined);
   const [exportEntry, setExportEntry] = useState<ArtifactLibraryEntry | undefined>(undefined);
@@ -152,8 +154,8 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
         open={exportOffers !== undefined || exportMessage !== undefined}
       >
         {exportOffers !== undefined &&
-        exportClient?.prepareExport !== undefined &&
-        exportClient.decideExport !== undefined ? (
+        prepareExport !== undefined &&
+        exportClient?.decideExport !== undefined ? (
           <CanvasExportPanel
             key={String(exportOffers.canvasId)}
             folder={exportFolder}
@@ -162,7 +164,7 @@ export function ArtifactLibrarySurface(props: ArtifactLibrarySurfaceProps) {
             onExportFolderChosen={() => {
               if (exportEntry !== undefined) void openExport(exportEntry);
             }}
-            onPrepare={exportClient.prepareExport}
+            onPrepare={(request) => prepareExport(withWorkspaceFrameTheme(request))}
           />
         ) : exportMessage === undefined ? null : (
           <p className="canvas-export__note">{exportMessage}</p>

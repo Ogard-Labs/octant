@@ -10,16 +10,18 @@ export interface QuitConfirmationCopy {
 }
 
 export function buildQuitConfirmation(snapshot: LocalHostSnapshot): QuitConfirmationCopy {
-  const message =
-    snapshot.activeAgentCount === 1
-      ? "1 active agent turn will be interrupted."
-      : snapshot.activeAgentCount > 1
-        ? `${String(snapshot.activeAgentCount)} active agent turns will be interrupted.`
-        : "Active Octant work may be interrupted.";
+  const sessionsConfirmed = snapshot.activityUnconfirmed !== true && snapshot.activeAgentCount > 0;
+  const message = !sessionsConfirmed
+    ? "Active Octant work may be interrupted."
+    : snapshot.activeAgentCount === 1
+      ? "1 provider session is still open."
+      : `${String(snapshot.activeAgentCount)} provider sessions are still open.`;
   return {
     title: "Quit Octant?",
     message,
-    detail: "Fully quitting stops the desktop-owned local host and its running work.",
+    detail: sessionsConfirmed
+      ? "Quitting closes these sessions and stops any running work on this local host."
+      : "Fully quitting stops the desktop-owned local host and its running work.",
     buttons: ["Cancel", "Quit and stop work"],
     defaultId: 0,
     cancelId: 0,
@@ -34,5 +36,5 @@ export async function evaluateQuitRequest(options: {
   const work = await workInFlight(options);
   const snapshot = options.snapshot();
   if (!shouldConfirmQuit(snapshot, work)) return true;
-  return options.confirm(snapshot);
+  return options.confirm({ ...snapshot, activityUnconfirmed: work.activityUnconfirmed });
 }

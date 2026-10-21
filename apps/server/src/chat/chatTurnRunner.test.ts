@@ -949,6 +949,75 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.failure).toEqual({ code: "incomplete" });
   });
 
+  it("keeps a turn alive while the provider streams only liveness past the idle window", async () => {
+    const updates: ChatAttempt[] = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          // ~400ms of liveness outlasts the 150ms idle window, and each gap
+          // stays well inside it so a loaded machine cannot expire it early.
+          for (let index = 0; index < 8; index += 1) {
+            yield* Effect.sleep(50);
+            yield* Queue.offer(queue, { kind: "liveness", sessionId } as never);
+          }
+          yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "Hello" } as never);
+          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+      }),
+      timeoutMs: 150,
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: false,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistResponse: () =>
+            Effect.succeed({
+              contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
+              digest: "a".repeat(64),
+              byteLength: 5,
+            }),
+        }),
+      ),
+    );
+
+    expect(updates.at(-1)?.outcome).toBe("completed");
+  });
+
   it("names provider silence past the idle window as a timeout on the attempt", async () => {
     const updates: ChatAttempt[] = [];
     const connection = {

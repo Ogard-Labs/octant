@@ -50,6 +50,7 @@ const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
 // in one tool call; more than that is not a shape the SDK can answer.
 const MAX_QUESTIONS = 4;
 const DIGEST_INPUT_MAX_CHARACTERS = 1_048_576;
+const LIVENESS_INTERVAL_MS = 5_000;
 const MAX_RETRY_AFTER_MS = 3_600_000;
 const DECODED_MESSAGE_KINDS = new Set([
   "initialized",
@@ -127,6 +128,8 @@ export interface ClaudeEventContext {
    * person typed into the session is not.
    */
   compactionRequested?: boolean;
+  /** When the last liveness event went out, in epoch milliseconds. */
+  lastLivenessAt?: number;
   /**
    * Each model call's usage this turn, by Claude message id. An assistant
    * message reports only its own call, so the turn's usage so far is their
@@ -219,6 +222,16 @@ function truncate(value: string, maximum: number): string {
 function normalized(value: string, maximum: number): string | undefined {
   const trimmed = value.trim();
   return trimmed.length === 0 ? undefined : truncate(trimmed, maximum);
+}
+
+/** At most one liveness event per interval, however fast the stream moves. */
+function livenessEvents(context: ClaudeEventContext): ReadonlyArray<ClaudeMappedMessage> {
+  const now = Date.now();
+  if (context.lastLivenessAt !== undefined && now - context.lastLivenessAt < LIVENESS_INTERVAL_MS) {
+    return [{ kind: "ignored" }];
+  }
+  context.lastLivenessAt = now;
+  return [event(context, { kind: "liveness" })];
 }
 
 function streamedEvents(
@@ -1039,8 +1052,12 @@ function mapStreamEvent(
       return usageIsSafe(message.event.usage)
         ? [{ kind: "ignored" }]
         : [failure("Claude returned invalid usage metadata.")];
-    case "message-stop":
+    // A tool call's input streams for minutes with nothing to show; the
+    // runner's idle clock would read that as a dead session.
+    case "ping":
     case "tool-input-delta":
+      return livenessEvents(context);
+    case "message-stop":
     case "reasoning-signature":
     case "citation-delta":
     case "compaction-delta":

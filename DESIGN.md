@@ -54,8 +54,8 @@ application ground, to a Vivid tile's face, and to a Project's letter tile;
 chrome stays flat. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground (0091): a first-party picture or a
-person's photo, shown plain or through one still print effect, behind the
-start screens or inside the primary card.
+person's photo, shown plain or through one still print effect, or the field of
+Pulsing characters, behind the start screens or inside the primary card.
 
 ## Language
 
@@ -86,12 +86,15 @@ but they do not own a second palette or visual language.
 
 ### Face
 
-Interface text uses the bundled Geist variable face by default, with the
-platform stack behind it: `'Geist Variable', -apple-system, BlinkMacSystemFont,
-'Segoe UI', system-ui, sans-serif` (0161). The platform face remains an explicit
-Appearance choice, System interface. Code, paths, branches,
-identifiers, and terminal text use the monospace stack. Antialiased,
-`text-rendering: optimizeLegibility`, no synthetic bold.
+Interface text uses the platform face by default (SF Pro on a Mac):
+`system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. It is
+what makes Octant read as a native app; with bundled Geist and antialiased
+smoothing the interface read as a web page, thin and grey beside the apps
+around it. Geist stays bundled as an explicit Appearance choice. Code, paths,
+branches, identifiers, and terminal text use the monospace stack. Default
+subpixel-style smoothing (no `-webkit-font-smoothing: antialiased`, which thins
+light text on a dark ground), `text-rendering: optimizeLegibility`, no synthetic
+bold.
 
 ### Scale
 
@@ -116,7 +119,9 @@ nothing essential sits under 12px at the default. The roles live in
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
-labels and controls, 600 (`--oct-weight-strong`) for emphasis (section labels,
+labels, controls, and every name in navigation (thread titles, sidebar rows,
+Settings sections), so a name stands apart from the facts under it by weight
+rather than size, 600 (`--oct-weight-strong`) for emphasis (section labels,
 card titles, counts, `strong`, the app's name), and 700 (`--oct-weight-title`)
 only for the page title and the welcome greeting. `bun run ui:check` counts a
 weight above 600 outside the title roles in `styles/surface.css` as a
@@ -262,6 +267,10 @@ Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
 
 Every Settings page is built from one kit, in `settings/primitives.tsx`:
+
+Selecting a page replaces its controls as well as its heading. Plugin pages
+resolve the currently selected entry point; a missing entry point shows an
+error instead of retaining another integration's account controls.
 
 - **Page header.** A 42px icon tile (`--oct-radius-inset`, a faint 8% ink fill, a
   hairline) holding the page's own navigation icon at 20px, the page title
@@ -447,7 +456,9 @@ behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 First-run setup asks only what a first task needs — a usable provider, a
 Project folder, and a model — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
-the first one. Skipping preserves settled answers, waits for pending writes,
+the first one. Opening setup focuses the current step's heading so a long
+provider list does not scroll past its introduction; Tab then reaches the
+step's controls. Skipping preserves settled answers, waits for pending writes,
 grants no authority, and creates no thread: provider, Project, model, and
 permission readiness are checked again when work is requested. After Skip, or
 in a later session with no ready instance, the New task composer in Work and
@@ -491,8 +502,8 @@ Model choices and settings wait for an asynchronous model change to finish befor
 accepting another edit, so the next configuration choice uses the confirmed pairing.
 
 The screen sits on the application ground (0091, 0129), set as two plain
-choices. What: one of the first-party Zen pictures, a person's photo, or the
-plain page. A fresh install starts on Soft glow, one of three Gradient
+choices. What: one of the first-party Zen pictures, a person's photo, a field
+of pulsing characters, or the plain page. A fresh install starts on Soft glow, one of three Gradient
 pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
 print, so the ground follows the window's scheme; the stylesheet swaps them
 by `data-octant-theme-mode`. A settings row written before the ground
@@ -500,7 +511,16 @@ existed replays as the plain page it showed. Effect: the picture is shown as it 
 dithered, at a chosen pixel size and colour count; an animated picture is
 printed from its still frame. Nothing is drawn over the picture and nothing
 moves across it; a ground saved with the retired dot pattern resolves to the
-plain page. Behind a
+plain page. Pulsing characters is the one drawn ground, and only when a person
+picks it: a grid of monospace letters and digits in the theme's primary ink,
+at most half opaque, whose brightness drifts in slow patches and breathes as
+a whole at twelve frames a second while a few glyphs swap. A click over it
+sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
+it grows, trailed by a fainter echo, and about one click in six draws a heart
+instead, and fades within two seconds. With the default Mono accent the ring
+is the ink, only brighter; a chosen accent colours it. It carries no picture, so the effect controls do not apply, and it
+pauses while the window is hidden. Reduced motion holds it on one still frame
+and takes no rings. Behind a
 start screen the ground is masked away behind the composer and fades out below
 it, so the prompt and the recent-thread list read on the plain page; in the
 light theme it fades out sooner, because dark text over a pale picture has
@@ -714,15 +734,15 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 | Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                                        |
 | Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                             |
 | Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                                    |
-| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                                      |
-| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                            |
+| Primary text           | `--octant-text-primary`                             | `#f5f5f7` | `#141414`   | Body and control text                                      |
+| Secondary text         | `--octant-text-secondary`                           | `#bcbcc2` | `#45454a`   | Supporting copy                                            |
 | Muted text             | `--octant-text-muted`                               | `#949494` | `#666666`   | Metadata and hints at 12px; AA on the control fill         |
 | Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                                       |
 | Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme compatibility and accent tints                       |
 | Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                          |
-| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                          |
+| Accent fill            | `--octant-accent`                                   | `#f5f5f7` | `#141414`   | One primary action or active mark                          |
 | Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                                        |
-| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast                  |
+| Accent text            | `--octant-accent-text`                              | `#f5f5f7` | `#141414`   | Accent used as text; normal-text contrast                  |
 | Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash          |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
@@ -747,7 +767,7 @@ and categorical data may retain semantic colour alongside a label or shape.
 | Meaning       | Surface                                                      | Text/border                                                                                 |
 | ------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | Success       | `--octant-success-surface` (`#16281f` dark, `#bfd8cc` light) | `--octant-success-text` (`#6bb299` dark, `#0f6144` light)                                   |
-| Warning       | `--octant-warning-surface` (`#2b2b2b` dark, `#f0f0ef` light) | `--octant-warning-text` (`#f0f0f0` dark, `#1b1b1b` light); border `--octant-warning-border` |
+| Warning       | `--octant-warning-surface` (`#2b2b2b` dark, `#f0f0ef` light) | `--octant-warning-text` (`#f5f5f7` dark, `#141414` light); border `--octant-warning-border` |
 | Danger        | No default surface                                           | `--octant-danger-text` (`#e17d96` dark, `#a8102f` light)                                    |
 | Diff addition | No default surface                                           | `--octant-addition-text`                                                                    |
 | Diff deletion | No default surface                                           | `--octant-deletion-text`                                                                    |
@@ -784,29 +804,32 @@ Typography has distinct jobs:
 
 | Job        | Default                                                                                             | Usage                                                                              |
 | ---------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interface  | `'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`            | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Interface  | `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`                              | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
 | Display    | inherits Interface                                                                                  | Wordmark, section headings, selected navigation labels                             |
 | Transcript | inherits Interface                                                                                  | Long-running conversation and composer; readable at 13–16px, 13px by default       |
 | Editor     | `'Geist Mono Variable', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |
 | Terminal   | Geist Mono, SF Mono, Nerd Font fallbacks, monospace                                                 | Terminal output and prompt glyphs                                                  |
 
-The default interface is Geist at 13px and weight 400; transcript text defaults
-to 13px. Geist and Geist Mono are one family, both bundled
-(`@fontsource-variable/geist` and `geist-mono`), and the only faces Octant
-ships, so text, code, and paths share one set of proportions on every
-platform; the stylesheet's own first-paint defaults are the same faces, so
-nothing swaps when settings load. The editor defaults to 13px, line height
+The default interface is the platform face at 13px and weight 400; transcript
+text defaults to 13px. Geist and Geist Mono are bundled
+(`@fontsource-variable/geist` and `geist-mono`): Geist Mono sets code by
+default and Geist is an Appearance choice. The stylesheet's own first-paint
+defaults are the same faces as the settings defaults, so nothing swaps when
+settings load. The editor defaults to 13px, line height
 1.5, and enabled ligatures. The terminal defaults to 12px, line height 1.4,
 and disabled ligatures.
 
 A saved stack that only ever meant "the default" reads as today's default
 (`savedUiFamily` in `packages/theme/src/typography.ts`): the old system
-interface stack beginning `-apple-system, BlinkMacSystemFont`, the unbundled
-`Geist, system-ui, sans-serif`, and the JetBrains code and terminal stacks. The
-explicit System interface choice therefore saves a different spelling,
-`system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`, so it
-stays distinct; an old System choice saved under the default's identical string
-cannot be told apart and needs reselecting.
+interface stack beginning `-apple-system, BlinkMacSystemFont`, the bundled-Geist
+default stack that began `'Geist Variable', -apple-system`, and the JetBrains
+code and terminal stacks. The old Geist entry's unbundled
+`Geist, system-ui, sans-serif` was an explicit pick, so it reads as bundled
+Geist.
+The Geist entry now saves `'Geist Variable', system-ui, sans-serif`, so a Geist
+pick made from here on stays distinct; a Geist pick saved under the old
+default's identical string cannot be told apart and moves to the platform face.
+System interface saves the default's own stack.
 
 The persisted typography schema supports independent UI, editor, and terminal
 family, size, weight, line height, and ligatures. Families are sanitized: no
@@ -1649,8 +1672,9 @@ interfaces. Revealing them must not move the transcript.
 
 Functional feedback uses 120–160ms transitions; the base system duration is
 200ms. Use standard easing and no decorative entrance animation. There is no
-ambient motion behind the work; an animated built-in picture is the one
-moving ground, and reduced motion shows its still frame. Running state
+ambient motion behind the work by default; an animated built-in picture and
+the Pulsing characters ground are the moving grounds a person may choose, and
+reduced motion holds each on a still frame. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-
 motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.
@@ -1809,10 +1833,12 @@ request from the person.
   through the providers. Renderer state is presentation only.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
-  confirmation when a turn is active or the desktop cannot confirm what the host
-  is running, then stop only the
+  confirmation when provider sessions remain open or the desktop cannot confirm
+  what the host is running, then stop only the
   desktop-owned host and its child resources. Cancellation leaves both app and
-  host running. Once the person confirms, quitting never waits on a person: a
+  host running. The session count can include idle sessions kept for another turn;
+  the warning names open sessions without claiming they are executing turns.
+  Once the person confirms, quitting never waits on a person: a
   failed or stalled window-state save or host stop is logged rather than shown
   in an alert, and a fixed deadline ends the app (after force-stopping the
   managed server) if shutdown has not finished.

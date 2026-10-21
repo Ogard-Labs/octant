@@ -157,8 +157,10 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "text",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#1b1b1b",
-    defaultDark: "#f0f0f0",
+    // Near-white, not grey: #f0f0f0 with thin rendering read washed out
+    // beside native apps.
+    defaultLight: "#141414",
+    defaultDark: "#f5f5f7",
   },
   {
     // Secondary copy sits on the workspace, the sidebar, and the control
@@ -168,8 +170,8 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "text",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#4f4f4f",
-    defaultDark: "#a9a9a9",
+    defaultLight: "#45454a",
+    defaultDark: "#bcbcc2",
   },
   {
     // Muted carries the 12px meta layer (timestamps, counts, chips), so it is
@@ -221,8 +223,8 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "ui",
-    defaultLight: "#1b1b1b",
-    defaultDark: "#f0f0f0",
+    defaultLight: "#141414",
+    defaultDark: "#f5f5f7",
   },
   {
     id: "accent-foreground",
@@ -241,8 +243,8 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "accent",
     contrastTarget: "workspace",
     contrastLevel: "normal-text",
-    defaultLight: "#1b1b1b",
-    defaultDark: "#f0f0f0",
+    defaultLight: "#141414",
+    defaultDark: "#f5f5f7",
   },
   {
     id: "success-surface",
@@ -291,8 +293,8 @@ const BASE_THEME_TOKEN_ROLES: ReadonlyArray<ThemeTokenRoleDefinition> = [
     category: "status",
     contrastTarget: "warning-surface",
     contrastLevel: "normal-text",
-    defaultLight: "#1b1b1b",
-    defaultDark: "#f0f0f0",
+    defaultLight: "#141414",
+    defaultDark: "#f5f5f7",
   },
   {
     // Targeted at `floating`, not `workspace`: status text sits inside

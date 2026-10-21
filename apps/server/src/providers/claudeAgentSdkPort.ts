@@ -216,6 +216,8 @@ export type ClaudeStreamEvent =
       readonly usage: ClaudeUsage;
     }
   | { readonly kind: "message-stop" }
+  /** The streaming API's keep-alive; it carries nothing and only shows the stream is alive. */
+  | { readonly kind: "ping" }
   | {
       readonly kind: "content-start";
       readonly index: number;

@@ -318,12 +318,10 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
           runtimeEvents.pipe(
             Stream.filter((event) => event.sessionId === input.providerSessionId),
             Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > MAX_EVENTS),
-            Stream.tap((event) =>
-              Effect.zipRight(
-                idle.touch,
-                Effect.sync(() => meter.observe(event)),
-              ),
-            ),
+            Stream.tap(() => idle.touch),
+            // Liveness only restarts the idle clock above; nothing else sees it.
+            Stream.filter((event) => event.kind !== "liveness"),
+            Stream.tap((event) => Effect.sync(() => meter.observe(event))),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
