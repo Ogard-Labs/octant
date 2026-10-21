@@ -432,6 +432,93 @@ describe("Canvas share policy", () => {
     expect(JSON.stringify(shared.document)).not.toContain("screens/home.png");
   });
 
+  it("shares frame notes, a validated brand, and richer diagram fields at share version 11, and leaves a captured page behind", () => {
+    const captureId = "66666666-6666-4666-8666-666666666666";
+    const design = {
+      ...onboardingFlowExample,
+      theme: "brand",
+      brand: { "color-primary": "#1a73e8", "radius-card": "8px" },
+      frames: [{ ...onboardingFlowExample.frames[0], notes: "Open with the demo." }],
+      assets: [{ assetId: "shot", source: { kind: "browser-capture", captureId } }],
+    };
+    const diagram = {
+      blockId: "arch",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "diagram",
+      nodes: [{ nodeId: "db", label: "Orders", icon: "database", detail: "Postgres" }],
+      edges: [],
+      groups: [
+        { groupId: "region", label: "Region", nodeIds: [] },
+        { groupId: "data", label: "Data", nodeIds: ["db"], parentGroupId: "region" },
+      ],
+    };
+    const share = (blocks: ReadonlyArray<unknown>) =>
+      buildCanvasStaticExportReceipt({
+        request: {
+          ...request,
+          consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
+        },
+        current: {
+          ...current,
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          definition: {
+            ...current.definition,
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            provenance: { ...current.definition.provenance, mode: "work" },
+            blocks,
+          },
+        },
+        context,
+      });
+    const receipt = share([design, diagram]);
+    expect(receipt.document.schemaVersion).toBe(CANVAS_SHARE_SCHEMA_VERSION);
+    expect(CANVAS_SHARE_SCHEMA_VERSION).toBe(11);
+    expect(CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION).toBe(CANVAS_SCHEMA_VERSION);
+    const { assets: _assets, ...withoutAssets } = design;
+    expect(receipt.document.blocks).toEqual([withoutAssets, diagram]);
+    expect(JSON.stringify(receipt.document)).not.toContain(captureId);
+  });
+
+  it("refuses a brand value that could load something, and notes that read as a credential", () => {
+    const share = (design: unknown) =>
+      shareDenial(() =>
+        buildCanvasStaticExportReceipt({
+          request: {
+            ...request,
+            consent: { ...request.consent, acknowledgedMarkupSharedAsWritten: true },
+          },
+          current: {
+            ...current,
+            schemaVersion: CANVAS_SCHEMA_VERSION,
+            definition: {
+              ...current.definition,
+              schemaVersion: CANVAS_SCHEMA_VERSION,
+              blocks: [design],
+            },
+          },
+          context,
+        }),
+      );
+    expect(
+      share({
+        ...onboardingFlowExample,
+        theme: "brand",
+        brand: { "color-primary": "url(https://example.test/a.png)" },
+      }),
+    ).toBe("unsafe-payload");
+    expect(
+      share({
+        ...onboardingFlowExample,
+        frames: [
+          {
+            ...onboardingFlowExample.frames[0],
+            notes: "token ghp_abcdefghijklmnopqrstuvwxyz0123456789",
+          },
+        ],
+      }),
+    ).toBe("unsafe-payload");
+  });
+
   it("refuses an acknowledged design whose own id or frame id reads as a credential", () => {
     const share = (design: unknown) =>
       shareDenial(() =>

@@ -27,8 +27,10 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // sankey chart types, version 15 the dashboard layout block, version 16 the
 // design document size and workspace theme, version 17 the design's declared
 // image assets, version 18 the design that runs script, version 19 the
-// tabs and columns layout groups, and version 20 a Chat Canvas that belongs
-// to its thread and to no Project. A version-gated
+// tabs and columns layout groups, version 20 a Chat Canvas that belongs
+// to its thread and to no Project, and version 21 the design frame notes,
+// brand tokens, and captured-page assets with the richer diagram node and
+// group fields. A version-gated
 // kind or hint is only valid inside a document declaring the version that
 // introduced it, so a rolled-back older
 // runtime refuses it as a declared future version instead of reading it as
@@ -39,12 +41,13 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // math-carrying v11, catalog-carrying v12, row-id-carrying v13,
 // flow-chart-carrying v14, dashboard-carrying v15,
 // design-document-carrying v16, design-asset-carrying v17,
-// running-design-carrying v18, and layout-group-carrying v19 documents)
+// running-design-carrying v18, layout-group-carrying v19, and
+// thread-owned v20 documents)
 // remains decodable so a host does not lose its history at the bump. The
 // literal set names each earlier version explicitly and ends at the current
 // one, so a future bump cannot silently drop an intermediate version from the
 // set that decodes.
-export const CANVAS_SCHEMA_VERSION = 20 as const;
+export const CANVAS_SCHEMA_VERSION = 21 as const;
 export const CanvasSchemaVersion = Schema.Literal(
   1,
   2,
@@ -65,6 +68,7 @@ export const CanvasSchemaVersion = Schema.Literal(
   17,
   18,
   19,
+  20,
   CANVAS_SCHEMA_VERSION,
 );
 export type CanvasSchemaVersion = typeof CanvasSchemaVersion.Type;

@@ -218,6 +218,18 @@ beside the column. Under forced colours every node is Canvas with a CanvasText
 rule, edges and heads are CanvasText, and dashes and shapes keep the
 distinctions.
 
+From Canvas schema version 21 a node may also carry an `icon` and a short
+`detail` subtitle, and a group a `parentGroupId`. The icon is one of sixteen
+generic infrastructure names (`client`, `browser`, `mobile`, `server`,
+`service`, `database`, `cache`, `queue`, `storage`, `cdn`, `gateway`, `auth`,
+`function`, `external`, `user`, `analytics`); the list is closed and names no
+product, so a renderer draws its own glyph. `detail` is at most 120 characters
+and sits under the label. A group nests inside another up to three levels; the
+domain policy refuses an unknown parent, a cycle, and a deeper chain. Drawing
+the icon, the detail, and nested bands is a later change: until then the board
+ignores the three fields and draws the node and group as before, and the share
+carries them (share version 11).
+
 **Gantt.** A plan's Gantt view is bars on days in a horizontally scrolling
 frame: a 200px title gutter, week ticks (four-week ticks, or a multiple of four
 weeks, on a long plan, so ticks stay a label apart) in hairline ink, and 16px

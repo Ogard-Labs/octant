@@ -504,6 +504,77 @@ export interface DesignFrameThemeValues {
 }
 
 /**
+ * The generic families and common system faces a brand font may name. A brand
+ * font is a stack of these, so a design cannot ask for a face the viewer must
+ * download: no web font is ever loaded.
+ */
+const BRAND_FONT_FAMILIES: ReadonlySet<string> = new Set([
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "system-ui",
+  "ui-serif",
+  "ui-sans-serif",
+  "ui-monospace",
+  "ui-rounded",
+  "arial",
+  "helvetica",
+  "helvetica neue",
+  "verdana",
+  "tahoma",
+  "trebuchet ms",
+  "georgia",
+  "times new roman",
+  "palatino",
+  "garamond",
+  "courier new",
+  "menlo",
+  "monaco",
+  "consolas",
+  "inter",
+]);
+
+const BRAND_COLOR_FUNCTION = /^(?:rgb|rgba|hsl|hsla|oklch|oklab)\(\s*[0-9a-z.,%/\s+-]{1,96}\)$/i;
+const BRAND_HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const BRAND_LENGTH = /^(?:0|(?:\d{1,3}(?:\.\d{1,3})?)(?:px|rem|em|%))$/;
+
+/**
+ * Why a brand token is refused, or undefined when it may be written into a
+ * frame's stylesheet. The name's kind decides the value's shape: a colour is a
+ * hex value or a colour function, a font is a comma list of the safe faces and
+ * generic families, and a radius or spacing step is a bounded length. Every
+ * value must also pass the frame token safety rule, so nothing a brand holds
+ * can end a declaration, close a rule, or name something to load.
+ */
+export function designBrandTokenRefusal(name: string, value: string): string | undefined {
+  if (!designFrameTokenValueIsSafe(value)) {
+    return `token ${name} holds a value that could end its declaration or load something`;
+  }
+  const kind = name.slice(0, name.indexOf("-"));
+  const trimmed = value.trim();
+  switch (kind) {
+    case "color":
+      return BRAND_HEX_COLOR.test(trimmed) || BRAND_COLOR_FUNCTION.test(trimmed)
+        ? undefined
+        : `token ${name} is not a hex colour or a colour function`;
+    case "font": {
+      const families = trimmed.split(",").map((family) => family.trim().toLowerCase());
+      return families.every((family) => BRAND_FONT_FAMILIES.has(family))
+        ? undefined
+        : `token ${name} names a font outside the safe list; use a system face or a generic family`;
+    }
+    case "radius":
+    case "space":
+      return BRAND_LENGTH.test(trimmed)
+        ? undefined
+        : `token ${name} is not a length in px, rem, em, or %`;
+    default:
+      return `token ${name} is not a colour, font, radius, or space token`;
+  }
+}
+
+/**
  * Whether a token's value may be written into a frame's stylesheet. The value
  * is a claim wherever it comes from: the app reads it from its own page, and
  * an export is handed it by a window. One that could end its declaration or

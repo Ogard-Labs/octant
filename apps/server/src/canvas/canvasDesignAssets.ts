@@ -88,6 +88,10 @@ export async function resolveCanvasDesignAssets(
         threadId: String(provenance.threadId),
         maximumBytes,
       });
+    } else if (asset.source.kind === "browser-capture") {
+      // The schema admits a captured page, but no port resolves one yet, so it
+      // fails closed as refused until a read under the thread's authority exists.
+      read = { status: "unavailable", reason: "refused" };
     } else if (provenance.mode === "chat" || provenance.projectId === null) {
       // A Chat Project is virtual: it has no folder for a path to name.
       read = { status: "unavailable", reason: "refused" };
