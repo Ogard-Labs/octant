@@ -388,6 +388,52 @@ describe("createCanvasAgentTools", () => {
     expect(result.previewGuide).toContain("script error");
   });
 
+  it("hands the Project's brand kit to describe and tells the agent to use the brand theme", async () => {
+    const brandKit = { "color-primary": "#0a7d5a", "font-heading": "georgia, serif" };
+    const brandKitFor = vi.fn((_projectId: string) => brandKit);
+    const { set } = tools({ brandKit: brandKitFor });
+    const design = (
+      await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+      })
+    ).result as { brandKit?: unknown; guidance?: Record<string, string> };
+    expect(design.brandKit).toEqual(brandKit);
+    expect(design.guidance?.design).toContain('"theme": "brand"');
+    expect(design.guidance?.design).toContain("--brand-");
+
+    const overview = (
+      await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "describe" }),
+      })
+    ).result as { brandKit?: unknown; brandKitGuidance?: string };
+    expect(overview.brandKit).toEqual(brandKit);
+    expect(overview.brandKitGuidance).toContain("brand kit");
+    // The kit is the one of the Project the thread is bound to, never one the model names.
+    expect(brandKitFor).toHaveBeenCalledWith(projectId);
+  });
+
+  it("says nothing about a brand kit when the Project has none", async () => {
+    const { set } = tools();
+    const design = (
+      await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "describe", blockKinds: ["design"] }),
+      })
+    ).result as { brandKit?: unknown; guidance?: Record<string, string> };
+    expect(design).not.toHaveProperty("brandKit");
+    expect(design.guidance?.design).not.toContain("brand kit");
+    const overview = (
+      await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "describe" }),
+      })
+    ).result as Record<string, unknown>;
+    expect(overview).not.toHaveProperty("brandKit");
+    expect(overview).not.toHaveProperty("brandKitGuidance");
+  });
+
   it("returns a finished running prototype with the design examples and states the bridge's limits", async () => {
     const { create, set } = tools();
     const described = await set.execute({

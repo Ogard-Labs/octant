@@ -19,6 +19,7 @@ import type { CanvasStaticExportDocument } from "@octant/contracts/canvas-share"
 import {
   DESIGN_FRAME_KIT,
   DESIGN_FRAME_THEME_TOKENS,
+  designBrandDeclarations,
   designFrameTokenValueIsSafe,
   type DesignFrameThemeValues,
 } from "@octant/domain";
@@ -312,11 +313,18 @@ export function renderCanvasDesignExportFrames(
   block: CanvasDesignBlock,
   theme?: DesignFrameThemeValues,
 ): ReadonlyArray<CanvasDesignExportFrame> | undefined {
-  const themed =
-    (block.theme ?? (block.size === "document" ? "workspace" : "none")) === "workspace";
+  const chosen = block.theme ?? (block.size === "document" ? "workspace" : "none");
+  const themed = chosen === "workspace";
   if (themed && theme === undefined) return undefined;
-  const themeStyles =
-    themed && theme !== undefined
+  // A brand draws from its own tokens, so an export needs no window's theme.
+  const branded = chosen === "brand" && block.brand !== undefined;
+  const themeStyles = branded
+    ? [
+        `<style>:root { color-scheme: light; ${designBrandDeclarations(block.brand ?? {})} }`,
+        "html { background: var(--oct-bg); }</style>",
+        `<style>${DESIGN_FRAME_KIT}</style>`,
+      ].join("")
+    : themed && theme !== undefined
       ? [
           `<style>:root { color-scheme: ${theme.scheme === "dark" ? "dark" : "light"}; ${theme.tokens
             .filter(

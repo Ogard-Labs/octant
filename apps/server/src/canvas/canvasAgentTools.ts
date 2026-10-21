@@ -9,6 +9,7 @@ import {
   decodeCanvasBlock,
   decodeCanvasId,
   type CanvasActor,
+  type CanvasDesignBrand,
   type CanvasDocumentRecipe,
   type CanvasId,
   type CanvasPresentation,
@@ -198,6 +199,13 @@ export interface CanvasAgentToolPort {
   ) => Promise<
     { readonly id: string; readonly type: string; readonly lifecycle: string } | undefined
   >;
+  /**
+   * The brand kit of the thread's own Project, when the person defined one.
+   * Keyed by the Project the host bound the thread to, never by anything the
+   * model names, and read without a window so describe stays free of window
+   * state. Absent on a host without Projects' kits.
+   */
+  readonly brandKit?: (projectId: string) => CanvasDesignBrand | undefined;
   readonly canvas: Pick<CanvasService, "create" | "revise" | "get" | "threadReferenceCards">;
   /**
    * The open comments a person sent to the agent about a Canvas. Absent on a
@@ -474,7 +482,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     diagram: {
       use: "A generic graph of nodes and edges.",
       detail:
-        "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Lay out a system or architecture diagram by tier: one group per tier (clients, services, data), the flow left to right, node labels of a few words, and the protocol or data on each edge label. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
+        "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Lay out a system or architecture diagram by tier: one group per tier (clients, services, data), the flow left to right, node labels of a few words, and the protocol or data on each edge label. For an architecture diagram give each node an icon (client, browser, mobile, server, service, database, cache, queue, storage, cdn, gateway, auth, function, external, user, or analytics) and a short detail such as a technology or port, and nest a group inside another with parentGroupId (up to three levels) for a region that holds zones. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
     },
     chart: {
       use: "A pie, donut, stacked or grouped bar, bar-line, funnel, radar, or sankey chart.",
@@ -576,10 +584,18 @@ function blockGuide(): Readonly<Record<string, string>> {
   );
 }
 
+/**
+ * Written only when the Project has a brand kit, so a thread without one is
+ * never told to look for it.
+ */
+const BRAND_KIT_GUIDANCE =
+  'This Project has a brand kit, returned as brandKit. A design that should look like the person\'s product or company sets "theme": "brand" and "brand" to those tokens unchanged (copy the whole object; do not invent colours or fonts). Frames then read --brand-<token> custom properties (for example var(--brand-color-primary) and var(--brand-font-heading)) and the kit classes pick up the colour, font, and radius roles. Without "theme": "brand" the design keeps the workspace theme or its own palette. A brand design cannot run script.';
+
 function describedGuidance(
   kinds: ReadonlyArray<string>,
   mode: "chat" | "work" | "code",
   chatOwner: ChatCanvasOwner = "project",
+  brandKit?: CanvasDesignBrand,
 ): Readonly<Record<string, string>> {
   const guidance: Record<string, string> = {};
   for (const kind of kinds) {
@@ -589,7 +605,13 @@ function describedGuidance(
     // part is written per describe rather than stored with the kind.
     guidance[kind] =
       kind === "design"
-        ? `${detail} ${designAssetGuidance(mode, chatOwner)} ${DESIGN_PROTOTYPE_GUIDANCE} ${DESIGN_APP_WINDOW_GUIDANCE}`
+        ? [
+            detail,
+            designAssetGuidance(mode, chatOwner),
+            DESIGN_PROTOTYPE_GUIDANCE,
+            DESIGN_APP_WINDOW_GUIDANCE,
+            ...(brandKit === undefined ? [] : [BRAND_KIT_GUIDANCE]),
+          ].join(" ")
         : detail;
   }
   return guidance;
@@ -1028,6 +1050,10 @@ export function createCanvasAgentTools(
     readerId: owner.thread.id,
     providerInstanceId: owner.thread.providerInstanceId,
     modelId: owner.thread.modelId,
+    brandKit: () =>
+      owner.thread.projectId === undefined
+        ? undefined
+        : options.port.brandKit?.(owner.thread.projectId),
     resolveTarget: () => resolveCanvasTarget(options.windowId, owner, options.port),
   });
 }
@@ -1066,6 +1092,7 @@ export function createChildCanvasAgentTools(options: {
     };
   }
   const author = childAuthor(options.run.id);
+  const projectId = options.run.projectId;
   return canvasToolSet({
     mode: options.run.mode,
     scope: "run",
@@ -1076,6 +1103,7 @@ export function createChildCanvasAgentTools(options: {
     providerInstanceId: options.run.providerInstanceId,
     modelId: options.run.modelId,
     ...(author === undefined ? {} : { author }),
+    brandKit: () => options.port.brandKit?.(projectId),
     resolveTarget: () => resolveChildCanvasTarget(options),
   });
 }
@@ -1151,6 +1179,8 @@ function canvasToolSet(options: {
   readonly providerInstanceId: CanvasAuthoringThread["providerInstanceId"];
   readonly modelId: CanvasAuthoringThread["modelId"];
   readonly author?: CanvasActor;
+  /** The thread's Project's brand kit, when it has one; read by describe alone. */
+  readonly brandKit?: () => CanvasDesignBrand | undefined;
   readonly resolveTarget: () => Promise<ResolvedCanvasTarget>;
 }): AppManagedToolSet {
   return {
@@ -1167,9 +1197,13 @@ function canvasToolSet(options: {
       let input = parseInput(inputJson);
       if ("error" in input) return { result: { error: input.error }, isError: true };
       if (input.operation === "describe") {
+        const brandKit = options.brandKit?.();
+        const brand = brandKit === undefined ? {} : { brandKit };
         if (input.blockKinds === undefined) {
           return {
             result: {
+              ...brand,
+              ...(brandKit === undefined ? {} : { brandKitGuidance: BRAND_KIT_GUIDANCE }),
               blockKinds,
               blockGuide: blockGuide(),
               tierGuide: TIER_GUIDE,
@@ -1201,7 +1235,8 @@ function canvasToolSet(options: {
         return {
           result: {
             blockSchema: JSONSchema.make(Schema.Union(...selected)),
-            guidance: describedGuidance(requested, options.mode, options.chatOwner),
+            guidance: describedGuidance(requested, options.mode, options.chatOwner, brandKit),
+            ...(input.blockKinds?.includes("design") === true ? brand : {}),
             ...(examples.length === 0 ? {} : { examples }),
           },
         };

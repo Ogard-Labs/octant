@@ -752,6 +752,16 @@ follows the same rules as a rename: an archived Project refuses it, and a change
 that would leave the colour as it is journals nothing. The colour grants no
 authority and carries no status.
 
+Any Project may hold a **brand kit**: named colour, font, radius, and spacing
+tokens that designs draw with under the Canvas `brand` theme. It lives on the
+Project record as `brandKit`, is set by `change-project-brand-kit`, and is
+journaled as `project.brand-kit-changed@1`; absent means no kit. The domain
+validates every value with the same rule a design's own brand passes
+(`designBrandTokenRefusal`), so nothing a kit holds can end a stylesheet
+declaration or load a resource. A kit carries no filesystem, shell, or provider
+authority, so Chat Projects hold one too. See [Canvas](design/canvas.md) for how
+it reaches an agent and a frame.
+
 A Work Project may opt into a **status file**: `STATUS.md` at the top of its
 folder, where the work stands, with dated follow-ups and deadlines. The setting
 lives on the Project record as `statusFile` and is journaled as

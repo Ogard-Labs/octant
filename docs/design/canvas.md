@@ -200,10 +200,37 @@ and the reader's renderer writes no tokens into it (`design-brand-refused`,
 value or an `rgb`, `hsl`, `oklch`, or `oklab` function, a font is a comma list
 drawn from a closed list of system faces and generic families (a brand never
 loads a font), and a radius or spacing step is a non-negative length in `px`,
-`rem`, `em`, or `%`. The renderers ignore these fields for now: a `brand`
-design is drawn as an unthemed page, notes and icons are not drawn, and a
-nested group draws as a top-level one. A `browser-capture` asset resolves
-under the owning thread's authority (see the design-asset rules below).
+`rem`, `em`, or `%`. A `brand` design is drawn from its own tokens: every
+frame starts from a neutral light base for each `--oct-*` role the kit classes
+read, then the brand's tokens, each written as `--brand-<name>` and onto the
+roles it names (`color-primary` sets the accent roles and the first series
+colour; `color-background`, `color-surface`, `color-text`, `color-muted`,
+`color-border`, `color-on-primary`, `color-secondary`, `color-success`,
+`color-warning`, `color-danger`, `font-body`, `font-mono`, and the `radius-*`
+tokens set theirs; `font-heading` and `space-*` are `--brand-*` only), ahead of
+the frame kit and the author's styles. It never reads the workspace theme, so
+the Canvas, Present, Play, the share viewer, the public link, and an HTML
+export draw it identically, always on a light scheme, and an export needs no
+window's theme. `designBrandDeclarations` writes the tokens and repeats the
+brand rule on every one, so a value that reached a renderer by another route
+is left out rather than written. Present shows a frame's notes, and a diagram's icons, details, and nested
+groups are drawn ([Canvas visuals](canvas-visuals.md)). A `browser-capture`
+asset resolves under the owning thread's authority (see the design-asset rules
+below).
+
+A Project holds a **brand kit** of the same shape (`brandKit` on the Project
+record, any Project type, including a Chat Project, which gains no folder or
+shell authority from it). It is set with `change-project-brand-kit`, journaled
+as `project.brand-kit-changed@1`, validated by the same rule as a design's
+brand (`invalid-brand-kit`), and cleared by saving an empty kit; the Project
+overview's **Brand kit** inspector edits it. When a thread's own Project has a
+kit, Canvas `describe` returns it as `brandKit` and tells the agent to author
+designs with `theme: "brand"` and those tokens copied unchanged; a thread with
+no Project, or a Project without a kit, is told nothing. The kit is looked up
+by the Project the host bound the thread to, never by a name the model gives,
+and `describe` still reads no window state. The agent's design carries its own
+copy of the tokens, so later edits to the kit change new designs, not ones
+already made.
 
 A share carries a brand (validated again before it leaves) and the diagram
 fields, so share version 11 names blocks up to Canvas version 21 and a share
