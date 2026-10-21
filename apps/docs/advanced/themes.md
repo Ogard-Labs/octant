@@ -37,6 +37,11 @@ your preset's palette, so it changes with light and dark, and it never
 recolours a warning or an error. It looks best in the light theme.
 **Increased contrast** always uses the Default style.
 
+**Accent** sits under Style: pick **Mono** (the theme's own) or a colour (Clay,
+Amber, Green, Blue, Purple). It colours switches, the send button, selected
+states and the click ring on Pulsing characters. Text stays in the theme's ink
+so it stays readable in both light and dark.
+
 ### Style
 
 **Style** sits under the color scheme. **Default** keeps the app monochrome.

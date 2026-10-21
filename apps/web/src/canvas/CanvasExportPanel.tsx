@@ -1,14 +1,16 @@
-import type {
-  CanvasExportApprovalCard,
-  CanvasExportDecideRequest,
-  CanvasExportDecideResult,
-  CanvasExportDelivery,
-  CanvasExportFormat,
-  CanvasExportOfferList,
-  CanvasExportPrepareRequest,
-  CanvasExportPrepareResult,
-  CanvasExportTargetOffer,
-  CanvasExportTargetStatus,
+import {
+  CANVAS_EXPORT_LINK_PASSWORD_MAX_CHARS,
+  CANVAS_EXPORT_LINK_PASSWORD_MIN_CHARS,
+  type CanvasExportApprovalCard,
+  type CanvasExportDecideRequest,
+  type CanvasExportDecideResult,
+  type CanvasExportDelivery,
+  type CanvasExportFormat,
+  type CanvasExportOfferList,
+  type CanvasExportPrepareRequest,
+  type CanvasExportPrepareResult,
+  type CanvasExportTargetOffer,
+  type CanvasExportTargetStatus,
 } from "@octant/contracts/canvas-export";
 import type {
   FolderCandidateId,
@@ -19,6 +21,7 @@ import { useState } from "react";
 import { FolderPicker } from "../projects/FolderPicker";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { OctantButton } from "../ui/base/OctantButton";
+import { OctantInput } from "../ui/base/OctantInput";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import type { CanvasExportFolderState } from "./useCanvasExportFolder";
 
@@ -30,6 +33,29 @@ export interface CanvasExportPanelProps {
   readonly folder?: CanvasExportFolderState;
   /** Called after a folder was chosen, so the offers are read again. */
   readonly onExportFolderChosen?: () => void;
+  /** Preselects a destination, such as the public link an Update starts from. */
+  readonly initialTargetId?: string;
+}
+
+const LINK_EXPIRY_DAYS: ReadonlyArray<number> = [1, 7, 30, 90, 365];
+const NEVER_EXPIRES = "never";
+
+function expiryLabel(days: number): string {
+  return days === 1 ? "1 day" : `${String(days)} days`;
+}
+
+function passwordFits(password: string): boolean {
+  return (
+    password.length >= CANVAS_EXPORT_LINK_PASSWORD_MIN_CHARS &&
+    password.length <= CANVAS_EXPORT_LINK_PASSWORD_MAX_CHARS
+  );
+}
+
+/** The fixed choices, plus the destination's own default when it is not one of them. */
+function expiryDays(defaultDays: number): ReadonlyArray<number> {
+  return LINK_EXPIRY_DAYS.includes(defaultDays)
+    ? LINK_EXPIRY_DAYS
+    : [...LINK_EXPIRY_DAYS, defaultDays].sort((a, b) => a - b);
 }
 
 const STATUS_LABEL: Record<CanvasExportTargetStatus, string> = {
@@ -41,6 +67,7 @@ const STATUS_LABEL: Record<CanvasExportTargetStatus, string> = {
 const FORMAT_LABEL: Record<CanvasExportFormat, string> = {
   markdown: "Markdown",
   html: "HTML",
+  "share-document": "Canvas page",
   png: "PNG images",
   pdf: "PDF",
 };
@@ -62,7 +89,10 @@ function fileSize(byteLength: number): string {
  */
 export function CanvasExportPanel(props: CanvasExportPanelProps) {
   const ready = props.offers.targets.filter((target) => target.status === "ready");
-  const [targetId, setTargetId] = useState(ready[0]?.targetId ?? "");
+  const initialTarget = ready.find(
+    (target) => String(target.targetId) === props.initialTargetId,
+  )?.targetId;
+  const [targetId, setTargetId] = useState(initialTarget ?? ready[0]?.targetId ?? "");
   const selected = props.offers.targets.find((target) => String(target.targetId) === targetId);
   const formats = selected?.formats ?? [];
   const [format, setFormat] = useState(formats[0] ?? "markdown");
@@ -74,6 +104,10 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
   // destination's own default each time a card is prepared, so a previous
   // choice never silently carries over to a different export.
   const [visibility, setVisibility] = useState<"secret" | "public">("secret");
+  // What the person chose for a link. Reset from the destination's terms each
+  // time a card is prepared; "never" is only ever picked, never a default.
+  const [linkExpiry, setLinkExpiry] = useState("");
+  const [linkPassword, setLinkPassword] = useState("");
 
   const chosenFormat = formats.includes(format) ? format : formats[0];
   const folder = props.folder;
@@ -99,6 +133,8 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
       if (result.kind === "approval") {
         setCard(result.card);
         setVisibility(result.card.destinationVisibility ?? "secret");
+        setLinkExpiry(String(result.card.destinationLinkTerms?.defaultExpiryDays ?? ""));
+        setLinkPassword("");
         return;
       }
       setMessage(result.message);
@@ -117,6 +153,14 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
 
   async function decide(decision: CanvasExportDecideRequest["decision"]) {
     if (card === undefined) return;
+    const terms = card.destinationLinkTerms;
+    const password = terms?.allowsPassword === true ? linkPassword : "";
+    if (decision === "approved" && password !== "" && !passwordFits(password)) {
+      setMessage(
+        `A password needs at least ${String(CANVAS_EXPORT_LINK_PASSWORD_MIN_CHARS)} characters.`,
+      );
+      return;
+    }
     setBusy(true);
     setMessage(undefined);
     try {
@@ -129,8 +173,20 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
         // The choice is only sent when the card actually offered one; a
         // destination with no audience never sees an audience field.
         ...(card.destinationVisibility === undefined ? {} : { visibility }),
+        ...(terms === undefined || decision !== "approved"
+          ? {}
+          : {
+              link: {
+                expiry:
+                  linkExpiry === NEVER_EXPIRES
+                    ? { kind: "never" as const }
+                    : { kind: "days" as const, days: Number(linkExpiry) },
+                ...(password === "" ? {} : { password }),
+              },
+            }),
       });
       setCard(undefined);
+      setLinkPassword("");
       if (result.kind === "exported") {
         setMessage(receiptText(result.record.outcome));
         return;
@@ -268,8 +324,8 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
           )}
           {card.writesDesignMarkup === true ? (
             <p className="canvas-export__note" data-testid="canvas-export-design-markup">
-              Includes this canvas's design markup exactly as written. Octant does not check markup
-              for secrets.
+              This Canvas's design markup leaves as written. Octant does not check markup for
+              secrets.
             </p>
           ) : null}
           {card.destinationAccount === undefined ? null : (
@@ -290,6 +346,51 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
               ]}
               value={visibility}
             />
+          )}
+          {card.destinationLinkTerms === undefined ? null : (
+            <div className="canvas-export__link" data-testid="canvas-export-link-terms">
+              <p className="canvas-export__note">The link opens for anyone who has it.</p>
+              {card.destinationLinkTerms.updatesLink === undefined ? null : (
+                <p className="canvas-export__note" data-testid="canvas-export-updates-link">
+                  {`Updates ${card.destinationLinkTerms.updatesLink}`}
+                </p>
+              )}
+              <label className="canvas-export__field">
+                <span>Link expires</span>
+                <OctantSelectField
+                  aria-label="Link expires"
+                  id="canvas-export-link-expiry"
+                  onValueChange={setLinkExpiry}
+                  options={[
+                    ...expiryDays(card.destinationLinkTerms.defaultExpiryDays).map((days) => ({
+                      id: String(days),
+                      label: expiryLabel(days),
+                    })),
+                    { id: NEVER_EXPIRES, label: "Never expires" },
+                  ]}
+                  value={linkExpiry}
+                />
+              </label>
+              {card.destinationLinkTerms.allowsPassword ? (
+                <label className="canvas-export__field">
+                  <span>Password (optional)</span>
+                  <OctantInput
+                    autoComplete="new-password"
+                    data-testid="canvas-export-link-password"
+                    maxLength={CANVAS_EXPORT_LINK_PASSWORD_MAX_CHARS}
+                    minLength={CANVAS_EXPORT_LINK_PASSWORD_MIN_CHARS}
+                    onChange={(event) => setLinkPassword(event.target.value)}
+                    type="password"
+                    value={linkPassword}
+                  />
+                  <span className="canvas-export__note">
+                    {card.destinationLinkTerms.hasPassword === true
+                      ? "This link has a password. An update keeps it unless you enter a new one."
+                      : `At least ${String(CANVAS_EXPORT_LINK_PASSWORD_MIN_CHARS)} characters.`}
+                  </span>
+                </label>
+              ) : null}
+            </div>
           )}
           {card.destinationNote === undefined ? null : (
             <p className="canvas-export__note" data-testid="canvas-export-note">

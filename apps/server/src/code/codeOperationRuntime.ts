@@ -55,6 +55,7 @@ import {
   type ProviderProbeResult,
   type WindowId,
   decodeCodeFailure,
+  MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import type {
@@ -4110,6 +4111,12 @@ function normalizedOperationEvent(
       state: event.status === "in-progress" ? "running" : ((event.status ?? "waiting") as never),
       summary:
         boundProviderSummary(event.text ?? "Provider task progress.") ?? "Provider task progress.",
+    };
+  if (event.category === "task-list")
+    return {
+      kind: "task-list",
+      // The panel keeps at most this many tasks, and the journal bounds the list to match.
+      taskIds: (event.taskIds ?? []).slice(0, MAX_THREAD_TASKS_PER_TURN),
     };
   if (event.category === "child-activity")
     return {
