@@ -604,6 +604,12 @@ export function ComposerModelPicker(props: ComposerModelPickerProps) {
         trigger={
           <>
             <span className="composer-model-picker__trigger-label">{selectedLabel}</span>
+            {/* A chosen effort rides on the trigger in quieter ink, so the level
+                the next turn runs at is read without opening the menu. The
+                provider default names nothing: no level was asked for. */}
+            {levelOption === undefined || levelIndex === 0 ? null : (
+              <span className="composer-model-picker__trigger-level">{levelLabel(levelValue)}</span>
+            )}
             <ChevronDown aria-hidden="true" className="composer-model-picker__chevron" size={12} />
           </>
         }

@@ -265,6 +265,9 @@ import {
   useSidebarVibrancySupported,
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
+import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
+import { RailUsageRings } from "./usage/RailUsageRings";
+import { FollowUpLineageProvider } from "./followUps/followUpLineage";
 import { AppBackdrop } from "./theme/AppBackdrop";
 import { useThreadUtilityPresentation } from "./shell/useThreadUtilityPresentation";
 import {
@@ -349,6 +352,7 @@ import {
   noteExistingDocuments,
   noteWrittenDocument,
   showWrittenDocument,
+  type WrittenDocument,
   type WrittenDocumentOffers,
 } from "./shell/writtenDocuments";
 import {
@@ -521,6 +525,7 @@ export function App(props: AppProps) {
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Browser session"
           message={locationLaunch.message}
           state="warning"
@@ -551,6 +556,7 @@ export function App(props: AppProps) {
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Desktop session"
           message="Open this renderer from the Octant desktop application."
           state="warning"
@@ -565,6 +571,7 @@ export function App(props: AppProps) {
       return (
         <main className="shell-boundary">
           <ShellState
+            presentation="page"
             eyebrow="Browser session"
             message="Establishing the authenticated Octant browser session."
             state="loading"
@@ -580,6 +587,7 @@ export function App(props: AppProps) {
       return (
         <main className="shell-boundary">
           <ShellState
+            presentation="page"
             eyebrow="Browser session"
             message="Octant opens a browser session only from the one-time link that the desktop app or `octant web` creates; typing the address is not enough."
             state="warning"
@@ -594,6 +602,7 @@ export function App(props: AppProps) {
         return (
           <main className="shell-boundary">
             <ShellState
+              presentation="page"
               eyebrow="Project authority"
               message="Octant could not establish the window identity for this browser session."
               state="warning"
@@ -618,6 +627,7 @@ export function App(props: AppProps) {
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Project authority"
           message={
             launchSession.failureMessage ??
@@ -634,6 +644,7 @@ export function App(props: AppProps) {
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Project authority"
           message="Retry from the Octant desktop application to establish this window session."
           state="warning"
@@ -647,6 +658,7 @@ export function App(props: AppProps) {
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Desktop session"
           message="Open this renderer from the Octant desktop application."
           state="warning"
@@ -840,30 +852,6 @@ function LaunchedShell(
     if (!zen.active) return;
     void zen.refreshThreads();
   }, [zen.active, zen.refreshThreads]);
-  // A Project terminal lives only as a Zen card, so Open terminal on a start
-  // screen asks Zen to hold it. The card cannot be pinned until Zen is loaded
-  // and active, so the request waits here for that instead of racing the
-  // entry. A request Zen never honours expires rather than opening a shell
-  // the next time the person happens to enter Zen.
-  const [homeTerminalProjectId, setHomeTerminalProjectId] = useState<ProjectId>();
-  // Start screens stay up until Zen is active, so a second click can arrive
-  // while the first entry is pending; only the latest request may expire.
-  const homeTerminalRequest = useRef(0);
-  useEffect(() => {
-    if (homeTerminalProjectId === undefined || !zen.active || zen.space === null) return;
-    setHomeTerminalProjectId(undefined);
-    void addZenProjectTerminal(homeTerminalProjectId);
-  }, [homeTerminalProjectId, zen.active, zen.space]);
-  function openHomeTerminal(projectId: ProjectId): void {
-    const request = ++homeTerminalRequest.current;
-    setHomeTerminalProjectId(projectId);
-    if (zen.active) return;
-    void zen.enterZen().finally(() => {
-      window.setTimeout(() => {
-        if (homeTerminalRequest.current === request) setHomeTerminalProjectId(undefined);
-      }, 3_000);
-    });
-  }
   // A renderer older than the host-backed setting stored each sidebar view's
   // row choice in localStorage. Adopt it once, as soon as the host's settings
   // are in hand: after that a person may have changed the host record, and a
@@ -1123,14 +1111,21 @@ function LaunchedShell(
   // The rail is a wide-window state: below the drawer breakpoint a collapsed
   // sidebar is a closed drawer, and a strip of icons would only take width
   // from the page it was hidden to make room for.
+  const railPresentation = (presentedShellSettings ?? controller.settings)
+    ?.sidebarCollapsedPresentation;
   const sidebarRail =
-    !sidebarIsDrawer &&
-    !isNarrow &&
-    sidebarCollapsed &&
-    (presentedShellSettings ?? controller.settings)?.sidebarCollapsedPresentation !== "hidden";
+    !sidebarIsDrawer && !isNarrow && sidebarCollapsed && railPresentation !== "hidden";
+  // Beside the open sidebar the rail takes the destinations and counts, so
+  // the sidebar is left to threads and Projects.
+  const sidebarRailBeside =
+    !sidebarIsDrawer && !isNarrow && !sidebarCollapsed && railPresentation === "always";
   const setSidebarCollapsedPersistent = useCallback(
-    (collapsed: boolean) => {
-      sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
+    (collapsed: boolean, options?: { readonly keepFocus?: boolean }) => {
+      // A keyboard shortcut leaves focus where it was (often the composer);
+      // only a clicked control that unmounts needs its replacement focused.
+      if (options?.keepFocus !== true) {
+        sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
+      }
       if (sidebarIsDrawer) {
         setSidebarDrawerOpen(!collapsed);
         return;
@@ -1139,6 +1134,12 @@ function LaunchedShell(
       writeSidebarCollapsed(globalThis, collapsed);
     },
     [sidebarIsDrawer],
+  );
+  useSidebarToggleShortcut(
+    useCallback(
+      () => setSidebarCollapsedPersistent(!presentedSidebarCollapsed, { keepFocus: true }),
+      [presentedSidebarCollapsed, setSidebarCollapsedPersistent],
+    ),
   );
   // A count tile on the collapsed rail asks for a list the rail cannot show,
   // so it expands the sidebar first; an open sidebar only switches its list.
@@ -2663,7 +2664,11 @@ function LaunchedShell(
     );
     const documents = cards
       .filter((card) => isAuthorizedCanvasDocument(card) && card.presentation !== "inline")
-      .map((card) => ({ kind: "canvas" as const, canvasId: String(card.canvasId) }));
+      .map((card) => ({
+        kind: "canvas" as const,
+        canvasId: String(card.canvasId),
+        title: card.title,
+      }));
     const offers = writtenDocumentsRef.current.get(key);
     if (offers === undefined) {
       const seeded = noteExistingDocuments(NO_WRITTEN_DOCUMENTS, documents);
@@ -2692,7 +2697,11 @@ function LaunchedShell(
   /** The person asked to see a Canvas drawn in the thread beside that thread. */
   function openCanvasInSidebar(card: CanvasThreadReferenceCard): void {
     const key = threadUtilityDockKey(card.scope.mode, String(card.originThreadId));
-    const document = { kind: "canvas" as const, canvasId: String(card.canvasId) };
+    const document = {
+      kind: "canvas" as const,
+      canvasId: String(card.canvasId),
+      title: card.title,
+    };
     setWrittenDocumentsByThread((current) =>
       new Map(current).set(
         key,
@@ -2700,6 +2709,21 @@ function LaunchedShell(
       ),
     );
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "canvas"));
+    setDockVisible(true);
+  }
+  /** The person picked one of the dock thread's outputs: its tool opens on it. */
+  function openWrittenDocument(document: WrittenDocument): void {
+    if (dockThreadKey === undefined) return;
+    const key = dockThreadKey;
+    setWrittenDocumentsByThread((current) =>
+      new Map(current).set(
+        key,
+        showWrittenDocument(current.get(key) ?? NO_WRITTEN_DOCUMENTS, document),
+      ),
+    );
+    setDockStatesByThread((current) =>
+      openThreadUtilityTab(current, key, document.kind === "canvas" ? "canvas" : "document"),
+    );
     setDockVisible(true);
   }
   function noteHandedOffDocument(mode: OctantMode, threadId: string, canvasId: string): void {
@@ -2915,6 +2939,21 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  // Built once per client and provider list: a new element on every render
+  // re-rendered the whole memoized sidebar for each streamed event.
+  // The settings opener is a new function each render, so it is read through
+  // the latest-actions ref rather than listed as a dependency.
+  const railUsage = useMemo(
+    () =>
+      launchedClients.providerUsageLimitsClient === undefined ? undefined : (
+        <RailUsageRings
+          client={launchedClients.providerUsageLimitsClient}
+          instances={providerController.instances}
+          onOpenUsage={() => void latestShellActions.current.openSettings({ section: "usage" })}
+        />
+      ),
+    [launchedClients.providerUsageLimitsClient, providerController.instances],
+  );
   // A custom image source (Settings › Image generation) is an image profile
   // too: the host's own profile list and the agent tool already offer it, and
   // without it here the Image generator and Revise said no profile was ready.
@@ -4405,7 +4444,6 @@ function LaunchedShell(
       openDraftInProject,
       openDraftThread: controller.openDraftThread,
       openGithubIssues,
-      openHomeTerminal,
       openImageLibrary,
       openInbox,
       openLinearIssues,
@@ -4434,6 +4472,7 @@ function LaunchedShell(
       openThreadSearch,
       openThreadBrowser: controller.openThreadBrowser,
       openWorkThread: controller.openWorkThread,
+      openWrittenDocument,
       persistBottomPanelPresentation,
       pinChatThreadInPane,
       pinCodeThread: codeController.pinThread,
@@ -4495,6 +4534,7 @@ function LaunchedShell(
       setProjectArchived: projectController.setArchived,
       setProjectColor: projectController.setColor,
       setProjectProviderPolicy: projectController.setProviderPolicy,
+      setProjectBrandKit: projectController.setBrandKit,
       setProjectWorkStatusFile: projectController.setWorkStatusFile,
       setProjectsListOpen,
       setRailPlaceholder,
@@ -4545,7 +4585,6 @@ function LaunchedShell(
     codeCheckouts: codeController.bootstrap?.checkouts ?? NO_CODE_CHECKOUTS,
     codeClient,
     codeThreads: codeController.bootstrap?.threads ?? NO_CODE_THREADS,
-    continueCards,
     feedRevision: pendingRequestFeedRevision,
     computerSnapshots,
     githubPullRequestCapability,
@@ -4553,7 +4592,6 @@ function LaunchedShell(
     hostResourceClient,
     isDesktop: props.hostBridge !== undefined,
     loadHomePullRequests,
-    navigation: navigationModel,
     needsYouThreadProviders,
     now: minuteNow.getTime(),
     openRunningServiceLive,
@@ -4563,7 +4601,6 @@ function LaunchedShell(
     runningServicesRemoteHost,
     serverUrl: props.launch.serverUrl,
     settings: controller.settings,
-    sidebarRunningCount: sidebarTileCounts.running,
     workingNowBoardFacts,
     workingNowHost,
     workingNowModes,
@@ -4579,6 +4616,7 @@ function LaunchedShell(
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Workspace"
           message="Loading authoritative shell state."
           state="loading"
@@ -4591,6 +4629,7 @@ function LaunchedShell(
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Workspace"
           message="A command outcome may have changed this workspace. Loading authoritative state."
           state="loading"
@@ -4603,6 +4642,7 @@ function LaunchedShell(
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           action={{ label: "Retry after recovery", onClick: controller.retry }}
           eyebrow="Local storage"
           message={controller.errorMessage ?? "Octant storage needs recovery before continuing."}
@@ -4617,6 +4657,7 @@ function LaunchedShell(
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           action={{ label: "Retry connection", onClick: controller.retry }}
           eyebrow="Connection"
           message={controller.errorMessage ?? "The local Octant server is unavailable."}
@@ -4635,6 +4676,7 @@ function LaunchedShell(
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Workspace"
           message="Loading authoritative shell state."
           state="loading"
@@ -6334,70 +6376,75 @@ function LaunchedShell(
         onPreviewSidebarWidth={setPreviewSidebarWidth}
         sidebarCollapsed={presentedSidebarCollapsed}
         sidebarRail={sidebarRail}
+        sidebarRailBeside={sidebarRailBeside}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
         transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
-          <SidebarContainer
-            actions={actions}
-            {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
-            {...(activeCodeThreadId === undefined ? {} : { activeCodeThreadId })}
-            activeMode={activeMode}
-            {...(activeProjectId === undefined ? {} : { activeProjectId })}
-            {...(activeSidebarDestination === undefined ? {} : { activeSidebarDestination })}
-            {...(activeWorkThreadId === undefined ? {} : { activeWorkThreadId })}
-            allProjects={projectController.allProjects}
-            archivedProjects={projectController.archivedProjects}
-            availabilityByProject={projectController.availabilityByProject}
-            {...(chatController.errorMessage === undefined
-              ? {}
-              : { chatErrorMessage: chatController.errorMessage })}
-            {...(chatProjectThreadListRequest === undefined
-              ? {}
-              : { chatProjectThreadListRequest })}
-            chatReadCursorStore={chatReadCursorStore}
-            chatStatus={chatController.status}
-            codeReadCursorStore={codeReadCursorStore}
-            codeStatus={codeController.status}
-            contextHealthByProject={contextHealthByProject}
-            environmentSelection={environmentSelection}
-            federatedHostStates={federatedHostStates}
-            githubIssuesReadAvailable={githubIssuesReadAvailable}
-            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-            hostReservesTitlebarInset={hostReservesTitlebarInset}
-            hosts={hosts}
-            imageLibraryAvailable={imageGenerationClient !== undefined}
-            inboxCount={inboxCount}
-            linearIssuesRead={linearIssuesRead}
-            navigation={navigationModel}
-            navigatorAvailable={navigatorAssistant.state.kind === "ready"}
-            {...(openSidebarThreadIds === undefined ? {} : { openSidebarThreadIds })}
-            {...(projectController.errorMessage === undefined
-              ? {}
-              : { projectErrorMessage: projectController.errorMessage })}
-            projectStatus={projectController.status}
-            projects={projectController.projects}
-            resolvedSidebarBackground={resolvedSidebarBackground}
-            setEnvironmentSelection={setEnvironmentSelection}
-            setSidebarCollapsed={setSidebarCollapsedPersistent}
-            setSidebarFilterQuery={setSidebarFilterQuery}
-            settings={presentedShellSettings ?? controller.settings}
-            shellBackdropCoversSidebar={shellBackdropCoversSidebar}
-            sidebarBackgroundFetcher={sidebarBackgroundFetcher}
-            sidebarFilterQuery={sidebarFilterQuery}
-            {...(sidebarListRequest === undefined ? {} : { sidebarListRequest })}
-            sidebarRail={sidebarRail}
-            sidebarTileCounts={sidebarTileCounts}
-            {...(projectThreadsAccess.errorMessage === undefined
-              ? {}
-              : { threadErrorMessage: projectThreadsAccess.errorMessage })}
-            threadExportClient={threadExportClient}
-            threadHandOffClient={threadHandOffClient}
-            threadStatus={projectThreadsAccess.status}
-            workStatus={workNavigation.status}
-            workspace={controller.workspace}
-          />
+          <FollowUpLineageProvider client={launchedClients.followUpSuggestionClient}>
+            <SidebarContainer
+              actions={actions}
+              {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
+              {...(activeCodeThreadId === undefined ? {} : { activeCodeThreadId })}
+              activeMode={activeMode}
+              {...(activeProjectId === undefined ? {} : { activeProjectId })}
+              {...(activeSidebarDestination === undefined ? {} : { activeSidebarDestination })}
+              {...(activeWorkThreadId === undefined ? {} : { activeWorkThreadId })}
+              allProjects={projectController.allProjects}
+              archivedProjects={projectController.archivedProjects}
+              availabilityByProject={projectController.availabilityByProject}
+              {...(chatController.errorMessage === undefined
+                ? {}
+                : { chatErrorMessage: chatController.errorMessage })}
+              {...(chatProjectThreadListRequest === undefined
+                ? {}
+                : { chatProjectThreadListRequest })}
+              chatReadCursorStore={chatReadCursorStore}
+              chatStatus={chatController.status}
+              codeReadCursorStore={codeReadCursorStore}
+              codeStatus={codeController.status}
+              contextHealthByProject={contextHealthByProject}
+              environmentSelection={environmentSelection}
+              federatedHostStates={federatedHostStates}
+              githubIssuesReadAvailable={githubIssuesReadAvailable}
+              {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+              hostReservesTitlebarInset={hostReservesTitlebarInset}
+              hosts={hosts}
+              imageLibraryAvailable={imageGenerationClient !== undefined}
+              inboxCount={inboxCount}
+              linearIssuesRead={linearIssuesRead}
+              navigation={navigationModel}
+              navigatorAvailable={navigatorAssistant.state.kind === "ready"}
+              {...(openSidebarThreadIds === undefined ? {} : { openSidebarThreadIds })}
+              {...(projectController.errorMessage === undefined
+                ? {}
+                : { projectErrorMessage: projectController.errorMessage })}
+              projectStatus={projectController.status}
+              projects={projectController.projects}
+              resolvedSidebarBackground={resolvedSidebarBackground}
+              setEnvironmentSelection={setEnvironmentSelection}
+              setSidebarCollapsed={setSidebarCollapsedPersistent}
+              setSidebarFilterQuery={setSidebarFilterQuery}
+              settings={presentedShellSettings ?? controller.settings}
+              shellBackdropCoversSidebar={shellBackdropCoversSidebar}
+              sidebarBackgroundFetcher={sidebarBackgroundFetcher}
+              sidebarFilterQuery={sidebarFilterQuery}
+              {...(sidebarListRequest === undefined ? {} : { sidebarListRequest })}
+              sidebarRail={sidebarRail}
+              sidebarRailBeside={sidebarRailBeside}
+              {...(railUsage === undefined ? {} : { railUsage })}
+              sidebarTileCounts={sidebarTileCounts}
+              {...(projectThreadsAccess.errorMessage === undefined
+                ? {}
+                : { threadErrorMessage: projectThreadsAccess.errorMessage })}
+              threadExportClient={threadExportClient}
+              threadHandOffClient={threadHandOffClient}
+              threadStatus={projectThreadsAccess.status}
+              workStatus={workNavigation.status}
+              workspace={controller.workspace}
+            />
+          </FollowUpLineageProvider>
         }
         sidebarResizable={!isNarrow}
         sidebarWidth={sidebarWidth}
@@ -6593,6 +6640,7 @@ function LaunchedShell(
                 dockTabs={dockTabs}
                 {...(dockThread === undefined ? {} : { dockThread })}
                 {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
+                dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
                 {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
                 {...(dockThreadProjectId === undefined ? {} : { dockThreadProjectId })}
                 {...(dockThreadRepository === undefined ? {} : { dockThreadRepository })}
@@ -6601,7 +6649,6 @@ function LaunchedShell(
                 launchableDockSurfaces={launchableDockSurfaces}
                 navigation={navigationModel}
                 now={minuteNow.getTime()}
-                observedByInstance={providerController.observedByInstance}
                 {...(dockOverviewThread === undefined
                   ? {}
                   : { overviewThread: dockOverviewThread })}

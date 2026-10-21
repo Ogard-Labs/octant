@@ -3,7 +3,12 @@ import { DockCanvasTool } from "../shell/DockCanvasTool";
 
 type Props = Pick<
   ThreadUtilityDockContentProps,
-  "canvasClient" | "canvasRevision" | "subject" | "writtenCanvasId"
+  | "canvasClient"
+  | "canvasRevision"
+  | "serverUrl"
+  | "subject"
+  | "windowCapability"
+  | "writtenCanvasId"
 >;
 
 export default function CanvasModule(props: Props) {
@@ -14,7 +19,11 @@ export default function CanvasModule(props: Props) {
       {...(props.canvasRevision === undefined ? {} : { revision: props.canvasRevision })}
       {...(props.subject.projectId === undefined ? {} : { projectId: props.subject.projectId })}
       {...(props.writtenCanvasId === undefined ? {} : { preferredCanvasId: props.writtenCanvasId })}
+      {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
       threadId={props.subject.threadId}
+      {...(props.windowCapability === undefined
+        ? {}
+        : { windowCapability: props.windowCapability })}
     />
   );
 }

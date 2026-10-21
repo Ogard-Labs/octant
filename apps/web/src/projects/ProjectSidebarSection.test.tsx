@@ -4,9 +4,16 @@ import { DEFAULT_SIDEBAR_ROW_PROPERTIES, type SidebarRowProperties } from "@octa
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { ProjectSidebarSection } from "./ProjectSidebarSection";
+
+// Status is the default arrangement, so tests that read the Project tree choose it first.
+function chooseProjectTree(modes: ReadonlyArray<string> = ["chat", "work", "code"]): void {
+  for (const mode of modes) {
+    window.localStorage.setItem(`octant.sidebar.activity-view.v1.${mode}`, "off");
+  }
+}
 
 const chatProjectA = {
   id: "11111111-1111-4111-8111-111111111111" as ProjectId,
@@ -23,6 +30,11 @@ const chatProjectB = {
 } as ProjectSummary;
 
 describe("ProjectSidebarSection chat thread nesting", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    chooseProjectTree();
+  });
+
   it("keeps one empty Projects affordance and hides an empty Archive", () => {
     render(
       <ProjectSidebarSection
@@ -86,6 +98,7 @@ describe("ProjectSidebarSection chat thread nesting", () => {
 
   it("still tells Work the Projects are in Code when the saved view groups by something else", () => {
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.work.project-view-preferences.v1",
       JSON.stringify({ filters: { grouping: "none" } }),
@@ -119,6 +132,7 @@ describe("ProjectSidebarSection chat thread nesting", () => {
 
   it("does not say No Projects yet when a saved view hides every Project in the mode", () => {
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.work.project-views.v1",
       JSON.stringify({
@@ -664,9 +678,15 @@ describe("ProjectSidebarSection archive", () => {
 });
 
 describe("ProjectSidebarSection threads filed in no Project", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    chooseProjectTree();
+  });
+
   it("groups each thread once and lets No project collapse and reveal search matches", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
     const props = {
       archivedProjects: [],
       availabilityByProject: new Map(),
@@ -728,6 +748,7 @@ describe("ProjectSidebarSection threads filed in no Project", () => {
 
   it("keeps a Chat started without a Project under Recents in the All Projects view", () => {
     window.localStorage.clear();
+    chooseProjectTree();
     render(
       <ProjectSidebarSection
         archivedProjects={[]}
@@ -752,15 +773,83 @@ describe("ProjectSidebarSection threads filed in no Project", () => {
     const recents = screen.getByRole("region", { name: "Recents" });
     expect(within(recents).getByRole("button", { name: /Quick question/ })).toBeVisible();
     window.localStorage.clear();
+    chooseProjectTree();
   });
 });
 
 describe("ProjectSidebarSection activity view", () => {
+  it("opens on Status with threads grouped under counted headings when no arrangement is stored", () => {
+    window.localStorage.clear();
+
+    try {
+      render(
+        <ProjectSidebarSection
+          archivedProjects={[]}
+          availabilityByProject={new Map()}
+          now={new Date("2026-08-14T15:00:00.000Z")}
+          onArchive={vi.fn()}
+          onMove={vi.fn()}
+          onProjectOpen={vi.fn()}
+          onReorder={vi.fn()}
+          onRestore={vi.fn()}
+          onSelectThread={vi.fn()}
+          projects={[chatProjectA]}
+          threads={[
+            {
+              projectId: String(chatProjectA.id),
+              threadId: "thread-working",
+              title: "Update AuroraDocs logos",
+              activity: "working",
+              updatedAt: "2026-08-14T12:00:00.000Z",
+            },
+            {
+              projectId: String(chatProjectA.id),
+              threadId: "thread-idle-a",
+              title: "Estimate app rebrand effort",
+              updatedAt: "2026-08-13T18:00:00.000Z",
+            },
+            {
+              threadId: "thread-idle-b",
+              title: "Draft release notes",
+              updatedAt: "2026-08-12T10:00:00.000Z",
+            },
+          ]}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: "Status" })).toHaveAttribute(
+        "aria-pressed",
+        "true",
+      );
+      expect(screen.getByRole("button", { name: "Project tree" })).toHaveAttribute(
+        "aria-pressed",
+        "false",
+      );
+      expect(screen.queryByRole("button", { name: "Collapse Test" })).not.toBeInTheDocument();
+
+      const working = screen.getByRole("region", { name: /^Working/ });
+      expect(working).toHaveTextContent("1");
+      expect(
+        within(working).getByRole("button", { name: /Update AuroraDocs logos/ }),
+      ).toBeVisible();
+      const idle = screen.getByRole("region", { name: /^Idle/ });
+      expect(idle).toHaveTextContent("2");
+      expect(
+        within(idle).getByRole("button", { name: /Estimate app rebrand effort/ }),
+      ).toBeVisible();
+      expect(within(idle).getByRole("button", { name: /Draft release notes/ })).toBeVisible();
+      expect(screen.queryByRole("region", { name: /^Needs input/ })).not.toBeInTheDocument();
+    } finally {
+      window.localStorage.clear();
+    }
+  });
+
   it("toggles a recency inbox that keeps Project attribution and attention glyphs", async () => {
     const user = userEvent.setup();
     const onSelectThread = vi.fn();
     const now = "2026-08-14T15:00:00.000Z";
     window.localStorage.clear();
+    chooseProjectTree();
 
     try {
       render(
@@ -820,6 +909,7 @@ describe("ProjectSidebarSection activity view", () => {
         "aria-pressed",
         "true",
       );
+      expect(window.localStorage.getItem("octant.sidebar.activity-view.v1.chat")).toBe("on");
       expect(screen.queryByRole("button", { name: "Collapse Test" })).not.toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Priority" })).toBeVisible();
       expect(screen.getByRole("heading", { name: "Yesterday" })).toBeVisible();
@@ -853,6 +943,7 @@ describe("ProjectSidebarSection activity view", () => {
       expect(onSelectThread).toHaveBeenCalledWith("thread-today");
 
       await user.click(screen.getByRole("button", { name: "Project tree" }));
+      expect(window.localStorage.getItem("octant.sidebar.activity-view.v1.chat")).toBe("off");
       expect(screen.getByRole("button", { name: "Collapse Test" })).toBeVisible();
       expect(screen.queryByRole("heading", { name: "Priority" })).not.toBeInTheDocument();
     } finally {
@@ -863,6 +954,7 @@ describe("ProjectSidebarSection activity view", () => {
   it("restores an independent activity preference when the mode changes", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
 
     try {
       const { rerender } = render(
@@ -891,6 +983,8 @@ describe("ProjectSidebarSection activity view", () => {
 
       await user.click(screen.getByRole("button", { name: "Activity feed" }));
       expect(screen.getByRole("heading", { name: "Today" })).toBeVisible();
+      expect(window.localStorage.getItem("octant.sidebar.activity-view.v1.chat")).toBe("on");
+      expect(window.localStorage.getItem("octant.sidebar.activity-view.v1.code")).toBe("off");
 
       rerender(
         <ProjectSidebarSection
@@ -946,6 +1040,7 @@ const codeProjectB = {
 describe("ProjectSidebarSection code project views", () => {
   it("does not expose Code project views in Chat", () => {
     window.localStorage.clear();
+    chooseProjectTree();
     render(
       <ProjectSidebarSection
         archivedProjects={[]}
@@ -966,6 +1061,7 @@ describe("ProjectSidebarSection code project views", () => {
   it("creates a named Code view that shows only the selected Projects", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
 
     render(
       <ProjectSidebarSection
@@ -1007,6 +1103,7 @@ describe("ProjectSidebarSection code project views", () => {
   it("keeps activity rows inside the selected Project View", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-views.v1",
       JSON.stringify({
@@ -1060,6 +1157,7 @@ describe("ProjectSidebarSection code project views", () => {
   it("tells a right-clicked view how many Projects it holds, and offers its two edits", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-views.v1",
       JSON.stringify({
@@ -1095,6 +1193,7 @@ describe("ProjectSidebarSection code project views", () => {
 
   it("keeps All Projects free of edits it cannot take", async () => {
     window.localStorage.clear();
+    chooseProjectTree();
 
     render(
       <ProjectSidebarSection
@@ -1122,6 +1221,7 @@ describe("ProjectSidebarSection code project views", () => {
   it("offers saved views as inline icon buttons when configured, and a dropdown otherwise", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-views.v1",
       JSON.stringify({
@@ -1182,6 +1282,7 @@ describe("ProjectSidebarSection code project views", () => {
   it("initializes project views when Code becomes enabled after Chat", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
     const { rerender } = render(
       <ProjectSidebarSection
         archivedProjects={[]}
@@ -1221,6 +1322,7 @@ describe("ProjectSidebarSection code project views", () => {
   it("opens an accessible Project View filter menu with only truthful environments", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
 
     render(
       <ProjectSidebarSection
@@ -1258,6 +1360,7 @@ describe("ProjectSidebarSection code project views", () => {
   it("switches the views between a dropdown and buttons from the filter menu", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
     const onPresentationChange = vi.fn();
     render(
       <ProjectSidebarSection
@@ -1292,6 +1395,7 @@ describe("ProjectSidebarSection code project views", () => {
   it("lists a connected host when the window actually reported one", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
 
     render(
       <ProjectSidebarSection
@@ -1322,6 +1426,7 @@ describe("ProjectSidebarSection code project views", () => {
   it("explains and preserves results for a reversed custom activity range", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-view-preferences.v1",
       JSON.stringify({
@@ -1377,6 +1482,7 @@ describe("ProjectSidebarSection code project views", () => {
   it("persists All Projects filters without mutating saved views", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-views.v1",
       JSON.stringify({
@@ -1421,6 +1527,7 @@ describe("ProjectSidebarSection code project views", () => {
   it("restores a saved view's complete filter state when switching views", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-views.v1",
       JSON.stringify({
@@ -1467,6 +1574,7 @@ describe("ProjectSidebarSection code project views", () => {
 
   it("keeps Work Project View filters independent of Code", async () => {
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.work.project-view-preferences.v1",
       JSON.stringify({ filters: { grouping: "none" } }),
@@ -1511,6 +1619,7 @@ describe("ProjectSidebarSection code project views", () => {
 
   it("hides Projects with no matching threads only when empty Projects are off", () => {
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-view-preferences.v1",
       JSON.stringify({
@@ -1559,6 +1668,7 @@ describe("ProjectSidebarSection code project views", () => {
 
   it("explains an activity window that matched no threads instead of a blank sidebar", () => {
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-view-preferences.v1",
       JSON.stringify({ filters: { activity: "today" } }),
@@ -1598,6 +1708,7 @@ describe("ProjectSidebarSection code project views", () => {
 
   it("keeps archived project rows when an activity window matches no threads", () => {
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-view-preferences.v1",
       JSON.stringify({ filters: { lifecycle: "archived", activity: "today" } }),
@@ -1636,6 +1747,11 @@ describe("ProjectSidebarSection code project views", () => {
 });
 
 describe("ProjectSidebarSection Code and Work recents", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    chooseProjectTree();
+  });
+
   it("puts a discrete add control on the Projects header and lists unfiled threads under Recents", async () => {
     const user = userEvent.setup();
     const onAddProject = vi.fn();
@@ -1719,6 +1835,11 @@ describe("ProjectSidebarSection Code and Work recents", () => {
 });
 
 describe("ProjectSidebarSection search", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    chooseProjectTree();
+  });
+
   const now = new Date("2026-08-14T15:00:00.000Z");
   const sharedProps = {
     archivedProjects: [],
@@ -1831,6 +1952,7 @@ describe("ProjectSidebarSection search", () => {
 
   it("explains that an environment-only filter hid every thread rather than implying deletion", () => {
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-view-preferences.v1",
       JSON.stringify({
@@ -1881,6 +2003,7 @@ describe("ProjectSidebarSection search", () => {
 
   it("explains that a status-only filter hid every thread rather than implying deletion", () => {
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-view-preferences.v1",
       JSON.stringify({
@@ -1928,6 +2051,7 @@ describe("ProjectSidebarSection search", () => {
 
   it("counts a status filter among the active filters on the view trigger", () => {
     window.localStorage.clear();
+    chooseProjectTree();
     window.localStorage.setItem(
       "octant.code.project-view-preferences.v1",
       JSON.stringify({
@@ -1975,6 +2099,7 @@ describe("ProjectSidebarSection search", () => {
   it("hides activity-view groups with no matches and restores them when search clears", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
 
     try {
       const { rerender } = render(<ProjectSidebarSection {...sharedProps} />);
@@ -2011,6 +2136,7 @@ describe("ProjectSidebarSection search", () => {
   it("keeps activity-view Project attribution when the query matches the folder word", async () => {
     const user = userEvent.setup();
     window.localStorage.clear();
+    chooseProjectTree();
 
     try {
       render(<ProjectSidebarSection {...sharedProps} searchQuery="test" />);
@@ -2081,6 +2207,11 @@ describe("ProjectSidebarSection context health", () => {
 });
 
 describe("snoozed and completed shelves", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    chooseProjectTree();
+  });
+
   it("files snoozed and put-away threads in collapsed shelves below the Projects", async () => {
     const user = userEvent.setup();
     const onSelectThread = vi.fn();
@@ -2137,6 +2268,7 @@ describe("snoozed and completed shelves", () => {
 
   it("opens the Put away shelf, or the Activity feed, when a sidebar tile asks for it", () => {
     window.localStorage.clear();
+    chooseProjectTree();
     const section = (listRequest?: { view: "activity" | "completed"; sequence: number }) => (
       <ProjectSidebarSection
         archivedProjects={[]}
@@ -2177,6 +2309,7 @@ describe("snoozed and completed shelves", () => {
       "true",
     );
     window.localStorage.clear();
+    chooseProjectTree();
   });
 
   it("opens the shelf that holds the thread on screen so the row never hides its own selection", () => {
@@ -2212,6 +2345,11 @@ describe("snoozed and completed shelves", () => {
 });
 
 describe("ProjectSidebarSection row property visibility", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    chooseProjectTree();
+  });
+
   const codeThread = {
     checkoutChip: { checkoutKind: "managed-worktree", label: "feature/sidebar" },
     projectId: String(codeProjectA.id),
@@ -2319,7 +2457,9 @@ describe("ProjectSidebarSection row property visibility", () => {
     // The row names the request whether or not it can also open it. It used to
     // leave the number to a separate control that never rendered once the row
     // had a menu, so a feed with GitHub authority showed no pull requests.
-    expect(within(row).getByRole("img", { name: "Pull request #12 · open" })).toBeVisible();
+    expect(
+      within(row).getByRole("img", { name: "Pull request #12 · open · checks passing" }),
+    ).toBeVisible();
     await user.hover(row);
     const details = await screen.findByRole("group", { name: "Thread details" });
     expect(details).toHaveTextContent("Planning");
@@ -2502,6 +2642,11 @@ describe("ProjectSidebarSection row property visibility", () => {
 });
 
 describe("ProjectSidebarSection folded Project status", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    chooseProjectTree();
+  });
+
   function renderProject(
     threads: ReadonlyArray<Omit<ChatThreadNavigationItem, "projectId">>,
     rowProperties?: SidebarRowProperties,

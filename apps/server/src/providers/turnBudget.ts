@@ -11,7 +11,8 @@ export function countsTowardTurnEventBudget(event: Pick<ProviderRuntimeEvent, "k
   return (
     event.kind !== "text-delta" &&
     event.kind !== "reasoning-delta" &&
-    event.kind !== "tool-progress"
+    event.kind !== "tool-progress" &&
+    event.kind !== "liveness"
   );
 }
 
