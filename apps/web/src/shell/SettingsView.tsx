@@ -1047,6 +1047,18 @@ function ActiveSectionContent({
                 : { discoverySnapshot: props.discoveryController.snapshot })}
               focused={focusedSetting === settingId("model-endpoints")}
               onDetailChange={onHarnessEndpointChange}
+              voice={{
+                settings: props.settings.voice,
+                onUseForTranscription: (providerInstanceId, modelId) =>
+                  props.onSettingsChange({
+                    voice: {
+                      ...props.settings.voice,
+                      transcription: { providerInstanceId, modelId },
+                    },
+                  }),
+                onOpenVoice: () =>
+                  onApplyDeepLink({ section: "voice", setting: settingId("transcription") }),
+              }}
               probeFailures={props.providerController.probeFailures}
               onCheckModelTools={props.providerController.checkModelTools}
               {...(props.nativeHarnessClient === undefined
