@@ -17,6 +17,8 @@ import type { LocalPluginFolderRegistry } from "./localPluginFolderRegistry";
  * could echo in part.
  */
 const SECRET_REFERENCE = /^\$\{OCTANT_SECRET:([0-9a-f-]{36})\}$/;
+/** A `${NAME}` left in a secret, which would be kept as that literal text. */
+const UNRESOLVED_PLACEHOLDER = /\$\{[A-Za-z_][A-Za-z0-9_]*(?::-[^}]*)?\}/;
 const RESERVED_ENV = new Set(["PLUGIN_ROOT", "PLUGIN_DATA"]);
 
 export type UserAddedMcpServerSource = Extract<ExtensionSource, { readonly kind: "user-added" }>;
@@ -97,6 +99,12 @@ export class UserAddedMcpServerStore {
         }
         if (value.value.length === 0) {
           throw new UserAddedMcpServerError("invalid", `${value.name} is marked secret but empty.`);
+        }
+        if (UNRESOLVED_PLACEHOLDER.test(value.value)) {
+          throw new UserAddedMcpServerError(
+            "invalid",
+            `${value.name} still holds a placeholder instead of its value.`,
+          );
         }
         const secretId = this.#uuid();
         await this.#secrets?.set(secretId, value.value);

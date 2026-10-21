@@ -145,6 +145,65 @@ export const UserAddedMcpServerRequest = Schema.Struct({
 export type UserAddedMcpServerRequest = typeof UserAddedMcpServerRequest.Type;
 export const decodeUserAddedMcpServerRequest = Schema.decodeUnknownSync(UserAddedMcpServerRequest);
 
+/**
+ * MCP servers and plugins another agent tool on this computer already knows,
+ * listed for the person to add. The listing carries no path and no value:
+ * an opaque id names each item, and the host keeps what it points at.
+ */
+export const DiscoveredAgentToolingOrigin = Schema.Literal("claude-code", "codex");
+export type DiscoveredAgentToolingOrigin = typeof DiscoveredAgentToolingOrigin.Type;
+const discoveredId = boundedText(128).pipe(Schema.pattern(/^[a-z]+-[a-f0-9]{32}$/));
+export const DiscoveredMcpServer = Schema.Struct({
+  id: discoveredId,
+  origin: DiscoveredAgentToolingOrigin,
+  /** Where the other tool keeps it: for the person, or for one Project's folder. */
+  scope: Schema.Literal("user", "project"),
+  name: boundedText(128),
+  transport: Schema.Literal("stdio", "streamable-http"),
+  /** The command line or the address, for the row; never a secret. */
+  summary: boundedText(512),
+  /** Variables the other tool reads from its environment that this host could not find. */
+  needsValues: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
+  /**
+   * Variables the other tool expands inside the command, its arguments or the
+   * address. Octant never copies a host value into those fields, so a server
+   * that has any cannot be added from here.
+   */
+  unsupportedPlaceholders: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
+  /** Values that will be kept in the credential store rather than the package. */
+  secretNames: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
+}).annotations(strict);
+export type DiscoveredMcpServer = typeof DiscoveredMcpServer.Type;
+export const DiscoveredPlugin = Schema.Struct({
+  id: discoveredId,
+  origin: DiscoveredAgentToolingOrigin,
+  name: boundedText(128),
+  version: Schema.optional(boundedText(64)),
+  format: Schema.Literal("agent-plugins", "codex-plugin", "claude-plugin"),
+  /** Whether the other tool has it switched on. */
+  enabledThere: Schema.Boolean,
+}).annotations(strict);
+export type DiscoveredPlugin = typeof DiscoveredPlugin.Type;
+export const DiscoveredAgentToolingListing = Schema.Struct({
+  servers: Schema.Array(DiscoveredMcpServer).pipe(Schema.maxItems(256)),
+  plugins: Schema.Array(DiscoveredPlugin).pipe(Schema.maxItems(256)),
+  /** What was found but cannot be offered, in plain words. */
+  notes: Schema.Array(boundedText(256)).pipe(Schema.maxItems(64)),
+}).annotations(strict);
+export type DiscoveredAgentToolingListing = typeof DiscoveredAgentToolingListing.Type;
+export const decodeDiscoveredAgentToolingListing = Schema.decodeUnknownSync(
+  DiscoveredAgentToolingListing,
+);
+export const DiscoveredAgentToolingRequest = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("add-server"), id: discoveredId }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("import-plugin"), id: discoveredId }).annotations(strict),
+);
+export type DiscoveredAgentToolingRequest = typeof DiscoveredAgentToolingRequest.Type;
+export const decodeDiscoveredAgentToolingRequest = Schema.decodeUnknownSync(
+  DiscoveredAgentToolingRequest,
+);
+
 export const ExtensionCommand = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("search-catalog"),

@@ -97,6 +97,22 @@ describe("MCP servers added by hand", () => {
     });
   });
 
+  it("refuses a secret that is still an unfilled placeholder, and stores nothing", async () => {
+    const secrets = secretsStore();
+    const { store: servers } = await store({ secrets });
+    await expect(
+      servers.add({
+        name: "Remote",
+        server: {
+          type: "streamable-http",
+          url: "https://mcp.example/mcp",
+          headers: [{ name: "Authorization", value: "Bearer ${MCP_TOKEN}", secret: true }],
+        },
+      }),
+    ).rejects.toMatchObject({ category: "invalid" });
+    expect(secrets.values.size).toBe(0);
+  });
+
   it("writes a package the host's inspection accepts, so adding it can finish", async () => {
     // Observed in a rendered run: every add from Settings failed with
     // "Package inspection failed." because the generated package named no

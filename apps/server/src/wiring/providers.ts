@@ -133,6 +133,7 @@ import { createDefaultCodexPluginPackageSources } from "../extensions/curatedBui
 import { AgentPluginMcpSessionManager } from "../extensions/agentPluginMcpSessionManager";
 import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegistry";
 import { UserAddedMcpServerStore } from "../extensions/userAddedMcpServers";
+import { AgentToolingDiscovery } from "../extensions/agentToolingDiscovery";
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import { createExtensionToolCallAuthorizer } from "../extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "../extensions/extensionToolGrantStore";
@@ -542,6 +543,25 @@ export function wireProviders(deps: ProvidersDependencies) {
             }),
           }),
     });
+    // What Claude Code and Codex keep on this computer, read for a local
+    // window to pick from; Octant never writes to their files.
+    const agentToolingDiscovery = new AgentToolingDiscovery({
+      home: homedir(),
+      projectRoots: () =>
+        persistence
+          .readProjects({ lifecycle: "active" })
+          .flatMap((project) =>
+            "binding" in project &&
+            typeof project.binding === "object" &&
+            project.binding !== null &&
+            "canonicalRoot" in project.binding &&
+            typeof project.binding.canonicalRoot === "string"
+              ? [project.binding.canonicalRoot]
+              : [],
+          ),
+      env: process.env,
+      parseToml: (text) => Bun.TOML.parse(text),
+    });
     const extensionPackageResolver =
       options.extensionPackageResolver ??
       new CodexPluginPackageResolver({
@@ -662,6 +682,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       localPluginFolderRegistry,
       localPluginImportReceipts: new LocalPluginImportReceiptStore(),
       userAddedMcpServers,
+      agentToolingDiscovery,
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,
     });

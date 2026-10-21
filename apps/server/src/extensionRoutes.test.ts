@@ -397,6 +397,7 @@ describe("bounded authenticated extension routes", () => {
     });
     const register = vi.fn(async () => ({
       source: { kind: "local-folder", sourceRef: "local-receipt" },
+      notes: [],
     }));
     const execute = vi.fn(async () => ({
       kind: "extension-command-failed",
@@ -923,6 +924,197 @@ describe("MCP servers added by hand", () => {
     execute.mockRejectedValueOnce(new Error("interrupted"));
     await handler(request("/api/extensions/user-servers", body));
     expect(remove).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("servers and plugins found on this computer", () => {
+  const listing = {
+    servers: [
+      {
+        id: "claude-00000000000000000000000000000001",
+        origin: "claude-code",
+        scope: "user",
+        name: "docs",
+        transport: "stdio",
+        summary: "npx -y docs-mcp",
+        needsValues: [],
+        unsupportedPlaceholders: [],
+        secretNames: ["DOCS_TOKEN"],
+      },
+    ],
+    plugins: [
+      {
+        id: "codex-00000000000000000000000000000002",
+        origin: "codex",
+        name: "github@openai-curated",
+        version: "1.1.0",
+        format: "codex-plugin",
+        enabledThere: true,
+      },
+    ],
+    notes: [],
+  };
+  const found = {
+    list: vi.fn(async () => listing),
+    server: vi.fn((id: string) =>
+      id === listing.servers[0]?.id
+        ? {
+            name: "docs",
+            server: { type: "stdio", command: "npx", args: ["-y", "docs-mcp"], env: [] },
+          }
+        : undefined,
+    ),
+    refusal: vi.fn((): unknown => undefined),
+    pluginPath: vi.fn((id: string) =>
+      id === listing.plugins[0]?.id
+        ? "/Users/ada/.codex/plugins/cache/openai-curated/github/1.1.0"
+        : undefined,
+    ),
+  };
+
+  it("lists for a local window only, and never names a path", async () => {
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      agentToolingDiscovery: found as never,
+      now: () => now,
+    });
+    const denied = await handler(
+      pairedDeviceRequest("/api/extensions/discovered", { kind: "list" }),
+    );
+    expect(denied?.status).toBe(401);
+    const answered = await handler(request("/api/extensions/discovered", { kind: "list" }));
+    expect(answered?.status).toBe(200);
+    const body = await answered?.text();
+    expect(JSON.parse(body ?? "")).toEqual(listing);
+    expect(body).not.toContain("/Users/ada");
+  });
+
+  it("adds a found server through the same act as adding one by hand", async () => {
+    const add = vi.fn(async () => ({ source: { kind: "user-added", sourceRef: "user-docs" } }));
+    const execute = vi.fn(async (command: ExtensionCommand) =>
+      command.kind === "inspect-package"
+        ? ({
+            kind: "package-inspected",
+            preview: {
+              entry: {
+                extensionId,
+                packageId,
+                version: "1.0.0",
+                digest,
+                source: { kind: "user-added", sourceRef: "user-docs" },
+              },
+            },
+          } as never)
+        : ({ kind: "extension-state-updated", snapshot: setupSnapshot() } as never),
+    );
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      agentToolingDiscovery: found as never,
+      userAddedMcpServers: { add } as never,
+      now: () => now,
+    });
+    const answered = await handler(
+      request("/api/extensions/discovered", { kind: "add-server", id: listing.servers[0]?.id }),
+    );
+    expect(answered?.status).toBe(200);
+    expect(add).toHaveBeenCalledWith({
+      name: "docs",
+      server: { type: "stdio", command: "npx", args: ["-y", "docs-mcp"], env: [] },
+    });
+    expect(execute.mock.calls.map(([command]) => command.kind)).toEqual([
+      "inspect-package",
+      "install-package",
+    ]);
+    const stale = await handler(
+      request("/api/extensions/discovered", {
+        kind: "add-server",
+        id: "claude-00000000000000000000000000000099",
+      }),
+    );
+    expect(stale?.status).toBe(404);
+  });
+
+  it("refuses to add a found server that still holds a placeholder, before anything is written", async () => {
+    const add = vi.fn();
+    const execute = vi.fn();
+    found.refusal.mockReturnValueOnce({ kind: "unsupported-placeholders", names: ["API_TOKEN"] });
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      agentToolingDiscovery: found as never,
+      userAddedMcpServers: { add } as never,
+      now: () => now,
+    });
+    const answered = await handler(
+      request("/api/extensions/discovered", { kind: "add-server", id: listing.servers[0]?.id }),
+    );
+    expect(answered?.status).toBe(400);
+    expect(await answered?.json()).toMatchObject({
+      failure: { category: "invalid", message: expect.stringContaining("API_TOKEN") },
+    });
+    expect(add).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("shows what the loader left out of a found plugin in the review's diagnostics", async () => {
+    const register = vi.fn(async () => ({
+      source: { kind: "local-folder", sourceRef: "local-github" },
+      notes: ["api: needs values Claude Code asks for (user_config); left out."],
+    }));
+    const execute = vi.fn(async () => ({
+      kind: "package-inspected",
+      preview: { diagnostics: [{ code: "existing", message: "Already there." }] },
+    }));
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      agentToolingDiscovery: found as never,
+      localPluginFolderRegistry: { register } as never,
+      now: () => now,
+    });
+    const answered = await handler(
+      request("/api/extensions/discovered", { kind: "import-plugin", id: listing.plugins[0]?.id }),
+    );
+    expect(await answered?.json()).toMatchObject({
+      kind: "package-inspected",
+      preview: {
+        diagnostics: [
+          { code: "existing" },
+          { message: "api: needs values Claude Code asks for (user_config); left out." },
+        ],
+      },
+    });
+  });
+
+  it("imports a found plugin for review through the folder registry", async () => {
+    const register = vi.fn(async () => ({
+      source: { kind: "local-folder", sourceRef: "local-github" },
+      notes: [],
+    }));
+    const execute = vi.fn(async () => ({
+      kind: "extension-command-failed",
+      failure: { category: "blocked", message: "Fixture inspection." },
+    }));
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      agentToolingDiscovery: found as never,
+      localPluginFolderRegistry: { register } as never,
+      now: () => now,
+    });
+    const answered = await handler(
+      request("/api/extensions/discovered", { kind: "import-plugin", id: listing.plugins[0]?.id }),
+    );
+    expect(answered?.status).toBe(200);
+    expect(register).toHaveBeenCalledWith(
+      "/Users/ada/.codex/plugins/cache/openai-curated/github/1.1.0",
+    );
+    expect(execute).toHaveBeenCalledWith(
+      { kind: "inspect-package", source: { kind: "local-folder", sourceRef: "local-github" } },
+      expect.anything(),
+    );
   });
 });
 
