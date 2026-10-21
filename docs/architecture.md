@@ -7472,7 +7472,12 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   startup the dev script rebuilds `apps/desktop/dist/entry.mjs` whenever
   `apps/desktop/src` is newer, so `apps/desktop/src` edits need only a
   restart of `bun run dev` rather than a manual
-  `bun run --cwd apps/desktop build`.
+  `bun run --cwd apps/desktop build`. It rebuilds the Canvas preview page
+  (`apps/web/dist/canvas-preview/`) the same way whenever `apps/web` or the contracts, domain or theme packages
+  are newer,
+  and hands the host it starts `OCTANT_WEB_DIST_PATH=apps/web/dist`, so an
+  agent's Canvas preview returns a picture on a development host; `octant web
+--dev` does both as well.
 - The server is composed by a root in `apps/server/src/server.ts` that calls
   the per-area wiring modules under `apps/server/src/wiring/` in a fixed
   order, and every module declares the reach it has as a `Pick` of the
