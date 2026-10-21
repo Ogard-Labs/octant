@@ -3,6 +3,7 @@ import type {
   CanvasExportDecideRequest,
   CanvasExportDecideResult,
   CanvasExportDelivery,
+  CanvasExportFormat,
   CanvasExportOfferList,
   CanvasExportPrepareRequest,
   CanvasExportPrepareResult,
@@ -36,6 +37,19 @@ const STATUS_LABEL: Record<CanvasExportTargetStatus, string> = {
   ready: "Ready",
   refused: "Refused",
 };
+
+const FORMAT_LABEL: Record<CanvasExportFormat, string> = {
+  markdown: "Markdown",
+  html: "HTML",
+  png: "PNG images",
+  pdf: "PDF",
+};
+
+function fileSize(byteLength: number): string {
+  return byteLength < 1024 * 1024
+    ? `${String(Math.max(1, Math.round(byteLength / 1024)))} KB`
+    : `${(byteLength / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 /**
  * Asks the host to render a Canvas, then shows the payload and destination
@@ -197,12 +211,13 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
             aria-label="Format"
             id="canvas-export-format"
             onValueChange={(value) => {
-              if (value === "markdown" || value === "html") setFormat(value);
+              const next = formats.find((item) => item === value);
+              if (next !== undefined) setFormat(next);
             }}
             options={(formats.length === 0 ? (["markdown", "html"] as const) : formats).map(
               (item) => ({
                 id: item,
-                label: item === "markdown" ? "Markdown" : "HTML",
+                label: FORMAT_LABEL[item],
               }),
             )}
             value={chosenFormat ?? "markdown"}
@@ -237,7 +252,7 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
               </OctantButton>
             </>
           }
-          detail={card.format === "markdown" ? "Markdown" : "HTML"}
+          detail={FORMAT_LABEL[card.format]}
           label="Approve export"
           summary={`Export to ${card.destinationLabel}`}
         >
@@ -246,6 +261,9 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
               {card.replacesExisting === true
                 ? `Replaces ${card.destinationPath}`
                 : `Writes ${card.destinationPath}`}
+              {card.alsoReplaces === undefined || card.alsoReplaces.length === 0
+                ? null
+                : ` and replaces ${card.alsoReplaces.join(", ")}`}
             </p>
           )}
           {card.writesDesignMarkup === true ? (
@@ -278,9 +296,26 @@ export function CanvasExportPanel(props: CanvasExportPanelProps) {
               {card.destinationNote}
             </p>
           )}
-          <pre className="canvas-export__payload" data-testid="canvas-export-payload">
-            {card.payload}
-          </pre>
+          {card.drawsDesignFrames === true ? (
+            <p className="canvas-export__note" data-testid="canvas-export-design-frames">
+              Draws this canvas's design frames as written. Octant does not check them for secrets.
+            </p>
+          ) : null}
+          {card.files === undefined ? null : (
+            <ul className="canvas-export__files" data-testid="canvas-export-files">
+              {card.pages === undefined ? null : (
+                <li>{card.pages === 1 ? "1 page" : `${String(card.pages)} pages`}</li>
+              )}
+              {card.files.map((file) => (
+                <li key={file.name}>{`${file.name} — ${fileSize(file.byteLength)}`}</li>
+              ))}
+            </ul>
+          )}
+          {card.payload === undefined ? null : (
+            <pre className="canvas-export__payload" data-testid="canvas-export-payload">
+              {card.payload}
+            </pre>
+          )}
         </OctantApprovalCard>
       )}
       {message === undefined ? null : (

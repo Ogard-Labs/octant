@@ -441,12 +441,12 @@ describe("Claude execution policy", () => {
     expect(claudeExecutionOptions("full-access")).toEqual({
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
-      tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"],
+      tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion", "TodoWrite"],
     });
     expect(claudeExecutionOptions("approval-gated")).toEqual({
       permissionMode: "default",
       allowDangerouslySkipPermissions: false,
-      tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"],
+      tools: ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion", "TodoWrite"],
     });
     expect(claudeExecutionOptions("approval-gated", false, "work").tools).toEqual([
       "Read",
@@ -455,11 +455,12 @@ describe("Claude execution policy", () => {
       "Edit",
       "Write",
       "AskUserQuestion",
+      "TodoWrite",
     ]);
     expect(claudeExecutionOptions("plan")).toEqual({
       permissionMode: "plan",
       allowDangerouslySkipPermissions: false,
-      tools: ["Read", "Glob", "Grep"],
+      tools: ["Read", "Glob", "Grep", "TodoWrite"],
     });
     // A Code Plan turn runs read-only commands only where its Seatbelt profile
     // can name the programs; Chat and Work have no shell in any posture.
@@ -467,6 +468,7 @@ describe("Claude execution policy", () => {
       "Read",
       "Glob",
       "Grep",
+      "TodoWrite",
       "Bash",
     ]);
     for (const [mode, platform] of [
@@ -478,6 +480,7 @@ describe("Claude execution policy", () => {
         "Read",
         "Glob",
         "Grep",
+        "TodoWrite",
       ]);
     }
   });
@@ -944,7 +947,7 @@ describe("Claude execution policy", () => {
       planConnection.connection.start({ sessionId, modelId, executionPolicy: "plan" }),
     );
     const planOpen = plan.opens[0]!;
-    expect(planOpen.tools).toEqual(["Read", "Glob", "Grep"]);
+    expect(planOpen.tools).toEqual(["Read", "Glob", "Grep", "TodoWrite"]);
     const signal = new AbortController().signal;
     const prePlan = (toolName: string, input: unknown, toolUseId: string) =>
       planOpen.preToolUse({
@@ -968,6 +971,9 @@ describe("Claude execution policy", () => {
     ).resolves.toMatchObject({ behavior: "deny" });
     const readInput = { file_path: `${projectRoot}/README.md` };
     await expect(prePlan("Read", readInput, "read")).resolves.toEqual({ behavior: "allow" });
+    // The checklist touches nothing outside Claude's session, so Plan keeps it.
+    const checklist = { todos: [{ content: "Read", status: "pending", activeForm: "Reading" }] };
+    await expect(prePlan("TodoWrite", checklist, "todo")).resolves.toEqual({ behavior: "allow" });
     await expect(
       planOpen.canUseTool({
         toolName: "Read",
@@ -988,6 +994,16 @@ describe("Claude execution policy", () => {
       }),
     );
     const gatedOpen = gated.opens[0]!;
+    await expect(
+      gatedOpen.preToolUse({
+        sessionId: "sdk-session-1",
+        projectRoot,
+        toolName: "TodoWrite",
+        input: { todos: [{ content: "Edit", status: "in_progress", activeForm: "Editing" }] },
+        toolUseId: "todo-gated",
+        signal,
+      }),
+    ).resolves.toEqual({ behavior: "allow" });
     await expect(
       gatedOpen.preToolUse({
         sessionId: "sdk-session-1",

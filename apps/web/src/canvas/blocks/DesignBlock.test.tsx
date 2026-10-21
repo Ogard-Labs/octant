@@ -46,6 +46,23 @@ function prototype(size: CanvasDesignBlock["size"] = "phone"): CanvasDesignBlock
   return block;
 }
 
+function staticWindow(screens: number): CanvasDesignBlock {
+  const block = decodeCanvasBlock({
+    blockId: "window",
+    schemaVersion: 9,
+    kind: "design",
+    title: "Window",
+    size: "desktop",
+    frames: Array.from({ length: screens }, (_, index) => ({
+      frameId: `screen-${String(index)}`,
+      title: `Screen ${String(index + 1)}`,
+      html: "<p>Home</p>",
+    })),
+  });
+  if (block.kind !== "design") throw new Error("Fixture is not a design.");
+  return block;
+}
+
 function runRuntime(fields: Partial<DesignRunRuntime> = {}) {
   const start = vi.fn<DesignRunRuntime["start"]>(async () => ({ kind: "ready", url: PAGE }));
   return {
@@ -143,8 +160,92 @@ function design(fields: Partial<Pick<CanvasDesignBlock, "size" | "theme">>): Can
   return block;
 }
 
+/** A deck long enough that drawing every slide at once would be felt. */
+function deck(slides: number): CanvasDesignBlock {
+  const block = decodeCanvasBlock({
+    ...launchDeckExampleBlock,
+    frames: Array.from({ length: slides }, (_, index) => ({
+      frameId: `slide-${String(index + 1)}`,
+      title: `Slide ${String(index + 1)}`,
+      html: `<section class="slide"><h2>Slide ${String(index + 1)}</h2></section>`,
+    })),
+  });
+  if (block.kind !== "design") throw new Error("Fixture is not a design.");
+  return block;
+}
+
+/**
+ * Layout, which jsdom has none of: a board the test gives a width, and a
+ * viewport the test scrolls figures into. Each stub records what is watched
+ * and lets the test report for it.
+ */
+function stubLayoutObservers() {
+  const boards: Array<{ element: Element; report: (width: number) => void }> = [];
+  const watched: Array<Element> = [];
+  let reveal: (entries: ReadonlyArray<{ target: Element; isIntersecting: boolean }>) => void = () =>
+    undefined;
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      readonly #callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.#callback = callback;
+      }
+      observe(element: Element) {
+        boards.push({
+          element,
+          report: (width) =>
+            this.#callback(
+              [{ target: element, contentRect: { width, height: 0 } } as ResizeObserverEntry],
+              this as unknown as ResizeObserver,
+            ),
+        });
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      constructor(callback: IntersectionObserverCallback) {
+        reveal = (entries) =>
+          callback(
+            entries as unknown as Array<IntersectionObserverEntry>,
+            this as unknown as IntersectionObserver,
+          );
+      }
+      observe(element: Element) {
+        watched.push(element);
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  return {
+    boards,
+    watched,
+    scrollTo: (elements: ReadonlyArray<Element>) =>
+      reveal(elements.map((target) => ({ target, isIntersecting: true }))),
+  };
+}
+
+function figures(container: ParentNode): ReadonlyArray<HTMLElement> {
+  return Array.from(container.querySelectorAll<HTMLElement>(".canvas-design__frame"));
+}
+
+function previews(container: ParentNode): ReadonlyArray<HTMLElement> {
+  return Array.from(container.querySelectorAll<HTMLElement>(".canvas-design__preview"));
+}
+
+function scaleOf(frame: HTMLIFrameElement): number {
+  const match = /scale\(([\d.]+)\)/.exec(frame.style.transform);
+  return match?.[1] === undefined ? Number.NaN : Number(match[1]);
+}
+
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   delete (window as { octantHost?: unknown }).octantHost;
   prototypeHost.reset();
   const root = document.documentElement;
@@ -291,6 +392,95 @@ describe("design block", () => {
     expect(prototype.srcdoc).not.toContain('href="#address"');
   });
 
+  it("draws a lone desktop window large on the board, and a row of desktop screens as thumbnails", () => {
+    const { container, rerender } = render(
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [staticWindow(1)] }} />,
+    );
+    // The stylesheet draws each box as wide as the board allows, up to this cap.
+    const previewWidth = () =>
+      (container.querySelector(".canvas-design__frame") as HTMLElement).style.getPropertyValue(
+        "--canvas-design-frame-cap",
+      );
+    expect(previewWidth()).toBe(`${String(CANVAS_DESIGN_VIEWPORT.desktop.width)}px`);
+
+    rerender(<CanvasDocument definition={{ ...canvasFixture, blocks: [staticWindow(2)] }} />);
+    expect(previewWidth()).toBe("440px");
+  });
+
+  describe("full screen", () => {
+    const original = Object.getOwnPropertyDescriptor(document, "fullscreenEnabled");
+    afterEach(() => {
+      if (original === undefined) {
+        delete (document as { fullscreenEnabled?: unknown }).fullscreenEnabled;
+      } else Object.defineProperty(document, "fullscreenEnabled", original);
+      delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+      delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+    });
+
+    function allowFullscreen() {
+      Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: true });
+      const request = vi.fn(async () => undefined);
+      HTMLElement.prototype.requestFullscreen = request;
+      return request;
+    }
+
+    function enter(element: Element | null) {
+      Object.defineProperty(document, "fullscreenElement", { configurable: true, value: element });
+      act(() => {
+        document.dispatchEvent(new Event("fullscreenchange"));
+      });
+    }
+
+    it("plays a design full screen where the browser allows it, and offers the way back", () => {
+      const request = allowFullscreen();
+      render(<CanvasDocument definition={{ ...canvasFixture, blocks: [staticWindow(1)] }} />);
+      fireEvent.click(screen.getByRole("button", { name: "Play" }));
+      const player = screen.getByRole("dialog", { name: "Playing Window" });
+
+      fireEvent.click(within(player).getByRole("button", { name: "Full screen" }));
+
+      const body = player.querySelector(".canvas-design-player__body");
+      expect(request.mock.contexts[0]).toBe(body);
+      enter(body);
+      expect(within(player).getByRole("button", { name: "Exit full screen" })).toBeVisible();
+    });
+
+    it("runs a desktop prototype full screen with Stop still reachable", async () => {
+      const request = allowFullscreen();
+      const { runtime } = runRuntime();
+      render(
+        <CanvasDocument
+          definition={{ ...canvasFixture, blocks: [prototype("desktop")] }}
+          designRunRuntime={runtime}
+          placement="thread"
+        />,
+      );
+      const region = screen.getByRole("region", { name: "Checkout, Desktop prototype" });
+      expect(within(region).queryByRole("button", { name: "Full screen" })).toBeNull();
+      fireEvent.click(within(region).getByRole("button", { name: "Run" }));
+      await within(region).findByTitle("Checkout, running prototype");
+
+      fireEvent.click(within(region).getByRole("button", { name: "Full screen" }));
+
+      expect(request.mock.contexts[0]).toBe(region);
+      enter(region);
+      expect(within(region).getByRole("button", { name: "Exit full screen" })).toBeVisible();
+      expect(within(region).getByRole("button", { name: "Stop" })).toBeVisible();
+
+      // Stopping leaves the section full screen, so the way back stays.
+      fireEvent.click(within(region).getByRole("button", { name: "Stop" }));
+      expect(within(region).getByRole("button", { name: "Exit full screen" })).toBeVisible();
+    });
+
+    it("offers no full screen button where the browser cannot", () => {
+      Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: false });
+      render(<CanvasDocument definition={{ ...canvasFixture, blocks: [staticWindow(1)] }} />);
+      fireEvent.click(screen.getByRole("button", { name: "Play" }));
+
+      expect(screen.queryByRole("button", { name: "Full screen" })).toBeNull();
+    });
+  });
+
   it("presents slides in order and moves with the arrow keys", () => {
     render(<CanvasDocument definition={{ ...canvasFixture, blocks: [launchDeckExampleBlock] }} />);
 
@@ -305,6 +495,136 @@ describe("design block", () => {
     expect(within(player).getByText("2 / 2")).toBeVisible();
     expect(within(player).getByTitle("Goals, slide 2")).toHaveAttribute("tabindex", "-1");
     expect(within(player).getByRole("button", { name: "Next slide" })).toBeDisabled();
+  });
+
+  it("enters full screen from the player and keeps the arrow keys moving slides", () => {
+    const requestFullscreen = vi.fn(() => Promise.resolve());
+    Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
+      configurable: true,
+      value: requestFullscreen,
+    });
+    // The player offers the control only where the browser allows full screen.
+    Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: true });
+    try {
+      render(
+        <CanvasDocument definition={{ ...canvasFixture, blocks: [launchDeckExampleBlock] }} />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Present" }));
+      const player = screen.getByRole("dialog", { name: "Presenting Launch plan" });
+
+      fireEvent.click(within(player).getByRole("button", { name: "Full screen" }));
+
+      expect(requestFullscreen).toHaveBeenCalledTimes(1);
+      fireEvent.keyDown(within(player).getByRole("button", { name: "Next slide" }), {
+        key: "ArrowRight",
+      });
+      expect(within(player).getByText("2 / 2")).toBeVisible();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "requestFullscreen");
+      Reflect.deleteProperty(document, "fullscreenEnabled");
+    }
+  });
+
+  it("draws every slide no wider than the column it sits in, and sizes its box before the column is measured", () => {
+    const layout = stubLayoutObservers();
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [deck(3)] }} />);
+    const board = screen.getByRole("region", { name: "Launch plan, Slide design" });
+    layout.scrollTo(layout.watched);
+
+    // Before the board is measured, each box already has the slide's shape
+    // and the width the stylesheet caps at the board; the page waits.
+    expect(figures(board)).toHaveLength(3);
+    for (const figure of figures(board)) {
+      expect(figure.style.getPropertyValue("--canvas-design-frame-cap")).toBe("440px");
+      expect(figure.style.width).toBe("");
+    }
+    for (const preview of previews(board)) expect(preview.style.aspectRatio).toBe("1920 / 1080");
+    expect(frames(board)).toHaveLength(0);
+
+    // A side panel narrower than a slide's full board width.
+    act(() => layout.boards[0]?.report(320));
+    expect(frames(board)).toHaveLength(3);
+    for (const page of frames(board)) {
+      expect(scaleOf(page) * CANVAS_DESIGN_VIEWPORT.slide.width).toBeLessThanOrEqual(320);
+    }
+
+    // A full tab: the cap, not the board, bounds a slide.
+    act(() => layout.boards[0]?.report(1200));
+    for (const page of frames(board)) {
+      expect(scaleOf(page) * CANVAS_DESIGN_VIEWPORT.slide.width).toBeCloseTo(440);
+    }
+  });
+
+  it("loads a slide's page only when the slide or its neighbour is near the visible part of the board", () => {
+    const layout = stubLayoutObservers();
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [deck(12)] }} />);
+    const board = screen.getByRole("region", { name: "Launch plan, Slide design" });
+    act(() => layout.boards[0]?.report(640));
+
+    // Every slide has its box and caption; no page has loaded yet.
+    expect(previews(board)).toHaveLength(12);
+    expect(within(board).getByText("Slide 12")).toBeInTheDocument();
+    expect(frames(board)).toHaveLength(0);
+    expect(layout.watched).toHaveLength(12);
+
+    // The first two slides scroll into view: they and the slide after them load.
+    act(() => layout.scrollTo(layout.watched.slice(0, 2)));
+    const loaded = frames(board);
+    expect(loaded).toHaveLength(3);
+    expect(loaded.map((page) => page.title)).toEqual([
+      "Slide 1, Slide slide",
+      "Slide 2, Slide slide",
+      "Slide 3, Slide slide",
+    ]);
+    expect(loaded[0]?.srcdoc).toContain("<h2>Slide 1</h2>");
+
+    // Scrolling on loads more, and a slide once loaded stays loaded.
+    act(() => layout.scrollTo(layout.watched.slice(6, 7)));
+    expect(frames(board).map((page) => page.title)).toEqual([
+      "Slide 1, Slide slide",
+      "Slide 2, Slide slide",
+      "Slide 3, Slide slide",
+      "Slide 6, Slide slide",
+      "Slide 7, Slide slide",
+      "Slide 8, Slide slide",
+    ]);
+  });
+
+  it("presents every slide of a long deck in turn, keeping only the neighbours loaded", () => {
+    stubLayoutObservers();
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [deck(12)] }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Present" }));
+    const player = screen.getByRole("dialog", { name: "Presenting Launch plan" });
+    const next = within(player).getByRole("button", { name: "Next slide" });
+    for (let slide = 1; slide <= 12; slide += 1) {
+      expect(within(player).getByText(`${String(slide)} / 12`)).toBeVisible();
+      const shown = within(player).getByTitle<HTMLIFrameElement>(
+        `Slide ${String(slide)}, slide ${String(slide)}`,
+      );
+      expect(shown).not.toHaveAttribute("hidden");
+      expect(shown).not.toHaveAttribute("aria-hidden");
+      expect(shown.srcdoc).toContain(`<h2>Slide ${String(slide)}</h2>`);
+      const mounted = frames(player);
+      expect(mounted.length).toBeLessThanOrEqual(3);
+      for (const page of mounted) {
+        // A neighbour is drawn beneath the shown page, never display: none,
+        // so it is already painted when a step reveals it.
+        if (page !== shown) {
+          expect(page).not.toHaveAttribute("hidden");
+          expect(page).toHaveAttribute("aria-hidden", "true");
+          expect(page).toHaveClass("canvas-design__page--beneath");
+        }
+      }
+      if (slide < 12) {
+        // The next slide is already loaded, so stepping shows it at once.
+        expect(
+          within(player).getByTitle(`Slide ${String(slide + 1)}, slide ${String(slide + 1)}`),
+        ).toBeInTheDocument();
+        fireEvent.keyDown(next, { key: "ArrowRight" });
+      }
+    }
+    expect(next).toBeDisabled();
   });
 
   it("never draws a frame that may run script beside Octant's own origin", () => {

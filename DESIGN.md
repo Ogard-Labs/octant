@@ -54,8 +54,8 @@ application ground, to a Vivid tile's face, and to a Project's letter tile;
 chrome stays flat. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground (0091): a first-party picture or a
-person's photo, shown plain or through one still print effect, behind the
-start screens or inside the primary card.
+person's photo, shown plain or through one still print effect, or the field of
+Pulsing characters, behind the start screens or inside the primary card.
 
 ## Language
 
@@ -268,6 +268,10 @@ draw the same hairline.
 
 Every Settings page is built from one kit, in `settings/primitives.tsx`:
 
+Selecting a page replaces its controls as well as its heading. Plugin pages
+resolve the currently selected entry point; a missing entry point shows an
+error instead of retaining another integration's account controls.
+
 - **Page header.** A 42px icon tile (`--oct-radius-inset`, a faint 8% ink fill, a
   hairline) holding the page's own navigation icon at 20px, the page title
   (`.oct-title`, 28px), a one-line subtitle with the page scope, and an
@@ -452,7 +456,9 @@ behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 First-run setup asks only what a first task needs — a usable provider, a
 Project folder, and a model — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
-the first one. Skipping preserves settled answers, waits for pending writes,
+the first one. Opening setup focuses the current step's heading so a long
+provider list does not scroll past its introduction; Tab then reaches the
+step's controls. Skipping preserves settled answers, waits for pending writes,
 grants no authority, and creates no thread: provider, Project, model, and
 permission readiness are checked again when work is requested. After Skip, or
 in a later session with no ready instance, the New task composer in Work and
@@ -496,8 +502,8 @@ Model choices and settings wait for an asynchronous model change to finish befor
 accepting another edit, so the next configuration choice uses the confirmed pairing.
 
 The screen sits on the application ground (0091, 0129), set as two plain
-choices. What: one of the first-party Zen pictures, a person's photo, or the
-plain page. A fresh install starts on Soft glow, one of three Gradient
+choices. What: one of the first-party Zen pictures, a person's photo, a field
+of pulsing characters, or the plain page. A fresh install starts on Soft glow, one of three Gradient
 pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
 print, so the ground follows the window's scheme; the stylesheet swaps them
 by `data-octant-theme-mode`. A settings row written before the ground
@@ -505,7 +511,16 @@ existed replays as the plain page it showed. Effect: the picture is shown as it 
 dithered, at a chosen pixel size and colour count; an animated picture is
 printed from its still frame. Nothing is drawn over the picture and nothing
 moves across it; a ground saved with the retired dot pattern resolves to the
-plain page. Behind a
+plain page. Pulsing characters is the one drawn ground, and only when a person
+picks it: a grid of monospace letters and digits in the theme's primary ink,
+at most half opaque, whose brightness drifts in slow patches and breathes as
+a whole at twelve frames a second while a few glyphs swap. A click over it
+sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
+it grows, trailed by a fainter echo, and about one click in six draws a heart
+instead, and fades within two seconds. With the default Mono accent the ring
+is the ink, only brighter; a chosen accent colours it. It carries no picture, so the effect controls do not apply, and it
+pauses while the window is hidden. Reduced motion holds it on one still frame
+and takes no rings. Behind a
 start screen the ground is masked away behind the composer and fades out below
 it, so the prompt and the recent-thread list read on the plain page; in the
 light theme it fades out sooner, because dark text over a pale picture has
@@ -1498,12 +1513,16 @@ dialog, with keyboard focus restored on cancellation. Submission records a
 proposed artifact and does not approve it or change execution access. The
 entry returns after withdrawal; the dock stays artifact-only.
 
-The provider's recorded task list is a separate, initially collapsed group. Its
-header keeps completed/total progress and failed or waiting counts visible while
-folded. An unfinished list after a settled turn says Incomplete; it does not
-claim that the agent is still running. Expansion shows the recorded ordered
-steps in a bounded, scrollable list. Neither this list nor the journaled plan
-borrows progress, completion, or authority from the subagent group.
+The provider's recorded task list is a separate group. It is open while the
+turn that recorded it runs, so the step in hand reads without a click, and
+folds to its header once the turn settles; a person's own open or fold wins
+over both. The header keeps completed/total progress and failed or waiting
+counts visible while folded. An unfinished list after a settled turn says
+Incomplete; it does not claim that the agent is still running. The open list
+shows the recorded ordered steps in a bounded, scrollable list: the running
+step at Medium (500), finished steps struck through in secondary ink, and no
+fill on any row. Neither this list nor the journaled plan borrows progress,
+completion, or authority from the subagent group.
 
 ### Breakpoints
 
@@ -1663,8 +1682,9 @@ interfaces. Revealing them must not move the transcript.
 
 Functional feedback uses 120–160ms transitions; the base system duration is
 200ms. Use standard easing and no decorative entrance animation. There is no
-ambient motion behind the work; an animated built-in picture is the one
-moving ground, and reduced motion shows its still frame. Running state
+ambient motion behind the work by default; an animated built-in picture and
+the Pulsing characters ground are the moving grounds a person may choose, and
+reduced motion holds each on a still frame. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-
 motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.
@@ -1823,10 +1843,12 @@ request from the person.
   through the providers. Renderer state is presentation only.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
-  confirmation when a turn is active or the desktop cannot confirm what the host
-  is running, then stop only the
+  confirmation when provider sessions remain open or the desktop cannot confirm
+  what the host is running, then stop only the
   desktop-owned host and its child resources. Cancellation leaves both app and
-  host running. Once the person confirms, quitting never waits on a person: a
+  host running. The session count can include idle sessions kept for another turn;
+  the warning names open sessions without claiming they are executing turns.
+  Once the person confirms, quitting never waits on a person: a
   failed or stalled window-state save or host stop is logged rather than shown
   in an alert, and a fixed deadline ends the app (after force-stopping the
   managed server) if shutdown has not finished.
