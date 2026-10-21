@@ -294,6 +294,10 @@
   white-space: nowrap;
 }
 
+.dock-card__label--meta {
+  color: var(--oct-meta);
+}
+
 .dock-card__meta {
   display: inline-flex;
   flex: none;

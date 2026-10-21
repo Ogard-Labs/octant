@@ -28,7 +28,7 @@ import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
 import { DockThreadOverviewContent } from "../shell/DockThreadOverviewContent";
 import { runningNowThreads } from "../shell/dockThreadOverviewModel";
-import type { OctantHostBridge } from "../shell/hostBridge";
+import { remoteAccessAdministrationOf, type OctantHostBridge } from "../shell/hostBridge";
 import { RightUtilityDock } from "../shell/RightUtilityDock";
 import type {
   RightUtilityDockResolution,
@@ -74,6 +74,7 @@ export interface DockContainerProps {
     | "openLinkedProjectPullRequestThread"
     | "openPreview"
     | "openProjectPullRequestChat"
+    | "openSettings"
     | "openSubagent"
     | "persistBottomPanelPresentation"
     | "selectChatThread"
@@ -90,6 +91,7 @@ export interface DockContainerProps {
     | "setRequestedAgentReview"
     | "setRequestedAgentView"
     | "setSelectedProjectPullRequest"
+    | "openWrittenDocument"
     | "updateSettings"
   >;
   readonly activeBottomSurface?: RightUtilityDockSurfaceDescriptor;
@@ -137,6 +139,8 @@ export interface DockContainerProps {
     readonly checkoutId?: CodeCheckoutId;
   };
   readonly dockThreadHost?: string;
+  /** Whether the dock's thread runs on this computer rather than a paired one. */
+  readonly dockThreadOnThisComputer: boolean;
   readonly dockThreadKey?: ThreadUtilityDockKey;
   readonly dockThreadProjectId?: ProjectId;
   readonly dockThreadRepository?: string;
@@ -206,6 +210,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     dockThread,
     dockThreadHost,
     dockThreadKey,
+    dockThreadOnThisComputer,
     dockThreadProjectId,
     dockThreadRepository,
     isNarrow,
@@ -241,6 +246,15 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
   // The pull requests the active Code thread is already about, offered where a
   // reader adds a tab. Read from the same catalogue the Environment panel uses,
   // so the two never disagree.
+  // This computer's listener, administered only from the desktop app's own
+  // window; the host refuses these actions for a paired client, which never
+  // holds the bridge.
+  const hostBridge = props.hostBridge;
+  const remoteAccessAdministration = useMemo(
+    () => remoteAccessAdministrationOf(hostBridge),
+    [hostBridge],
+  );
+
   const launchableDockReferences = useMemo(() => {
     const dockRepository = parseRepository(dockThreadRepository);
     if (
@@ -449,6 +463,19 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         }}
         projectId={thread?.projectId}
         projectName={projectName}
+        agentRunClient={agentRunClient}
+        documents={
+          dockThreadKey === undefined
+            ? undefined
+            : writtenDocumentsByThread.get(dockThreadKey)?.documents
+        }
+        now={now}
+        onOpenDocument={actions.openWrittenDocument}
+        onOpenRemoteAccessSettings={() => void actions.openSettings({ section: "remote-access" })}
+        onOpenSubagent={actions.openSubagent}
+        {...(dockThreadOnThisComputer && remoteAccessAdministration !== undefined
+          ? { remoteAccess: remoteAccessAdministration }
+          : {})}
         serverUrl={serverUrl}
         windowCapability={windowCapability}
         running={runningNowThreads({
