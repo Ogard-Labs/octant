@@ -66,7 +66,16 @@ export function DockThreadOverviewContent(props: DockThreadOverviewContentProps)
     ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
     ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
   });
-  const servers = useMemo(() => checkoutServers(localServers.snapshot), [localServers.snapshot]);
+  // The controller keeps its last reading while it reads the next thread, and
+  // keeps it if that read fails; a reading taken for another thread is never
+  // shown as this one's.
+  const snapshot =
+    codeThreadId !== undefined &&
+    localServers.snapshot !== undefined &&
+    String(localServers.snapshot.threadId) === String(codeThreadId)
+      ? localServers.snapshot
+      : undefined;
+  const servers = useMemo(() => checkoutServers(snapshot), [snapshot]);
   const branch = card === undefined ? props.branchFallback : boardBranch(card);
   const facts: DockThreadFacts = {
     ...(props.projectName === undefined ? {} : { project: props.projectName }),
