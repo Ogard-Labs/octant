@@ -7426,7 +7426,10 @@ macOS-only.
   signed in, not installed, or disabled never holds an install back: quitting
   asks on the same terms, because both read the one `workInFlight` reading of
   the host rather than its `attentionRequired` flag, which also marks the menu
-  bar for provider readiness. Automatic checks are a setting; the host starts with them
+  bar for provider readiness. This conservative reading currently counts open
+  provider sessions, including idle sessions kept for another turn, so the quit
+  warning describes sessions rather than claiming that each is running work.
+  Automatic checks are a setting; the host starts with them
   off until the persisted choice arrives, then checks daily. A check is a
   plain GET carrying only version, platform, and architecture (the ring is in
   the path); it is not a telemetry channel.
