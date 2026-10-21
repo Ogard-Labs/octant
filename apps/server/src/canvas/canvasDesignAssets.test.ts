@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CANVAS_DESIGN_ASSET_MAX_BYTES,
   CanvasDesignAssetId,
+  decodeBrowserCaptureId,
   decodeImageArtifactId,
   type CanvasDesignBlock,
 } from "@octant/contracts";
@@ -48,6 +49,10 @@ function filePorts(
     status: "unavailable",
     reason: "missing",
   }),
+  browserCapture: CanvasDesignAssetPorts["browserCapture"] = async () => ({
+    status: "unavailable",
+    reason: "missing",
+  }),
 ): CanvasDesignAssetPorts & { readonly projectFile: ReturnType<typeof vi.fn> } {
   const projectFile = vi.fn(async (input: Parameters<CanvasDesignAssetPorts["projectFile"]>[0]) =>
     readCanvasDesignAssetFile({
@@ -57,7 +62,7 @@ function filePorts(
       maximumBytes: input.maximumBytes,
     }),
   );
-  return { generatedImage: generated, projectFile };
+  return { generatedImage: generated, browserCapture, projectFile };
 }
 
 function design(assets: NonNullable<CanvasDesignBlock["assets"]>) {
@@ -109,19 +114,51 @@ describe("resolveCanvasDesignAssets", () => {
     expect(ports.projectFile).not.toHaveBeenCalled();
   });
 
-  it("answers a captured-page asset as refused without reading anything until captures resolve", async () => {
-    const ports = filePorts();
-    const capture = {
-      assetId: "shot",
-      source: { kind: "browser-capture", captureId: "44444444-4444-4444-8444-444444444444" },
-    } as NonNullable<CanvasDesignBlock["assets"]>[number];
-    const resolved = await resolveCanvasDesignAssets(
-      design([capture]),
-      { mode: "work", projectId: projectId as never, threadId: threadId as never },
-      ports,
-    );
-    expect(resolved).toEqual([{ assetId: "shot", status: "unavailable", reason: "refused" }]);
-    expect(ports.projectFile).not.toHaveBeenCalled();
+  describe("captured pages", () => {
+    const captureId = decodeBrowserCaptureId("55555555-5555-4555-8555-555555555555");
+    const shot = design([
+      {
+        assetId: decodeCanvasDesignAssetId("before"),
+        source: { kind: "browser-capture", captureId },
+      },
+    ]);
+
+    it("draws the screenshot a Work or Code thread kept, asked for by that thread alone", async () => {
+      for (const mode of ["work", "code"] as const) {
+        const capture = vi.fn(async (_input: { readonly threadId: string }) => ({
+          status: "read" as const,
+          bytes: PNG,
+        }));
+        const resolved = await resolveCanvasDesignAssets(
+          shot,
+          { mode, projectId: projectId as never, threadId: threadId as never },
+          filePorts(undefined, capture),
+        );
+        expect(resolved[0]).toMatchObject({ assetId: "before", status: "resolved" });
+        expect(capture).toHaveBeenCalledWith(expect.objectContaining({ captureId, threadId }));
+      }
+    });
+
+    it("refuses a capture in a Chat Canvas without asking for it", async () => {
+      const capture = vi.fn(async () => ({ status: "read" as const, bytes: PNG }));
+      const resolved = await resolveCanvasDesignAssets(
+        shot,
+        { mode: "chat", projectId: null, threadId: threadId as never },
+        filePorts(undefined, capture),
+      );
+      expect(resolved).toEqual([{ assetId: "before", status: "unavailable", reason: "refused" }]);
+      expect(capture).not.toHaveBeenCalled();
+    });
+
+    it("reports a capture the thread does not hold as missing so the design keeps its other assets", async () => {
+      const resolved = await resolveCanvasDesignAssets(
+        design([...(shot.assets ?? []), file("home", "screens/home.png")]),
+        { mode: "work", projectId: projectId as never, threadId: threadId as never },
+        filePorts(),
+      );
+      expect(resolved.map((entry) => entry.status)).toEqual(["unavailable", "resolved"]);
+      expect(resolved[0]).toEqual({ assetId: "before", status: "unavailable", reason: "missing" });
+    });
   });
 
   it("draws a generated image in a Chat Canvas only when its Project says so", async () => {

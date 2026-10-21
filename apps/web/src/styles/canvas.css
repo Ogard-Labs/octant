@@ -4489,8 +4489,25 @@
 
 .canvas-design-player__body {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100%;
+}
+
+.canvas-design-player__notes {
+  max-height: 30vh;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  overflow-y: auto;
+  border-top: 1px solid var(--oct-border);
+  font-size: var(--oct-text-sm);
+}
+
+.canvas-design-player__notes p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.canvas-design-player__notes-empty {
+  color: var(--oct-meta);
 }
 
 .canvas-design-player__body:fullscreen {
