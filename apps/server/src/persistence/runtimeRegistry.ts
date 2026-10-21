@@ -29,6 +29,7 @@ import {
   CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED,
   CodeProjectPullRequestMergeRecorded,
   WorkProjectStatusFileChanged,
+  ProjectBrandKitChanged,
   CodeCheckoutObserved,
   CodeCheckoutRemoved,
   CodeFileReferenceUpdated,
@@ -319,6 +320,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(CODE_PROJECT_PULL_REQUEST_MERGE_RECORDED, 1, CodeProjectPullRequestMergeRecorded)
     .register("project.provider-policy-changed@1", 1, ProjectProviderPolicyChanged)
     .register("project.work-status-file-changed@1", 1, WorkProjectStatusFileChanged)
+    .register("project.brand-kit-changed@1", 1, ProjectBrandKitChanged)
     .register("memory.entry-created@1", 1, MemoryEntryCreated)
     .register("memory.entry-superseded@1", 1, MemoryEntrySuperseded)
     .register("memory.entry-retracted@1", 1, MemoryEntryRetracted)

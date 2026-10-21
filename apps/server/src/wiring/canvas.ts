@@ -884,6 +884,7 @@ export function wireCanvas(deps: CanvasDependencies) {
         ? undefined
         : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
     },
+    brandKit: (projectId) => persistence.readProject(decodeProjectId(projectId))?.brandKit,
     canvas: canvasService,
     commentRequests: (canvasId) => canvasCommentService.agentRequests(canvasId),
     markReader: ({ readerId, canvasId }) => {

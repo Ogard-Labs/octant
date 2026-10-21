@@ -122,6 +122,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectArchived"
     | "setProjectColor"
     | "setProjectProviderPolicy"
+    | "setProjectBrandKit"
     | "setProjectWorkStatusFile"
     | "setThreadStatsVisible"
     | "setUsageOpen"
@@ -372,6 +373,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectArchived,
     setProjectColor,
     setProjectProviderPolicy,
+    setProjectBrandKit,
     setProjectWorkStatusFile,
     setThreadStatsVisible,
     setUsageOpen,
@@ -655,6 +657,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               onRenameProject={renameProject}
               onProjectColorChange={setProjectColor}
               onProviderPolicyChange={setProjectProviderPolicy}
+              onBrandKitChange={setProjectBrandKit}
               onWorkStatusFileChange={(projectId, enabled) =>
                 setProjectWorkStatusFile(projectId, enabled ? "enabled" : "disabled")
               }
