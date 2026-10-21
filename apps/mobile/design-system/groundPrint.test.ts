@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bayerThreshold, clampEffect, coverFit } from "./groundPrint";
+import { bayerThreshold, clampEffect, coverFit, sourceKey } from "./groundPrint";
 
 /** The desktop's own function, copied as the oracle for the port. */
 function desktopBayerThreshold(x: number, y: number): number {
@@ -68,5 +68,11 @@ describe("ground print", () => {
     expect(fit.scale).toBe(2);
     expect(fit.offsetX).toBe(0);
     expect(fit.offsetY).toBe(-350);
+  });
+
+  it("keeps one picture identity when the caller rebuilds the source object", () => {
+    expect(sourceKey({ uri: "file:///a.jpg" })).toBe(sourceKey({ uri: "file:///a.jpg" }));
+    expect(sourceKey({ uri: "file:///a.jpg" })).not.toBe(sourceKey({ uri: "file:///b.jpg" }));
+    expect(sourceKey(7)).not.toBe(sourceKey(8));
   });
 });

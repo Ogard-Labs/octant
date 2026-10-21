@@ -4,6 +4,8 @@
  * both. The shader in PrintedGround.tsx mirrors `bayerThreshold`.
  */
 
+import type { ImageSourcePropType } from "react-native";
+
 export type GroundPicture =
   | "soft-glow"
   | "soft-graphite"
@@ -52,6 +54,18 @@ export function bayerThreshold(x: number, y: number): number {
     ((xy & 4) >> 1) |
     ((row & 4) >> 2);
   return (value + 0.5) / 64;
+}
+
+/**
+ * A stable identity for a picture source: the same module or address gives the
+ * same key however often the caller rebuilds the source object.
+ */
+export function sourceKey(source: ImageSourcePropType): string {
+  if (typeof source === "number") return `module:${source}`;
+  if (!Array.isArray(source) && "uri" in source && typeof source.uri === "string") {
+    return `uri:${source.uri}`;
+  }
+  return "unsupported";
 }
 
 export interface Size {

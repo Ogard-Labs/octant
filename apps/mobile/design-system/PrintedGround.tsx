@@ -9,7 +9,7 @@ import {
 } from "react-native";
 import { Asset } from "expo-asset";
 import { GLView, type ExpoWebGLRenderingContext } from "expo-gl";
-import { clampEffect, type GroundEffect, type Size } from "./groundPrint";
+import { clampEffect, sourceKey, type GroundEffect, type Size } from "./groundPrint";
 
 export interface PrintedGroundProps {
   readonly source: ImageSourcePropType;
@@ -125,16 +125,31 @@ function loadWebImage(uri: string): Promise<HTMLImageElement> {
   });
 }
 
-/** Uploads the picture into the renderer's texture and reports its pixel size. */
+/**
+ * Uploads the picture into the renderer's texture and reports its pixel size,
+ * or `undefined` when `isCurrent` turned false while it loaded. Every await
+ * finishes before the shared texture is touched, so a request that was
+ * replaced mid-download never writes its picture over the newer one.
+ */
 async function uploadPicture(
   renderer: Renderer,
   source: ImageSourcePropType,
   filter: number,
-): Promise<LoadedPicture> {
+  isCurrent: () => boolean,
+): Promise<LoadedPicture | undefined> {
   const asset = sourceAsset(source);
   if (asset === undefined) throw new Error("Unsupported picture source.");
   await asset.downloadAsync();
   const { gl, texture } = renderer;
+  const uri = asset.localUri ?? asset.uri;
+  const webImage = Platform.OS === "web" ? await loadWebImage(uri) : undefined;
+  const size =
+    webImage !== undefined
+      ? { width: webImage.naturalWidth, height: webImage.naturalHeight }
+      : asset.width !== null && asset.height !== null
+        ? { width: asset.width, height: asset.height }
+        : await nativeImageSize(uri);
+  if (!isCurrent()) return undefined;
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   // Non-power-of-two pictures need clamped edges and no mipmaps in GLES 2.
@@ -142,16 +157,10 @@ async function uploadPicture(
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
-  const uri = asset.localUri ?? asset.uri;
-  if (Platform.OS === "web") {
-    const image = await loadWebImage(uri);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-    return { size: { width: image.naturalWidth, height: image.naturalHeight } };
+  if (webImage !== undefined) {
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, webImage);
+    return { size };
   }
-  const size =
-    asset.width !== null && asset.height !== null
-      ? { width: asset.width, height: asset.height }
-      : await nativeImageSize(uri);
   // The native bridge reads a file-backed source that the DOM typings do not
   // describe, so the call goes through Reflect rather than a typed overload.
   Reflect.apply(gl.texImage2D, gl, [
@@ -205,14 +214,17 @@ function draw(
 export function PrintedGround(props: PrintedGroundProps) {
   const effect = clampEffect(props.effect);
   const [renderer, setRenderer] = useState<Renderer | undefined>();
-  const [layoutWidth, setLayoutWidth] = useState(0);
-  const [failed, setFailed] = useState(false);
+  const [layout, setLayout] = useState<Size>({ width: 0, height: 0 });
+  // A GL context that cannot be used stays on the plain picture for good; a
+  // picture that cannot be loaded is only that picture's problem.
+  const [contextFailed, setContextFailed] = useState(false);
+  const [pictureFailed, setPictureFailed] = useState(false);
   const [picture, setPicture] = useState<LoadedPicture | undefined>();
   const filter = effect.kind === "none" ? "linear" : "nearest";
 
-  const fail = useCallback((cause: unknown) => {
+  const failContext = useCallback((cause: unknown) => {
     if (__DEV__) console.warn("Printed ground fell back to the plain picture.", cause);
-    setFailed(true);
+    setContextFailed(true);
   }, []);
 
   const onContextCreate = useCallback(
@@ -220,46 +232,63 @@ export function PrintedGround(props: PrintedGroundProps) {
       try {
         setRenderer(createRenderer(gl));
       } catch (cause) {
-        fail(cause);
+        failContext(cause);
       }
     },
-    [fail],
+    [failContext],
   );
 
   // Reload the texture when the picture or its filtering changes; a stale
-  // load that finishes late must not replace a newer one.
+  // load that finishes late must not replace a newer one. The effect follows
+  // the source's identity, not the object, so an inline `{ uri }` does not
+  // reload on every render, and a new source gets a fresh try.
+  const { source } = props;
+  const pictureKey = sourceKey(source);
   useEffect(() => {
     if (renderer === undefined) return;
     let current = true;
     const { gl } = renderer;
-    void uploadPicture(renderer, props.source, filter === "linear" ? gl.LINEAR : gl.NEAREST).then(
+    setPictureFailed(false);
+    void uploadPicture(
+      renderer,
+      source,
+      filter === "linear" ? gl.LINEAR : gl.NEAREST,
+      () => current,
+    ).then(
       (loaded) => {
-        if (current) setPicture(loaded);
+        if (current && loaded !== undefined) setPicture(loaded);
       },
       (cause: unknown) => {
-        if (current) fail(cause);
+        if (!current) return;
+        if (__DEV__) console.warn("Printed ground could not load its picture.", cause);
+        setPictureFailed(true);
       },
     );
     return () => {
       current = false;
     };
-  }, [renderer, props.source, filter, fail]);
+    // `source` is read through `pictureKey`, which changes whenever it does.
+  }, [renderer, pictureKey, filter]);
 
   const { kind, cell, levels } = effect;
   useEffect(() => {
     if (renderer === undefined || picture === undefined) return;
     try {
-      draw(renderer, picture, { kind, cell, levels }, layoutWidth);
+      draw(renderer, picture, { kind, cell, levels }, layout.width);
     } catch (cause) {
-      fail(cause);
+      failContext(cause);
     }
-  }, [renderer, picture, kind, cell, levels, layoutWidth, fail]);
+    // The buffer follows the view's height too, so a height-only change redraws.
+  }, [renderer, picture, kind, cell, levels, layout.width, layout.height, failContext]);
 
   const onLayout = (event: LayoutChangeEvent) => {
-    setLayoutWidth(event.nativeEvent.layout.width);
+    const { width, height } = event.nativeEvent.layout;
+    setLayout((previous) =>
+      previous.width === width && previous.height === height ? previous : { width, height },
+    );
   };
 
-  if (failed) {
+  if (contextFailed) {
     return (
       <Image
         accessibilityIgnoresInvertColors
@@ -278,6 +307,15 @@ export function PrintedGround(props: PrintedGroundProps) {
       {...(props.testID === undefined ? {} : { testID: props.testID })}
     >
       <GLView onContextCreate={onContextCreate} style={StyleSheet.absoluteFill} />
+      {pictureFailed ? (
+        <Image
+          accessibilityIgnoresInvertColors
+          resizeMode="cover"
+          source={source}
+          style={StyleSheet.absoluteFill}
+          {...(props.testID === undefined ? {} : { testID: `${props.testID}-fallback` })}
+        />
+      ) : null}
     </View>
   );
 }
