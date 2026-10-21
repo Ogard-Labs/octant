@@ -139,6 +139,15 @@ name, with reset time in local time and when the reading was last updated. An
 API-key Claude account says plan limits do not apply instead of drawing empty
 bars. A failed or missing refresh keeps the last reading and shows its age.
 
+Devin and OpenCode Go show their plan windows too: Devin's daily and weekly
+allowance, and OpenCode Go's 5-hour, weekly, and monthly windows. Their
+runtimes do not report limits, so Octant reads the sign-in each CLI already
+saved on this computer and asks that provider's usage service, every five
+minutes while the provider is enabled and whenever you press **Refresh**.
+Octant only reads that sign-in; it never copies or stores it. Without a Devin
+or OpenCode sign-in the limits wait until you sign in, and an OpenCode sign-in
+without a Go plan says plan limits do not apply.
+
 Other providers contribute windows when their supported runtime or response
 headers report them. A provider that reports no quota data stays unavailable;
 Octant does not infer a balance from token history.

@@ -295,6 +295,25 @@ const inTreeCanvasDocumentRecipeDocuments = [
       { kind: "rich-text", role: "What the prototype shows, what is faked, and what to try." },
     ],
   },
+  {
+    id: "app-redesign-prototype",
+    title: "App redesign prototype",
+    summary: "A whole app window you can click through, with real navigation and a live accent.",
+    whenToUse:
+      "When someone asks to redesign an app, show a full app window, or try a layout with real navigation, state, and a colour they can change, such as a sidebar of threads, panes, tabs, and an accent picker.",
+    skeleton: [
+      {
+        kind: "design",
+        size: "desktop",
+        role: "Desktop window, runsScript true, accent as a :root variable; grow it with designEdits revisions.",
+      },
+      { kind: "heading", role: "Notes" },
+      {
+        kind: "rich-text",
+        role: "What the window shows, what is faked, and what to try, such as changing the accent.",
+      },
+    ],
+  },
 ] as const;
 
 const inTreeRecipes = inTreeCanvasDocumentRecipeDocuments.map((recipe) =>

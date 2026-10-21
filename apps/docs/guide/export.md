@@ -5,7 +5,8 @@ description: How exporting a Canvas or artifact works — to a folder you choose
 # Export a Canvas or artifact
 
 Export writes a readable copy of a Canvas or an artifact somewhere you choose.
-The copy is Markdown or HTML, so any editor, viewer, or other tool can open it.
+The copy is Markdown, HTML, PNG images, or a PDF, so any editor, viewer, or
+other tool can open it.
 Two destinations ship today: a folder on this Mac, and a GitHub Gist.
 
 Whatever the destination, Octant renders the document first and shows it to you
@@ -123,8 +124,34 @@ The gist destination reports one of three states:
 
 ## Formats and platforms
 
-Markdown and HTML are rendered today. PDF and PNG are named in the export seam
-so a later destination can declare them; this host does not render them.
+Markdown, HTML, PNG and PDF are rendered. The folder destination accepts all
+four; the Gist destination takes Markdown only.
+
+### Pictures: PNG and PDF
+
+PNG and PDF are drawn by a browser on this computer, so a Mac with no Chromium
+Octant can use refuses them with a plain message, and Markdown and HTML still
+work. Nothing is drawn on a server.
+
+- **A deck or a set of screens** (a design of slides or device-size screens): PNG
+  writes one image per slide or screen, numbered in order (`Launch plan 1.png`,
+  `Launch plan 2.png`). PDF writes one file with one page per slide or screen, at
+  the slide's own size.
+- **Any other Canvas:** PNG writes one tall image of the document, and PDF
+  writes an A4 document that the browser paginates.
+
+The approval card lists every file and its size instead of showing a body. When
+the pictures show a design, it also says Octant does not check the design for
+secrets, the same as HTML export. A picture export is placed like any other
+file: if a file is already there, the card says so, and approving it replaces
+each file by name; otherwise each existing file gets a numbered copy beside it.
 
 Export to a folder works on macOS and Linux. The gist destination needs a
 working GitHub connection.
+
+## Present and Play full screen
+
+**Present** (a deck) and **Play** (a set of screens) open in a large window over
+the Canvas. Press **Full screen** in its top bar to fill the display, and press
+Esc to leave. The left and right arrow keys, Page Up and Page Down still move
+between slides.

@@ -10,6 +10,7 @@ import {
   CANVAS_MIN_RADAR_AXES,
   CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_DIAGRAM_EDGES,
+  CANVAS_MAX_DESIGN_MARKUP_LENGTH,
   CANVAS_MAX_DIAGRAM_NODES,
   CANVAS_MAX_ER_ATTRIBUTES_PER_ENTITY,
   CANVAS_MAX_IMAGES,
@@ -42,6 +43,7 @@ import {
   type CanvasDefinition,
 } from "@octant/contracts/canvas";
 import {
+  appWindowPrototypeExample,
   launchDeckExample,
   onboardingFlowExample,
   searchSpecExample,
@@ -1016,6 +1018,41 @@ describe("design frames", () => {
         withBlocks([onboardingFlowExample, launchDeckExample, searchSpecExample]),
       ),
     ).not.toThrow();
+  });
+
+  it("accepts the running app window example and a full 64 KiB screen with its script", () => {
+    expect(() => validateCanvasDefinition(withBlocks([appWindowPrototypeExample]))).not.toThrow();
+    const html = `<div>${"<p>Row</p>".repeat(6_000)}</div><script>var rows = 6000;</script>`;
+    const large = {
+      ...appWindowPrototypeExample,
+      styles: "p { margin: 0; }".repeat(4_000),
+      frames: [
+        { frameId: "app", title: "App", html: html.padEnd(CANVAS_MAX_DESIGN_MARKUP_LENGTH) },
+      ],
+    };
+    const started = performance.now();
+    expect(refusalOf(large)).toBe("accepted");
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it("still bounds a design by the Canvas text budget when every frame is full", () => {
+    const frame = (frameId: string) => ({
+      frameId,
+      title: frameId,
+      html: "<p>x</p>".padEnd(CANVAS_MAX_DESIGN_MARKUP_LENGTH),
+    });
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([
+            {
+              ...appWindowPrototypeExample,
+              frames: [frame("a"), frame("b"), frame("c"), frame("d"), frame("e")],
+            },
+          ]),
+        ),
+      "text-budget-exceeded",
+    );
   });
 
   it("refuses a design document or theme inside a document declaring version 15", () => {

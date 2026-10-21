@@ -119,6 +119,23 @@ describe("AppBackgroundSettings", () => {
     });
   });
 
+  it("saves pulsing characters as the ground in one choice, keeping every dial", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <AppBackgroundSettings
+        background={DEFAULT_APP_BACKGROUND}
+        library={library()}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Application background" }));
+    await user.click(await screen.findByRole("option", { name: "Pulsing characters" }));
+
+    expect(onChange).toHaveBeenLastCalledWith({ ...dials, kind: "characters" });
+  });
+
   it("uploads a photo through the host and makes it the ground", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
