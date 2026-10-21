@@ -1751,8 +1751,13 @@ html[data-octant-native-host="true"]
    paint and under everything else. A narrow window keeps its overlay
    drawer. */
 @media (min-width: 681px) {
+  /* The sheet's stage piece sits at a negative level so the ground can lie
+     over it; the shell has to hold that level itself; without a ground the
+     piece otherwise dropped below the shell's own background and the stage
+     showed the frame colour. */
   .shell.shell-frame {
     --octant-sheet-inset: var(--oct-space-2);
+    isolation: isolate;
   }
 
   .shell-frame > .sidebar {
@@ -1823,6 +1828,12 @@ html[data-octant-native-host="true"]
       inset -1px 0 0 var(--octant-border-soft);
     content: "";
     pointer-events: none;
+  }
+
+  /* The dock's surface inside its frame painted the opaque workspace colour
+     over the sheet piece, so the dock stayed solid under Glass. */
+  .shell-frame .right-utility-dock__surface {
+    background: transparent;
   }
 
   /* The dock's hairline divides the sheet, not the title band. */
@@ -1908,7 +1919,14 @@ html[data-octant-native-host="true"]
     grid-row: 1;
     /* The narrow sidebar is an overlay drawer, so the chrome row must paint
        its own ground instead of relying on the workspace underneath. */
-    background: var(--oct-bg);
+    background: var(--octant-stage-surface);
+  }
+
+  /* A narrow window has no frame and sheet: the workspace is one flat stage
+     under the title row. Its panes are clear everywhere, so the layer paints
+     the stage itself rather than letting the frame colour through. */
+  .shell-frame > .workspace-layer {
+    background: var(--octant-stage-surface);
   }
 
   .shell-frame > .sidebar {
