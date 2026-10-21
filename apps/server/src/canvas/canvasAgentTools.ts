@@ -13,6 +13,7 @@ import {
   type CanvasDocumentRecipe,
   type CanvasId,
   type CanvasPresentation,
+  type CanvasProvenance,
   type ChatThread,
   type HostId,
   type PermissionPersistence,
@@ -26,6 +27,7 @@ import type { ChildCanvasWorkspaceResolution } from "./childCanvasWorkspace";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ReaderMarking } from "../context/inheritedExternalContentMark";
 import type { CanvasService } from "./canvasService";
+import type { CanvasCommentAgentRequestView } from "./canvasCommentService";
 import type {
   CanvasPreviewImageOmitted,
   CanvasPreviewOutcome,
@@ -205,6 +207,12 @@ export interface CanvasAgentToolPort {
    */
   readonly brandKit?: (projectId: string) => CanvasDesignBrand | undefined;
   readonly canvas: Pick<CanvasService, "create" | "revise" | "get" | "threadReferenceCards">;
+  /**
+   * The open comments a person sent to the agent about a Canvas. Absent on a
+   * host without comments; the tool then shows no requests and checks no
+   * revision against them.
+   */
+  readonly commentRequests?: (canvasId: CanvasId) => ReadonlyArray<CanvasCommentAgentRequestView>;
   /**
    * Marks the thread or managed child about to read a Canvas, when the
    * Canvas carries outside content (`markCanvasReader`). Called after a read or
@@ -474,7 +482,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     diagram: {
       use: "A generic graph of nodes and edges.",
       detail:
-        "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
+        "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Lay out a system or architecture diagram by tier: one group per tier (clients, services, data), the flow left to right, node labels of a few words, and the protocol or data on each edge label. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
     },
     chart: {
       use: "A pie, donut, stacked or grouped bar, bar-line, funnel, radar, or sankey chart.",
@@ -499,7 +507,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     design: {
       use: "Finished-looking app screens, a website or landing page, or a slide deck.",
       detail:
-        'A finished-looking design is a design block: app screens, a website or landing page, a slide deck, or a document such as an article, spec, or design system. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, slide 1920x1080, or document, as wide as the Canvas and as tall as its content), put shared CSS in styles, and write each screen, slide, or document section as a frame of static HTML. Link frames with href="#frameId"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs. A document is drawn in the workspace theme (theme workspace, its default; a device size defaults to none and keeps its own palette): it gets Octant\'s fonts and --oct-* colour tokens and the kit classes oct-article, oct-eyebrow, oct-lede, oct-grid, oct-card, oct-metrics with oct-metric (__label, __value, __delta--good or --bad), oct-badge (--accent, --success, --warn, --danger), oct-callout (--success, --warn, --danger), oct-table in oct-table-wrap, oct-code, and oct-tabs (radio inputs with labels, then one div.oct-tab-panel per tab, at most eight tabs). In a document, use the kit and tokens rather than your own colours or fonts, and never size anything with vh. Make a device design look finished: real copy, a clear type scale, and a deliberate palette. Describe design to get a phone flow, a deck, a themed spec, and a running cart.',
+        "A finished-looking design is a design block: app screens, a website or landing page, a slide deck, or a document such as an article, spec, or design system. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, slide 1920x1080, or document, as wide as the Canvas and as tall as its content), put shared CSS in styles, and write each screen, slide, or document section as a frame of static HTML. Link frames with href=\"#frameId\"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs. A document is drawn in the workspace theme (theme workspace, its default; a device size defaults to none and keeps its own palette): it gets Octant's fonts and --oct-* colour tokens and the kit classes oct-article, oct-eyebrow, oct-lede, oct-grid, oct-card, oct-metrics with oct-metric (__label, __value, __delta--good or --bad), oct-badge (--accent, --success, --warn, --danger), oct-callout (--success, --warn, --danger), oct-table in oct-table-wrap, oct-code, and oct-tabs (radio inputs with labels, then one div.oct-tab-panel per tab, at most eight tabs). In a document, use the kit and tokens rather than your own colours or fonts, and never size anything with vh. Make a device design look finished: real copy, a clear type scale, and a deliberate palette. Lay a slide out in fixed pixels at its 1920x1080 size, never in vh or vw: body text at or above 32px, titles 64 to 96px, one idea per slide, and the same header and footer in the same place on every slide. A website or landing page is a desktop design whose page has its real sections in order (header, hero, features, proof, call to action, footer) in real copy. A UI kit's component sheet is a document with theme none that shows each control in its rest, hover, focus, disabled, and error states, each labelled. Describe design to get a phone flow, a deck, a themed spec, and a running cart.",
     },
     "bar-list": {
       use: "A ranking, such as hottest files or slowest tests.",
@@ -554,7 +562,7 @@ const TIER_GUIDE =
   'A Canvas carries work in three tiers; use the lowest tier that delivers the result, and mix them in one Canvas when the work needs it. 1. Typed blocks (headings, text, tables, metrics, charts, plans, the diagram kinds, and tabs and columns to arrange them) carry data: people comment on them, a revision edits them, and a share keeps their structure. 2. A static design frame carries the look: a design block of HTML and CSS that runs nothing, either a document in the workspace theme (an article, a spec, a design system) or screens and slides at a device size. 3. A running design frame carries behaviour: a design with "runsScript": true, for a prototype whose state changes as the person uses it. Describe design for the frame kit classes, how a frame shows real images, the limits a running frame keeps, and a finished example of each frame tier.';
 
 const RECIPE_GUIDE =
-  'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "write a memo or a one-page report" uses memo, "review this PR" uses code-review, "summarise research" uses research-brief, "decide between designs" uses architecture-review, "write an article" uses article, "make slides" uses slide-deck, "show the key numbers" uses dashboard, "design a website or landing page" uses design-prototype, "pitch a product or a game" uses design-brief, "show the design system" uses design-system, "a prototype I can try" uses clickable-prototype, and "redesign the whole app window" uses app-redesign-prototype. A design slot names the size it is drawn at. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
+  'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "write a memo or a one-page report" uses memo, "review this PR" uses code-review, "summarise research" uses research-brief, "decide between designs" uses architecture-review, "write an article" uses article, "make slides" uses slide-deck, "show the key numbers" uses dashboard, "design or redesign a website or landing page" uses design-prototype at desktop size with the page\'s real sections, "pitch a product or a game" uses design-brief, "show the design system" uses design-system, "a UI kit or component sheet" uses ui-kit, "diagram the architecture or how the system fits together" uses architecture-diagram, "a prototype I can try" uses clickable-prototype, and "redesign the whole app window" uses app-redesign-prototype. A design slot names the size it is drawn at. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
 
 const PREVIEW_GUIDE =
   "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, on a bar list clipped labels or empty series, and on a design each declared image the host could not draw, with the frames that name it, a frame whose content is wider than its page, text below its contrast target, and each script error a running design threw as it loaded. Every other block kind gets no warnings, so read its picture yourself.";
@@ -1281,12 +1289,29 @@ function canvasToolSet(options: {
         if (!readerMarked(options, canvasId)) {
           return { result: { error: CANVAS_READER_UNMARKED }, isError: true };
         }
+        const requested = pendingCommentRequests(
+          options.port,
+          canvasId,
+          outcome.version.definition.provenance,
+          options.originThreadId,
+        );
         return {
           result: {
             canvasId: input.canvasId,
             title: outcome.version.definition.title,
             sequence: outcome.version.sequence,
             blocks: outcome.version.definition.blocks,
+            ...(requested.length === 0
+              ? {}
+              : {
+                  requestedChanges: requested.map((request) => ({
+                    commentId: request.commentId,
+                    anchor: request.anchor,
+                    comment: request.body,
+                    ...(request.replies.length === 0 ? {} : { replies: request.replies }),
+                  })),
+                  requestedChangesGuidance: REQUESTED_CHANGES_GUIDANCE,
+                }),
           },
         };
       }
@@ -1426,6 +1451,9 @@ function canvasToolSet(options: {
       const placed = placement(input);
       const actor =
         options.author ?? decodeCanvasActor({ kind: "agent", actorId: options.port.uuid() });
+      // What the person asked to change, and the blocks as they stand, read
+      // before the revision so the result can say whether it stayed inside.
+      const focus = revisionFocus(options.port, input, target, options.originThreadId);
       const revision = {
         schemaVersion: 1,
         kind: "canvas-revise",
@@ -1473,6 +1501,7 @@ function canvasToolSet(options: {
         effective === "sidebar"
           ? canvasInlineRefusal(input.blocks)
           : undefined);
+      const strayed = focus === undefined ? [] : blocksChangedOutsideRequests(focus, input.blocks);
       return {
         result: {
           canvasId: input.canvasId,
@@ -1482,6 +1511,7 @@ function canvasToolSet(options: {
           ...(effective === undefined ? {} : { presentation: effective }),
           ...(note === undefined ? {} : { presentationNote: note }),
           ...(effective === "inline" ? { whereShown: INLINE_WHERE_SHOWN } : {}),
+          ...(strayed.length === 0 ? {} : { warning: outsideRequestWarning(strayed) }),
         },
       };
     },
@@ -1506,6 +1536,101 @@ function noPictureSentence(reason: CanvasPreviewImageOmitted | undefined): strin
             ? "the model driving this turn cannot be shown images in a tool result"
             : "the preview could not draw it";
   return `No picture was taken because ${because}, so rely on the listed warnings only.`;
+}
+
+// Carried on the read that shows the requests rather than in the tool's
+// always-visible definition, which is kept under a size budget.
+const REQUESTED_CHANGES_GUIDANCE =
+  "A person sent these comments to you. Revise only the block each anchor names (and within it only the named node, edge, row, or region) and keep every other block identical, including block ids and order; the revise result warns when other blocks changed.";
+
+/**
+ * The comments a person sent to the agent that no agent version has answered
+ * yet (the port drops an answered one), and only to the Canvas's owning
+ * thread. Another thread's agent can read the same Canvas under the Project's
+ * authorization, but the request was sent to the owner, so it neither sees it
+ * nor is held to it.
+ */
+function pendingCommentRequests(
+  port: CanvasAgentToolPort,
+  canvasId: CanvasId,
+  provenance: CanvasProvenance,
+  originThreadId: string,
+): ReadonlyArray<CanvasCommentAgentRequestView> {
+  const requests = port.commentRequests?.(canvasId) ?? [];
+  return requests.length > 0 && String(provenance.threadId) === originThreadId ? requests : [];
+}
+
+interface RevisionFocus {
+  readonly requests: ReadonlyArray<CanvasCommentAgentRequestView>;
+  readonly before: ReadonlyArray<CanvasBlock>;
+}
+
+/** The pending requests and the blocks they were made against, or nothing when none are pending. */
+function revisionFocus(
+  port: CanvasAgentToolPort,
+  input: { readonly canvasId?: string; readonly expectedSequence?: number },
+  target: Extract<ResolvedCanvasTarget, { readonly kind: "ready" }>,
+  originThreadId: string,
+): RevisionFocus | undefined {
+  if (input.canvasId === undefined || input.expectedSequence === undefined) return undefined;
+  let canvasId: CanvasId;
+  try {
+    canvasId = decodeCanvasId(input.canvasId);
+  } catch {
+    return undefined;
+  }
+  const current = port.canvas.get(canvasId, target.context, target.project);
+  if (current.kind !== "ready" || current.version.sequence !== input.expectedSequence) {
+    return undefined;
+  }
+  const requests = pendingCommentRequests(
+    port,
+    canvasId,
+    current.version.definition.provenance,
+    originThreadId,
+  );
+  if (requests.length === 0) return undefined;
+  return { requests, before: current.version.definition.blocks };
+}
+
+/**
+ * The ids of blocks this revision changed, added, removed, or moved that no
+ * pending request names. Blocks are compared with their keys in one order,
+ * because the agent's JSON and the stored definition spell the same block in
+ * different orders.
+ */
+function blocksChangedOutsideRequests(
+  focus: RevisionFocus,
+  after: ReadonlyArray<CanvasBlock>,
+): ReadonlyArray<string> {
+  const named = new Set(focus.requests.map((request) => String(request.anchor.blockId)));
+  const previous = new Map(
+    focus.before.map((block, index) => [String(block.blockId), { index, text: canonical(block) }]),
+  );
+  const changed: string[] = [];
+  after.forEach((block, index) => {
+    const id = String(block.blockId);
+    const was = previous.get(id);
+    previous.delete(id);
+    if (was !== undefined && was.index === index && was.text === canonical(block)) return;
+    if (!named.has(id)) changed.push(id);
+  });
+  for (const id of previous.keys()) if (!named.has(id)) changed.push(id);
+  return changed;
+}
+
+function outsideRequestWarning(blockIds: ReadonlyArray<string>): string {
+  return `This revision changed, moved, or removed blocks the person did not ask about: ${blockIds.join(", ")}. The request was to change only the anchored block and keep the rest identical; revise again if that was not intended.`;
+}
+
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) =>
+    inner !== null && typeof inner === "object" && !Array.isArray(inner)
+      ? Object.fromEntries(
+          Object.entries(inner as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1)),
+        )
+      : inner,
+  );
 }
 
 const CANVAS_READER_UNMARKED =

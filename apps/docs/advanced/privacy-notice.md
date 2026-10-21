@@ -199,10 +199,34 @@ does not delete a gist afterward; take it down on GitHub. A folder export
 makes no network call. See
 [Export a Canvas or artifact](/guide/export#export-to-a-github-gist).
 
+A Canvas published as a public link goes to the public Canvas share service.
+Octant operates that service, at `https://canvas.octant.sh` unless you enter
+another URL in **Settings › Data & privacy › Public links**, which is off by default.
+Turning it on sends nothing; the first request is your first publish, after you
+approve a card that shows the exact content, the audience (anyone with the
+link), the expiry, and an optional password. The service receives the Canvas's
+title, a summary of up to 200 characters, its blocks, and the markup of any
+design as written. It does not receive file contents, images, host, Project,
+or thread ids, or a Canvas that holds an action block. The operator can read
+published content: that is how the service draws the page and the link
+preview. A password-protected link previews as "Password-protected Canvas".
+Content is kept until the link expires (30 days by default, at most 365 unless
+you choose no expiry) or you revoke it. Revoking, expiry, or deleting the
+Canvas deletes the content; a tombstone holding only the link's id and time
+stays for 90 days. The service writes no IP address or user-agent logs and
+keeps an aggregate view count. Anyone can report a link, without giving their
+address. See [Share a Canvas with a public link](/guide/public-links).
+
+::: warning Draft
+Before the service launches the maintainer must fill in: the abuse contact
+address, the hosting region, and the final legal wording of this disclosure.
+:::
+
 ## What never leaves
 
-These do not go to an Octant-operated service, and they are not included in
-thread export, diagnostics, or logs:
+These do not go to an Octant-operated service (a public link carries only the
+Canvas you publish, as described above), and they are not included in thread
+export, diagnostics, or logs:
 
 - Provider credentials, OAuth tokens, session secrets, and raw provider
   payloads

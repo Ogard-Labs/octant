@@ -41,6 +41,9 @@ import { CanvasShareEventStore } from "../canvas/canvasShareEventStore";
 import { CanvasShareService } from "../canvas/canvasShareService";
 import { CanvasExportEventStore } from "../canvas/canvasExportEventStore";
 import { CanvasExportService } from "../canvas/canvasExportService";
+import { CanvasPublicShareService } from "../canvas/canvasPublicShareService";
+import { createHttpCanvasPublicShareServicePort } from "../canvas/canvasPublicShareServicePort";
+import { makeCanvasPublicShareSecretBrokerClient } from "../providers/credentialBrokerClient";
 import { createCanvasRefreshSourceResolver } from "../canvas/canvasRefreshSourceResolver";
 import { readCanvasRefreshFile, resolveCanvasRefreshFile } from "../canvas/canvasRefreshFileRead";
 import type {
@@ -837,6 +840,23 @@ export function wireCanvas(deps: CanvasDependencies) {
   const canvasPreviewRenderer = createPlaywrightCanvasPreviewRenderer({
     webAssetsPath: options.webAssetsPath ?? resolveWebAssetsPath(),
   });
+  // Comments are journaled facts of the Canvas, authored as the local user
+  // with the originating device recorded beside the author; the service
+  // rebuilds them from the journal and refuses reads a workspace may not make.
+  const canvasCommentService = new CanvasCommentService(
+    {
+      journal: persistence.journal,
+      projection: persistence.canvasProjection,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      // A person's comment change on a Canvas the replica carries goes to
+      // their other computers; one taken in from another computer does not.
+      committed: (canvasId, event) => {
+        void replicaArtifactSync.service?.commentCommitted({ canvasId, event });
+      },
+    },
+    { authorize: authorizeCanvas },
+  );
   // What a Chat thread's agent may do with a Canvas: write blocks into one,
   // through the same service and the same Project the person clicking New
   // Canvas reaches. The Project and workspace are resolved from the window
@@ -852,6 +872,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     },
     brandKit: (projectId) => persistence.readProject(decodeProjectId(projectId))?.brandKit,
     canvas: canvasService,
+    commentRequests: (canvasId) => canvasCommentService.agentRequests(canvasId),
     markReader: ({ readerId, canvasId }) => {
       const entry = persistence.canvasProjection.getById(canvasId);
       if (entry === undefined) return { status: "refused" };
@@ -979,6 +1000,24 @@ export function wireCanvas(deps: CanvasDependencies) {
     home: homedir(),
     standingOutsideApproval: false,
   });
+  // Public links: off until the person turns them on, published only through
+  // the export card, and the owner secrets kept in the broker's own namespace.
+  // The only calls made unprompted finish a revoke the host already owes and
+  // delete an expired link's secret; both run from the host's start.
+  const canvasPublicShareService = new CanvasPublicShareService({
+    journal: persistence.journal,
+    service: createHttpCanvasPublicShareServicePort(),
+    secrets:
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeCanvasPublicShareSecretBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          }),
+    uuid: randomUUID,
+    clock: () => new Date().toISOString() as never,
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
   const canvasExportRegistration: CanvasExportTargetRegistration = {
     folderFor: (canvasId) => {
       const entry = persistence.canvasProjection.getById(canvasId);
@@ -1001,6 +1040,7 @@ export function wireCanvas(deps: CanvasDependencies) {
       availability: () => gistConnection.availability(),
       gists: createGhGistCreationPort(options.ghExecutable),
     },
+    publicLinks: canvasPublicShareService,
   };
   // Destinations arrive through the export contribution and are offered
   // through the same activation policy a plugin's contribution passes. The
@@ -1071,23 +1111,6 @@ export function wireCanvas(deps: CanvasDependencies) {
     mirror: artifactMirrorService,
     windowAuthorityStore,
   });
-  // Comments are journaled facts of the Canvas, authored as the local user
-  // with the originating device recorded beside the author; the service
-  // rebuilds them from the journal and refuses reads a workspace may not make.
-  const canvasCommentService = new CanvasCommentService(
-    {
-      journal: persistence.journal,
-      projection: persistence.canvasProjection,
-      uuid: randomUUID,
-      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-      // A person's comment change on a Canvas the replica carries goes to
-      // their other computers; one taken in from another computer does not.
-      committed: (canvasId, event) => {
-        void replicaArtifactSync.service?.commentCommitted({ canvasId, event });
-      },
-    },
-    { authorize: authorizeCanvas },
-  );
   const snapshotCanvas: NonNullable<AgentRunRouteDependencies["snapshotCanvas"]> = (input) =>
     createAgentRunForestCanvasSnapshot({
       mode: input.mode,
@@ -1123,6 +1146,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     designRunTickets: new CanvasDesignRunTickets(),
     canvasShareService,
     canvasExportService,
+    canvasPublicShareService,
     // A host with no usable `gh` has no GitHub state to read; the gist
     // destination then stays not-connected without spawning anything.
     ...(options.ghExecutable === undefined
@@ -1143,6 +1167,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     artifactMirrorRoutes,
     canvasAgentToolPort,
     canvasCommentService,
+    canvasPublicShareService,
     canvasRoutes,
     canvasService,
     replicaArtifactSync,

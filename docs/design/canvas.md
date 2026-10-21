@@ -44,7 +44,17 @@ guidance names the frame kit classes, the images the thread's mode can show
 (generated images in every mode, and Project files in Work and Code), when a
 design should declare that it runs script, and the limits its bridge keeps;
 its examples are a phone flow, a deck, a themed spec, and a prototype that
-runs, one finished example of each frame tier. Unscoped
+runs, one finished example of each frame tier. The same guidance lays a
+slide out in fixed pixels at its 1920x1080 size, never in `vh` or `vw`
+(a slide is drawn in that viewport and scaled as a picture, so a viewport
+unit tracks whatever draws it; the deck example once used `100vh`), with body
+text at or above 32px, titles of 64 to 96px, one idea per slide, and the same
+header and footer on every slide; it gives a website or landing page a
+desktop size and the page's real sections in order; and it draws a UI kit's
+component sheet as a document in the kit's own palette with each control in
+every state. The `diagram` guidance lays a system diagram out by tier (one
+group per tier, flow left to right, short node labels, the protocol on each
+edge). Unscoped
 describe also lists document recipes: an id, a title, when to use one, and a
 skeleton of block kinds that already exist, where a `design` slot may name
 the `size` it is drawn at. The
@@ -53,12 +63,15 @@ blocks alone: summary, facts, detail, and the ask), a design spec, an
 architecture review (its options in a comparison matrix), a code review, an
 audit or test report, a postmortem, a research brief, a dashboard, a
 repository map, a design prototype (screens, a website, or a landing page at a
-device size), a slide deck, a data model, an article (one themed document), a
+device size), a slide deck, a data model, an architecture diagram (the parts
+grouped by tier as a diagram, the main flow as a sequence, and a key-decisions
+table), an article (one themed document), a
 product or game design brief (a themed pitch, then typed blocks in tabs), a
-design system (a themed document and a token table), and a clickable
-prototype (a design that runs). Together they cover the deliverables people
-ask an assistant for most: a web page, a one-page document, a deck, a
-dashboard, and a prototype or small app. A trusted, enabled, unscoped skill
+design system (a themed document and a token table), a UI kit (a token table
+and a component sheet in the kit's own palette with every state), and a
+clickable prototype (a design that runs). Together they cover the deliverables
+people ask an assistant for most: a web page, a one-page document, a deck, a
+dashboard, a system diagram, and a prototype or small app. A trusted, enabled, unscoped skill
 may add recipes through its Canvas contribution; a skill that is not enabled
 contributes none, and a contributed recipe cannot replace an in-tree id. A
 recipe is a starting shape, not a document and not authority. Describe reads no
@@ -530,6 +543,8 @@ Project is not shared: the share overview answers no authority for it, and a
 share request is refused `scope-mismatch` with the reason. It stays in its
 thread; export is how it leaves.
 
+A public link carries the same blocks without host, Project, thread, or
+source identity; its rules are in [Canvas public links](canvas-public-links.md).
 A share carries every block kind and field a Canvas holds except source ids,
 a design's declared images, and the action block it refuses (see the `design`
 block). A table
@@ -690,6 +705,30 @@ unauthorized reads with no bodies, and stamps each comment's origin (`host` or
 the authenticated `remote-device`) beside its `local-user` author. The host
 stamps that author (and a resolve's or delete's actor) itself and ignores the
 actor the request names, so a renderer can never author a comment as an agent.
+A person can send an open comment, with its replies, to the Canvas's owning
+thread as a focused revision request (**Send to agent**, event
+`canvas.comment-sent-to-agent@1`, command `canvas-comment-send-to-agent`). The
+renderer queues one follow-up turn through the thread's message queue, so the
+turn runs under that thread's own authority and no new authority exists; the
+prompt names the Canvas, the anchor by block, node, edge, row or region id, and
+the text, and asks for a change to that part alone with every other block kept
+identical. A Chat thread also carries the Canvas as a context selection. The
+action is absent when the Canvas has no thread the person can reach, when a
+version older than the head is on screen, and while a request is already with
+the agent. The host marks the comment sent only after the thread took the
+turn, stamping the Canvas head it holds. The turn's request, message and
+selection ids are derived from the comment and the send it replaces, so a
+retry after the host refused the sent marker (a concurrent comment change) is
+the same send: the queue answers it as a duplicate and no second turn runs.
+The Canvas tool's read lists open requests as `requestedChanges` to the
+Canvas's owning thread only (and its managed children), never to another
+thread that can read the same Canvas, and a revise result carries a `warning`
+when blocks outside every requested anchor changed; the warning does not refuse
+the revision. A request stays open, and the warning stays on, across a
+person's own edit made after the send and before the agent ran. A comment reads
+"Addressed in vN" once an agent-authored version after the one it was sent
+against exists; a person's own layout edit does not answer it, and only that
+agent version closes the request in the tool as well. A send stays on this computer and is not carried by artifact sync.
 A table row is either a list of cells or `{ id, cells }`; the id is the
 author's, unique within the table (the domain policy refuses a repeat as
 `duplicate-table-row-id`), and arrives with Canvas schema version 13. A `row`

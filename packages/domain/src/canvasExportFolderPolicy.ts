@@ -130,7 +130,7 @@ export function canvasExportStem(title: string): string {
 /** The extension a rendered format is written with. */
 export function canvasExportFileExtension(
   format: CanvasExportImplementedFormat,
-): "md" | "html" | "png" | "pdf" {
+): "md" | "html" | "json" | "png" | "pdf" {
   switch (format) {
     case "html":
       return "html";
@@ -140,6 +140,8 @@ export function canvasExportFileExtension(
       return "pdf";
     case "markdown":
       return "md";
+    case "share-document":
+      return "json";
   }
 }
 

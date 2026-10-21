@@ -13,6 +13,8 @@ import {
   type GistExportAvailability,
   type GistExportTargetDependencies,
 } from "./gistExportTarget";
+import type { CanvasPublicShareService } from "./canvasPublicShareService";
+import { createPublicLinkExportTarget, publicLinkActivationFacts } from "./publicLinkExportTarget";
 
 /**
  * In-tree export destinations.
@@ -41,6 +43,11 @@ export interface CanvasExportTargetRegistration {
    * connected can change while the host runs.
    */
   readonly gist?: GistExportTargetDependencies;
+  /**
+   * Public links. The destination is bound only while Settings › Data &
+   * privacy › Public links is on, so with it off nothing is offered and nothing is sent.
+   */
+  readonly publicLinks?: CanvasPublicShareService;
 }
 
 export function canvasExportTargetBindings(
@@ -57,10 +64,17 @@ export function canvasExportTargetBindings(
     }),
   };
   const gist = registration.gist;
-  if (gist === undefined) return [folder];
+  const links = registration.publicLinks;
   return [
     folder,
-    { facts: gistActivationFacts(gist.availability()), target: createGistExportTarget(gist) },
+    ...(gist === undefined
+      ? []
+      : [
+          { facts: gistActivationFacts(gist.availability()), target: createGistExportTarget(gist) },
+        ]),
+    ...(links === undefined || !links.enabled()
+      ? []
+      : [{ facts: publicLinkActivationFacts(links), target: createPublicLinkExportTarget(links) }]),
   ];
 }
 

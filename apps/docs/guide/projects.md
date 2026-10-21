@@ -90,11 +90,16 @@ them again. The page never merges, approves, or comments on a pull request, and 
 deletes work. You can also open it from the command palette with **Review
 finished threads**.
 
-**Hide sidebar** shrinks the sidebar to a narrow rail of icons: the modes, the
-count tiles with their numbers, your Projects as letter tiles, the Activity
-feed, and Settings. Click **Show sidebar** at the top of the rail to bring it
-back. Choose **Hidden** in **Settings › Sidebar › When collapsed** to hide it
-completely instead.
+A narrow rail of icons stands to the left of the sidebar: Inbox, Running, To
+review and Done with their counts, your other places (Board, Pull requests and
+so on), the Activity feed, and Settings. Above Settings, a ring for each
+provider that reports plan limits shows how much of its week (outer) and five
+hours (inner) is left; hover it for every window and when it resets. **Hide sidebar** (or
+**⌘\**) shrinks the sidebar down to that rail, which then also shows the
+modes, New thread, Search, and your Projects as letter tiles. Click **Show
+sidebar** at the top of the rail, or press *_⌘\*_ again, to bring it back. In
+**Settings › Sidebar › Icon rail**, choose **When hidden** to show the rail
+only while the sidebar is hidden, or **Never** to hide everything.
 
 The switch beside the Project view picker chooses how threads are listed:
 **Projects** groups them under their Project, **Activity** lists them by

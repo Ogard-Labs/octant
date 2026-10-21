@@ -144,6 +144,15 @@ later messages** and **Jump to latest** underneath; sending a message also
 takes you back to the newest messages. Find in page searches the messages
 loaded so far. Export and purge always cover the whole thread.
 
+## Send a Canvas comment to the agent
+
+Open a Canvas from a thread, open its comments, and choose **Send to agent** on
+a comment. The thread's agent gets the comment, what it is on, and the Canvas,
+and is asked to change only that part. The comment shows **Sent to agent**, then
+**Addressed in vN** once a new version from the agent arrives. The button is
+missing when the thread cannot be reached or when you are viewing an older
+version of the Canvas. The turn follows the thread's own permissions.
+
 ## Export
 
 These actions live in the thread header's **Thread actions** menu (the ⋯

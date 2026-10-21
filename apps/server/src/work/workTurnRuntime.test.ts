@@ -497,6 +497,15 @@ describe("WorkTurnRuntime", () => {
         instanceId: ids.provider,
         sequence: 3,
         correlationId: decodeCorrelationId(String(ids.project)),
+        occurredAt: decodeTimestamp("2026-08-11T12:00:01.500Z"),
+        kind: "task-list",
+        sessionId: ids.session as never,
+        taskIds: [],
+      },
+      {
+        instanceId: ids.provider,
+        sequence: 4,
+        correlationId: decodeCorrelationId(String(ids.project)),
         occurredAt: decodeTimestamp("2026-08-11T12:00:02.000Z"),
         kind: "text-delta",
         sessionId: ids.session as never,
@@ -504,7 +513,7 @@ describe("WorkTurnRuntime", () => {
       },
       {
         instanceId: ids.provider,
-        sequence: 4,
+        sequence: 5,
         correlationId: decodeCorrelationId(String(ids.project)),
         occurredAt: decodeTimestamp("2026-08-11T12:00:03.000Z"),
         kind: "completed",
@@ -557,6 +566,8 @@ describe("WorkTurnRuntime", () => {
     expect(updates).toEqual([
       [{ taskId: "task-1", state: "running", summary: "Read the brief" }],
       [{ taskId: "task-1", state: "completed", summary: "Read the brief" }],
+      // The provider restated an empty plan, so the finished step leaves the panel.
+      [],
     ]);
   });
 
