@@ -20,6 +20,40 @@ const project = (brandKit?: Record<string, string>): ProjectSummary =>
   }) as unknown as ProjectSummary;
 
 describe("ProjectBrandKitSection", () => {
+  it("offers no save while the fields hold the saved kit", async () => {
+    const onChange = vi.fn(async () => true);
+    render(
+      <ProjectBrandKitSection
+        onChange={onChange}
+        project={project({ "color-primary": "#0a7d5a" })}
+      />,
+    );
+    const save = screen.getByRole("button", { name: "Save brand kit" });
+    expect(save).toBeDisabled();
+    await userEvent.type(screen.getByLabelText("Heading font"), "georgia, serif");
+    expect(save).toBeEnabled();
+    await userEvent.clear(screen.getByLabelText("Heading font"));
+    expect(save).toBeDisabled();
+  });
+
+  it("follows a kit another window saved instead of keeping the old values", () => {
+    const onChange = vi.fn(async () => true);
+    const { rerender } = render(
+      <ProjectBrandKitSection
+        onChange={onChange}
+        project={project({ "color-primary": "#0a7d5a" })}
+      />,
+    );
+    rerender(
+      <ProjectBrandKitSection
+        onChange={onChange}
+        project={project({ "color-primary": "#222222" })}
+      />,
+    );
+    expect(screen.getByLabelText("Primary colour")).toHaveValue("#222222");
+    expect(screen.getByRole("button", { name: "Save brand kit" })).toBeDisabled();
+  });
+
   it("saves the values typed, leaving out blanks", async () => {
     const onChange = vi.fn(async () => true);
     render(<ProjectBrandKitSection onChange={onChange} project={project()} />);

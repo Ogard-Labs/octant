@@ -55,11 +55,27 @@ function draftKit(
   return kit;
 }
 
+function fieldValues(saved: CanvasDesignBrand): Readonly<Record<string, string>> {
+  return Object.fromEntries(BRAND_KIT_FIELDS.map((field) => [field.name, saved[field.name] ?? ""]));
+}
+
+/** Two kits hold the same tokens, whatever order they were written in. */
+function sameKit(a: CanvasDesignBrand, b: CanvasDesignBrand): boolean {
+  const names = Object.keys(a);
+  return names.length === Object.keys(b).length && names.every((name) => a[name] === b[name]);
+}
+
 export function ProjectBrandKitSection(props: ProjectBrandKitSectionProps) {
   const saved: CanvasDesignBrand = props.project.brandKit ?? {};
-  const [values, setValues] = useState<Readonly<Record<string, string>>>(() =>
-    Object.fromEntries(BRAND_KIT_FIELDS.map((field) => [field.name, saved[field.name] ?? ""])),
-  );
+  const [values, setValues] = useState<Readonly<Record<string, string>>>(() => fieldValues(saved));
+  // The kit the fields were last filled from. When another window saves a new
+  // kit, the fields follow it; otherwise a save would send the stale draft
+  // under the refreshed version and silently overwrite that window's change.
+  const [filledFrom, setFilledFrom] = useState<CanvasDesignBrand>(saved);
+  if (!sameKit(filledFrom, saved)) {
+    setFilledFrom(saved);
+    setValues(fieldValues(saved));
+  }
   // Each command asserts the Project version it read, so a second save sent
   // before the first returns would be refused as a conflict.
   const [pending, setPending] = useState(false);
@@ -116,7 +132,7 @@ export function ProjectBrandKitSection(props: ProjectBrandKitSectionProps) {
       })}
       <div>
         <OctantButton
-          disabled={disabled || refusals.size > 0}
+          disabled={disabled || refusals.size > 0 || sameKit(draft, saved)}
           onClick={() => void commit(draft)}
           size="sm"
           type="button"
