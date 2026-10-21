@@ -571,6 +571,17 @@
   background: var(--octant-app-background);
 }
 
+/* Code Home is the one start screen taller than the pane: its cards and Up
+   next run past the fold and the pane scrolls. A stage held at the pane's
+   height scrolled away with its first screen, leaving a hard edge where the
+   ground stopped and the plain panel showed under Up next. It grows with its
+   content instead. New task keeps the fixed height: its composer docks to the
+   foot of the page through a percentage height, which an auto stage drops. */
+.welcome-stage:has(.code-home) {
+  height: auto;
+  min-height: 100%;
+}
+
 /* Everything the stage holds except the ground itself takes a level above it.
    An unpositioned block paints below every positioned sibling however late it
    comes in the DOM, so naming the two screens that had been lifted left the
