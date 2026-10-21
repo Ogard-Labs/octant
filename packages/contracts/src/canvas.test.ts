@@ -12,6 +12,7 @@ import {
   CANVAS_DESIGN_ASSETS_MAX_BYTES,
   CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION,
   CANVAS_MAX_DESIGN_ASSETS,
+  CANVAS_MAX_DESIGN_MARKUP_LENGTH,
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_THREAD_OWNED_SCHEMA_VERSION,
@@ -228,6 +229,32 @@ describe("Canvas contracts", () => {
     ).toThrow();
     expect(() =>
       decodeCanvasDefinition({ ...definition, blocks: [{ ...design, size: "watch" }] }),
+    ).toThrow();
+  });
+
+  it("holds a whole app window in one frame and refuses a frame or stylesheet past 64 KiB", () => {
+    const appWindow = {
+      blockId: "window",
+      schemaVersion: CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
+      kind: "design",
+      title: "Workspace window",
+      size: "desktop",
+      runsScript: true,
+      frames: [{ frameId: "app", title: "App", html: "x".repeat(CANVAS_MAX_DESIGN_MARKUP_LENGTH) }],
+    } as const;
+    expect(CANVAS_MAX_DESIGN_MARKUP_LENGTH).toBe(65_536);
+    expect(decodeCanvasDefinition({ ...definition, blocks: [appWindow] })).toMatchObject({
+      blocks: [appWindow],
+    });
+    const over = "x".repeat(CANVAS_MAX_DESIGN_MARKUP_LENGTH + 1);
+    expect(() =>
+      decodeCanvasDefinition({
+        ...definition,
+        blocks: [{ ...appWindow, frames: [{ ...appWindow.frames[0], html: over }] }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...appWindow, styles: over }] }),
     ).toThrow();
   });
 
