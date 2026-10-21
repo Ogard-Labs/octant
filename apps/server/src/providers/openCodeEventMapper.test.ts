@@ -366,6 +366,7 @@ describe("mapOpenCodeEvent", () => {
         status: "completed",
         summary: "Write mapper",
       },
+      { kind: "task-list", sequence: 9, taskIds: ["task-1", "task-2"] },
     ]);
   });
 
@@ -387,6 +388,7 @@ describe("mapOpenCodeEvent", () => {
 
     expect(results).toMatchObject([
       { kind: "task-progress", sequence: 7, taskId: "task-2", status: "in-progress" },
+      { kind: "task-list", sequence: 8, taskIds: ["task-2"] },
     ]);
   });
 
@@ -639,7 +641,7 @@ describe("mapOpenCodeEvent", () => {
     expect(mapped(event)).toEqual([]);
   });
 
-  it("ignores empty provider deltas and empty collections without consuming a sequence", () => {
+  it("ignores empty provider deltas without consuming a sequence", () => {
     expect(
       mapped(
         official({
@@ -655,6 +657,9 @@ describe("mapOpenCodeEvent", () => {
         }),
       ),
     ).toEqual([]);
+  });
+
+  it("clears the task panel when OpenCode empties its todo list", () => {
     expect(
       mapped(
         official({
@@ -663,7 +668,7 @@ describe("mapOpenCodeEvent", () => {
           properties: { sessionID: "provider-session", todos: [] },
         }),
       ),
-    ).toEqual([]);
+    ).toMatchObject([{ kind: "task-list", taskIds: [] }]);
   });
 
   it("preserves meaningful whitespace in streamed text", () => {

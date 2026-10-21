@@ -40,6 +40,35 @@ function upsert(
   return rows.map((candidate, candidateIndex) => (candidateIndex === index ? row : candidate));
 }
 
+/**
+ * Applies a provider's restated plan to a turn's rows: task rows the plan no
+ * longer lists go, and the rest take the plan's order in the slots task rows
+ * already held, so tool rows keep their place in the transcript.
+ */
+function restateTaskRows(
+  rows: ReadonlyArray<TurnActivityRow>,
+  taskIds: ReadonlyArray<string>,
+): ReadonlyArray<TurnActivityRow> {
+  const tasks = new Map<string, TaskActivityRow>();
+  for (const row of rows) if (row.kind === "task") tasks.set(row.id, row);
+  const listed = taskIds.flatMap((taskId) => {
+    const task = tasks.get(taskId);
+    if (task === undefined) return [];
+    tasks.delete(taskId);
+    return [task];
+  });
+  let next = 0;
+  const restated = rows.flatMap((row): ReadonlyArray<TurnActivityRow> => {
+    if (row.kind !== "task") return [row];
+    const task = listed[next];
+    next += 1;
+    return task === undefined ? [] : [task];
+  });
+  const unchanged =
+    restated.length === rows.length && restated.every((row, index) => row === rows[index]);
+  return unchanged ? rows : restated;
+}
+
 type ToolActivityRow = Extract<TurnActivityRow, { kind: "tool" }>;
 
 function previousTool(
@@ -97,6 +126,10 @@ export function applyActivityEvent(
         summary: event.summary,
       }),
     };
+  }
+  if (event.kind === "task-list") {
+    const rows = restateTaskRows(activity.rows, event.taskIds);
+    return rows === activity.rows ? activity : { ...activity, rows };
   }
   if (event.kind === "file-change") {
     const path = String(event.path);

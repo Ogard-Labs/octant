@@ -28,11 +28,14 @@ The design rests on a small set of invariants that every package obeys:
   Octant operates none of it; an S3-compatible store is contacted only at the
   endpoint the person configured and only while the Settings › Sync switch is
   on. Remote access is host-to-device over the user's
-  own network. Three host-initiated
+  own network. Four host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
-  device-tool update checks against the npm registry, and server marketplace
+  device-tool update checks against the npm registry, server marketplace
   fetches when the person searches, inspects, previews, or installs from the
-  catalog. All have a Settings off switch: marketplace off means no catalog
+  catalog, and calls to the public Canvas share service when the person
+  publishes, updates, or revokes a public link (and the host retries a revoke
+  it could not complete). All have a Settings off switch: Public links starts
+  off and off means no share-service request except finishing a revoke; marketplace off means no catalog
   request; Updates off disables automatic update checks (manual Check for
   updates may still contact the signed feed); device tools' automatic updates
   start off, and off means no registry request (a manual check may still
@@ -376,7 +379,13 @@ Descriptions explain the existing presentation flows and distinguish creation,
 queued jobs, and work proposals from opened previews or completed work.
 Work also includes a short, budgeted artifact instruction in its required
 context, so runtimes that use their own file tools know how written documents
-appear in Files and Document. That instruction offers no tools or authority.
+appear in Files and Document, and every turn that offers `octant_canvas` (Work,
+Code, and every Chat thread) includes a short, budgeted Canvas
+delivery instruction, so a runtime delivers kept or shared work as a Canvas
+rather than as its own file or a long reply; its text is owned by
+[Canvas](design/canvas.md#agent-tool-and-recipes). Neither instruction offers
+tools or authority, and the Canvas one is absent wherever the tool is not
+offered.
 
 ### Desktop menu bar
 
@@ -467,6 +476,18 @@ rule holds. Each tier is a Canvas schema bump, so an older runtime refuses the
 document as a future version. Frames follow the
 [Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md).
 
+- **A Canvas belongs to its thread's Project, or to the thread.** A Work or
+  Code Canvas belongs to the thread's Project and the root or worktree the
+  host resolves for it; a Chat Canvas to the thread's Chat Project, or, when
+  the thread is in none, to the thread alone, with no Project in its
+  provenance (Canvas schema version 20). A thread-owned Canvas holds what a
+  Chat Project Canvas holds and no more (no file, shell, Git, or network
+  authority; images only from its own thread), is reached by its own thread's
+  agent and by a window in Chat, follows its thread into a Chat Project
+  without joining that Project's inventory or memory, is erased with the
+  thread's purge, exports to the host folder, and is never mirrored, shared,
+  or published to a replica. [Canvas](design/canvas.md#agent-tool-and-recipes)
+  owns the rule. This has shipped.
 - **Typed blocks carry data.** Metrics, tables, charts, plans, and the diagram
   family stay the catalog, because comments anchor to them, revision edits
   them, and shares keep their structure. Shipped at schema version 19 (see
@@ -529,7 +550,13 @@ document as a future version. Frames follow the
   HTML export writes frames as sandboxed `srcdoc` pages with the policy
   inside, the approval card names the markup it writes, and a themed design
   is drawn in the theme the person's window hands over; this has shipped.
-  Markdown export writes the title. Public links stay out.
+  Markdown export writes the title. A public link is an export too: off until
+  the person turns on Settings › Data & privacy › Public links, published only from
+  the approval card in a local window and never by an agent, it carries the
+  share filter's blocks without host, Project, thread, or source identity to
+  the public Canvas share service, which can read it, draws design frames only
+  from a separate user-content origin, and deletes it on revoke or expiry (see
+  [Canvas public links](design/canvas-public-links.md)).
 
 _Rationale:_ a `srcdoc` frame inherits the app policy (`script-src 'self'`),
 so a running frame needs a page the host serves, and a frame sandboxed without
@@ -725,6 +752,16 @@ follows the same rules as a rename: an archived Project refuses it, and a change
 that would leave the colour as it is journals nothing. The colour grants no
 authority and carries no status.
 
+Any Project may hold a **brand kit**: named colour, font, radius, and spacing
+tokens that designs draw with under the Canvas `brand` theme. It lives on the
+Project record as `brandKit`, is set by `change-project-brand-kit`, and is
+journaled as `project.brand-kit-changed@1`; absent means no kit. The domain
+validates every value with the same rule a design's own brand passes
+(`designBrandTokenRefusal`), so nothing a kit holds can end a stylesheet
+declaration or load a resource. A kit carries no filesystem, shell, or provider
+authority, so Chat Projects hold one too. See [Canvas](design/canvas.md) for how
+it reaches an agent and a frame.
+
 A Work Project may opt into a **status file**: `STATUS.md` at the top of its
 folder, where the work stands, with dated follow-ups and deadlines. The setting
 lives on the Project record as `statusFile` and is journaled as
@@ -886,7 +923,8 @@ lands in first (`Synced from …`). A version taken from another computer is
 recorded under its own author, an agent whose id is the version's id, and the
 Canvas carries that author whenever the thread it lands in is marked, so a
 person's clear of that thread never makes the synced text the thread's own. A version taken before it recorded its own author is named the same way at host start, from the thread's journaled ingestion of it (`replica-artifact:<canvas>:<version>`), which a clear does not erase. The Canvas tool's `read` and `preview` are how
-another thread's model reaches a Canvas (any Canvas of its Project, by id), so
+another thread's model reaches a Canvas (any Canvas of its Project, by id; a
+Canvas a Chat thread owns outside every Project answers only that thread), so
 both mark the reader (label `canvas`, content reference `canvas-<canvas>`)
 after the Canvas is read and before anything from it is returned, when the
 Canvas records a writer other than the reader or the thread it belongs to is
@@ -1662,9 +1700,26 @@ or stops a thread.
 ## Agent task display
 
 Providers that report their own task plans (Claude, Codex, ACP, OpenCode) emit
-`task-progress` runtime events, and the host journals them. Each thread surface
-shows the agent's restated plan as a live "N of M tasks completed" panel while
-any task is open or the turn is still writing: Code from its journaled
+`task-progress` runtime events, and the host journals them. Claude's checklist
+is its `TodoWrite` tool: the driver offers it in every posture, Plan included,
+and lets it run unasked, because it changes only Claude's own session state
+(no file, shell, network, or person). Each call restates the whole list, and
+a task id follows a list position, so the panel keeps Claude's latest order and
+wording.
+
+`task-progress` adds or updates one task. Because every one of these providers
+restates its whole plan, each restatement ends with a `task-list` event naming
+the ids the plan now holds, in order (at most 64, the per-turn task cap). Each
+surface keeps only those tasks, in that order, so a step the provider drops
+leaves the panel, a moved step moves, and an empty list clears it. `task-list`
+belongs to the `taskProgress` capability: a driver that reports it supported
+may send either kind. Code journals it as its own operation event; Chat and
+Work fold it into the list they already journal whole. A journal written before
+`task-list` existed holds only `task-progress` and replays exactly as it did,
+dropped steps included.
+
+Each thread surface shows the agent's restated plan as a live "N of M tasks
+completed" panel while any task is open or the turn is still writing: Code from its journaled
 operation events, Chat from `ChatAttempt.tasks` carried on
 `chat.attempt-updated@1`, and Work from `WorkTurnState.tasks` journaled on
 `work.turn-updated@1` with a live `turn-tasks` stream frame. The panel is a
@@ -2095,7 +2150,8 @@ flowchart LR
   journal are listed as omissions. The thread's generated images and retained
   Browser captures appear as attachment records without bytes. A local owner
   can also take one `octant.host-export/1` cut of what this host holds: a thread bundle for
-  every thread of every mode, Projects, Project memory, Canvases, a
+  every thread of every mode, Projects, Project memory, every Canvas (one a
+  Chat thread owns outside every Project names no Project), a
   non-secret settings summary, usage export rows, and retention windows
   with purge tombstones. That call is a host-control read on the loopback
   route chain. A remote principal and a paired device are refused, and the
@@ -2158,7 +2214,9 @@ flowchart LR
   recreate threads, Projects, or settings. Binding an imported version to a
   local Project follows the existing artifact import rule and is not widened
   here. Scope is artifact and Canvas versions and tombstones, and changes to
-  a Canvas's comment threads under the same rules. Threads and settings are
+  a Canvas's comment threads under the same rules; a Canvas owned by a Chat
+  thread outside every Project has no Project to file under and is never
+  published. Threads and settings are
   not in this log. A
   replica-store contribution offers list, get, and put-if-absent. A folder
   store and an S3-compatible store ship in-tree on that seam. Direct cloud
@@ -2325,9 +2383,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   model picker, thread pinning, and usage history are written against
   that profile. Octant never reads, stores, or injects that provider's
   credentials ([0005](decisions/0005-provider-sdk-contract.md)).
-  Plan usage limits (rolling windows, per-model weekly, overage) come
-  only from the provider's own process: session `rate-limit-window`
-  events, or a process reading a person asks for. That reading starts
+  Claude and Codex plan usage limits (rolling windows, per-model weekly,
+  overage) come only from the provider's own process: session
+  `rate-limit-window` events, or a process reading a person asks for.
+  Devin and OpenCode Go have no such channel in their runtimes, so their
+  plan windows come from the account usage endpoint under the
+  account usage endpoint rule in
+  [Security and authority](#security-and-authority). The Claude
+  reading starts
   the provider's process, so it is made only on an explicit refresh
   (`onDemand` on the context-facts input), never on the schedule or
   before a turn. Observed with Claude Code 2.1.296, a process started
@@ -2337,8 +2400,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `rate_limits_available: false` in that cold process. For a subscription
   account this means unavailable usage, not that a plan does not apply.
   Only explicit API-key authentication establishes the no-plan state.
-  Octant never reads a token or credential file to
-  fetch those numbers, and never calls a vendor usage endpoint
+  For Claude and Codex, Octant never reads a token or credential file
+  to fetch those numbers, and never calls a vendor usage endpoint
   itself. Each account keeps its own snapshot, keyed by
   the instance and the state directory that session ran under. The
   snapshots live in `providers/plan-usage.json` in the host store,
@@ -3070,7 +3133,11 @@ only the ledger carries (request shape, category, host, quality). A harness
 turn record carries the same usage, timing, start and stop reason, and the
 session's `usage` and `metrics` totals fold them, so a Code turn on a direct
 endpoint no longer records zero tokens. Chat, Work and Code on every provider
-journal the frame; the harness additionally keeps its own record.
+journal the frame; the harness additionally keeps its own record. The native
+record is written at final host settlement, after provider completion and
+cleanup. If cancellation wins that interval, the record carries the final
+interrupted outcome and usage once; it does not also retain a successful record
+for the same turn. Advisor review starts only for a successfully settled turn.
 
 **Compacting a session on request.** Built so far: the host path for Chat and
 Work on a direct endpoint — the `compact-session` command, its receipt,
@@ -3993,7 +4060,11 @@ native harness in `apps/server/src/harness`:
   session and its conversation stay live, so the next `send` continues it
   without a resume or a journal rebuild, and a cancel during a tool step first
   closes the calls its runner never answered with the same interrupted results
-  a resume would write. Only `stop` releases the session. Chat and Work still
+  a resume would write. Only `stop` or connection teardown releases the session.
+  Opening an endpoint belongs to the pending start or resume: if that operation
+  is cancelled or its connection closes before opening finishes, the late
+  endpoint is released without admitting a session or changing its transcript.
+  It cannot restore an active-session count after cleanup. Chat and Work still
   rebuild their history on the host and
   start a fresh session each turn.
 - **Forks.** A Code fork on a harness model starts its first session from a
@@ -4270,7 +4341,17 @@ native harness in `apps/server/src/harness`:
   `take` itself is destructive and has no idempotent receipt: if its response
   is lost, the web retains the displayed text with an ownership-unknown
   notice, never requeues that unclaimed snapshot automatically. This is not
-  a crash-atomic transfer; a reload can lose a client-held uncertain claim.
+  a crash-atomic transfer; a reload can lose a client-held uncertain claim. The
+  terminal likewise retains confirmed-taken text locally when its next prompt
+  reports a refusal, scoped to its originating thread. It never requeues
+  consumed note ids. Its prompt ports also report server errors as refusals,
+  so the terminal does not infer non-submission from that result: it preserves
+  the error and asks the person to inspect the conversation and queue before
+  manually copying and resending. A lost take response retains the displayed
+  snapshot with an ownership-unknown warning, never sends it automatically.
+  `/notes copy` copies retained text; `/notes discard` removes only the local
+  recovery copy. Closing the terminal loses this copy. Retained notes do not
+  replace the composer draft or hide pending approvals.
   The route allows exactly the
   windows and paired devices that may already answer the thread's questions,
   and the web adds no authority to it. A turn's start is journaled
@@ -5362,13 +5443,17 @@ same. This holds in Chat, Work, and Code.
 offers it only when the package is installed, trusted, enabled, and effective;
 a disabled or uninstalled target is omitted, not listed as refused. The server
 renders the Canvas to Markdown or HTML, shows an approval card with that
-payload and the destination, and calls the target only after approval. The
+payload and the destination, and calls the target only after approval. PNG and
+PDF are drawn in the host's own browser, the one the Canvas preview uses
+([Canvas visuals](design/canvas-visuals.md)): a card for them names each file
+and its size instead of showing a body, and a destination receives named files
+only if it declared the format. A host with no browser refuses a picture export
+as a value (`unavailable`) before anything is held. The
 call returns a receipt (a link, a path, or a remote id) or a typed refusal.
 Each completed export is a `canvas.export@1` journal event and is rebuilt by
 replay. When the destination was called but the journal could not take the
 record, the answer is `unrecorded` and carries the destination's outcome; it is
-never reported as a failed export. PDF and PNG are named formats the seam can carry later; this host does
-not render them. A target that passed activation is still reported honestly as
+never reported as a failed export. A target that passed activation is still reported honestly as
 `not-connected`, `ready`, or `refused`. A local target may describe the exact
 file it would write, and the card then names that path: approving a card that
 names an existing file is the confirmation to replace it, and a call without
@@ -5414,6 +5499,41 @@ the rendered document passes the same secret-and-path filter every exported
 document does, and one that fails it is refused rather than published. The
 receipt is the gist URL and its id, journaled in `canvas.export@1` like any
 other destination's.
+
+**Connectors and user-added MCP servers.** A person connects an MCP server
+from Settings › Skills & Extensions without writing a package: Add MCP server
+takes a command Octant starts (with arguments and environment) or an address
+it connects to over Streamable HTTP (with headers). The host writes an
+ordinary Agent Plugins package for it (`plugin.json` and an `mcp.json` with
+the one server) into its own folder under the data directory and registers it
+under the `user-added` source kind, so the activation ladder, per-call
+approvals, remembered grants, taint rules, and the confined launch apply
+unchanged; the package is installed, trusted and switched on as one act,
+because the person just typed it in. Only a local window may add one
+(`/api/extensions/user-servers`); a paired device cannot. A value the person
+marks secret never enters the package: the host stores it in the credential
+broker's own namespace for these secrets (`/v1/mcp-server-credentials/*`, the
+`mcp-server-credential` Keychain service or Secret Service attribute) and the
+package carries `${OCTANT_SECRET:<id>}` in its place. The session manager
+fills references in at launch, only for a package the host's own store of
+generated folders vouches for by source reference (the installed manifest's
+source kind is rewritten to `plugin-package`, so it cannot be the authority),
+so a third-party package can never name a secret; a reference the broker
+cannot answer fails the launch rather than starting the server with a blank.
+Uninstalling the package removes its folder and every secret it referenced,
+and an add that fails before the package is installed removes them too, so a
+retry with the same name is not blocked. Refusals travel as typed results
+(HTTP 200) like every other extension command, so the dialog shows the host's
+own sentence.
+On a host without a broker the add is refused when it carries a secret, with
+the Octant app named as the way to do it. This is the base the connector work
+builds on: discovery of servers and plugins other tools already know on this
+Mac, sign-in to a hosted server through the MCP authorization flow, a
+first-party connectors catalog, and Project pins each arrive as their own
+change on these same seams. The release-boundary hold on a connector
+marketplace was lifted by the maintainer on 2026-10-20; the start gates in
+[release-boundary holds](release-boundary-holds.md) are met by this section
+and the rules above.
 
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured
@@ -5514,7 +5634,9 @@ credentials requires its own explicit confirmation.
 The rationale and original migration account remain in
 [0001](decisions/0001-plugin-architecture.md). This section owns the current
 boundary and approved direction; the archived proposal's status is not a delivery
-gate. The connector marketplace hold remains in force.
+gate. The connector marketplace hold was lifted on 2026-10-20; connectors are
+built as user-added MCP server packages on these seams, as the
+[Connectors and user-added MCP servers](#extensions-and-skills) rules describe.
 
 ## Security and authority
 
@@ -5887,6 +6009,38 @@ mechanisms are:
   itself. That boundary is accepted: the mark gates Octant's own tools only,
   and Claude's and Codex's built-in tools run under the runtime's own sandbox
   and approvals.
+  A Claude launch sets no `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+  umbrella: blanket-blocking every non-essential channel of the runtime's
+  was stricter than Octant needs, so each channel that matters is kept off
+  by its own switch on every launch, the version read included
+  (`ISOLATED_CLAUDE_LAUNCH_GUARDS`; maintainer decision, 2026-10-20): usage
+  metrics (`DISABLE_TELEMETRY`), error reports (`DISABLE_ERROR_REPORTING`),
+  the runtime's self-update (`DISABLE_AUTOUPDATER`), `/bug` and `/feedback`,
+  which upload the conversation (`DISABLE_BUG_COMMAND`,
+  `DISABLE_FEEDBACK_COMMAND`; the second is not in the public reference, but
+  both installed binaries carry it beside the first), the session-quality
+  survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`), auto-memory, the SDK's
+  built-in agents, and marketplace auto-install. The runtime's release-note,
+  PR-badge, and availability checks are therefore its own traffic to
+  Anthropic under the person's account; they carry no Project content.
+  Feature-flag fetching stays off: Anthropic's environment-variable reference
+  says `DISABLE_TELEMETRY` also disables it, so the runtime evaluates its
+  flags from the defaults it ships with. A channel with no switch of its own is closed by the
+  launch shape instead: `/share`, like any slash command, runs only when the
+  person types it, as in the runtime's own terminal (the model cannot invoke
+  one, and Octant sends none but `/compact`); a plugin's background `command`
+  cannot run because the query is opened with no setting sources, plugins,
+  skills, agents, or MCP servers, so no plugin is loaded, and
+  `strictMcpConfig` keeps the account's claude.ai connectors out (2.1.304
+  lists them without it, setting sources or not); Remote Control starts only
+  on a flag or command Octant never passes; and the advisor, like every other
+  tool the runtime might add, stays out because the port holds the
+  initialized tool list to the requested set. The runtime's `Artifact` tool
+  is not a reason either way: measured the same day, the runtime offers it
+  only when launched by Anthropic's own desktop app (it keys on the launching
+  entrypoint), so from Octant it is absent with or without the umbrella. A
+  host that exports `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` itself keeps
+  the umbrella on every launch; only that disabling value crosses.
   A confined Claude Plan launch reads the assigned leaf of that account's
   state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
   writes only `sessions/` and its own session in `projects/`: the
@@ -6421,8 +6575,9 @@ mechanisms are:
 - **Canvas design images.** A design frame never loads anything itself. The
   server resolves the images a design declares on every read, through the
   authorized Canvas read and under the version's mode, Project, and thread: a
-  Chat Project reaches only images generated in its own threads, and Work and
-  Code files pass the Work confinement sequence. Only sniffed raster images
+  Chat Project reaches only images generated in its own threads, a Chat
+  thread outside every Project only images generated in that thread, and Work
+  and Code files pass the Work confinement sequence. Only sniffed raster images
   within the per-image and per-design budgets are returned, the renderer
   inlines them as `data:` images, and the journal holds references only
   ([Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md), F5).
@@ -7279,6 +7434,32 @@ mechanisms are:
   deleted, and a request the plan route's profile cannot express is refused
   before send. The wire details are in
   [Provider runtimes](design/provider-runtimes.md#subscription-sign-in-dialects).
+- **Account usage endpoints.** Devin and OpenCode Go report plan windows only from an account endpoint, so the
+  host reads the sign-in their own CLI saved and asks that endpoint. Devin:
+  `windsurf_api_key` (and an `https` `api_server_url`, else
+  `server.codeium.com`) from `~/.local/share/devin/credentials.toml`, sent in
+  the body of a Connect `POST` to
+  `SeatManagementService/GetUserStatus`; daily and weekly remaining
+  percentages become windows, and the overage balance is not shown. OpenCode
+  Go: the `opencode-go` key from the `credential` table of OpenCode 2's
+  `opencode*.db` in its data directory (`$XDG_DATA_HOME/opencode`, default
+  `~/.local/share/opencode`), opened read-only with no pragmas, else
+  `auth.json` when no database keeps sign-ins; sent as a bearer token to
+  `GET opencode.ai/zen/go/v1/usage`, whose 5-hour, weekly, and monthly
+  used percentages become windows. The reads run in the host process, only
+  for an enabled instance of that provider. Only a refresh a person asks for
+  waits on the endpoint. Every other caller, the limits service's
+  five-minute schedule and the service-limits read before each Chat turn,
+  gets the last reading at once and starts at most one background read per
+  five minutes, so a turn never waits on the endpoint and frequent turns
+  never multiply the calls. The request sends nothing else and follows no
+  redirect. Octant never writes, copies, or stores either key. It
+  stays out of logs, the journal, snapshots, and errors: every failure carries
+  a fixed message. A missing sign-in reads as not ready, an OpenCode sign-in
+  without Go as plan limits not applying, a refused key as unauthenticated,
+  and a 429 keeps its `Retry-After`. The Devin call is not a published
+  interface; an answer whose shape stops matching fails as a protocol change
+  and keeps the last reading rather than guessing.
 - **Update feed signing keys are per ring.** The desktop updater verifies a
   feed's Ed25519 signature against the compiled-in keys of the ring the signed
   release names, before any other field is believed. Stable trusts only the
@@ -7427,7 +7608,10 @@ macOS-only.
   signed in, not installed, or disabled never holds an install back: quitting
   asks on the same terms, because both read the one `workInFlight` reading of
   the host rather than its `attentionRequired` flag, which also marks the menu
-  bar for provider readiness. Automatic checks are a setting; the host starts with them
+  bar for provider readiness. This conservative reading currently counts open
+  provider sessions, including idle sessions kept for another turn, so the quit
+  warning describes sessions rather than claiming that each is running work.
+  Automatic checks are a setting; the host starts with them
   off until the persisted choice arrives, then checks daily. A check is a
   plain GET carrying only version, platform, and architecture (the ring is in
   the path); it is not a telemetry channel.
@@ -7444,10 +7628,23 @@ storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account. See
 [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
 
-The start gates for the connector / OAuth marketplace and full LSP /
-extension host / debugger holds are in
-[release-boundary holds](release-boundary-holds.md). Neither hold is opened by
+The public Canvas share service (`https://canvas.octant.sh`, in the
+`octant-webapp` repository) is in scope: an Octant-operated service that stores, and can read, the Canvases
+people publish as public links, under the rules in
+[Canvas public links](design/canvas-public-links.md). It is not an Octant
+account, a relay, or a sync store; nothing reaches it until the person turns
+Public links on and approves a publish, and a self-hosted service URL is a
+Settings choice. Deploying it, its DNS and TLS, and its operator contact are
+release steps of their own.
+
+The start gates for the full LSP / extension host / debugger hold are in
+[release-boundary holds](release-boundary-holds.md); that hold is not opened by
 plugin work, a first-party Integration, or Monaco and external-editor handoff.
+The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
+[Connectors and user-added MCP servers](#extensions-and-skills) rules: a
+bundled first-party catalog, sign-in through the MCP authorization flow, and
+servers imported from other tools' configuration on this Mac, all as
+user-added packages through the published seams and the credential broker.
 
 ## Development loop
 
@@ -7470,7 +7667,12 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   startup the dev script rebuilds `apps/desktop/dist/entry.mjs` whenever
   `apps/desktop/src` is newer, so `apps/desktop/src` edits need only a
   restart of `bun run dev` rather than a manual
-  `bun run --cwd apps/desktop build`.
+  `bun run --cwd apps/desktop build`. It rebuilds the Canvas preview page
+  (`apps/web/dist/canvas-preview/`) the same way whenever `apps/web` or the contracts, domain or theme packages
+  are newer,
+  and hands the host it starts `OCTANT_WEB_DIST_PATH=apps/web/dist`, so an
+  agent's Canvas preview returns a picture on a development host; `octant web
+--dev` does both as well.
 - The server is composed by a root in `apps/server/src/server.ts` that calls
   the per-area wiring modules under `apps/server/src/wiring/` in a fixed
   order, and every module declares the reach it has as a `Pick` of the

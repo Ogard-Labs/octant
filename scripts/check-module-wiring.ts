@@ -637,7 +637,12 @@ export function findUnregisteredRouteModules(
  * states a dated reason and the caller it is waiting on. Empty means every
  * served endpoint has a caller (or is a routing prefix).
  */
-export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map();
+export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
+  [
+    "/api/v1/shares",
+    "Served by the public Canvas share service (the octant-webapp repository) and called by the host's share-service port in apps/server, which builds the address from the configured service URL; no window or device calls it. Remove when the checker counts apps/server as a caller of an external service's routes.",
+  ],
+]);
 
 const API_PATH_PATTERN = /"(\/api\/[a-z0-9/_-]+)"/g;
 const PREFIX_GUARD_PATTERN = /startsWith\(\s*"(\/api\/[a-z0-9/_-]+)"/g;

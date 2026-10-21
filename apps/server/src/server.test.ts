@@ -551,6 +551,8 @@ describe("startOctantServer", () => {
             instanceId: "managed-instance",
             activeAgentCount: 0,
             attentionRequired: false,
+            // Depends on whether this checkout has a built preview page.
+            canvasPreviewPage: expect.any(Boolean),
           });
 
           const rendererOrigin = "http://127.0.0.1:5181";

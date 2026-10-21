@@ -65,6 +65,22 @@ describe("keychainHelperSpec", () => {
     });
   });
 
+  it("sends an MCP server's secret to its own namespace, named by its secret id", () => {
+    const spec = keychainHelperSpec(
+      helperPath,
+      { operation: "resolve", providerInstanceId },
+      storeScope,
+      "mcp-server-credential",
+    );
+    expect(JSON.parse(spec.stdin)).toEqual({
+      version: 1,
+      storeScope,
+      namespace: "mcp-server-credential",
+      secretId: providerInstanceId,
+      operation: "resolve",
+    });
+  });
+
   it("passes set credentials through stdin and never process arguments", () => {
     const spec = keychainHelperSpec(
       helperPath,

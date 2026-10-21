@@ -6,6 +6,7 @@ import { Schema } from "effect";
 import {
   CANVAS_SCHEMA_VERSION,
   CANVAS_SHARE_MAX_ACCESS_LOG_EVENTS,
+  CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
   CANVAS_SHARE_MAX_OVERVIEW_SNAPSHOTS,
   CanvasCreated,
   CanvasVersionAppended,
@@ -956,7 +957,13 @@ describe("CanvasShareService", () => {
     const opened = service.access({ request: accessRequest(), principal: localPrincipal });
     expect(opened.kind).toBe("allowed");
     if (opened.kind !== "allowed") return;
-    expect(opened.document.blocks).toEqual(blocks);
+    // A share names each block at most the newest version the share format represents.
+    expect(opened.document.blocks).toEqual(
+      blocks.map((block) => ({
+        ...block,
+        schemaVersion: Math.min(block.schemaVersion, CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION),
+      })),
+    );
   });
 
   it("answers a Canvas holding a block the snapshot format does not carry with a denial instead of throwing", () => {

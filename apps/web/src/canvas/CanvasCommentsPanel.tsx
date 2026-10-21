@@ -16,10 +16,12 @@ import {
   type CanvasDefinition,
   type CanvasId,
 } from "@octant/contracts/canvas";
+import type { CanvasVersionHistoryEntry } from "@octant/contracts/canvas-revision";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { canvasBlockLabel } from "./CanvasDocument";
 import { canvasTableRowLabel } from "./blocks/TableBlock";
+import { canvasCommentAgentState } from "./canvasCommentAgentTurn";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantSelectField } from "../ui/base/OctantSelect";
 import { OctantTextarea } from "../ui/base/OctantTextarea";
@@ -48,6 +50,21 @@ export interface CanvasCommentsPanelProps {
   readonly onShowAllBlocks?: () => void;
   /** Every journaled thread, reported whenever the host's list is reloaded. */
   readonly onThreadsChange?: (threads: ReadonlyArray<CanvasCommentThread>) => void;
+  /**
+   * Hands an open thread to the agent of the Canvas's owning thread as its
+   * next turn. Present only when the person can reach that thread; without
+   * it no comment offers Send to agent. Resolves with the Canvas sequence the
+   * request was made against once the turn is on its way.
+   */
+  readonly onSendToAgent?: (
+    thread: CanvasCommentThread,
+    anchorLabel: string,
+  ) => Promise<
+    | { readonly status: "sent"; readonly canvasSequence: number }
+    | { readonly status: "refused"; readonly message: string }
+  >;
+  /** The Canvas's versions, from which a sent comment reads whether a revision answered it. */
+  readonly history?: ReadonlyArray<CanvasVersionHistoryEntry>;
 }
 
 type CommentFilter = "open" | "resolved" | "all";
@@ -325,6 +342,38 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
 
   const now = () => decodeUtcTimestamp(new Date().toISOString());
 
+  // The turn goes first and the mark second: a comment is shown as sent only
+  // once the thread has the message, and a refused send leaves it unmarked.
+  const sendToAgent = async (thread: CanvasCommentThread, anchorLabel: string) => {
+    const send = props.onSendToAgent;
+    if (send === undefined || outcome?.kind !== "ready") return;
+    setWorking(true);
+    setMessage(undefined);
+    let sent: Awaited<ReturnType<typeof send>>;
+    try {
+      sent = await send(thread, anchorLabel);
+    } catch {
+      sent = { status: "refused", message: "The comment could not reach the thread." };
+    }
+    setWorking(false);
+    if (sent.status === "refused") {
+      setMessage(sent.message);
+      return;
+    }
+    await dispatch(
+      (expectedSequence) => ({
+        kind: "canvas-comment-send-to-agent",
+        canvasId: props.canvasId,
+        commentId: thread.comment.commentId,
+        sentBy: props.author,
+        canvasSequence: sent.canvasSequence,
+        expectedSequence,
+        issuedAt: now(),
+      }),
+      () => undefined,
+    );
+  };
+
   if (outcome === undefined) return null;
   if (outcome.kind === "unauthorized") return null;
   if (outcome.kind === "unavailable") {
@@ -387,9 +436,11 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
             const commentId = String(thread.comment.commentId);
             const resolved = thread.comment.resolvedAt !== undefined;
             const onLabel = anchorLabel(thread.comment.anchor, choices);
+            const agentState = canvasCommentAgentState(thread.comment, props.history ?? []);
             return (
               <li
                 className="canvas-comments__thread"
+                data-agent={agentState.kind}
                 data-outdated={onLabel === OUTDATED_ANCHOR_LABEL ? "true" : "false"}
                 data-resolved={resolved ? "true" : "false"}
                 key={commentId}
@@ -398,6 +449,10 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
                   <span>{onLabel}</span>
                   <span>{authorLabel(thread.comment)}</span>
                   {resolved ? <span>Resolved</span> : null}
+                  {agentState.kind === "sent" ? <span>Sent to agent</span> : null}
+                  {agentState.kind === "addressed" ? (
+                    <span>Addressed in v{agentState.sequence}</span>
+                  ) : null}
                 </p>
                 <p className="canvas-comments__body">{thread.comment.body}</p>
                 {thread.replies.map((reply) => (
@@ -447,6 +502,22 @@ export function CanvasCommentsPanel(props: CanvasCommentsPanelProps) {
                   >
                     Reply
                   </OctantButton>
+                  {/* A request already with the agent is not sent twice; once
+                      a revision answered it, the thread can go again. */}
+                  {resolved ||
+                  props.onSendToAgent === undefined ||
+                  agentState.kind === "sent" ? null : (
+                    <OctantButton
+                      aria-label={`Send comment on ${onLabel} to the agent`}
+                      disabled={working}
+                      onClick={() => void sendToAgent(thread, onLabel)}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                    >
+                      Send to agent
+                    </OctantButton>
+                  )}
                   {resolved ? null : (
                     <OctantButton
                       disabled={working}

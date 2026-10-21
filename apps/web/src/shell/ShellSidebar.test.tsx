@@ -1029,6 +1029,45 @@ describe("ShellSidebar", () => {
     expect(onExpand).toHaveBeenCalledOnce();
   });
 
+  it("stands the rail beside the open sidebar, which keeps only its header, Projects, and threads", async () => {
+    const user = userEvent.setup();
+    const actions = {
+      "new-code-thread": vi.fn(),
+      inbox: vi.fn(),
+      "thread-board": vi.fn(),
+      "pull-requests": vi.fn(),
+      projects: vi.fn(),
+    };
+    render(
+      <ShellSidebar
+        codeNavigation={{ actions }}
+        countTiles={{ running: 2, toReview: 0, doneToday: 1 }}
+        inboxCount={3}
+        onAddFolder={vi.fn()}
+        onOpenNavigator={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onSelectMode={vi.fn()}
+        projectSection={<nav aria-label="Projects">Project navigation</nav>}
+        railBeside={{}}
+        settings={defaultShellSettings()}
+        workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+      />,
+    );
+
+    const rail = screen.getByRole("complementary", { name: "Destinations" });
+    const sidebar = screen.getByRole("complementary", { name: "Octant sidebar" });
+    await user.click(within(rail).getByRole("button", { name: "Pull requests" }));
+    expect(actions["pull-requests"]).toHaveBeenCalledOnce();
+    expect(within(rail).getByRole("button", { name: "Inbox, 3" })).toBeInTheDocument();
+    // The rail does not repeat what the sidebar beside it already offers.
+    expect(within(rail).queryByRole("button", { name: "Show sidebar" })).toBeNull();
+    expect(within(rail).queryByRole("button", { name: "Code" })).toBeNull();
+    // And the sidebar does not repeat the rail's places and counts.
+    expect(within(sidebar).queryByRole("button", { name: "Pull requests" })).toBeNull();
+    expect(within(sidebar).queryByRole("button", { name: /^Inbox/ })).toBeNull();
+    expect(within(sidebar).getByRole("navigation", { name: "Projects" })).toBeInTheDocument();
+  });
+
   it("renders the rows in the customized order", () => {
     render(
       <ShellSidebar

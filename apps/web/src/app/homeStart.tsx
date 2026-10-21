@@ -12,7 +12,6 @@ import type { PaneId } from "@octant/contracts/shell";
 import { localHostDisplayName, type createLocalServerClient } from "@octant/client-runtime";
 import { useMemo } from "react";
 import { useRetainedRecord } from "../polling/useRetainedRecord";
-import type { useContinueCards } from "../code/useContinueCards";
 import { createCiFailuresCard } from "../home/CiFailuresCard";
 import { currentCodeProjectBranches } from "../home/ciFailures";
 import { createComputersCard } from "../home/ComputersCard";
@@ -26,21 +25,17 @@ import {
   type PullRequestCardRow,
 } from "../home/pullRequests";
 import { createPullRequestsCard } from "../home/PullRequestsCard";
-import { RunningTab } from "../home/RunningTab";
 import type { RemoteOpenMode, RemoteOpenOutcome } from "../home/runningServices";
 import { createRunningServicesCard } from "../home/RunningServicesCard";
-import { stopRunningRow } from "../home/stopRunningRow";
 import { createWorkingNowCard, type WorkingNowCardSource } from "../home/WorkingNowCard";
 import type { WorkingNowThread } from "../home/workingNow";
 import type { useHostFederationLifecycle } from "../host/useHostFederationLifecycle";
 import type { ThreadProviderIdentity } from "../shell/navigationModel";
 import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "../shell/contributionRegistry";
 import type { DraftThreadWorkspaceProps } from "../shell/DraftThreadWorkspace";
-import { reviewWaitingCount, runningThreadCount } from "../shell/runningNow";
 import type { useShellController } from "../shell/useShellController";
 import type { createLaunchedShellClients } from "./createLaunchedShellClients";
 import type { ShellActions } from "./shellActions";
-import type { ShellNavigationModel } from "./shellNavigationModel";
 
 type ShellController = ReturnType<typeof useShellController>;
 type HostFederation = NonNullable<ReturnType<typeof useHostFederationLifecycle>>;
@@ -51,9 +46,7 @@ export interface HomeStartInput {
     ShellActions,
     | "closeWorkspaceReaders"
     | "openDraftThread"
-    | "openHomeTerminal"
     | "openInbox"
-    | "openReview"
     | "openRunningService"
     | "openSidebarList"
     | "openSubagentRequest"
@@ -80,7 +73,6 @@ export interface HomeStartInput {
   readonly codeCheckouts: ReadonlyArray<CodeCheckoutIdentity>;
   readonly codeClient: CodeClient;
   readonly codeThreads: ReadonlyArray<CodeThread>;
-  readonly continueCards: ReturnType<typeof useContinueCards>;
   /** The sum of every mode's navigation revision: when a turn starts or ends. */
   readonly feedRevision: number;
   readonly githubPullRequestCapability: PullRequestCardCapability;
@@ -95,7 +87,6 @@ export interface HomeStartInput {
   /** A desktop window reads this computer; a browser window names its host. */
   readonly isDesktop: boolean;
   readonly loadHomePullRequests: ReturnType<typeof sharePullRequestRead>;
-  readonly navigation: ShellNavigationModel;
   readonly needsYouThreadProviders: ReadonlyMap<string, ThreadProviderIdentity>;
   readonly now: number;
   readonly openRunningServiceLive:
@@ -110,7 +101,6 @@ export interface HomeStartInput {
     | undefined;
   readonly serverUrl: string;
   readonly settings: ShellController["settings"];
-  readonly sidebarRunningCount: number;
   readonly workingNowBoardFacts: WorkingNowCardSource["boardFacts"];
   readonly workingNowHost: string | undefined;
   readonly workingNowModes: WorkingNowCardSource["modes"];
@@ -134,12 +124,10 @@ export function useHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["
 }
 
 /**
- * The start screen's cards and tabs for the active mode: Needs you, Working
- * now, Running services, Pull requests, CI failures and Computers, with the
- * Running tab above the composer. Work and Code share one shape, tiles then
- * the card area; Chat has no folder tiles. The card list is rebuilt on each
- * call and is cheap: each card's own rows are memoized from the inputs, which
- * keep their identity between renders.
+ * The start screen's cards for the active mode: Needs you, Working now,
+ * Running services, Pull requests, CI failures and Computers. The card list
+ * is rebuilt on each call and is cheap: each card's own rows are memoized from
+ * the inputs, which keep their identity between renders.
  */
 function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeStart"] {
   const {
@@ -152,7 +140,6 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     codeCheckouts,
     codeClient,
     codeThreads,
-    continueCards,
     feedRevision,
     githubPullRequestCapability,
     computerSnapshots,
@@ -160,7 +147,6 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     hostResourceClient,
     isDesktop,
     loadHomePullRequests,
-    navigation,
     needsYouThreadProviders,
     now,
     openRunningServiceLive,
@@ -170,7 +156,6 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
     runningServicesRemoteHost,
     serverUrl,
     settings,
-    sidebarRunningCount,
     workingNowBoardFacts,
     workingNowHost,
     workingNowModes,
@@ -183,7 +168,6 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
   } = input;
   // Before the shell has its settings and workspace there is no start screen to draw.
   if (settings === undefined || workspace === undefined) return undefined;
-  const { codeProjectThreads, workProjectThreads } = navigation;
   const computerLaunchHostId = isDesktop
     ? String(LOCAL_HOST_ID)
     : String(
@@ -369,49 +353,14 @@ function buildHomeStart(input: HomeStartInput): DraftThreadWorkspaceProps["homeS
       },
     }),
   ];
-  // The Running tab lists the card's own rows and shows the sidebar's own
-  // Running count, so the three never disagree.
-  const composerTabs = {
-    runningCount: sidebarRunningCount,
-    running: (
-      <RunningTab
-        onStop={(row) =>
-          stopRunningRow({ agentRunClient, chatClient, codeClient, workTurnClient }, row)
-        }
-        source={workingNowSource}
-      />
-    ),
-  };
   const homeStart: DraftThreadWorkspaceProps["homeStart"] =
-    activeMode === "chat"
+    activeMode === "chat" || activeMode === "code" || activeMode === "work"
       ? {
-          reviewCount: 0,
-          runningCount: 0,
           cards: homeCards,
-          composerTabs,
           cardCustomization: settings.homeCards,
           onCardCustomizationChange: (homeCardChoice) =>
             void actions.updateSettings({ homeCards: homeCardChoice }),
         }
-      : activeMode === "code" || activeMode === "work"
-        ? {
-            reviewCount: reviewWaitingCount(
-              activeMode === "code" ? codeProjectThreads : workProjectThreads,
-            ),
-            runningCount:
-              activeMode === "code"
-                ? continueCards.kind === "ready"
-                  ? continueCards.runningTotal
-                  : 0
-                : runningThreadCount(workProjectThreads),
-            onReview: actions.openReview,
-            cards: homeCards,
-            composerTabs,
-            cardCustomization: settings.homeCards,
-            onCardCustomizationChange: (homeCardChoice) =>
-              void actions.updateSettings({ homeCards: homeCardChoice }),
-            ...(activeMode === "code" ? { onOpenTerminal: actions.openHomeTerminal } : {}),
-          }
-        : undefined;
+      : undefined;
   return homeStart;
 }

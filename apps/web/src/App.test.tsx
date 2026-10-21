@@ -115,10 +115,55 @@ afterEach(() => {
   }
 });
 
+/** Status is the default sidebar arrangement; tests that read the Project tree choose it. */
+function chooseProjectTree(modes: ReadonlyArray<string> = ["chat", "work", "code"]): void {
+  for (const mode of modes) {
+    window.localStorage.setItem(`octant.sidebar.activity-view.v1.${mode}`, "off");
+  }
+}
+
 /** Tests that need a visible dock ask for it through the ordinary shell action. */
 async function showRightUtilityDock(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   if (screen.queryByRole("complementary", { name: "Right Utility Dock" }) !== null) return;
   await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
+}
+
+/** A tool the dock's title band offers by face before any tool is open. */
+async function openQuickDockTool(
+  user: ReturnType<typeof userEvent.setup>,
+  dock: HTMLElement,
+  tool: string,
+): Promise<void> {
+  const quickTools = within(dock).getByRole("group", { name: "Quick tools" });
+  await user.click(within(quickTools).getByRole("button", { name: `Open ${tool}` }));
+}
+
+/** Opens the dock's Add tool menu; it hangs from the plus in a portal outside the dock. */
+async function openAddToolMenu(
+  user: ReturnType<typeof userEvent.setup>,
+  dock: HTMLElement,
+): Promise<HTMLElement> {
+  await user.click(within(dock).getByRole("button", { name: "Add tool" }));
+  return screen.findByRole("menu", { name: "Add tool" });
+}
+
+/** A tool with no quick button is opened from the dock's Add tool menu. */
+async function openDockToolFromLauncher(
+  user: ReturnType<typeof userEvent.setup>,
+  dock: HTMLElement,
+  tool: string,
+): Promise<void> {
+  const menu = await openAddToolMenu(user, dock);
+  await user.click(within(menu).getByRole("menuitem", { name: tool }));
+}
+
+/** Code with nothing open: the Code welcome tab, which renders Code Home. */
+function codeHomeShellBootstrap(): ShellBootstrap {
+  const value = bootstrap();
+  return {
+    ...value,
+    workspace: applyWorkspaceOperation(value.workspace, { kind: "set-active-mode", mode: "code" }),
+  };
 }
 
 function navigatorAssistantClient(
@@ -963,6 +1008,7 @@ describe("App", () => {
   });
 
   it("shows the Chat add-project control while ready before any threads exist", async () => {
+    chooseProjectTree();
     render(
       <App
         chatClient={chats()}
@@ -1819,6 +1865,7 @@ describe("App", () => {
   });
 
   it("opens a newly created chat while its first provider turn is still pending", async () => {
+    chooseProjectTree();
     const user = userEvent.setup();
     const chatApi = chats();
     const shellApi = client(chatShellBootstrap());
@@ -2566,6 +2613,7 @@ describe("App", () => {
   });
 
   it("hides and restores a sidebar thread-row property through Sidebar settings", async () => {
+    chooseProjectTree();
     const user = userEvent.setup();
     const shellApi = client();
     const codeApi = codes();
@@ -3244,14 +3292,14 @@ describe("App", () => {
     expect(within(dock).queryByRole("tab", { name: "Project memory" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("tab", { name: "Navigator" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("tab", { name: "Thread tools" })).not.toBeInTheDocument();
-    expect(within(dock).getByRole("button", { name: "Files" })).toBeVisible();
+    expect(within(dock).getByRole("button", { name: "Open Files" })).toBeVisible();
     expect(within(dock).queryByRole("button", { name: "Project memory" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("button", { name: "Navigator" })).not.toBeInTheDocument();
-    expect(within(dock).queryByRole("button", { name: "Context" })).not.toBeInTheDocument();
     expect(within(dock).queryByRole("button", { name: "Thread tools" })).not.toBeInTheDocument();
-    expect(within(dock).queryByRole("button", { name: "Plan" })).not.toBeInTheDocument();
-    expect(within(dock).queryByRole("button", { name: "Delivery" })).not.toBeInTheDocument();
-    expect(within(dock).getByRole("button", { name: "Agents" })).toBeVisible();
+    const addTool = await openAddToolMenu(user, dock);
+    expect(within(addTool).queryByRole("menuitem", { name: "Plan" })).not.toBeInTheDocument();
+    expect(within(addTool).queryByRole("menuitem", { name: "Delivery" })).not.toBeInTheDocument();
+    expect(within(addTool).getByRole("menuitem", { name: "Agents" })).toBeVisible();
   });
 
   it.each([
@@ -3336,7 +3384,7 @@ describe("App", () => {
       } else {
         await showRightUtilityDock(user);
         const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
-        await user.click(within(dock).getByRole("button", { name: "Agents" }));
+        await openDockToolFromLauncher(user, dock, "Agents");
         await user.click(await within(dock).findByRole("button", { name: /Inspect parser/ }));
       }
 
@@ -3606,8 +3654,7 @@ describe("App", () => {
     ).toBeVisible();
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(await within(dock).findByRole("button", { name: "Plan" })).toBeVisible();
-    await user.click(within(dock).getByRole("button", { name: "Plan" }));
+    await openDockToolFromLauncher(user, dock, "Plan");
     expect(await within(dock).findByText("Land the replay fix")).toBeVisible();
     expect(within(dock).queryByRole("button", { name: "Propose plan" })).not.toBeInTheDocument();
   });
@@ -3657,7 +3704,8 @@ describe("App", () => {
     ).toBeVisible();
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(await within(dock).findByRole("button", { name: "Delivery" })).toBeVisible();
+    const addTool = await openAddToolMenu(user, dock);
+    expect(await within(addTool).findByRole("menuitem", { name: "Delivery" })).toBeVisible();
     expect(within(dock).queryByRole("button", { name: "Publish" })).not.toBeInTheDocument();
   });
 
@@ -3797,52 +3845,13 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "New task" }));
 
     expect(await screen.findByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
-    expect(
-      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
   });
 
-  it("shows the sidebar's own Running count on the start screen's Running tab and lists that thread there", async () => {
+  it("lists the threads to continue on Code Home and leaves them off a new task", async () => {
     const user = userEvent.setup();
     const codeApi = codes();
-    const listed = await codeApi.navigation();
-    vi.mocked(codeApi.navigation).mockResolvedValue({
-      ...listed,
-      runtime: [{ threadId: codeThreadId, executing: true }],
-    } as never);
-    render(
-      <App
-        codeClient={codeApi}
-        isNarrow={false}
-        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
-        projectClient={projects({ ...projectBootstrap(), availability: [] })}
-        projectWindowCapability={projectWindowCapability}
-        shellClient={client(codeShellBootstrap())}
-      />,
-    );
-
-    await user.click(await screen.findByRole("button", { name: "New task" }));
-    const tile = await screen.findByRole("button", { name: "Running, 1" });
-    const tab = await screen.findByRole("tab", { name: "Running 1" });
-    expect(tile).toBeVisible();
-
-    await user.click(tab);
-    const list = await screen.findByRole("list", { name: "Running now" });
-    expect(within(list).getByText("Controller foundation")).toBeVisible();
-  });
-
-  it("keeps the threads to continue on screen when a new task starts over", async () => {
-    const user = userEvent.setup();
-    const codeApi = codes();
-    // Starting over remounts the draft to clear the composer. A second read
-    // that has not landed stands in for the frame the Continue section used to
-    // spend empty: the threads it already showed belong to the window, so they
-    // have to survive the remount whether or not a fresh read answers.
-    const laterRead = deferred<CodeBoardView>();
-    let reads = 0;
     vi.mocked(codeApi.queryBoard).mockImplementation(async () => {
-      reads += 1;
-      if (reads > 1) return await laterRead.promise;
       return {
         version: 1,
         query: { version: 1 },
@@ -3871,21 +3880,20 @@ describe("App", () => {
         launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
         projectClient={projects({ ...projectBootstrap(), availability: [] })}
         projectWindowCapability={projectWindowCapability}
-        shellClient={client(codeShellBootstrap())}
+        shellClient={client(codeHomeShellBootstrap())}
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "New task" }));
     const shown = await screen.findByRole("region", { name: "Continue" });
     expect(within(shown).getByText("Ai slop callouts")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "New task" }));
 
-    const kept = screen.getByRole("region", { name: "Continue" });
-    expect(within(kept).getByText("Ai slop callouts")).toBeVisible();
     expect(
-      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+      await screen.findByRole("heading", { name: "What are we building today?" }),
     ).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Continue" })).toBeNull();
+    expect(screen.queryByText("Ai slop callouts")).toBeNull();
   });
 
   it("keeps the draft composer's chosen Project after a visit to Settings", async () => {
@@ -4049,11 +4057,10 @@ describe("App", () => {
           launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
           projectClient={projects({ ...projectBootstrap(), availability: [] })}
           projectWindowCapability={projectWindowCapability}
-          shellClient={client(codeShellBootstrap())}
+          shellClient={client(codeHomeShellBootstrap())}
         />,
       );
 
-      await user.click(await screen.findByRole("button", { name: "New task" }));
       const ciFailures = await screen.findByRole("region", { name: "CI failures" });
       await user.click(
         await within(ciFailures).findByRole("button", {
@@ -4084,6 +4091,7 @@ describe("App", () => {
         expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(""),
       );
       expect(screen.queryByText("feature/handed-by-start-a-fix")).toBeNull();
+      expect(screen.queryByRole("region", { name: "CI failures" })).toBeNull();
     },
   );
 
@@ -4159,10 +4167,16 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    expect(screen.queryByRole("button", { name: "Open Environment" })).not.toBeInTheDocument();
+    // Environment opens from the dock's own title band; nothing outside the
+    // dock offers a second way in.
+    expect(
+      screen
+        .queryAllByRole("button", { name: "Open Environment" })
+        .filter((button) => button.closest('[aria-label="Right Utility Dock"]') === null),
+    ).toHaveLength(0);
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await user.click(within(dock).getByRole("button", { name: "Environment" }));
+    await openQuickDockTool(user, dock, "Environment");
     expect(within(dock).getByRole("tab", { name: "Environment" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -5239,7 +5253,7 @@ describe("App", () => {
 
     await showRightUtilityDock(user);
     let dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await user.click(within(dock).getByRole("button", { name: "Browser" }));
+    await openQuickDockTool(user, dock, "Browser");
     expect(within(dock).getByRole("tab", { name: "Browser" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -5258,9 +5272,11 @@ describe("App", () => {
     expect(
       screen.getByRole("region", { name: "Workspace pane: Controller foundation" }),
     ).not.toHaveAttribute("aria-current");
-    await waitFor(() => expect(within(dock).getByText("Tools")).toBeVisible());
+    await waitFor(() =>
+      expect(within(dock).getByRole("group", { name: "Quick tools" })).toBeVisible(),
+    );
     expect(within(dock).queryByRole("tab", { name: "Browser" })).not.toBeInTheDocument();
-    await user.click(within(dock).getByRole("button", { name: "Terminal" }));
+    await openQuickDockTool(user, dock, "Terminal");
     dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     expect(within(dock).getByRole("tab", { name: "Terminal" })).toHaveAttribute(
       "aria-selected",
@@ -5510,7 +5526,7 @@ describe("App", () => {
 
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await user.click(within(dock).getByRole("button", { name: "Pull requests" }));
+    await openDockToolFromLauncher(user, dock, "Pull requests");
     expect(await within(dock).findByText("Inspect dock pull request")).toBeVisible();
 
     await user.click(within(dock).getByRole("button", { name: /Inspect dock pull request/ }));
@@ -5706,6 +5722,161 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Back to workspace" })).not.toBeInTheDocument();
   });
 
+  it.each(["select", "add", "bottom"])(
+    "starts a restored dock terminal only after an explicit %s gesture",
+    async (gesture) => {
+      window.localStorage.clear();
+      const user = userEvent.setup();
+      const codeApi = codes();
+      vi.mocked(codeApi.executeOperation).mockImplementation(async (command) => ({
+        kind: "operation-failed",
+        operationId: command.operationId,
+        failure: { category: "unavailable", message: "Terminal is unavailable." },
+      }));
+      writeUtilityDockPresentation(globalThis, String(windowId), {
+        open: true,
+        threads: new Map([
+          [
+            threadUtilityDockKey("code", String(codeThreadId)),
+            {
+              tabs: [{ id: "terminal", surface: "terminal" }],
+              active: "terminal",
+            },
+          ],
+        ]),
+      });
+      render(
+        <App
+          codeClient={codeApi}
+          contextClient={contextClient()}
+          isNarrow={false}
+          launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+          projectClient={projects()}
+          projectWindowCapability={projectWindowCapability}
+          providerClient={providersWithToolModel()}
+          shellClient={client(codeShellBootstrap())}
+        />,
+      );
+      const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+      expect(await within(dock).findByRole("button", { name: "Start terminal" })).toBeVisible();
+      expect(
+        vi
+          .mocked(codeApi.executeOperation)
+          .mock.calls.some(([command]) => command.kind === "start-terminal"),
+      ).toBe(false);
+      if (gesture === "bottom") {
+        await user.click(screen.getByRole("button", { name: "Open bottom panel" }));
+      } else if (gesture === "select") {
+        await user.click(within(dock).getByRole("tab", { name: "Terminal" }));
+      } else {
+        await user.click(within(dock).getByRole("button", { name: "Add tool" }));
+        await user.click(
+          within(await screen.findByRole("menu", { name: "Add tool" })).getByRole("menuitem", {
+            name: "Terminal",
+          }),
+        );
+      }
+      await waitFor(() =>
+        expect(
+          vi
+            .mocked(codeApi.executeOperation)
+            .mock.calls.filter(([command]) => command.kind === "start-terminal"),
+        ).toHaveLength(1),
+      );
+    },
+  );
+
+  it("retains terminal selection across thread switches without activating another thread", async () => {
+    window.localStorage.clear();
+    const user = userEvent.setup();
+    const codeApi = codes();
+    const initial = codeShellBootstrap();
+    const layout = initial.workspace.layouts.code;
+    if (layout.kind !== "pane") throw new Error("Expected Code pane");
+    const otherId = decodeCodeThreadId("00000000-0000-4000-8000-000000000807");
+    const original = await codeApi.thread(codeThreadId);
+    const other = { ...original.thread, id: otherId, title: "Another Code thread" };
+    vi.mocked(codeApi.thread).mockImplementation(async (id) => ({
+      ...original,
+      thread: String(id) === String(otherId) ? other : original.thread,
+    }));
+    const workspace = applyWorkspaceOperation(
+      initial.workspace,
+      decodeWorkspaceOperation({
+        kind: "split-pane",
+        mode: "code",
+        targetPaneId: layout.paneId,
+        surface: {
+          kind: "code-overview",
+          mode: "code",
+          id: "00000000-0000-4000-8000-000000000808",
+          threadId: otherId,
+          title: other.title,
+        },
+        splitNodeId: "00000000-0000-4000-8000-000000000809",
+        newPaneNodeId: "00000000-0000-4000-8000-000000000810",
+        newPaneId: "00000000-0000-4000-8000-000000000811",
+        orientation: "horizontal",
+        placement: "after",
+        ratio: 0.5,
+      }),
+    );
+    writeUtilityDockPresentation(globalThis, String(windowId), {
+      open: true,
+      threads: new Map(
+        [codeThreadId, otherId].map((id) => [
+          threadUtilityDockKey("code", String(id)),
+          { tabs: [{ id: "terminal", surface: "terminal" }], active: "terminal" },
+        ]),
+      ),
+    });
+    const pendingAttach = deferred<void>();
+    let holdAttach = true;
+    vi.mocked(codeApi.executeOperation).mockImplementation(async (command) => {
+      if (
+        command.kind === "attach-terminal" &&
+        String(command.threadId) === String(codeThreadId) &&
+        holdAttach
+      ) {
+        await pendingAttach.promise;
+      }
+      return {
+        kind: "operation-failed",
+        operationId: command.operationId,
+        failure: { category: "unavailable", message: "Terminal is unavailable." },
+      };
+    });
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client({ ...initial, workspace, workspaceVersion: workspace.version })}
+      />,
+    );
+    const first = await screen.findByRole("region", {
+      name: "Workspace pane: Controller foundation",
+    });
+    const second = screen.getByRole("region", { name: "Workspace pane: Another Code thread" });
+    await user.click(first);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    await user.click(within(dock).getByRole("tab", { name: "Terminal" }));
+    await user.click(second);
+    expect(await within(dock).findByRole("button", { name: "Start terminal" })).toBeVisible();
+    const starts = () =>
+      vi.mocked(codeApi.executeOperation).mock.calls.filter(([c]) => c.kind === "start-terminal");
+    expect(starts()).toHaveLength(0);
+    holdAttach = false;
+    await act(async () => pendingAttach.resolve());
+    await user.click(first);
+    await waitFor(() => expect(starts()).toHaveLength(1));
+    expect(starts()[0]?.[0].threadId).toBe(codeThreadId);
+  });
+
   it("restores a thread's dock tools after the window reloads", async () => {
     writeUtilityDockPresentation(globalThis, String(windowId), {
       open: true,
@@ -5763,7 +5934,7 @@ describe("App", () => {
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await user.click(within(dock).getByRole("button", { name: "Browser" }));
+    await openQuickDockTool(user, dock, "Browser");
     await user.click(within(dock).getByRole("button", { name: "Add tool" }));
     // The menu hangs from the plus in a portal, outside the dock's own region.
     const addTool = await screen.findByRole("menu", { name: "Add tool" });
@@ -5805,7 +5976,7 @@ describe("App", () => {
     // a second one is a second shell, so the dock keeps offering it.
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    expect(within(dock).getByRole("button", { name: "Terminal" })).toBeVisible();
+    expect(within(dock).getByRole("button", { name: "Open Terminal" })).toBeVisible();
 
     await user.click(within(panel).getByRole("button", { name: "Add tool" }));
     await user.click(
@@ -5922,7 +6093,7 @@ describe("App", () => {
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
-    await user.click(within(dock).getByRole("button", { name: "Terminal" }));
+    await openQuickDockTool(user, dock, "Terminal");
     expect(within(dock).getByRole("tab", { name: "Terminal" })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -6225,11 +6396,10 @@ describe("App", () => {
       name: "Workspace pane: Controller foundation",
     });
     await showRightUtilityDock(user);
-    await user.click(
-      within(await screen.findByRole("complementary", { name: "Right Utility Dock" })).getByRole(
-        "button",
-        { name: "Environment" },
-      ),
+    await openQuickDockTool(
+      user,
+      await screen.findByRole("complementary", { name: "Right Utility Dock" }),
+      "Environment",
     );
     await user.click(await screen.findByRole("button", { name: "View changes" }));
 
@@ -6269,7 +6439,7 @@ describe("App", () => {
     await user.click(overflow);
     await showRightUtilityDock(user);
     const drawer = await screen.findByRole("dialog", { name: "Right sidebar" });
-    await user.click(within(drawer).getByRole("button", { name: "Review" }));
+    await openDockToolFromLauncher(user, drawer, "Review");
     expect(await screen.findByRole("dialog", { name: "Review" })).toBeVisible();
     expect(screen.queryByRole("complementary", { name: "Right Utility Dock" })).toBeNull();
     await user.keyboard("{Escape}");

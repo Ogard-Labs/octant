@@ -72,16 +72,16 @@
   --octant-success-border: color-mix(in srgb, var(--octant-success-text) 55%, transparent);
   --octant-card: var(--octant-floating);
   --octant-tray: color-mix(in srgb, var(--octant-control) 75%, var(--octant-workspace));
-  --octant-text-primary: #f0f0f0;
-  --octant-text-secondary: #a9a9a9;
+  --octant-text-primary: #f5f5f7;
+  --octant-text-secondary: #bcbcc2;
   --octant-text-muted: #949494;
   --octant-text-primary-high-contrast: #ffffff;
   --octant-text-secondary-high-contrast: #c9c8c3;
   --octant-text-muted-high-contrast: #a5a4a0;
   --octant-primary-foreground: #171717;
-  --octant-accent: #f0f0f0;
+  --octant-accent: #f5f5f7;
   --octant-accent-foreground: #171717;
-  --octant-accent-text: #f0f0f0;
+  --octant-accent-text: #f5f5f7;
   --octant-divider-strong: #808080;
   --octant-destructive: #e17d96;
   --octant-shadow-hairline: 0 0 0 1px var(--octant-border);
@@ -118,7 +118,7 @@
   --octant-success-text: #6bb299;
   --octant-warning-surface: #2b2b2b;
   --octant-warning-border: #8a8a8a;
-  --octant-warning-text: #f0f0f0;
+  --octant-warning-text: #f5f5f7;
   --octant-danger-text: #e17d96;
   --octant-addition-text: #6bb299;
   --octant-deletion-text: #e17d96;
@@ -132,8 +132,7 @@
   --octant-palette-pink: #f4809a;
   /* The same faces the settings default to, so the first paint before
      settings load is not a different font that swaps a moment later. */
-  --octant-ui-font-family:
-    "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --octant-ui-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --octant-ui-font-size: 13px;
   --octant-ui-font-weight: 400;
   --octant-editor-font-family:
@@ -175,22 +174,22 @@ html[data-octant-theme-mode="light"] {
   --octant-border-subtle: #e0e0de;
   --octant-border-strong: #bdbdbb;
   --octant-divider-strong: #6f6f6d;
-  --octant-text-primary: #1b1b1b;
-  --octant-text-secondary: #4f4f4f;
+  --octant-text-primary: #141414;
+  --octant-text-secondary: #45454a;
   --octant-text-muted: #666666;
   --octant-primary-foreground: #ffffff;
   --octant-focus-ring: #1f6f96;
   --octant-focus: #1f6f96;
   --octant-selection: #ebebea;
   --octant-surface-selected: #ebebea;
-  --octant-accent: #1b1b1b;
+  --octant-accent: #141414;
   --octant-accent-foreground: #ffffff;
-  --octant-accent-text: #1b1b1b;
+  --octant-accent-text: #141414;
   --octant-success-surface: #bfd8cc;
   --octant-success-text: #0f6144;
   --octant-warning-surface: #f0f0ef;
   --octant-warning-border: #6e6e6e;
-  --octant-warning-text: #1b1b1b;
+  --octant-warning-text: #141414;
   --octant-danger-text: #a8102f;
   --octant-destructive: #a8102f;
   --octant-addition-text: #0f6144;
@@ -1062,6 +1061,12 @@ h6 {
   font-variant-numeric: tabular-nums;
 }
 
+/* A Status heading is plain text, not the fold's flex row, so its count takes
+   the fold's glyph gap itself. */
+.sidebar-section > .activity-nav__fold-count {
+  margin-inline-start: var(--oct-space-1);
+}
+
 .activity-nav__fold > svg {
   transition: transform var(--oct-motion-fast) var(--oct-ease-standard);
 }
@@ -1606,58 +1611,34 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   white-space: nowrap;
 }
 
-/* The Project the thread works in. Chips are short, so the title gives up
-   room first (it shrinks eight times as fast); a chip truncates only once the
-   title is mostly gone, or past its own cap. The title has no fixed minimum:
-   a 12ch floor clipped the Running pill off a 180px pane, since the grip
-   hides what overflows it. The
-   cap is in ch, not a share of the handle: the handle shrink-wraps its
-   content, so 30% of it clipped "octant-qa-code-repo" to "octant-qa-code-re…"
-   beside a short title with most of the header empty. Shrinking the chips
-   first, or in proportion to a long title, left "octant…" and "m…", two chips
-   that no longer named anything. */
+/* The breadcrumb's first step: the Project the pane runs in, as plain meta
+   text before a slash and the title. The title gives up room first (it
+   shrinks eight times as fast), so the Project truncates only once the title
+   is mostly gone or past its own cap. The cap is in ch because the handle
+   shrink-wraps its content: a share of it clipped short Project names. */
 .workspace-pane__context {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 32ch;
   overflow: hidden;
-  padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
-  border: 1px solid var(--oct-border-soft);
-  border-radius: var(--oct-radius-pill);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-regular);
-  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* The branch is its own chip beside the Project's, in the identifier face so
-   a branch name never reads as prose. It keeps its width like the Project
-   chip, under the same title-first shrinking and a cap of its own. */
-.workspace-pane__branch {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 28ch;
-  overflow: hidden;
-  padding: 0 var(--oct-space-2);
+.workspace-pane__crumb {
+  flex: none;
   color: var(--oct-meta);
-  border: 1px solid var(--oct-border-soft);
-  border-radius: var(--oct-radius-pill);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-regular);
-  line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--oct-text-sm);
 }
 
-/* A phone header is about 340px wide: the two chips kept their widths and
-   left a thread title of "Reply …". The title is what names the pane, and the
-   Project and branch are still shown by the composer's context bar below. */
+/* A phone header is about 340px wide, and the title is what names the pane;
+   the composer's strip still names the Project. */
 @media (max-width: 680px) {
   .workspace-pane__context,
-  .workspace-pane__branch {
+  .workspace-pane__crumb {
     display: none;
   }
 }
@@ -3481,6 +3462,57 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding-inline: var(--oct-space-3);
 }
 
+/* A state that is the whole window: a large dotted mark in the primary ink,
+   a centred title, one line under it, and the way back as a text link in the
+   accent ink. It reads as the window speaking, not as a panel's note, so it
+   has none of the compact state's columns. */
+.shell-state.shell-state--page {
+  display: grid;
+  width: min(100% - 40px, 440px);
+  max-width: 440px;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: var(--oct-space-3);
+  margin: auto;
+  padding: var(--oct-space-6) 0;
+  text-align: center;
+}
+
+.shell-state__mark {
+  width: 96px;
+  height: 96px;
+  margin-bottom: var(--oct-space-4);
+  color: var(--octant-text-primary);
+}
+
+.shell-state__page-title {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-xl);
+  font-weight: var(--oct-weight-strong);
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.shell-state__page-message {
+  max-width: 44ch;
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+  line-height: 1.5;
+}
+
+.shell-state__page-action {
+  height: auto;
+  margin-top: var(--oct-space-2);
+}
+
+/* The link variant paints nothing of its own; the label carries the accent. */
+.shell-state__page-action-label {
+  color: var(--octant-accent-text);
+  font-size: var(--oct-text-sm);
+}
+
 /* Loading is not an object on the page; it is the page not being there yet.
    The raised card with an icon well, a title, and a sentence read as a
    finished empty state ("Loading pull requests / Reading the last authorized
@@ -4785,6 +4817,12 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .composer-model-picker__trigger-label {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-model-picker__trigger-level {
+  flex: 0 0 auto;
+  color: var(--octant-text-muted);
   white-space: nowrap;
 }
 

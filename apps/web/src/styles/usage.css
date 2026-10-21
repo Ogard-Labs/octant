@@ -496,3 +496,117 @@ p.provider-limits__warning {
   background: var(--oct-accent);
   border-radius: var(--oct-radius-pill);
 }
+
+/* Plan usage rings at the foot of the icon rail. Each ring takes its
+   provider's identity colour (0129: colour names identity), and a window near
+   or at its limit takes the danger ink so a spent week reads at a glance. */
+.rail-usage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: var(--oct-space-1);
+}
+
+.rail-usage__ring {
+  display: block;
+  width: auto;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+}
+
+.rail-usage__face {
+  position: relative;
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--oct-radius-sm);
+}
+
+.rail-usage__ring:hover .rail-usage__face,
+.rail-usage__ring:focus-visible .rail-usage__face {
+  background: color-mix(in oklab, var(--oct-fg) 7%, transparent);
+}
+
+.rail-usage__face > svg {
+  width: 28px;
+  height: 28px;
+  transform: rotate(-90deg);
+}
+
+.rail-usage__track,
+.rail-usage__arc {
+  fill: none;
+  stroke-width: 2;
+}
+
+.rail-usage__track {
+  stroke: color-mix(in oklab, var(--oct-fg) 14%, transparent);
+}
+
+.rail-usage__arc {
+  stroke: var(--rail-usage-color, var(--oct-fg));
+  stroke-linecap: round;
+}
+
+.rail-usage__arc--inner {
+  opacity: 0.7;
+}
+
+.rail-usage__arc:is([data-level="near"], [data-level="spent"]) {
+  stroke: var(--oct-danger);
+}
+
+.rail-usage__face > .rail-usage__glyph {
+  position: absolute;
+}
+
+.rail-usage__card {
+  display: grid;
+  min-width: 232px;
+  gap: var(--oct-space-3);
+}
+
+.rail-usage__card-title {
+  margin: 0;
+  font-weight: var(--oct-weight-strong);
+}
+
+.rail-usage__window {
+  display: grid;
+  gap: var(--oct-space-1);
+}
+
+.rail-usage__window-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--oct-space-3);
+}
+
+.rail-usage__left {
+  color: var(--oct-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.rail-usage__bar {
+  display: block;
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--oct-fg) 14%, transparent);
+}
+
+.rail-usage__bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--oct-fg);
+}
+
+.rail-usage__window:is([data-level="near"], [data-level="spent"]) .rail-usage__bar > span {
+  background: var(--oct-danger);
+}

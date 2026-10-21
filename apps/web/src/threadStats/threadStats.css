@@ -1,5 +1,5 @@
-/* The quiet stats line under a thread's composer. Meta ink on the tray, the
-   same step as the context strip above it, no hue on any figure: the numbers
+/* The quiet stats line above a thread's composer. Meta ink on the page, the
+   same step as the context strip beside it, no hue on any figure: the numbers
    are read, not scanned for a colour. It wraps rather than scrolls so every
    figure stays readable at phone width. */
 .thread-stats {

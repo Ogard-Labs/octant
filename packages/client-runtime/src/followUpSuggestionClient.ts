@@ -1,5 +1,6 @@
 import {
   type ActivateNativeHarnessFollowUp,
+  FollowUpThreadLineage,
   NativeHarnessFollowUpActivationResult,
   NativeHarnessFollowUpPreview,
   ThreadFollowUpSuggestions,
@@ -25,6 +26,8 @@ export interface FollowUpSuggestionClient {
     activation: ActivateNativeHarnessFollowUp,
     signal?: AbortSignal,
   ): Promise<NativeHarnessFollowUpActivationResult>;
+  /** Which thread each started follow-up came from, for the threads this window may read. */
+  lineage(signal?: AbortSignal): Promise<FollowUpThreadLineage>;
 }
 
 export class FollowUpSuggestionClientFailure extends Error {
@@ -62,6 +65,14 @@ export function createFollowUpSuggestionClient(
     });
 
   return {
+    async lineage(signal) {
+      const body = await send(fetch, url("lineage"), {
+        method: "GET",
+        headers,
+        ...(signal === undefined ? {} : { signal }),
+      });
+      return decodeHostAnswer(FollowUpThreadLineage)(body);
+    },
     async suggestions(threadId, signal) {
       const body = await send(fetch, url(threadId), {
         method: "GET",

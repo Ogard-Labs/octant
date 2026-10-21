@@ -5,8 +5,11 @@ import { loadAgentPluginDirectory, localPluginSourceRefForPath } from "./agentPl
 import type { AgentPluginPackageInput } from "./agentPluginIngestion";
 import type { ExtensionArchiveEntry } from "./packageInspector";
 
+/** The source kinds a folder registry may hand out: a folder the person picked, or one the host wrote for a server they added. */
+export type LocalPluginFolderSourceKind = "local-folder" | "user-added";
+
 export interface RegisteredLocalPluginFolder {
-  readonly source: Extract<ExtensionSource, { readonly kind: "local-folder" }>;
+  readonly source: Extract<ExtensionSource, { readonly kind: LocalPluginFolderSourceKind }>;
   readonly absolutePath: string;
   readonly packageInput: AgentPluginPackageInput;
 }
@@ -27,17 +30,21 @@ export class LocalPluginFolderRegistry {
   readonly #appVersion: string;
   readonly #platform: NodeJS.Platform;
   readonly #statePath: string | undefined;
+  readonly #sourceKind: LocalPluginFolderSourceKind;
 
   constructor(
     options: {
       readonly appVersion?: string;
       readonly platform?: NodeJS.Platform;
       readonly statePath?: string;
+      /** The source kind every folder here is registered under; local-folder unless told otherwise. */
+      readonly sourceKind?: LocalPluginFolderSourceKind;
     } = {},
   ) {
     this.#appVersion = options.appVersion ?? "1.0.0";
     this.#platform = options.platform ?? process.platform;
     this.#statePath = options.statePath;
+    this.#sourceKind = options.sourceKind ?? "local-folder";
   }
 
   get(sourceRef: string): RegisteredLocalPluginFolder | undefined {
@@ -89,9 +96,9 @@ export class LocalPluginFolderRegistry {
     const loaded = await loadAgentPluginDirectory(absolutePath);
     const sourceRef = localPluginSourceRefForPath(loaded.pluginRoot);
     const source = {
-      kind: "local-folder",
+      kind: this.#sourceKind,
       sourceRef,
-    } as Extract<ExtensionSource, { readonly kind: "local-folder" }>;
+    } as Extract<ExtensionSource, { readonly kind: LocalPluginFolderSourceKind }>;
     const entries: ExtensionArchiveEntry[] = loaded.entries.map((entry) => ({
       path: entry.path,
       kind: entry.kind === "directory" ? "directory" : "file",
@@ -115,6 +122,12 @@ export class LocalPluginFolderRegistry {
       await this.#persist();
     }
     return registered;
+  }
+
+  /** Forgets a folder; the caller removes what is on disk. */
+  async unregister(sourceRef: string): Promise<void> {
+    if (!this.#folders.delete(sourceRef)) return;
+    await this.#persist();
   }
 
   async #persist(): Promise<void> {

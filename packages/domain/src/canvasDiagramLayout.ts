@@ -4,6 +4,7 @@ import {
   type CanvasDiagramBlock,
   type CanvasDiagramEdgeStyle,
   type CanvasDiagramFlow,
+  type CanvasDiagramNodeIcon,
   type CanvasDiagramTone,
 } from "@octant/contracts/canvas";
 
@@ -40,6 +41,9 @@ export interface CanvasDiagramNodeBox {
   readonly nodeId: string;
   readonly label: string;
   readonly role?: string;
+  readonly icon?: CanvasDiagramNodeIcon;
+  /** The full subtitle; draw `canvasDiagramNodeContent(node).detail`, which fits the box. */
+  readonly detail?: string;
   readonly shape: CanvasDiagramNodeShape;
   readonly x: number;
   readonly y: number;
@@ -72,6 +76,10 @@ export interface CanvasDiagramGroupBox {
   readonly groupId: string;
   readonly label: string;
   readonly tone?: CanvasDiagramTone;
+  /** The group this one sits inside, when that group is drawn too. */
+  readonly parentGroupId?: string;
+  /** 1 for a top-level group, 2 for a group inside it, and so on. */
+  readonly depth: number;
   readonly x: number;
   readonly y: number;
   readonly width: number;
@@ -130,51 +138,270 @@ function rankNodes(block: CanvasDiagramBlock): Map<string, number> {
 }
 
 /**
+ * The groups as a forest, parents before their children, each group's
+ * children in declaration order. An unknown parent makes a group top-level and
+ * a cycle is cut at its first group in declaration order: the policy refuses
+ * both, but a layout is a pure reading and must not lose a group to bad data.
+ */
+function groupForest(block: CanvasDiagramBlock): {
+  readonly preorder: ReadonlyArray<string>;
+  readonly parentOf: ReadonlyMap<string, string>;
+  readonly depthOf: ReadonlyMap<string, number>;
+} {
+  const groups = (block.groups ?? []).map((group) => String(group.groupId));
+  const known = new Set(groups);
+  const parentOf = new Map<string, string>();
+  const children = new Map<string, string[]>();
+  for (const group of block.groups ?? []) {
+    const id = String(group.groupId);
+    const parent = group.parentGroupId === undefined ? undefined : String(group.parentGroupId);
+    if (parent === undefined || parent === id || !known.has(parent)) continue;
+    parentOf.set(id, parent);
+    children.set(parent, [...(children.get(parent) ?? []), id]);
+  }
+  const preorder: string[] = [];
+  const depthOf = new Map<string, number>();
+  const visit = (id: string, depth: number): void => {
+    if (depthOf.has(id)) return;
+    depthOf.set(id, depth);
+    preorder.push(id);
+    for (const child of children.get(id) ?? []) visit(child, depth + 1);
+  };
+  for (const id of groups) if (!parentOf.has(id)) visit(id, 1);
+  for (const id of groups) {
+    if (depthOf.has(id)) continue;
+    parentOf.delete(id);
+    visit(id, 1);
+  }
+  return { preorder, parentOf, depthOf };
+}
+
+/**
  * Where each node sits across the flow: its slot, counted from the near edge,
- * and how many band gaps precede it.
+ * and the extra room in pixels that precedes its band.
  *
- * Without groups a node takes the next free slot in its rank. With groups,
- * each group is a band of slots of its own across every rank, after a band of
- * the ungrouped nodes, so two groups never share a slot range and their frames
- * cannot overlap even when their members sit in different ranks: a zone map
- * reads as regions rather than as frames drawn over each other.
+ * Without groups a node takes a slot in its rank. With groups, each group is a
+ * band of slots of its own across every rank — a parent's own nodes, then each
+ * child group's band — after a band of the ungrouped nodes, so two groups never
+ * share a slot range and their frames cannot overlap even when their members
+ * sit in different ranks: a zone map reads as regions rather than as frames
+ * drawn over each other. A band is followed by room for every frame that
+ * closes after it and every frame that opens before the next one.
  */
 function acrossFlowSlots(
   block: CanvasDiagramBlock,
   ranks: ReadonlyMap<string, number>,
-): ReadonlyMap<string, { readonly slot: number; readonly band: number }> {
-  const groups = block.groups ?? [];
+  forest: ReturnType<typeof groupForest>,
+): ReadonlyMap<string, { readonly slot: number; readonly offset: number }> {
+  const bandOfGroup = new Map(forest.preorder.map((id, index) => [id, index + 1]));
   const bandOf = new Map<string, number>();
-  groups.forEach((group, index) => {
-    for (const nodeId of group.nodeIds) bandOf.set(String(nodeId), index + 1);
-  });
-  const bandCount = groups.length + 1;
-  // How many slots each band needs: its most crowded rank.
-  const counts = new Map<string, number>();
-  const widths = Array.from({ length: bandCount }, () => 0);
-  const order: Array<{ readonly nodeId: string; readonly band: number; readonly index: number }> =
-    [];
-  for (const node of block.nodes) {
-    const nodeId = String(node.nodeId);
-    const band = bandOf.get(nodeId) ?? 0;
-    const key = `${String(band)}:${String(ranks.get(nodeId) ?? 0)}`;
-    const index = counts.get(key) ?? 0;
-    counts.set(key, index + 1);
-    widths[band] = Math.max(widths[band] ?? 0, index + 1);
-    order.push({ nodeId, band, index });
+  for (const group of block.groups ?? []) {
+    const band = bandOfGroup.get(String(group.groupId)) ?? 0;
+    for (const nodeId of group.nodeIds) bandOf.set(String(nodeId), band);
   }
-  const placements = new Map<string, { readonly slot: number; readonly band: number }>();
-  for (const { nodeId, band, index } of order) {
-    let start = 0;
-    let gaps = 0;
-    for (let earlier = 0; earlier < band; earlier += 1) {
-      const width = widths[earlier] ?? 0;
-      start += width;
-      if (width > 0) gaps += 1;
+  const bandCount = forest.preorder.length + 1;
+  const members = Array.from({ length: bandCount }, () => 0);
+  for (const node of block.nodes) {
+    const band = bandOf.get(String(node.nodeId)) ?? 0;
+    members[band] = (members[band] ?? 0) + 1;
+  }
+  const order = orderWithinCells(block, ranks, bandOf, bandCount);
+  const widths = Array.from({ length: bandCount }, () => 0);
+  for (const { band, index } of order.values()) {
+    widths[band] = Math.max(widths[band] ?? 0, index + 1);
+  }
+
+  // Frames that are drawn: a group holding a node, directly or through a
+  // child. `last` is the final band of a group's subtree.
+  const lastBand = new Map<string, number>();
+  const holds = new Map<string, boolean>();
+  for (const id of [...forest.preorder].reverse()) {
+    const own = bandOfGroup.get(id) ?? 0;
+    holds.set(id, (holds.get(id) ?? false) || (members[own] ?? 0) > 0);
+    lastBand.set(id, Math.max(lastBand.get(id) ?? own, own));
+    const parent = forest.parentOf.get(id);
+    if (parent !== undefined) {
+      lastBand.set(parent, Math.max(lastBand.get(parent) ?? 0, lastBand.get(id) ?? own));
+      holds.set(parent, (holds.get(parent) ?? false) || (holds.get(id) ?? false));
     }
-    placements.set(nodeId, { slot: start + index, band: groups.length === 0 ? 0 : gaps });
+  }
+  const framed = forest.preorder.filter((id) => holds.get(id) === true);
+
+  const start = Array.from({ length: bandCount }, () => 0);
+  const offset = Array.from({ length: bandCount }, () => 0);
+  let slots = 0;
+  let previous: number | undefined;
+  for (let band = 0; band < bandCount; band += 1) {
+    start[band] = slots;
+    slots += widths[band] ?? 0;
+    if ((widths[band] ?? 0) === 0) continue;
+    if (previous !== undefined && forest.preorder.length > 0) {
+      let opens = 0;
+      let closes = 0;
+      for (const id of framed) {
+        const opened = bandOfGroup.get(id) ?? 0;
+        const closed = lastBand.get(id) ?? opened;
+        if (opened > previous && opened <= band) opens += 1;
+        if (closed >= previous && closed < band) closes += 1;
+      }
+      const room = closes * GROUP_PADDING + opens * (GROUP_PADDING + GROUP_LABEL_HEIGHT);
+      offset[band] = (offset[previous] ?? 0) + Math.max(BAND_GAP, room);
+    } else {
+      offset[band] = previous === undefined ? 0 : (offset[previous] ?? 0);
+    }
+    previous = band;
+  }
+  const placements = new Map<string, { readonly slot: number; readonly offset: number }>();
+  for (const [nodeId, { band, index }] of order) {
+    placements.set(nodeId, { slot: (start[band] ?? 0) + index, offset: offset[band] ?? 0 });
   }
   return placements;
+}
+
+/** How many times the order is swept down and up the ranks before it is kept. */
+const CROSSING_SWEEPS = 12;
+
+/**
+ * The order of the nodes inside each (band, rank) cell, as an index per node.
+ *
+ * The first order is declaration order. Barycenter sweeps then move each node
+ * toward the mean position of its neighbours on the ranks before it (down), or
+ * after it (up), and the order with the fewest crossings seen is kept, so a
+ * sweep can only help: a diagram already free of crossings keeps the order its
+ * author wrote. Only nodes inside one cell trade places; the bands of a grouped
+ * diagram keep the order the groups were declared in. Sweeps, and the pair
+ * count inside each, are bounded by the contract's edge limit.
+ */
+function orderWithinCells(
+  block: CanvasDiagramBlock,
+  ranks: ReadonlyMap<string, number>,
+  bandOf: ReadonlyMap<string, number>,
+  bandCount: number,
+): ReadonlyMap<string, { readonly band: number; readonly index: number }> {
+  const cells = new Map<string, string[]>();
+  const band = new Map<string, number>();
+  for (const node of block.nodes) {
+    const nodeId = String(node.nodeId);
+    const own = bandOf.get(nodeId) ?? 0;
+    const key = `${String(own)}:${String(ranks.get(nodeId) ?? 0)}`;
+    const cell = cells.get(key) ?? [];
+    cell.push(nodeId);
+    cells.set(key, cell);
+    band.set(nodeId, own);
+  }
+  const index = new Map<string, number>();
+  const reindex = (cell: ReadonlyArray<string>): void =>
+    cell.forEach((nodeId, position) => index.set(nodeId, position));
+  for (const cell of cells.values()) reindex(cell);
+
+  const widths = Array.from({ length: bandCount }, () => 0);
+  for (const [nodeId, position] of index) {
+    const own = band.get(nodeId) ?? 0;
+    widths[own] = Math.max(widths[own] ?? 0, position + 1);
+  }
+  const start: number[] = [];
+  let slots = 0;
+  for (const width of widths) {
+    start.push(slots);
+    slots += width;
+  }
+  const slotOf = (nodeId: string): number =>
+    (start[band.get(nodeId) ?? 0] ?? 0) + (index.get(nodeId) ?? 0);
+
+  // Each edge once, from its lower rank to its higher one.
+  const spans: Array<{ readonly low: string; readonly high: string }> = [];
+  const before = new Map<string, string[]>();
+  const after = new Map<string, string[]>();
+  for (const edge of block.edges) {
+    const source = String(edge.source);
+    const target = String(edge.target);
+    const sourceRank = ranks.get(source);
+    const targetRank = ranks.get(target);
+    if (sourceRank === undefined || targetRank === undefined || sourceRank === targetRank) continue;
+    const [low, high] = sourceRank < targetRank ? [source, target] : [target, source];
+    spans.push({ low, high });
+    before.set(high, [...(before.get(high) ?? []), low]);
+    after.set(low, [...(after.get(low) ?? []), high]);
+  }
+  const snapshot = (): ReadonlyMap<string, { readonly band: number; readonly index: number }> =>
+    new Map(
+      [...index].map(([nodeId, position]) => [
+        nodeId,
+        { band: band.get(nodeId) ?? 0, index: position },
+      ]),
+    );
+  let best = snapshot();
+  let fewest = countCrossings(spans, ranks, slotOf);
+  if (fewest === 0) return best;
+
+  const cellsByRank = new Map<number, string[][]>();
+  for (const [key, cell] of cells) {
+    const rank = Number(key.slice(key.indexOf(":") + 1));
+    cellsByRank.set(rank, [...(cellsByRank.get(rank) ?? []), cell]);
+  }
+  const rankOrder = [...cellsByRank.keys()].sort((a, b) => a - b);
+  for (let sweep = 0; sweep < CROSSING_SWEEPS; sweep += 1) {
+    const down = sweep % 2 === 0;
+    for (const rank of down ? rankOrder : [...rankOrder].reverse()) {
+      for (const cell of cellsByRank.get(rank) ?? []) {
+        const keyed = cell.map((nodeId, position) => {
+          const neighbours = (down ? before : after).get(nodeId) ?? [];
+          const barycenter =
+            neighbours.length === 0
+              ? slotOf(nodeId)
+              : neighbours.reduce((sum, other) => sum + slotOf(other), 0) / neighbours.length;
+          return { nodeId, barycenter, position };
+        });
+        keyed.sort((a, b) => a.barycenter - b.barycenter || a.position - b.position);
+        const ordered = keyed.map((entry) => entry.nodeId);
+        cell.splice(0, cell.length, ...ordered);
+        reindex(cell);
+      }
+    }
+    const crossings = countCrossings(spans, ranks, slotOf);
+    if (crossings < fewest) {
+      fewest = crossings;
+      best = snapshot();
+      if (fewest === 0) break;
+    }
+  }
+  return best;
+}
+
+/**
+ * How many pairs of edges cross, each edge drawn straight from its slot on one
+ * rank to its slot on another. Two edges that meet at a shared node do not.
+ */
+function countCrossings(
+  spans: ReadonlyArray<{ readonly low: string; readonly high: string }>,
+  ranks: ReadonlyMap<string, number>,
+  slotOf: (nodeId: string) => number,
+): number {
+  const lines = spans.map(({ low, high }) => ({
+    fromRank: ranks.get(low) ?? 0,
+    toRank: ranks.get(high) ?? 0,
+    fromSlot: slotOf(low),
+    toSlot: slotOf(high),
+  }));
+  const slotAt = (line: (typeof lines)[number], rank: number): number =>
+    line.fromSlot +
+    ((line.toSlot - line.fromSlot) * (rank - line.fromRank)) / (line.toRank - line.fromRank);
+  let crossings = 0;
+  for (let first = 0; first < lines.length; first += 1) {
+    const a = lines[first];
+    if (a === undefined) continue;
+    for (let second = first + 1; second < lines.length; second += 1) {
+      const b = lines[second];
+      if (b === undefined) continue;
+      const from = Math.max(a.fromRank, b.fromRank);
+      const to = Math.min(a.toRank, b.toRank);
+      if (from >= to) continue;
+      const atStart = slotAt(a, from) - slotAt(b, from);
+      const atEnd = slotAt(a, to) - slotAt(b, to);
+      if (atStart * atEnd < 0) crossings += 1;
+    }
+  }
+  return crossings;
 }
 
 /**
@@ -188,12 +415,13 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
   const flow = block.flow ?? "down";
   const autoLayout = block.layout === "auto";
   const ranks = rankNodes(block);
-  const across = acrossFlowSlots(block, ranks);
+  const forest = groupForest(block);
+  const across = acrossFlowSlots(block, ranks, forest);
   // Groups need room above their nodes for a frame and a name, so a grouped
-  // diagram starts that much further in rather than drawing its first frame
-  // above the picture's edge.
+  // diagram starts that much further in, once per level of nesting, rather
+  // than drawing its first frame above the picture's edge.
   const origin =
-    MARGIN + ((block.groups ?? []).length > 0 ? GROUP_PADDING + GROUP_LABEL_HEIGHT : 0);
+    MARGIN + Math.max(0, ...forest.depthOf.values()) * (GROUP_PADDING + GROUP_LABEL_HEIGHT);
   // Before the diagram-styles version a role was free text, so an older
   // block that happened to write `decision` meant nothing by it and keeps the
   // plain box rather than being redrawn as a shape it never asked for.
@@ -201,16 +429,18 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
   const boxes = block.nodes.map((node) => {
     const nodeId = String(node.nodeId);
     const rank = ranks.get(nodeId) ?? 0;
-    const placement = across.get(nodeId) ?? { slot: 0, band: 0 };
+    const placement = across.get(nodeId) ?? { slot: 0, offset: 0 };
     const alongFlow = origin + rank * (rankExtent(flow) + RANK_GAP);
     const acrossFlow =
-      origin + placement.slot * (siblingExtent(flow) + SIBLING_GAP) + placement.band * BAND_GAP;
+      origin + placement.slot * (siblingExtent(flow) + SIBLING_GAP) + placement.offset;
     const authoredX = autoLayout ? undefined : node.x;
     const authoredY = autoLayout ? undefined : node.y;
     return {
       nodeId,
       label: node.label,
       ...(node.role === undefined ? {} : { role: node.role }),
+      ...(node.icon === undefined ? {} : { icon: node.icon }),
+      ...(node.detail === undefined ? {} : { detail: node.detail }),
       shape: styled ? canvasDiagramNodeShape(node.role) : "plain",
       x: authoredX ?? (flow === "down" ? acrossFlow : alongFlow),
       y: authoredY ?? (flow === "down" ? alongFlow : acrossFlow),
@@ -220,29 +450,57 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
   });
   const byId = new Map(boxes.map((box) => [box.nodeId, box]));
 
-  const groups = (block.groups ?? []).flatMap((group) => {
-    const members: CanvasDiagramNodeBox[] = [];
+  // A group's frame wraps its own nodes and the frames of its child groups, so
+  // a child sits inside its parent whatever the author placed by hand. Children
+  // are framed first; the result is read back parents first so a parent is
+  // painted beneath the groups it holds.
+  const declared = new Map((block.groups ?? []).map((group) => [String(group.groupId), group]));
+  const framed = new Map<string, CanvasDiagramGroupBox>();
+  for (const groupId of [...forest.preorder].reverse()) {
+    const group = declared.get(groupId);
+    if (group === undefined) continue;
+    const parts: Array<{ left: number; top: number; right: number; bottom: number }> = [];
     for (const nodeId of group.nodeIds) {
       const member = byId.get(String(nodeId));
-      if (member !== undefined) members.push(member);
+      if (member !== undefined) {
+        parts.push({
+          left: member.x,
+          top: member.y,
+          right: member.x + member.width,
+          bottom: member.y + member.height,
+        });
+      }
     }
-    if (members.length === 0) return [];
-    const left = Math.min(...members.map((member) => member.x));
-    const top = Math.min(...members.map((member) => member.y));
-    const right = Math.max(...members.map((member) => member.x + member.width));
-    const bottom = Math.max(...members.map((member) => member.y + member.height));
-    return [
-      {
-        groupId: String(group.groupId),
-        label: group.label,
-        ...(group.tone === undefined ? {} : { tone: group.tone }),
-        x: left - GROUP_PADDING,
-        y: top - GROUP_PADDING - GROUP_LABEL_HEIGHT,
-        width: right - left + GROUP_PADDING * 2,
-        height: bottom - top + GROUP_PADDING * 2 + GROUP_LABEL_HEIGHT,
-      },
-    ];
-  });
+    for (const [childId, parentId] of forest.parentOf) {
+      const child = parentId === groupId ? framed.get(childId) : undefined;
+      if (child !== undefined) {
+        parts.push({
+          left: child.x,
+          top: child.y,
+          right: child.x + child.width,
+          bottom: child.y + child.height,
+        });
+      }
+    }
+    if (parts.length === 0) continue;
+    const left = Math.min(...parts.map((part) => part.left));
+    const top = Math.min(...parts.map((part) => part.top));
+    const right = Math.max(...parts.map((part) => part.right));
+    const bottom = Math.max(...parts.map((part) => part.bottom));
+    const parent = forest.parentOf.get(groupId);
+    framed.set(groupId, {
+      groupId,
+      label: group.label,
+      ...(group.tone === undefined ? {} : { tone: group.tone }),
+      ...(parent === undefined ? {} : { parentGroupId: parent }),
+      depth: forest.depthOf.get(groupId) ?? 1,
+      x: left - GROUP_PADDING,
+      y: top - GROUP_PADDING - GROUP_LABEL_HEIGHT,
+      width: right - left + GROUP_PADDING * 2,
+      height: bottom - top + GROUP_PADDING * 2 + GROUP_LABEL_HEIGHT,
+    });
+  }
+  const groups = forest.preorder.flatMap((groupId) => framed.get(groupId) ?? []);
 
   const edges = block.edges.flatMap((edge): ReadonlyArray<CanvasDiagramEdgeRoute> => {
     const source = byId.get(String(edge.source));
@@ -316,20 +574,45 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
     ];
   });
 
+  // Frames grow left and up by their padding and name, so a hand-placed node
+  // near the origin pushes the outermost frame to a negative coordinate, where
+  // a renderer's viewport clips its label. Slide the whole picture right and
+  // down by that overshoot. Every part moves by the same amount, so
+  // hand-placed nodes keep their positions relative to each other.
+  const shiftX = Math.max(0, -Math.min(...boxes.map((box) => box.x), ...groups.map((g) => g.x)));
+  const shiftY = Math.max(0, -Math.min(...boxes.map((box) => box.y), ...groups.map((g) => g.y)));
+  const moved = shiftX !== 0 || shiftY !== 0;
+  const slide = <T extends { readonly x: number; readonly y: number }>(item: T): T =>
+    moved ? { ...item, x: item.x + shiftX, y: item.y + shiftY } : item;
+  const nodes = boxes.map(slide);
+  const frames = groups.map(slide);
+  const routes = moved
+    ? edges.map((edge) => ({
+        ...edge,
+        x1: edge.x1 + shiftX,
+        y1: edge.y1 + shiftY,
+        x2: edge.x2 + shiftX,
+        y2: edge.y2 + shiftY,
+        points: edge.points.map((point) => ({ x: point.x + shiftX, y: point.y + shiftY })),
+        labelX: edge.labelX + shiftX,
+        labelY: edge.labelY + shiftY,
+      }))
+    : edges;
+
   const extents = [
-    ...edges.flatMap((edge) =>
+    ...routes.flatMap((edge) =>
       edge.points.map((point) => ({ right: point.x + DETOUR_GAP, bottom: point.y + DETOUR_GAP })),
     ),
-    ...boxes.map((box) => ({ right: box.x + box.width, bottom: box.y + box.height })),
-    ...groups.map((group) => ({ right: group.x + group.width, bottom: group.y + group.height })),
+    ...nodes.map((box) => ({ right: box.x + box.width, bottom: box.y + box.height })),
+    ...frames.map((group) => ({ right: group.x + group.width, bottom: group.y + group.height })),
   ];
   return {
     width: Math.max(...extents.map((extent) => extent.right), MARGIN) + MARGIN,
     height: Math.max(...extents.map((extent) => extent.bottom), MARGIN) + MARGIN,
     flow,
-    nodes: boxes,
-    edges,
-    groups,
+    nodes,
+    edges: routes,
+    groups: frames,
   };
 }
 
@@ -358,6 +641,73 @@ function crosses(
     }
   }
   return false;
+}
+
+/** An icon is drawn at one of the app's icon steps. */
+export const CANVAS_DIAGRAM_ICON_SIZE = 16;
+const ICON_INSET = 12;
+const ICON_GAP = 6;
+const TEXT_INSET = 8;
+/** Room a 12px-high character takes, so a subtitle is cut where it would leave the box. */
+const DETAIL_CHARACTER_WIDTH = 5.8;
+/** The label's line sits this far above a two-line node's middle, the subtitle below it. */
+const LABEL_RISE = 7;
+const DETAIL_DROP = 8;
+
+/** Where a node's icon, label, and subtitle sit inside its box. */
+export interface CanvasDiagramNodeContent {
+  /** The icon's top-left corner and side; absent when the node draws none. */
+  readonly icon?: {
+    readonly name: CanvasDiagramNodeIcon;
+    readonly x: number;
+    readonly y: number;
+    readonly size: number;
+  };
+  /** Where the label is centred. */
+  readonly labelX: number;
+  readonly labelY: number;
+  /** The subtitle cut to fit the box, centred under the label. */
+  readonly detail?: { readonly text: string; readonly x: number; readonly y: number };
+}
+
+/**
+ * Where the parts of a node's contents sit, shared by every drawing of a
+ * diagram so the board, the preview, and an export place an icon and a
+ * subtitle alike. The icon takes the left of the box and the text centres in
+ * what is left. A diamond has no room at its corners for either, so a decision
+ * draws its label alone.
+ */
+export function canvasDiagramNodeContent(node: CanvasDiagramNodeBox): CanvasDiagramNodeContent {
+  const roomy = node.shape !== "decision";
+  const icon = roomy ? node.icon : undefined;
+  const detail = roomy ? node.detail : undefined;
+  const left =
+    node.x + (icon === undefined ? TEXT_INSET : ICON_INSET + CANVAS_DIAGRAM_ICON_SIZE + ICON_GAP);
+  const right = node.x + node.width - TEXT_INSET;
+  const x = (left + right) / 2;
+  const middle = node.y + node.height / 2;
+  const fits = Math.floor((right - left) / DETAIL_CHARACTER_WIDTH);
+  const text =
+    detail === undefined
+      ? undefined
+      : detail.length <= fits
+        ? detail
+        : `${detail.slice(0, Math.max(1, fits - 1)).trimEnd()}…`;
+  return {
+    ...(icon === undefined
+      ? {}
+      : {
+          icon: {
+            name: icon,
+            x: node.x + ICON_INSET,
+            y: middle - CANVAS_DIAGRAM_ICON_SIZE / 2,
+            size: CANVAS_DIAGRAM_ICON_SIZE,
+          },
+        }),
+    labelX: x,
+    labelY: text === undefined ? middle : middle - LABEL_RISE,
+    ...(text === undefined ? {} : { detail: { text, x, y: middle + DETAIL_DROP } }),
+  };
 }
 
 function rankExtent(flow: CanvasDiagramFlow): number {

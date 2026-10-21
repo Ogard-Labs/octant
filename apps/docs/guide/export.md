@@ -5,8 +5,10 @@ description: How exporting a Canvas or artifact works — to a folder you choose
 # Export a Canvas or artifact
 
 Export writes a readable copy of a Canvas or an artifact somewhere you choose.
-The copy is Markdown or HTML, so any editor, viewer, or other tool can open it.
-Two destinations ship today: a folder on this Mac, and a GitHub Gist.
+The copy is Markdown, HTML, PNG images, or a PDF, so any editor, viewer, or
+other tool can open it.
+Three destinations ship today: a folder on this Mac, a GitHub Gist, and a
+public link.
 
 Whatever the destination, Octant renders the document first and shows it to you
 before anything is sent or written. A destination is called only after you
@@ -25,9 +27,9 @@ Export uses one folder per choice:
 
 - A folder you choose while a Canvas or artifact is open is remembered for that
   Project.
-- A thread filed under no Project exports to the host's folder. Choose one the
-  same way from any Canvas, and it applies to everything without a Project of
-  its own.
+- A thread filed under no Project, and a Canvas made in such a Chat thread,
+  export to the host's folder. Choose one the same way from any Canvas, and it
+  applies to everything without a Project of its own.
 
 The folder always comes from Octant's own folder browser, which lists folders on
 this computer. Octant never takes a folder path typed or sent from a window.
@@ -121,10 +123,45 @@ The gist destination reports one of three states:
   stored in plain text on this Mac, so Octant will not send through it. The same
   rule applies to Octant's other GitHub features.
 
+## Publish a public link
+
+A public link is a read-only page hosted by a share service, so anyone you give
+the URL can open the Canvas in a browser. It is off until you turn on
+**Settings › Data & privacy › Public links**. The approval card shows the content that
+will be sent, who can open it, the expiry, and an optional password, and the
+service can read what you publish. See
+[Share a Canvas with a public link](/guide/public-links).
+
 ## Formats and platforms
 
-Markdown and HTML are rendered today. PDF and PNG are named in the export seam
-so a later destination can declare them; this host does not render them.
+Markdown, HTML, PNG and PDF are rendered. The folder destination accepts all
+four; the Gist destination takes Markdown only.
+
+### Pictures: PNG and PDF
+
+PNG and PDF are drawn by a browser on this computer, so a Mac with no Chromium
+Octant can use refuses them with a plain message, and Markdown and HTML still
+work. Nothing is drawn on a server.
+
+- **A deck or a set of screens** (a design of slides or device-size screens): PNG
+  writes one image per slide or screen, numbered in order (`Launch plan 1.png`,
+  `Launch plan 2.png`). PDF writes one file with one page per slide or screen, at
+  the slide's own size.
+- **Any other Canvas:** PNG writes one tall image of the document, and PDF
+  writes an A4 document that the browser paginates.
+
+The approval card lists every file and its size instead of showing a body. When
+the pictures show a design, it also says Octant does not check the design for
+secrets, the same as HTML export. A picture export is placed like any other
+file: if a file is already there, the card says so, and approving it replaces
+each file by name; otherwise each existing file gets a numbered copy beside it.
 
 Export to a folder works on macOS and Linux. The gist destination needs a
 working GitHub connection.
+
+## Present and Play full screen
+
+**Present** (a deck) and **Play** (a set of screens) open in a large window over
+the Canvas. Press **Full screen** in its top bar to fill the display, and press
+Esc to leave. The left and right arrow keys, Page Up and Page Down still move
+between slides.

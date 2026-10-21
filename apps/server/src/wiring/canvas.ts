@@ -7,6 +7,7 @@ import {
   type CanvasRefreshSkill,
   decodeCanvasDefinition,
   decodeAgentRunId,
+  decodeBrowserThreadId,
   decodeCanvasId,
   decodeChatThreadId,
   decodeCodeThreadId,
@@ -41,6 +42,9 @@ import { CanvasShareEventStore } from "../canvas/canvasShareEventStore";
 import { CanvasShareService } from "../canvas/canvasShareService";
 import { CanvasExportEventStore } from "../canvas/canvasExportEventStore";
 import { CanvasExportService } from "../canvas/canvasExportService";
+import { CanvasPublicShareService } from "../canvas/canvasPublicShareService";
+import { createHttpCanvasPublicShareServicePort } from "../canvas/canvasPublicShareServicePort";
+import { makeCanvasPublicShareSecretBrokerClient } from "../providers/credentialBrokerClient";
 import { createCanvasRefreshSourceResolver } from "../canvas/canvasRefreshSourceResolver";
 import { readCanvasRefreshFile, resolveCanvasRefreshFile } from "../canvas/canvasRefreshFileRead";
 import type {
@@ -74,7 +78,11 @@ import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
 } from "../canvas/canvasExportTargets";
-import { authorizeCanvasInventoryAccess, defaultShellSettings } from "@octant/domain";
+import {
+  authorizeCanvasInventoryAccess,
+  chatThreadHoldsCanvas as threadLifecycleHoldsCanvas,
+  defaultShellSettings,
+} from "@octant/domain";
 import { type CanvasAgentToolPort, createChildCanvasAgentTools } from "../canvas/canvasAgentTools";
 import { loadChildCanvasWorkspace } from "../canvas/childCanvasWorkspace";
 import { effectiveAgentRunExecutionTarget } from "@octant/domain/agent-run-policy";
@@ -129,7 +137,7 @@ export function sameCanvasSkillScope(
 }
 
 export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<AuthorityWiring, "agentRunPersistence" | "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "agentRunPersistence" | "browserCaptures" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "contributeChildTools" | "managedWorktreeReceipts"> &
   Pick<IntegrationsWiring, "gistConnection" | "threadOutsideContentMarks"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
@@ -143,6 +151,7 @@ export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
 export function wireCanvas(deps: CanvasDependencies) {
   const {
     agentRunPersistence,
+    browserCaptures,
     chatDataDirectory,
     contributeChildTools,
     extensionApiService,
@@ -186,11 +195,36 @@ export function wireCanvas(deps: CanvasDependencies) {
   // One server-owned Canvas authority, shared by every Canvas mutation
   // including sharing, so a share can never be admitted under weaker checks
   // than a revise or a refresh.
+  // A Chat thread in no Chat Project may own a Canvas of its own. Such a
+  // Canvas is read wherever its thread is: a person's window in Chat may
+  // reach it while the thread exists and is not being deleted, whatever
+  // Project the window shows, because the thread itself has no Project
+  // authority to match; an agent reaches it only from the thread that owns
+  // it, since no Project makes it a neighbour's. Deleting the thread takes
+  // the Canvas out of reach; the purge erases it with the thread. The shell
+  // restores and opens such a Canvas's tab under the same lifecycle rule.
+  const chatThreadHoldsCanvas = (threadId: string): boolean => {
+    let thread;
+    try {
+      thread = persistence.readChatThread(decodeChatThreadId(threadId));
+    } catch {
+      return false;
+    }
+    return threadLifecycleHoldsCanvas(thread);
+  };
   const authorizeCanvas: CanvasServiceDependencies["authorize"] = (entry, context, project) => {
+    const provenance = entry.currentVersion.definition.provenance;
+    if (provenance.projectId === null) {
+      return (
+        context.mode === "chat" &&
+        (context.originThreadId === undefined ||
+          context.originThreadId === String(provenance.threadId)) &&
+        chatThreadHoldsCanvas(String(provenance.threadId))
+      );
+    }
     if (context.projectId === null || project === undefined || project.lifecycle !== "active") {
       return false;
     }
-    const provenance = entry.currentVersion.definition.provenance;
     let activeProjectId: ProjectId;
     try {
       activeProjectId = decodeProjectId(context.projectId);
@@ -311,7 +345,7 @@ export function wireCanvas(deps: CanvasDependencies) {
    * current revision, and a Code file only under the thread's checkout.
    */
   const canvasDesignAssetPorts: CanvasDesignAssetPorts = {
-    generatedImage: async ({ imageId, projectId, maximumBytes }) => {
+    generatedImage: async ({ imageId, projectId, threadId, maximumBytes }) => {
       const job = imageJobService.completedJobFor(imageId);
       if (job === undefined) return { status: "unavailable", reason: "missing" };
       const artifact = job.artifacts.find(
@@ -332,7 +366,13 @@ export function wireCanvas(deps: CanvasDependencies) {
       if (owner.lifecycle === "deleted" || owner.lifecycle === "deleting") {
         return { status: "unavailable", reason: "missing" };
       }
-      if (owner.projectId === undefined || String(owner.projectId) !== projectId) {
+      // A Canvas owned by its thread reaches only images that thread made;
+      // a Project Canvas reaches those of any thread in its Project.
+      if (projectId === null) {
+        if (job.threadKind !== "chat-thread" || String(job.scopeId) !== threadId) {
+          return { status: "unavailable", reason: "refused" };
+        }
+      } else if (owner.projectId === undefined || String(owner.projectId) !== projectId) {
         return { status: "unavailable", reason: "refused" };
       }
       if (artifact.size > maximumBytes) return { status: "unavailable", reason: "too-large" };
@@ -345,6 +385,18 @@ export function wireCanvas(deps: CanvasDependencies) {
       return read === undefined
         ? { status: "unavailable", reason: "missing" }
         : { status: "read", bytes: read.bytes };
+    },
+    browserCapture: async ({ captureId, threadId, maximumBytes }) => {
+      // The service lists only the captures this thread kept, so another
+      // thread's capture id is simply not found, and so is one already dropped.
+      const kept = await browserCaptures
+        .read(decodeBrowserThreadId(threadId), captureId)
+        .catch(() => undefined);
+      if (kept === undefined) return { status: "unavailable", reason: "missing" };
+      if (kept.bytes.byteLength > maximumBytes) {
+        return { status: "unavailable", reason: "too-large" };
+      }
+      return { status: "read", bytes: kept.bytes };
     },
     projectFile: async ({ mode, projectId, threadId, path, maximumBytes }) => {
       let root: string | undefined;
@@ -456,7 +508,8 @@ export function wireCanvas(deps: CanvasDependencies) {
           message: "The Project or thread this artifact belongs to is no longer available.",
         };
       }
-      const project = persistence.readProject(provenance.projectId);
+      const project =
+        provenance.projectId === null ? undefined : persistence.readProject(provenance.projectId);
       const result = canvasService.revise(
         {
           schemaVersion: 1,
@@ -485,7 +538,7 @@ export function wireCanvas(deps: CanvasDependencies) {
         },
         {
           mode: provenance.mode,
-          projectId: String(provenance.projectId),
+          projectId: provenance.projectId === null ? null : String(provenance.projectId),
           hostId: String(LOCAL_HOST_ID),
           workspace,
           originThreadId: String(provenance.threadId),
@@ -779,7 +832,44 @@ export function wireCanvas(deps: CanvasDependencies) {
       },
       resolveWorkspace: resolveCanvasWorkspace,
       authorize: authorizeCanvas,
+      // Only an active Chat thread outside every Chat Project owns its own
+      // Canvas; a thread in a Project has that Project to hold it.
+      threadMayOwnCanvas: (threadId) => {
+        let thread;
+        try {
+          thread = persistence.readChatThread(decodeChatThreadId(threadId));
+        } catch {
+          return false;
+        }
+        return (
+          thread !== undefined && thread.lifecycle === "active" && thread.projectId === undefined
+        );
+      },
     },
+  );
+  // One browser seam draws both the agent's preview and a picture export.
+  // The preview page ships beside the web build, so it follows the same
+  // folder a host injects for the app; otherwise every preview would report
+  // no renderer on that host.
+  const canvasPreviewRenderer = createPlaywrightCanvasPreviewRenderer({
+    webAssetsPath: options.webAssetsPath ?? resolveWebAssetsPath(),
+  });
+  // Comments are journaled facts of the Canvas, authored as the local user
+  // with the originating device recorded beside the author; the service
+  // rebuilds them from the journal and refuses reads a workspace may not make.
+  const canvasCommentService = new CanvasCommentService(
+    {
+      journal: persistence.journal,
+      projection: persistence.canvasProjection,
+      uuid: randomUUID,
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+      // A person's comment change on a Canvas the replica carries goes to
+      // their other computers; one taken in from another computer does not.
+      committed: (canvasId, event) => {
+        void replicaArtifactSync.service?.commentCommitted({ canvasId, event });
+      },
+    },
+    { authorize: authorizeCanvas },
   );
   // What a Chat thread's agent may do with a Canvas: write blocks into one,
   // through the same service and the same Project the person clicking New
@@ -794,7 +884,9 @@ export function wireCanvas(deps: CanvasDependencies) {
         ? undefined
         : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
     },
+    brandKit: (projectId) => persistence.readProject(decodeProjectId(projectId))?.brandKit,
     canvas: canvasService,
+    commentRequests: (canvasId) => canvasCommentService.agentRequests(canvasId),
     markReader: ({ readerId, canvasId }) => {
       const entry = persistence.canvasProjection.getById(canvasId);
       if (entry === undefined) return { status: "refused" };
@@ -810,12 +902,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     preview: createCanvasPreviewService({
       canvas: canvasService,
       resolveDesignAssets,
-      renderer: createPlaywrightCanvasPreviewRenderer({
-        // The preview page ships beside the web build, so it follows the
-        // same folder a host injects for the app; otherwise every preview
-        // would report no renderer on that host.
-        webAssetsPath: options.webAssetsPath ?? resolveWebAssetsPath(),
-      }),
+      renderer: canvasPreviewRenderer,
     }),
     imagesInToolResults: ({ providerInstanceId, modelId }) => {
       const model = providerRuntimeRegistry
@@ -927,12 +1014,33 @@ export function wireCanvas(deps: CanvasDependencies) {
     home: homedir(),
     standingOutsideApproval: false,
   });
+  // Public links: off until the person turns them on, published only through
+  // the export card, and the owner secrets kept in the broker's own namespace.
+  // The only calls made unprompted finish a revoke the host already owes and
+  // delete an expired link's secret; both run from the host's start.
+  const canvasPublicShareService = new CanvasPublicShareService({
+    journal: persistence.journal,
+    service: createHttpCanvasPublicShareServicePort(),
+    secrets:
+      options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? undefined
+        : makeCanvasPublicShareSecretBrokerClient({
+            url: options.credentialBrokerUrl,
+            token: options.credentialBrokerToken,
+          }),
+    uuid: randomUUID,
+    clock: () => new Date().toISOString() as never,
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
   const canvasExportRegistration: CanvasExportTargetRegistration = {
     folderFor: (canvasId) => {
       const entry = persistence.canvasProjection.getById(canvasId);
       if (entry === undefined) return undefined;
+      // A Canvas owned by its thread exports to the host folder, the one
+      // chosen for everything without a Project of its own.
+      const projectId = entry.currentVersion.definition.provenance.projectId;
       return canvasExportFolderService.folderFor(
-        String(entry.currentVersion.definition.provenance.projectId),
+        projectId === null ? undefined : String(projectId),
       );
     },
     files: canvasExportFilePort,
@@ -946,6 +1054,7 @@ export function wireCanvas(deps: CanvasDependencies) {
       availability: () => gistConnection.availability(),
       gists: createGhGistCreationPort(options.ghExecutable),
     },
+    publicLinks: canvasPublicShareService,
   };
   // Destinations arrive through the export contribution and are offered
   // through the same activation policy a plugin's contribution passes. The
@@ -967,6 +1076,7 @@ export function wireCanvas(deps: CanvasDependencies) {
         sequence: version.sequence,
         title: version.definition.title,
         blocks: version.definition.blocks,
+        definition: version.definition,
       };
     },
     targets: (canvasId) => canvasExportTargetBindings(canvasExportRegistration, canvasId),
@@ -976,6 +1086,9 @@ export function wireCanvas(deps: CanvasDependencies) {
     }),
     uuid: randomUUID,
     clock: () => new Date().toISOString() as never,
+    // A picture export is drawn by the same browser, under the same no-route
+    // switches and interception, that the agent's preview uses.
+    renderer: canvasPreviewRenderer,
   });
   // The library is a host-wide read of the same journal-derived projection
   // the per-Project inventory reads. It is deliberately wider than a window's
@@ -1012,23 +1125,6 @@ export function wireCanvas(deps: CanvasDependencies) {
     mirror: artifactMirrorService,
     windowAuthorityStore,
   });
-  // Comments are journaled facts of the Canvas, authored as the local user
-  // with the originating device recorded beside the author; the service
-  // rebuilds them from the journal and refuses reads a workspace may not make.
-  const canvasCommentService = new CanvasCommentService(
-    {
-      journal: persistence.journal,
-      projection: persistence.canvasProjection,
-      uuid: randomUUID,
-      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-      // A person's comment change on a Canvas the replica carries goes to
-      // their other computers; one taken in from another computer does not.
-      committed: (canvasId, event) => {
-        void replicaArtifactSync.service?.commentCommitted({ canvasId, event });
-      },
-    },
-    { authorize: authorizeCanvas },
-  );
   const snapshotCanvas: NonNullable<AgentRunRouteDependencies["snapshotCanvas"]> = (input) =>
     createAgentRunForestCanvasSnapshot({
       mode: input.mode,
@@ -1064,6 +1160,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     designRunTickets: new CanvasDesignRunTickets(),
     canvasShareService,
     canvasExportService,
+    canvasPublicShareService,
     // A host with no usable `gh` has no GitHub state to read; the gist
     // destination then stays not-connected without spawning anything.
     ...(options.ghExecutable === undefined
@@ -1084,6 +1181,7 @@ export function wireCanvas(deps: CanvasDependencies) {
     artifactMirrorRoutes,
     canvasAgentToolPort,
     canvasCommentService,
+    canvasPublicShareService,
     canvasRoutes,
     canvasService,
     replicaArtifactSync,

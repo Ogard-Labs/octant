@@ -93,8 +93,10 @@ render when you have one; set your own family in Settings to prefer another.
 Plan mode cannot start or stop terminals. Opening or selecting the Terminal tab
 yourself starts a shell without a prompt in every other posture — your click is
 the approval. A Terminal tab that merely reopens with a restored layout starts
-nothing: it waits for **Start terminal**, so a restart never launches a shell
-you did not ask for. Approval-gated mode still prompts before an agent starts or
+nothing: it waits for **Start terminal** or for you to select the tab again.
+If its process is still running, the restored tab reattaches to it without
+starting another. A full restart never launches a new shell just because its
+tab was saved. Approval-gated mode still prompts before an agent starts or
 stops a terminal; Full access allows it. The shell keeps its history and prompt
 caches in an Octant-owned directory of its own repository root, since the
 sandbox never lets it write inside your home and one repository's shell state is

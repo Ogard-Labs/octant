@@ -6,22 +6,10 @@ import { useHomeStart, type HomeStartInput } from "./homeStart";
 
 const settings = settingsPastFirstRun();
 const workspace = codeShellBootstrap().workspace;
-const navigation = {
-  codeProjectThreads: [],
-  liveThreadTitles: new Map<string, string>(),
-  markedChatNavigation: [],
-  markedThreadGroups: undefined,
-  providerByThreadId: new Map(),
-  runningThreadIds: new Set<string>(),
-  needsPersonThreadIds: new Set<string>(),
-  withProviderMark: (thread: never) => thread,
-  workProjectThreads: [],
-} as never;
 const emptyMap = new Map<string, never>();
 const none: ReadonlyArray<never> = [];
 const codeOnly: HomeStartInput["workingNowModes"] = ["code"];
 const noPullRequests: HomeStartInput["githubPullRequestCapability"] = { readable: false };
-const loadingContinueCards = { kind: "loading" } as never;
 const noActions = {} as never;
 const stubClient = {} as never;
 const hostResourceClient = { read: async () => ({ status: "refused" as const }) } as never;
@@ -40,14 +28,12 @@ function input(computerSnapshots: HomeStartInput["computerSnapshots"]): HomeStar
     codeClient: stubClient,
     codeThreads: none,
     computerSnapshots,
-    continueCards: loadingContinueCards,
     feedRevision: 0,
     githubPullRequestCapability: noPullRequests,
     hostFederationTransports: undefined,
     hostResourceClient,
     isDesktop: false,
     loadHomePullRequests,
-    navigation,
     needsYouThreadProviders: emptyMap,
     now: 0,
     openRunningServiceLive: undefined,
@@ -57,7 +43,6 @@ function input(computerSnapshots: HomeStartInput["computerSnapshots"]): HomeStar
     runningServicesRemoteHost: undefined,
     serverUrl: "http://127.0.0.1:13773",
     settings,
-    sidebarRunningCount: 0,
     workingNowBoardFacts: emptyMap,
     workingNowHost: undefined,
     workingNowModes: codeOnly,

@@ -20,6 +20,7 @@ import type {
 import type { ExtensionPackagePreview } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { SettingsDisclosure, SettingsSection } from "../settings/primitives";
+import { AddMcpServerDialog } from "./AddMcpServerDialog";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -84,6 +85,8 @@ function sourceLabel(source: ExtensionSnapshot["packages"][number]["source"]): s
       return "Plugin package";
     case "provider-native":
       return "Provider native";
+    case "user-added":
+      return "Added by you";
   }
 }
 
@@ -289,6 +292,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [inspectingSkillId, setInspectingSkillId] = useState<string | undefined>();
   const [installingSkill, setInstallingSkill] = useState(false);
   const [importingLocal, setImportingLocal] = useState(false);
+  const [addingServer, setAddingServer] = useState(false);
   const [installedSkillQuery, setInstalledSkillQuery] = useState("");
   const [showAllInstalledSkills, setShowAllInstalledSkills] = useState(false);
   const installedSkillSearch = useRef<HTMLInputElement>(null);
@@ -776,6 +780,26 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   ))}
                 </ul>
               )}
+              <div className="extensions-settings__local-import">
+                <OctantButton
+                  disabled={installing}
+                  onClick={() => setAddingServer(true)}
+                  type="button"
+                  variant="outline"
+                >
+                  Add MCP server…
+                </OctantButton>
+              </div>
+              <AddMcpServerDialog
+                client={props.client}
+                onAdded={() => {
+                  setAddingServer(false);
+                  void reload();
+                }}
+                onClose={() => setAddingServer(false)}
+                open={addingServer}
+                secretsAvailable={props.client.toolGrantsAvailable}
+              />
             </div>
           </SettingsSection>
 
