@@ -340,8 +340,9 @@ export const DEFAULT_THEME_SETTINGS: ThemeSettings = {
   mode: "system",
   typography: {
     ui: {
-      family:
-        "'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+      // The platform face (SF Pro on a Mac): it is what makes Octant read as
+      // a native app. Geist stays bundled as a choice in Appearance.
+      family: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       size: 13,
       weight: 400,
     },
