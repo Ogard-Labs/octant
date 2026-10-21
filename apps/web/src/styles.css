@@ -2356,6 +2356,33 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .endpoint-row__consent,
+/* An endpoint with voice models offers them to Voice settings: a lead line, then one row per model. */
+.voice-tip {
+  display: grid;
+  gap: var(--oct-space-1);
+  margin: var(--oct-space-2) 0 0;
+  padding: var(--oct-space-3);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
+}
+
+.voice-tip__lead {
+  margin: 0;
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.voice-tip__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
 .endpoint-choice__consent {
   flex-basis: 100%;
   margin: 0;

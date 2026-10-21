@@ -832,3 +832,65 @@ describe("Add endpoint presets", () => {
     ).toHaveAttribute("href", endpointPreset("mistral").keyPage.url);
   });
 });
+
+describe("voice models on a new endpoint", () => {
+  it("offers a listed transcription model to Voice on the last step, in one click", async () => {
+    const user = userEvent.setup();
+    const onUseForTranscription = vi.fn(async () => true);
+    renderFlow({
+      creates: endpoint("openai-compatible"),
+      observedAfterCreate: observed([model("gpt-4.1"), model("whisper-1")]),
+      voice: { settings: undefined, onUseForTranscription, onOpenVoice: vi.fn() },
+    });
+    const form = await connect(user, "OpenAI-compatible", {
+      name: "Team gateway",
+      url: "https://gateway.example/v1",
+      key: "k",
+    });
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    const tip = await screen.findByTestId("voice-tip");
+    expect(tip).toHaveTextContent("This endpoint has voice models.");
+    expect(tip).toHaveTextContent("whisper-1 can turn your speech into text.");
+    await user.click(within(tip).getByRole("button", { name: "Use for Transcription" }));
+    expect(onUseForTranscription).toHaveBeenCalledWith(id, "whisper-1");
+  });
+
+  it("offers no voice tip for an endpoint Voice could not use, even when it lists a voice model", async () => {
+    const user = userEvent.setup();
+    renderFlow({
+      creates: { ...endpoint("openai-compatible"), enabled: false } as ModelEndpointInstance,
+      observedAfterCreate: observed([model("gpt-4.1"), model("whisper-1")]),
+      voice: { settings: undefined, onUseForTranscription: vi.fn(), onOpenVoice: vi.fn() },
+    });
+    const form = await connect(user, "OpenAI-compatible", {
+      name: "Team gateway",
+      url: "https://gateway.example/v1",
+      key: "k",
+    });
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(screen.queryByTestId("voice-tip")).not.toBeInTheDocument();
+  });
+
+  it("says nothing about voice when the endpoint lists no voice model", async () => {
+    const user = userEvent.setup();
+    renderFlow({
+      creates: endpoint("openai-compatible"),
+      observedAfterCreate: observed([model("gpt-4.1")]),
+      voice: { settings: undefined, onUseForTranscription: vi.fn(), onOpenVoice: vi.fn() },
+    });
+    const form = await connect(user, "OpenAI-compatible", {
+      name: "Team gateway",
+      url: "https://gateway.example/v1",
+      key: "k",
+    });
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(screen.queryByTestId("voice-tip")).not.toBeInTheDocument();
+  });
+});

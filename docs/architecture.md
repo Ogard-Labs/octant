@@ -2603,7 +2603,16 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   **Voice** is an app-managed capability rather than a provider kind: speech
   to text and text to speech each resolve against one enabled OpenAI-compatible
   instance named in Settings › Voice and reuse its base URL, authentication,
-  and credential. The host serves `/api/speech/status`, `/api/speech/transcriptions`,
+  and credential. Mistral's speech route is the one dialect the adapter
+  speaks besides OpenAI's: on `api.mistral.ai` the voice goes as `voice_id`
+  and the reply is JSON with base64 `audio_data`, as Mistral's OpenAPI
+  description lays out; transcription there is OpenAI-shaped and needs no
+  dialect. An endpoint page, and Add endpoint's last step, offer the
+  endpoint's voice models to Voice settings when it lists any (a preset's
+  known models, or ids that read as transcription or speech models): one
+  click makes a transcription model the one Voice uses, and speech is named
+  with what it still needs, a voice from the provider, since Octant cannot
+  choose one. The host serves `/api/speech/status`, `/api/speech/transcriptions`,
   and `/api/speech/synthesis` behind window authority, sniffs and bounds the
   audio, persists nothing, and reports each direction `ready`, `unconfigured`,
   or `unavailable` with the Settings link that fixes it; see
