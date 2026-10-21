@@ -2429,12 +2429,11 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   background: var(--octant-workspace);
 }
 
-/* Dead-centring the start screen in a tall window left the prompt floating in
-   the middle of an empty pane with several hundred pixels of nothing above and
-   below it. It is anchored in the upper third instead, which is where the eye
-   already is, and the pane stops reading as an empty page.
+/* The same geometry as `.welcome`: the question takes the free height and
+   centres in it, which docks the composer at the foot of the page where the
+   thread continues.
 
-   It also takes a level above the ground, which paints at z-index 0 under this
+   The canvas also takes a level above the ground, which paints at z-index 0 under this
    same start screen. Without one the ground's dots landed over the greeting
    and over the suggestion cards, which reads as the cards being
    see-through. */
@@ -2448,13 +2447,15 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   align-items: stretch;
   justify-content: flex-start;
   min-height: 100%;
-  padding-block: min(16vh, 148px) 48px;
+  padding-block: min(8vh, 64px) var(--oct-space-5);
   margin: 0 auto;
   gap: var(--oct-space-2);
 }
 
 .draft-thread__welcome {
   display: grid;
+  flex: 1 1 auto;
+  align-content: center;
   justify-items: start;
   gap: 4px;
   margin-bottom: 24px;

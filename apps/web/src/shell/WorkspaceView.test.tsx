@@ -2848,49 +2848,7 @@ describe("WorkspaceView Chat surfaces", () => {
     expect(within(quickStart).getByRole("button", { name: "Start thread" })).toBeDisabled();
   });
 
-  it("opens a recent Chat Project thread from the Chat start screen", async () => {
-    const project = {
-      id: "00000000-0000-4000-8000-000000000914",
-      type: "chat",
-      name: "Launch planning",
-      lifecycle: "active",
-      pinned: true,
-      rank: "0/1",
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-    } as never as ProjectSummary;
-    const thread = {
-      id: "00000000-0000-4000-8000-000000000915",
-      projectId: project.id,
-      title: "Resume planning",
-    };
-    const tab = {
-      id: ids.tab,
-      kind: "draft-thread",
-      mode: "chat",
-      title: "New Chat",
-      projectId: project.id,
-    } as WorkspaceTab;
-    const base = propsFor(tab);
-    const onOpenChatThread = vi.fn();
-    render(
-      <WorkspaceView
-        {...base}
-        chatController={
-          { ...base.chatController, bootstrap: { threads: [thread] }, status: "ready" } as never
-        }
-        mode="chat"
-        onOpenChatThread={onOpenChatThread}
-        projects={[project]}
-      />,
-    );
-
-    fireEvent.click(await screen.findByRole("button", { name: /Resume planning/i }));
-    expect(onOpenChatThread).toHaveBeenCalledWith(thread.id, thread.title, project.id);
-  });
-
-  it("keeps archived and deleted Chat threads out of Continue", async () => {
+  it("offers starter ideas while only archived and deleted Chat threads exist, and lists no threads", async () => {
     const project = {
       id: "00000000-0000-4000-8000-000000000917",
       type: "chat",
@@ -2902,12 +2860,6 @@ describe("WorkspaceView Chat surfaces", () => {
       createdAt: now,
       updatedAt: now,
     } as never as ProjectSummary;
-    const active = {
-      id: "00000000-0000-4000-8000-000000000918",
-      projectId: project.id,
-      title: "Keep me",
-      lifecycle: "active",
-    };
     const archived = {
       id: "00000000-0000-4000-8000-000000000919",
       projectId: project.id,
@@ -2920,20 +2872,19 @@ describe("WorkspaceView Chat surfaces", () => {
       title: "Hide deleted",
       lifecycle: "deleted",
     };
-    const tab = {
-      id: ids.tab,
-      kind: "draft-thread",
+    const tab: WorkspaceTab = {
+      id: decodeWorkspaceTabId(ids.tab),
+      kind: "welcome",
       mode: "chat",
       title: "New Chat",
-      projectId: project.id,
-    } as WorkspaceTab;
+    };
     render(
       <WorkspaceView
         {...propsFor(tab)}
         chatController={
           {
             ...propsFor(tab).chatController,
-            bootstrap: { threads: [archived, active, deleted] },
+            bootstrap: { threads: [archived, deleted] },
             status: "ready",
           } as never
         }
@@ -2942,9 +2893,10 @@ describe("WorkspaceView Chat surfaces", () => {
         projects={[project]}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Keep me" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Hide archived" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Hide deleted" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("group", { name: "Starter ideas" })).toBeVisible();
+    for (const title of ["Hide archived", "Hide deleted"]) {
+      expect(screen.queryByRole("button", { name: title })).not.toBeInTheDocument();
+    }
   });
 
   it("routes bounded Chat Overview sections to the Project thread hierarchy", async () => {

@@ -1,6 +1,6 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import { FolderOpen, FolderPlus, SquarePen } from "lucide-react";
-import { WelcomeHeading } from "../composer/WelcomeHeading";
+import { WELCOME_QUESTION } from "../composer/WelcomeHeading";
 import { OctantButton } from "../ui/base/OctantButton";
 import { WorkKindSwitch } from "./WorkKindSwitch";
 
@@ -95,7 +95,9 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
           <FolderOpen size={20} strokeWidth={1.6} />
         </span>
         {leadsWithTask ? (
-          <WelcomeHeading />
+          // The question alone: this screen has buttons, not a composer, so the
+          // shared "just start typing" line would promise nothing.
+          <h1 className="oct-title oct-title--hero">{WELCOME_QUESTION}</h1>
         ) : (
           <h1 className="oct-title oct-title--hero">{folderQuestion[props.mode]}</h1>
         )}

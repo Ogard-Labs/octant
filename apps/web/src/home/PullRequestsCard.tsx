@@ -40,7 +40,7 @@ export function createPullRequestsCard(source: PullRequestsCardSource): HomeCard
     id: PULL_REQUESTS_CARD_ID,
     title: "Pull requests",
     icon: GitPullRequest,
-    defaultOn: false,
+    defaultOn: true,
     available: source.available,
     emptyLabel: "Nothing is waiting on you.",
     useContent: () => usePullRequestsContent(source),

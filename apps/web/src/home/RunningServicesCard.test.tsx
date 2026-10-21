@@ -9,7 +9,6 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HomeDashboard } from "./HomeDashboard";
-import { cardsTurnedOn } from "./homeCardsTestSupport";
 import { createRunningServicesCard, type RunningServicesCardSource } from "./RunningServicesCard";
 import { RUNNING_SERVICES_ROW_LIMIT } from "./runningServices";
 import { disconnectedRunningServicesClient } from "./remoteServerLiveOpener";
@@ -72,7 +71,7 @@ function renderCard(card: ReturnType<typeof createRunningServicesCard>) {
   return render(
     <HomeDashboard
       cards={[card]}
-      customization={cardsTurnedOn([card])}
+      customization={{ order: [], visibility: [] }}
       onCustomizationChange={vi.fn()}
     />,
   );
@@ -495,7 +494,7 @@ describe("the Running services refresh", () => {
     const view = render(
       <HomeDashboard
         cards={[card]}
-        customization={cardsTurnedOn([card])}
+        customization={{ order: [], visibility: [] }}
         onCustomizationChange={vi.fn()}
       />,
     );

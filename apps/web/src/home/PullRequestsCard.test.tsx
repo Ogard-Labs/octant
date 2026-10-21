@@ -7,7 +7,6 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { HomeDashboard } from "./HomeDashboard";
-import { cardsTurnedOn } from "./homeCardsTestSupport";
 import { createPullRequestsCard, type PullRequestsCardSource } from "./PullRequestsCard";
 
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
@@ -92,7 +91,7 @@ function renderCard(overrides: Partial<PullRequestsCardSource> = {}) {
   render(
     <HomeDashboard
       cards={[createPullRequestsCard(source(overrides))]}
-      customization={cardsTurnedOn([createPullRequestsCard(source(overrides))])}
+      customization={{ order: [], visibility: [] }}
       onCustomizationChange={vi.fn()}
     />,
   );
@@ -105,7 +104,7 @@ describe("the Pull requests card", () => {
     render(
       <HomeDashboard
         cards={[createPullRequestsCard(source({ onOpenRow }))]}
-        customization={cardsTurnedOn([createPullRequestsCard(source({ onOpenRow }))])}
+        customization={{ order: [], visibility: [] }}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -133,7 +132,7 @@ describe("the Pull requests card", () => {
     render(
       <HomeDashboard
         cards={[createPullRequestsCard(source({ available: false, load }))]}
-        customization={cardsTurnedOn([createPullRequestsCard(source({ available: false, load }))])}
+        customization={{ order: [], visibility: [] }}
         onCustomizationChange={vi.fn()}
       />,
     );

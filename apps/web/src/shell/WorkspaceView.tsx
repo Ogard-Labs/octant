@@ -139,11 +139,9 @@ import type { WorkPromotionController } from "../work/useWorkPromotionController
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
 import { ProjectCanvasInventory } from "../projects/ProjectCanvasInventory";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
-import type { DraftRecentThread } from "./DraftThreadWorkspace";
+import type { DraftRecentThread, DraftStartPresentation } from "./DraftThreadWorkspace";
 import type { OctantMode } from "@octant/contracts/modes";
 import { AgentModeWelcome } from "./AgentModeWelcome";
-import { HomeStart } from "./HomeStart";
-import { HomeDashboard } from "../home/HomeDashboard";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
@@ -1455,6 +1453,7 @@ function renderNonCodeTab(
   },
   openProviderSettings: (() => void) | undefined,
   drafts: NewTaskDrafts | undefined,
+  startPresentation: DraftStartPresentation = "new-task",
 ): React.ReactNode {
   // Code's welcome tab is only a routing placeholder. Keep one start surface
   // so a split or restored fallback never sends the reader through a second
@@ -1477,6 +1476,10 @@ function renderNonCodeTab(
       canvasContext,
       openProviderSettings,
       drafts,
+      // Opening Code with nothing chosen lands on Code Home: the composer
+      // with what is next, what to continue, and the cards. New task is the
+      // question and the composer alone.
+      "home",
     );
   }
   if (tab.kind === "draft-thread") {
@@ -1488,6 +1491,7 @@ function renderNonCodeTab(
           key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevisions?.[String(paneId)] ?? 0)}`}
           {...(recentThreads.length === 0 ? {} : { recentThreads })}
           mode={tab.mode}
+          startPresentation={startPresentation}
           {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
           {...(props.selectedCreateHostId === undefined
             ? {}
@@ -2215,25 +2219,9 @@ function renderNonCodeTab(
   }
   if (tab.mode === "chat") {
     const recentThreads = draftRecentThreads("chat", props);
-    const home = props.homeStart;
     return (
       <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
         <ChatWelcome
-          {...(home?.cards === undefined
-            ? {}
-            : {
-                homeStart: (
-                  <HomeStart
-                    dashboard={
-                      <HomeDashboard
-                        cards={home.cards}
-                        customization={home.cardCustomization}
-                        onCustomizationChange={home.onCardCustomizationChange}
-                      />
-                    }
-                  />
-                ),
-              })}
           {...(recentThreads.length === 0 ? {} : { recentThreads })}
           {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
           {...(props.selectedCreateHostId === undefined

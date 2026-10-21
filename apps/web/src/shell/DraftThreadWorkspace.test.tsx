@@ -161,7 +161,7 @@ describe("DraftThreadWorkspace", () => {
     },
   );
   it("keeps the context chips as the composer's first row with model controls below the prompt", () => {
-    const { container } = render(<DraftThreadWorkspace {...baseProps} />);
+    const { container } = render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
     const composer = container.querySelector(".composer");
     const contextBar = container.querySelector(".composer-tray");
     expect(
@@ -344,6 +344,7 @@ describe("DraftThreadWorkspace", () => {
         onAttachFolder={vi.fn()}
         projectId={workProjectId}
         projects={projects}
+        startPresentation="home"
       />,
     );
 
@@ -354,26 +355,30 @@ describe("DraftThreadWorkspace", () => {
     expect(composer.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("shows the card area and its Customize control under the Chat composer while Chat threads exist", async () => {
-    render(
+  it("shows the card area and its Customize control under the Code composer on Home, and none on New task", async () => {
+    const homeStart = {
+      cards: [
+        {
+          id: "fixture",
+          title: "Fixture card",
+          icon: Activity,
+          defaultOn: true,
+          available: true,
+          emptyLabel: "Nothing here.",
+          useContent: () => ({ status: "ready" as const, count: 0, body: null }),
+        },
+      ],
+      cardCustomization: { order: [], visibility: [] },
+      onCardCustomizationChange: vi.fn(),
+    };
+    const view = render(
       <DraftThreadWorkspace
         {...baseProps}
-        homeStart={{
-          cards: [
-            {
-              id: "fixture",
-              title: "Fixture card",
-              icon: Activity,
-              defaultOn: true,
-              available: true,
-              emptyLabel: "Nothing here.",
-              useContent: () => ({ status: "ready", count: 0, body: null }),
-            },
-          ],
-          cardCustomization: { order: [], visibility: [] },
-          onCardCustomizationChange: vi.fn(),
-        }}
-        recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
+        homeStart={homeStart}
+        mode="code"
+        projectId={codeProjectId}
+        projects={projects}
+        startPresentation="home"
       />,
     );
 
@@ -381,12 +386,42 @@ describe("DraftThreadWorkspace", () => {
     const cards = await screen.findByRole("region", { name: "Home cards" });
     expect(composer.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("button", { name: /Customize/ })).toBeVisible();
-    expect(screen.queryByRole("group", { name: "Quick actions" })).not.toBeInTheDocument();
-    expect(screen.getByText("Latency telemetry")).toBeVisible();
+    view.unmount();
+
+    render(
+      <DraftThreadWorkspace
+        {...baseProps}
+        homeStart={homeStart}
+        mode="code"
+        projectId={codeProjectId}
+        projects={projects}
+      />,
+    );
+    expect(screen.getByRole("textbox", { name: "First message" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Home cards" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Customize/ })).not.toBeInTheDocument();
+  });
+
+  it("shows only the question and the composer on New task, in every mode", () => {
+    for (const mode of ["chat", "work", "code"] as const) {
+      const { unmount } = render(
+        <DraftThreadWorkspace
+          {...baseProps}
+          mode={mode}
+          projects={projects}
+          recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
+        />,
+      );
+      expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+      expect(screen.getByRole("textbox", { name: "First message" })).toBeVisible();
+      expect(screen.queryByRole("group", { name: "Suggested actions" })).not.toBeInTheDocument();
+      expect(screen.queryByText("Latency telemetry")).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
   it("renders intent cards for the active mode", () => {
-    const { container } = render(<DraftThreadWorkspace {...baseProps} />);
+    const { container } = render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
     expect(screen.getByRole("group", { name: "Suggested actions" })).toBeVisible();
     expect(screen.getByText("Explain a concept")).toBeVisible();
     expect(screen.getByText("Draft text")).toBeVisible();
@@ -401,6 +436,7 @@ describe("DraftThreadWorkspace", () => {
       <DraftThreadWorkspace
         {...baseProps}
         recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
+        startPresentation="home"
       />,
     );
 
@@ -417,6 +453,7 @@ describe("DraftThreadWorkspace", () => {
           { id: "thread-a", title: "Latency telemetry", detail: "2 hours ago", onOpen },
           { id: "thread-b", title: "Cache hit ratio", onOpen: vi.fn() },
         ]}
+        startPresentation="home"
       />,
     );
 
@@ -434,7 +471,7 @@ describe("DraftThreadWorkspace", () => {
 
   it("fills the composer when an intent card is clicked", async () => {
     const user = userEvent.setup();
-    render(<DraftThreadWorkspace {...baseProps} />);
+    render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
     await user.click(screen.getByText("Explain a concept"));
     const textarea = screen.getByRole("textbox", { name: "First message" });
     expect(textarea).toHaveValue("Explain a concept: ");
@@ -442,7 +479,7 @@ describe("DraftThreadWorkspace", () => {
 
   it("does not overwrite existing prompt text when an intent card is clicked", async () => {
     const user = userEvent.setup();
-    render(<DraftThreadWorkspace {...baseProps} />);
+    render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
     const textarea = screen.getByRole("textbox", { name: "First message" });
     await user.type(textarea, "My custom prompt");
     await user.click(screen.getByText("Explain a concept"));
@@ -533,6 +570,7 @@ describe("DraftThreadWorkspace", () => {
         onCreateCodeThread={onCreateCodeThread}
         projectId={"20000000-0000-4000-8000-000000000001" as never}
         projects={projects}
+        startPresentation="home"
       />,
     );
 

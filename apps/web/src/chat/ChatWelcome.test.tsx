@@ -161,19 +161,19 @@ describe("ChatWelcome", () => {
     expect(onCreateChat).toHaveBeenCalledWith("Ship the preview");
   });
 
-  it("offers the conversations already open and reopens the one chosen", async () => {
-    const user = userEvent.setup();
-    const onOpen = vi.fn();
+  it("lists no recent threads and offers starter ideas only while there are none", () => {
+    const first = render(<ChatWelcome onCreateChat={vi.fn()} />);
+    expect(screen.getByRole("group", { name: "Starter ideas" })).toBeVisible();
+    first.unmount();
+
     render(
       <ChatWelcome
         onCreateChat={vi.fn()}
-        recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen }]}
+        recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
       />,
     );
-
+    expect(screen.queryByText("Latency telemetry")).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Starter ideas" })).not.toBeInTheDocument();
-    await user.click(screen.getByText("Latency telemetry"));
-    expect(onOpen).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the first-message draft after the welcome remounts", async () => {

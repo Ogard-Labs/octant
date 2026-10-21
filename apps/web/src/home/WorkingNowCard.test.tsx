@@ -6,7 +6,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { createComputersCard } from "./ComputersCard";
 import { HomeDashboard } from "./HomeDashboard";
-import { cardsTurnedOn } from "./homeCardsTestSupport";
 import { createWorkingNowCard, type WorkingNowCardSource } from "./WorkingNowCard";
 
 const NOW = Date.parse("2026-10-06T10:00:00.000Z");
@@ -44,7 +43,7 @@ function renderCard(card: ReturnType<typeof createWorkingNowCard>) {
   return render(
     <HomeDashboard
       cards={[card]}
-      customization={cardsTurnedOn([card])}
+      customization={{ order: [], visibility: [] }}
       onCustomizationChange={vi.fn()}
     />,
   );
@@ -224,7 +223,7 @@ describe("the Working now card", () => {
     const { rerender } = render(
       <HomeDashboard
         cards={[card(0)]}
-        customization={cardsTurnedOn([card(0)])}
+        customization={{ order: [], visibility: [] }}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -232,7 +231,7 @@ describe("the Working now card", () => {
     rerender(
       <HomeDashboard
         cards={[card(0)]}
-        customization={cardsTurnedOn([card(0)])}
+        customization={{ order: [], visibility: [] }}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -240,7 +239,7 @@ describe("the Working now card", () => {
     rerender(
       <HomeDashboard
         cards={[card(1)]}
-        customization={cardsTurnedOn([card(1)])}
+        customization={{ order: [], visibility: [] }}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -282,26 +281,7 @@ describe("the Working now card", () => {
                 onOpenRunning: vi.fn(),
               }),
             ]}
-            customization={cardsTurnedOn([
-              createWorkingNowCard(shared),
-              createComputersCard({
-                hosts: [
-                  {
-                    hostId: "local",
-                    name: "This computer",
-                    connection: "connected",
-                    figuresAllowed: true,
-                    runningAgents: 2,
-                  },
-                ],
-                launchHostId: "local",
-                agentRunClient: reader,
-                runRevision: revision,
-                now: NOW,
-                readResources: vi.fn(async () => ({ status: "unavailable" as const })),
-                onOpenRunning: vi.fn(),
-              }),
-            ])}
+            customization={{ order: [], visibility: [] }}
             onCustomizationChange={vi.fn()}
           />
         </>

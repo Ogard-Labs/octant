@@ -12,13 +12,15 @@ Update this specification with an approved change, following the
 
 ### Layout
 
-A start screen is the question in the middle of the page, the composer docked
-at its foot, and under the composer the card area. It has no tabs and no action
-tiles: adding a folder lives in the composer's Project picker, a terminal in
-the workspace tools, and what is running or waiting for review in the
-sidebar. Code also keeps its agent home under the composer (see
-[Code agent home](#code-agent-home)); with it the page scrolls and the
-composer sits under the question rather than at the foot.
+There are two start screens. **New task**, in every mode, is the question in
+the middle of the page and the composer docked at its foot, and nothing else;
+Chat and Work add their starter chips only before the mode's first thread.
+**Code Home** is where Code lands with nothing chosen (the Code welcome tab):
+the question and the composer, then Code's prompt suggestions, the card area,
+and [Code agent home](#code-agent-home). With those the page scrolls and the
+composer sits under the question. Neither screen has tabs or action tiles:
+adding a folder lives in the composer's Project picker, a terminal in the
+workspace tools, and what is running or waiting for review in the sidebar.
 
 ### Card area
 
@@ -91,11 +93,8 @@ the issue as the thread's Create from context.
 
 ## Card area behavior
 
-Under the composer, every start screen carries a card area: Chat, Work, and
-Code, in each variant a mode has, including the Chat screen that also lists the
-threads to continue. It is the same area with the same stored setting on all of
-them. Every card starts off, so a fresh start screen is the question and the
-composer alone. The area is a **Customize** control on the
+Under the composer, Code Home carries the card area; New task has none. The
+area is a **Customize** control on the
 right, then cards in a grid (two columns, one at phone width). The composer paints first; the area mounts on the frame after the
 first commit, and each card begins its reads only then, so a start screen never
 waits on a card. A card that is off or unavailable is never mounted and reads
@@ -131,7 +130,7 @@ changes the contract. A store from before the cards decodes to the defaults.
 
 ### Needs you
 
-**Needs you** is the card before Working now, off by default. It lists the
+**Needs you** is the card before Working now, on by default. It lists the
 approvals and questions a provider is waiting on, and the decisions finished
 Work and Code turns asked, from one host list of everything this window can
 answer across Chat, Work, and Code and across Projects, oldest waiting first. Work's start screen shows Chat and Work
@@ -183,7 +182,7 @@ start a host read per delta.
 
 ### Working now
 
-**Working now** follows Needs you, off by default, never unavailable. It lists
+**Working now** follows Needs you, on by default, never unavailable. It lists
 the threads executing now (the navigation rows the host projects as `working`,
 the sidebar's Running rule, so a snoozed or completed row is never listed) and
 the agent runs in progress from the AgentRun projection, most recently moved
@@ -215,7 +214,7 @@ list.
 
 ### Running services
 
-**Running services** follows Working now, off by default. It lists the dev servers
+**Running services** follows Working now, on by default. It lists the dev servers
 and other listeners running in the host's Code Projects: the Code Environment's
 Local servers read host-wide, across every active Code Project the Project
 bootstrap lists, which today does not vary by window (see
@@ -259,7 +258,7 @@ Project sees an empty card.
 
 ### Pull requests
 
-**Pull requests** follows Running services, off by default, and only on a Code
+**Pull requests** follows Running services, on by default, and only on a Code
 start screen. It is hidden — and left out of Customize — unless the Pull requests
 destination is offered and its read is allowed: no connection, insecure token
 storage, or a missing pull-request capability hides it, the same gate that
@@ -293,7 +292,7 @@ and CI failures share one read of the snapshot when they mount together.
 
 ### CI failures
 
-**CI failures** follows Pull requests, off by default, and only on a Code start
+**CI failures** follows Pull requests, on by default, and only on a Code start
 screen. It uses the same gate as Pull requests: no connection, insecure token
 storage, or a missing pull-request capability hides it and leaves it out of
 Customize. It lists failing checks the pull-request refresh already recorded,
@@ -323,7 +322,7 @@ Pull requests reads and adds no poll.
 
 ### Computers
 
-**Computers** follows CI failures, off by default, on Chat, Work, and Code. It
+**Computers** follows CI failures, on by default, on Chat, Work, and Code. It
 leaves the grid while the only computer is this one and no agent is running
 on it, including while that count is still landing, so a quiet start screen
 does not open on host gauges. It comes back when a second computer is

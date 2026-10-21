@@ -216,10 +216,11 @@ than its composer, stay pane and attachment behaviour.
 
 ## Start-screen cards
 
-Every start screen (Chat, Work, and Code, in each variant a mode has, including
-the Chat screen that lists threads to continue) shows one question in the
-middle of the page, its composer docked at the foot, and under it one card
-area with the same stored setting. It has no tabs and no action tiles. These are the rules; each card's rows,
+Every start screen shows one question and its composer. **New task**, in
+every mode, stops there, with the composer docked at the foot of the page.
+**Code Home**, where Code lands with nothing chosen, adds Code's prompt
+suggestions, one card area, and Code's agent home under the composer. No
+start screen has tabs or action tiles. These are the rules; each card's rows,
 wording, and reads are specified in [Start screen](start-screen.md).
 
 - **Paint order.** The composer paints first. The card area mounts on the frame
@@ -227,9 +228,7 @@ wording, and reads are specified in [Start screen](start-screen.md).
   screen never waits on a card. A card that is off or unavailable is never
   mounted and reads nothing.
 - **Cards, in default order.** Needs you, Working now, Running services, Pull
-  requests, CI failures, and Computers, each off by default, so a fresh start
-  screen is the question and the composer alone; Customize turns them on. Pull
-  requests and CI failures appear only on a Code start screen.
+  requests, CI failures, and Computers, each on by default, on Code Home only.
 - **Unavailable is hidden.** A card this window cannot read is hidden and left
   out of Customize rather than shown broken: Needs you without a
   pending-request reader (a remote window); Pull requests and CI failures

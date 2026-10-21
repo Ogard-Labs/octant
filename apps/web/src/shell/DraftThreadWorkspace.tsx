@@ -109,8 +109,17 @@ import { OctantAlert } from "../ui/base/OctantAlert";
 /** One row of the start screen's recent-work list. */
 export type DraftRecentThread = RecentThreadListItem;
 
+/**
+ * Which start screen a draft is. **Home** is where Code lands with nothing
+ * chosen: the composer with what is next, what to continue, prompt
+ * suggestions, and the cards. **New task** is the question and the composer
+ * alone, in every mode.
+ */
+export type DraftStartPresentation = "home" | "new-task";
+
 export interface DraftThreadWorkspaceProps {
   readonly mode: OctantMode;
+  readonly startPresentation?: DraftStartPresentation;
   /**
    * What this mode already has open, shown under the composer. A start screen
    * with nothing below the prompt left most of the pane empty and gave the
@@ -561,8 +570,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
     else props.onAttachFolder?.();
   }
 
+  const home = props.startPresentation === "home";
   const homeStartNode =
-    props.homeStart?.cards === undefined ? undefined : (
+    !home || props.homeStart?.cards === undefined ? undefined : (
       <HomeStart
         dashboard={
           <HomeDashboard
@@ -643,72 +653,73 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
       props.linearPluginEnabled === true ? props.codeHome?.loadOpenLinearIssues : undefined;
     const fillPrompt = (text: string) =>
       setPromptRequest((current) => ({ text, revision: (current?.revision ?? 0) + 1 }));
-    const beneath =
-      githubHomeClient === undefined && linearHome === undefined && props.codeHome === undefined ? (
-        (props.recentThreads?.length ?? 0) === 0 ? undefined : (
-          <div className="code-home">
-            <RecentThreadList threads={props.recentThreads ?? []} />
-          </div>
-        )
-      ) : (
-        <CodeHome
-          {...(githubHomeClient === undefined ? {} : { githubClient: githubHomeClient })}
-          {...(linearHome === undefined ? {} : { loadAssignedLinearIssues: linearHome })}
-          {...(linearFresh === undefined ? {} : { loadOpenLinearIssues: linearFresh })}
-          {...(props.codeHome?.continueCards === undefined
-            ? {}
-            : { continueCards: props.codeHome.continueCards })}
-          {...(props.codeHome?.projectNames === undefined
-            ? {}
-            : { projectNames: props.codeHome.projectNames })}
-          {...(props.codeHome?.providerLabels === undefined
-            ? {}
-            : { providerLabels: props.codeHome.providerLabels })}
-          {...(props.codeHome?.onOpenThread === undefined
-            ? {}
-            : { onOpenThread: props.codeHome.onOpenThread })}
-          {...(props.codeHome?.onOpenInbox === undefined
-            ? {}
-            : { onOpenInbox: props.codeHome.onOpenInbox })}
-          {...(props.codeHome?.onOpenIssues === undefined
-            ? {}
-            : { onOpenIssues: props.codeHome.onOpenIssues })}
-          onPickGithub={(item) => {
-            const reference = `${item.owner}/${item.name}#${String(item.number)}`;
-            // Only an issue can be attached to the new thread, so picking a
-            // pull request has to take the previous issue back off: leaving it
-            // sent a "Review pull request …" draft away carrying an unrelated
-            // issue as its context.
-            setCreateFromSelection(
-              item.category === "issue"
-                ? {
-                    kind: "github",
-                    request: { owner: item.owner, name: item.name, number: item.number },
-                    label: reference,
-                  }
-                : undefined,
-            );
-            fillPrompt(
-              item.category === "issue"
-                ? `Work on ${reference}: ${item.title}`
-                : `Review pull request ${reference}: ${item.title}`,
-            );
-          }}
-          onPickIssue={adoptIssue}
-          onPickLinear={(row) => {
-            setCreateFromSelection({
-              kind: "linear",
-              request: { id: row.id },
-              label: row.identifier,
-            });
-            fillPrompt(`Work on ${row.identifier}: ${row.title}`);
-          }}
-        />
-      );
+    const beneath = !home ? undefined : githubHomeClient === undefined &&
+      linearHome === undefined &&
+      props.codeHome === undefined ? (
+      (props.recentThreads?.length ?? 0) === 0 ? undefined : (
+        <div className="code-home">
+          <RecentThreadList threads={props.recentThreads ?? []} />
+        </div>
+      )
+    ) : (
+      <CodeHome
+        {...(githubHomeClient === undefined ? {} : { githubClient: githubHomeClient })}
+        {...(linearHome === undefined ? {} : { loadAssignedLinearIssues: linearHome })}
+        {...(linearFresh === undefined ? {} : { loadOpenLinearIssues: linearFresh })}
+        {...(props.codeHome?.continueCards === undefined
+          ? {}
+          : { continueCards: props.codeHome.continueCards })}
+        {...(props.codeHome?.projectNames === undefined
+          ? {}
+          : { projectNames: props.codeHome.projectNames })}
+        {...(props.codeHome?.providerLabels === undefined
+          ? {}
+          : { providerLabels: props.codeHome.providerLabels })}
+        {...(props.codeHome?.onOpenThread === undefined
+          ? {}
+          : { onOpenThread: props.codeHome.onOpenThread })}
+        {...(props.codeHome?.onOpenInbox === undefined
+          ? {}
+          : { onOpenInbox: props.codeHome.onOpenInbox })}
+        {...(props.codeHome?.onOpenIssues === undefined
+          ? {}
+          : { onOpenIssues: props.codeHome.onOpenIssues })}
+        onPickGithub={(item) => {
+          const reference = `${item.owner}/${item.name}#${String(item.number)}`;
+          // Only an issue can be attached to the new thread, so picking a
+          // pull request has to take the previous issue back off: leaving it
+          // sent a "Review pull request …" draft away carrying an unrelated
+          // issue as its context.
+          setCreateFromSelection(
+            item.category === "issue"
+              ? {
+                  kind: "github",
+                  request: { owner: item.owner, name: item.name, number: item.number },
+                  label: reference,
+                }
+              : undefined,
+          );
+          fillPrompt(
+            item.category === "issue"
+              ? `Work on ${reference}: ${item.title}`
+              : `Review pull request ${reference}: ${item.title}`,
+          );
+        }}
+        onPickIssue={adoptIssue}
+        onPickLinear={(row) => {
+          setCreateFromSelection({
+            kind: "linear",
+            request: { id: row.id },
+            label: row.identifier,
+          });
+          fillPrompt(`Work on ${row.identifier}: ${row.title}`);
+        }}
+      />
+    );
     return (
       <>
         <CodeComposerAdapter
-          suggestions={CODE_SUGGESTIONS}
+          {...(home ? { suggestions: CODE_SUGGESTIONS } : {})}
           {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
           {...(beneath === undefined ? {} : { beneath })}
           {...(promptRequest === undefined ? {} : { promptRequest })}
@@ -1184,7 +1195,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
 
         {homeStartNode}
 
-        {(props.recentThreads?.length ?? 0) === 0 ? (
+        {home && (props.recentThreads?.length ?? 0) === 0 ? (
           <div className="draft-thread__intent-cards" role="group" aria-label="Suggested actions">
             {presentation.intentCards.map((card) => (
               <OctantButton
@@ -1201,7 +1212,7 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
           </div>
         ) : null}
 
-        <RecentThreadList threads={props.recentThreads ?? []} />
+        {home ? <RecentThreadList threads={props.recentThreads ?? []} /> : null}
       </div>
     </section>
   );

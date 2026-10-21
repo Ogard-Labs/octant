@@ -5,7 +5,7 @@ import {
 } from "../composer/useComposerSlashCommands";
 import { Compass, GraduationCap, ListChecks, PenLine } from "lucide-react";
 import { useNewTaskPrompt } from "../composer/useNewTaskPrompt";
-import { useCallback, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useRef, useState, type KeyboardEvent } from "react";
 import type { ChatControllerStatus } from "./useChatController";
 import { HostSelector } from "../shell/HostSelector";
 import type { HostId, HostIdentity } from "@octant/contracts/host";
@@ -30,7 +30,6 @@ import { WelcomeHeading } from "../composer/WelcomeHeading";
 import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import type { DraftRecentThread } from "../shell/DraftThreadWorkspace";
-import { RecentThreadList } from "../shell/RecentThreadList";
 import {
   unattachedCapabilityMentionCopy,
   unattachedCapabilityMentions,
@@ -38,10 +37,11 @@ import {
 import { WorkKindSwitch } from "../shell/WorkKindSwitch";
 
 export interface ChatWelcomeProps {
-  /** The threads this mode already has, shown under the starter ideas. */
+  /**
+   * The threads this mode already has. The start screen lists none of them
+   * (the sidebar does); it offers starter ideas only while there are none.
+   */
   readonly recentThreads?: ReadonlyArray<DraftRecentThread>;
-  /** The card area under the composer, ahead of the starter ideas. */
-  readonly homeStart?: ReactNode;
   readonly creating?: boolean;
   readonly errorMessage?: string;
   readonly hosts?: ReadonlyArray<HostIdentity>;
@@ -263,7 +263,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             Retry Chat
           </OctantButton>
         ) : null}
-        {props.homeStart}
         {(props.recentThreads?.length ?? 0) === 0 ? (
           <div aria-label="Starter ideas" className="chat-welcome__suggestions" role="group">
             {starterIdeas.map((idea) => {
@@ -284,7 +283,6 @@ export function ChatWelcome(props: ChatWelcomeProps) {
             })}
           </div>
         ) : null}
-        <RecentThreadList threads={props.recentThreads ?? []} />
       </div>
     </section>
   );

@@ -463,13 +463,14 @@ composer keeps its context strip beneath the card. Nothing about delivery is
 asked up front; it is derived from the chips and shown on the thread once it
 exists.
 
-Under the composer, a start screen shows only a Customize control, the cards
-a person has turned on there (every card starts off), and, before the first
-thread, one row of outline prompt chips (Code's suggestions, Work's starters).
-It has no tabs and no action tiles: adding a folder lives in the composer's
-Project picker. Code's start screen also keeps its agent home (Up next and
-Continue) under the composer, so there the page scrolls and the composer sits
-under the question rather than at the foot. Their anatomy is in
+**New task**, in every mode, is the question and the composer and nothing
+else; Chat and Work add one row of outline starter chips only before the
+mode's first thread. **Code Home** is where Code lands with nothing chosen:
+the same question and composer, then Code's prompt suggestions, the card area
+(a **Customize** control and the cards, on by default), and Code's agent home
+(Up next and Continue). There the page scrolls and the composer sits under
+the question. The cards appear on no other start screen. Neither screen has
+tabs or action tiles: adding a folder lives in the composer's Project picker. Their anatomy is in
 [Start screen: presentation](docs/design/start-screen.md#presentation); their
 behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 

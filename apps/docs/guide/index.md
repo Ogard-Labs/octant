@@ -43,15 +43,16 @@ into split panes; the active pane is marked, and the right dock follows that
 pane's thread and Project. Work and Code have server-derived thread boards;
 Chat has no board.
 
-### Start screen and home cards
+### New task and Code Home
 
-A new chat or a new Work or Code task opens on one question, **What are we
-building today?**, with the composer at the bottom of the page where the
-conversation will continue. Pick a Project in the composer, or just start
-typing. What is running and what waits for your review are in the sidebar.
+**New task** opens on one question, **What are we building today?**, with the
+composer at the bottom of the page where the conversation will continue. Pick
+a Project in the composer, or just start typing. What is running and what
+waits for your review are in the sidebar.
 
-Under the composer you can turn on a few cards that show what is happening now.
-They all start off; **Customize** turns them on. **Working now** lists what is running across your Projects:
+**Code Home** is where Code opens when nothing is chosen. Under the same
+composer it shows prompt suggestions, cards about what is happening now, and
+your **Up next** and **Continue** lists. **Working now** lists what is running across your Projects:
 each row has the provider mark, the thread's title, a line saying what it is
 doing, and a time. A command or tool shows as it runs, such as `Command: bun run
 test`, or the row says it is waiting for your approval or an answer. The time is

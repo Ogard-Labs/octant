@@ -121,14 +121,12 @@ async function showRightUtilityDock(user: ReturnType<typeof userEvent.setup>): P
   await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
 }
 
-/** Every start-screen card starts off; a test that drives one turns it on. */
-function withCiFailuresCardOn(value: ShellBootstrap): ShellBootstrap {
+/** Code with nothing open: the Code welcome tab, which renders Code Home. */
+function codeHomeShellBootstrap(): ShellBootstrap {
+  const value = bootstrap();
   return {
     ...value,
-    settings: {
-      ...value.settings,
-      homeCards: { order: [], visibility: [{ id: "ci-failures", visible: true }] },
-    },
+    workspace: applyWorkspaceOperation(value.workspace, { kind: "set-active-mode", mode: "code" }),
   };
 }
 
@@ -3811,18 +3809,10 @@ describe("App", () => {
     expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
   });
 
-  it("keeps the threads to continue on screen when a new task starts over", async () => {
+  it("lists the threads to continue on Code Home and leaves them off a new task", async () => {
     const user = userEvent.setup();
     const codeApi = codes();
-    // Starting over remounts the draft to clear the composer. A second read
-    // that has not landed stands in for the frame the Continue section used to
-    // spend empty: the threads it already showed belong to the window, so they
-    // have to survive the remount whether or not a fresh read answers.
-    const laterRead = deferred<CodeBoardView>();
-    let reads = 0;
     vi.mocked(codeApi.queryBoard).mockImplementation(async () => {
-      reads += 1;
-      if (reads > 1) return await laterRead.promise;
       return {
         version: 1,
         query: { version: 1 },
@@ -3851,19 +3841,20 @@ describe("App", () => {
         launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
         projectClient={projects({ ...projectBootstrap(), availability: [] })}
         projectWindowCapability={projectWindowCapability}
-        shellClient={client(codeShellBootstrap())}
+        shellClient={client(codeHomeShellBootstrap())}
       />,
     );
 
-    await user.click(await screen.findByRole("button", { name: "New task" }));
     const shown = await screen.findByRole("region", { name: "Continue" });
     expect(within(shown).getByText("Ai slop callouts")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "New task" }));
 
-    const kept = screen.getByRole("region", { name: "Continue" });
-    expect(within(kept).getByText("Ai slop callouts")).toBeVisible();
-    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+    expect(
+      await screen.findByRole("heading", { name: "What are we building today?" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Continue" })).toBeNull();
+    expect(screen.queryByText("Ai slop callouts")).toBeNull();
   });
 
   it("keeps the draft composer's chosen Project after a visit to Settings", async () => {
@@ -4027,11 +4018,10 @@ describe("App", () => {
           launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
           projectClient={projects({ ...projectBootstrap(), availability: [] })}
           projectWindowCapability={projectWindowCapability}
-          shellClient={client(withCiFailuresCardOn(codeShellBootstrap()))}
+          shellClient={client(codeHomeShellBootstrap())}
         />,
       );
 
-      await user.click(await screen.findByRole("button", { name: "New task" }));
       const ciFailures = await screen.findByRole("region", { name: "CI failures" });
       await user.click(
         await within(ciFailures).findByRole("button", {
@@ -4062,6 +4052,7 @@ describe("App", () => {
         expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(""),
       );
       expect(screen.queryByText("feature/handed-by-start-a-fix")).toBeNull();
+      expect(screen.queryByRole("region", { name: "CI failures" })).toBeNull();
     },
   );
 
