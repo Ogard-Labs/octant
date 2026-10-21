@@ -17,6 +17,11 @@ private let replicaDeviceKeyNamespace = "replica-device-key"
 // when a person enters a new key pair.
 private let replicaStoreCredentialService = "app.octant.replica-store-credentials.v1"
 private let replicaStoreCredentialNamespace = "replica-store-credential"
+// A public link's owner secret proves to the share service that this host may
+// update or revoke that link. It lives apart from provider credentials, so a
+// provider purge never strands a link its owner can no longer revoke.
+private let canvasPublicShareSecretService = "app.octant.canvas-public-share-secrets.v1"
+private let canvasPublicShareSecretNamespace = "canvas-public-share-secret"
 private let hostIdentityNamespace = "app.octant.host-identity.v1"
 private let hostIdentityKeyId = "host-identity"
 private let maximumPurgeProviderInstances = 128
@@ -50,6 +55,7 @@ private let octantOwnedServices = [
     hostIdentityService,
     replicaDeviceKeyService,
     replicaStoreCredentialService,
+    canvasPublicShareSecretService,
 ]
 
 // A credential namespace of its own: the Keychain service it reaches, the
@@ -70,6 +76,11 @@ private let separateNamespaces: [String: SeparateNamespace] = [
         service: replicaStoreCredentialService,
         idField: "credentialRef",
         replaceable: true
+    ),
+    canvasPublicShareSecretNamespace: SeparateNamespace(
+        service: canvasPublicShareSecretService,
+        idField: "credentialRef",
+        replaceable: false
     ),
 ]
 

@@ -1063,8 +1063,21 @@ function htmlPiece(piece: Piece): string {
     case "frame": {
       // The page is an attribute value, so its markup is escaped once more;
       // a frame is the only thing here that can hold the author's markup.
-      const width = piece.width === undefined ? "100%" : `${String(piece.width)}px`;
-      return `<figure><figcaption>${escapeXml(piece.title)}</figcaption><iframe sandbox="${piece.sandbox}" referrerpolicy="no-referrer" loading="lazy" title="${escapeXml(piece.title)}" style="width:${width};max-width:100%;height:${String(piece.height)}px;border:1px solid ${DEFAULT_ARTIFACT_PALETTE.muted}" srcdoc="${escapeXml(piece.page)}"></iframe></figure>`;
+      const border = `1px solid ${DEFAULT_ARTIFACT_PALETTE.muted}`;
+      const attributes = `sandbox="${piece.sandbox}" referrerpolicy="no-referrer" loading="lazy" title="${escapeXml(piece.title)}"`;
+      const srcdoc = `srcdoc="${escapeXml(piece.page)}"`;
+      if (piece.width === undefined) {
+        return `<figure><figcaption>${escapeXml(piece.title)}</figcaption><iframe ${attributes} style="width:100%;max-width:100%;height:${String(piece.height)}px;border:${border}" ${srcdoc}></iframe></figure>`;
+      }
+      // A slide or device screen is laid out against its declared viewport, so
+      // the page keeps that size and the box scales it to the width on offer;
+      // clipping the right edge would lose the footer and the composition.
+      // `tan(atan2(...))` turns the box's width over the viewport width into
+      // the unitless factor `scale` needs; where a browser lacks it the frame
+      // draws at its own size inside the box.
+      const width = `${String(piece.width)}px`;
+      const height = `${String(piece.height)}px`;
+      return `<figure><figcaption>${escapeXml(piece.title)}</figcaption><div style="width:min(100%,${width});aspect-ratio:${String(piece.width)}/${String(piece.height)};container-type:inline-size;overflow:hidden;border:${border}"><iframe ${attributes} style="display:block;width:${width};height:${height};border:0;transform-origin:0 0;transform:scale(tan(atan2(100cqw,${width})))" ${srcdoc}></iframe></div></figure>`;
     }
     default: {
       const unhandled: never = piece;

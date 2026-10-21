@@ -3479,6 +3479,16 @@
   gap: var(--oct-space-1);
 }
 
+.canvas-public-links {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+.canvas-public-links__url {
+  overflow-wrap: anywhere;
+}
+
 .canvas-share__row-audience {
   color: var(--oct-muted);
 }
@@ -4577,6 +4587,21 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--oct-space-1);
+}
+
+.canvas-export__link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+}
+
+.canvas-export__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
 }
 
 .canvas-export__payload {

@@ -42,6 +42,14 @@ import {
   CanvasExportFolderResult,
   CanvasExportFolderView,
 } from "@octant/contracts/canvas-export-folder";
+import {
+  CanvasPublicLinkSettings,
+  type CanvasPublicLinkSettingsCommand,
+  CanvasPublicLinkSettingsResult,
+  CanvasPublicShareList,
+  type CanvasPublicShareRevokeRequest,
+  CanvasPublicShareRevokeResult,
+} from "@octant/contracts/canvas-public-share";
 import { CanvasDocumentRecipeCatalog } from "@octant/contracts/canvas-skill";
 import type { FolderBrowseRequest, FolderBrowseResult } from "@octant/contracts/folder-browse";
 import { createFolderBrowseClient } from "./folderBrowseClient";
@@ -134,6 +142,19 @@ export interface CanvasClient {
   exportFolder?(canvasId: CanvasId): Promise<CanvasExportFolderView>;
   /** Record the folder a person picked in the host's own browser. */
   chooseExportFolder?(command: CanvasExportFolderCommand): Promise<CanvasExportFolderResult>;
+  /**
+   * Public links. The host keeps the record of each link and the owner
+   * secret; a window reads the list, revokes one, and reads or changes the
+   * Settings switch and service address.
+   */
+  publicShares?(canvasId: CanvasId): Promise<CanvasPublicShareList>;
+  revokePublicShare?(
+    request: CanvasPublicShareRevokeRequest,
+  ): Promise<CanvasPublicShareRevokeResult>;
+  publicLinkSettings?(): Promise<CanvasPublicLinkSettings>;
+  setPublicLinkSettings?(
+    command: CanvasPublicLinkSettingsCommand,
+  ): Promise<CanvasPublicLinkSettingsResult>;
   /**
    * The host's folder browser, reached through this client so a renderer sends
    * the browser's candidate id and never a path of its own.
@@ -425,6 +446,48 @@ export function createCanvasClient(options: CanvasClientOptions): CanvasClient {
           body: JSON.stringify(body),
         },
         decodeHostAnswer(CanvasExportDecideResult),
+      );
+    },
+    publicShares(canvasId) {
+      const url = new URL("/api/canvas/public-shares", options.baseUrl);
+      url.searchParams.set("canvasId", String(canvasId));
+      return request(
+        options.fetch,
+        url.toString(),
+        { method: "GET", headers },
+        decodeHostAnswer(CanvasPublicShareList),
+      );
+    },
+    revokePublicShare(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/public-share-revoke", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasPublicShareRevokeResult),
+      );
+    },
+    publicLinkSettings() {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/public-link-settings", options.baseUrl).toString(),
+        { method: "GET", headers },
+        decodeHostAnswer(CanvasPublicLinkSettings),
+      );
+    },
+    setPublicLinkSettings(body) {
+      return request(
+        options.fetch,
+        new URL("/api/canvas/public-link-settings", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(body),
+        },
+        decodeHostAnswer(CanvasPublicLinkSettingsResult),
       );
     },
     exportFolder(canvasId) {

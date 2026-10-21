@@ -2956,6 +2956,20 @@ describe("ChatTurnRunner", () => {
             summary: "Commit the captured evidence",
           } as never);
           yield* Queue.offer(queue, {
+            kind: "task-progress",
+            sessionId,
+            taskId: "task-3",
+            status: "pending",
+            summary: "A step the provider drops again",
+          } as never);
+          // The provider restates its plan without the third step and with
+          // the second one first.
+          yield* Queue.offer(queue, {
+            kind: "task-list",
+            sessionId,
+            taskIds: ["task-2", "task-1"],
+          } as never);
+          yield* Queue.offer(queue, {
             kind: "child-agent-activity",
             sessionId,
             instanceId: providerInstanceId,
@@ -3026,8 +3040,8 @@ describe("ChatTurnRunner", () => {
     ]);
     expect(updates.at(-1)?.childObservations?.children[0]).not.toHaveProperty("runId");
     expect(updates.at(-1)?.tasks).toEqual([
-      { taskId: "task-1", state: "completed", summary: "Watch CI on the branch head" },
       { taskId: "task-2", state: "pending", summary: "Commit the captured evidence" },
+      { taskId: "task-1", state: "completed", summary: "Watch CI on the branch head" },
     ]);
   });
 

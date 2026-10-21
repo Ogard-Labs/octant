@@ -60,9 +60,25 @@ export function makeReplicaStoreCredentialBrokerClient(
   return makeBrokerCredentialClient(options, "/v1/replica-store-credentials/", "credentialRef");
 }
 
+/**
+ * Public links' owner secrets, through the broker's own routes for them, keyed
+ * by each link's credential reference. They sit apart from provider
+ * credentials, so a provider purge never strands a link its owner can no
+ * longer revoke.
+ */
+export function makeCanvasPublicShareSecretBrokerClient(
+  options: CredentialBrokerClientOptions,
+): ProviderCredentialStore {
+  return makeBrokerCredentialClient(options, "/v1/canvas-public-share-secrets/", "credentialRef");
+}
+
 function makeBrokerCredentialClient(
   options: CredentialBrokerClientOptions,
-  routePrefix: "/v1/credentials/" | "/v1/replica-device-keys/" | "/v1/replica-store-credentials/",
+  routePrefix:
+    | "/v1/credentials/"
+    | "/v1/replica-device-keys/"
+    | "/v1/replica-store-credentials/"
+    | "/v1/canvas-public-share-secrets/",
   field: "providerInstanceId" | "instanceId" | "credentialRef",
 ): ProviderCredentialStore {
   const fetch = options.fetch ?? globalThis.fetch;

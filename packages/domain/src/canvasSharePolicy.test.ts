@@ -1,4 +1,8 @@
-import { CANVAS_SCHEMA_VERSION, decodeCanvasVersion } from "@octant/contracts/canvas";
+import {
+  CANVAS_MAX_TEXT_LENGTH,
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasVersion,
+} from "@octant/contracts/canvas";
 import { decodeCanvasComment } from "@octant/contracts/canvas-board";
 import {
   CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION,
@@ -36,6 +40,7 @@ import { metricExamples } from "./canvasMetricExamples";
 import { mockupExamples } from "./canvasMockupExamples";
 import { treemapExamples } from "./canvasTreemapExamples";
 import {
+  buildCanvasPublicShareDocument,
   buildCanvasStaticExportDocument,
   buildCanvasStaticExportReceipt,
   CanvasSharePolicyRejected,
@@ -808,6 +813,30 @@ describe("Canvas share policy", () => {
     ).toThrowError(CanvasSharePolicyRejected);
   });
 
+  it("scans a long run of scheme letters in linear time and still finds a URL after it", () => {
+    const rich = (text: string) => ({
+      request,
+      current: {
+        ...current,
+        definition: {
+          ...current.definition,
+          blocks: [{ blockId: "rich-long", schemaVersion: 1, kind: "rich-text" as const, text }],
+        },
+      },
+      context,
+    });
+    const started = performance.now();
+    expect(() =>
+      buildCanvasStaticExportReceipt(rich("A".repeat(CANVAS_MAX_TEXT_LENGTH))),
+    ).not.toThrow();
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(() =>
+      buildCanvasStaticExportReceipt(
+        rich(`${"A".repeat(20_000)} see 1https://example.test/file?token=opaque-secret`),
+      ),
+    ).toThrowError(CanvasSharePolicyRejected);
+  });
+
   it("requires authenticated local-user consent bound to the caller", () => {
     expect(() =>
       validateCanvasStaticExportRequest({
@@ -1034,5 +1063,94 @@ describe("Canvas share of tabs, columns, diagram styles, and the Gantt view", ()
         schemaVersion: CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION - 1,
       }),
     ).toThrow();
+  });
+});
+
+describe("a public link's payload", () => {
+  const atVersion = (blocks: ReadonlyArray<unknown>) =>
+    decodeCanvasVersion({
+      ...current,
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      definition: {
+        ...current.definition,
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        provenance: { ...current.definition.provenance, mode: "work" },
+        blocks,
+      },
+    });
+  const publishedAt = "2026-10-20T10:00:00.000Z";
+
+  it("is the filtered share document without host, Project, thread, Canvas, or source identity", () => {
+    const payload = buildCanvasPublicShareDocument({
+      definition: atVersion(current.definition.blocks).definition,
+      publishedAt,
+      markupAcknowledged: false,
+    });
+    const snapshot = buildCanvasStaticExportDocument({
+      request: decodeCanvasStaticExportRequest(request),
+      current: atVersion(current.definition.blocks),
+      exportedAt: publishedAt,
+    });
+    expect(payload.blocks).toEqual(snapshot.blocks);
+    const wire = JSON.stringify(payload);
+    for (const id of [ids.canvas, ids.version, ids.project, ids.thread, ids.source, ids.provider]) {
+      expect(wire).not.toContain(id);
+    }
+    expect(payload).not.toHaveProperty("provenance");
+    expect(payload).not.toHaveProperty("sourceManifest");
+  });
+
+  it("carries a design's frames only with the acknowledgement, and never its declared images", () => {
+    const design = {
+      ...onboardingFlowExample,
+      assets: [{ assetId: "shot", source: { kind: "project-file", path: "screens/home.png" } }],
+    };
+    expect(
+      shareDenial(() =>
+        buildCanvasPublicShareDocument({
+          definition: atVersion([design]).definition,
+          publishedAt,
+          markupAcknowledged: false,
+        }),
+      ),
+    ).toBe("consent-required");
+    const payload = buildCanvasPublicShareDocument({
+      definition: atVersion([design]).definition,
+      publishedAt,
+      markupAcknowledged: true,
+    });
+    expect(payload.blocks[0]).not.toHaveProperty("assets");
+    expect(JSON.stringify(payload)).not.toContain("screens/home.png");
+  });
+
+  it("refuses an action block", () => {
+    const action = {
+      blockId: "action-1",
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      kind: "action",
+      label: "Refresh",
+      command: { command: "canvas.request-refresh" },
+    };
+    expect(
+      shareDenial(() =>
+        buildCanvasPublicShareDocument({
+          definition: atVersion([action]).definition,
+          publishedAt,
+          markupAcknowledged: true,
+        }),
+      ),
+    ).toBe("unsafe-payload");
+  });
+
+  it("takes its link-preview summary from the first reading text", () => {
+    const payload = buildCanvasPublicShareDocument({
+      definition: atVersion([
+        ...current.definition.blocks,
+        { blockId: "body", schemaVersion: 1, kind: "rich-text", text: "We **ship** on Friday." },
+      ]).definition,
+      publishedAt,
+      markupAcknowledged: false,
+    });
+    expect(payload.summary).toBe("We ship on Friday.");
   });
 });

@@ -559,6 +559,41 @@ describe("rendering a canvas as a document", () => {
       expect(html.body).toContain("<figcaption>Cart</figcaption>");
     });
 
+    it("scales a slide frame to the width on offer instead of clipping it, and leaves a document-size frame responsive", () => {
+      const deck = decodeCanvasBlock({
+        blockId: "deck",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "design",
+        title: "Deck",
+        size: "slide",
+        frames: [{ frameId: "one", title: "One", html: "<h1>One</h1>" }],
+      });
+      const page = decodeCanvasBlock({
+        blockId: "page",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "design",
+        title: "Page",
+        size: "document",
+        theme: "none",
+        frames: [{ frameId: "home", title: "Home", html: "<p>Home</p>" }],
+      });
+      const slides = renderArtifactHtml(definition([deck]), frames);
+      const pages = renderArtifactHtml(definition([page]), frames);
+      if (slides.kind !== "rendered" || pages.kind !== "rendered") {
+        throw new Error("The export did not render.");
+      }
+
+      expect(slides.body).toContain(
+        '<div style="width:min(100%,1920px);aspect-ratio:1920/1080;container-type:inline-size;overflow:hidden;',
+      );
+      expect(slides.body).toMatch(
+        /<iframe [^>]*style="display:block;width:1920px;height:1080px;border:0;transform-origin:0 0;transform:scale\(tan\(atan2\(100cqw,1920px\)\)\)"/,
+      );
+      expect(slides.body).not.toContain("max-width:100%;height:1080px");
+      expect(pages.body).not.toContain("container-type");
+      expect(pages.body).toContain("width:100%;max-width:100%;height:");
+    });
+
     it("writes a running prototype as one page sandboxed to scripts alone, with no way to connect", () => {
       const prototype = decodeCanvasBlock({
         blockId: "cart",
