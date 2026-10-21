@@ -48,6 +48,34 @@ describe("in-tree Canvas document recipes", () => {
     expect(redesign.skeleton[0]?.role).toContain("Never fetch");
   });
 
+  it("offers an architecture diagram and a UI kit built only from block kinds the catalogue has", () => {
+    const recipes = new Map(
+      inTreeCanvasDocumentRecipes().map((recipe) => [String(recipe.id), recipe] as const),
+    );
+    const architecture = recipes.get("architecture-diagram");
+    const uiKit = recipes.get("ui-kit");
+    if (architecture === undefined || uiKit === undefined) {
+      throw new Error("The architecture diagram or UI kit recipe is not offered.");
+    }
+    // The system as grouped tiers, one flow through it, and the decisions behind it.
+    const architectureKinds = architecture.skeleton.map((block) => block.kind);
+    expect(architectureKinds).toContain("diagram");
+    expect(architectureKinds).toContain("sequence");
+    expect(architectureKinds).toContain("table");
+    expect(architecture.skeleton.find((block) => block.kind === "diagram")?.role).toContain("tier");
+    // Tokens as a table the person can sort, and the components as one sheet.
+    const uiKitKinds = uiKit.skeleton.map((block) => block.kind);
+    expect(uiKitKinds).toContain("table");
+    expect(uiKit.skeleton.find((block) => block.kind === "design")).toMatchObject({
+      size: "document",
+    });
+    expect(uiKit.skeleton.find((block) => block.kind === "design")?.role).toContain("state");
+    // The skeleton schema admits only kinds the block catalogue has today.
+    for (const recipe of [architecture, uiKit]) {
+      expect(decodeCanvasDocumentRecipe(recipe)).toEqual(recipe);
+    }
+  });
+
   it("shapes a memo from typed blocks alone, so the reader can comment on and revise each part", () => {
     const memo = inTreeCanvasDocumentRecipes().find((recipe) => String(recipe.id) === "memo");
     if (memo === undefined) throw new Error("The memo recipe is not offered.");

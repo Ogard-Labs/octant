@@ -265,6 +265,8 @@ import {
   useSidebarVibrancySupported,
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
+import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
+import { RailUsageRings } from "./usage/RailUsageRings";
 import { AppBackdrop } from "./theme/AppBackdrop";
 import { useThreadUtilityPresentation } from "./shell/useThreadUtilityPresentation";
 import {
@@ -1123,14 +1125,21 @@ function LaunchedShell(
   // The rail is a wide-window state: below the drawer breakpoint a collapsed
   // sidebar is a closed drawer, and a strip of icons would only take width
   // from the page it was hidden to make room for.
+  const railPresentation = (presentedShellSettings ?? controller.settings)
+    ?.sidebarCollapsedPresentation;
   const sidebarRail =
-    !sidebarIsDrawer &&
-    !isNarrow &&
-    sidebarCollapsed &&
-    (presentedShellSettings ?? controller.settings)?.sidebarCollapsedPresentation !== "hidden";
+    !sidebarIsDrawer && !isNarrow && sidebarCollapsed && railPresentation !== "hidden";
+  // Beside the open sidebar the rail takes the destinations and counts, so
+  // the sidebar is left to threads and Projects.
+  const sidebarRailBeside =
+    !sidebarIsDrawer && !isNarrow && !sidebarCollapsed && railPresentation === "always";
   const setSidebarCollapsedPersistent = useCallback(
-    (collapsed: boolean) => {
-      sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
+    (collapsed: boolean, options?: { readonly keepFocus?: boolean }) => {
+      // A keyboard shortcut leaves focus where it was (often the composer);
+      // only a clicked control that unmounts needs its replacement focused.
+      if (options?.keepFocus !== true) {
+        sidebarToggleFocusRef.current = collapsed ? "Show sidebar" : "Hide sidebar";
+      }
       if (sidebarIsDrawer) {
         setSidebarDrawerOpen(!collapsed);
         return;
@@ -1139,6 +1148,12 @@ function LaunchedShell(
       writeSidebarCollapsed(globalThis, collapsed);
     },
     [sidebarIsDrawer],
+  );
+  useSidebarToggleShortcut(
+    useCallback(
+      () => setSidebarCollapsedPersistent(!presentedSidebarCollapsed, { keepFocus: true }),
+      [presentedSidebarCollapsed, setSidebarCollapsedPersistent],
+    ),
   );
   // A count tile on the collapsed rail asks for a list the rail cannot show,
   // so it expands the sidebar first; an open sidebar only switches its list.
@@ -2915,6 +2930,21 @@ function LaunchedShell(
     serverUrl: props.launch.serverUrl,
     windowCapability: props.projectWindowCapability,
   });
+  // Built once per client and provider list: a new element on every render
+  // re-rendered the whole memoized sidebar for each streamed event.
+  // The settings opener is a new function each render, so it is read through
+  // the latest-actions ref rather than listed as a dependency.
+  const railUsage = useMemo(
+    () =>
+      launchedClients.providerUsageLimitsClient === undefined ? undefined : (
+        <RailUsageRings
+          client={launchedClients.providerUsageLimitsClient}
+          instances={providerController.instances}
+          onOpenUsage={() => void latestShellActions.current.openSettings({ section: "usage" })}
+        />
+      ),
+    [launchedClients.providerUsageLimitsClient, providerController.instances],
+  );
   // A custom image source (Settings › Image generation) is an image profile
   // too: the host's own profile list and the agent tool already offer it, and
   // without it here the Image generator and Revise said no profile was ready.
@@ -6334,6 +6364,7 @@ function LaunchedShell(
         onPreviewSidebarWidth={setPreviewSidebarWidth}
         sidebarCollapsed={presentedSidebarCollapsed}
         sidebarRail={sidebarRail}
+        sidebarRailBeside={sidebarRailBeside}
         sidebarVibrancyMode={presentedShellSettings?.sidebarBackground.vibrancyMode ?? "off"}
         showThreadProviderIcons={controller.settings.showThreadProviderIcons}
         transcriptTextSize={controller.settings.transcriptTextSize}
@@ -6388,6 +6419,8 @@ function LaunchedShell(
             sidebarFilterQuery={sidebarFilterQuery}
             {...(sidebarListRequest === undefined ? {} : { sidebarListRequest })}
             sidebarRail={sidebarRail}
+            sidebarRailBeside={sidebarRailBeside}
+            {...(railUsage === undefined ? {} : { railUsage })}
             sidebarTileCounts={sidebarTileCounts}
             {...(projectThreadsAccess.errorMessage === undefined
               ? {}

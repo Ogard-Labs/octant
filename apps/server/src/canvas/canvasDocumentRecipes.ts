@@ -223,6 +223,25 @@ const inTreeCanvasDocumentRecipeDocuments = [
     ],
   },
   {
+    id: "architecture-diagram",
+    title: "Architecture diagram",
+    summary: "The system as grouped tiers, one flow through it, and the decisions that shaped it.",
+    whenToUse:
+      "When someone asks to diagram a system, draw the architecture, show how the parts connect, or explain how a request or data moves through them.",
+    skeleton: [
+      { kind: "heading", role: "System" },
+      { kind: "rich-text", role: "What the system does, and where its boundary is." },
+      {
+        kind: "diagram",
+        role: "The parts grouped by tier (clients, services, data), left to right, with short labels and the protocol on each edge.",
+      },
+      { kind: "heading", role: "Flow" },
+      { kind: "sequence", role: "The main request or data flow through the parts, in order." },
+      { kind: "heading", role: "Key decisions" },
+      { kind: "table", role: "Each decision: what was chosen, why, and what it rules out." },
+    ],
+  },
+  {
     id: "dashboard",
     title: "Dashboard",
     summary: "Headline metrics, a trend chart, a ranking, and what needs attention.",
@@ -288,6 +307,26 @@ const inTreeCanvasDocumentRecipeDocuments = [
       { kind: "table", role: "Each token: its name, its value, and where it is used." },
       { kind: "heading", role: "Rules" },
       { kind: "rich-text", role: "How to use the system, and what is still open." },
+    ],
+  },
+  {
+    id: "ui-kit",
+    title: "UI kit",
+    summary:
+      "Design tokens as a table, and a component sheet in the kit's own palette with every state.",
+    whenToUse:
+      "When someone asks for a UI kit, a component sheet, a set of controls with their states, or the building blocks of an interface.",
+    skeleton: [
+      { kind: "heading", role: "Tokens" },
+      { kind: "table", role: "Each token: its name, its value, and where it is used." },
+      { kind: "heading", role: "Components" },
+      {
+        kind: "design",
+        size: "document",
+        role: "The sheet in the kit's own palette (theme none): buttons, inputs, toggles, badges, and cards, labelled in every state.",
+      },
+      { kind: "heading", role: "Rules" },
+      { kind: "rich-text", role: "How to use the kit, and what is still open." },
     ],
   },
   {

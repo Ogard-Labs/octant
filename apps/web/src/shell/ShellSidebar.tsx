@@ -126,6 +126,16 @@ export interface ShellSidebarProps {
    * draws the rail instead of the full column, from the same destinations,
    * counts, and modes.
    */
+  /**
+   * Present while the icon rail stands beside the open sidebar: the rail then
+   * carries the destinations and counts, and the sidebar keeps the header,
+   * search, threads, Projects, and profile.
+   */
+  /** Plan usage rings for the icon rail, in either placement. */
+  readonly railUsage?: ReactNode;
+  readonly railBeside?: {
+    readonly onOpenActivity?: () => void;
+  };
   readonly rail?: {
     readonly onExpand: () => void;
     readonly projects: ReadonlyArray<SidebarRailProject>;
@@ -277,6 +287,42 @@ export function ShellSidebar(props: ShellSidebarProps) {
     const action = navigationActions[descriptor.id];
     return action === undefined ? [] : [{ ...descriptor, onSelect: action }];
   });
+  const railDestinations = destinationRows.flatMap((id) => {
+    const action = navigationActions[id];
+    return id === "projects" || action === undefined
+      ? []
+      : [
+          {
+            id,
+            label: sidebarNavigationDescriptor(id).label,
+            onSelect: action,
+            active: props.activeDestination === id,
+          },
+        ];
+  });
+  const besideRail =
+    props.railBeside === undefined ? null : (
+      <SidebarRail
+        activeMode={activeMode}
+        destinations={railDestinations}
+        modes={modes}
+        nativeHost={props.nativeHost === true}
+        {...(props.railBeside.onOpenActivity === undefined
+          ? {}
+          : { onOpenActivity: props.railBeside.onOpenActivity })}
+        onOpenSettings={() => props.onOpenSettings()}
+        usage={props.railUsage}
+        onSelectMode={props.onSelectMode}
+        placement="beside"
+        projects={[]}
+        tiles={tiles}
+      />
+    );
+  // Beside the rail the sidebar would repeat what the rail already shows.
+  const sidebarTiles = besideRail === null ? tiles : [];
+  // Projects stays: its row heads the Project list the sidebar is left with.
+  const sidebarRows =
+    besideRail === null ? destinationRows : destinationRows.filter((id) => id === "projects");
   if (props.rail !== undefined) {
     return (
       <SidebarRail
@@ -308,6 +354,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
           : { onOpenProjects: navigationActions.projects })}
         {...(props.onOpenSearch === undefined ? {} : { onOpenSearch: props.onOpenSearch })}
         onOpenSettings={() => props.onOpenSettings()}
+        usage={props.railUsage}
         onSelectMode={props.onSelectMode}
         projects={props.rail.projects}
         tiles={tiles}
@@ -315,211 +362,216 @@ export function ShellSidebar(props: ShellSidebarProps) {
     );
   }
   return (
-    <aside
-      aria-label="Octant sidebar"
-      className={`sidebar${props.projectsDirectory === undefined ? "" : " sidebar--projects"}`}
-      data-octant-sidebar
-    >
-      {props.backgroundCoveredByWorkspace !== true &&
-      props.resolvedSidebarBackground !== undefined &&
-      props.backgroundFetcher !== undefined ? (
-        <SidebarBackgroundLayer
-          resolved={props.resolvedSidebarBackground}
-          fetcher={props.backgroundFetcher}
-        />
-      ) : null}
-      <div className="sidebar__primary">
-        {props.nativeHost === true ? (
-          <div className="sidebar__native-leading">
-            <span
-              aria-hidden="true"
-              className="sidebar__traffic-light-space"
-              data-traffic-light-safe-space
-            />
-            {props.onCollapseSidebar === undefined ? null : (
-              <IconButton
-                className="sidebar__native-collapse"
-                icon={PanelLeftClose}
-                label="Hide sidebar"
-                onClick={props.onCollapseSidebar}
+    <>
+      {besideRail}
+      <aside
+        aria-label="Octant sidebar"
+        className={`sidebar${props.projectsDirectory === undefined ? "" : " sidebar--projects"}`}
+        data-octant-sidebar
+      >
+        {props.backgroundCoveredByWorkspace !== true &&
+        props.resolvedSidebarBackground !== undefined &&
+        props.backgroundFetcher !== undefined ? (
+          <SidebarBackgroundLayer
+            resolved={props.resolvedSidebarBackground}
+            fetcher={props.backgroundFetcher}
+          />
+        ) : null}
+        <div className="sidebar__primary">
+          {props.nativeHost === true ? (
+            <div className="sidebar__native-leading">
+              <span
+                aria-hidden="true"
+                className="sidebar__traffic-light-space"
+                data-traffic-light-safe-space
+              />
+              {props.onCollapseSidebar === undefined ? null : (
+                <IconButton
+                  className="sidebar__native-collapse"
+                  icon={PanelLeftClose}
+                  label="Hide sidebar"
+                  onClick={props.onCollapseSidebar}
+                />
+              )}
+              <span aria-hidden="true" className="sidebar__drag-surface window-drag-region" />
+            </div>
+          ) : null}
+          <div className="sidebar__content window-no-drag" data-octant-sidebar-content>
+            {props.environments === undefined || props.environments.hostStates.length < 2 ? null : (
+              <EnvironmentFilter
+                hostStates={props.environments.hostStates}
+                {...(props.environments.localHostId === undefined
+                  ? {}
+                  : { localHostId: props.environments.localHostId })}
+                onSelectionChange={props.environments.onSelectionChange}
+                selection={props.environments.selection}
               />
             )}
-            <span aria-hidden="true" className="sidebar__drag-surface window-drag-region" />
-          </div>
-        ) : null}
-        <div className="sidebar__content window-no-drag" data-octant-sidebar-content>
-          {props.environments === undefined || props.environments.hostStates.length < 2 ? null : (
-            <EnvironmentFilter
-              hostStates={props.environments.hostStates}
-              {...(props.environments.localHostId === undefined
-                ? {}
-                : { localHostId: props.environments.localHostId })}
-              onSelectionChange={props.environments.onSelectionChange}
-              selection={props.environments.selection}
-            />
-          )}
-          <ModeSwitcher
-            actions={
-              <>
-                <span className="sidebar__primary-actions">
-                  {filter === undefined || searchAlwaysShown ? (
-                    filter === undefined ? (
+            <ModeSwitcher
+              actions={
+                <>
+                  <span className="sidebar__primary-actions">
+                    {filter === undefined || searchAlwaysShown ? (
+                      filter === undefined ? (
+                        <IconButton
+                          data-navigation-id="search"
+                          icon={Search}
+                          label="Search"
+                          onClick={props.onOpenSearch}
+                        />
+                      ) : null
+                    ) : (
                       <IconButton
+                        aria-expanded={searchOpen}
                         data-navigation-id="search"
                         icon={Search}
                         label="Search"
-                        onClick={props.onOpenSearch}
+                        onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+                        ref={searchToggle}
                       />
-                    ) : null
-                  ) : (
-                    <IconButton
-                      aria-expanded={searchOpen}
-                      data-navigation-id="search"
-                      icon={Search}
-                      label="Search"
-                      onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
-                      ref={searchToggle}
-                    />
-                  )}
-                  {newThread === undefined || newThreadLabel === undefined ? null : (
-                    <IconButton
-                      className="sidebar__new-thread"
-                      data-navigation-id={newThreadId}
-                      icon={SquarePen}
-                      label={newThreadLabel}
-                      onClick={() => newThread()}
-                    />
-                  )}
-                  {props.nativeHost === true || props.onCollapseSidebar === undefined ? null : (
-                    <IconButton
-                      className="sidebar__browser-collapse"
-                      icon={PanelLeftClose}
-                      label="Hide sidebar"
-                      onClick={props.onCollapseSidebar}
-                    />
-                  )}
-                </span>
-              </>
-            }
-            activeMode={props.workspace.activeMode}
-            modes={modes}
-            onSelectMode={(mode) => {
-              if (mode !== "chat") props.onSelectMode(mode);
-            }}
-            presentation={props.settings.modeSwitcherPresentation}
-          />
-          {filterShown && filter !== undefined ? (
-            <div className="sidebar-search" role="search">
-              <Search
-                aria-hidden="true"
-                className="sidebar-search__icon"
-                size={14}
-                strokeWidth={1.8}
-              />
-              <OctantInput
-                aria-label="Filter threads"
-                className="sidebar-search__field"
-                onChange={(event) => filter.onQueryChange(event.currentTarget.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape" && !searchAlwaysShown) {
-                    event.preventDefault();
-                    closeSearch();
-                  } else if (event.key === "Enter" && filter.onSearchEverywhere !== undefined) {
-                    event.preventDefault();
-                    filter.onSearchEverywhere(filter.query);
-                  }
-                }}
-                placeholder="Filter threads"
-                title="Type to filter this list. Enter searches every thread."
-                ref={searchField}
-                type="search"
-                value={filter.query}
-              />
-              {searchAlwaysShown ? null : (
-                <IconButton
-                  className="sidebar-search__close"
-                  icon={X}
-                  label="Close search"
-                  onClick={closeSearch}
-                />
-              )}
-            </div>
-          ) : null}
-          {tiles.length === 0 ? null : <SidebarCountTiles tiles={tiles} />}
-          <SidebarNavigation
-            {...(props.activeDestination === undefined
-              ? {}
-              : { activeDestination: props.activeDestination })}
-            actions={navigationActions}
-            {...(props.inboxCount === undefined || props.inboxCount === 0
-              ? {}
-              : { counts: { inbox: props.inboxCount } })}
-            input={navigationInput}
-            {...(moreActions.length === 0
-              ? {}
-              : {
-                  more: (
-                    <SidebarMore
-                      {...(props.activeDestination === undefined
-                        ? {}
-                        : { activeDestination: props.activeDestination })}
-                      items={moreActions}
-                      onCustomizeSidebar={() =>
-                        props.onOpenSettings({
-                          section: "appearance",
-                          setting: "sidebar-destinations",
-                        })
-                      }
-                    />
-                  ),
-                })}
-            projectSection={
-              props.projectsDirectory === undefined ? props.projectSection : undefined
-            }
-            rows={destinationRows}
-          />
-          {chatStatusMessage === undefined ? null : (
-            <div
-              className="project-nav__status sidebar__chat-status"
-              role={
-                props.chatErrorMessage !== undefined || props.chatStatus === "disconnected"
-                  ? "alert"
-                  : "status"
+                    )}
+                    {newThread === undefined || newThreadLabel === undefined ? null : (
+                      <IconButton
+                        className="sidebar__new-thread"
+                        data-navigation-id={newThreadId}
+                        icon={SquarePen}
+                        label={newThreadLabel}
+                        onClick={() => newThread()}
+                      />
+                    )}
+                    {props.nativeHost === true || props.onCollapseSidebar === undefined ? null : (
+                      <IconButton
+                        className="sidebar__browser-collapse"
+                        icon={PanelLeftClose}
+                        label="Hide sidebar"
+                        onClick={props.onCollapseSidebar}
+                      />
+                    )}
+                  </span>
+                </>
               }
-            >
-              <span>{chatStatusMessage}</span>
-              {props.chatStatus === "disconnected" ? (
-                <OctantButton onClick={props.onRetryChat} type="button" variant="ghost">
-                  Retry Chat
-                </OctantButton>
-              ) : null}
-              {props.chatErrorMessage === undefined ? null : (
-                <OctantButton
-                  onClick={() => props.onOpenSettings({ section: "chat" })}
-                  type="button"
-                  variant="ghost"
-                >
-                  Open Chat settings
-                </OctantButton>
-              )}
-            </div>
-          )}
-          <SidebarProfile
-            navigatorAvailable={props.navigatorAvailable === true}
-            {...(props.onOpenArchive === undefined ? {} : { onOpenArchive: props.onOpenArchive })}
-            onOpenNavigator={props.onOpenNavigator}
-            onOpenSettings={props.onOpenSettings}
-            {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}
-            profile={props.settings?.userProfile ?? defaultShellSettings().userProfile}
-            secondaryActions={secondaryActions}
-          />
+              activeMode={props.workspace.activeMode}
+              modes={modes}
+              onSelectMode={(mode) => {
+                if (mode !== "chat") props.onSelectMode(mode);
+              }}
+              presentation={props.settings.modeSwitcherPresentation}
+            />
+            {filterShown && filter !== undefined ? (
+              <div className="sidebar-search" role="search">
+                <Search
+                  aria-hidden="true"
+                  className="sidebar-search__icon"
+                  size={14}
+                  strokeWidth={1.8}
+                />
+                <OctantInput
+                  aria-label="Filter threads"
+                  className="sidebar-search__field"
+                  onChange={(event) => filter.onQueryChange(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape" && !searchAlwaysShown) {
+                      event.preventDefault();
+                      closeSearch();
+                    } else if (event.key === "Enter" && filter.onSearchEverywhere !== undefined) {
+                      event.preventDefault();
+                      filter.onSearchEverywhere(filter.query);
+                    }
+                  }}
+                  placeholder="Filter threads"
+                  title="Type to filter this list. Enter searches every thread."
+                  ref={searchField}
+                  type="search"
+                  value={filter.query}
+                />
+                {searchAlwaysShown ? null : (
+                  <IconButton
+                    className="sidebar-search__close"
+                    icon={X}
+                    label="Close search"
+                    onClick={closeSearch}
+                  />
+                )}
+              </div>
+            ) : null}
+            {sidebarTiles.length === 0 ? null : <SidebarCountTiles tiles={sidebarTiles} />}
+            <SidebarNavigation
+              {...(props.activeDestination === undefined
+                ? {}
+                : { activeDestination: props.activeDestination })}
+              actions={navigationActions}
+              {...(props.inboxCount === undefined || props.inboxCount === 0
+                ? {}
+                : { counts: { inbox: props.inboxCount } })}
+              input={navigationInput}
+              // More stays in the sidebar beside the rail too: its menu ends in
+              // Customize sidebar, which the rail has no room to show.
+              {...(moreActions.length === 0
+                ? {}
+                : {
+                    more: (
+                      <SidebarMore
+                        {...(props.activeDestination === undefined
+                          ? {}
+                          : { activeDestination: props.activeDestination })}
+                        items={moreActions}
+                        onCustomizeSidebar={() =>
+                          props.onOpenSettings({
+                            section: "appearance",
+                            setting: "sidebar-destinations",
+                          })
+                        }
+                      />
+                    ),
+                  })}
+              projectSection={
+                props.projectsDirectory === undefined ? props.projectSection : undefined
+              }
+              rows={sidebarRows}
+            />
+            {chatStatusMessage === undefined ? null : (
+              <div
+                className="project-nav__status sidebar__chat-status"
+                role={
+                  props.chatErrorMessage !== undefined || props.chatStatus === "disconnected"
+                    ? "alert"
+                    : "status"
+                }
+              >
+                <span>{chatStatusMessage}</span>
+                {props.chatStatus === "disconnected" ? (
+                  <OctantButton onClick={props.onRetryChat} type="button" variant="ghost">
+                    Retry Chat
+                  </OctantButton>
+                ) : null}
+                {props.chatErrorMessage === undefined ? null : (
+                  <OctantButton
+                    onClick={() => props.onOpenSettings({ section: "chat" })}
+                    type="button"
+                    variant="ghost"
+                  >
+                    Open Chat settings
+                  </OctantButton>
+                )}
+              </div>
+            )}
+            <SidebarProfile
+              navigatorAvailable={props.navigatorAvailable === true}
+              {...(props.onOpenArchive === undefined ? {} : { onOpenArchive: props.onOpenArchive })}
+              onOpenNavigator={props.onOpenNavigator}
+              onOpenSettings={props.onOpenSettings}
+              {...(props.onOpenZen === undefined ? {} : { onOpenZen: props.onOpenZen })}
+              profile={props.settings?.userProfile ?? defaultShellSettings().userProfile}
+              secondaryActions={secondaryActions}
+            />
+          </div>
         </div>
-      </div>
-      {props.projectsDirectory === undefined ? null : (
-        <section aria-label="Projects sidebar" className="sidebar__projects-pane window-no-drag">
-          {props.projectsDirectory}
-        </section>
-      )}
-    </aside>
+        {props.projectsDirectory === undefined ? null : (
+          <section aria-label="Projects sidebar" className="sidebar__projects-pane window-no-drag">
+            {props.projectsDirectory}
+          </section>
+        )}
+      </aside>
+    </>
   );
 }

@@ -160,8 +160,8 @@ export const CanvasExportId = brandedUuid("CanvasExportId");
 export type CanvasExportId = typeof CanvasExportId.Type;
 
 /**
- * Static export is the only share surface for now. Authenticated browser
- * snapshots, public links, and remote audience controls are deferred.
+ * The static export channel. Public links are an export destination of their
+ * own (see canvasPublicShare.ts), not a share channel.
  */
 export const CanvasShareChannel = Schema.Literal("static-export");
 export type CanvasShareChannel = typeof CanvasShareChannel.Type;

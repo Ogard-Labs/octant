@@ -38,6 +38,7 @@ import { ScaffoldDirectoryName, ScaffoldId, ScaffoldRun, ScaffoldRunId } from ".
 import { AggregateVersion, UtcTimestamp } from "./events";
 import { UsageCost } from "./context";
 import { ProjectId } from "./projects";
+import { MAX_THREAD_TASKS_PER_TURN } from "./threadTasks";
 import { TerminalBrowserGrantOutcome } from "./terminalBrowserGrants";
 import {
   PermissionPersistence,
@@ -1317,6 +1318,15 @@ const TaskProgressEvent = Schema.Struct({
   state: Schema.Literal("pending", "running", "waiting", "completed", "failed"),
   summary: boundedNonEmptyText(MAX_CODE_OPERATION_SUMMARY_BYTES),
 }).annotations(strict);
+/**
+ * The provider restated its plan: the turn's tasks are now exactly these ids,
+ * in this order. Journals written before it existed carry only
+ * `task-progress`, and replay them as before.
+ */
+const TaskListEvent = Schema.Struct({
+  kind: Schema.Literal("task-list"),
+  taskIds: Schema.Array(boundedNonEmptyText(255)).pipe(Schema.maxItems(MAX_THREAD_TASKS_PER_TURN)),
+}).annotations(strict);
 const UsageEvent = Schema.Struct({
   kind: Schema.Literal("usage"),
   inputTokens: Schema.Int.pipe(Schema.nonNegative()),
@@ -1592,6 +1602,7 @@ export const CodeOperationEvent = Schema.Union(
   FileChangeEvent,
   DiffEvent,
   TaskProgressEvent,
+  TaskListEvent,
   UsageEvent,
   ProviderLimitEvent,
   ChildActivityEvent,
