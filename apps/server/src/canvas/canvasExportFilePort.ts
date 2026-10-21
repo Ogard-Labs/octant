@@ -13,11 +13,11 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
  * truncated document under the real name.
  */
 export interface CanvasExportFilePort {
-  /** Write one named file into the folder, atomically. */
+  /** Write one named file into the folder, atomically. Text is written as UTF-8. */
   readonly writeAtomically: (
     folder: string,
     fileName: string,
-    contents: string,
+    contents: string | Uint8Array,
     tempId: string,
   ) => Promise<void>;
   readonly existsIn: (folder: string, fileName: string) => boolean;

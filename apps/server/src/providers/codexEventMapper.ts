@@ -26,6 +26,7 @@ const DIFF_MAX_CHARACTERS = 65_536;
 const LABEL_MAX_CHARACTERS = 256;
 const SUMMARY_MAX_CHARACTERS = 1_024;
 const PATH_MAX_CHARACTERS = 4_096;
+const LIVENESS_INTERVAL_MS = 5_000;
 
 export interface CodexEventContext {
   readonly instanceId: ProviderInstanceId;
@@ -47,6 +48,8 @@ export interface CodexEventContext {
    * `resetsAt` timing for a usage-limit failure the turn itself reports.
    */
   exhaustedWindowReset?: UtcTimestamp;
+  /** When the last liveness event went out, in epoch milliseconds. */
+  lastLivenessAt?: number;
   /**
    * This run is the compaction the connection's `compact` asked for, so the
    * compaction it carries is `requested` rather than the runtime's own.
@@ -164,6 +167,16 @@ function mappedEvent(
 
 function event(context: CodexEventContext, value: RuntimeEventWithoutEnvelope): CodexMappedMessage {
   return { kind: "event", event: mappedEvent(context, value) };
+}
+
+/** At most one liveness event per interval, however fast the output streams. */
+function livenessEvents(context: CodexEventContext): ReadonlyArray<CodexMappedMessage> {
+  const now = Date.now();
+  if (context.lastLivenessAt !== undefined && now - context.lastLivenessAt < LIVENESS_INTERVAL_MS) {
+    return [{ kind: "ignored" }];
+  }
+  context.lastLivenessAt = now;
+  return [event(context, { kind: "liveness" })];
 }
 
 function truncate(value: string, maximum: number): string {
@@ -751,6 +764,16 @@ function mapNotification(
       }
       return streamedEvents(context, "reasoning-delta", message.params.delta);
     }
+    // A long command or MCP call shows nothing while it runs; the runner's
+    // idle clock would read that as a dead session. The output stays out.
+    case "item/commandExecution/outputDelta":
+    case "item/mcpToolCall/progress":
+    case "item/fileChange/patchUpdated": {
+      if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
+        return correlationFailure();
+      }
+      return livenessEvents(context);
+    }
     case "turn/diff/updated": {
       if (!matchesCorrelation(context, message.params.threadId, message.params.turnId)) {
         return correlationFailure();
@@ -766,6 +789,7 @@ function mapNotification(
         return correlationFailure();
       }
       const results: CodexMappedMessage[] = [];
+      const taskIds: string[] = [];
       const occurrences = new Map<string, number>();
       message.params.plan.forEach((step) => {
         const summary = normalized(step.step, SUMMARY_MAX_CHARACTERS);
@@ -778,6 +802,7 @@ function mapNotification(
           taskId = context.makeTaskId();
           context.taskIds.set(key, taskId);
         }
+        taskIds.push(taskId);
         results.push(
           event(context, {
             kind: "task-progress",
@@ -787,7 +812,9 @@ function mapNotification(
           }),
         );
       });
-      return results.length === 0 ? [{ kind: "ignored" }] : results;
+      // Codex restates the whole plan, so the steps it left out are gone.
+      results.push(event(context, { kind: "task-list", taskIds }));
+      return results;
     }
     case "thread/tokenUsage/updated": {
       if (message.params.threadId !== context.threadId) return correlationFailure();

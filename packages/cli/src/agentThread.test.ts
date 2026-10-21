@@ -1,3 +1,4 @@
+import { sendSteeringFollowUp } from "./agentSteeringFollowUp";
 import { WORK_TURN_CAPABILITIES, decodeCancelWorkTurnCommand } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
@@ -367,6 +368,30 @@ describe("a Chat thread in the terminal's window", () => {
         await createAgentThread(fake.session, { mode: "chat", title: "No inference", model }),
       ).toMatchObject({ kind: "refused" });
       expect(fake.commands).toEqual([]);
+    },
+  );
+
+  it.each([409, 500])(
+    "keeps retained notes for inspection after an unconfirmed prompt response %s",
+    async (status) => {
+      const fake = chatHost();
+      const requests: LocalControlRequest[] = [];
+      const session: OpenedLocalControlSession = {
+        ...fake.session,
+        send: async (request) => {
+          if (request.path !== "/api/chat/commands") return fake.session.send(request);
+          requests.push(request);
+          return { status, body: { message: "The host could not confirm the turn." } };
+        },
+      };
+      const port = agentThreadPort(session, "chat", chatThread.id);
+      expect(await sendSteeringFollowUp("Use sqlite.", (text) => port.send(text))).toEqual({
+        text: "Use sqlite.",
+        status: "submission-unknown",
+        message:
+          "The host could not confirm the turn. Acceptance was not confirmed. Check the conversation and queue before resending.",
+      });
+      expect(requests).toHaveLength(1);
     },
   );
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { runLoad, runMutation } from "./runMutation";
+import { runLoad, runMutation, sendThenReload } from "./runMutation";
 import { createSelectedThreadGuard } from "./selectedThreadGuard";
 import type { MutationGate, ThreadUi } from "./threadTypes";
 
@@ -102,6 +102,54 @@ describe("run mutation", () => {
 
     expect(outcome).toBe("failed");
     expect(calls).toContain("error:Stop failed.");
+  });
+});
+
+describe("send then reload", () => {
+  it("clears the submitted draft and reports done when the reload after an accepted send fails", async () => {
+    const guard = createSelectedThreadGuard();
+    guard.select("h:a");
+    const { calls, ui } = recorder();
+    let draft = "hello";
+
+    const outcome = await runMutation({
+      guard,
+      identity: "h:a",
+      gate: open,
+      ui,
+      failure: "Follow-up failed.",
+      run: () =>
+        sendThenReload({
+          send: async () => undefined,
+          onSent: () => {
+            draft = "";
+          },
+          reload: async () => {
+            throw new Error("offline");
+          },
+        }),
+      onDone: () => undefined,
+    });
+
+    expect(outcome).toBe("done");
+    expect(draft).toBe("");
+    expect(calls).not.toContain("error:Follow-up failed.");
+  });
+
+  it("keeps the draft and fails when the send itself is refused", async () => {
+    let draft = "hello";
+    await expect(
+      sendThenReload({
+        send: async () => {
+          throw new Error("rejected");
+        },
+        onSent: () => {
+          draft = "";
+        },
+        reload: async () => "view",
+      }),
+    ).rejects.toThrow("rejected");
+    expect(draft).toBe("hello");
   });
 });
 

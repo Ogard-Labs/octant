@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPairingScanGate } from "./pairingScanGate";
+import { createPairingScanGate, pairingCodeAfterTogglingDetails } from "./pairingScanGate";
 
 describe("the pairing scanner", () => {
   it("hands over one pairing code per opening and scans again after it reopens", () => {
@@ -10,5 +10,15 @@ describe("the pairing scanner", () => {
     expect(gate.offer("octant-pair-1.AAAA")).toBe("ignored");
     gate.reset();
     expect(gate.offer("octant-pair-1.AAAA")).toBe("deliver");
+  });
+});
+
+describe("choosing to type the details after a scan failed", () => {
+  it("drops the failed scan so submitting uses the typed details", () => {
+    expect(pairingCodeAfterTogglingDetails("octant-pair-1.AAAA", true)).toBe("");
+  });
+
+  it("keeps a pasted code when the details form is closed again", () => {
+    expect(pairingCodeAfterTogglingDetails("octant-pair-1.AAAA", false)).toBe("octant-pair-1.AAAA");
   });
 });

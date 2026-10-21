@@ -30,7 +30,16 @@ export async function requireBiometricConfirmation(input: {
 }): Promise<BiometricGateResult> {
   const releasePrompt = beginMobileHighRiskPrompt();
   try {
-    const hasDeviceCredential = await input.authenticator.hasDeviceCredential();
+    // A native auth API that throws is "cannot confirm", not a send failure.
+    const hasDeviceCredential = await input.authenticator
+      .hasDeviceCredential()
+      .catch(() => undefined);
+    if (hasDeviceCredential === undefined) {
+      return {
+        status: "unavailable",
+        reason: "Biometric confirmation is unavailable right now.",
+      };
+    }
     if (!hasDeviceCredential) {
       return {
         status: "unavailable",

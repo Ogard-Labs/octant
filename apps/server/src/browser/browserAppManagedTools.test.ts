@@ -585,6 +585,22 @@ describe("browser diagnostics reach the provider-facing result", () => {
       isError: false,
       result: { page: { captureNotKept: "unavailable" } },
     });
+    expect(JSON.stringify(result.result)).not.toContain("captureId");
+  });
+
+  it("returns the id of the capture the thread kept so a Canvas design can name it", async () => {
+    const captureId = "6f1c2f0e-8a58-4c53-9a1b-3a4f0f6f7a10";
+    const tools = toolsFor({
+      revision: 12,
+      screenshotDataUrl: "data:image/png;base64,aGVsbG8=",
+      capture: { status: "kept", captureId },
+    } as never);
+    const result = await tools.execute({
+      name: "octant_browser",
+      inputJson: '{"operation":"screenshot"}',
+    });
+    expect(result).toMatchObject({ isError: false, result: { page: { captureId } } });
+    expect(JSON.stringify(result.result)).not.toContain("captureNotKept");
   });
 
   it("passes what the page logged and failed to load through to the result", async () => {

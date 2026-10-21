@@ -5,6 +5,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
 import { decodeWorkspaceTab, decodeWorkspaceTabId } from "@octant/contracts";
 import { lazy, Suspense, useEffect, useState } from "react";
+import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import { OctantButton } from "../ui/base/OctantButton";
 import { isAuthorizedCanvasDocument } from "./dockToolAvailability";
 import { ShellState } from "./ShellState";
@@ -22,6 +23,9 @@ export interface DockCanvasToolProps {
   readonly mode: OctantMode;
   readonly projectId?: ProjectId;
   readonly threadId: string;
+  /** With the window capability, lets a Canvas comment be sent to the owning thread's agent. */
+  readonly serverUrl?: string;
+  readonly windowCapability?: string;
   /** The Canvas to show first when the thread has several — the one just written. */
   readonly preferredCanvasId?: string;
   /** Changes when a referenced Canvas gains a version; the open document reloads. */
@@ -149,7 +153,19 @@ export function DockCanvasTool(props: DockCanvasToolProps) {
           </OctantButton>
         )}
         <Suspense fallback={<ShellState state="loading" title="Loading canvas" />}>
-          <CanvasWorkspaceTab key={String(openCard.versionId)} client={props.client} tab={tab} />
+          <CanvasWorkspaceTab
+            key={String(openCard.versionId)}
+            client={props.client}
+            tab={tab}
+            {...(props.serverUrl === undefined || props.windowCapability === undefined
+              ? {}
+              : {
+                  queueClient: createThreadMessageQueueClient({
+                    serverUrl: props.serverUrl,
+                    windowCapability: props.windowCapability,
+                  }),
+                })}
+          />
         </Suspense>
       </div>
     );

@@ -28,7 +28,7 @@ import type { ProviderController } from "../providers/useProviderController";
 import { BottomUtilityPanel } from "../shell/BottomUtilityPanel";
 import { DockThreadOverviewContent } from "../shell/DockThreadOverviewContent";
 import { runningNowThreads } from "../shell/dockThreadOverviewModel";
-import type { OctantHostBridge } from "../shell/hostBridge";
+import { remoteAccessAdministrationOf, type OctantHostBridge } from "../shell/hostBridge";
 import { RightUtilityDock } from "../shell/RightUtilityDock";
 import type {
   RightUtilityDockResolution,
@@ -74,6 +74,7 @@ export interface DockContainerProps {
     | "openLinkedProjectPullRequestThread"
     | "openPreview"
     | "openProjectPullRequestChat"
+    | "openSettings"
     | "openSubagent"
     | "persistBottomPanelPresentation"
     | "selectChatThread"
@@ -90,6 +91,7 @@ export interface DockContainerProps {
     | "setRequestedAgentReview"
     | "setRequestedAgentView"
     | "setSelectedProjectPullRequest"
+    | "openWrittenDocument"
     | "updateSettings"
   >;
   readonly activeBottomSurface?: RightUtilityDockSurfaceDescriptor;
@@ -137,6 +139,8 @@ export interface DockContainerProps {
     readonly checkoutId?: CodeCheckoutId;
   };
   readonly dockThreadHost?: string;
+  /** Whether the dock's thread runs on this computer rather than a paired one. */
+  readonly dockThreadOnThisComputer: boolean;
   readonly dockThreadKey?: ThreadUtilityDockKey;
   readonly dockThreadProjectId?: ProjectId;
   readonly dockThreadRepository?: string;
@@ -145,7 +149,6 @@ export interface DockContainerProps {
   readonly launchableDockSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly navigation: ShellNavigationModel;
   readonly now: number;
-  readonly observedByInstance: ProviderController["observedByInstance"];
   readonly overviewThread?: DockOverviewThread;
   readonly projectNames: ReadonlyMap<string, string>;
   readonly projectPullRequestReviewOpen: boolean;
@@ -207,13 +210,13 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     dockThread,
     dockThreadHost,
     dockThreadKey,
+    dockThreadOnThisComputer,
     dockThreadProjectId,
     dockThreadRepository,
     isNarrow,
     launchableDockSurfaces,
     navigation,
     now,
-    observedByInstance,
     overviewThread,
     projectNames,
     projectPullRequestReviewOpen,
@@ -243,6 +246,15 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
   // The pull requests the active Code thread is already about, offered where a
   // reader adds a tab. Read from the same catalogue the Environment panel uses,
   // so the two never disagree.
+  // This computer's listener, administered only from the desktop app's own
+  // window; the host refuses these actions for a paired client, which never
+  // holds the bridge.
+  const hostBridge = props.hostBridge;
+  const remoteAccessAdministration = useMemo(
+    () => remoteAccessAdministrationOf(hostBridge),
+    [hostBridge],
+  );
+
   const launchableDockReferences = useMemo(() => {
     const dockRepository = parseRepository(dockThreadRepository);
     if (
@@ -422,13 +434,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     const thread = overviewThread;
     const projectName =
       thread === undefined ? undefined : projectNames.get(String(thread.projectId));
-    const modelLabel =
-      thread === undefined
-        ? undefined
-        : (observedByInstance
-            .get(thread.providerInstanceId)
-            ?.models.find((listed) => String(listed.id) === String(thread.modelId))?.displayName ??
-          String(thread.modelId));
     const occupancy = composerContextOccupancy({
       snapshot: contextSnapshot,
       fallback: mode === "code" ? activeCodeThreadUsageFallback : undefined,
@@ -439,7 +444,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         : undefined;
     return (
       <DockThreadOverviewContent
-        access={thread?.access}
         boardRevision={codeNavigationRevision}
         {...(occupancy === undefined
           ? {}
@@ -450,7 +454,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         {...(dockThreadHost === undefined ? {} : { host: dockThreadHost })}
         loadBoard={actions.loadCodeBoard}
         mode={mode}
-        model={modelLabel}
+        onOpenEnvironment={() => actions.addDockTab("environment")}
         onOpenReview={() => actions.addDockTab("review")}
         onOpenRunning={(running) => {
           if (running.mode === "chat") actions.selectChatThread(running.threadId);
@@ -459,6 +463,21 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         }}
         projectId={thread?.projectId}
         projectName={projectName}
+        agentRunClient={agentRunClient}
+        documents={
+          dockThreadKey === undefined
+            ? undefined
+            : writtenDocumentsByThread.get(dockThreadKey)?.documents
+        }
+        now={now}
+        onOpenDocument={actions.openWrittenDocument}
+        onOpenRemoteAccessSettings={() => void actions.openSettings({ section: "remote-access" })}
+        onOpenSubagent={actions.openSubagent}
+        {...(dockThreadOnThisComputer && remoteAccessAdministration !== undefined
+          ? { remoteAccess: remoteAccessAdministration }
+          : {})}
+        serverUrl={serverUrl}
+        windowCapability={windowCapability}
         running={runningNowThreads({
           rows: {
             chat: navigation.markedChatNavigation,

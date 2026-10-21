@@ -47,7 +47,7 @@ import type { PreviewClient } from "@octant/client-runtime/preview-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { CanvasInventoryEntry, ImageGenerationProfileView } from "@octant/contracts";
-import type { CanvasId } from "@octant/contracts/canvas";
+import type { CanvasDesignBrand, CanvasId } from "@octant/contracts/canvas";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type {
@@ -113,6 +113,7 @@ import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { ThreadHarnessApproval } from "../harness/ThreadHarnessApproval";
 import { ThreadHarnessSteering } from "../harness/ThreadHarnessSteering";
+import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { useWorkResearchController } from "../work/useWorkResearchController";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
@@ -139,11 +140,9 @@ import type { WorkPromotionController } from "../work/useWorkPromotionController
 import type { CodeThreadProviderChoice } from "../code/codeThreadCreate";
 import { ProjectCanvasInventory } from "../projects/ProjectCanvasInventory";
 import { DraftThreadWorkspace } from "./DraftThreadWorkspace";
-import type { DraftRecentThread } from "./DraftThreadWorkspace";
+import type { DraftRecentThread, DraftStartPresentation } from "./DraftThreadWorkspace";
 import type { OctantMode } from "@octant/contracts/modes";
 import { AgentModeWelcome } from "./AgentModeWelcome";
-import { HomeStart } from "./HomeStart";
-import { HomeDashboard } from "../home/HomeDashboard";
 import { WorkThreadWorkspace } from "../work/WorkThreadWorkspace";
 import { WorkThreadEnvironment } from "../environment/WorkThreadEnvironment";
 import { ChatThreadEnvironment } from "../environment/ChatThreadEnvironment";
@@ -415,11 +414,13 @@ export interface WorkspaceViewProps {
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
   ) => Promise<boolean>;
+  readonly onBrandKitChange?: (
+    projectId: ProjectId,
+    brandKit: CanvasDesignBrand,
+  ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
   readonly welcomeBackdrop?: ReactNode;
-  /** The person's name from their profile, for the greeting on every start screen. */
-  readonly greetingName?: string | undefined;
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
@@ -539,6 +540,7 @@ export interface WorkspaceViewProps {
 
 export function WorkspaceView(props: WorkspaceViewProps) {
   const newTaskDrafts = useContext(NewTaskDraftsContext);
+  const followUpOffersFor = useStableFollowUpOffers(props.followUpSuggestions);
   const previousProjectOverviews = useRef<ReadonlyArray<ProjectOverviewDraftRef>>([]);
   const previousPaneDrafts = useRef<ReadonlyArray<PaneDraftRef>>([]);
   const previousWorkspaceVersion = useRef<ShellBootstrap["workspaceVersion"] | undefined>(
@@ -695,38 +697,25 @@ export function WorkspaceView(props: WorkspaceViewProps) {
   const contextProject = props.projects.find(
     (project) => String(project.id) === String(contextProjectId),
   );
-  const codeBootstrap = props.codeController.bootstrap;
   // Test doubles hand the view a controller with no navigation at all; the
   // header then simply shows no facts rather than refusing to render.
   const codeNavigation = props.codeController.navigation ?? [];
   const paneFactsByThreadId = useMemo(() => {
     const facts = new Map<string, PaneFacts>();
-    const checkouts = new Map(
-      (codeBootstrap?.checkouts ?? []).map((checkout) => [String(checkout.id), checkout]),
-    );
     for (const item of codeNavigation) {
-      const thread = codeBootstrap?.threads.find(
-        (candidate) => String(candidate.id) === String(item.threadId),
-      );
-      const head =
-        thread === undefined ? undefined : checkouts.get(String(thread.checkoutId))?.head;
-      const branch = head?.kind === "branch" ? head.name : undefined;
       const project = props.projects.find(
         (candidate) => String(candidate.id) === String(item.projectId),
       );
       const summary = item.pullRequestSummaries?.items[0];
-      // A branch is only named beside the Project it belongs to.
       const projectName = project?.name;
-      const chipBranch = projectName === undefined ? undefined : branch;
       if (summary === undefined && projectName === undefined) continue;
       facts.set(String(item.threadId), {
         ...(summary === undefined ? {} : { pullRequest: summary }),
         ...(projectName === undefined ? {} : { projectName }),
-        ...(chipBranch === undefined ? {} : { branch: chipBranch }),
       });
     }
     return facts;
-  }, [codeBootstrap, codeNavigation, props.projects]);
+  }, [codeNavigation, props.projects]);
 
   return (
     <TabActivationProvider
@@ -764,9 +753,7 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           activePaneId={props.workspace.activePaneIds[props.mode]}
           {...(props.focusedPaneId === undefined ? {} : { focusedPaneId: props.focusedPaneId })}
           renderSurface={(surface, paneId) => (
-            <FollowUpSuggestionContext
-              value={followUpSuggestionsFor(surface, props.followUpSuggestions)}
-            >
+            <FollowUpSuggestionContext value={followUpOffersFor(surface)}>
               <ComposerSubagentsContext value={subagentsTrayFor(surface, props)}>
                 <ComposerNoticeProvider
                   value={paneId === activePaneId && inlineNotice ? contextNotice : null}
@@ -885,6 +872,37 @@ function SurfaceLinkActionsProvider(props: {
  * A thread's suggestions come from the host that runs it; a pane showing a
  * thread on another host has no local offer to show.
  */
+/**
+ * The follow-up offers each thread's surfaces read, kept the same object across
+ * renders. A fresh object every render re-rendered every reader of the context,
+ * and with Environment's Suggested tasks open that put a commit in the thread
+ * pane on streamed events. The latest `onCreated` is always the one called.
+ */
+function useStableFollowUpOffers(host: WorkspaceViewProps["followUpSuggestions"]) {
+  const latestHost = useRef(host);
+  latestHost.current = host;
+  const cache = useRef(new Map<string, ComposerOffers>());
+  return (surface: WorkspaceTab): ComposerOffers | undefined => {
+    const fresh = followUpSuggestionsFor(surface, host);
+    if (fresh === undefined) return undefined;
+    const key = `${fresh.threadId}:${fresh.mode}`;
+    const cached = cache.current.get(key);
+    if (
+      cached !== undefined &&
+      cached.client === fresh.client &&
+      cached.sideTaskClient === fresh.sideTaskClient
+    ) {
+      return cached;
+    }
+    const offers: ComposerOffers = {
+      ...fresh,
+      onCreated: (input) => latestHost.current?.onCreated(input),
+    };
+    cache.current.set(key, offers);
+    return offers;
+  };
+}
+
 function followUpSuggestionsFor(
   surface: WorkspaceTab,
   host: WorkspaceViewProps["followUpSuggestions"],
@@ -1427,6 +1445,7 @@ function renderNonCodeTab(
   },
   openProviderSettings: (() => void) | undefined,
   drafts: NewTaskDrafts | undefined,
+  startPresentation: DraftStartPresentation = "new-task",
 ): React.ReactNode {
   // Code's welcome tab is only a routing placeholder. Keep one start surface
   // so a split or restored fallback never sends the reader through a second
@@ -1449,6 +1468,10 @@ function renderNonCodeTab(
       canvasContext,
       openProviderSettings,
       drafts,
+      // Opening Code with nothing chosen lands on Code Home: the composer
+      // with what is next, what to continue, and the cards. New task is the
+      // question and the composer alone.
+      "home",
     );
   }
   if (tab.kind === "draft-thread") {
@@ -1457,10 +1480,10 @@ function renderNonCodeTab(
     return (
       <NewTaskDraftScopeContext.Provider value={`${tab.mode}:${String(paneId)}`}>
         <DraftThreadWorkspace
-          greetingName={props.greetingName}
           key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevisions?.[String(paneId)] ?? 0)}`}
           {...(recentThreads.length === 0 ? {} : { recentThreads })}
           mode={tab.mode}
+          startPresentation={startPresentation}
           {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
           {...(props.selectedCreateHostId === undefined
             ? {}
@@ -1856,6 +1879,14 @@ function renderNonCodeTab(
           client={props.canvasClient}
           tab={tab}
           onAttachContext={canvasContext.onAttachCanvasContext}
+          {...(props.projectServerUrl === undefined || props.projectWindowCapability === undefined
+            ? {}
+            : {
+                queueClient: createThreadMessageQueueClient({
+                  serverUrl: props.projectServerUrl,
+                  windowCapability: props.projectWindowCapability,
+                }),
+              })}
           {...(props.onPinCanvasInFocusZone === undefined
             ? {}
             : { onPinCanvasInFocusZone: props.onPinCanvasInFocusZone })}
@@ -2164,6 +2195,9 @@ function renderNonCodeTab(
         {...(props.onProviderPolicyChange === undefined
           ? {}
           : { onProviderPolicyChange: props.onProviderPolicyChange })}
+        {...(props.onBrandKitChange === undefined
+          ? {}
+          : { onBrandKitChange: props.onBrandKitChange })}
         {...(props.onWorkStatusFileChange === undefined
           ? {}
           : { onWorkStatusFileChange: props.onWorkStatusFileChange })}
@@ -2188,28 +2222,9 @@ function renderNonCodeTab(
   }
   if (tab.mode === "chat") {
     const recentThreads = draftRecentThreads("chat", props);
-    const home = props.homeStart;
     return (
       <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
         <ChatWelcome
-          greetingName={props.greetingName}
-          {...(home?.composerTabs === undefined ? {} : { composerTabs: home.composerTabs })}
-          {...(home?.cards === undefined
-            ? {}
-            : {
-                homeStart: (
-                  <HomeStart
-                    actions={[]}
-                    dashboard={
-                      <HomeDashboard
-                        cards={home.cards}
-                        customization={home.cardCustomization}
-                        onCustomizationChange={home.onCardCustomizationChange}
-                      />
-                    }
-                  />
-                ),
-              })}
           {...(recentThreads.length === 0 ? {} : { recentThreads })}
           {...(props.hosts === undefined ? {} : { hosts: props.hosts })}
           {...(props.selectedCreateHostId === undefined
@@ -2258,9 +2273,6 @@ function renderNonCodeTab(
         (project) => project.type === tab.mode && project.lifecycle === "active",
       )}
       mode={tab.mode === "code" ? "code" : "work"}
-      greetingName={props.greetingName}
-      reviewCount={props.homeStart?.reviewCount}
-      runningCount={props.homeStart?.runningCount}
       onAddFolder={props.onAttachFolder ?? (() => {})}
       {...(props.onOpenDraftThread === undefined
         ? {}

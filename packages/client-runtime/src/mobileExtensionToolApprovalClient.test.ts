@@ -60,7 +60,7 @@ describe("MCP tool prompts on a paired device", () => {
     });
   });
 
-  it("reports a refused answer, and lists nothing when the host refuses the list", async () => {
+  it("reports a refused answer, and fails the read when the host refuses the list", async () => {
     const transport = {
       hostId: "66000000-0000-4000-8000-0000000000ff",
       authenticatedFetch: (async () =>
@@ -69,7 +69,7 @@ describe("MCP tool prompts on a paired device", () => {
           { status: 409 },
         )) as MobileRemoteTransport["authenticatedFetch"],
     };
-    await expect(listMobileExtensionToolApprovals({ transport, threadId })).resolves.toEqual([]);
+    await expect(listMobileExtensionToolApprovals({ transport, threadId })).rejects.toThrow();
     await expect(
       decideMobileExtensionToolApproval({
         transport,

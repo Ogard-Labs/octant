@@ -34,17 +34,49 @@ const PASSTHROUGH_VARIABLES = new Set([
   "USER",
 ]);
 
-/** Static switches every isolated Claude launch sets. */
+/**
+ * Static switches every Claude launch sets, each one channel of the runtime's
+ * own kept off by its own switch. The `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+ * umbrella is deliberately not among them: blanket-blocking every
+ * non-essential channel was stricter than Octant needs, so each channel that
+ * matters is named here instead (maintainer decision, 2026-10-20). The
+ * channels without a switch of their own are closed by the launch shape, as
+ * the architecture's security section records.
+ */
 export const ISOLATED_CLAUDE_LAUNCH_GUARDS = {
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
+  /** Usage metrics. */
+  DISABLE_TELEMETRY: "1",
+  /** Error reports. */
+  DISABLE_ERROR_REPORTING: "1",
+  /** The runtime replacing its own binary. */
+  DISABLE_AUTOUPDATER: "1",
+  /** `/bug`, which uploads the conversation. */
+  DISABLE_BUG_COMMAND: "1",
+  /**
+   * `/feedback`, which uploads the conversation. Not in the public reference,
+   * but both installed binaries carry the name beside `DISABLE_BUG_COMMAND`.
+   */
+  DISABLE_FEEDBACK_COMMAND: "1",
+  /** The session-quality survey the runtime would otherwise raise. */
+  CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: "1",
   CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
   CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: "1",
   CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: "1",
-  DISABLE_TELEMETRY: "1",
-  DISABLE_ERROR_REPORTING: "1",
-  DISABLE_AUTOUPDATER: "1",
-  DISABLE_BUG_COMMAND: "1",
 } as const;
+
+const HOST_DISABLE_ONLY_SWITCH = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC";
+
+/**
+ * The umbrella is the person's to set, not Octant's: a host that exports
+ * `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` keeps it on every launch. Only
+ * that disabling value crosses; any other value is dropped with the rest of
+ * the host environment.
+ */
+export function hostDisableOnlySwitches(hostEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return hostEnvironment[HOST_DISABLE_ONLY_SWITCH] === "1"
+    ? { [HOST_DISABLE_ONLY_SWITCH]: "1" }
+    : {};
+}
 
 export interface IsolatedClaudeAccountEnvironmentInput {
   readonly hostEnvironment: NodeJS.ProcessEnv;
@@ -80,7 +112,11 @@ export function isolatedClaudeAccountEnvironment(
   if (input.authentication === "api-key" && input.apiKey !== undefined) {
     environment.ANTHROPIC_API_KEY = input.apiKey;
   }
-  return { ...environment, ...ISOLATED_CLAUDE_LAUNCH_GUARDS };
+  return {
+    ...environment,
+    ...hostDisableOnlySwitches(input.hostEnvironment),
+    ...ISOLATED_CLAUDE_LAUNCH_GUARDS,
+  };
 }
 
 /**

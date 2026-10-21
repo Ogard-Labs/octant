@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildMobileThreadDeepLink } from "../notifications/deepLinks";
 import {
   DEEP_LINK_HOST_NOT_PAIRED,
+  DEEP_LINK_HOSTS_UNREADABLE,
   deepLinkRefusal,
   inboxRowFromDeepLinkTarget,
   resolveDeepLinkToInboxRow,
@@ -63,5 +64,10 @@ describe("deep link navigation", () => {
   it("explains a link to a computer that is not paired on this phone", () => {
     expect(deepLinkRefusal({ hostId }, ["someone-else"])).toBe(DEEP_LINK_HOST_NOT_PAIRED);
     expect(deepLinkRefusal({ hostId }, [hostId])).toBeUndefined();
+  });
+
+  it("does not call a computer unpaired when the paired list could not be read", () => {
+    expect(deepLinkRefusal({ hostId }, [], true)).toBe(DEEP_LINK_HOSTS_UNREADABLE);
+    expect(deepLinkRefusal({ hostId }, [], false)).toBe(DEEP_LINK_HOST_NOT_PAIRED);
   });
 });

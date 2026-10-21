@@ -166,6 +166,30 @@ describe("transcript activity", () => {
     expect(withTask.rows).toHaveLength(2);
   });
 
+  it("drops task rows a restated plan leaves out and follows its order around tool rows", () => {
+    const task = (taskId: string, summary: string) =>
+      ({ kind: "task-progress", taskId, state: "pending", summary }) as CodeOperationEvent;
+    let activity = applyActivityEvent(EMPTY_TURN_ACTIVITY, task("t1", "Read"));
+    activity = applyActivityEvent(activity, tool("running"));
+    activity = applyActivityEvent(activity, task("t2", "Write"));
+    activity = applyActivityEvent(activity, task("t3", "Test"));
+    const restated = applyActivityEvent(activity, {
+      kind: "task-list",
+      taskIds: ["t3", "t1"],
+    } as CodeOperationEvent);
+    expect(restated.rows.map((row) => `${row.kind} ${row.id}`)).toEqual([
+      "task t3",
+      "tool call-1",
+      "task t1",
+    ]);
+    expect(
+      applyActivityEvent(restated, {
+        kind: "task-list",
+        taskIds: ["t3", "t1"],
+      } as CodeOperationEvent),
+    ).toBe(restated);
+  });
+
   it("ignores events the transcript does not render", () => {
     const unchanged = applyActivityEvent(EMPTY_TURN_ACTIVITY, {
       kind: "operation-state",

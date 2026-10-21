@@ -140,6 +140,13 @@ export interface CanvasServiceDependencies {
     context: CanvasAuthorizationContext,
     project: CanvasProjectRecord | undefined,
   ) => boolean;
+  /**
+   * Whether a Chat thread may own a Canvas of its own: it exists, is active,
+   * and is in no Chat Project. A create that names no Project is refused
+   * without this, so a host that cannot read its threads opens no Canvas
+   * bound to one.
+   */
+  readonly threadMayOwnCanvas?: (threadId: string) => boolean;
   /** Reauthorize a source against provider, extension, and credential state. */
   readonly refreshSource?: (
     source: import("@octant/contracts").CanvasSourceManifestEntry,
@@ -222,6 +229,7 @@ export class CanvasService {
   readonly #uuid: () => string;
   readonly #clock: () => UtcTimestamp;
   readonly #authorize: CanvasServiceDependencies["authorize"];
+  readonly #threadMayOwnCanvas: CanvasServiceDependencies["threadMayOwnCanvas"];
   readonly #promptSummaries = new Map<string, string>();
   readonly #onVersionCommitted: CanvasServiceOptions["onVersionCommitted"];
   readonly #actor: CanvasActor;
@@ -268,6 +276,7 @@ export class CanvasService {
     this.#clock = options.clock;
     this.#onVersionCommitted = options.onVersionCommitted;
     this.#authorize = dependencies.authorize;
+    this.#threadMayOwnCanvas = dependencies.threadMayOwnCanvas;
     this.#resolveWorkspace = dependencies.resolveWorkspace;
     this.#listRefreshSkills = dependencies.listRefreshSkills;
     this.#skillAuthorized = dependencies.skillAuthorized;
@@ -762,7 +771,27 @@ export class CanvasService {
         message: "Canvas create request is malformed.",
       };
     }
-    if (project === undefined || project.lifecycle !== "active" || project.type !== request.mode) {
+    // A Chat Canvas with no Project belongs to its thread: the request names
+    // no Project, the window has none active, and the thread is an active
+    // Chat thread outside any Chat Project. Anything else needs its Project.
+    const threadOwned = request.mode === "chat" && request.workspace.projectId === null;
+    if (threadOwned) {
+      if (
+        project !== undefined ||
+        context.projectId !== null ||
+        this.#threadMayOwnCanvas?.(String(request.originThreadId)) !== true
+      ) {
+        return {
+          kind: "denied",
+          denialCode: "unavailable",
+          message: "This Chat thread cannot hold a Canvas of its own.",
+        };
+      }
+    } else if (
+      project === undefined ||
+      project.lifecycle !== "active" ||
+      project.type !== request.mode
+    ) {
       return {
         kind: "denied",
         denialCode: "unavailable",
@@ -802,7 +831,7 @@ export class CanvasService {
         admitted,
         canvasId,
         versionId,
-        projectId: project.id as never,
+        projectId: project === undefined ? null : (project.id as never),
         actor: authoredBy ?? this.#actor,
         providerInstanceId: this.#providerInstanceId,
         modelId: this.#modelId,
@@ -1645,17 +1674,30 @@ export class CanvasService {
     this.#rememberActionResult(result);
   }
 
+  /**
+   * The Canvases a thread shows. A Chat thread also shows the Canvases it
+   * owned before it was moved into a Chat Project: they stay the thread's,
+   * never the Project's, and a thread that moved would otherwise lose sight
+   * of them.
+   */
   threadReferenceCards(input: {
     readonly mode: "chat" | "work" | "code";
     readonly threadId: string;
-    readonly projectId: string;
+    readonly projectId: string | null;
   }): ReadonlyArray<CanvasThreadReferenceCard> {
-    return this.#projection
-      .byThread({
-        mode: input.mode,
-        threadId: input.threadId,
-        projectId: input.projectId as never,
-      })
+    const owned = this.#projection.byThread({
+      mode: input.mode,
+      threadId: input.threadId,
+      projectId: input.projectId as never,
+    });
+    const threadOwned =
+      input.mode === "chat" && input.projectId !== null
+        ? this.#projection.byThread({ mode: "chat", threadId: input.threadId, projectId: null })
+        : [];
+    return [...threadOwned, ...owned]
+      .sort((left, right) =>
+        left.updatedAt < right.updatedAt ? -1 : left.updatedAt > right.updatedAt ? 1 : 0,
+      )
       .map((entry) =>
         projectThreadReferenceCardFromVersion({
           version: entry.currentVersion,

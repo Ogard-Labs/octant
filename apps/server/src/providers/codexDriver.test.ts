@@ -1902,6 +1902,35 @@ describe("Codex thread and turn lifecycle", () => {
     await acquired.close();
   });
 
+  it("keeps a running session alive on command output without exposing the output", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()));
+    await startSession(acquired.connection);
+    await Effect.runPromise(
+      acquired.connection.send({ sessionId, prompt: "build", attachments: [], tools: [] }),
+    );
+    const events = takeEvents(acquired.connection, 2);
+    f.emit(
+      notification("item/commandExecution/outputDelta", {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "item-1",
+        delta: "private build output",
+      }),
+    );
+    f.emit(
+      notification("turn/completed", {
+        threadId: "thread-1",
+        turn: { id: "turn-1", status: "completed" },
+      }),
+    );
+
+    const seen = await events;
+    expect(seen).toMatchObject([{ kind: "liveness", sessionId }, { kind: "completed" }]);
+    expect(JSON.stringify(seen)).not.toContain("private build output");
+    await acquired.close();
+  });
+
   it("retries saturation three times before accepted output with 50/100/200ms delays", async () => {
     let attempts = 0;
     const delays: number[] = [];

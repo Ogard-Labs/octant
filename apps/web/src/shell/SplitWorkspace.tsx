@@ -88,7 +88,7 @@ export interface SplitWorkspaceProps {
   readonly environmentNames?: ReadonlyMap<string, string>;
   /**
    * What a thread's pane says about where its work is: the pull request it
-   * carries and its Project/branch. Read the way a person names a change,
+   * carries and its Project. Read the way a person names a change,
    * so two panes on one Project tell apart by more than their titles.
    */
   readonly paneFactsByThreadId?: ReadonlyMap<string, PaneFacts>;
@@ -117,8 +117,6 @@ export interface PaneFacts {
   readonly pullRequest?: ThreadBoardPullRequestSummary;
   /** The Project the thread works in, as its own chip. */
   readonly projectName?: string;
-  /** Code only: the branch the thread's checkout is on, as its own chip. */
-  readonly branch?: string;
 }
 
 interface WorkspaceNodeProps extends SplitWorkspaceProps {
@@ -418,7 +416,6 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
   const selectPullRequest = props.onSelectPullRequest;
   const projectName =
     "threadId" in surface ? (facts?.projectName ?? props.contextLabel) : undefined;
-  const branch = "threadId" in surface ? facts?.branch : undefined;
   const running =
     environment !== undefined &&
     "threadId" in surface &&
@@ -494,19 +491,25 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                       : { onOpen: () => selectPullRequest(pullRequest.identity) })}
                   />
                 )}
-                {showTabs ? null : <span className="workspace-pane__title">{title}</span>}
+                {/* A breadcrumb: the Project the pane runs in, then what it
+                    shows. Tabs replace the title text, but the Project names
+                    the pane's execution context rather than the active tab,
+                    so it stays when content tabs are open. The branch lives
+                    in the composer's strip, beside the thread it runs. */}
                 {projectName === undefined ? null : (
-                  // Tabs replace the redundant title text, but the Project
-                  // chip names the pane's execution context rather than the
-                  // active tab, so it stays even when content tabs are open.
                   <span className="workspace-pane__context" title={projectName}>
                     {projectName}
                   </span>
                 )}
-                {branch === undefined ? null : (
-                  <span className="workspace-pane__branch" title={branch}>
-                    {branch}
-                  </span>
+                {showTabs ? null : (
+                  <>
+                    {projectName === undefined ? null : (
+                      <span aria-hidden="true" className="workspace-pane__crumb">
+                        /
+                      </span>
+                    )}
+                    <span className="workspace-pane__title">{title}</span>
+                  </>
                 )}
                 {running ? (
                   // The host reports that a turn is executing, not when it

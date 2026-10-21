@@ -45,8 +45,15 @@ The Project tree places each active thread under its listed Project or under
 the Projects with no horizontal divider or separate section heading. It is
 absent when empty and does not create a Project or filesystem authority.
 Sidebar search reveals matches inside collapsed groups and restores their
-collapse state when cleared. The Activity feed is an alternative view of the
-same threads; it is not shown as a duplicate list beneath the Project tree.
+collapse state when cleared. Status and the Activity feed are alternative views
+of the same threads; neither is shown as a duplicate list beneath the Project
+tree. **Status** is each mode's default until a person picks another
+arrangement, and each mode keeps its own pick (a pick made before Status
+existed is kept). It lists the threads flat under counted headings in the
+order a person acts on them: **Pinned**, **Needs input** (waiting on an
+approval or an answer), **Ready for review** (a finished turn nobody has
+looked at), **Working**, and **Idle** (everything else), newest first within
+each. A thread appears once, under the first heading that holds it.
 
 Chat, Work, and Code keep the active mode's sidebar current with projection-only
 navigation reads ([routes](host-reads-and-commands.md#sidebar-navigation-reads)).
@@ -71,7 +78,10 @@ Project heading, a filter, and a sort all resolve through that policy, so they
 cannot rank the same facts differently.
 
 - Nothing to report is the absence of a status (`undefined`), not a word: no
-  "Idle" label, mark, filter value, or sort rank exists.
+  "Idle" mark, filter value, or sort rank exists. The Status arrangement's
+  **Idle** heading only gathers the threads with no status; it is not one of
+  the words, and its headings are phrased as what the person does next rather
+  than as the status labels.
 - Only facts the sidebar already carries are statuses. A failed run or blocked
   check is not inferred from silence; adding a status is a wire change that
   requires the sidebar to carry the fact first. This vocabulary answers what is
@@ -172,10 +182,12 @@ shell reads the title from the navigation rows instead, and a rename made in
 any window reaches every open pane. A thread pane's title row is its
 drag handle: an environment mark (a small neutral tile holding a laptop glyph
 when the thread runs on this computer, a cloud glyph and the host's name when
-it runs on another host), the title, a quiet chip naming the Project, and for
-Code a second chip naming the branch. The chips keep their width (each capped at a fixed character count, not a share of the header) and the title truncates first (it shrinks much faster than the chips, with no fixed floor so a narrow pane keeps its status pill), so a long title never squeezes a chip to one letter and a short title never clips a chip beside empty space;
-the Project chip is omitted without a Project and the branch chip without a
-branch. While the host projects the thread as executing, a "Running" pill with
+it runs on another host), then a breadcrumb: the Project in meta text, a slash,
+and the title. The Project keeps its width (capped at a fixed character count,
+not a share of the header) and the title truncates first (it shrinks much
+faster, with no fixed floor so a narrow pane keeps its status pill); without a
+Project the breadcrumb is the title alone. The branch is not repeated here: it
+is in the composer's strip, beside the thread it runs. While the host projects the thread as executing, a "Running" pill with
 a spinner follows them; it carries no elapsed time because the host does not
 report when the turn began. A thread whose turn is parked on the agent's own
 approval is not running: the pill reads "Needs you", with no spinner, until
@@ -216,9 +228,11 @@ than its composer, stay pane and attachment behaviour.
 
 ## Start-screen cards
 
-Every start screen (Chat, Work, and Code, in each variant a mode has, including
-the Chat screen that lists threads to continue) shows its composer and then one
-card area with the same stored setting. These are the rules; each card's rows,
+Every start screen shows one question and its composer. **New task**, in
+every mode, stops there, with the composer docked at the foot of the page.
+**Code Home**, where Code lands with nothing chosen, adds Code's prompt
+suggestions, one card area, and Code's agent home under the composer. No
+start screen has tabs or action tiles. These are the rules; each card's rows,
 wording, and reads are specified in [Start screen](start-screen.md).
 
 - **Paint order.** The composer paints first. The card area mounts on the frame
@@ -226,8 +240,7 @@ wording, and reads are specified in [Start screen](start-screen.md).
   screen never waits on a card. A card that is off or unavailable is never
   mounted and reads nothing.
 - **Cards, in default order.** Needs you, Working now, Running services, Pull
-  requests, CI failures, and Computers, each on by default. Pull requests and CI
-  failures appear only on a Code start screen. Chat has no folder tiles.
+  requests, CI failures, and Computers, each on by default, on Code Home only.
 - **Unavailable is hidden.** A card this window cannot read is hidden and left
   out of Customize rather than shown broken: Needs you without a
   pending-request reader (a remote window); Pull requests and CI failures
@@ -264,11 +277,6 @@ wording, and reads are specified in [Start screen](start-screen.md).
   card, each change stored at once in the `homeCards` shell setting, and
   **Reset to default**. An id the registry does not know is ignored, and a card
   shipped later arrives with its own default.
-- **New task and Running tabs.** Two tabs above the composer. New task is
-  selected first and keeps the composer's arrival focus. Running lists every
-  executing thread and agent run with **Open** and a confirmed **Stop**, hides
-  the composer without unmounting it, reads only while open, and adds no
-  persisted state or authority.
 - **Needs you elsewhere.** Board cards, the command palette, the Inbox, and the
   Review page read the same host list and answer in place through the same
   commands. The desktop menu bar lists the same waiting threads but only opens
@@ -286,9 +294,11 @@ its Git subprocesses are network-denied and its data is an ephemeral read,
 not a second journal. Pages anchor to immutable Git tips, and commit details
 compare immutable object IDs with an explicit parent for merges.
 The top-right control reveals the dock only when the active pane has a bound thread
-or a valid launchable tool. An available empty dock opens on a thread overview (running threads and a thread card with its facts and
-changes; see [DESIGN.md](../../DESIGN.md#shell-and-layout))
-above a grid of tool tiles; an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
+or a valid launchable tool. An available empty dock opens on a stack of fact cards (Environment with
+the local window's Remote access switch, Local servers, Context, Changes,
+Outputs, Background tasks, Running now; see [DESIGN.md](../../DESIGN.md#shell-and-layout));
+its title band offers the common tools, Add tool lists the rest, and an open
+dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
 Tests, iOS Simulator, and Android emulator, as mode and capability allow. Chat
 admits only the [Agents dock](#subagents) and has no bottom panel. Side
@@ -591,8 +601,8 @@ the composer and Environment explain an admission refusal and its recovery.
 [Context and usage accounting](../architecture.md#context-and-usage-accounting)
 owns budget enforcement, provenance, native-session identity, and journal rules.
 
-Under the composer of every thread, in Chat, Work, and Code and for every provider, a
-quiet stats line states what the thread used: input and output tokens, the cache
+Above the composer of every thread, in Chat, Work, and Code and for every provider, a
+quiet stats line, right of the thread's context in one strip, states what the thread used: input and output tokens, the cache
 hit, output speed, time to first token, and cost. When the provider reported account
 limit windows, the line leads with one bar per window, showing the share left
 (`composerLimitWindows` in `apps/web/src/context`, read from the context snapshot and

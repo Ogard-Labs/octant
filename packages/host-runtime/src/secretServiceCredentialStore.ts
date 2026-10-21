@@ -21,6 +21,9 @@ export const SECRET_SERVICE_REPLICA_DEVICE_KEY_ATTRIBUTE = "octant.replica-devic
  */
 export const SECRET_SERVICE_REPLICA_STORE_CREDENTIAL_ATTRIBUTE =
   "octant.replica-store-credentials.v1";
+/** Public links' owner secrets, apart from provider credentials and sync keys. */
+export const SECRET_SERVICE_CANVAS_PUBLIC_SHARE_SECRET_ATTRIBUTE =
+  "octant.canvas-public-share-secrets.v1";
 const NAMESPACES = {
   provider: { attribute: SECRET_SERVICE_ATTRIBUTE, label: "Octant provider credential" },
   "replica-device-key": {
@@ -30,6 +33,10 @@ const NAMESPACES = {
   "replica-store-credential": {
     attribute: SECRET_SERVICE_REPLICA_STORE_CREDENTIAL_ATTRIBUTE,
     label: "Octant sync bucket key",
+  },
+  "canvas-public-share-secret": {
+    attribute: SECRET_SERVICE_CANVAS_PUBLIC_SHARE_SECRET_ATTRIBUTE,
+    label: "Octant public link owner secret",
   },
 } as const;
 const DEFAULT_TIMEOUT_MS = 2_000;

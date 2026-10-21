@@ -303,6 +303,12 @@ function decodeStreamEvent(
     };
   }
   if (event.type === "message_stop") return { kind: "message-stop" };
+  // The streaming API sends `ping` as a keep-alive during a long generation,
+  // and the runtime forwards it like any other stream event. It carries no
+  // content, so it is read as nothing; refusing it ended every turn whose
+  // tool input took long enough to stream (observed on 2.1.3xx while the
+  // model wrote a large Canvas document).
+  if (event.type === "ping") return { kind: "ping" };
   const index = nonNegativeNumber(event.index);
   if (index === undefined || !Number.isInteger(index)) {
     throw protocol("Claude returned an unsupported runtime message.");

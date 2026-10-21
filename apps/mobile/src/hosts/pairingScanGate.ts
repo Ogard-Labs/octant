@@ -28,3 +28,13 @@ export function createPairingScanGate() {
     },
   };
 }
+
+/**
+ * A scanned code is kept in the pairing code field even when its pairing
+ * failed, and a saved code wins over typed details on submit. Opening the
+ * details form therefore drops it, so the user's typed address and ticket
+ * are the ones used.
+ */
+export function pairingCodeAfterTogglingDetails(pairingCode: string, opening: boolean): string {
+  return opening ? "" : pairingCode;
+}
