@@ -202,13 +202,10 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                     onRefused={setAttachmentNotice}
                     onFileSelected={() => undefined}
                   />
-                  <ComposerVoiceButton
-                    disabled={!ready || props.creating === true}
-                    onTranscript={(transcript) =>
-                      setPrompt((current) => appendTranscript(current, transcript))
-                    }
-                  />
-                  <span aria-hidden="true" className="composer-gap" />
+                </>
+              ),
+              trailing: (
+                <>
                   <ComposerModelPicker
                     ariaLabel="Provider and model"
                     disabled={!ready || props.creating === true}
@@ -234,6 +231,12 @@ export function ChatWelcome(props: ChatWelcomeProps) {
                     {...(props.selectedProviderInstanceId === undefined
                       ? {}
                       : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                  />
+                  <ComposerVoiceButton
+                    disabled={!ready || props.creating === true}
+                    onTranscript={(transcript) =>
+                      setPrompt((current) => appendTranscript(current, transcript))
+                    }
                   />
                 </>
               ),

@@ -1139,16 +1139,9 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
               />
             }
             row={{
-              leading: (
+              leading: <>{folderControl}</>,
+              trailing: (
                 <>
-                  {folderControl}
-                  <ComposerVoiceButton
-                    disabled={props.creating}
-                    onTranscript={(transcript) =>
-                      setPrompt((current) => appendTranscript(current, transcript))
-                    }
-                  />
-                  <span className="composer-gap" aria-hidden="true" />
                   <ComposerModelPicker
                     ariaLabel="Provider and model"
                     disabled={props.creating === true}
@@ -1174,6 +1167,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
                     {...(props.selectedProviderInstanceId === undefined
                       ? {}
                       : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+                  />
+                  <ComposerVoiceButton
+                    disabled={props.creating}
+                    onTranscript={(transcript) =>
+                      setPrompt((current) => appendTranscript(current, transcript))
+                    }
                   />
                 </>
               ),
