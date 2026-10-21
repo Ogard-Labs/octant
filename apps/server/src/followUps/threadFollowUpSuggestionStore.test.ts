@@ -18,7 +18,7 @@ import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { registerNativeHarnessEvents } from "../harness/nativeHarnessEvents";
 import { NativeHarnessSessionStore } from "../harness/nativeHarnessSessionStore";
-import { settleFollowUpSuggestion } from "./followUpSuggestionRoutes";
+import { readableFollowUpLinks, settleFollowUpSuggestion } from "./followUpSuggestionRoutes";
 import {
   registerFollowUpSuggestionEvents,
   ThreadFollowUpSuggestionStore,
@@ -104,6 +104,51 @@ describe("thread follow-up suggestions", () => {
 
     restarted.recordReply({ threadId, mode: "code", suggestedBy: claude, followUps: undefined });
     expect(storeOn(connection).read(threadId)?.followUps.suggestions).toEqual([]);
+  });
+
+  it("remembers which thread a started follow-up came from, past a later reply and a restart", () => {
+    const connection = openConnection();
+    const store = storeOn(connection);
+    const child = "00000000-0000-4000-8000-000000000099";
+    store.recordReply({
+      threadId,
+      mode: "code",
+      projectId: projectId as never,
+      suggestedBy: claude,
+      followUps: suggestions(),
+    });
+    store.activate(threadId, suggestionId as never, {
+      kind: "new-thread",
+      mode: "code",
+      projectId: projectId as never,
+      title: "Add tests" as never,
+      threadId: child as never,
+    });
+    store.recordReply({ threadId, mode: "code", suggestedBy: claude, followUps: undefined });
+
+    const restarted = storeOn(connection);
+    expect(restarted.links()).toEqual([{ threadId: child, parentThreadId: threadId }]);
+  });
+
+  it("names a follow-up link only when the window may read both the child and its parent", async () => {
+    const child = "00000000-0000-4000-8000-000000000099";
+    const store = {
+      links: () => [{ threadId: child, parentThreadId: threadId }],
+    } as never;
+    const windowId = "00000000-0000-4000-8000-0000000000f0";
+    const both = await readableFollowUpLinks({ store, authorizeThread: () => true }, windowId);
+    expect(both).toEqual([{ threadId: child, parentThreadId: threadId }]);
+    const childOnly = await readableFollowUpLinks(
+      { store, authorizeThread: ({ threadId: asked }) => asked === child },
+      windowId,
+    );
+    expect(childOnly).toEqual([]);
+    // Listing in the sidebar does not need either thread open.
+    const listed = await readableFollowUpLinks(
+      { store, authorizeThread: () => false, authorizeListing: () => true },
+      windowId,
+    );
+    expect(listed).toEqual([{ threadId: child, parentThreadId: threadId }]);
   });
 
   it("writes nothing for a thread whose replies never suggested anything", () => {

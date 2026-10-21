@@ -497,7 +497,7 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByText("Reviewer")).toBeNull();
   });
 
-  it("keeps the model beside send in a thread, apart from what the person attaches", () => {
+  it("keeps access beside attach and the model, then the microphone, beside send", () => {
     render(
       <CodeThreadWorkspace
         controller={controller()}
@@ -505,18 +505,18 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    // A new task's composer already reads attach, space, model, access, send.
-    // The thread's composer put the model beside attach, so it changed sides
-    // the moment a task became a thread.
-    const gap = screen.getByLabelText("Thread context").querySelector(".composer-gap");
-    const model = screen.getByRole("button", { name: "Provider and model" });
+    // Every composer reads attach, access, model, microphone, send. The thread's
+    // composer put the model beside attach, so it changed sides the moment a
+    // task became a thread.
+    const attach = screen.getByRole("button", { name: "Add attachment" });
     const access = screen.getByRole("button", { name: "Next turn access" });
-    expect(gap).not.toBeNull();
+    const model = screen.getByRole("button", { name: "Provider and model" });
     const follows = (before: Node, after: Node) =>
       (before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-    expect(follows(screen.getByRole("button", { name: "Add attachment" }), gap as Node)).toBe(true);
-    expect(follows(gap as Node, model)).toBe(true);
-    expect(follows(model, access)).toBe(true);
+    expect(follows(attach, access)).toBe(true);
+    expect(follows(access, model)).toBe(true);
+    const mic = screen.queryByRole("button", { name: /dictat|microphone|voice/i });
+    if (mic !== null) expect(follows(model, mic)).toBe(true);
   });
 
   it("renders the conversation center and sends follow-ups through the controller", async () => {

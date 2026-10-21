@@ -33,7 +33,7 @@ export interface AppBackgroundSettingsProps {
   readonly onChange: (next: AppBackground) => void;
 }
 
-type Choice = "builtin" | "photo" | "none";
+type Choice = "builtin" | "photo" | "characters" | "none";
 
 /** A ground saved as the retired dot pattern draws nothing, and says so. */
 function choiceFor(kind: AppBackground["kind"]): Choice {
@@ -157,7 +157,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   }, [library, showPhoto]);
 
   const choose = (kind: string) => {
-    if (kind === "none") {
+    if (kind === "none" || kind === "characters") {
       setChoice(kind);
       setStatus(undefined);
       props.onChange({ ...carry(background), kind });
@@ -210,7 +210,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     <>
       <div className="setgroup">
         <SettingRow
-          description="A picture behind Octant: a built-in one, your own photo, or none."
+          description="What sits behind Octant: a built-in picture, your own photo, pulsing characters, or none."
           focused={props.focused === true}
           label="Background"
           labelledBySection
@@ -224,6 +224,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
             options={[
               { id: "builtin", label: "Built-in picture" },
               { id: "photo", label: "Your photo" },
+              { id: "characters", label: "Pulsing characters" },
               { id: "none", label: "None" },
             ]}
             value={choice}

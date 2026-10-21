@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "vite build && vite build --config vite.canvas-preview.config.ts",
+    "build": "vite build && bun run build:canvas-preview",
+    "build:canvas-preview": "vite build --config vite.canvas-preview.config.ts",
     "dev": "vite",
     "test": "vitest run --testTimeout=15000",
     "typecheck": "tsc -p tsconfig.json"

@@ -19,6 +19,7 @@ import {
   CanvasCommentReplied,
   CanvasCommentReply,
   CanvasCommentResolved,
+  CanvasCommentSentToAgent,
   CanvasDiagramLayoutReviseCommand,
   CanvasDiagramNodePosition,
   CanvasPlanTaskReviseCommand,
@@ -76,6 +77,7 @@ export type CanvasCommentAdmitResult =
   | { readonly kind: "accepted"; readonly event: CanvasCommentReplied }
   | { readonly kind: "accepted"; readonly event: CanvasCommentResolved }
   | { readonly kind: "accepted"; readonly event: CanvasCommentDeleted }
+  | { readonly kind: "accepted"; readonly event: CanvasCommentSentToAgent }
   | CanvasBoardRejected;
 
 function findComment(
@@ -239,6 +241,24 @@ export function admitCanvasCommentCommand(
       };
       return { kind: "accepted", event };
     }
+    case "canvas-comment-send-to-agent": {
+      const target = findComment(state.comments, String(command.commentId));
+      if (target === undefined) {
+        return reject("unknown-comment", "Canvas comment to send to the agent does not exist.");
+      }
+      if (!isUserOrAgent(command.sentBy)) {
+        return reject("unauthorized", "Canvas comments are sent to the agent by a user or agent.");
+      }
+      const event: CanvasCommentSentToAgent = {
+        canvasId: command.canvasId,
+        commentId: command.commentId,
+        sentBy: command.sentBy,
+        canvasSequence: command.canvasSequence,
+        sentAt: command.issuedAt,
+        sequence: state.sequence + 1,
+      };
+      return { kind: "accepted", event };
+    }
   }
 }
 
@@ -290,6 +310,26 @@ export function applyCanvasCommentEvent(
         sequence,
         comments: state.comments.filter((comment) => String(comment.commentId) !== commentId),
         replies: state.replies.filter((reply) => String(reply.commentId) !== commentId),
+      };
+    }
+    case "sent-to-agent": {
+      // A later send replaces the earlier request: the newest Canvas sequence
+      // is the one a revision must come after to count as addressing it.
+      const commentId = String(event.event.commentId);
+      return {
+        ...state,
+        sequence,
+        comments: state.comments.map((comment) =>
+          String(comment.commentId) === commentId
+            ? {
+                ...comment,
+                sentToAgent: {
+                  canvasSequence: event.event.canvasSequence,
+                  sentAt: event.event.sentAt,
+                },
+              }
+            : comment,
+        ),
       };
     }
   }

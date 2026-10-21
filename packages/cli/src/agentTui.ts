@@ -21,6 +21,7 @@ import {
   type AgentThreadPort,
   type AgentThreadSnapshot,
 } from "./agentThread";
+import { takeSteeringFollowUp, type AgentSteeringFollowUp } from "./agentSteeringFollowUp";
 import { randomUUID } from "node:crypto";
 import { readdir } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -174,6 +175,7 @@ class AgentScreen {
   #ticks = 0;
   #lastCtrlC = 0;
   #flushingSteering = false;
+  readonly #steeringFollowUps = new Map<string, AgentSteeringFollowUp>();
   #verbose = false;
   #showReasoning = false;
   #showHelp = false;
@@ -513,6 +515,7 @@ class AgentScreen {
     if (
       queued.length === 0 ||
       this.#flushingSteering ||
+      this.#steeringFollowUps.has(this.#threadId) ||
       this.#thread === undefined ||
       isAgentSnapshotRunning(this.#thread) ||
       this.#session?.session.status === "running"
@@ -523,26 +526,15 @@ class AgentScreen {
     const threadId = this.#threadId;
     const port = this.#port;
     try {
-      const taken = await takeAgentSteering(this.#input.session, threadId);
-      if (taken.kind === "refused") {
-        this.#note = taken.message;
-        return;
-      }
-      if (taken.notes.length === 0) return;
-      const sent = await port.send(taken.notes.map((note) => note.text).join("\n\n"));
-      if (sent.kind === "refused") {
-        this.#note = sent.message;
-        // Put them back under their own ids so the person's notes are not lost.
-        for (const note of taken.notes) {
-          await steerAgent(this.#input.session, threadId, {
-            kind: "queue",
-            text: note.text,
-            noteId: note.id,
-          });
-        }
-      }
+      const retained = await takeSteeringFollowUp({
+        displayedText: queued.map((note) => note.text).join("\n\n"),
+        take: () => takeAgentSteering(this.#input.session, threadId),
+        send: (text) => port.send(text),
+      });
+      if (retained !== undefined) this.#steeringFollowUps.set(threadId, retained);
     } finally {
       this.#flushingSteering = false;
+      this.#draw();
     }
   }
 
@@ -713,6 +705,7 @@ class AgentScreen {
           "/next N      take a suggested follow-up    /pause /resume /model /threads /open N /quit",
           "/side text   ask Side Chat, which only reads  /back  return to the thread",
           "/steer text  note for the lead's next step    /goal · /goal revise text",
+          "/notes       show retained notes · /notes copy · /notes discard",
           "/fork        fork at the last reply           /checkpoint · /checkpoints · /restore N",
           "/agents      list the helper agents           /agent N shows one · /agent N text replies",
           "drag + Ctrl+C  copy selected text           /copy   copy the last reply",
@@ -757,6 +750,13 @@ class AgentScreen {
         return `  ${index + 1}. ${option}${meaning === undefined ? "" : ` — ${meaning}`}`;
       });
       this.#panelText.content = t`${fg(p.text)(pending.prompt)}${options.length === 0 ? "" : "\n"}${fg(p.textSecondary)(options.join("\n"))}\n${dim(fg(p.muted)("Type a number or an answer, then Enter."))}`;
+      this.#panel.visible = true;
+    } else if (this.#steeringFollowUps.has(this.#threadId)) {
+      const retained = this.#steeringFollowUps.get(this.#threadId);
+      this.#panel.title = " Retained steering notes ";
+      this.#panel.borderColor = p.warning;
+      const actions = "Check the conversation and queue first · /notes copy · /notes discard";
+      this.#panelText.content = t`${fg(p.warning)(retained?.message ?? "")}\n${fg(p.text)(retained?.text ?? "")}\n${dim(fg(p.muted)(actions))}`;
       this.#panel.visible = true;
     } else if (this.#pendingFollowUp !== undefined) {
       this.#panel.title = " Follow-up ";
@@ -1070,6 +1070,19 @@ class AgentScreen {
     }
     if (text.length === 0) return;
     this.#note = "";
+    if (text === "/notes" || text.startsWith("/notes ")) {
+      const threadId = this.#threadId;
+      const retained = this.#steeringFollowUps.get(threadId);
+      if (this.#flushingSteering) this.#note = "Waiting for the host to answer about the notes.";
+      else if (retained === undefined)
+        this.#note = "No retained steering notes in this terminal for this thread.";
+      else if (text === "/notes copy") await this.#copy(retained.text);
+      else if (text === "/notes discard") this.#steeringFollowUps.delete(threadId);
+      else this.#note = retained.message;
+      this.#listing = undefined;
+      this.#draw();
+      return;
+    }
     if (text === "/quit" || text === "/exit") {
       this.#resolveExit?.(0);
       return;

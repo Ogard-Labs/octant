@@ -12,6 +12,7 @@ The precedence and authorization rules live in [AGENTS.md](../../AGENTS.md#missi
 | System architecture    | [Architecture](../architecture.md)                          | Changing processes, authority, modes, persistence, providers, plugins, or release boundaries; follow the relevant section |
 | Workspace behavior     | [Workspace](workspace.md)                                   | Changing navigation, Projects, panes, content tabs, tool presentation, or workspace lifecycle                             |
 | Canvas                 | [Canvas](canvas.md)                                         | Changing the Canvas tool, recipes, preview, block catalogue, boards, comments, or the `design` block                      |
+| Canvas public links    | [Canvas public links](canvas-public-links.md)               | Changing public share links, their approval card, payload, terms, host records, or the `apps/share` service               |
 | Artifact replica sync  | [Artifact replica sync](artifact-replica-sync.md)           | Changing replica entries, stores, membership, publish, pull, restore, the synced library, or store selection              |
 | Provider runtimes      | [Provider runtimes](provider-runtimes.md)                   | Changing OpenCode's version-specific routes, the local-server adapter, or a subscription sign-in dialect                  |
 | Device workbench       | [Device workbench](device-workbench.md)                     | Changing Simulator or emulator panes, capture, input delivery, keyboard layouts, or managed device tools                  |

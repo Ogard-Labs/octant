@@ -1,6 +1,10 @@
 import { isComputerUseSelection } from "@octant/plugin-host/computer-use";
 import { isBrowserUseSelection } from "@octant/plugin-host/browser-use";
 import { combineAppManagedToolSets } from "../providers/appManagedToolSet";
+import {
+  CANVAS_DELIVERY_INSTRUCTIONS,
+  offersCanvasTool,
+} from "../canvas/canvasDeliveryInstructions";
 import { createHash } from "node:crypto";
 import {
   ActorId,
@@ -3891,6 +3895,7 @@ export class ChatService {
       sideChatSourceContext,
       threadMentionContexts,
       handoff?.blocks,
+      offersCanvasTool(tools?.definitions),
     );
     const maintained = nativeConversation
       ? context
@@ -4881,6 +4886,12 @@ export class ChatService {
      * provider answering as if it had never seen the conversation.
      */
     handoffBlocks?: ReadonlyArray<ProviderContextBlock>,
+    /**
+     * Whether this turn offers `octant_canvas`. Only then does the turn carry
+     * the Canvas delivery instruction; a thread outside a Chat Project is
+     * offered neither.
+     */
+    canvasOffered = false,
   ): ChatTurnContextPlan {
     const providerInstanceId = decodeProviderInstanceId(thread.providerInstanceId);
     const subject = decodeContextSubjectRef({
@@ -5219,6 +5230,21 @@ export class ChatService {
         ),
         { kind: "instructions", text: thread.personalityInstructions },
       ),
+      ...(canvasOffered
+        ? [
+            contextEntry(
+              this.#contextEntry(
+                thread,
+                "octant-policy",
+                CANVAS_DELIVERY_INSTRUCTIONS,
+                Math.max(16, Math.ceil(CANVAS_DELIVERY_INSTRUCTIONS.length / 4)),
+                "required",
+                { kind: "instruction", referenceId: "octant-canvas-delivery" },
+              ),
+              { kind: "instructions", text: CANVAS_DELIVERY_INSTRUCTIONS },
+            ),
+          ]
+        : []),
       ...memoryEntries,
       ...summaryEntries,
       ...transcriptEntries,
@@ -5681,6 +5707,7 @@ export class ChatService {
   #contextEntry(
     thread: ChatThread,
     category:
+      | "octant-policy"
       | "user-instructions"
       | "current-request"
       | "conversation"

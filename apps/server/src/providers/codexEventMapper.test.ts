@@ -4,9 +4,12 @@ import {
   decodeProviderInstanceId,
   decodeProviderRuntimeEvent,
   decodeProviderSessionId,
+  restateThreadTaskList,
+  upsertThreadTaskProgress,
+  type ThreadTaskProgressList,
 } from "@octant/contracts";
 import { Schema } from "effect";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   mapCodexMessage,
   type CodexEventContext,
@@ -149,6 +152,53 @@ describe("mapCodexMessage", () => {
       },
     });
     expect(JSON.stringify(result)).not.toContain("provider-");
+  });
+
+  it("reports content-free liveness for running tool output, at most once every few seconds", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-10-21T10:00:00.000Z"));
+      const ctx = context();
+      const params = {
+        threadId: "thread-1",
+        turnId: "turn-1",
+        itemId: "provider-command-1",
+      };
+      const output = notification("item/commandExecution/outputDelta", params);
+      const progress = notification("item/mcpToolCall/progress", params);
+      const patch = notification("item/fileChange/patchUpdated", params);
+
+      const first = map(ctx, output);
+      expect(first).toHaveLength(1);
+      expect(first[0]).toMatchObject({
+        kind: "event",
+        event: { kind: "liveness", sequence: 41 },
+      });
+      expect(JSON.stringify(first)).not.toContain("provider-");
+      vi.advanceTimersByTime(4_999);
+      expect(map(ctx, progress)).toEqual([{ kind: "ignored" }]);
+      expect(map(ctx, patch)).toEqual([{ kind: "ignored" }]);
+      vi.advanceTimersByTime(1);
+      expect(map(ctx, progress)[0]).toMatchObject({
+        kind: "event",
+        event: { kind: "liveness", sequence: 42 },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails a tool progress notification that belongs to another turn", () => {
+    const [result] = map(
+      context(),
+      notification("item/mcpToolCall/progress", {
+        threadId: "thread-1",
+        turnId: "other-turn",
+        itemId: "item-1",
+      }),
+    );
+
+    expect(result).toMatchObject({ kind: "protocol-failure" });
   });
 
   it("preserves meaningful streamed whitespace, ignores empty deltas, and bounds large deltas", () => {
@@ -980,10 +1030,12 @@ describe("mapCodexMessage", () => {
           sequence: 8,
         },
       },
+      { kind: "event", event: { kind: "task-list", taskIds: ["task-1", "task-2"], sequence: 9 } },
     ]);
     expect(second).toMatchObject([
-      { kind: "event", event: { taskId: "task-1", status: "completed", sequence: 9 } },
-      { kind: "event", event: { taskId: "task-2", status: "in-progress", sequence: 10 } },
+      { kind: "event", event: { taskId: "task-1", status: "completed", sequence: 10 } },
+      { kind: "event", event: { taskId: "task-2", status: "in-progress", sequence: 11 } },
+      { kind: "event", event: { kind: "task-list", taskIds: ["task-1", "task-2"], sequence: 12 } },
     ]);
     expect(JSON.stringify([...first, ...second])).not.toContain("raw explanation");
   });
@@ -1042,6 +1094,52 @@ describe("mapCodexMessage", () => {
       expect(event.taskId).toMatch(/^task-\d+$/);
       expect(event.taskId).not.toContain(event.summary);
     }
+  });
+
+  it("shows Codex's latest plan in its own order and drops the steps it left out", () => {
+    const ctx = context();
+    let panel: ThreadTaskProgressList = [];
+    const plan = (steps: ReadonlyArray<string>) => {
+      for (const result of map(
+        ctx,
+        notification("turn/plan/updated", {
+          threadId: "thread-1",
+          turnId: "turn-1",
+          explanation: null,
+          plan: steps.map((step) => ({ step, status: "pending" as const })),
+        }),
+      )) {
+        if (result.kind !== "event") continue;
+        const event = result.event;
+        if (event.kind === "task-progress")
+          panel = upsertThreadTaskProgress(panel, {
+            taskId: event.taskId,
+            state: "pending",
+            summary: event.summary,
+          });
+        if (event.kind === "task-list") panel = restateThreadTaskList(panel, event.taskIds);
+      }
+      return panel.map((task) => task.summary);
+    };
+
+    expect(plan(["Inspect", "Implement", "Run checks"])).toEqual([
+      "Inspect",
+      "Implement",
+      "Run checks",
+    ]);
+    // Shrink: a step Codex drops leaves the panel.
+    expect(plan(["Inspect", "Run checks"])).toEqual(["Inspect", "Run checks"]);
+    // Rename: a reworded step replaces the old one rather than sitting beside it.
+    expect(plan(["Inspect the protocol", "Run checks"])).toEqual([
+      "Inspect the protocol",
+      "Run checks",
+    ]);
+    // Reorder: the panel follows Codex's order, not first-seen order.
+    expect(plan(["Run checks", "Inspect the protocol"])).toEqual([
+      "Run checks",
+      "Inspect the protocol",
+    ]);
+    expect(plan([])).toEqual([]);
   });
 
   it("uses occurrence identity for duplicate plan summaries", () => {

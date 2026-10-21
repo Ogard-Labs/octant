@@ -44,6 +44,12 @@ the Browser pane
   thread is already tainted by `thread.external-content-ingested@1`. The capture
   adds only the origin it came from.
 
+## Tool result
+
+- A screenshot the thread kept returns `captureId` beside the image, so the agent
+  can declare it as a `browser-capture` asset in a Canvas design. Nothing else of
+  the capture is returned.
+
 ## Failure
 
 - Keeping is best effort. The screenshot succeeds either way.
@@ -108,6 +114,18 @@ the Browser pane
 - The product route classifier leaves all three unlisted, so a paired device is
   stopped before the route too.
 
+## Canvas design assets
+
+- A Work or Code Canvas design may declare a `browser-capture` asset and draw
+  the stored screenshot in its preview. The server reads it through the
+  service's `read`, which finds only a retained capture of the Canvas's own
+  thread, so another thread's capture and a dropped one are missing, and a Chat
+  Canvas refuses the source.
+- The stored picture is already a screenshot, so the size bound stays the
+  screenshot envelope (about 40 KiB); the design asset caps are far above it.
+- Exports and shares never carry the picture: a share carries no declared image,
+  and a Canvas export leaves captures out like every other design asset.
+
 ## Strip
 
 - A thread with captures shows a "Browser captures" strip in its transcript
@@ -125,4 +143,4 @@ the Browser pane
 
 `browserCapturePolicy.test.ts`, `browserCaptureService.test.ts`,
 `browserAutomationService.test.ts`, `browserAutomationRoutes.test.ts`,
-`threadPurge.test.ts`, `threadExportService.test.ts`, `BrowserCaptureList.test.tsx`, and `BrowserWorkspace.test.tsx`.
+`threadPurge.test.ts`, `threadExportService.test.ts`, `canvasDesignAssets.test.ts`, `BrowserCaptureList.test.tsx`, and `BrowserWorkspace.test.tsx`.

@@ -256,6 +256,7 @@ describe("CanvasEventStore", () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9, 9]);
     const resolved = await resolveCanvasDesignAssets(design, v1.definition.provenance, {
       generatedImage: async () => ({ status: "read", bytes: png }),
+      browserCapture: async () => ({ status: "unavailable", reason: "refused" }),
       projectFile: async () => ({ status: "unavailable", reason: "refused" }),
     });
     const encoded = Buffer.from(png).toString("base64");

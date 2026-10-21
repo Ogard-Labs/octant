@@ -6,7 +6,9 @@ import {
 import { MAX_ARTIFACT_PREVIEW_CHARACTERS } from "@octant/contracts/artifact-library";
 import { CHART_BAR_RADIUS, CHART_LINE_WIDTH, DEFAULT_LIGHT_TOKENS } from "@octant/theme";
 import type { CanvasDiagramTone } from "@octant/contracts/canvas";
+import { CANVAS_DIAGRAM_ICON_PATHS } from "@octant/domain/canvas-diagram-icons";
 import {
+  canvasDiagramNodeContent,
   layoutCanvasDiagram,
   type CanvasDiagramLayout,
 } from "@octant/domain/canvas-diagram-layout";
@@ -862,9 +864,26 @@ export function drawCanvasDiagramLayout(
         : `<rect data-node-id="${escapeXml(node.nodeId)}" x="${String(x)}" y="${String(y)}" width="${String(w)}" height="${String(h)}" rx="${String(node.shape === "terminator" ? round(h / 2) : node.shape === "process" ? 1 : round(6 * scale))}" ${stroke}/>`,
     );
     if (showLabels) {
+      // Icon, label, and subtitle sit where the board puts them, scaled with
+      // the picture. An icon is a stroked 24-unit glyph, so it needs no image.
+      const content = canvasDiagramNodeContent(node);
+      if (content.icon !== undefined) {
+        // Not rounded: the glyph's scale is a fraction of its 24-unit grid
+        // (16px is 2/3 at full size), and a whole number would draw it at 24px
+        // or collapse it to nothing in a thumbnail.
+        const glyphScale = Math.round(((content.icon.size * scale) / 24) * 1000) / 1000;
+        parts.push(
+          `<g data-icon="${content.icon.name}" transform="translate(${String(px(content.icon.x))} ${String(py(content.icon.y))}) scale(${String(glyphScale)})" fill="none" stroke="${palette.muted}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${CANVAS_DIAGRAM_ICON_PATHS[content.icon.name].map((d) => `<path d="${d}"/>`).join("")}</g>`,
+        );
+      }
       parts.push(
-        `<text x="${String(round(x + w / 2))}" y="${String(round(y + h / 2))}" font-size="${String(fontSize)}" fill="${palette.ink}" text-anchor="middle" dominant-baseline="middle">${escapeXml(placement.label(node.label))}</text>`,
+        `<text x="${String(px(content.labelX))}" y="${String(py(content.labelY))}" font-size="${String(fontSize)}" fill="${palette.ink}" text-anchor="middle" dominant-baseline="middle">${escapeXml(placement.label(node.label))}</text>`,
       );
+      if (content.detail !== undefined) {
+        parts.push(
+          `<text x="${String(px(content.detail.x))}" y="${String(py(content.detail.y))}" font-size="${String(round(fontSize * 0.85))}" fill="${palette.muted}" text-anchor="middle" dominant-baseline="middle">${escapeXml(placement.label(content.detail.text))}</text>`,
+        );
+      }
     }
   }
   return parts.join("");

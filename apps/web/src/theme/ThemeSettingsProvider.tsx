@@ -39,6 +39,19 @@ const HIGH_CONTRAST_TEXT_ROLES: ReadonlySet<string> = new Set([
 
 const IncreasedContrastContext = createContext<boolean | undefined>(undefined);
 
+// Settings renders its own provider inside the window's. Closing Settings used
+// to delete the root's theme while the window's provider stayed mounted with
+// no reason to run again, so the window fell back to the stylesheet's dark
+// default until a reload. Each mounted provider registers how it paints the
+// root, and when one leaves, the most recent one still mounted paints again.
+const mountedPaints: Array<() => void> = [];
+const mountedContrastSettings: boolean[] = [];
+
+function leave<T>(mounted: T[], entry: T): void {
+  const index = mounted.lastIndexOf(entry);
+  if (index !== -1) mounted.splice(index, 1);
+}
+
 /**
  * Whether the app is drawing increased contrast: the person's setting or the
  * system's preference, whichever asks. Outside the provider only the system
@@ -92,8 +105,12 @@ export function ThemeSettingsProvider(props: {
   useLayoutEffect(() => {
     // Republishes when the system changes too, so the attribute follows it
     // even where the entry module's listener is not running.
+    mountedContrastSettings.push(settingIncreasedContrast);
     publishIncreasedContrastSetting(settingIncreasedContrast);
-    return () => publishIncreasedContrastSetting(false);
+    return () => {
+      leave(mountedContrastSettings, settingIncreasedContrast);
+      publishIncreasedContrastSetting(mountedContrastSettings.at(-1) ?? false);
+    };
   }, [settingIncreasedContrast, increasedContrast]);
 
   useLayoutEffect(() => {
@@ -102,60 +119,66 @@ export function ThemeSettingsProvider(props: {
     if (settings === undefined) return;
     const accessible = enforceSidebarBackgroundAccessibility(settings);
     const resolved = resolveEffectiveTokens(accessible, systemPrefersDark);
-    for (const [role, color] of Object.entries(resolved.tokens)) {
-      if (!(increasedContrast && HIGH_CONTRAST_TEXT_ROLES.has(role))) {
-        root.style.setProperty(`--octant-${role}`, color);
+    const paint = () => {
+      for (const [role, color] of Object.entries(resolved.tokens)) {
+        if (!(increasedContrast && HIGH_CONTRAST_TEXT_ROLES.has(role))) {
+          root.style.setProperty(`--octant-${role}`, color);
+        }
+        for (const alias of VARIABLE_ALIASES[role] ?? []) {
+          root.style.setProperty(`--octant-${alias}`, color);
+        }
+        if (role === "sidebar" || role === "workspace") {
+          const defaults = GLASS_TINT_DEFAULTS[resolved.mode];
+          // A tint the person set replaces every level's for the sidebar and
+          // the gutters it shares a back with; glass cards keep their own.
+          // Increased contrast keeps enough of the colour under sidebar text.
+          const chosen = role === "sidebar" ? accessible.glassTint : undefined;
+          const tint =
+            chosen === undefined
+              ? undefined
+              : accessible.increasedContrast
+                ? Math.max(chosen, 80)
+                : chosen;
+          const opacity =
+            tint !== undefined
+              ? { regular: tint, subtle: tint, strong: tint }
+              : resolved.mode === "light"
+                ? { regular: 86, ...defaults }
+                : { regular: 80, ...defaults };
+          root.style.setProperty(
+            `--octant-${role}-translucent`,
+            `color-mix(in srgb, ${color} ${opacity.regular}%, transparent)`,
+          );
+          root.style.setProperty(
+            `--octant-${role}-translucent-subtle`,
+            `color-mix(in srgb, ${color} ${opacity.subtle}%, transparent)`,
+          );
+          root.style.setProperty(
+            `--octant-${role}-translucent-strong`,
+            `color-mix(in srgb, ${color} ${opacity.strong}%, transparent)`,
+          );
+        }
       }
-      for (const alias of VARIABLE_ALIASES[role] ?? []) {
-        root.style.setProperty(`--octant-${alias}`, color);
+      root.dataset.octantThemeMode = resolved.mode;
+      root.dataset.octantReducedMotion = String(accessible.reducedMotion);
+      root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
+      // Increased contrast keeps the monochrome chrome: colour as decoration is
+      // the first thing that setting exists to take away.
+      root.dataset.octantStyle =
+        accessible.increasedContrast || accessible.style === undefined
+          ? "default"
+          : accessible.style;
+      root.style.colorScheme = resolved.mode;
+      // The desktop owns the approval document; a window only reports the
+      // palette it resolved, and only when it has the ordinary host bridge.
+      const palette = approvalSurfacePalette(resolved);
+      const reportPalette = getInjectedHostBridge()?.setApprovalSurfacePalette;
+      if (palette !== undefined && reportPalette !== undefined) {
+        void Promise.resolve(reportPalette(palette)).catch(() => undefined);
       }
-      if (role === "sidebar" || role === "workspace") {
-        const defaults = GLASS_TINT_DEFAULTS[resolved.mode];
-        // A tint the person set replaces every level's for the sidebar and
-        // the gutters it shares a back with; glass cards keep their own.
-        // Increased contrast keeps enough of the colour under sidebar text.
-        const chosen = role === "sidebar" ? accessible.glassTint : undefined;
-        const tint =
-          chosen === undefined
-            ? undefined
-            : accessible.increasedContrast
-              ? Math.max(chosen, 80)
-              : chosen;
-        const opacity =
-          tint !== undefined
-            ? { regular: tint, subtle: tint, strong: tint }
-            : resolved.mode === "light"
-              ? { regular: 86, ...defaults }
-              : { regular: 80, ...defaults };
-        root.style.setProperty(
-          `--octant-${role}-translucent`,
-          `color-mix(in srgb, ${color} ${opacity.regular}%, transparent)`,
-        );
-        root.style.setProperty(
-          `--octant-${role}-translucent-subtle`,
-          `color-mix(in srgb, ${color} ${opacity.subtle}%, transparent)`,
-        );
-        root.style.setProperty(
-          `--octant-${role}-translucent-strong`,
-          `color-mix(in srgb, ${color} ${opacity.strong}%, transparent)`,
-        );
-      }
-    }
-    root.dataset.octantThemeMode = resolved.mode;
-    root.dataset.octantReducedMotion = String(accessible.reducedMotion);
-    root.dataset.octantReducedTransparency = String(accessible.reducedTransparency);
-    // Increased contrast keeps the monochrome chrome: colour as decoration is
-    // the first thing that setting exists to take away.
-    root.dataset.octantStyle =
-      accessible.increasedContrast || accessible.style === undefined ? "default" : accessible.style;
-    root.style.colorScheme = resolved.mode;
-    // The desktop owns the approval document; a window only reports the
-    // palette it resolved, and only when it has the ordinary host bridge.
-    const palette = approvalSurfacePalette(resolved);
-    const reportPalette = getInjectedHostBridge()?.setApprovalSurfacePalette;
-    if (palette !== undefined && reportPalette !== undefined) {
-      void Promise.resolve(reportPalette(palette)).catch(() => undefined);
-    }
+    };
+    paint();
+    mountedPaints.push(paint);
     return () => {
       for (const role of Object.keys(resolved.tokens)) {
         root.style.removeProperty(`--octant-${role}`);
@@ -174,6 +197,8 @@ export function ThemeSettingsProvider(props: {
       delete root.dataset.octantReducedTransparency;
       delete root.dataset.octantStyle;
       root.style.removeProperty("color-scheme");
+      leave(mountedPaints, paint);
+      mountedPaints.at(-1)?.();
     };
   }, [props.settings, increasedContrast, systemPrefersDark]);
   return (
