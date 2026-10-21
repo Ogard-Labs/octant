@@ -2345,6 +2345,17 @@ export const ProviderRuntimeEvent = Schema.Union(
     status: Schema.Literal("pending", "in-progress", "completed", "failed"),
     summary: Schema.NonEmptyTrimmedString,
   }).annotations(strict),
+  /**
+   * The provider restated its whole plan: the turn's tasks are now exactly
+   * these ids, in this order. It follows the restatement's `task-progress`
+   * events, so a task the provider dropped leaves the panel and a moved one
+   * moves. A provider that only reports single tasks never sends it.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("task-list"),
+    taskIds: Schema.Array(Schema.NonEmptyTrimmedString),
+  }).annotations(strict),
   ProviderChildActivityEvent,
   Schema.Struct({
     ...ProviderRuntimeEventFields,

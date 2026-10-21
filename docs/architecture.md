@@ -1676,10 +1676,21 @@ is its `TodoWrite` tool: the driver offers it in every posture, Plan included,
 and lets it run unasked, because it changes only Claude's own session state
 (no file, shell, network, or person). Each call restates the whole list, and
 a task id follows a list position, so the panel keeps Claude's latest order and
-wording. `task-progress` cannot remove a task, so a shrinking list leaves its
-old last rows until the turn ends, as it does for every whole-plan provider. Each thread surface
-shows the agent's restated plan as a live "N of M tasks completed" panel while
-any task is open or the turn is still writing: Code from its journaled
+wording.
+
+`task-progress` adds or updates one task. Because every one of these providers
+restates its whole plan, each restatement ends with a `task-list` event naming
+the ids the plan now holds, in order (at most 64, the per-turn task cap). Each
+surface keeps only those tasks, in that order, so a step the provider drops
+leaves the panel, a moved step moves, and an empty list clears it. `task-list`
+belongs to the `taskProgress` capability: a driver that reports it supported
+may send either kind. Code journals it as its own operation event; Chat and
+Work fold it into the list they already journal whole. A journal written before
+`task-list` existed holds only `task-progress` and replays exactly as it did,
+dropped steps included.
+
+Each thread surface shows the agent's restated plan as a live "N of M tasks
+completed" panel while any task is open or the turn is still writing: Code from its journaled
 operation events, Chat from `ChatAttempt.tasks` carried on
 `chat.attempt-updated@1`, and Work from `WorkTurnState.tasks` journaled on
 `work.turn-updated@1` with a live `turn-tasks` stream frame. The panel is a

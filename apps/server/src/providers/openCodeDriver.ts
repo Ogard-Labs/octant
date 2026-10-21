@@ -2391,6 +2391,7 @@ function mapAndOffer(
     return;
   }
   const taskOccurrences = new Map<string, number>();
+  const stableTaskIds = new Map<string, string>();
   for (const original of mapped) {
     const occurrence =
       original.kind === "task-progress" ? (taskOccurrences.get(original.summary) ?? 0) : 0;
@@ -2398,6 +2399,19 @@ function mapAndOffer(
       taskOccurrences.set(original.summary, occurrence + 1);
     }
     let normalized = stableTaskIdentity(state, original, occurrence);
+    if (original.kind === "task-progress" && normalized.kind === "task-progress") {
+      stableTaskIds.set(original.taskId, normalized.taskId);
+    }
+    // The list names the same tasks as the items before it in this batch.
+    if (normalized.kind === "task-list") {
+      normalized = {
+        ...normalized,
+        taskIds: normalized.taskIds.flatMap((taskId) => {
+          const stable = stableTaskIds.get(taskId);
+          return stable === undefined ? [] : [stable];
+        }),
+      };
+    }
     if (beta !== undefined)
       normalized = failClosedBetaEvent(normalized, state, beta.mode, beta.projectRoot);
     // OpenCode settles usage once per model step. Consumers keep the latest
