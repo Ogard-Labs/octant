@@ -250,6 +250,29 @@ describe("CanvasProjection", () => {
     ).toHaveLength(1);
   });
 
+  it("indexes a Canvas owned by its thread under that thread and no Project, and rebuilds it the same way", () => {
+    const projection = new CanvasProjection();
+    const owned = version({
+      definition: {
+        ...definition,
+        sourceManifest: [],
+        provenance: { ...provenance, projectId: null },
+      },
+    });
+    const event = envelope(CANVAS_CREATED, 1, { canvasId: ids.canvas, version: owned });
+    projection.apply({} as never, event);
+    const key = { projectId: null, threadId: ids.thread, mode: "chat" as const };
+    expect(projection.byProject(ids.project as never)).toHaveLength(0);
+    expect(projection.byThread(key)).toHaveLength(1);
+    expect(projection.byThread({ ...key, projectId: ids.project as never })).toHaveLength(0);
+    const before = projection.getById(canvasId);
+
+    projection.reset({} as never);
+    projection.apply({} as never, event);
+    expect(projection.getById(canvasId)).toEqual(before);
+    expect(projection.byThread(key)).toHaveLength(1);
+  });
+
   it("exposes a snapshot that does not mutate internal state", () => {
     const projection = new CanvasProjection();
     projection.applyCreated({ canvasId, version: version() });

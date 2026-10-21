@@ -1,6 +1,6 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import { FolderOpen, FolderPlus, SquarePen } from "lucide-react";
-import { WelcomeHeading } from "../composer/WelcomeHeading";
+import { WELCOME_QUESTION } from "../composer/WelcomeHeading";
 import { OctantButton } from "../ui/base/OctantButton";
 import { WorkKindSwitch } from "./WorkKindSwitch";
 
@@ -12,10 +12,6 @@ export interface AgentModeWelcomeProps {
   readonly onOpenDraft?: () => void;
   readonly providerReady: boolean;
   readonly providerMessage?: string;
-  /** The person's name for the greeting once a Project leads the page with a task. */
-  readonly greetingName?: string | undefined;
-  readonly runningCount?: number | undefined;
-  readonly reviewCount?: number | undefined;
 }
 
 interface Presentation {
@@ -99,11 +95,9 @@ export function AgentModeWelcome(props: AgentModeWelcomeProps) {
           <FolderOpen size={20} strokeWidth={1.6} />
         </span>
         {leadsWithTask ? (
-          <WelcomeHeading
-            greetingName={props.greetingName}
-            reviewCount={props.reviewCount}
-            runningCount={props.runningCount}
-          />
+          // The question alone: this screen has buttons, not a composer, so the
+          // shared "just start typing" line would promise nothing.
+          <h1 className="oct-title oct-title--hero">{WELCOME_QUESTION}</h1>
         ) : (
           <h1 className="oct-title oct-title--hero">{folderQuestion[props.mode]}</h1>
         )}

@@ -158,7 +158,7 @@ describe("CodeComposerAdapter", () => {
 
   it("renders composer with project and branch context", () => {
     const html = renderToStaticMarkup(<CodeComposerAdapter {...defaultProps} />);
-    expect(html).toMatch(/Good (morning|afternoon|evening)/);
+    expect(html).toMatch(/What are we building today\?/);
     expect(html).not.toContain("What should we build");
     expect(html).toContain("My Repo");
     expect(html).toContain("development");
@@ -260,9 +260,7 @@ describe("CodeComposerAdapter", () => {
     const frame = container.querySelector(".composer");
     const dock = container.querySelector(".composer-tray");
     const row = container.querySelector(".composer-row");
-    expect(
-      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
     expect(frame).not.toBeNull();
     expect(dock).not.toBeNull();
     if (frame === null || dock === null || row === null) {

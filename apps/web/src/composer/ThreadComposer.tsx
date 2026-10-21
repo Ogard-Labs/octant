@@ -75,7 +75,10 @@ export interface ThreadComposerRow {
   readonly toolbar?: boolean | undefined;
   /** Surface-specific controls: pickers, access policy, attachments, profile. */
   readonly leading?: ReactNode;
-  /** Access and approval choices stay beside send at the trailing edge. */
+  /**
+   * The model, then the microphone, right of the context ring and before
+   * send. Access and approval choices lead the row instead, beside attach.
+   */
   readonly trailing?: ReactNode;
   readonly actions: ThreadComposerActions;
 }
@@ -90,7 +93,7 @@ export interface ThreadComposerRow {
  */
 export interface ThreadComposerProps {
   readonly presentation?: "follow-up";
-  /** Existing-thread checkout context, attached beneath the message surface. */
+  /** Existing-thread checkout context, in the strip above the message surface. */
   readonly context?: ReactNode;
   /** Naming the frame promotes it to a `<section>` landmark (Chat). */
   readonly ariaLabel?: string | undefined;
@@ -147,7 +150,6 @@ export function ThreadComposer(props: ThreadComposerProps) {
     <>
       {props.startContext}
       {props.queue}
-      <ComposerFollowUpSuggestions />
       {props.chips}
       {props.label === undefined ? (
         props.input
@@ -179,8 +181,19 @@ export function ThreadComposer(props: ThreadComposerProps) {
       />
     </div>
   );
+  // Suggested tasks stand above the composer, as the last thing in the
+  // thread; inside the surface they made the box read as one tall composer.
+  // Where the thread runs and how much of the plan is left share one strip
+  // above the box, so the box itself holds only the message and its controls.
   const body = followUp ? (
     <>
+      <ComposerFollowUpSuggestions />
+      <div className="thread-composer__strip">
+        {props.context === undefined ? null : (
+          <div className="thread-composer__context">{props.context}</div>
+        )}
+        <ThreadStats />
+      </div>
       <div className="thread-composer__surface">
         <ComposerOutsideContentNotice busy={props.threadBusy === true} />
         {message}
@@ -190,13 +203,10 @@ export function ThreadComposer(props: ThreadComposerProps) {
         </div>
         {controls}
       </div>
-      {props.context === undefined ? null : (
-        <div className="thread-composer__context">{props.context}</div>
-      )}
-      <ThreadStats />
     </>
   ) : (
     <>
+      <ComposerFollowUpSuggestions />
       {message}
       {controls}
       {compactingNote}
@@ -263,8 +273,8 @@ function ThreadComposerTrailing(props: {
     const { send } = props.actions;
     return (
       <div className="composer-actions">
-        {props.controls}
         {meter}
+        {props.controls}
         <OctantButton
           aria-describedby={props.compactingNoteId}
           aria-label={send.ariaLabel}
@@ -282,8 +292,8 @@ function ThreadComposerTrailing(props: {
   const { cellClassName, sending, send, stop } = props.actions;
   return (
     <div className={cellClassName}>
-      {props.controls}
       {meter}
+      {props.controls}
       {sending ? (
         <OctantButton
           aria-label={stop.ariaLabel}

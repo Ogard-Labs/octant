@@ -31,16 +31,21 @@ connection details, have a Save button.
 ### Style
 
 **Style** sits under the color scheme. **Default** keeps the app monochrome.
-**Vivid** adds colour where something has a name: the welcome greeting, the
+**Vivid** adds colour where something has a name: the welcome question, the
 sidebar's count tiles, board columns, and each Project's colour. Vivid uses
 your preset's palette, so it changes with light and dark, and it never
 recolours a warning or an error. It looks best in the light theme.
 **Increased contrast** always uses the Default style.
 
+**Accent** sits under Style: pick **Mono** (the theme's own) or a colour (Clay,
+Amber, Green, Blue, Purple). It colours switches, the send button, selected
+states and the click ring on Pulsing characters. Text stays in the theme's ink
+so it stays readable in both light and dark.
+
 ### Style
 
 **Style** sits under the color scheme. **Default** keeps the app monochrome.
-**Vivid** adds colour where something has a name: the welcome greeting, the
+**Vivid** adds colour where something has a name: the welcome question, the
 sidebar's count tiles, board columns, and each Project's colour. Vivid uses
 your preset's palette, so it changes with light and dark, and it never
 recolours a warning or an error. It looks best in the light theme.
@@ -150,7 +155,11 @@ picture stands for the set until you choose **Change**. **Your photo** uses a
 picture of yours: upload a PNG, JPEG, or WebP up to 8 MiB and 4096×4096 pixels,
 or pick one already on this host, and **Photo strength** sets how strongly it
 shows. The sidebar and the background share one photo library, and a photo in
-use cannot be deleted. **None** keeps the plain page.
+use cannot be deleted. **Pulsing characters** fills the ground with faint
+letters and digits that slowly brighten and fade in patches, and a click sends
+a wobbly ring of letters in your theme's accent colour across it (now and then a
+heart); it has no picture,
+so **Effect** does not apply. **None** keeps the plain page.
 
 **Effect** prints a picture: **Off** shows it as it is, **Pixelate** draws it in
 square pixels, and **Dither** does that with fewer colours, like a print.
@@ -164,7 +173,8 @@ inside the main card, where transcript responses carry their own reading
 cards. The sidebar and the gaps around the cards keep their own look. **Cover
 the sidebar** runs the picture under the whole window instead, frosted behind
 the sidebar and the gaps.
-Reduced motion shows an animated picture's still frame; Increased contrast
+Reduced motion shows an animated picture's still frame and holds the characters
+still; Increased contrast
 turns the background off.
 
 ### Zen backgrounds

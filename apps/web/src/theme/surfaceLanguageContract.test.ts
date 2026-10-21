@@ -16,13 +16,13 @@ function read(relative: string): string {
  * roles, and no uppercase kickers creeping back into headings.
  */
 describe("surface language", () => {
-  it("ships Geist as the only interface face, with Geist Mono for code", () => {
+  it("defaults to the platform face, bundles Geist as a choice, and sets code in Geist Mono", () => {
     expect(read("styles.css")).toContain('@import "@fontsource-variable/geist/index.css";');
     expect(read("styles.css")).toContain('@import "@fontsource-variable/geist-mono/index.css";');
     // The earlier default (Inter) and display face (Space Grotesk) are gone.
     expect(read("styles.css")).not.toContain("@fontsource-variable/inter");
     expect(read("styles/octant.css")).not.toContain("Octant Display");
-    expect(DEFAULT_THEME_SETTINGS.typography.ui.family).toMatch(/^'Geist Variable', /);
+    expect(DEFAULT_THEME_SETTINGS.typography.ui.family).toMatch(/^system-ui, /);
     expect(DEFAULT_THEME_SETTINGS.typography.ui.family).toContain("system-ui");
     expect(read("styles/octant.css")).toMatch(/^body \{[^}]*font-optical-sizing: auto;/m);
   });

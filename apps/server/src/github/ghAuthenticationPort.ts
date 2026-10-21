@@ -729,7 +729,11 @@ function startGhInteractiveAuthentication(
 export function extractDeviceFlowCode(output: string): string | undefined {
   if (Buffer.byteLength(output, "utf8") > MAX_OUTPUT_BYTES) return undefined;
   const match =
-    /(?:your\s+)?(?:one-time|device)(?:\s+your)?\s+code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/i.exec(output);
+    /(?:your\s+)?(?:one-time|device)(?:\s+your)?\s+code:\s*([A-Z0-9]{4}-[A-Z0-9]{4})/i.exec(
+      output,
+    ) ??
+    // gh 2.101 uses parentheses when copying succeeds, even with prompts disabled.
+    /\bone-time\s+code\s+\(([A-Z0-9]{4}-[A-Z0-9]{4})\)\s+copied to clipboard\b/i.exec(output);
   return match?.[1]?.toUpperCase();
 }
 

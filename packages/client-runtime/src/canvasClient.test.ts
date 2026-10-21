@@ -633,4 +633,88 @@ describe("createCanvasClient", () => {
       "POST http://127.0.0.1:8123/api/canvas/share-access",
     ]);
   });
+
+  it("reads and changes public links through the public link routes", async () => {
+    const calls: Array<{ readonly route: string; readonly body: string | undefined }> = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push({
+        route: `${init?.method ?? "GET"} ${url.pathname}${url.search}`,
+        body: typeof init?.body === "string" ? init.body : undefined,
+      });
+      if (url.pathname === "/api/canvas/public-shares") {
+        return new Response(
+          JSON.stringify({
+            schemaVersion: 1,
+            kind: "canvas-public-share-list",
+            canvasId: String(canvasId),
+            enabled: false,
+            serviceUrl: "https://canvas.octant.sh",
+            shares: [],
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.pathname === "/api/canvas/public-share-revoke") {
+        return new Response(
+          JSON.stringify({ kind: "refused", code: "not-found", message: "No such link." }),
+          { status: 200 },
+        );
+      }
+      if (init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            kind: "canvas-public-link-settings-refused",
+            reason: "stale-version",
+            message: "Settings changed elsewhere.",
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          kind: "canvas-public-link-settings",
+          enabled: false,
+          serviceUrl: "https://canvas.octant.sh",
+          version: 0,
+        }),
+        { status: 200 },
+      );
+    });
+    const client = createCanvasClient({
+      baseUrl: "http://127.0.0.1:8123",
+      fetch: fetchImpl as unknown as typeof globalThis.fetch,
+      windowCapability: "capability",
+    });
+
+    const list = await client.publicShares!(canvasId);
+    expect(list).toMatchObject({ enabled: false, shares: [] });
+    const revokeRequest = {
+      schemaVersion: 1,
+      kind: "canvas-public-share-revoke",
+      canvasId: String(canvasId),
+      publicShareId: "AAAAAAAAAAAAAAAAAAAAAA",
+    };
+    const revoked = await client.revokePublicShare!(revokeRequest as never);
+    expect(revoked).toMatchObject({ kind: "refused", code: "not-found" });
+    const settings = await client.publicLinkSettings!();
+    expect(settings).toMatchObject({ enabled: false, version: 0 });
+    const command = {
+      schemaVersion: 1,
+      kind: "set-canvas-public-link-settings",
+      enabled: true,
+      serviceUrl: "https://canvas.octant.sh",
+      expectedVersion: 0,
+    };
+    const result = await client.setPublicLinkSettings!(command as never);
+    expect(result).toMatchObject({ reason: "stale-version" });
+    expect(calls.map((call) => call.route)).toEqual([
+      `GET /api/canvas/public-shares?canvasId=${String(canvasId)}`,
+      "POST /api/canvas/public-share-revoke",
+      "GET /api/canvas/public-link-settings",
+      "POST /api/canvas/public-link-settings",
+    ]);
+    expect(JSON.parse(calls[1]?.body ?? "{}")).toEqual(revokeRequest);
+    expect(JSON.parse(calls[3]?.body ?? "{}")).toEqual(command);
+  });
 });

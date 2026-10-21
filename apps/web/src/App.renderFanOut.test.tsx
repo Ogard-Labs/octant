@@ -191,7 +191,11 @@ describe("render fan-out of a streaming Code turn", () => {
     // A tool that reads nothing of the thread, open in the dock: the dock
     // follows the thread only while a tool that shows the turn is open.
     const dock = screen.getByRole("complementary", { name: "Right Utility Dock" });
-    await userEvent.click(within(dock).getByRole("button", { name: "Environment" }));
+    await userEvent.click(
+      within(within(dock).getByRole("group", { name: "Quick tools" })).getByRole("button", {
+        name: "Open Environment",
+      }),
+    );
     await waitFor(() =>
       expect(document.querySelector("[data-octant-environment-dock]")).not.toBeNull(),
     );

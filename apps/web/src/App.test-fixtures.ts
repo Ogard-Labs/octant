@@ -57,7 +57,14 @@ import { decodeComputerUseSessionView } from "@octant/contracts/computer-use";
  * hides the workspace from assistive technology while it is open.
  */
 export function settingsPastFirstRun(): ReturnType<typeof defaultShellSettings> {
-  return { ...defaultShellSettings(), firstRunOnboarding: "completed" as const };
+  // The App suite reaches destinations through the sidebar's own rows. The
+  // default rail beside the sidebar moves them there, which ShellSidebar's
+  // own tests cover; these keep the rail to a hidden sidebar.
+  return {
+    ...defaultShellSettings(),
+    firstRunOnboarding: "completed" as const,
+    sidebarCollapsedPresentation: "rail" as const,
+  };
 }
 
 export const windowId = decodeWindowId("00000000-0000-4000-8000-000000000601");

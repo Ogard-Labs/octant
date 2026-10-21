@@ -4,8 +4,9 @@ import {
   buildSidebarActivityView,
   filterSidebarActivityView,
   matchesSidebarSearch,
-  readActivityViewEnabled,
-  writeActivityViewEnabled,
+  buildSidebarStatusView,
+  readThreadArrangement,
+  writeThreadArrangement,
 } from "./activityViewModel";
 import type { ChatThreadNavigationItem } from "./navigationModel";
 
@@ -255,45 +256,61 @@ describe("filterSidebarActivityView", () => {
 });
 
 describe("activity view preference", () => {
-  it("defaults off and round-trips a local presentation preference", () => {
+  it("opens on Status and round-trips each arrangement", () => {
     const storage = memoryStorage();
-    expect(readActivityViewEnabled(storage)).toBe(false);
-    writeActivityViewEnabled(true, storage);
+    expect(readThreadArrangement(storage)).toBe("status");
+    writeThreadArrangement("activity", storage);
     expect(storage.getItem(`${ACTIVITY_VIEW_STORAGE_KEY}.chat`)).toBe("on");
-    expect(readActivityViewEnabled(storage)).toBe(true);
-    writeActivityViewEnabled(false, storage);
-    expect(readActivityViewEnabled(storage)).toBe(false);
+    expect(readThreadArrangement(storage)).toBe("activity");
+    writeThreadArrangement("projects", storage);
+    expect(readThreadArrangement(storage)).toBe("projects");
+    writeThreadArrangement("status", storage);
+    expect(readThreadArrangement(storage)).toBe("status");
   });
 
-  it("keeps Chat, Work, and Code activity preferences independent", () => {
+  it("keeps a feed or tree chosen before Status existed", () => {
+    expect(
+      readThreadArrangement(
+        memoryStorage({ [`${ACTIVITY_VIEW_STORAGE_KEY}.code`]: "off" }),
+        globalThis,
+        "code",
+      ),
+    ).toBe("projects");
+    expect(
+      readThreadArrangement(
+        memoryStorage({ [`${ACTIVITY_VIEW_STORAGE_KEY}.code`]: "on" }),
+        globalThis,
+        "code",
+      ),
+    ).toBe("activity");
+  });
+
+  it("keeps Chat, Work, and Code arrangements independent", () => {
     const storage = memoryStorage();
-    writeActivityViewEnabled(true, storage, globalThis, "chat");
-    expect(readActivityViewEnabled(storage, globalThis, "chat")).toBe(true);
-    expect(readActivityViewEnabled(storage, globalThis, "code")).toBe(false);
-    writeActivityViewEnabled(true, storage, globalThis, "code");
-    expect(readActivityViewEnabled(storage, globalThis, "chat")).toBe(true);
-    expect(readActivityViewEnabled(storage, globalThis, "code")).toBe(true);
-    writeActivityViewEnabled(false, storage, globalThis, "chat");
-    expect(readActivityViewEnabled(storage, globalThis, "chat")).toBe(false);
-    expect(readActivityViewEnabled(storage, globalThis, "code")).toBe(true);
+    writeThreadArrangement("activity", storage, globalThis, "chat");
+    expect(readThreadArrangement(storage, globalThis, "chat")).toBe("activity");
+    expect(readThreadArrangement(storage, globalThis, "code")).toBe("status");
+    writeThreadArrangement("projects", storage, globalThis, "code");
+    expect(readThreadArrangement(storage, globalThis, "chat")).toBe("activity");
+    expect(readThreadArrangement(storage, globalThis, "code")).toBe("projects");
   });
 
   it("copies a pre-mode preference into each mode once", () => {
     const storage = memoryStorage({ [ACTIVITY_VIEW_STORAGE_KEY]: "on" });
-    expect(readActivityViewEnabled(storage, globalThis, "work")).toBe(true);
+    expect(readThreadArrangement(storage, globalThis, "work")).toBe("activity");
     expect(storage.getItem(ACTIVITY_VIEW_STORAGE_KEY)).toBeNull();
     expect(storage.getItem(`${ACTIVITY_VIEW_STORAGE_KEY}.chat`)).toBe("on");
-    writeActivityViewEnabled(false, storage, globalThis, "work");
-    expect(readActivityViewEnabled(storage, globalThis, "chat")).toBe(true);
-    expect(readActivityViewEnabled(storage, globalThis, "work")).toBe(false);
+    writeThreadArrangement("projects", storage, globalThis, "work");
+    expect(readThreadArrangement(storage, globalThis, "chat")).toBe("activity");
+    expect(readThreadArrangement(storage, globalThis, "work")).toBe("projects");
   });
 
-  it("ignores corrupt preference values", () => {
+  it("falls back to Status for a corrupt value", () => {
     const storage = memoryStorage({ [ACTIVITY_VIEW_STORAGE_KEY]: "maybe" });
-    expect(readActivityViewEnabled(storage)).toBe(false);
+    expect(readThreadArrangement(storage)).toBe("status");
   });
 
-  it("defaults off when resolving storage itself throws", () => {
+  it("falls back to Status when resolving storage itself throws", () => {
     const throwingStorage = {
       getItem() {
         throw new Error("denied");
@@ -307,10 +324,10 @@ describe("activity view preference", () => {
         throw new DOMException("denied", "SecurityError");
       },
     };
-    expect(readActivityViewEnabled(undefined, storageHolder)).toBe(false);
-    expect(() => writeActivityViewEnabled(true, undefined, storageHolder)).not.toThrow();
-    expect(readActivityViewEnabled(throwingStorage)).toBe(false);
-    expect(() => writeActivityViewEnabled(true, throwingStorage)).not.toThrow();
+    expect(readThreadArrangement(undefined, storageHolder)).toBe("status");
+    expect(() => writeThreadArrangement("activity", undefined, storageHolder)).not.toThrow();
+    expect(readThreadArrangement(throwingStorage)).toBe("status");
+    expect(() => writeThreadArrangement("activity", throwingStorage)).not.toThrow();
   });
 
   it("keeps a pinned thread at the top, above attention and recency", () => {
@@ -338,5 +355,40 @@ describe("activity view preference", () => {
     expect(view.groups[0]?.id).toBe("pinned");
     expect(view.groups[0]?.threads.map((thread) => thread.threadId)).toEqual(["pinned"]);
     expect(view.groups[1]?.id).toBe("priority");
+  });
+});
+
+describe("buildSidebarStatusView", () => {
+  it("groups threads by what they need, pinned first, newest first within a group", () => {
+    const view = buildSidebarStatusView({
+      projects: [{ id: projectId, name: "Octant" }],
+      threads: [
+        thread({ threadId: "idle-old", title: "Idle old", updatedAt: "2026-08-10T10:00:00.000Z" }),
+        thread({ threadId: "idle-new", title: "Idle new", updatedAt: "2026-08-14T10:00:00.000Z" }),
+        thread({ threadId: "working", title: "Running", activity: "working" }),
+        thread({ threadId: "review", title: "Finished", unread: true }),
+        thread({
+          threadId: "asks",
+          title: "Asks",
+          activity: "attention",
+          awaitingKind: "approval",
+        }),
+        thread({
+          threadId: "pinned",
+          title: "Pinned and running",
+          pinned: true,
+          activity: "working",
+        }),
+      ],
+    });
+    expect(
+      view.groups.map((group) => [group.label, group.threads.map((row) => row.threadId)]),
+    ).toEqual([
+      ["Pinned", ["pinned"]],
+      ["Needs input", ["asks"]],
+      ["Ready for review", ["review"]],
+      ["Working", ["working"]],
+      ["Idle", ["idle-new", "idle-old"]],
+    ]);
   });
 });

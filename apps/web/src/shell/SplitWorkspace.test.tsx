@@ -217,17 +217,15 @@ describe("SplitWorkspace", () => {
         {...splitCallbacks()}
         environmentNames={new Map([[hostId, "Studio devbox"]])}
         layout={layout}
-        paneFactsByThreadId={new Map([[threadId, { projectName: "Octant", branch: "fix/remote" }]])}
+        paneFactsByThreadId={new Map([[threadId, { projectName: "Octant" }]])}
         renderSurface={(tab) => tab.title}
       />,
     );
 
     expect(screen.getByRole("img", { name: "Runs on Studio devbox" })).toBeVisible();
     expect(screen.queryByRole("img", { name: "Runs on this computer" })).not.toBeInTheDocument();
-    // The Project and the branch are two chips, so each can be read and
-    // truncated on its own.
-    expect(screen.getByText("Octant")).toBeVisible();
-    expect(screen.getByText("fix/remote")).toHaveClass("workspace-pane__branch");
+    // The Project leads the breadcrumb before the title.
+    expect(screen.getByText("Octant")).toHaveClass("workspace-pane__context");
 
     rerender(
       <SplitWorkspace {...splitCallbacks()} layout={layout} renderSurface={(tab) => tab.title} />,

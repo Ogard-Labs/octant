@@ -1,3 +1,4 @@
+import { CANVAS_SCHEMA_VERSION } from "@octant/contracts/canvas";
 import { decodeProjectId } from "@octant/contracts/projects";
 import { threadExportContainsForbiddenKey } from "./threadExportPolicy";
 import { describe, expect, it } from "vitest";
@@ -5,11 +6,57 @@ import {
   authorizeHostExport,
   encodeHostExportPage,
   hostExportOmissions,
+  projectHostExportCanvas,
   projectHostExportProject,
   projectHostExportSettings,
 } from "./hostExportPolicy";
 
 const SEEDED_CREDENTIAL = "seeded-credential-do-not-export";
+const generatedAt = "2026-08-19T12:00:00.000Z";
+
+const threadOwnedCanvas = {
+  canvasId: "11111111-1111-4111-8111-111111111112",
+  projectId: null,
+  mode: "chat",
+  title: "Memo",
+  updatedAt: generatedAt,
+  definition: {
+    schemaVersion: CANVAS_SCHEMA_VERSION,
+    title: "Memo",
+    provenance: {
+      mode: "chat",
+      hostId: "local",
+      projectId: null,
+      threadId: "99999999-9999-4999-8999-999999999999",
+      actor: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
+      providerInstanceId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      modelId: "octant-test-model",
+      createdAt: generatedAt,
+    },
+    sourceManifest: [],
+    blocks: [
+      {
+        blockId: "block-1",
+        schemaVersion: CANVAS_SCHEMA_VERSION,
+        kind: "heading",
+        level: 1,
+        text: "Memo",
+      },
+    ],
+  },
+};
+
+describe("projectHostExportCanvas", () => {
+  it("keeps a Canvas owned by a Chat thread outside every Project, with its whole definition", () => {
+    expect(projectHostExportCanvas(threadOwnedCanvas)).toEqual(threadOwnedCanvas);
+  });
+
+  it("drops a Canvas record that carries a forbidden key", () => {
+    expect(
+      projectHostExportCanvas({ ...threadOwnedCanvas, apiKey: SEEDED_CREDENTIAL }),
+    ).toBeUndefined();
+  });
+});
 
 describe("authorizeHostExport", () => {
   it("allows only the local owner", () => {

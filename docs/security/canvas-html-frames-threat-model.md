@@ -36,7 +36,9 @@ person their app.
 
 - Typed catalog blocks, including `tabs`, `columns`, diagram styles, Gantt,
   and Mermaid import; they render first-party components and no markup
-- Public or anonymous share links
+- Public share links, whose frames are drawn from a separate user-content
+  origin under the rules in
+  [Canvas public links](../design/canvas-public-links.md#viewer-safety)
 - A frame that runs script with `allow-same-origin`; no tier admits it
 - Protecting frame content from the agent that wrote it
 

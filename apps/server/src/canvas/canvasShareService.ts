@@ -144,6 +144,10 @@ export class CanvasShareService {
     if (entry === undefined) return undefined;
     if (!this.#authorize(entry, context, project)) return undefined;
     const provenance = entry.currentVersion.definition.provenance;
+    // A share names the Project it is taken from. A Canvas owned by a Chat
+    // thread outside every Project has none, so it offers no share surface;
+    // the share policy refuses the request itself the same way.
+    if (provenance.projectId === null) return undefined;
     const nowIso = this.#clock();
     const snapshots = boundedOverviewSnapshots(
       [...this.#records.values()]

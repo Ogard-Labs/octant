@@ -2326,12 +2326,35 @@ export const ProviderRuntimeEvent = Schema.Union(
     tokensBefore: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
     tokensAfter: Schema.optional(Schema.Int.pipe(Schema.nonNegative())),
   }).annotations(strict),
+  /**
+   * The provider's stream is still moving but has nothing a person can see
+   * yet: a tool call's input is being written, or a keep-alive arrived. It
+   * carries no content. The turn runners count it as activity so a long tool
+   * call is not mistaken for silence; every other consumer ignores it, and it
+   * never reaches a transcript, the journal, usage, or a turn's event budget.
+   * An adapter sends it at most once every few seconds.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("liveness"),
+  }).annotations(strict),
   Schema.Struct({
     ...ProviderRuntimeEventFields,
     kind: Schema.Literal("task-progress"),
     taskId: Schema.NonEmptyTrimmedString,
     status: Schema.Literal("pending", "in-progress", "completed", "failed"),
     summary: Schema.NonEmptyTrimmedString,
+  }).annotations(strict),
+  /**
+   * The provider restated its whole plan: the turn's tasks are now exactly
+   * these ids, in this order. It follows the restatement's `task-progress`
+   * events, so a task the provider dropped leaves the panel and a moved one
+   * moves. A provider that only reports single tasks never sends it.
+   */
+  Schema.Struct({
+    ...ProviderRuntimeEventFields,
+    kind: Schema.Literal("task-list"),
+    taskIds: Schema.Array(Schema.NonEmptyTrimmedString),
   }).annotations(strict),
   ProviderChildActivityEvent,
   Schema.Struct({
