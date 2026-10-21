@@ -51,12 +51,22 @@ const exportBody = Schema.String.pipe(
   }),
 );
 
-/** Formats a destination may declare. Every one is rendered by this host. */
-export const CanvasExportFormat = Schema.Literal("markdown", "html", "pdf", "png");
+/**
+ * Formats a destination may declare. Every one is rendered by this host.
+ * `share-document` is the Canvas's shared blocks as JSON, for a destination
+ * that draws them itself (a public link).
+ */
+export const CanvasExportFormat = Schema.Literal(
+  "markdown",
+  "html",
+  "share-document",
+  "pdf",
+  "png",
+);
 export type CanvasExportFormat = typeof CanvasExportFormat.Type;
 
 /** The forms rendered as one text body. */
-export const CanvasExportTextFormat = Schema.Literal("markdown", "html");
+export const CanvasExportTextFormat = Schema.Literal("markdown", "html", "share-document");
 export type CanvasExportTextFormat = typeof CanvasExportTextFormat.Type;
 
 /**
@@ -66,10 +76,22 @@ export type CanvasExportTextFormat = typeof CanvasExportTextFormat.Type;
 export const CanvasExportPictureFormat = Schema.Literal("png", "pdf");
 export type CanvasExportPictureFormat = typeof CanvasExportPictureFormat.Type;
 
-export const CanvasExportImplementedFormat = Schema.Literal("markdown", "html", "png", "pdf");
+export const CanvasExportImplementedFormat = Schema.Literal(
+  "markdown",
+  "html",
+  "share-document",
+  "png",
+  "pdf",
+);
 export type CanvasExportImplementedFormat = typeof CanvasExportImplementedFormat.Type;
 
-export const CANVAS_EXPORT_IMPLEMENTED_FORMATS = ["markdown", "html", "png", "pdf"] as const;
+export const CANVAS_EXPORT_IMPLEMENTED_FORMATS = [
+  "markdown",
+  "html",
+  "share-document",
+  "png",
+  "pdf",
+] as const;
 
 export function isCanvasExportImplementedFormat(
   format: string,
@@ -140,7 +162,7 @@ export const CanvasExportContribution = Schema.Struct({
   targetId: CanvasExportTargetId,
   label: safeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
   formats: Schema.NonEmptyArray(CanvasExportFormat).pipe(
-    Schema.maxItems(4),
+    Schema.maxItems(5),
     Schema.filter(uniqueFormats, {
       message: () => "Canvas export formats must be unique.",
     }),
@@ -167,7 +189,7 @@ export const CanvasExportTargetOffer = Schema.Struct({
   targetId: CanvasExportTargetId,
   label: safeBounded(CANVAS_EXPORT_LABEL_MAX_CHARS),
   formats: Schema.Array(CanvasExportImplementedFormat).pipe(
-    Schema.maxItems(4),
+    Schema.maxItems(5),
     Schema.filter(uniqueFormats, {
       message: () => "Canvas export formats must be unique.",
     }),
@@ -381,6 +403,55 @@ export const CanvasExportDelivery = Schema.Union(
 );
 export type CanvasExportDelivery = typeof CanvasExportDelivery.Type;
 
+/** The longest a link a destination keeps may live, and the default it offers. */
+export const CANVAS_EXPORT_LINK_MAX_EXPIRY_DAYS = 365;
+export const CANVAS_EXPORT_LINK_DEFAULT_EXPIRY_DAYS = 30;
+export const CANVAS_EXPORT_LINK_PASSWORD_MIN_CHARS = 8;
+export const CANVAS_EXPORT_LINK_PASSWORD_MAX_CHARS = 256;
+
+/**
+ * How long a published link lives. `never` exists only as the person's own
+ * choice on the card; a destination's default is always a number of days.
+ */
+export const CanvasExportLinkExpiry = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("days"),
+    days: Schema.Int.pipe(Schema.between(1, CANVAS_EXPORT_LINK_MAX_EXPIRY_DAYS)),
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("never") }).annotations(strict),
+);
+export type CanvasExportLinkExpiry = typeof CanvasExportLinkExpiry.Type;
+
+/**
+ * A link's password. It travels from the card to the destination and on to
+ * the service over TLS; it is never journaled, echoed, or put in a URL.
+ */
+export const CanvasExportLinkPassword = Schema.String.pipe(
+  Schema.minLength(CANVAS_EXPORT_LINK_PASSWORD_MIN_CHARS),
+  Schema.maxLength(CANVAS_EXPORT_LINK_PASSWORD_MAX_CHARS),
+);
+
+/**
+ * The terms a link destination offers on the card: its default expiry, and
+ * the link an approval would update when one already exists.
+ */
+export const CanvasExportLinkTerms = Schema.Struct({
+  defaultExpiryDays: Schema.Int.pipe(Schema.between(1, CANVAS_EXPORT_LINK_MAX_EXPIRY_DAYS)),
+  allowsPassword: Schema.Boolean,
+  /** The existing link this export replaces the content of, keeping its URL. */
+  updatesLink: Schema.optional(exportUrl),
+  /** Whether the link it updates has a password, which an update keeps. */
+  hasPassword: Schema.optional(Schema.Boolean),
+}).annotations(strict);
+export type CanvasExportLinkTerms = typeof CanvasExportLinkTerms.Type;
+
+/** What the person chose for a link on the card. */
+export const CanvasExportLinkChoice = Schema.Struct({
+  expiry: CanvasExportLinkExpiry,
+  password: Schema.optional(CanvasExportLinkPassword),
+}).annotations(strict);
+export type CanvasExportLinkChoice = typeof CanvasExportLinkChoice.Type;
+
 export const CanvasExportApprovalCard = Schema.Struct({
   schemaVersion: CanvasExportSchemaVersion,
   kind: Schema.Literal("canvas-export-approval"),
@@ -454,6 +525,11 @@ export const CanvasExportApprovalCard = Schema.Struct({
   ),
   /** How many pages a PDF holds. */
   pages: Schema.optional(Schema.Int.pipe(Schema.positive())),
+  /**
+   * Present when the destination publishes a link: its default expiry, whether
+   * it takes a password, and the link this export would update.
+   */
+  destinationLinkTerms: Schema.optional(CanvasExportLinkTerms),
   payloadDigest: CanvasExportPayloadDigest,
   byteLength: Schema.Int.pipe(
     Schema.nonNegative(),
@@ -556,6 +632,11 @@ export const CanvasExportDecideRequest = Schema.Struct({
    * approved.
    */
   visibility: Schema.optional(CanvasExportVisibility),
+  /**
+   * The expiry and optional password the person chose when the card offered
+   * link terms. Absent means the destination's default expiry and no password.
+   */
+  link: Schema.optional(CanvasExportLinkChoice),
 }).annotations(strict);
 export type CanvasExportDecideRequest = typeof CanvasExportDecideRequest.Type;
 
