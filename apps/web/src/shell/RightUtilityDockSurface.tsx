@@ -91,7 +91,13 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       <header className="dock-head right-utility-dock__toolbar">
         <div className="right-utility-dock__tabs">
           {props.tabs.length === 0 ? (
-            <span aria-hidden="true" className="right-utility-dock__title-spacer" />
+            <DockQuickTools
+              onOpen={(surface) => {
+                focusOpenedTool.current = true;
+                props.onOpenTab(surface);
+              }}
+              surfaces={props.launchableSurfaces}
+            />
           ) : (
             <DockToolStrip
               {...(activeTabId === undefined ? {} : { active: activeTabId })}
@@ -257,4 +263,50 @@ function workMapDetail(surface: RightUtilityDockSurfaceId): string {
   // Every surface above names what it does; a row that says "Open this tool"
   // beside twelve that mean something is a placeholder, not a description.
   return "Open this tool";
+}
+
+/** The tools the title band offers before any is open, in this order. */
+const QUICK_TOOLS: ReadonlyArray<RightUtilityDockSurfaceId> = [
+  "environment",
+  "terminal",
+  "browser",
+  "files",
+  "ios-simulator",
+  "android-emulator",
+];
+
+/**
+ * The title band's tools while none is open: Environment by name, the rest as
+ * icons, so the band reads the same before and after a tool opens and the
+ * tools a thread reaches for most are one click away. A tool this thread
+ * cannot open is left out rather than shown dead.
+ */
+function DockQuickTools(props: {
+  readonly onOpen: (surface: RightUtilityDockSurfaceId) => void;
+  readonly surfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
+}) {
+  const available = QUICK_TOOLS.flatMap((id) => {
+    const surface = props.surfaces.find((candidate) => candidate.id === id);
+    return surface === undefined ? [] : [surface];
+  });
+  return (
+    <div aria-label="Quick tools" className="dock-quick-tools" role="group">
+      {available.map((surface) => (
+        <OctantButton
+          aria-label={`Open ${surface.label}`}
+          className="dock-quick-tools__tool window-no-drag"
+          data-labelled={surface.id === "environment" ? "true" : undefined}
+          key={surface.id}
+          onClick={() => props.onOpen(surface.id)}
+          size="sm"
+          title={surface.label}
+          type="button"
+          variant="ghost"
+        >
+          <DockToolIcon surface={surface.id} />
+          {surface.id === "environment" ? <span>{surface.label}</span> : null}
+        </OctantButton>
+      ))}
+    </div>
+  );
 }

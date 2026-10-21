@@ -63,9 +63,26 @@
   text-transform: none;
 }
 
-.right-utility-dock__title-spacer {
+/* Before any tool opens, the band offers the tools a thread reaches for most:
+   Environment by name, the rest as icons, the same faces the strip uses. At
+   the dock's narrowest the band has room for fewer than all of them, and a
+   button pushed past the window controls was clipped half-visible; the row
+   wraps instead, and the band shows only its first line, so a tool that does
+   not fit leaves whole. Every tool is also under Add tool. */
+.dock-quick-tools {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   min-width: 0;
-  flex: 1 1 auto;
+  height: var(--oct-rail-button-h);
+  overflow: hidden;
+  align-items: center;
+  gap: 2px;
+}
+
+.dock-quick-tools__tool > svg {
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
 }
 
 .right-utility-dock__tabs {
@@ -114,6 +131,12 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Only the open tool names itself; the others are their icons, with the name
+   in the tooltip, so several open tools fit the band without ellipsizing. */
+.dock-tool-strip__select[aria-selected="false"] > span {
+  display: none;
 }
 
 .dock-tool-strip__select > svg {

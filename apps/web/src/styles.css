@@ -1611,58 +1611,34 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   white-space: nowrap;
 }
 
-/* The Project the thread works in. Chips are short, so the title gives up
-   room first (it shrinks eight times as fast); a chip truncates only once the
-   title is mostly gone, or past its own cap. The title has no fixed minimum:
-   a 12ch floor clipped the Running pill off a 180px pane, since the grip
-   hides what overflows it. The
-   cap is in ch, not a share of the handle: the handle shrink-wraps its
-   content, so 30% of it clipped "octant-qa-code-repo" to "octant-qa-code-re…"
-   beside a short title with most of the header empty. Shrinking the chips
-   first, or in proportion to a long title, left "octant…" and "m…", two chips
-   that no longer named anything. */
+/* The breadcrumb's first step: the Project the pane runs in, as plain meta
+   text before a slash and the title. The title gives up room first (it
+   shrinks eight times as fast), so the Project truncates only once the title
+   is mostly gone or past its own cap. The cap is in ch because the handle
+   shrink-wraps its content: a share of it clipped short Project names. */
 .workspace-pane__context {
   flex: 0 1 auto;
   min-width: 0;
   max-width: 32ch;
   overflow: hidden;
-  padding: 0 var(--oct-space-2);
   color: var(--oct-meta);
-  border: 1px solid var(--oct-border-soft);
-  border-radius: var(--oct-radius-pill);
-  font-size: var(--oct-text-xs);
+  font-size: var(--oct-text-sm);
   font-weight: var(--oct-weight-regular);
-  line-height: 18px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-/* The branch is its own chip beside the Project's, in the identifier face so
-   a branch name never reads as prose. It keeps its width like the Project
-   chip, under the same title-first shrinking and a cap of its own. */
-.workspace-pane__branch {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 28ch;
-  overflow: hidden;
-  padding: 0 var(--oct-space-2);
+.workspace-pane__crumb {
+  flex: none;
   color: var(--oct-meta);
-  border: 1px solid var(--oct-border-soft);
-  border-radius: var(--oct-radius-pill);
-  font-family: var(--oct-font-mono);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-regular);
-  line-height: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: var(--oct-text-sm);
 }
 
-/* A phone header is about 340px wide: the two chips kept their widths and
-   left a thread title of "Reply …". The title is what names the pane, and the
-   Project and branch are still shown by the composer's context bar below. */
+/* A phone header is about 340px wide, and the title is what names the pane;
+   the composer's strip still names the Project. */
 @media (max-width: 680px) {
   .workspace-pane__context,
-  .workspace-pane__branch {
+  .workspace-pane__crumb {
     display: none;
   }
 }

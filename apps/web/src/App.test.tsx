@@ -4138,7 +4138,13 @@ describe("App", () => {
     );
 
     await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
-    expect(screen.queryByRole("button", { name: "Open Environment" })).not.toBeInTheDocument();
+    // Environment opens from the dock's own title band; nothing outside the
+    // dock offers a second way in.
+    expect(
+      screen
+        .queryAllByRole("button", { name: "Open Environment" })
+        .filter((button) => button.closest('[aria-label="Right Utility Dock"]') === null),
+    ).toHaveLength(0);
     await showRightUtilityDock(user);
     const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
     await user.click(within(dock).getByRole("button", { name: "Environment" }));

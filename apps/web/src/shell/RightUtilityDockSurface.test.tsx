@@ -65,6 +65,36 @@ describe("the right sidebar surface", () => {
     expect(dockStylesheet).not.toContain("--oct-radius-xs");
     expect(ruleBody(dockStylesheet, ".dock-tool-strip__tab")).not.toMatch(/overflow:\s*hidden/);
   });
+  it("offers Environment by name and the common tools as icons in the title band before any opens", async () => {
+    const user = userEvent.setup();
+    const onOpenTab = vi.fn();
+    render(
+      <RightUtilityDockSurface
+        launchableSurfaces={[browser, terminal, files, surface("environment"), surface("plan")]}
+        onCloseTab={vi.fn()}
+        onOpenTab={onOpenTab}
+        onSelectSurface={vi.fn()}
+        resolution={{ kind: "closed", reason: "no-surface" }}
+        tabs={[]}
+      />,
+    );
+
+    const band = screen.getByRole("group", { name: "Quick tools" });
+    const tools = within(band).getAllByRole("button");
+    expect(tools.map((tool) => tool.getAttribute("aria-label"))).toEqual([
+      "Open Environment",
+      "Open Terminal",
+      "Open Browser",
+      "Open Files",
+    ]);
+    expect(tools[0]).toHaveTextContent("Environment");
+    expect(tools[1]).not.toHaveTextContent("Terminal");
+    const terminalTool = tools[1];
+    if (terminalTool === undefined) throw new Error("Expected the Terminal tool.");
+    await user.click(terminalTool);
+    expect(onOpenTab).toHaveBeenCalledWith("terminal");
+  });
+
   it("shows the active thread work map with no tool open", async () => {
     const user = userEvent.setup();
     const onOpenTab = vi.fn();
