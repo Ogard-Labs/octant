@@ -6,7 +6,7 @@ export interface RailUsageReading {
   readonly providerInstanceId: string;
   /** Every reported window with a figure, in the provider's order (shortest first). */
   readonly windows: ReadonlyArray<ComposerLimitWindow>;
-  /** The longest window, drawn as the outer arc: what is left of the week. */
+  /** The longest window, drawn as the outer arc: what is left of the week (or of the month, where one is reported). */
   readonly outer: ComposerLimitWindow;
   /** The shortest window, drawn as the inner arc, when there are two or more. */
   readonly inner?: ComposerLimitWindow;
@@ -78,6 +78,8 @@ const NAMED_WINDOW_HOURS: Readonly<Record<string, number>> = {
   five_hour: 5,
   one_day: 24,
   seven_day: 168,
+  // A month is taken as 30 days: only its order against the week matters here.
+  monthly: 720,
 };
 
 const UNIT_HOURS: Readonly<Record<string, number>> = { m: 1 / 60, h: 1, d: 24, w: 168 };

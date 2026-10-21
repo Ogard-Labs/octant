@@ -1,6 +1,6 @@
 import { decodeProviderUsageLimitsSnapshot } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { railUsageReadings, resetPhrase } from "./railUsageReading";
+import { railUsageReadings, resetPhrase, windowHours } from "./railUsageReading";
 
 const now = Date.parse("2026-10-20T12:00:00.000Z");
 const providerInstanceId = "10000000-0000-4000-8000-000000000001";
@@ -87,6 +87,44 @@ describe("rail usage rings", () => {
     );
     expect(reading?.outer).toMatchObject({ window: "codex:secondary_7d", percent: 80 });
     expect(reading?.inner).toMatchObject({ window: "codex:primary_5h", percent: 90 });
+  });
+
+  it("treats a monthly window as the longest, so five hours and the month are the pair", () => {
+    const window = (id: string, utilization: number) => ({
+      window: id,
+      status: "allowed",
+      utilization,
+      observedAt: "2026-10-20T12:00:00.000Z",
+    });
+    const [reading] = railUsageReadings(
+      entries({
+        providerInstanceId,
+        status: "available",
+        source: "provider-runtime",
+        observedAt: "2026-10-20T12:00:00.000Z",
+        limits: {
+          providerInstanceId,
+          scope: "account",
+          requests: { status: "unavailable" },
+          tokens: { status: "unavailable" },
+          concurrency: { status: "unavailable" },
+          retry: { status: "inactive" },
+          quota: "available",
+          source: "observed-evidence",
+          confidence: "high",
+          updatedAt: "2026-10-20T12:00:00.000Z",
+          rateLimitWindows: [
+            window("five_hour", 0.15),
+            window("seven_day", 0.3),
+            window("monthly", 0.6),
+          ],
+        },
+      }),
+      now,
+    );
+    expect(reading?.inner).toMatchObject({ window: "five_hour", percent: 85 });
+    expect(reading?.outer).toMatchObject({ window: "monthly", percent: 40 });
+    expect(windowHours("monthly")).toBeGreaterThan(windowHours("seven_day"));
   });
 
   it("gives no ring to a provider that reported no window figure", () => {
