@@ -5361,13 +5361,17 @@ same. This holds in Chat, Work, and Code.
 offers it only when the package is installed, trusted, enabled, and effective;
 a disabled or uninstalled target is omitted, not listed as refused. The server
 renders the Canvas to Markdown or HTML, shows an approval card with that
-payload and the destination, and calls the target only after approval. The
+payload and the destination, and calls the target only after approval. PNG and
+PDF are drawn in the host's own browser, the one the Canvas preview uses
+([Canvas visuals](design/canvas-visuals.md)): a card for them names each file
+and its size instead of showing a body, and a destination receives named files
+only if it declared the format. A host with no browser refuses a picture export
+as a value (`unavailable`) before anything is held. The
 call returns a receipt (a link, a path, or a remote id) or a typed refusal.
 Each completed export is a `canvas.export@1` journal event and is rebuilt by
 replay. When the destination was called but the journal could not take the
 record, the answer is `unrecorded` and carries the destination's outcome; it is
-never reported as a failed export. PDF and PNG are named formats the seam can carry later; this host does
-not render them. A target that passed activation is still reported honestly as
+never reported as a failed export. A target that passed activation is still reported honestly as
 `not-connected`, `ready`, or `refused`. A local target may describe the exact
 file it would write, and the card then names that path: approving a card that
 names an existing file is the confirmation to replace it, and a call without
