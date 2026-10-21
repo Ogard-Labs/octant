@@ -574,20 +574,45 @@ export function layoutCanvasDiagram(block: CanvasDiagramBlock): CanvasDiagramLay
     ];
   });
 
+  // Frames grow left and up by their padding and name, so a hand-placed node
+  // near the origin pushes the outermost frame to a negative coordinate, where
+  // a renderer's viewport clips its label. Slide the whole picture right and
+  // down by that overshoot. Every part moves by the same amount, so
+  // hand-placed nodes keep their positions relative to each other.
+  const shiftX = Math.max(0, -Math.min(...boxes.map((box) => box.x), ...groups.map((g) => g.x)));
+  const shiftY = Math.max(0, -Math.min(...boxes.map((box) => box.y), ...groups.map((g) => g.y)));
+  const moved = shiftX !== 0 || shiftY !== 0;
+  const slide = <T extends { readonly x: number; readonly y: number }>(item: T): T =>
+    moved ? { ...item, x: item.x + shiftX, y: item.y + shiftY } : item;
+  const nodes = boxes.map(slide);
+  const frames = groups.map(slide);
+  const routes = moved
+    ? edges.map((edge) => ({
+        ...edge,
+        x1: edge.x1 + shiftX,
+        y1: edge.y1 + shiftY,
+        x2: edge.x2 + shiftX,
+        y2: edge.y2 + shiftY,
+        points: edge.points.map((point) => ({ x: point.x + shiftX, y: point.y + shiftY })),
+        labelX: edge.labelX + shiftX,
+        labelY: edge.labelY + shiftY,
+      }))
+    : edges;
+
   const extents = [
-    ...edges.flatMap((edge) =>
+    ...routes.flatMap((edge) =>
       edge.points.map((point) => ({ right: point.x + DETOUR_GAP, bottom: point.y + DETOUR_GAP })),
     ),
-    ...boxes.map((box) => ({ right: box.x + box.width, bottom: box.y + box.height })),
-    ...groups.map((group) => ({ right: group.x + group.width, bottom: group.y + group.height })),
+    ...nodes.map((box) => ({ right: box.x + box.width, bottom: box.y + box.height })),
+    ...frames.map((group) => ({ right: group.x + group.width, bottom: group.y + group.height })),
   ];
   return {
     width: Math.max(...extents.map((extent) => extent.right), MARGIN) + MARGIN,
     height: Math.max(...extents.map((extent) => extent.bottom), MARGIN) + MARGIN,
     flow,
-    nodes: boxes,
-    edges,
-    groups,
+    nodes,
+    edges: routes,
+    groups: frames,
   };
 }
 

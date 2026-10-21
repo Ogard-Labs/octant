@@ -505,6 +505,45 @@ describe("layoutCanvasDiagram nested groups", () => {
     expect(outer && inner && inside(inner, outer)).toBe(true);
   });
 
+  it("keeps every frame and its name inside the picture when a hand-placed node sits near the origin", () => {
+    const placed = diagram({
+      layout: "manual",
+      nodes: [
+        { nodeId: "leaf" as never, label: "Leaf", x: 20, y: 60, positioned: true },
+        { nodeId: "far" as never, label: "Far", x: 220, y: 160, positioned: true },
+      ],
+      edges: [{ edgeId: "e" as never, source: "leaf" as never, target: "far" as never }],
+      groups: [
+        { groupId: "one" as never, label: "One", nodeIds: ["leaf"] as never },
+        {
+          groupId: "two" as never,
+          label: "Two",
+          nodeIds: [] as never,
+          parentGroupId: "one" as never,
+        },
+        {
+          groupId: "three" as never,
+          label: "Three",
+          nodeIds: ["leaf"] as never,
+          parentGroupId: "two" as never,
+        },
+      ],
+    });
+    const layout = layoutCanvasDiagram(placed);
+    const [leaf, far] = layout.nodes;
+
+    expect(layout.groups).toHaveLength(3);
+    for (const group of layout.groups) {
+      expect(group.x).toBeGreaterThanOrEqual(0);
+      expect(group.y).toBeGreaterThanOrEqual(0);
+      expect(group.x + group.width).toBeLessThanOrEqual(layout.width);
+      expect(group.y + group.height).toBeLessThanOrEqual(layout.height);
+    }
+    // Slid as one: the two hand-placed nodes keep their distance apart.
+    expect((far?.x ?? 0) - (leaf?.x ?? 0)).toBe(200);
+    expect((far?.y ?? 0) - (leaf?.y ?? 0)).toBe(100);
+  });
+
   it("draws a group whose parent is unknown or loops back as a top-level one", () => {
     const layout = layoutCanvasDiagram(
       diagram({

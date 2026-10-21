@@ -868,9 +868,12 @@ export function drawCanvasDiagramLayout(
       // the picture. An icon is a stroked 24-unit glyph, so it needs no image.
       const content = canvasDiagramNodeContent(node);
       if (content.icon !== undefined) {
-        const side = round(content.icon.size * scale);
+        // Not rounded: the glyph's scale is a fraction of its 24-unit grid
+        // (16px is 2/3 at full size), and a whole number would draw it at 24px
+        // or collapse it to nothing in a thumbnail.
+        const glyphScale = Math.round(((content.icon.size * scale) / 24) * 1000) / 1000;
         parts.push(
-          `<g data-icon="${content.icon.name}" transform="translate(${String(px(content.icon.x))} ${String(py(content.icon.y))}) scale(${String(round(side / 24))})" fill="none" stroke="${palette.muted}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${CANVAS_DIAGRAM_ICON_PATHS[content.icon.name].map((d) => `<path d="${d}"/>`).join("")}</g>`,
+          `<g data-icon="${content.icon.name}" transform="translate(${String(px(content.icon.x))} ${String(py(content.icon.y))}) scale(${String(glyphScale)})" fill="none" stroke="${palette.muted}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${CANVAS_DIAGRAM_ICON_PATHS[content.icon.name].map((d) => `<path d="${d}"/>`).join("")}</g>`,
         );
       }
       parts.push(
