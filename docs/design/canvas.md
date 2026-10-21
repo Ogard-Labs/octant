@@ -239,7 +239,18 @@ minute, and an image no wider than 1,600 px and no taller than 4,096 px. When no
 Chromium is present, the build carries no preview page, the page fails to
 settle, or the model driving the turn does not accept images in a tool result,
 the warnings still return and the result names which (`no-browser`,
-`no-renderer`, `render-failed`, `provider-cannot-take-images`). A `design` is markup, so how its frames read
+`no-renderer`, `render-failed`, `provider-cannot-take-images`) beside one plain
+sentence (`imageOmittedNote`) saying that no picture was taken, why, and that
+the listed warnings are the whole reading. The code alone was not enough: shown
+a bare `no-renderer`, a live model reported "no picture" in one turn and
+described the picture it never saw in the next. A development host has the
+page too: `bun run dev` and `octant web --dev` build it before the host starts,
+again whenever the renderer's sources or the contracts, domain or theme
+packages it bundles are newer, and point the host at
+`apps/web/dist` through `OCTANT_WEB_DIST_PATH`, since a host run from source
+does not find the web build on its own. `/health` reports `canvasPreviewPage`,
+whether the host finds the page, so `octant web --dev` attaching to a host left
+running without the web build warns that it must be restarted. A `design` is markup, so how its frames read
 is measured in the drawn page rather than computed from the document: after
 the page settles the host reads each drawn frame and adds a
 `design-frame-overflow` warning for a frame whose content is wider than its
@@ -773,7 +784,27 @@ a prototype that set its own address loaded another page, which reached a
 local listener; the document's policy refuses that navigation, and a `srcdoc`
 frame, which is not one, still draws. A `srcdoc` page inherits the document's
 policy, so the document admits inline script only when it draws a running
-frame. The export approval card says when the document writes design markup
+frame. Present and Play open a near-full-window dialog with a full-screen
+toggle (`requestFullscreen` on the player; Esc leaves, and the arrow keys keep
+moving slides). **PNG and PDF export** draw the same standalone pages in the host's
+browser, under the preview's no-route switches and request interception. A
+Canvas that holds device-size or slide designs is drawn one frame to a sheet at
+the frame's own size: a PNG per frame, named `Title 1.png`, `Title 2.png` and so
+on (padded to the count), or one PDF with a page per frame at that size. A PDF
+holds each frame as a picture drawn at twice its size, because print mode drops
+backgrounds inside frames and flattens blur and large shadows; text in design
+frames is not selectable there. A
+running design is drawn as a single sheet after the preview's settle wait. A
+Canvas with no such frames is drawn as the thread draws it: one PNG (cut off at
+a fixed height) or an A4 PDF the browser paginates. A set is placed like a
+single file: the card names which files of the set are already there, approving
+it replaces exactly those, and any other file already taken, including one that
+appeared after the card, is numbered.
+The Gist destination declares Markdown only, so it is never offered either
+form. Pictures of design frames are as unreadable to the share filter as the
+markup, so their card sets `drawsDesignFrames` for the person to acknowledge,
+and a themed design needs the window's `frameTheme` as in HTML export.
+The export approval card says when the document writes design markup
 (`writesDesignMarkup`), so approving it is the person's acknowledgement that
 markup leaves as written. A declared image draws a placeholder. A design in
 the workspace theme is exported in the theme the person's window draws it
@@ -803,6 +834,34 @@ Chromium stops painting sandboxed frames that are `inert` or have
 `pointer-events: none`, so a frame shown as a picture stays hit-testable and a
 cover over it takes the pointer
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](../decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
+A whole app window is a `desktop` design that runs script, and it is built in
+steps. A frame and the shared stylesheet each hold up to 65,536 characters
+(`CANVAS_MAX_DESIGN_MARKUP_LENGTH`, raised from 32,768): a finished window at
+1440×900, with its sidebar, panes, tabs, and script in one frame, ran past the
+old number, and 64 KiB holds one with room. The limits that keep a document sane
+are unchanged: 24 frames, 128 blocks, 256 KiB of text across the whole Canvas
+(so about three frames this large, or many smaller screens), and a 1 MiB
+payload. Widening a limit needs no schema version: a reader that predates it
+refuses the larger frame as invalid rather than drawing it wrongly. An agent
+does not send the window in one call. `revise` takes `designEdits` instead of
+`blocks`: for each named design block, a replacement `styles`, `frames` added
+or replaced by `frameId`, and `removeFrameIds`. The host reads the current
+version, requires `expectedSequence` to equal its sequence so a person's change
+in between is not overwritten, marks the reading thread as a read does, applies
+the edits, decodes the edited design whole, and revises with the full block list,
+so every other block and frame is kept and the markup policy, budgets, and
+authority are the ordinary revise path's. Describe's `design` guidance teaches
+the order (shell first, then a frame per screen), the `app-redesign-prototype`
+recipe names the shape, and the worked `app-window` example shows state without
+a framework: one `state` object, one `render()` that writes it to the page and
+sets CSS variables such as `--accent` on the root, and one delegated listener.
+In the thread a running prototype is drawn at its design size, scaled to the
+column; **Full screen** (where the browser offers it) takes the prototype and its
+header, so **Stop** stays reachable, and scales it to the screen's height as well
+as its width. Play for a static design has the same control. A lone static desktop
+window takes the board's full width instead of the thumbnail width a row of
+screens shares.
+
 Version 18 lets a design declare `runsScript: true`, which makes it a running
 prototype. For it alone, the markup policy admits inline `<script>` elements
 and event handlers; a script file, every remote load, `meta`, `base`,

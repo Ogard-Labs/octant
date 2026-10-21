@@ -67,6 +67,11 @@ nothing when there is none. Code has no turn to name: its host cancels only the
 turn it is running for that thread and answers a cancel it had no turn for with
 a failed turn state and no reason, which counts as nothing running.
 
+Every Code Stop, including the terminal client's, uses a fresh operation ID.
+The start ID would replay the start's saved result without cancelling anything.
+The terminal reports interruption only for an `interrupted` turn result bearing
+the Stop's own operation ID; HTTP success alone is not confirmation.
+
 ## Thread windows
 
 A thread opens on its newest turns and loads earlier ones on request. Each

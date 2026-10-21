@@ -9,6 +9,9 @@ import { WorkThreadService } from "./work/workThreadService";
 import { WorkTurnService } from "./work/workTurnService";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { CANVAS_PREVIEW_ASSET_FOLDER, CANVAS_PREVIEW_PAGE } from "./canvas/canvasPreviewRenderer";
 import { healthResponse } from "./health";
 import {
   Persistence,
@@ -86,7 +89,8 @@ export {
   deriveExistingWorktreeCheckoutId,
   plainFolderCheckoutIdentity,
 } from "./wiring/code";
-export { resolveWebAssetsPath } from "./wiring/computerUse";
+import { resolveWebAssetsPath } from "./wiring/computerUse";
+export { resolveWebAssetsPath };
 export { stableAppleRootId } from "./wiring/devices";
 export { makeConfiguredProviderDriver, pathIsProjectConfined } from "./wiring/providers";
 export {
@@ -1122,10 +1126,21 @@ export function startOctantServer(
             fetch: async (request) => {
               const url = new URL(request.url);
               if (url.pathname === "/health") {
-                return healthResponse(version, options.instanceId, {
-                  activeAgentCount: providerRuntimeRegistry.activeSessionTotal(),
-                  attentionRequired: providerRuntimeRegistry.attentionRequired(),
-                });
+                return healthResponse(
+                  version,
+                  options.instanceId,
+                  {
+                    activeAgentCount: providerRuntimeRegistry.activeSessionTotal(),
+                    attentionRequired: providerRuntimeRegistry.attentionRequired(),
+                  },
+                  existsSync(
+                    join(
+                      options.webAssetsPath ?? resolveWebAssetsPath(),
+                      CANVAS_PREVIEW_ASSET_FOLDER,
+                      CANVAS_PREVIEW_PAGE,
+                    ),
+                  ),
+                );
               }
               // Every route below trusts a loopback Origin as the renderer, so a
               // page on another loopback port (a dev server a Code thread

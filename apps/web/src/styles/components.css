@@ -851,7 +851,7 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   }
 }
 
-/* Task progress stays separate from child execution and opens only on request. */
+/* Task progress stays separate from child execution; it is open while the turn runs. */
 .thread-tasks {
   width: min(560px, calc(100% - 2 * var(--oct-space-3)));
   margin: 0 var(--oct-space-3) var(--oct-space-2);
@@ -921,10 +921,6 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
   padding: var(--oct-space-1) 2px;
 }
 
-.thread-tasks__list > li[data-task-state="running"] {
-  background: var(--oct-selection);
-}
-
 .thread-tasks__index {
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
@@ -970,6 +966,16 @@ html[data-octant-reduced-motion="true"] .turn-action-menu__more {
 .thread-tasks__list > li[data-task-state="completed"] .thread-tasks__summary,
 .thread-tasks__list > li[data-task-state="failed"] .thread-tasks__summary {
   color: var(--octant-text-secondary);
+}
+
+/* A finished step is struck through; the step in hand reads a weight up. */
+.thread-tasks__list > li[data-task-state="completed"] .thread-tasks__summary {
+  text-decoration: line-through;
+  text-decoration-color: var(--octant-text-muted);
+}
+
+.thread-tasks__list > li[data-task-state="running"] .thread-tasks__summary {
+  font-weight: 500;
 }
 
 .goal-loop {
