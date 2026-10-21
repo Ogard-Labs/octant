@@ -128,7 +128,8 @@ import {
   SIDEBAR_THREAD_STATUS_ORDER,
 } from "@octant/domain/sidebar-thread-status-policy";
 import { type SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
-import { groupThreadsByProject } from "./projectThreadGrouping";
+import { groupThreadsByProject, nestFollowUpThreads } from "./projectThreadGrouping";
+import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { lineageParentTitle } from "./threadLineage";
 import {
   ProjectThreadList,
@@ -143,7 +144,7 @@ import {
 } from "./ProjectThreadList";
 import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
 
@@ -475,6 +476,13 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
       ? groupThreadsByProject(threads, props.projects)
       : undefined;
   const unfiled = threadsByProject?.unfiled ?? [];
+  // Unfiled Chat threads skip ProjectThreadList, so they take the same
+  // follow-up nesting here: a thread started from a suggestion sits under it.
+  const followUpParents = useContext(FollowUpLineageContext);
+  const unfiledRows = useMemo(() => {
+    const nesting = nestFollowUpThreads(unfiled, followUpParents);
+    return nesting.expand(nesting.topLevel);
+  }, [followUpParents, unfiled]);
   const projectHasVisibleThreads = (project: ProjectSummary): boolean =>
     (threadsByProject?.byProjectId.get(String(project.id))?.length ?? 0) > 0;
   const hideEmptyProjects = searching || currentFilters?.showEmptyProjects === false;
@@ -812,7 +820,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                       {...(props.openThreadIds === undefined
                         ? {}
                         : { openThreadIds: props.openThreadIds })}
-                      threads={unfiled}
+                      threads={unfiledRows}
                     />
                   </div>
                 ) : null}

@@ -267,6 +267,7 @@ import {
 } from "./shell/useShellPresentation";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
 import { RailUsageRings } from "./usage/RailUsageRings";
+import { FollowUpLineageProvider } from "./followUps/followUpLineage";
 import { AppBackdrop } from "./theme/AppBackdrop";
 import { useThreadUtilityPresentation } from "./shell/useThreadUtilityPresentation";
 import {
@@ -6370,67 +6371,69 @@ function LaunchedShell(
         transcriptTextSize={controller.settings.transcriptTextSize}
         transcriptWidth={controller.settings.transcriptWidth}
         sidebar={
-          <SidebarContainer
-            actions={actions}
-            {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
-            {...(activeCodeThreadId === undefined ? {} : { activeCodeThreadId })}
-            activeMode={activeMode}
-            {...(activeProjectId === undefined ? {} : { activeProjectId })}
-            {...(activeSidebarDestination === undefined ? {} : { activeSidebarDestination })}
-            {...(activeWorkThreadId === undefined ? {} : { activeWorkThreadId })}
-            allProjects={projectController.allProjects}
-            archivedProjects={projectController.archivedProjects}
-            availabilityByProject={projectController.availabilityByProject}
-            {...(chatController.errorMessage === undefined
-              ? {}
-              : { chatErrorMessage: chatController.errorMessage })}
-            {...(chatProjectThreadListRequest === undefined
-              ? {}
-              : { chatProjectThreadListRequest })}
-            chatReadCursorStore={chatReadCursorStore}
-            chatStatus={chatController.status}
-            codeReadCursorStore={codeReadCursorStore}
-            codeStatus={codeController.status}
-            contextHealthByProject={contextHealthByProject}
-            environmentSelection={environmentSelection}
-            federatedHostStates={federatedHostStates}
-            githubIssuesReadAvailable={githubIssuesReadAvailable}
-            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-            hostReservesTitlebarInset={hostReservesTitlebarInset}
-            hosts={hosts}
-            imageLibraryAvailable={imageGenerationClient !== undefined}
-            inboxCount={inboxCount}
-            linearIssuesRead={linearIssuesRead}
-            navigation={navigationModel}
-            navigatorAvailable={navigatorAssistant.state.kind === "ready"}
-            {...(openSidebarThreadIds === undefined ? {} : { openSidebarThreadIds })}
-            {...(projectController.errorMessage === undefined
-              ? {}
-              : { projectErrorMessage: projectController.errorMessage })}
-            projectStatus={projectController.status}
-            projects={projectController.projects}
-            resolvedSidebarBackground={resolvedSidebarBackground}
-            setEnvironmentSelection={setEnvironmentSelection}
-            setSidebarCollapsed={setSidebarCollapsedPersistent}
-            setSidebarFilterQuery={setSidebarFilterQuery}
-            settings={presentedShellSettings ?? controller.settings}
-            shellBackdropCoversSidebar={shellBackdropCoversSidebar}
-            sidebarBackgroundFetcher={sidebarBackgroundFetcher}
-            sidebarFilterQuery={sidebarFilterQuery}
-            {...(sidebarListRequest === undefined ? {} : { sidebarListRequest })}
-            sidebarRail={sidebarRail}
-            sidebarRailBeside={sidebarRailBeside}
-            {...(railUsage === undefined ? {} : { railUsage })}
-            sidebarTileCounts={sidebarTileCounts}
-            {...(projectThreadsAccess.errorMessage === undefined
-              ? {}
-              : { threadErrorMessage: projectThreadsAccess.errorMessage })}
-            threadExportClient={threadExportClient}
-            threadHandOffClient={threadHandOffClient}
-            threadStatus={projectThreadsAccess.status}
-            workStatus={workNavigation.status}
-            workspace={controller.workspace}
-          />
+          <FollowUpLineageProvider client={launchedClients.followUpSuggestionClient}>
+            <SidebarContainer
+              actions={actions}
+              {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
+              {...(activeCodeThreadId === undefined ? {} : { activeCodeThreadId })}
+              activeMode={activeMode}
+              {...(activeProjectId === undefined ? {} : { activeProjectId })}
+              {...(activeSidebarDestination === undefined ? {} : { activeSidebarDestination })}
+              {...(activeWorkThreadId === undefined ? {} : { activeWorkThreadId })}
+              allProjects={projectController.allProjects}
+              archivedProjects={projectController.archivedProjects}
+              availabilityByProject={projectController.availabilityByProject}
+              {...(chatController.errorMessage === undefined
+                ? {}
+                : { chatErrorMessage: chatController.errorMessage })}
+              {...(chatProjectThreadListRequest === undefined
+                ? {}
+                : { chatProjectThreadListRequest })}
+              chatReadCursorStore={chatReadCursorStore}
+              chatStatus={chatController.status}
+              codeReadCursorStore={codeReadCursorStore}
+              codeStatus={codeController.status}
+              contextHealthByProject={contextHealthByProject}
+              environmentSelection={environmentSelection}
+              federatedHostStates={federatedHostStates}
+              githubIssuesReadAvailable={githubIssuesReadAvailable}
+              {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+              hostReservesTitlebarInset={hostReservesTitlebarInset}
+              hosts={hosts}
+              imageLibraryAvailable={imageGenerationClient !== undefined}
+              inboxCount={inboxCount}
+              linearIssuesRead={linearIssuesRead}
+              navigation={navigationModel}
+              navigatorAvailable={navigatorAssistant.state.kind === "ready"}
+              {...(openSidebarThreadIds === undefined ? {} : { openSidebarThreadIds })}
+              {...(projectController.errorMessage === undefined
+                ? {}
+                : { projectErrorMessage: projectController.errorMessage })}
+              projectStatus={projectController.status}
+              projects={projectController.projects}
+              resolvedSidebarBackground={resolvedSidebarBackground}
+              setEnvironmentSelection={setEnvironmentSelection}
+              setSidebarCollapsed={setSidebarCollapsedPersistent}
+              setSidebarFilterQuery={setSidebarFilterQuery}
+              settings={presentedShellSettings ?? controller.settings}
+              shellBackdropCoversSidebar={shellBackdropCoversSidebar}
+              sidebarBackgroundFetcher={sidebarBackgroundFetcher}
+              sidebarFilterQuery={sidebarFilterQuery}
+              {...(sidebarListRequest === undefined ? {} : { sidebarListRequest })}
+              sidebarRail={sidebarRail}
+              sidebarRailBeside={sidebarRailBeside}
+              {...(railUsage === undefined ? {} : { railUsage })}
+              sidebarTileCounts={sidebarTileCounts}
+              {...(projectThreadsAccess.errorMessage === undefined
+                ? {}
+                : { threadErrorMessage: projectThreadsAccess.errorMessage })}
+              threadExportClient={threadExportClient}
+              threadHandOffClient={threadHandOffClient}
+              threadStatus={projectThreadsAccess.status}
+              workStatus={workNavigation.status}
+              workspace={controller.workspace}
+            />
+          </FollowUpLineageProvider>
         }
         sidebarResizable={!isNarrow}
         sidebarWidth={sidebarWidth}

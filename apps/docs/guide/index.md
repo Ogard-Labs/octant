@@ -150,7 +150,8 @@ card shows what it would do — put the prompt in this
 composer, start a new thread in the same mode and Project, or, in Code,
 start a thread on its own worktree — and nothing happens until you choose
 **Start** (or **Use prompt**). The new thread opens on the same model with
-the prompt waiting in its composer; sending it is still your move. A Code
+the prompt waiting in its composer; sending it is still your move. In the
+sidebar it sits indented under the thread that suggested it. A Code
 follow-up starts approval-gated, because Full access is remembered per
 thread. A follow-up or side task from a thread marked as having read outside
 content starts marked too, because a model that had read it wrote the prompt.

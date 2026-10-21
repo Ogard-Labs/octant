@@ -3,7 +3,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeProjectId, type ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import type { SidebarRowPropertyVisibility } from "@octant/contracts/shell";
-import { ProjectThreadRows } from "./ProjectThreadList";
+import { ProjectThreadList, ProjectThreadRows } from "./ProjectThreadList";
+import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarRowPropertiesContext } from "../shell/sidebarRowProperties";
 
 const thread = {
@@ -32,6 +33,23 @@ function pullRequest(
 }
 
 const identity12 = { projectId, repositoryOwner: "octant", repositoryName: "octant", number: 12 };
+
+describe("ProjectThreadList nesting", () => {
+  it("lists a started task right under the thread that suggested it, marked as nested", () => {
+    const parent = { threadId: "parent", title: "Redesign the shell" };
+    const other = { threadId: "other", title: "Write the docs" };
+    const child = { threadId: "child", title: "Add a README" };
+    render(
+      <FollowUpLineageContext value={new Map([["child", "parent"]])}>
+        <ProjectThreadList onSelectThread={vi.fn()} threads={[parent, other, child]} />
+      </FollowUpLineageContext>,
+    );
+    const rows = [...document.querySelectorAll<HTMLElement>("[data-thread-id]")];
+    expect(rows.map((row) => row.dataset.threadId)).toEqual(["parent", "child", "other"]);
+    expect(rows[1]?.dataset.nestedTask).toBe("true");
+    expect(rows[0]?.dataset.nestedTask).toBeUndefined();
+  });
+});
 
 describe("ProjectThreadRows", () => {
   it("shows a thread's age and its pull request on the row itself, not only in the card", () => {

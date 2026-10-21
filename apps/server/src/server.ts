@@ -434,6 +434,7 @@ export function startOctantServer(
       sideTaskRoutes,
       threadWork,
     } = wireHarness({
+      projectService,
       agentRunInteractions,
       nativeHarnessApprovals,
       nativeHarnessQuestions,

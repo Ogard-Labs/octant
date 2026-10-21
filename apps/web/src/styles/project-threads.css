@@ -1482,3 +1482,26 @@ html[data-octant-increased-contrast="true"] .project-row[data-active="true"] {
   overflow: auto;
   background: var(--octant-app-background);
 }
+
+/* A thread started from a suggested task sits one step in under the thread
+   that suggested it, with a thin elbow joining them, so the task reads as
+   part of the conversation it came from. The elbow is drawn on the row
+   wrapper; the row's own button recipe is only placed. */
+.sidebar-navigation__thread[data-nested-task="true"] {
+  padding-inline-start: calc(var(--oct-nav-inset) + var(--oct-space-5));
+}
+
+.sidebar-navigation__thread-row:has(
+  > .sidebar-navigation__thread[data-nested-task="true"]
+)::before {
+  position: absolute;
+  top: 0;
+  left: calc(var(--oct-nav-inset) + var(--oct-space-2));
+  width: var(--oct-space-2);
+  height: 50%;
+  border-bottom: 1px solid var(--oct-border);
+  border-left: 1px solid var(--oct-border);
+  border-bottom-left-radius: var(--oct-radius-sm);
+  content: "";
+  pointer-events: none;
+}

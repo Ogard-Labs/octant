@@ -2,9 +2,9 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { X } from "lucide-react";
@@ -47,11 +47,6 @@ export interface FollowUpSuggestionChipsProps {
    * reply offered nothing.
    */
   readonly frame?: (cards: ReactNode) => ReactNode;
-  /**
-   * Whether this surface reads the host itself. Environment's copy shows what
-   * the composer's cards read, so the thread is polled once.
-   */
-  readonly reads?: boolean;
 }
 
 export interface ComposerOffers extends FollowUpSuggestionChipsProps {
@@ -95,6 +90,91 @@ export function ComposerFollowUpSuggestions() {
   );
 }
 
+interface FollowUpFeed {
+  readonly client: Pick<FollowUpSuggestionClient, "suggestions">;
+  value: ThreadFollowUpSuggestions | null;
+  readonly listeners: Set<() => void>;
+  stop: () => void;
+  load: () => Promise<void>;
+}
+
+/**
+ * One reader per thread, shared by every surface that shows its suggestions
+ * (the cards at the foot of the thread and Environment's copy). Two pollers
+ * each storing their own answer doubled the requests, and the second one's
+ * first answer re-rendered the thread pane mid-stream.
+ */
+const followUpFeeds = new Map<string, FollowUpFeed>();
+
+function subscribeFollowUps(
+  client: Pick<FollowUpSuggestionClient, "suggestions">,
+  threadId: string,
+  intervalMs: number,
+  listener: () => void,
+): () => void {
+  let feed = followUpFeeds.get(threadId);
+  if (feed === undefined || feed.client !== client) {
+    feed?.stop();
+    let inFlight = false;
+    const created: FollowUpFeed = {
+      client,
+      value: feed?.value ?? null,
+      listeners: feed?.listeners ?? new Set(),
+      stop: () => undefined,
+      load: async () => {
+        try {
+          const next = await client.suggestions(threadId);
+          if (followUpFeeds.get(threadId) !== created) return;
+          // An unchanged answer keeps the same value, so nothing re-renders.
+          if (JSON.stringify(created.value) === JSON.stringify(next)) return;
+          created.value = next;
+          for (const notify of created.listeners) notify();
+        } catch {
+          // Suggestions are an offer, not state the person is waiting on; a
+          // failed read keeps what was shown and the next tick tries again.
+        }
+      },
+    };
+    const tick = () => {
+      if (inFlight) return;
+      inFlight = true;
+      void created.load().finally(() => {
+        inFlight = false;
+      });
+    };
+    followUpFeeds.set(threadId, created);
+    tick();
+    created.stop = scheduleVisibleInterval(tick, intervalMs);
+    feed = created;
+  }
+  const active = feed;
+  active.listeners.add(listener);
+  return () => {
+    active.listeners.delete(listener);
+    if (active.listeners.size === 0) {
+      active.stop();
+      if (followUpFeeds.get(threadId) === active) followUpFeeds.delete(threadId);
+    }
+  };
+}
+
+function useThreadFollowUps(
+  client: Pick<FollowUpSuggestionClient, "suggestions">,
+  threadId: string,
+  intervalMs: number,
+): ThreadFollowUpSuggestions | null {
+  const subscribe = useCallback(
+    (listener: () => void) => subscribeFollowUps(client, threadId, intervalMs, listener),
+    [client, intervalMs, threadId],
+  );
+  return useSyncExternalStore(subscribe, () => followUpFeeds.get(threadId)?.value ?? null);
+}
+
+/** Reads a thread's suggestions again now, for every surface showing them. */
+function refreshThreadFollowUps(threadId: string): Promise<void> {
+  return followUpFeeds.get(threadId)?.load() ?? Promise.resolve();
+}
+
 /**
  * Which suggestion set the person dismissed on each thread, shared by every
  * surface that shows it: dismissing at the foot of the thread also hides the
@@ -110,92 +190,12 @@ function dismissFollowUps(threadId: string, turnId: string): void {
 }
 
 function useDismissedTurn(threadId: string): string | undefined {
-  return useSharedValue(dismissalListeners, () => dismissedTurnByThread.get(threadId), [threadId]);
-}
-
-/**
- * Follows one value of a window-wide store. It sets state only when the value
- * moved: a no-op update still renders the component, and the Environment copy
- * sits outside the transcript, so it would add a commit the turn never asked for.
- */
-function useSharedValue<T>(
-  listeners: Set<() => void>,
-  read: () => T,
-  keys: ReadonlyArray<unknown>,
-): T {
-  const [value, setValue] = useState(read);
-  const shown = useRef(value);
-  shown.current = value;
-  const latestRead = useRef(read);
-  latestRead.current = read;
-  useEffect(() => {
-    const follow = () => {
-      const next = latestRead.current();
-      if (!Object.is(next, shown.current)) setValue(() => next);
-    };
-    follow();
-    listeners.add(follow);
-    return () => {
-      listeners.delete(follow);
-    };
-  }, [listeners, ...keys]);
-  return value;
-}
-
-/**
- * The latest suggestions read for each thread, shared by every surface that
- * shows them. With Environment open, the composer's cards and Environment's
- * copy each read on their own, and while a turn streamed every read landed as
- * a second commit of the thread pane. One read now feeds both, in one commit.
- */
-type SuggestionReader = Pick<FollowUpSuggestionClient, "suggestions">;
-
-interface SuggestionStore {
-  readonly byThread: Map<string, ThreadFollowUpSuggestions | null>;
-  readonly inFlight: Map<string, Promise<void>>;
-}
-
-// One store per host connection: another client is another host, whose
-// threads share nothing with this one's even when an id matches.
-const suggestionStores = new WeakMap<SuggestionReader, SuggestionStore>();
-
-function suggestionStore(client: SuggestionReader): SuggestionStore {
-  let store = suggestionStores.get(client);
-  if (store === undefined) {
-    store = { byThread: new Map(), inFlight: new Map() };
-    suggestionStores.set(client, store);
-  }
-  return store;
-}
-const suggestionListeners = new Set<() => void>();
-
-function readSuggestions(client: SuggestionReader, threadId: string): Promise<void> {
-  const store = suggestionStore(client);
-  const inFlight = store.inFlight.get(threadId);
-  if (inFlight !== undefined) return inFlight;
-  const read = client
-    .suggestions(threadId)
-    .then((next) => {
-      // A poll that returns what is already shown changes nothing on screen,
-      // so it must not commit either surface again.
-      const previous = store.byThread.get(threadId);
-      if (previous !== undefined && JSON.stringify(previous) === JSON.stringify(next)) return;
-      store.byThread.set(threadId, next);
-      for (const listener of suggestionListeners) listener();
-    })
-    .finally(() => store.inFlight.delete(threadId));
-  store.inFlight.set(threadId, read);
-  return read;
-}
-
-function useThreadSuggestions(
-  client: SuggestionReader,
-  threadId: string,
-): ThreadFollowUpSuggestions | null {
-  return useSharedValue(
-    suggestionListeners,
-    () => suggestionStore(client).byThread.get(threadId) ?? null,
-    [client, threadId],
+  return useSyncExternalStore(
+    (listener) => {
+      dismissalListeners.add(listener);
+      return () => dismissalListeners.delete(listener);
+    },
+    () => dismissedTurnByThread.get(threadId),
   );
 }
 
@@ -213,48 +213,31 @@ function describeCreation(creation: NativeHarnessFollowUpCreation): string {
  * waits in the new thread's composer.
  */
 export function FollowUpSuggestionChips(props: FollowUpSuggestionChipsProps) {
-  const [preview, setPreview] = useState<NativeHarnessFollowUpPreview>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
   const { client, threadId } = props;
-  const suggestions = useThreadSuggestions(client, threadId);
+  // A preview and an error belong to the thread they were made for, so moving
+  // the pane to another thread shows neither, without a reset on mount: a
+  // mount-time reset cost a render each time the Environment copy re-attached.
+  const [previewFor, setPreviewFor] = useState<{
+    readonly threadId: string;
+    readonly preview: NativeHarnessFollowUpPreview;
+  }>();
+  const [errorFor, setErrorFor] = useState<{
+    readonly threadId: string;
+    readonly message: string;
+  }>();
+  const [busy, setBusy] = useState(false);
+  const preview = previewFor?.threadId === threadId ? previewFor.preview : undefined;
+  const error = errorFor?.threadId === threadId ? errorFor.message : undefined;
+  const setPreview = (next: NativeHarnessFollowUpPreview | undefined) =>
+    setPreviewFor(next === undefined ? undefined : { threadId, preview: next });
+  const setError = (message: string | undefined) =>
+    setErrorFor(message === undefined ? undefined : { threadId, message });
+  const suggestions = useThreadFollowUps(client, threadId, props.refreshIntervalMs ?? 4_000);
   const dismissedTurnId = useDismissedTurn(threadId);
   // The pane can move to another thread while a preview is on its way.
   const currentThread = useRef(threadId);
   currentThread.current = threadId;
-
-  const load = useCallback(async () => {
-    // Each thread keeps its own read, so a response for a thread the composer
-    // has left never paints over the one it shows now.
-    try {
-      await readSuggestions(client, threadId);
-    } catch {
-      // Chips are an offer, not state the person is waiting on; a failed read
-      // keeps what was shown and the next tick tries again.
-    }
-  }, [client, threadId]);
-
-  const reads = props.reads !== false;
-  useEffect(() => {
-    // Opened before the composer's first read landed: read once, never poll.
-    if (!reads) {
-      if (!suggestionStore(client).byThread.has(threadId)) void load();
-      return;
-    }
-    setPreview(undefined);
-    setError(undefined);
-    let inFlight = false;
-    const tick = () => {
-      if (inFlight) return;
-      inFlight = true;
-      void load().finally(() => {
-        inFlight = false;
-      });
-    };
-    tick();
-    const stop = scheduleVisibleInterval(tick, props.refreshIntervalMs ?? 4_000);
-    return stop;
-  }, [client, load, props.refreshIntervalMs, reads, threadId]);
+  const load = useCallback(() => refreshThreadFollowUps(threadId), [threadId]);
 
   const open =
     suggestions?.followUps.suggestions.filter(
@@ -413,7 +396,6 @@ export function EnvironmentSuggestedTasks() {
     <FollowUpSuggestionChips
       {...chips}
       frame={(cards) => <EnvironmentCard caption="Suggested tasks">{cards}</EnvironmentCard>}
-      reads={false}
     />
   );
 }
