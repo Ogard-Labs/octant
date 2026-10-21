@@ -1,4 +1,4 @@
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { homedir } from "node:os";
 import {
   type PermissionPersistence,
@@ -31,7 +31,9 @@ import { makeAcpDriver } from "./acpDriver";
 import type { AcpProcessPort } from "./acpProcess";
 import { acpProviderProfiles, type AcpProviderKind } from "./acpProfiles";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import { makeDevinPlanUsageFacts } from "./devinPlanUsage";
 import { makeOpenCodeDriver } from "./openCodeDriver";
+import { makeOpenCodeGoUsageFacts } from "./openCodeGoUsage";
 import type { OpenCodeProcessPort } from "./openCodeProcess";
 import { makeOllamaDriver } from "./ollamaDriver";
 import type { OllamaFetch } from "./ollamaEndpoint";
@@ -92,13 +94,24 @@ export function makeProviderDriver(
       // Route selection follows the version the process attests, not the
       // binary's file name. A released 2.x install and a 1.x install can
       // share the name `opencode`.
-      return makeOpenCodeDriver({
-        instanceId: instance.id,
-        binaryPath: instance.configuration.binaryPath,
-        process: options.openCodeProcess,
-        runtimeRegistry: options.runtimeRegistry,
-        permissionPersistence: options.permissionPersistence,
-      });
+      return {
+        ...makeOpenCodeDriver({
+          instanceId: instance.id,
+          binaryPath: instance.configuration.binaryPath,
+          process: options.openCodeProcess,
+          runtimeRegistry: options.runtimeRegistry,
+          permissionPersistence: options.permissionPersistence,
+        }),
+        // Plan windows come from the account behind the CLI's own sign-in,
+        // not from the runtime, so both OpenCode lines report them alike.
+        contextFacts: makeOpenCodeGoUsageFacts({
+          instanceId: instance.id,
+          dataDirectory: join(
+            process.env.XDG_DATA_HOME ?? join(homedir(), ".local", "share"),
+            "opencode",
+          ),
+        }),
+      };
     case "codex": {
       if (options.codexInstances === undefined) {
         throw new ProviderDriverConfigurationError();
@@ -245,8 +258,9 @@ export function makeProviderDriver(
         throw new ProviderDriverConfigurationError();
       }
       const configuration = instance.configuration;
-      return makeAcpDriver({
-        profile: acpProviderProfiles[instance.driverKind],
+      const profile = acpProviderProfiles[instance.driverKind];
+      const driver = makeAcpDriver({
+        profile,
         instanceId: instance.id,
         binaryPath: configuration.binaryPath,
         managedHome: options.acpHome(instance.driverKind, instance.id),
@@ -265,6 +279,16 @@ export function makeProviderDriver(
           ? {}
           : { credentialResolver: options.credentialResolver }),
       });
+      const credential = profile.process.hostAuthentication;
+      return instance.driverKind === "devin" && credential?.kind === "credential-file"
+        ? {
+            ...driver,
+            contextFacts: makeDevinPlanUsageFacts({
+              instanceId: instance.id,
+              credentialPath: credential.defaultPath,
+            }),
+          }
+        : driver;
     }
     case "ollama":
       return makeOllamaDriver({

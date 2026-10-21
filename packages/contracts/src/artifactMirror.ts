@@ -150,7 +150,8 @@ export type ArtifactMirrorCommitOutcome = typeof ArtifactMirrorCommitOutcome.Typ
 export const ArtifactMirrorReceipt = Schema.Struct({
   canvasId: CanvasId,
   versionId: CanvasVersionId,
-  projectId: ProjectId,
+  /** The Canvas's Project; null for a Chat Canvas owned by its thread, which is never mirrored. */
+  projectId: Schema.NullOr(ProjectId),
   destination: ArtifactMirrorDestination,
   /** Paths written, relative to the destination's own root. */
   paths: Schema.Array(ArtifactMirrorRelativePath).pipe(

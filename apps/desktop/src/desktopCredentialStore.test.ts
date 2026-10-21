@@ -35,6 +35,7 @@ describe("resolveDesktopCredentialBackend", () => {
       store: expect.any(Object),
       replicaDeviceKeys: expect.any(Object),
       replicaStoreCredentials: expect.any(Object),
+      canvasPublicShareSecrets: expect.any(Object),
     });
     expect(backend.purgeStore).toBeUndefined();
   });

@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { chmodSync } from "node:fs";
-import type { SqliteConnection, SqliteStatement } from "./sqlitePort.ts";
+import type { ReadOnlySqliteConnection, SqliteConnection, SqliteStatement } from "./sqlitePort.ts";
 
 export function openBunSqlite(path: string): SqliteConnection {
   const database = new Database(path);
@@ -40,6 +40,14 @@ export function openBunSqlite(path: string): SqliteConnection {
       return rows;
     },
     transaction: (body) => database.transaction(body),
+    close: () => database.close(),
+  };
+}
+
+export function openBunSqliteReadOnly(path: string): ReadOnlySqliteConnection {
+  const database = new Database(path, { readonly: true });
+  return {
+    all: (sql) => database.query(sql).all(),
     close: () => database.close(),
   };
 }

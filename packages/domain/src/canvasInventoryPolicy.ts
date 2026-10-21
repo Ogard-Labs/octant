@@ -1,4 +1,4 @@
-import type { CanvasInventoryEntry, ProjectId } from "@octant/contracts";
+import type { CanvasInventoryEntry, ChatThread, ProjectId } from "@octant/contracts";
 import type { OctantMode } from "@octant/contracts/modes";
 
 export type CanvasTabAuthority = "bound" | "unavailable";
@@ -32,6 +32,39 @@ export function classifyCanvasTabRestore(input: {
     return "unavailable-project";
   }
   return "bound";
+}
+
+/**
+ * A Canvas a Chat thread owns outside every Project is reachable while that
+ * thread exists and is not deleted or deleting. Deletion takes the Canvas out
+ * of reach before the purge erases it, and an archived thread still holds it.
+ * The Canvas routes and the shell share this rule, so a tab is never kept for
+ * a Canvas the routes would refuse.
+ */
+export function chatThreadHoldsCanvas(
+  thread: { readonly lifecycle: ChatThread["lifecycle"] } | undefined,
+): boolean {
+  return thread !== undefined && thread.lifecycle !== "deleted" && thread.lifecycle !== "deleting";
+}
+
+export type ThreadOwnedCanvasTabAuthority = "bound" | "unavailable-canvas" | "unavailable-thread";
+
+/**
+ * A Canvas tab that names no Project stands only for a Canvas a Chat thread
+ * owns outside every Project, in the Chat layout. The window's Project is not
+ * consulted: the thread itself has no Project authority to match. Checking the
+ * Canvas alone restored a tab whose thread had been deleted, which opened to
+ * a refusal.
+ */
+export function classifyThreadOwnedCanvasTab(input: {
+  readonly mode: OctantMode;
+  readonly canvas: { readonly projectId: ProjectId | null } | undefined;
+  readonly thread: { readonly lifecycle: ChatThread["lifecycle"] } | undefined;
+}): ThreadOwnedCanvasTabAuthority {
+  if (input.mode !== "chat" || input.canvas === undefined || input.canvas.projectId !== null) {
+    return "unavailable-canvas";
+  }
+  return chatThreadHoldsCanvas(input.thread) ? "bound" : "unavailable-thread";
 }
 
 export function filterCanvasInventoryEntries(

@@ -140,12 +140,24 @@ async function defaultCredentialBrokerFactory(): Promise<CredentialBroker | unde
   if (process.platform !== "linux") return undefined;
   const availability = await probeSecretService();
   if (!availability.available) return undefined;
+  return startSecretServiceCredentialBroker();
+}
+
+/**
+ * The broker with every namespace the server reaches. The server treats a
+ * broker as proof each namespace exists, so one left out here is offered and
+ * then fails at the first write.
+ */
+export function startSecretServiceCredentialBroker(
+  makeStore: typeof makeSecretServiceCredentialStore = makeSecretServiceCredentialStore,
+): Promise<CredentialBroker> {
   return startCredentialBroker(
-    makeSecretServiceCredentialStore(),
+    makeStore(),
     undefined,
     undefined,
-    makeSecretServiceCredentialStore({ namespace: "replica-device-key" }),
-    makeSecretServiceCredentialStore({ namespace: "replica-store-credential" }),
+    makeStore({ namespace: "replica-device-key" }),
+    makeStore({ namespace: "replica-store-credential" }),
+    makeStore({ namespace: "canvas-public-share-secret" }),
   );
 }
 

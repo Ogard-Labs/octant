@@ -11,7 +11,9 @@ credential storage inside the event store.
 
 Most network traffic is yours to configure: provider API requests for Chat,
 Work, and Code, a Canvas export to a GitHub Gist that you approve, and remote
-access when you enable pairing. Two HTTPS calls
+access when you enable pairing. Public links are off until you turn them on:
+a Canvas published to one goes to the public Canvas share service, which can
+read it ([details](/advanced/privacy-notice#destinations-you-choose)). Two HTTPS calls
 Octant makes on its own behalf are the exception: [update checks](/guide/installation#updates)
 and [marketplace fetches](/advanced/plugins-and-skills#what-a-marketplace-fetch-discloses).
 Neither is a telemetry channel. This page states the posture of those two
@@ -197,6 +199,29 @@ that hosts the thread, not from a paired phone or browser.
   Installation never implies trust, activation, enablement, or authority.
 - Browser automation uses per-thread incognito contexts with an origin
   allowlist and credential-field protection.
+
+### What the Claude runtime does on its own
+
+Octant does not set Claude Code's blanket
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` switch: blocking every
+non-essential channel at once was stricter than Octant needs. What Octant
+turns off in Claude Code, it turns off by name on every launch:
+
+- usage metrics and error reports (`DISABLE_TELEMETRY`,
+  `DISABLE_ERROR_REPORTING`)
+- the runtime updating itself (`DISABLE_AUTOUPDATER`)
+- the `/bug` and `/feedback` commands, which upload the conversation
+  (`DISABLE_BUG_COMMAND`, `DISABLE_FEEDBACK_COMMAND`), and the session
+  survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`)
+- auto-memory, the SDK's built-in agents, and marketplace auto-install
+
+What the runtime may do on its own, under your Anthropic account: check
+for release notes, pull-request badges, and service availability. None of
+those carry Project content. It does not fetch feature flags: turning
+telemetry off also turns that off. Plugins, skills, and
+Remote Control stay out because Octant starts the runtime without them. If
+you export `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` yourself, Octant
+passes it through.
 
 ## Remote transport
 

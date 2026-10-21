@@ -58,6 +58,13 @@ third denial in one turn: the provider received that Deny and the host then
 stopped the turn, so it counts as answered. The start-screen card, the command
 palette, and the open Code thread all read Code answers this way.
 
+## Stopping a Code turn
+
+Every Code Stop, including the terminal client's, uses a fresh operation ID.
+The start ID would replay the start's saved result without cancelling anything.
+The terminal reports interruption only for an `interrupted` turn result bearing
+the Stop's own operation ID; HTTP success alone is not confirmation.
+
 ## Thread windows
 
 A thread opens on its newest turns and loads earlier ones on request. Each
