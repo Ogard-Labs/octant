@@ -51,7 +51,11 @@ import {
   CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
   CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION,
   CANVAS_THREAD_OWNED_SCHEMA_VERSION,
+  CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
+  CANVAS_MAX_DIAGRAM_GROUP_DEPTH,
   canvasProvenanceIsThreadOwned,
+  canvasDesignUsesDesignFields,
+  canvasDiagramUsesRichFields,
   canvasDiagramUsesStyles,
   canvasPlanUsesGantt,
   isCanvasDiagramNodeRole,
@@ -87,6 +91,7 @@ import {
   type CanvasSourceId,
 } from "@octant/contracts/canvas";
 import { canvasDesignMarkupRefusal, canvasDesignStylesheetRefusal } from "./canvasDesignPolicy";
+import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import { canvasMathSourceRefusal } from "./canvasMathPolicy";
 import { canvasDashboardColumns, isCanvasDashboardCellKind } from "./canvasDashboardLayout";
 import { canonicalizeWorkRelativePath, WorkConfinementRejected } from "./workConfinementPolicy";
@@ -116,6 +121,7 @@ const SUPPORTED_CANVAS_SCHEMA_VERSIONS: readonly number[] = [
   CANVAS_DESIGN_ASSET_SCHEMA_VERSION,
   CANVAS_DESIGN_RUNNING_SCHEMA_VERSION,
   CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION,
+  CANVAS_THREAD_OWNED_SCHEMA_VERSION,
   CANVAS_SCHEMA_VERSION,
 ];
 
@@ -252,6 +258,10 @@ export type CanvasPolicyRejectionCode =
   | "repeated-layout-child"
   | "nested-layout-group"
   | "unknown-diagram-role"
+  | "unknown-diagram-parent-group"
+  | "diagram-group-nesting-cycle"
+  | "diagram-group-depth-exceeded"
+  | "design-brand-refused"
   | "block-placed-twice";
 
 export class CanvasPolicyRejected extends Error {
@@ -456,7 +466,8 @@ function calculateBudgetUsage(
  * block from version 3, a thread presentation from version 4, a treemap from
  * version 5, a heatmap from version 6, a design block from version 9, a design
  * document or theme from version 16, design assets from version 17, a
- * design that runs script from version 18) inside a
+ * design that runs script from version 18, frame notes, brand tokens, and the
+ * richer diagram fields from version 21) inside a
  * document that declares an older version — must fail closed as an
  * unsupported schema version, before any content is read, rather than
  * collapsing into a generic "corrupt" decode failure. Works on both a
@@ -515,6 +526,9 @@ function declaredSchemaRejection(input: unknown): CanvasPolicyRejectionCode | un
             canvasDesignUsesAssets(block as Record<string, unknown>)) ||
           (declared < CANVAS_DESIGN_RUNNING_SCHEMA_VERSION &&
             canvasDesignRunsScript(block as Record<string, unknown>)) ||
+          (declared < CANVAS_DESIGN_FIELDS_SCHEMA_VERSION &&
+            (canvasDesignUsesDesignFields(block as Record<string, unknown>) ||
+              canvasDiagramUsesRichFields(block as Record<string, unknown>))) ||
           (declared < CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION &&
             (canvasDiagramUsesStyles(block as Record<string, unknown>) ||
               canvasPlanUsesGantt(block as Record<string, unknown>)))),
@@ -1069,6 +1083,7 @@ function validateCrossReferences(definition: CanvasDefinition): void {
           grouped.add(nodeId);
         }
       }
+      validateDiagramGroupNesting(block, groups);
     }
 
     if (block.kind === "sequence") validateSequence(block);
@@ -1217,6 +1232,89 @@ function validatePlacedOnce(definition: CanvasDefinition): void {
 }
 
 /**
+ * A brand is chosen with `theme: "brand"` and holds only values that may be
+ * written into a frame's stylesheet. Either half without the other would draw
+ * as something the author did not write, so each is refused alone. A running
+ * design is served as the author's own page, which the reader's renderer does
+ * not write tokens into, so it cannot take a brand.
+ */
+function validateDesignBrand(block: Extract<CanvasBlock, { readonly kind: "design" }>): void {
+  if (block.brand === undefined) {
+    if (block.theme === "brand") {
+      reject(
+        "design-brand-refused",
+        `Canvas design ${block.blockId} chooses the brand theme but declares no brand tokens.`,
+      );
+    }
+    return;
+  }
+  if (block.theme !== "brand") {
+    reject(
+      "design-brand-refused",
+      `Canvas design ${block.blockId} declares brand tokens; choose theme "brand" to draw with them.`,
+    );
+  }
+  if (block.runsScript === true) {
+    reject(
+      "design-run-refused",
+      `Canvas design ${block.blockId} runs script and is drawn as its own page; leave out its brand and style it in the design.`,
+    );
+  }
+  for (const [name, value] of Object.entries(block.brand)) {
+    const refusal = designBrandTokenRefusal(name, value);
+    if (refusal !== undefined) {
+      reject("design-brand-refused", `Canvas design ${block.blockId} brand ${refusal}.`);
+    }
+  }
+}
+
+/**
+ * A group may sit inside another so a region can hold its zones. The parent
+ * must be a group of the same diagram, the chain must end at a top-level group
+ * rather than loop back on itself, and it may not run deeper than the
+ * contract's limit: past that the boundaries stop reading as zones.
+ */
+function validateDiagramGroupNesting(
+  block: Extract<CanvasBlock, { readonly kind: "diagram" }>,
+  groupIds: ReadonlySet<string>,
+): void {
+  const groups = block.groups ?? [];
+  const parents = new Map<string, string>();
+  for (const group of groups) {
+    if (group.parentGroupId === undefined) continue;
+    const parent = String(group.parentGroupId);
+    if (!groupIds.has(parent)) {
+      reject(
+        "unknown-diagram-parent-group",
+        `Canvas diagram ${block.blockId} nests group ${group.groupId} inside a group it does not hold.`,
+      );
+    }
+    parents.set(String(group.groupId), parent);
+  }
+  for (const group of groups) {
+    const seen = new Set([String(group.groupId)]);
+    let depth = 1;
+    for (let cursor = parents.get(String(group.groupId)); cursor !== undefined;) {
+      if (seen.has(cursor)) {
+        reject(
+          "diagram-group-nesting-cycle",
+          `Canvas diagram ${block.blockId} nests group ${group.groupId} inside itself.`,
+        );
+      }
+      seen.add(cursor);
+      depth += 1;
+      cursor = parents.get(cursor);
+    }
+    if (depth > CANVAS_MAX_DIAGRAM_GROUP_DEPTH) {
+      reject(
+        "diagram-group-depth-exceeded",
+        `Canvas diagram ${block.blockId} nests group ${group.groupId} ${String(depth)} levels deep; the limit is ${String(CANVAS_MAX_DIAGRAM_GROUP_DEPTH)}.`,
+      );
+    }
+  }
+}
+
+/**
  * Frames are linked by id, so two frames sharing one would make a link land
  * on whichever came first. Markup a sandboxed frame could not draw as written
  * is refused with the reason, so the author can fix it rather than ship a
@@ -1238,6 +1336,7 @@ function validateDesign(
       `Canvas design ${block.blockId} runs script and is drawn as its own page; leave out theme "workspace" and style it in the design.`,
     );
   }
+  validateDesignBrand(block);
   const assetIds = new Set<string>();
   for (const asset of block.assets ?? []) {
     const id = String(asset.assetId);
@@ -1248,13 +1347,16 @@ function validateDesign(
       );
     }
     assetIds.add(id);
-    if (asset.source.kind !== "project-file") continue;
+    if (asset.source.kind === "generated-image") continue;
     if (mode === "chat") {
       reject(
         "design-asset-refused",
-        `Canvas design ${block.blockId} asset ${id} names a Project file; a Chat Project has no folder, so use a generated image.`,
+        asset.source.kind === "project-file"
+          ? `Canvas design ${block.blockId} asset ${id} names a Project file; a Chat Project has no folder, so use a generated image.`
+          : `Canvas design ${block.blockId} asset ${id} names a captured page; Chat keeps no captures for a design, so use a generated image.`,
       );
     }
+    if (asset.source.kind === "browser-capture") continue;
     try {
       canonicalizeWorkRelativePath(asset.source.path);
     } catch (error) {

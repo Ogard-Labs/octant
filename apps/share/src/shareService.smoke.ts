@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CANVAS_SHARE_SCHEMA_VERSION } from "@octant/contracts/canvas-share";
 import { startShareService } from "./server.ts";
 
 // Starts the service on loopback ports with a temporary data directory,
@@ -30,7 +31,7 @@ const body = {
   document: {
     schemaVersion: 1,
     kind: "canvas-public-share-document",
-    shareSchemaVersion: 10,
+    shareSchemaVersion: CANVAS_SHARE_SCHEMA_VERSION,
     title,
     summary: "A Canvas published by the smoke test.",
     publishedAt: new Date().toISOString(),

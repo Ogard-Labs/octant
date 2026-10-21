@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CANVAS_PUBLIC_SHARE_MAX_DOCUMENT_BYTES } from "@octant/contracts/canvas-public-share";
+import { CANVAS_SHARE_SCHEMA_VERSION } from "@octant/contracts/canvas-share";
 import { readShareConfig, type ShareConfig } from "./config.ts";
 import { startShareService, type ShareService } from "./server.ts";
 import { runTakedown } from "./takedown.ts";
@@ -72,7 +73,7 @@ function documentWith(blocks: ReadonlyArray<unknown>, title = "Quarterly plan") 
   return {
     schemaVersion: 1,
     kind: "canvas-public-share-document",
-    shareSchemaVersion: 10,
+    shareSchemaVersion: CANVAS_SHARE_SCHEMA_VERSION,
     title,
     summary: "A short summary of the plan",
     publishedAt: "2026-10-21T00:00:00.000Z",

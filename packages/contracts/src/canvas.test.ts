@@ -16,6 +16,10 @@ import {
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
   CANVAS_THREAD_OWNED_SCHEMA_VERSION,
+  CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
+  CANVAS_MAX_DESIGN_BRAND_TOKENS,
+  CANVAS_MAX_DESIGN_NOTES_LENGTH,
+  CANVAS_MAX_DIAGRAM_DETAIL_LENGTH,
   CANVAS_EVENT_NAMES,
   CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
@@ -291,7 +295,7 @@ describe("Canvas contracts", () => {
       decodeCanvasDefinition({ ...definition, schemaVersion: 15, blocks: [phone] }),
     ).toMatchObject({ blocks: [phone] });
     expect(() =>
-      decodeCanvasDefinition({ ...definition, blocks: [{ ...article, theme: "brand" }] }),
+      decodeCanvasDefinition({ ...definition, blocks: [{ ...article, theme: "sepia" }] }),
     ).toThrow();
     expect(CANVAS_DESIGN_DOCUMENT_SCHEMA_VERSION).toBe(16);
   });
@@ -2296,11 +2300,12 @@ describe("tabs and columns layout groups", () => {
     expect(decoded.blocks[0]).toEqual(tabs);
     expect(decoded.blocks[1]).toEqual(columns);
     expect(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION).toBe(19);
-    expect(CANVAS_SCHEMA_VERSION).toBe(CANVAS_THREAD_OWNED_SCHEMA_VERSION);
+    expect(CANVAS_THREAD_OWNED_SCHEMA_VERSION).toBe(20);
+    expect(CANVAS_SCHEMA_VERSION).toBe(CANVAS_DESIGN_FIELDS_SCHEMA_VERSION);
   });
 
   it("keeps every version through the current one decodable when it gates nothing new", () => {
-    for (const schemaVersion of [15, 16, 17, 18, 19, 20]) {
+    for (const schemaVersion of [15, 16, 17, 18, 19, 20, 21]) {
       const decoded = decodeCanvasDefinition({
         ...definition,
         schemaVersion,
@@ -2357,6 +2362,124 @@ describe("tabs and columns layout groups", () => {
     ).toThrow();
     expect(() =>
       decodeCanvasBlock({ ...tabs, panes: [{ ...first, blockIds: [] }, second] }),
+    ).toThrow();
+  });
+});
+
+describe("design fields and richer diagrams", () => {
+  const document = {
+    schemaVersion: CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
+    title: "Launch deck",
+    provenance,
+    sourceManifest: [],
+  } as const;
+  const deck = {
+    blockId: "deck",
+    schemaVersion: CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
+    kind: "design",
+    title: "Launch deck",
+    size: "slide",
+    theme: "brand",
+    brand: { "color-primary": "#1a73e8", "font-heading": "Georgia, serif", "radius-card": "8px" },
+    frames: [
+      { frameId: "intro", title: "Intro", html: "<h1>Hi</h1>", notes: "Open with the demo." },
+      { frameId: "close", title: "Close", html: "<h1>Bye</h1>" },
+    ],
+    assets: [
+      {
+        assetId: "shot",
+        source: { kind: "browser-capture", captureId: "99999999-9999-4999-8999-999999999999" },
+      },
+    ],
+  } as const;
+  const architecture = {
+    blockId: "arch",
+    schemaVersion: CANVAS_DESIGN_FIELDS_SCHEMA_VERSION,
+    kind: "diagram",
+    nodes: [
+      { nodeId: "web", label: "Web app", icon: "browser", detail: "React" },
+      { nodeId: "db", label: "Orders", icon: "database" },
+    ],
+    edges: [{ edgeId: "e1", source: "web", target: "db" }],
+    groups: [
+      { groupId: "region", label: "Region", nodeIds: [] },
+      { groupId: "data", label: "Data", nodeIds: ["db"], parentGroupId: "region" },
+    ],
+  } as const;
+
+  it("decodes frame notes, a brand, a captured-page asset, and diagram icons and nesting at version 21", () => {
+    const decoded = decodeCanvasDefinition({ ...document, blocks: [deck, architecture] });
+    expect(decoded.blocks).toEqual([deck, architecture]);
+  });
+
+  it("keeps a version 20 document without the new fields decodable", () => {
+    const older = {
+      ...document,
+      schemaVersion: 20,
+      blocks: [
+        {
+          ...architecture,
+          schemaVersion: 20,
+          nodes: [{ nodeId: "web", label: "Web app" }],
+          edges: [],
+          groups: [{ groupId: "region", label: "Region", nodeIds: ["web"] }],
+        },
+        {
+          ...deck,
+          schemaVersion: 20,
+          theme: "workspace",
+          brand: undefined,
+          assets: undefined,
+          frames: [{ frameId: "intro", title: "Intro", html: "<h1>Hi</h1>" }],
+        },
+      ],
+    };
+    expect(decodeCanvasDefinition(older).schemaVersion).toBe(20);
+  });
+
+  it("refuses each new field in a document that declares version 20", () => {
+    const frameNotes = { ...deck, theme: undefined, brand: undefined, assets: undefined };
+    const brandOnly = { ...deck, frames: [deck.frames[1]], assets: undefined };
+    const captureOnly = { ...deck, theme: undefined, brand: undefined, frames: [deck.frames[1]] };
+    for (const block of [frameNotes, brandOnly, captureOnly, architecture]) {
+      expect(() =>
+        decodeCanvasDefinition({
+          ...document,
+          schemaVersion: 20,
+          blocks: [{ ...block, schemaVersion: 20 }],
+        }),
+      ).toThrow();
+    }
+  });
+
+  it("bounds notes, the brand, the node detail, and the icon list", () => {
+    const [intro] = deck.frames;
+    const tooLong = "x".repeat(CANVAS_MAX_DESIGN_NOTES_LENGTH + 1);
+    expect(() => decodeCanvasBlock({ ...deck, frames: [{ ...intro, notes: tooLong }] })).toThrow();
+    expect(() => decodeCanvasBlock({ ...deck, frames: [{ ...intro, notes: "" }] })).toThrow();
+    const crowded = Object.fromEntries(
+      Array.from({ length: CANVAS_MAX_DESIGN_BRAND_TOKENS + 1 }, (_value, index) => [
+        `color-c${String(index)}`,
+        "#fff",
+      ]),
+    );
+    expect(() => decodeCanvasBlock({ ...deck, brand: crowded })).toThrow();
+    expect(() => decodeCanvasBlock({ ...deck, brand: { "margin-top": "4px" } })).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...architecture,
+        nodes: [
+          { nodeId: "web", label: "Web", detail: "d".repeat(CANVAS_MAX_DIAGRAM_DETAIL_LENGTH + 1) },
+        ],
+        groups: [],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeCanvasBlock({
+        ...architecture,
+        nodes: [{ nodeId: "web", label: "Web", icon: "vendor-logo" }],
+        groups: [],
+      }),
     ).toThrow();
   });
 });

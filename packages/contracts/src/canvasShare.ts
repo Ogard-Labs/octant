@@ -3,6 +3,7 @@ import {
   CANVAS_MAX_BAR_LIST_ROWS,
   CANVAS_MAX_DASHBOARD_CELLS,
   CANVAS_MAX_DESIGN_FRAMES,
+  CANVAS_MAX_DIAGRAM_DETAIL_LENGTH,
   CANVAS_MAX_DASHBOARD_COLUMNS,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
   CANVAS_MAX_HEATMAP_CELLS,
@@ -26,6 +27,7 @@ import {
   CanvasActor,
   CanvasBarListScale,
   CanvasBlock,
+  CanvasDesignBrand,
   CanvasDesignFrame,
   CanvasDesignMarkup,
   CanvasDesignSize,
@@ -52,7 +54,10 @@ import {
   CANVAS_MIN_COLUMN_TRACKS,
   isCanvasLayoutGroup,
   CanvasDiagramEdgeStyle,
+  CanvasDiagramNodeIcon,
   CanvasDiagramTone,
+  canvasDesignUsesDesignFields,
+  canvasDiagramUsesRichFields,
   canvasDiagramUsesStyles,
   canvasPlanUsesGantt,
   decodeCanvasDefinition,
@@ -115,7 +120,12 @@ export const CANVAS_SHARE_LAYOUT_GROUPS_SCHEMA_VERSION = 9;
 // draw a shared frame under the frame policy refuses version 10 as a future
 // version, so a frame never reaches a viewer that would draw it any other way.
 export const CANVAS_SHARE_FRAMES_SCHEMA_VERSION = 10;
-export const CANVAS_SHARE_SCHEMA_VERSION = 10 as const;
+// Version 11 carries what Canvas version 21 added to a share: a design's brand
+// tokens and a diagram node's icon and detail with a group's parent. A frame's
+// presenter notes and a captured-page asset are not carried; the schema still
+// accepts notes so a version-11 document stays decodable if that changes.
+export const CANVAS_SHARE_DESIGN_FIELDS_SCHEMA_VERSION = 11;
+export const CANVAS_SHARE_SCHEMA_VERSION = 11 as const;
 // The newest Canvas block version a share at this version names. Canvas
 // version 13 added only the table row id, which a share drops, so share
 // version 6 named a block authored at 13 as 12. Version 14 adds chart types a
@@ -126,9 +136,11 @@ export const CANVAS_SHARE_SCHEMA_VERSION = 10 as const;
 // nothing a share carries. Version 19 adds tabs and columns, so share version
 // 9 names blocks up to 19. Version 20 changes only a Canvas's provenance (a
 // Chat Canvas owned by its thread, which is never shared), so a block authored
-// at 20 is shared as 19. A later Canvas bump that adds something a share
+// at 20 is shared as 19. Version 21 adds design notes and brand tokens and the
+// richer diagram fields, which a share carries, so share version 11 names
+// blocks up to 21. A later Canvas bump that adds something a share
 // carries bumps the share version again.
-export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 19 as const;
+export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 21 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(
   1,
   2,
@@ -139,6 +151,7 @@ export const CanvasShareSchemaVersion = Schema.Literal(
   7,
   8,
   9,
+  10,
   CANVAS_SHARE_SCHEMA_VERSION,
 );
 export type CanvasShareSchemaVersion = typeof CanvasShareSchemaVersion.Type;
@@ -552,6 +565,8 @@ export const CanvasStaticExportBlock = Schema.Union(
         nodeId: boundedToken("CanvasNodeId"),
         label: ExportLabel,
         role: Schema.optional(boundedToken("CanvasNodeRole")),
+        icon: Schema.optional(CanvasDiagramNodeIcon),
+        detail: Schema.optional(boundedNonEmptyText(CANVAS_MAX_DIAGRAM_DETAIL_LENGTH)),
         x: Schema.optional(Schema.Number),
         y: Schema.optional(Schema.Number),
         positioned: Schema.optional(Schema.Literal(true)),
@@ -574,6 +589,7 @@ export const CanvasStaticExportBlock = Schema.Union(
           label: ExportLabel,
           nodeIds: Schema.Array(boundedToken("CanvasNodeId")).pipe(Schema.maxItems(512)),
           tone: Schema.optional(CanvasDiagramTone),
+          parentGroupId: Schema.optional(boundedToken("CanvasGroupId")),
         }).annotations(strict),
       ).pipe(Schema.maxItems(64)),
     ),
@@ -986,6 +1002,7 @@ export const CanvasStaticExportBlock = Schema.Union(
     title: ExportNonEmptyText,
     size: CanvasDesignSize,
     theme: Schema.optional(CanvasDesignTheme),
+    brand: Schema.optional(CanvasDesignBrand),
     runsScript: Schema.optional(Schema.Literal(true)),
     styles: Schema.optional(CanvasDesignMarkup),
     frames: Schema.Array(CanvasDesignFrame).pipe(
@@ -1092,6 +1109,17 @@ export const CanvasStaticExportDocument = Schema.Struct({
         document.schemaVersion >= CANVAS_SHARE_FRAMES_SCHEMA_VERSION ||
         !document.blocks.some((block) => block.kind === "design"),
       { message: () => "Design frames require Canvas share version 10." },
+    ),
+    Schema.filter(
+      (document) =>
+        document.schemaVersion >= CANVAS_SHARE_DESIGN_FIELDS_SCHEMA_VERSION ||
+        !document.blocks.some(
+          (block) => canvasDesignUsesDesignFields(block) || canvasDiagramUsesRichFields(block),
+        ),
+      {
+        message: () =>
+          "Brand tokens and diagram icons, details, and nested groups require Canvas share version 11.",
+      },
     ),
   );
 export type CanvasStaticExportDocument = typeof CanvasStaticExportDocument.Type;

@@ -174,9 +174,44 @@ version 16, a design's image `assets` at version 17, a design's
 `runsScript` at version 18, the `tabs` and `columns` layout groups,
 diagram styles, and the plan's `gantt` view at version 19, and a Chat
 Canvas owned by its thread (a chat provenance with no Project) at version
-20, so a document that declares an earlier version and carries one is
-refused as a declared future version. Version 20 adds no block or field a
-share carries, so a share still names a block authored at 20 as 19. The optional table column
+20, and the design and diagram fields below at version 21, so a document that
+declares an earlier version and carries one is refused as a declared future
+version. Version 20 adds no block or field a share carries, so a share names a
+block authored at 20 as 19 under share version 10. Version 21 adds the
+following, all optional, so every version 20 document still decodes:
+
+| Field                            | Where             | Limit                                                                                                                                                                                                                              |
+| -------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `notes`                          | each design frame | Non-empty plain text, at most 2,000 characters; shown as text, never as markup                                                                                                                                                     |
+| `theme: "brand"` with `brand`    | design block      | At most 32 tokens named `color-*`, `font-*`, `radius-*`, or `space-*` (lowercase slug), each value at most 128 characters                                                                                                          |
+| `source.kind: "browser-capture"` | design asset      | A `captureId`; allowed in Work and Code, refused in Chat like a Project file (`design-asset-refused`)                                                                                                                              |
+| `icon`, `detail`                 | diagram node      | `icon` is one of `client`, `browser`, `mobile`, `server`, `service`, `database`, `cache`, `queue`, `storage`, `cdn`, `gateway`, `auth`, `function`, `external`, `user`, `analytics`; `detail` is non-empty, at most 120 characters |
+| `parentGroupId`                  | diagram group     | A group of the same diagram, nested at most 3 levels                                                                                                                                                                               |
+
+The domain policy refuses an unknown parent group
+(`unknown-diagram-parent-group`), a cycle (`diagram-group-nesting-cycle`), and
+nesting deeper than three levels (`diagram-group-depth-exceeded`). A brand is
+chosen with `theme: "brand"`: either half without the other is refused, as is
+a brand on a design that runs script, because a running design is its own page
+and the reader's renderer writes no tokens into it (`design-brand-refused`,
+`design-run-refused`). Each token must pass the frame token safety rule
+(`designFrameTokenValueIsSafe`: no `;`, braces, angle brackets, backslash,
+`url(`, `@import`, or `expression(`) and its kind's shape: a colour is a hex
+value or an `rgb`, `hsl`, `oklch`, or `oklab` function, a font is a comma list
+drawn from a closed list of system faces and generic families (a brand never
+loads a font), and a radius or spacing step is a non-negative length in `px`,
+`rem`, `em`, or `%`. The renderers ignore these fields for now: a `brand`
+design is drawn as an unthemed page, notes and icons are not drawn, and a
+nested group draws as a top-level one. A `browser-capture` asset resolves as
+`refused` until captures resolve under the thread's authority.
+
+A share carries a brand (validated again before it leaves) and the diagram
+fields, so share version 11 names blocks up to Canvas version 21 and a share
+under version 10 that carries one is refused as a future version. Frame notes
+are the presenter's, like speaker notes in a deck: a share, a public link, and
+an export carry the slides and drop the notes, and what notes hold never blocks
+a share because it never leaves. A captured-page asset is not shared, as no
+declared image is. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
 version, but the strict definition schema refuses an unknown field, so a
@@ -494,9 +529,10 @@ version 6 named a block authored at version 13 as version 12. Share version 7
 carried the version-14 chart types, so it named blocks up to version 14, share
 version 8 carries the version-15 dashboard, so it named blocks up to version
 15, and share version 9 carries tabs, columns, diagram styles, and the Gantt
-view, so it names blocks up to version 19
-(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`). Share version 10 carries a design's
-frames and accompanies no Canvas version.
+view, so it names blocks up to version 19. Share version 10 carries a design's
+frames and accompanies no Canvas version, and share version 11 carries the
+version-21 design and diagram fields, so it names blocks up to version 21
+(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
@@ -505,7 +541,8 @@ mockup catalog with share version 6, the funnel, radar, and sankey charts
 with share version 7 (whose blocks may name Canvas version 14), the dashboard
 with share version 8, and tabs, columns, a diagram's edge styles and tones,
 its group tones, and a plan's `gantt` view with share version 9, and a
-design's frames with share version 10, so a share
+design's frames with share version 10, and a brand and the richer diagram
+fields with share version 11 (frame notes never leave), so a share
 that declares an older version
 and carries one is refused as a future version.
 A `tabs` block has 2 to 12 panes, each a short label and the block ids it
@@ -688,7 +725,7 @@ markup: the frames of one design at one size, `phone` (390×844), `tablet`
 (820×1180), `desktop` (1440×900), or `slide` (1920×1080), each a page of
 static HTML, plus one shared stylesheet. Version 16 adds the `document` size,
 whose frames are sections of one page as wide as the Canvas column and as tall
-as its content, and an optional `theme`: `workspace` or `none`, defaulting to
+as its content, and an optional `theme`: `workspace`, `none`, or (from version 21) `brand`, defaulting to
 `workspace` for a document and `none` for a device size, so a product screen
 keeps its own brand. The renderer draws each frame in an `iframe` with a
 `srcdoc` page whose policy loads nothing but inline styles and `data:` images
@@ -719,8 +756,10 @@ construct; the event store and revise policy return that reason to the
 author rather than a generic failure. The sandbox is the boundary and the
 link rule is part of it, because a link is the one way a page with no script
 can leave. Version 17 lets a design declare up to 12 image `assets`, each a
-`generated-image` (a completed image job's attachment id) or a `project-file`
+`generated-image` (a completed image job's attachment id), a `project-file`
 (a path relative to the Work thread's folder or the Code thread's checkout),
+or, from version 21, a `browser-capture` (a kept capture's id, not yet
+resolved),
 and markup names one as `octant-asset:<id>` in `src`, `srcset`, a `url()`, or
 an `image-set()` candidate. The markup policy admits a reference only for a
 declared id spelled literally and refuses a Project file in a Chat Canvas or
