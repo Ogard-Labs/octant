@@ -131,6 +131,8 @@ export interface ShellSidebarProps {
    * carries the destinations and counts, and the sidebar keeps the header,
    * search, threads, Projects, and profile.
    */
+  /** Plan usage rings for the icon rail, in either placement. */
+  readonly railUsage?: ReactNode;
   readonly railBeside?: {
     readonly onOpenActivity?: () => void;
   };
@@ -309,6 +311,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
           ? {}
           : { onOpenActivity: props.railBeside.onOpenActivity })}
         onOpenSettings={() => props.onOpenSettings()}
+        usage={props.railUsage}
         onSelectMode={props.onSelectMode}
         placement="beside"
         projects={[]}
@@ -351,6 +354,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
           : { onOpenProjects: navigationActions.projects })}
         {...(props.onOpenSearch === undefined ? {} : { onOpenSearch: props.onOpenSearch })}
         onOpenSettings={() => props.onOpenSettings()}
+        usage={props.railUsage}
         onSelectMode={props.onSelectMode}
         projects={props.rail.projects}
         tiles={tiles}

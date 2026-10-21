@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_THEME_SETTINGS } from "@octant/contracts/theme";
+import { DEFAULT_THEME_SETTINGS, type ThemeSettings } from "@octant/contracts/theme";
 import { ThemeAppearanceEditor } from "./ThemeAppearanceEditor";
 import type { ThemeController } from "./useThemeController";
 
@@ -25,6 +25,37 @@ function controller(): ThemeController {
 }
 
 describe("ThemeAppearanceEditor", () => {
+  it("saves a chosen accent colour with dark ink on it, and Mono puts the theme's own back", async () => {
+    const applyPatch = vi.fn(async (_patch: Partial<ThemeSettings>) => true);
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ThemeAppearanceEditor controller={{ ...controller(), applyPatch }} />,
+    );
+
+    expect(screen.getByRole("radio", { name: "Mono" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("radio", { name: "Clay" }));
+    expect(applyPatch).toHaveBeenLastCalledWith({
+      semanticOverrides: [
+        { role: "accent", color: "#d97757" },
+        { role: "accent-foreground", color: "#141414" },
+        { role: "primary-foreground", color: "#141414" },
+      ],
+    });
+
+    const clay = {
+      ...DEFAULT_THEME_SETTINGS,
+      semanticOverrides: applyPatch.mock.lastCall?.[0]?.semanticOverrides ?? [],
+    };
+    rerender(
+      <ThemeAppearanceEditor
+        controller={{ ...controller(), applyPatch, settings: clay, draft: clay }}
+      />,
+    );
+    expect(screen.getByRole("radio", { name: "Clay" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("radio", { name: "Mono" }));
+    expect(applyPatch).toHaveBeenLastCalledWith({ semanticOverrides: [] });
+  });
+
   it("keeps specialist fonts behind named disclosures and omits the obsolete ring control", async () => {
     const user = userEvent.setup();
     render(<ThemeAppearanceEditor controller={controller()} />);
