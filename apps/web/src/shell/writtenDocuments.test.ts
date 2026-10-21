@@ -86,4 +86,24 @@ describe("documents an agent turn writes", () => {
     );
     expect(stillWritten).toBe(written);
   });
+
+  it("keeps every document the thread has as its outputs, once each, and forgets a deleted file", () => {
+    const seen = noteExistingDocuments(NO_WRITTEN_DOCUMENTS, [
+      { kind: "canvas", canvasId: "c-1", title: "Plan" },
+    ]);
+    const handoff = { kind: "file" as const, path: "docs/handoff.md" };
+    const written = noteWrittenDocument(seen, handoff).offers;
+    const rewritten = noteWrittenDocument(written, handoff).offers;
+    expect(rewritten.documents).toEqual([
+      { kind: "canvas", canvasId: "c-1", title: "Plan" },
+      handoff,
+    ]);
+
+    const reopened = showWrittenDocument(rewritten, { kind: "canvas", canvasId: "c-1" });
+    expect(reopened.documents).toHaveLength(2);
+
+    const deleted = forgetDeletedWrittenDocument(reopened, new Set(["docs/handoff.md"]), new Set());
+    expect(deleted.documents).toEqual([{ kind: "canvas", canvasId: "c-1", title: "Plan" }]);
+    expect(deleted.current).toEqual({ kind: "canvas", canvasId: "c-1" });
+  });
 });

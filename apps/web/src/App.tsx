@@ -352,6 +352,7 @@ import {
   noteExistingDocuments,
   noteWrittenDocument,
   showWrittenDocument,
+  type WrittenDocument,
   type WrittenDocumentOffers,
 } from "./shell/writtenDocuments";
 import {
@@ -2663,7 +2664,11 @@ function LaunchedShell(
     );
     const documents = cards
       .filter((card) => isAuthorizedCanvasDocument(card) && card.presentation !== "inline")
-      .map((card) => ({ kind: "canvas" as const, canvasId: String(card.canvasId) }));
+      .map((card) => ({
+        kind: "canvas" as const,
+        canvasId: String(card.canvasId),
+        title: card.title,
+      }));
     const offers = writtenDocumentsRef.current.get(key);
     if (offers === undefined) {
       const seeded = noteExistingDocuments(NO_WRITTEN_DOCUMENTS, documents);
@@ -2692,7 +2697,11 @@ function LaunchedShell(
   /** The person asked to see a Canvas drawn in the thread beside that thread. */
   function openCanvasInSidebar(card: CanvasThreadReferenceCard): void {
     const key = threadUtilityDockKey(card.scope.mode, String(card.originThreadId));
-    const document = { kind: "canvas" as const, canvasId: String(card.canvasId) };
+    const document = {
+      kind: "canvas" as const,
+      canvasId: String(card.canvasId),
+      title: card.title,
+    };
     setWrittenDocumentsByThread((current) =>
       new Map(current).set(
         key,
@@ -2700,6 +2709,21 @@ function LaunchedShell(
       ),
     );
     setDockStatesByThread((current) => openThreadUtilityTab(current, key, "canvas"));
+    setDockVisible(true);
+  }
+  /** The person picked one of the dock thread's outputs: its tool opens on it. */
+  function openWrittenDocument(document: WrittenDocument): void {
+    if (dockThreadKey === undefined) return;
+    const key = dockThreadKey;
+    setWrittenDocumentsByThread((current) =>
+      new Map(current).set(
+        key,
+        showWrittenDocument(current.get(key) ?? NO_WRITTEN_DOCUMENTS, document),
+      ),
+    );
+    setDockStatesByThread((current) =>
+      openThreadUtilityTab(current, key, document.kind === "canvas" ? "canvas" : "document"),
+    );
     setDockVisible(true);
   }
   function noteHandedOffDocument(mode: OctantMode, threadId: string, canvasId: string): void {
@@ -4448,6 +4472,7 @@ function LaunchedShell(
       openThreadSearch,
       openThreadBrowser: controller.openThreadBrowser,
       openWorkThread: controller.openWorkThread,
+      openWrittenDocument,
       persistBottomPanelPresentation,
       pinChatThreadInPane,
       pinCodeThread: codeController.pinThread,
@@ -6614,6 +6639,7 @@ function LaunchedShell(
                 dockTabs={dockTabs}
                 {...(dockThread === undefined ? {} : { dockThread })}
                 {...(dockThreadHost === undefined ? {} : { dockThreadHost })}
+                dockThreadOnThisComputer={dockThreadHostId === String(LOCAL_HOST_ID)}
                 {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
                 {...(dockThreadProjectId === undefined ? {} : { dockThreadProjectId })}
                 {...(dockThreadRepository === undefined ? {} : { dockThreadRepository })}

@@ -1374,7 +1374,11 @@ has nothing true to put in it. A card is the overview's own recipe: the surface
 fill, a hairline, a medium-weight title, and rows at the 28px step, with a
 figure or word in meta ink at the title's right. **Environment** names where
 the thread runs (the host, the Project, the branch with Worktree when it runs
-in one) and the mode at its right; **Local servers** lists the servers this
+in one) and the mode at its right, and, in the desktop app's own window for a
+thread on this computer, a **Remote access** switch read once from the host's
+listener status: on turns the listener off through the same host action
+Settings uses, and off opens Settings › Remote access, where the address and
+certificate enabling needs are chosen and confirmed; **Local servers** lists the servers this
 thread's checkout is serving, each a dot (the success ink when it answers) and
 its name with the port, from one observation when the overview opens, never a
 poll; both titles open the Environment tool. **Context** shows the share used
@@ -1382,6 +1386,14 @@ at its right beside a short neutral bar, with used of total under it, from the
 composer meter's own source. **Changes** (Code only) shows the board's observed
 `+`/`-` totals over the file count, never a stale observation, as the row that
 opens Review, and the thread's pull request with its checks in words.
+**Outputs** lists the documents and Canvases the window knows the thread has
+(those it had when opened and those its turns wrote since, never a deleted
+file), newest first and at most five, each a row that opens it in Document or
+Canvas, with the count at the title's right. **Background tasks** lists the
+runs the thread's agent handed work to, from the same read and cadence as the
+Environment tab's Subagents row: each running one a spinner, task, and age,
+with the running count at the title's right, and the finished ones folded under
+one "N finished" row; a row opens that run in Agents.
 **Running now** lists the other threads the window knows are working (any
 mode, at most five, newest first, never the thread on screen), each a spinner,
 title, Project, and age, and opens that thread. Model and access are not

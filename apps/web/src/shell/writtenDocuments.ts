@@ -12,15 +12,26 @@
  */
 export type WrittenDocument =
   | { readonly kind: "file"; readonly path: string }
-  | { readonly kind: "canvas"; readonly canvasId: string };
+  | {
+      readonly kind: "canvas";
+      readonly canvasId: string;
+      /** The Canvas's own title, when the window read its card. */
+      readonly title?: string;
+    };
 
 export interface WrittenDocumentOffers {
   readonly offered: ReadonlySet<string>;
   /** The document the dock shows for this thread, when one was written. */
   readonly current?: WrittenDocument;
+  /**
+   * Every document the window knows the thread has, oldest first: the ones it
+   * had when it was opened and the ones its turns wrote since. The dock's
+   * overview lists them as the thread's outputs.
+   */
+  readonly documents: ReadonlyArray<WrittenDocument>;
 }
 
-export const NO_WRITTEN_DOCUMENTS: WrittenDocumentOffers = { offered: new Set() };
+export const NO_WRITTEN_DOCUMENTS: WrittenDocumentOffers = { offered: new Set(), documents: [] };
 
 const DOCUMENT_EXTENSIONS: ReadonlySet<string> = new Set(["md", "markdown", "mdx", "txt"]);
 
@@ -49,7 +60,10 @@ export function noteWrittenDocument(
   if (offers.offered.has(id)) return { offers, open: false };
   const offered = new Set(offers.offered);
   offered.add(id);
-  return { offers: { offered, current: document }, open: true };
+  return {
+    offers: { offered, current: document, documents: withDocument(offers.documents, document) },
+    open: true,
+  };
 }
 
 /**
@@ -63,7 +77,7 @@ export function showWrittenDocument(
 ): WrittenDocumentOffers {
   const offered = new Set(offers.offered);
   offered.add(writtenDocumentId(document));
-  return { offered, current: document };
+  return { offered, current: document, documents: withDocument(offers.documents, document) };
 }
 
 /**
@@ -77,16 +91,21 @@ export function noteExistingDocuments(
 ): WrittenDocumentOffers {
   if (documents.length === 0) return offers;
   const offered = new Set(offers.offered);
-  for (const document of documents) offered.add(writtenDocumentId(document));
-  return { ...offers, offered };
+  let known = offers.documents;
+  for (const document of documents) {
+    offered.add(writtenDocumentId(document));
+    known = withDocument(known, document);
+  }
+  return { ...offers, offered, documents: known };
 }
 
 /**
- * Drops the shown document when the turn deleted the file behind it.
+ * Drops a document the turn deleted, and stops showing it.
  *
  * A turn can write a document and then remove it, which takes the path out of
  * the turn's written paths. The dock must stop offering a file that is no
- * longer there rather than hand the Document tool a path that cannot be read.
+ * longer there rather than hand the Document tool a path that cannot be read,
+ * and must stop listing it among the thread's outputs.
  *
  * The rule reads the move from written to gone, not absence alone: a reopened
  * thread replays tool and reasoning steps without written paths, and that
@@ -98,8 +117,29 @@ export function forgetDeletedWrittenDocument(
   previousPaths: ReadonlySet<string>,
   livePaths: ReadonlySet<string>,
 ): WrittenDocumentOffers {
+  const deleted = (document: WrittenDocument) =>
+    document.kind === "file" && previousPaths.has(document.path) && !livePaths.has(document.path);
+  const documents = offers.documents.filter((document) => !deleted(document));
   const current = offers.current;
-  if (current === undefined || current.kind !== "file") return offers;
-  if (!previousPaths.has(current.path) || livePaths.has(current.path)) return offers;
-  return { offered: offers.offered };
+  const currentDeleted = current !== undefined && deleted(current);
+  if (!currentDeleted && documents.length === offers.documents.length) return offers;
+  return {
+    offered: offers.offered,
+    documents,
+    ...(current === undefined || currentDeleted ? {} : { current }),
+  };
+}
+
+/** Adds a document once; a later sighting with a title names the one already listed. */
+function withDocument(
+  documents: ReadonlyArray<WrittenDocument>,
+  document: WrittenDocument,
+): ReadonlyArray<WrittenDocument> {
+  const id = writtenDocumentId(document);
+  const index = documents.findIndex((known) => writtenDocumentId(known) === id);
+  if (index === -1) return [...documents, document];
+  const known = documents[index];
+  if (document.kind !== "canvas" || document.title === undefined) return documents;
+  if (known?.kind === "canvas" && known.title === document.title) return documents;
+  return documents.map((entry, at) => (at === index ? document : entry));
 }
