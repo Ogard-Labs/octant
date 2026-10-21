@@ -1080,8 +1080,12 @@ overview, or Project-level list. An unsplit conversation uses the title band
 for the Project/mode breadcrumb and compact thread strip, so the transcript
 does not repeat a second title block. Split panes and utility surfaces retain
 their own pane headers and lifecycle controls. Capability-gated toggles for
-Open in, bottom panel, and right dock remain window chrome. Environment is
-opened from the dock tab strip or Add tool. Zen
+Open in, bottom panel, and right dock remain window chrome. Above the right
+dock, in the same title band, sit its tools: while none is open, Environment by
+name and Terminal, Browser, Files, and the device tools as icons (each only
+where the thread can open it); once tools are open, the tab strip, where only
+the open tool names itself and the others are their icons with the name in
+the tooltip. Environment is opened from that band or Add tool. Zen
 remains in the bottom-left identity menu.
 
 Zen is a desk. Every card is a window: its title bar moves it, every edge and
@@ -1397,8 +1401,8 @@ A welcome, Project, or other pane with neither a bound thread nor a valid
 launchable tool keeps the dock closed and omits its toggle. Restored presentation
 for another subject never makes unavailable chrome visible.
 
-Environment is a right-dock tool, opened from the dock's tab strip or Add tool
-and nowhere else; the title band carries no second Environment button. It reads
+Environment is a right-dock tool, opened from the dock's title band (its
+quick tools or tab strip) or Add tool and nowhere else; the title band carries no second Environment button. It reads
 top to bottom as cards in the Settings kit's grouped-card look: one header card,
 then two captioned cards of rows. The header card names what the thread works
 in: the name on its own line, then the branch glyph, the branch, a dot, and the
@@ -1557,7 +1561,7 @@ widest viewport its behavior applies to:
 | At or below | Source                                                     | What changes                                                                                                                                                                                                                                     |
 | ----------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 960px       | `useNarrowViewport` (`useShellPresentation.ts`), shell.css | The right dock opens as one narrow modal sheet over the page (a titled dialog, no resize handle, Escape closes it and returns focus) instead of a column; the bottom panel is unavailable; the sidebar stops resizing; Settings uses its drawer. |
-| 680px       | `useSidebarDrawerViewport`, shell.css (`min-width: 681px`) | The workspace sidebar becomes an overlay drawer, the window frame goes flat, and pane headers drop their Project and branch chips.                                                                                                               |
+| 680px       | `useSidebarDrawerViewport`, shell.css (`min-width: 681px`) | The workspace sidebar becomes an overlay drawer, the window frame goes flat, and pane headers drop the Project step of their breadcrumb.                                                                                                         |
 
 Inside a surface, layouts reflow at component breakpoints rather than shell
 ones: `--oct-bp-lg` 920px (two-to-four column grids and the Project overview gutter),

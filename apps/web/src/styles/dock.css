@@ -63,9 +63,19 @@
   text-transform: none;
 }
 
-.right-utility-dock__title-spacer {
+/* Before any tool opens, the band offers the tools a thread reaches for most:
+   Environment by name, the rest as icons, the same faces the strip uses. */
+.dock-quick-tools {
+  display: flex;
+  flex: 0 1 auto;
   min-width: 0;
-  flex: 1 1 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.dock-quick-tools__tool > svg {
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
 }
 
 .right-utility-dock__tabs {
@@ -114,6 +124,12 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Only the open tool names itself; the others are their icons, with the name
+   in the tooltip, so several open tools fit the band without ellipsizing. */
+.dock-tool-strip__select[aria-selected="false"] > span {
+  display: none;
 }
 
 .dock-tool-strip__select > svg {

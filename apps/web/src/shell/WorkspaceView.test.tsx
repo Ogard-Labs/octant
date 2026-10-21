@@ -1112,7 +1112,7 @@ function localServersWiring(
 }
 
 describe("WorkspaceView pane title facts", () => {
-  it("names the thread's pull request and Project/branch beside the pane title", async () => {
+  it("names the thread's pull request and its Project as the breadcrumb before the pane title", async () => {
     const base = propsFor(codeTab("code-overview", "Faster issue validation"));
     const project = {
       id: ids.project,
@@ -1180,7 +1180,9 @@ describe("WorkspaceView pane title facts", () => {
     expect(chip).toHaveAttribute("data-checks", "failing");
     // The Project and the branch ride in the title row as two chips.
     expect(within(header).getByText("Octant")).toBeVisible();
-    expect(within(header).getByText("fix/validation")).toHaveClass("workspace-pane__branch");
+    // The branch lives in the composer's strip, not repeated in the header.
+    expect(within(header).queryByText("fix/validation")).not.toBeInTheDocument();
+    expect(within(header).getByText("/")).toHaveClass("workspace-pane__crumb");
 
     // The pane tab's mention is a control, not a mark: it hands the shell the
     // request's full identity so the dock can open it.
