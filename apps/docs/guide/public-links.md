@@ -172,9 +172,13 @@ takedown, are not final. The maintainer sets them before the service launches.
 
 ## Run your own service
 
-You do not have to use `canvas.octant.sh`. The share service is a small Bun app
-in the [octant-webapp](https://github.com/Ogard-Labs/octant-webapp) repository. Run it on your own server, put TLS in front
-of it, and enter its URL in **Settings › Data & privacy › Public links**. Your links
+::: info Not available yet
+The share service's source is not public yet, so you cannot run your own copy
+today. These steps apply once it is published.
+:::
+
+You do not have to use `canvas.octant.sh`. The share service is a small Bun app.
+Run it on your own server, put TLS in front of it, and enter its URL in **Settings › Data & privacy › Public links**. Your links
 then live wherever you run it.
 
 The service uses two web addresses: one for pages and one for design frames. It
