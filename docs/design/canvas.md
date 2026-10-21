@@ -383,6 +383,8 @@ version 6.
 
 ## Shares
 
+A public link carries the same blocks without host, Project, thread, or
+source identity; its rules are in [Canvas public links](canvas-public-links.md).
 A share carries every block kind and field a Canvas holds except source ids,
 a design's declared images, and the action block it refuses (see the `design`
 block). A table

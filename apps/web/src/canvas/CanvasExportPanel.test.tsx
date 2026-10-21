@@ -195,7 +195,7 @@ describe("CanvasExportPanel", () => {
     );
     await user.click(screen.getByRole("button", { name: "Review export" }));
     expect(await screen.findByTestId("canvas-export-design-markup")).toHaveTextContent(
-      "design markup exactly as written",
+      "This Canvas's design markup leaves as written.",
     );
     withMarkup.unmount();
 
@@ -316,5 +316,154 @@ describe("CanvasExportPanel", () => {
     await user.click(screen.getByRole("button", { name: "Approve export" }));
 
     expect(onDecide).toHaveBeenCalledWith(expect.objectContaining({ visibility: "public" }));
+  });
+
+  describe("a public link destination", () => {
+    const linkOffers = (): CanvasExportOfferList => ({
+      ...offers(),
+      targets: [
+        ...offers().targets,
+        {
+          targetId: "public-link" as CanvasExportOfferList["targets"][number]["targetId"],
+          label: "Public link",
+          formats: ["share-document"],
+          status: "ready",
+        },
+      ],
+    });
+    const linkCard = (terms: Record<string, unknown>) => ({
+      kind: "approval" as const,
+      card: {
+        schemaVersion: 1 as const,
+        kind: "canvas-export-approval" as const,
+        approvalId,
+        canvasId,
+        versionId,
+        sequence: 1,
+        targetId: "public-link",
+        destinationLabel: "Public link",
+        format: "share-document" as const,
+        title: "Launch plan",
+        destinationLinkTerms: terms,
+        payload: "{}",
+        payloadDigest: "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        byteLength: 2,
+      },
+    });
+    const refused = async () => ({ kind: "refused" as const, message: "Not sent." });
+
+    it("shows the link terms with the default expiry chosen and never expiring left unchosen", async () => {
+      const user = userEvent.setup();
+      render(
+        <CanvasExportPanel
+          initialTargetId="public-link"
+          offers={linkOffers()}
+          onDecide={vi.fn()}
+          onPrepare={
+            vi.fn(async () =>
+              linkCard({
+                defaultExpiryDays: 30,
+                allowsPassword: true,
+                updatesLink: "https://canvas.octant.sh/s/abc",
+                hasPassword: true,
+              }),
+            ) as never
+          }
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "Review export" }));
+
+      expect(await screen.findByText("The link opens for anyone who has it.")).toBeVisible();
+      expect(screen.getByTestId("canvas-export-updates-link")).toHaveTextContent(
+        "Updates https://canvas.octant.sh/s/abc",
+      );
+      expect(screen.getByRole("combobox", { name: "Link expires" })).toHaveTextContent("30 days");
+      expect(screen.getByText(/keeps it unless you enter a new one/)).toBeVisible();
+      expect(screen.getByTestId("canvas-export-link-password")).toHaveAttribute("type", "password");
+    });
+
+    it("sends the chosen expiry and password when the person approves", async () => {
+      const user = userEvent.setup();
+      const onDecide = vi.fn(refused);
+      render(
+        <CanvasExportPanel
+          initialTargetId="public-link"
+          offers={linkOffers()}
+          onDecide={onDecide as never}
+          onPrepare={
+            vi.fn(async () => linkCard({ defaultExpiryDays: 30, allowsPassword: true })) as never
+          }
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "Review export" }));
+      await user.click(await screen.findByRole("combobox", { name: "Link expires" }));
+      await user.click(await screen.findByRole("option", { name: "7 days" }));
+      await user.type(screen.getByTestId("canvas-export-link-password"), "correct horse");
+      await user.click(screen.getByRole("button", { name: "Approve export" }));
+
+      expect(onDecide).toHaveBeenCalledWith(
+        expect.objectContaining({
+          decision: "approved",
+          link: { expiry: { kind: "days", days: 7 }, password: "correct horse" },
+        }),
+      );
+    });
+
+    it("sends the destination's default expiry and no password when the person changes nothing", async () => {
+      const user = userEvent.setup();
+      const onDecide = vi.fn(refused);
+      render(
+        <CanvasExportPanel
+          initialTargetId="public-link"
+          offers={linkOffers()}
+          onDecide={onDecide as never}
+          onPrepare={
+            vi.fn(async () => linkCard({ defaultExpiryDays: 30, allowsPassword: true })) as never
+          }
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "Review export" }));
+      await user.click(await screen.findByRole("button", { name: "Approve export" }));
+
+      expect(onDecide).toHaveBeenCalledWith(
+        expect.objectContaining({ link: { expiry: { kind: "days", days: 30 } } }),
+      );
+    });
+
+    it("refuses a password that is too short before anything is sent", async () => {
+      const user = userEvent.setup();
+      const onDecide = vi.fn(refused);
+      render(
+        <CanvasExportPanel
+          initialTargetId="public-link"
+          offers={linkOffers()}
+          onDecide={onDecide as never}
+          onPrepare={
+            vi.fn(async () => linkCard({ defaultExpiryDays: 30, allowsPassword: true })) as never
+          }
+        />,
+      );
+      await user.click(screen.getByRole("button", { name: "Review export" }));
+      await user.type(await screen.findByTestId("canvas-export-link-password"), "short");
+      await user.click(screen.getByRole("button", { name: "Approve export" }));
+
+      expect(onDecide).not.toHaveBeenCalled();
+      expect(screen.getByRole("status")).toHaveTextContent("at least 8 characters");
+    });
+
+    it("preselects the destination it was opened for", () => {
+      render(
+        <CanvasExportPanel
+          initialTargetId="public-link"
+          offers={linkOffers()}
+          onDecide={vi.fn()}
+          onPrepare={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByRole("combobox", { name: "Destination" })).toHaveTextContent(
+        "Public link",
+      );
+    });
   });
 });

@@ -19,6 +19,12 @@ import {
   type CanvasVersion,
 } from "@octant/contracts/canvas";
 import type { UtcTimestamp } from "@octant/contracts/events";
+import {
+  CANVAS_PUBLIC_SHARE_SUMMARY_MAX_CHARS,
+  CANVAS_PUBLIC_SHARE_WIRE_VERSION,
+  decodeCanvasPublicShareDocument,
+  type CanvasPublicShareDocument,
+} from "@octant/contracts/canvas-public-share";
 
 export type CanvasShareDenialCode =
   | "malformed-request"
@@ -72,11 +78,36 @@ function extractCandidateUrls(value: string): string[] {
   const candidates = new Set<string>();
   const trimmed = value.trim();
   if (trimmed) candidates.add(trimmed);
-  const embedded = value.match(/[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`<>]+/g) ?? [];
-  for (const match of embedded) {
+  for (const match of embeddedUrls(value)) {
     candidates.add(trimTrailingUrlPunctuation(match));
   }
   return [...candidates];
+}
+
+const URL_SCHEME_CHAR = /^[A-Za-z0-9+.-]$/;
+const URL_SCHEME_START = /^[A-Za-z]$/;
+const URL_END_CHAR = /[\s"'`<>]/;
+
+/**
+ * Every `scheme://rest` run in the text, found by a linear scan from each
+ * `://`. A single regex over the whole text backtracked quadratically on a
+ * long run of scheme letters with no `://`, and public links now feed this
+ * text from outside the host.
+ */
+function embeddedUrls(value: string): string[] {
+  const found: string[] = [];
+  let from = 0;
+  for (;;) {
+    const separator = value.indexOf("://", from);
+    if (separator < 0) return found;
+    let start = separator;
+    while (start > 0 && URL_SCHEME_CHAR.test(value.charAt(start - 1))) start -= 1;
+    while (start < separator && !URL_SCHEME_START.test(value.charAt(start))) start += 1;
+    let end = separator + 3;
+    while (end < value.length && !URL_END_CHAR.test(value.charAt(end))) end += 1;
+    if (start < separator && end > separator + 3) found.push(value.slice(start, end));
+    from = Math.max(end, separator + 3);
+  }
 }
 
 function assertNoCredentialBearingUrl(value: string, path: string): void {
@@ -388,6 +419,64 @@ export function buildCanvasStaticExportDocument(input: {
     blocks,
     threatModelId: "canvas-share-static-export-v1",
   };
+}
+
+/**
+ * The payload of a public link: the same filtered blocks a snapshot carries,
+ * with nothing that names the host, its Project, the thread, the Canvas, or a
+ * source, because the link leaves for a service anyone with the URL can read.
+ * `markupAcknowledged` is the person's approval of a card that said a design's
+ * markup leaves as written; without it a design refuses the whole payload.
+ */
+export function buildCanvasPublicShareDocument(input: {
+  readonly definition: Pick<CanvasDefinition, "title" | "blocks">;
+  readonly publishedAt: UtcTimestamp | string;
+  readonly markupAcknowledged: boolean;
+}): CanvasPublicShareDocument {
+  const definition = input.definition;
+  for (const block of definition.blocks) {
+    if (block.kind === "action") {
+      reject(
+        "unsafe-payload",
+        `Canvas action ${block.blockId} runs on this host, so a public link cannot carry it.`,
+      );
+    }
+  }
+  assertNoSecretShape(definition.title, "title");
+  const blocks = definition.blocks.map((block) =>
+    sharedBlockVersion(sanitizeBlock(block, input.markupAcknowledged)),
+  );
+  const summary = publicShareSummary(blocks);
+  try {
+    return decodeCanvasPublicShareDocument({
+      schemaVersion: CANVAS_PUBLIC_SHARE_WIRE_VERSION,
+      kind: "canvas-public-share-document",
+      shareSchemaVersion: CANVAS_SHARE_SCHEMA_VERSION,
+      title: definition.title,
+      ...(summary === undefined ? {} : { summary }),
+      publishedAt: String(input.publishedAt),
+      blocks,
+    });
+  } catch {
+    return reject("unsafe-payload", "This Canvas holds something a public link cannot carry.");
+  }
+}
+
+/** The first reading text, on one line and cut at a word, for a link preview. */
+function publicShareSummary(blocks: ReadonlyArray<CanvasStaticExportBlock>): string | undefined {
+  for (const block of blocks) {
+    if (block.kind !== "rich-text" && block.kind !== "callout") continue;
+    const line = block.text
+      .replace(/[`*_#>[\]()]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (line === "") continue;
+    if (line.length <= CANVAS_PUBLIC_SHARE_SUMMARY_MAX_CHARS) return line;
+    const cut = line.slice(0, CANVAS_PUBLIC_SHARE_SUMMARY_MAX_CHARS - 1);
+    const space = cut.lastIndexOf(" ");
+    return `${(space > 80 ? cut.slice(0, space) : cut).trimEnd()}…`;
+  }
+  return undefined;
 }
 
 export function buildCanvasStaticExportReceipt(input: {
