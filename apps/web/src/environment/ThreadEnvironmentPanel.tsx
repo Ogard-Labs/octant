@@ -1,5 +1,6 @@
 import { GitBranch } from "lucide-react";
 import { DockModuleBoundary } from "../shell/DockModuleBoundary";
+import { EnvironmentSuggestedTasks } from "../followUps/FollowUpSuggestionChips";
 import type { EnvironmentCompactIdentity } from "@octant/contracts";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
@@ -106,7 +107,10 @@ export function ThreadEnvironmentPanel(props: ThreadEnvironmentPanelProps) {
         </div>
         {props.headerContent}
       </header>
-      <div className="thread-environment-dock__body">{props.children}</div>
+      <div className="thread-environment-dock__body">
+        <EnvironmentSuggestedTasks />
+        {props.children}
+      </div>
     </section>
   );
   const isolated = <DockModuleBoundary>{content}</DockModuleBoundary>;

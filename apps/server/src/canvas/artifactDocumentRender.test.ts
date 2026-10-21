@@ -19,7 +19,11 @@ import {
   renderArtifactHtml,
   renderArtifactMarkdown,
 } from "./artifactDocumentRender";
-import { renderArtifactSidecarSvg } from "./artifactRender";
+import {
+  DEFAULT_ARTIFACT_PALETTE,
+  drawCanvasDiagramLayout,
+  renderArtifactSidecarSvg,
+} from "./artifactRender";
 
 function definition(blocks: ReadonlyArray<CanvasBlock>, title = "Launch plan") {
   return { title, blocks };
@@ -923,6 +927,109 @@ describe("exporting a styled diagram and a Gantt plan", () => {
     expect(markdown.body).toContain("- Start run (terminator)");
     expect(markdown.body).toContain("Encounter? ⇢ Return to camp: flee");
     expect(markdown.body).not.toContain("<svg");
+  });
+
+  it("draws icons, subtitles, and nested groups in the HTML, the Markdown reading, and the sidecar picture", () => {
+    const architecture = decodeCanvasBlock({
+      schemaVersion: 21,
+      blockId: "architecture",
+      kind: "diagram",
+      nodes: [
+        { nodeId: "web", label: "Web app", icon: "browser", detail: "React" },
+        { nodeId: "api", label: "API", icon: "service", detail: "Bun on port 3000" },
+        { nodeId: "db", label: "Orders", icon: "database", detail: "Postgres 16" },
+      ],
+      edges: [
+        { edgeId: "e1", source: "web", target: "api" },
+        { edgeId: "e2", source: "api", target: "db" },
+      ],
+      groups: [
+        { groupId: "cloud", label: "Cloud", nodeIds: ["api"] },
+        { groupId: "data", label: "Data", nodeIds: ["db"], parentGroupId: "cloud" },
+      ],
+    });
+    if (architecture.kind !== "diagram") throw new Error("fixture");
+
+    const html = renderArtifactHtml(definition([architecture], "Architecture"));
+    if (html.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(html.body.match(/data-icon="(browser|service|database)"/g)).toHaveLength(3);
+    expect(html.body).toContain("Postgres 16");
+    expect(html.body).toContain("Bun on port 3000");
+    // Both frames are drawn, the inner one inside the outer one.
+    const frames = [
+      ...html.body.matchAll(/<rect x="(\d+)" y="(\d+)" width="(\d+)" height="(\d+)" rx="8"/g),
+    ].map((match) => match.slice(1).map(Number) as [number, number, number, number]);
+    expect(frames).toHaveLength(2);
+    const [outer, inner] = frames;
+    expect(inner?.[0]).toBeGreaterThan(outer?.[0] ?? Number.POSITIVE_INFINITY);
+    expect(inner?.[1]).toBeGreaterThan(outer?.[1] ?? Number.POSITIVE_INFINITY);
+    expect((inner?.[0] ?? 0) + (inner?.[2] ?? 0)).toBeLessThan(
+      (outer?.[0] ?? 0) + (outer?.[2] ?? 0),
+    );
+    expect((inner?.[1] ?? 0) + (inner?.[3] ?? 0)).toBeLessThan(
+      (outer?.[1] ?? 0) + (outer?.[3] ?? 0),
+    );
+
+    const markdown = renderArtifactMarkdown(definition([architecture], "Architecture"));
+    if (markdown.kind !== "rendered") throw new Error("expected a rendered document");
+    expect(markdown.body).toContain("- Orders — Postgres 16");
+
+    const svg = renderArtifactSidecarSvg({ title: "Architecture", blocks: [architecture] });
+    expect(svg).toContain('data-icon="database"');
+  });
+
+  it("draws a node's icon at the board's 16px at full size and at half that in a half-size thumbnail", () => {
+    const icons = decodeCanvasBlock({
+      schemaVersion: 21,
+      blockId: "icons",
+      kind: "diagram",
+      nodes: [{ nodeId: "db", label: "Orders", icon: "database" }],
+      edges: [],
+    });
+    if (icons.kind !== "diagram") throw new Error("fixture");
+    const iconLayout = layoutCanvasDiagram(icons);
+    const scaleOf = (scale: number) => {
+      const markup = drawCanvasDiagramLayout(iconLayout, DEFAULT_ARTIFACT_PALETTE, {
+        x: 0,
+        y: 0,
+        scale,
+        label: (value) => value,
+      });
+      return Number(/data-icon="database" transform="[^"]*scale\(([\d.]+)\)/.exec(markup)?.[1]);
+    };
+
+    expect(scaleOf(1) * 24).toBeCloseTo(16, 1);
+    expect(scaleOf(0.5) * 24).toBeCloseTo(8, 1);
+  });
+
+  it("keeps the HTML picture's viewBox around a nested group placed near the origin", () => {
+    const placed = decodeCanvasBlock({
+      schemaVersion: 21,
+      blockId: "nested",
+      kind: "diagram",
+      layout: "manual",
+      nodes: [{ nodeId: "leaf", label: "Leaf", x: 20, y: 60, positioned: true }],
+      edges: [],
+      groups: [
+        { groupId: "one", label: "One", nodeIds: ["leaf"] },
+        { groupId: "two", label: "Two", nodeIds: [], parentGroupId: "one" },
+        { groupId: "three", label: "Three", nodeIds: ["leaf"], parentGroupId: "two" },
+      ],
+    });
+    if (placed.kind !== "diagram") throw new Error("fixture");
+    const html = renderArtifactHtml(definition([placed], "Nested"));
+    if (html.kind !== "rendered") throw new Error("expected a rendered document");
+    const box = /viewBox="0 0 (\d+) (\d+)"/.exec(html.body);
+    const frames = [
+      ...html.body.matchAll(/<rect x="(-?\d+)" y="(-?\d+)" width="(\d+)" height="(\d+)" rx="8"/g),
+    ].map((match) => match.slice(1).map(Number) as [number, number, number, number]);
+    expect(frames).toHaveLength(3);
+    for (const [x, y, width, height] of frames) {
+      expect(x).toBeGreaterThanOrEqual(0);
+      expect(y).toBeGreaterThanOrEqual(0);
+      expect(x + width).toBeLessThanOrEqual(Number(box?.[1]));
+      expect(y + height).toBeLessThanOrEqual(Number(box?.[2]));
+    }
   });
 
   it("draws the sidecar picture's nodes at the board's layout, scaled into the page", () => {

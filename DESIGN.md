@@ -404,11 +404,18 @@ states stay explicit. It offers no staging, discard or parent-checkout editor
 controls. Unavailable capture stays unavailable. Evidence references are disclosed
 on request rather than presented as unsupported navigation links.
 
-A reply's suggested follow-ups sit as outline chips at the top of the
-thread composer, inside its surface, with a quiet "Next" label and a dismiss
-control. Choosing one swaps the row for an inline preview of what it would
-create and its prompt; nothing is created until **Start** (or **Use prompt**).
-Side-task offers stack above the chips as hairline cards: a target icon
+A reply's suggested follow-ups sit as cards at the foot of the thread, just
+above the composer, so the next task reads as the last thing the agent offered.
+Each card is the radius-md bordered card on the surface fill: a small meta line
+naming where it would run ("New task", "New task · own worktree", "Next step
+here"), a dismiss control, the title at medium weight, two clamped lines of the
+prompt in secondary ink, and one outline **Start…** (or **Use here…**) button.
+Start… expands that card into a preview sentence of exactly what it would
+create, with Cancel and **Start** (or **Use prompt**); nothing is created
+before that. The same open suggestions also stand in a "Suggested tasks" card
+at the top of the thread's Environment panel, without a second border, so an
+offer the conversation has scrolled past stays in reach; it shows only while a
+suggestion is open. Side-task offers stack above them as hairline cards: a target icon
 (branch for a worktree, new-message otherwise), the title, a dismiss control,
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
