@@ -106,4 +106,15 @@ describe("documents an agent turn writes", () => {
     expect(deleted.documents).toEqual([{ kind: "canvas", canvasId: "c-1", title: "Plan" }]);
     expect(deleted.current).toEqual({ kind: "canvas", canvasId: "c-1" });
   });
+
+  it("lists a deleted document again when a later turn recreates it, without reopening the tab", () => {
+    const handoff = { kind: "file" as const, path: "docs/handoff.md" };
+    const written = noteWrittenDocument(NO_WRITTEN_DOCUMENTS, handoff).offers;
+    const deleted = forgetDeletedWrittenDocument(written, new Set([handoff.path]), new Set());
+    expect(deleted.documents).toEqual([]);
+
+    const recreated = noteWrittenDocument(deleted, handoff);
+    expect(recreated.open).toBe(false);
+    expect(recreated.offers.documents).toEqual([handoff]);
+  });
 });

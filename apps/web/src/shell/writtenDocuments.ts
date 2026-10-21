@@ -57,7 +57,13 @@ export function noteWrittenDocument(
   document: WrittenDocument,
 ): { readonly offers: WrittenDocumentOffers; readonly open: boolean } {
   const id = writtenDocumentId(document);
-  if (offers.offered.has(id)) return { offers, open: false };
+  if (offers.offered.has(id)) {
+    // A document deleted and later recreated stays offered, so it never
+    // reopens the tab, but it is a live output again and belongs in the list.
+    const documents = withDocument(offers.documents, document);
+    if (documents === offers.documents) return { offers, open: false };
+    return { offers: { ...offers, documents }, open: false };
+  }
   const offered = new Set(offers.offered);
   offered.add(id);
   return {
