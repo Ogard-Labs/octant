@@ -52,9 +52,19 @@ most one every five seconds per turn. The Chat, Work, and Code runners count it
 as activity, so their idle timeout measures a session that stopped producing
 anything rather than one that is still writing. Every other consumer ignores
 it: it carries no content and reaches no transcript, journal, usage figure, or
-turn event budget. A session that goes fully silent still times out. Codex's
-app-server announces a tool call only once the item starts and sends no
-argument deltas the adapter decodes, so it emits no `liveness` today.
+turn event budget. A session that goes fully silent still times out.
+
+Codex sends nothing while the model streams a tool call's arguments: the
+installed 0.163.0 app-server schema has no argument-delta notification, and
+`item/started` arrives only after the arguments are complete. Once a tool runs,
+the app-server reports progress, and the adapter turns `item/commandExecution/outputDelta`,
+`item/mcpToolCall/progress`, and `item/fileChange/patchUpdated` into the same
+throttled `liveness` event. It decodes only their thread, turn, and item
+correlation, never the output, message, or patch. The legacy
+`item/fileChange/outputDelta` is never emitted, and the `process/*`,
+`command/exec/*`, and `model/safetyBuffering/updated` notifications are not tied
+to a turn item, so they stay ignored. A single Codex tool call whose arguments
+take longer than the idle timeout to write can therefore still end as timed out.
 
 ## OpenCode
 
