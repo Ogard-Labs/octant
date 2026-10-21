@@ -381,6 +381,13 @@ agent asks for your theme.
   or make Octant look up a host name, and if Octant cannot set that up, the
   prototype does not run and says why. If it stops responding, or tries to
   open another page, Octant stops it and offers **Run again**. Script errors appear as text under it.
+- Ask to redesign a whole app, and the agent can build a prototype of its
+  window at desktop size, with a sidebar of threads, tabs, panes, and an accent
+  colour you can change. It builds the window in steps, adding a screen at a
+  time, rather than in one long request, so a large prototype appears sooner and
+  your own changes to the Canvas are kept in between. Press **Full screen**
+  above a running prototype, or in **Play**, to see it as large as your screen
+  allows. Octant scales it to fit, and **Stop** stays in view.
 - A running prototype is part of the Tab order, right after **Stop**, whether
   it started when you opened it or when you pressed **Run**. Octant does not
   move the keyboard into it by itself; press **Tab** from **Stop** to enter it.

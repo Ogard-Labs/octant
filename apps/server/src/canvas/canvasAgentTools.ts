@@ -3,6 +3,7 @@ import {
   CANVAS_DESIGN_ASSET_MAX_BYTES,
   CANVAS_DESIGN_ASSETS_MAX_BYTES,
   CANVAS_MAX_DESIGN_ASSETS,
+  CANVAS_MAX_DESIGN_MARKUP_LENGTH,
   CANVAS_SCHEMA_VERSION,
   decodeCanvasActor,
   decodeCanvasBlock,
@@ -25,6 +26,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ReaderMarking } from "../context/inheritedExternalContentMark";
 import type { CanvasService } from "./canvasService";
 import type {
+  CanvasPreviewImageOmitted,
   CanvasPreviewOutcome,
   CanvasPreviewService,
   CanvasPreviewWidth,
@@ -43,6 +45,7 @@ import {
   releaseMindmapExample,
   chartExamples,
   mockupExamples,
+  appWindowPrototypeExample,
   cartPrototypeExample,
   onboardingFlowExample,
   launchDeckExample,
@@ -79,6 +82,7 @@ const INLINE_WHERE_SHOWN =
 const MAX_AUTHORED_BLOCKS = 128;
 const MAX_TITLE_CHARS = 120;
 const MAX_DESCRIBED_BLOCK_KINDS = 3;
+const MAX_DESIGN_EDITS = 16;
 
 function memberKind(member: (typeof CanvasBlock.members)[number]): string {
   const struct = "fields" in member ? member : member.from;
@@ -148,7 +152,15 @@ const canvasDefinitionSchema = {
       maxItems: MAX_AUTHORED_BLOCKS,
       items: { type: "object" },
       description:
-        "Required for create and revise. Complete document blocks matching the schemas from describe; revise replaces the block list.",
+        "Required for create and revise (unless designEdits). Complete document blocks matching the schemas from describe; revise replaces the block list.",
+    },
+    designEdits: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_DESIGN_EDITS,
+      items: { type: "object" },
+      description:
+        "For revise, instead of blocks: [{blockId, frames?, styles?, removeFrameIds?}] edits designs in place. See describe design.",
     },
     presentation: {
       type: "string",
@@ -285,6 +297,7 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
         launchDeckExample,
         searchSpecExample,
         cartPrototypeExample,
+        appWindowPrototypeExample,
       );
     }
     if (kind === "treemap") examples.push(...treemapExamples);
@@ -506,7 +519,7 @@ const TIER_GUIDE =
   'A Canvas carries work in three tiers; use the lowest tier that delivers the result, and mix them in one Canvas when the work needs it. 1. Typed blocks (headings, text, tables, metrics, charts, plans, the diagram kinds, and tabs and columns to arrange them) carry data: people comment on them, a revision edits them, and a share keeps their structure. 2. A static design frame carries the look: a design block of HTML and CSS that runs nothing, either a document in the workspace theme (an article, a spec, a design system) or screens and slides at a device size. 3. A running design frame carries behaviour: a design with "runsScript": true, for a prototype whose state changes as the person uses it. Describe design for the frame kit classes, how a frame shows real images, the limits a running frame keeps, and a finished example of each frame tier.';
 
 const RECIPE_GUIDE =
-  'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "write a memo or a one-page report" uses memo, "review this PR" uses code-review, "summarise research" uses research-brief, "decide between designs" uses architecture-review, "write an article" uses article, "make slides" uses slide-deck, "show the key numbers" uses dashboard, "design or redesign a website or landing page" uses design-prototype at desktop size with the page\'s real sections, "pitch a product or a game" uses design-brief, "show the design system" uses design-system, "a UI kit or component sheet" uses ui-kit, "diagram the architecture or how the system fits together" uses architecture-diagram, and "a prototype I can try" uses clickable-prototype. A design slot names the size it is drawn at. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
+  'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "write a memo or a one-page report" uses memo, "review this PR" uses code-review, "summarise research" uses research-brief, "decide between designs" uses architecture-review, "write an article" uses article, "make slides" uses slide-deck, "show the key numbers" uses dashboard, "design or redesign a website or landing page" uses design-prototype at desktop size with the page\'s real sections, "pitch a product or a game" uses design-brief, "show the design system" uses design-system, "a UI kit or component sheet" uses ui-kit, "diagram the architecture or how the system fits together" uses architecture-diagram, "a prototype I can try" uses clickable-prototype, and "redesign the whole app window" uses app-redesign-prototype. A design slot names the size it is drawn at. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
 
 const PREVIEW_GUIDE =
   "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, on a bar list clipped labels or empty series, and on a design each declared image the host could not draw, with the frames that name it, a frame whose content is wider than its page, text below its contrast target, and each script error a running design threw as it loaded. Every other block kind gets no warnings, so read its picture yourself.";
@@ -514,6 +527,13 @@ const PREVIEW_GUIDE =
 /** When a design should run script, and what a running one still may not do. */
 const DESIGN_PROTOTYPE_GUIDANCE =
   'When the person asks for a working prototype (state that changes as they click, such as a cart that fills or a form that validates), set "runsScript": true on the design. Its frames may then use inline <script> elements and event handlers (onclick and the like); keep everything in the design. Still refused: <script src>, remote images, fonts, stylesheets, and imports, <meta>, <base>, <link>, iframes and other embedded documents, links that leave the design, and theme workspace (style a prototype yourself). Fetch, XHR, WebSocket, forms, and new windows are blocked, so put its data in the script. That is not a promise of privacy: a script can still open a direct connection to another computer, which Octant does not block yet, so keep secrets and private data out of a prototype and never tell the person it cannot reach the network. The person starts it with Run in the thread, and Octant stops a prototype that stops responding or loads another page. Use it only when interaction needs state; a clickable flow between screens is a static design with href="#frameId" links. Octant\'s bridge runs first in the page and reports its height, its uncaught errors (the first 280 characters of each), and a heartbeat every second; a page silent for 5 seconds, posting more than 250 messages a second, or loading another page is stopped, and preview returns the errors it threw as it loaded.';
+
+/**
+ * How to build a whole app window as a running prototype without one giant
+ * call. The numbers come from the contract so the guidance cannot drift from
+ * what the host accepts.
+ */
+const DESIGN_APP_WINDOW_GUIDANCE = `For a whole app window (sidebar, threads, panes, tabs, settings), use size desktop (1440x900) with "runsScript": true, and build it in steps instead of one huge call. First create the Canvas with the shell: the shared styles (put colours on :root as CSS variables such as --accent, so changing one variable recolours everything) and one frame holding the window's layout and its script. Then add each screen or pane with a revise that sends designEdits instead of blocks: [{"blockId": "...", "frames": [a complete frame to add, or to replace the frame with the same frameId], "styles": "the whole stylesheet, only if it changed", "removeFrameIds": []}] with the expectedSequence you last saw. Every other block and frame stays as it is. A frame and the stylesheet each hold at most ${String(CANVAS_MAX_DESIGN_MARKUP_LENGTH)} characters, and all the text in a Canvas at most 256 KiB, so give each large screen its own frame. Keep state without a framework: one state object, one render() that writes the state to the page (set aria-current, aria-selected, or hidden on elements, and set CSS variables on document.documentElement), and one click listener on document that reads data-* attributes, updates state, and calls render(); a colour picker is an input type=color whose input event sets state.accent and calls render(). A script in any frame runs once when the page loads, and every frame is in the page, so the script can reach elements in all of them. Move between whole screens with href="#frameId". Describe design returns a working window to start from. Preview after the first step, then after the last.`;
 
 function blockGuide(): Readonly<Record<string, string>> {
   return Object.fromEntries(
@@ -533,7 +553,7 @@ function describedGuidance(
     // part is written per describe rather than stored with the kind.
     guidance[kind] =
       kind === "design"
-        ? `${detail} ${designAssetGuidance(mode)} ${DESIGN_PROTOTYPE_GUIDANCE}`
+        ? `${detail} ${designAssetGuidance(mode)} ${DESIGN_PROTOTYPE_GUIDANCE} ${DESIGN_APP_WINDOW_GUIDANCE}`
         : detail;
   }
   return guidance;
@@ -582,6 +602,18 @@ type CanvasMermaidOutcome =
       readonly detail: string;
     };
 
+/**
+ * A change to one design, applied to the version the author read. Frames are
+ * kept loose here: the merged block is decoded whole, so the block schema is
+ * the one place that says what a frame is.
+ */
+interface CanvasDesignEdit {
+  readonly blockId: string;
+  readonly styles?: string;
+  readonly frames?: ReadonlyArray<unknown>;
+  readonly removeFrameIds?: ReadonlyArray<string>;
+}
+
 interface CanvasAuthoringInput {
   readonly operation: "create" | "revise";
   readonly mermaid?: ReadonlyArray<CanvasMermaidOutcome>;
@@ -589,8 +621,105 @@ interface CanvasAuthoringInput {
   readonly canvasId?: string;
   readonly expectedSequence?: number;
   readonly prompt?: string;
+  /** Empty when `designEdits` is set; the edits are applied to the current blocks. */
   readonly blocks: ReadonlyArray<CanvasBlock>;
+  readonly designEdits?: ReadonlyArray<CanvasDesignEdit>;
   readonly presentation?: CanvasPresentation;
+}
+
+function parseDesignEdits(raw: unknown): ReadonlyArray<CanvasDesignEdit> | { error: string } {
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_DESIGN_EDITS) {
+    return { error: `designEdits carries one to ${String(MAX_DESIGN_EDITS)} design changes.` };
+  }
+  const edits: CanvasDesignEdit[] = [];
+  for (const [index, entry] of raw.entries()) {
+    const at = `Design edit ${String(index + 1)}`;
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+      return { error: `${at} is not an object.` };
+    }
+    const record = entry as Record<string, unknown>;
+    const unknownKey = Object.keys(record).find(
+      (key) => !["blockId", "styles", "frames", "removeFrameIds"].includes(key),
+    );
+    if (unknownKey !== undefined) {
+      return { error: `${at} has a field this host does not know: ${unknownKey}.` };
+    }
+    const { blockId, styles, frames, removeFrameIds } = record;
+    if (typeof blockId !== "string") return { error: `${at} needs the blockId of a design.` };
+    if (styles !== undefined && typeof styles !== "string") {
+      return { error: `${at} styles must be text.` };
+    }
+    if (frames !== undefined && !Array.isArray(frames)) {
+      return { error: `${at} frames must be a list.` };
+    }
+    if (
+      removeFrameIds !== undefined &&
+      (!Array.isArray(removeFrameIds) || !removeFrameIds.every((id) => typeof id === "string"))
+    ) {
+      return { error: `${at} removeFrameIds must be a list of frame ids.` };
+    }
+    if (styles === undefined && frames === undefined && removeFrameIds === undefined) {
+      return { error: `${at} changes nothing: give styles, frames, or removeFrameIds.` };
+    }
+    edits.push({
+      blockId,
+      ...(styles === undefined ? {} : { styles }),
+      ...(frames === undefined ? {} : { frames }),
+      ...(removeFrameIds === undefined ? {} : { removeFrameIds }),
+    });
+  }
+  return edits;
+}
+
+/**
+ * The blocks with each edit applied: styles replaced, frames added or replaced
+ * by frameId, frames removed. Every block the edits do not name is kept as
+ * read, so a person's changes and the other blocks survive an incremental
+ * build. The edited design is decoded again as a whole.
+ */
+function applyDesignEdits(
+  blocks: ReadonlyArray<CanvasBlock>,
+  edits: ReadonlyArray<CanvasDesignEdit>,
+): { readonly blocks: ReadonlyArray<CanvasBlock> } | { readonly error: string } {
+  const next = [...blocks];
+  for (const edit of edits) {
+    const index = next.findIndex((block) => String(block.blockId) === edit.blockId);
+    const design = next[index];
+    if (design === undefined || design.kind !== "design") {
+      return { error: `${edit.blockId} is not a design in this Canvas.` };
+    }
+    const frames: unknown[] = [...design.frames];
+    for (const frameId of edit.removeFrameIds ?? []) {
+      const at = frames.findIndex(
+        (frame) => String((frame as { frameId: unknown }).frameId) === frameId,
+      );
+      if (at === -1) return { error: `${edit.blockId} has no frame ${frameId} to remove.` };
+      frames.splice(at, 1);
+    }
+    for (const frame of edit.frames ?? []) {
+      const frameId =
+        typeof frame === "object" && frame !== null
+          ? String((frame as { frameId?: unknown }).frameId)
+          : "";
+      const at = frames.findIndex(
+        (kept) => String((kept as { frameId: unknown }).frameId) === frameId,
+      );
+      if (at === -1) frames.push(frame);
+      else frames[at] = frame;
+    }
+    try {
+      next[index] = decodeCanvasBlock({
+        ...design,
+        ...(edit.styles === undefined ? {} : { styles: edit.styles }),
+        frames,
+      });
+    } catch {
+      return {
+        error: `${edit.blockId} is not a valid design after that edit: check each frame's frameId, title, and html.`,
+      };
+    }
+  }
+  return { blocks: next };
 }
 
 type CanvasToolInput =
@@ -740,8 +869,19 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
       error: "Canvas tool operation must be describe, list, read, create, revise, or preview.",
     };
   }
-  const blocks = record["blocks"];
-  if (!Array.isArray(blocks) || blocks.length === 0) {
+  let designEdits: ReadonlyArray<CanvasDesignEdit> | undefined;
+  if (record["designEdits"] !== undefined) {
+    if (operation !== "revise")
+      return { error: "designEdits change a Canvas, so they belong to revise." };
+    if (record["blocks"] !== undefined) {
+      return { error: "Send blocks or designEdits to revise, not both." };
+    }
+    const parsed = parseDesignEdits(record["designEdits"]);
+    if ("error" in parsed) return parsed;
+    designEdits = parsed;
+  }
+  const blocks: unknown = designEdits === undefined ? record["blocks"] : [];
+  if (!Array.isArray(blocks) || (blocks.length === 0 && designEdits === undefined)) {
     return { error: "A Canvas needs at least one block." };
   }
   if (blocks.length > MAX_AUTHORED_BLOCKS) {
@@ -796,6 +936,7 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
   return {
     operation,
     blocks: decoded,
+    ...(designEdits === undefined ? {} : { designEdits }),
     ...(mermaid.length === 0 ? {} : { mermaid }),
     ...(presentation === undefined ? {} : { presentation }),
     ...(typeof title === "string" ? { title: title.slice(0, MAX_TITLE_CHARS) } : {}),
@@ -981,7 +1122,7 @@ function canvasToolSet(options: {
     execute: async ({ name, inputJson }) => {
       if (name !== CANVAS_TOOL_NAME)
         return { result: { error: "tool-unavailable" }, isError: true };
-      const input = parseInput(inputJson);
+      let input = parseInput(inputJson);
       if ("error" in input) return { result: { error: input.error }, isError: true };
       if (input.operation === "describe") {
         if (input.blockKinds === undefined) {
@@ -1010,14 +1151,15 @@ function canvasToolSet(options: {
             },
           };
         }
+        const requested = input.blockKinds;
         const selected = CanvasBlock.members.filter((block) =>
-          input.blockKinds?.includes(memberKind(block)),
+          requested.includes(memberKind(block)),
         );
-        const examples = describedExamples(input.blockKinds ?? []);
+        const examples = describedExamples(requested);
         return {
           result: {
             blockSchema: JSONSchema.make(Schema.Union(...selected)),
-            guidance: describedGuidance(input.blockKinds ?? [], options.mode),
+            guidance: describedGuidance(requested, options.mode),
             ...(examples.length === 0 ? {} : { examples }),
           },
         };
@@ -1115,6 +1257,43 @@ function canvasToolSet(options: {
           return { result: { error: CANVAS_READER_UNMARKED }, isError: true };
         }
         return previewToolResult(outcome, imagesInToolResults);
+      }
+
+      if (input.operation === "revise" && input.designEdits !== undefined) {
+        if (input.canvasId === undefined || input.expectedSequence === undefined) {
+          return {
+            result: { error: "Revising a Canvas needs its id and the version being revised." },
+            isError: true,
+          };
+        }
+        let canvasId;
+        try {
+          canvasId = decodeCanvasId(input.canvasId);
+        } catch {
+          return { result: { error: "That Canvas is unavailable." }, isError: true };
+        }
+        const current = options.port.canvas.get(canvasId, target.context, target.project);
+        if (current.kind !== "ready") {
+          return { result: { error: "That Canvas is unavailable." }, isError: true };
+        }
+        // The edits land on the blocks as they stand, so they must be the
+        // version the author meant; a person's change in between is theirs.
+        if (current.version.sequence !== input.expectedSequence) {
+          return {
+            result: {
+              error: `That Canvas is at sequence ${String(current.version.sequence)}, not ${String(input.expectedSequence)}. Read it and send the edits against its current sequence.`,
+            },
+            isError: true,
+          };
+        }
+        // The merged version keeps blocks the author never read, so the
+        // thread is marked as it is for a read.
+        if (!readerMarked(options, canvasId)) {
+          return { result: { error: CANVAS_READER_UNMARKED }, isError: true };
+        }
+        const edited = applyDesignEdits(current.version.definition.blocks, input.designEdits);
+        if ("error" in edited) return { result: { error: edited.error }, isError: true };
+        input = { ...input, blocks: edited.blocks };
       }
 
       if (input.operation === "create") {
@@ -1240,6 +1419,26 @@ function canvasToolSet(options: {
   };
 }
 
+/**
+ * One plain sentence beside the omission code. The code alone was not enough:
+ * with a bare `no-renderer`, a live model reported the preview "returned no
+ * picture" in one turn and described the picture it never saw in the next, so
+ * the sentence says what did not happen, why, and what to go on instead.
+ */
+function noPictureSentence(reason: CanvasPreviewImageOmitted | undefined): string {
+  const because =
+    reason === "no-browser"
+      ? "this host has no browser to draw the Canvas"
+      : reason === "no-renderer"
+        ? "this build carries no Canvas preview page"
+        : reason === "render-failed"
+          ? "the preview page did not settle or the screenshot failed"
+          : reason === "provider-cannot-take-images"
+            ? "the model driving this turn cannot be shown images in a tool result"
+            : "the preview could not draw it";
+  return `No picture was taken because ${because}, so rely on the listed warnings only.`;
+}
+
 const CANVAS_READER_UNMARKED =
   "That Canvas carries outside content, and this thread could not be marked with it, so it was not read. Try again.";
 
@@ -1301,7 +1500,11 @@ function previewToolResult(
           warnings: outcome.warnings,
           imagesInToolResults,
           ...(outcome.image === undefined
-            ? { imageIncluded: false, imageOmitted: outcome.imageOmitted }
+            ? {
+                imageIncluded: false,
+                imageOmitted: outcome.imageOmitted,
+                imageOmittedNote: noPictureSentence(outcome.imageOmitted),
+              }
             : { imageIncluded: true }),
         },
       };

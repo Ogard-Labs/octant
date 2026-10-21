@@ -59,6 +59,13 @@ export interface NativeHarnessTurnObserverOptions {
   readonly clock: () => string;
 }
 
+interface CompletedHarnessResponse extends NativeHarnessTurnScope {
+  readonly text: string;
+  readonly toolCalls: number;
+  readonly turn?: TurnEndSummary | undefined;
+  readonly contextSubject?: ContextSubjectRef | undefined;
+}
+
 const ADVISOR_INSTRUCTIONS = [
   "You supervise a coding agent's session. You will receive a digest of its latest turn.",
   "Answer with exactly one JSON object and nothing else:",
@@ -79,6 +86,7 @@ const ADVISOR_INSTRUCTIONS = [
 export class NativeHarnessTurnObserver {
   readonly #options: NativeHarnessTurnObserverOptions;
   readonly #redirects = new Map<string, string>();
+  readonly #completedResponses = new Map<string, CompletedHarnessResponse>();
 
   constructor(options: NativeHarnessTurnObserverOptions) {
     this.#options = options;
@@ -136,26 +144,35 @@ export class NativeHarnessTurnObserver {
   }
 
   /**
-   * Every turn ends here, whatever its outcome. A completed turn, including one
-   * cut off at the output limit, is already closed by its record from
-   * `turnCompleted`; recording it again would fold its usage into the session
-   * twice. One that failed or was stopped is recorded here with
-   * how it really stopped and what it had cost by then, so the session's
-   * totals count it, a pause waiting for it knows it is done, and a restart
-   * does not mistake it for one it cut off.
+   * A provider's completed response can still lose to cancellation or cleanup.
+   * Record only at final settlement, with the runner's final usage and reason,
+   * so that race cannot charge the native session for the same turn twice.
    */
   turnEnded(scope: NativeHarnessTurnScope, turn?: TurnEndSummary): void {
     if (!this.#options.isHarnessProvider(scope.providerInstanceId)) return;
-    if (
-      turn !== undefined &&
-      turn.stopReason !== "end-of-turn" &&
-      turn.stopReason !== "max-tokens"
-    ) {
+    const response = this.#completedResponses.get(scope.threadId);
+    this.#completedResponses.delete(scope.threadId);
+    const finalTurn = turn ?? response?.turn;
+    if (finalTurn !== undefined || response !== undefined) {
+      const turnId = decodeNativeHarnessTurnId(this.#options.uuid());
       this.#recordTurn(scope, {
-        turnId: decodeNativeHarnessTurnId(this.#options.uuid()),
-        stopReason: harnessStopReason(turn.stopReason),
-        turn,
+        turnId,
+        stopReason: harnessStopReason(finalTurn?.stopReason ?? "end-of-turn"),
+        ...(response === undefined ? {} : { toolCalls: response.toolCalls }),
+        ...(finalTurn === undefined ? {} : { turn: finalTurn }),
       });
+      if (response !== undefined) {
+        if (response.contextSubject !== undefined)
+          this.#recordReductions(scope.threadId, turnId, response.contextSubject);
+        if (
+          finalTurn === undefined ||
+          finalTurn.stopReason === "end-of-turn" ||
+          finalTurn.stopReason === "max-tokens"
+        ) {
+          // Review cannot hold up settlement or run for a cancelled response.
+          void this.#review(response, turnId).catch(() => undefined);
+        }
+      }
     }
     this.#options.sessions.settleTurn(scope.threadId);
     this.#options.sessions.clearRetry(scope.threadId);
@@ -184,30 +201,11 @@ export class NativeHarnessTurnObserver {
     this.#options.sessions.clearRetry(scope.threadId);
   }
 
-  async turnCompleted(
-    input: NativeHarnessTurnScope & {
-      readonly text: string;
-      readonly toolCalls: number;
-      /** What the turn cost and how it ran, as the runner that watched it measured. */
-      readonly turn?: TurnEndSummary | undefined;
-      readonly contextSubject?: ContextSubjectRef | undefined;
-    },
-  ): Promise<void> {
+  async turnCompleted(input: CompletedHarnessResponse): Promise<void> {
     if (!this.#options.isHarnessProvider(input.providerInstanceId)) return;
-    const turnId = decodeNativeHarnessTurnId(this.#options.uuid());
     // A note the lead already read is done; one still queued waits for the next prompt.
     this.#options.sessions.clearSteering(input.threadId, "delivered");
-    this.#recordTurn(input, {
-      turnId,
-      stopReason: input.turn?.stopReason === "max-tokens" ? "max-tokens" : "end-of-turn",
-      toolCalls: input.toolCalls,
-      ...(input.turn === undefined ? {} : { turn: input.turn }),
-    });
-    if (input.contextSubject !== undefined)
-      this.#recordReductions(input.threadId, turnId, input.contextSubject);
-    // The advisor answers in its own time; the thread is free the moment the
-    // turn is recorded, and its verdict lands on the session when it arrives.
-    void this.#review(input, turnId).catch(() => undefined);
+    this.#completedResponses.set(input.threadId, input);
   }
 
   /** The one place a turn becomes a journaled record, whether it finished or stopped early. */

@@ -7,10 +7,12 @@ import { INITIAL_ARTIFACT_FILTERS } from "./useArtifactLibrary";
 
 const exportOffers = vi.fn<(canvasId: string) => Promise<CanvasExportOfferList>>();
 
+const prepareExport = vi.fn();
+
 vi.mock("@octant/client-runtime/canvas-client", () => ({
   createCanvasClient: () => ({
     exportOffers,
-    prepareExport: vi.fn(),
+    prepareExport,
     decideExport: vi.fn(),
   }),
 }));
@@ -96,20 +98,48 @@ const listing = {
   generatedAt: "2026-08-18T09:00:00.000Z",
 } as unknown as ArtifactLibraryListing;
 
-function offersFor(canvasId: string, label: string): CanvasExportOfferList {
+function offersFor(
+  canvasId: string,
+  label: string,
+  formats: ReadonlyArray<string> = ["markdown"],
+): CanvasExportOfferList {
   return {
     schemaVersion: 1,
     kind: "canvas-export-offers",
     canvasId,
     versionId: "30000000-0000-4000-8000-000000000001",
     sequence: 1,
-    targets: [{ targetId: "reading-copy", label, formats: ["markdown"], status: "ready" }],
+    targets: [{ targetId: "reading-copy", label, formats, status: "ready" }],
   } as unknown as CanvasExportOfferList;
 }
 
 describe("ArtifactLibrarySurface export", () => {
   beforeEach(() => {
     exportOffers.mockReset();
+    prepareExport.mockReset();
+  });
+
+  it("sends the workspace theme when a picture export of an artifact is reviewed", async () => {
+    exportOffers.mockResolvedValue(offersFor(firstCanvasId, "Pictures", ["png"]));
+    prepareExport.mockResolvedValue({ kind: "refused", code: "refused", message: "Not now." });
+    const user = userEvent.setup();
+    render(
+      <ArtifactLibrarySurface
+        onClose={vi.fn()}
+        onOpen={vi.fn()}
+        serverUrl="http://127.0.0.1:1"
+        windowCapability="capability"
+      />,
+    );
+
+    await user.click(screen.getAllByRole("button", { name: "Export…" })[0] as HTMLElement);
+    await user.click(await screen.findByRole("button", { name: "Review export" }));
+
+    await waitFor(() => expect(prepareExport).toHaveBeenCalledTimes(1));
+    expect(prepareExport.mock.calls[0]?.[0]).toMatchObject({
+      format: "png",
+      frameTheme: { scheme: expect.stringMatching(/^(light|dark)$/) },
+    });
   });
 
   it("shows the destinations of the artifact asked about last when an older answer arrives late", async () => {

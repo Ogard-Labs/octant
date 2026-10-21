@@ -77,6 +77,15 @@ describe("in-tree Canvas document recipes", () => {
     expect(kinds.at(-1)).toBe("callout");
   });
 
+  it("offers an app redesign prototype drawn as a running desktop window", () => {
+    const recipe = inTreeCanvasDocumentRecipes().find(
+      (candidate) => String(candidate.id) === "app-redesign-prototype",
+    );
+    expect(recipe?.skeleton[0]).toMatchObject({ kind: "design", size: "desktop" });
+    expect(recipe?.skeleton[0]?.role).toContain("runsScript");
+    expect(recipe?.skeleton[0]?.role).toContain("designEdits");
+  });
+
   it("opens the article recipe as a themed document frame with headings that wait for content", () => {
     const article = inTreeCanvasDocumentRecipes().find((recipe) => String(recipe.id) === "article");
     if (article === undefined) throw new Error("The article recipe is not offered.");
