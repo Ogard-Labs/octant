@@ -68,7 +68,14 @@ export const dockModuleInputs = {
   document: ["codeClient", "serverUrl", "subject", "windowCapability", "writtenDocumentPath"],
   plan: ["planClient", "subject"],
   delivery: ["shipClient", "subject"],
-  canvas: ["canvasClient", "canvasRevision", "subject", "writtenCanvasId"],
+  canvas: [
+    "canvasClient",
+    "canvasRevision",
+    "serverUrl",
+    "subject",
+    "windowCapability",
+    "writtenCanvasId",
+  ],
   review: [
     "agentRunClient",
     "requestedAgentReview",

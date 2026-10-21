@@ -175,8 +175,23 @@ describe("GhAuthenticationPort", () => {
     expect(deadlineObserved).toBe(true);
   });
 
-  it("accepts gh's current device-code prompt wording", () => {
-    expect(extractDeviceFlowCode("First, copy your one-time code: ABCD-EFGH")).toBe("ABCD-EFGH");
+  it.each([
+    "First, copy your one-time code: ABCD-EFGH",
+    "! One-time code (ABCD-EFGH) copied to clipboard\nOpen this URL to continue in your web browser: https://github.com/login/device",
+  ])(
+    "accepts a device-code prompt whether gh copied the code or asks the person to copy it",
+    (prompt) => {
+      expect(extractDeviceFlowCode(prompt)).toBe("ABCD-EFGH");
+    },
+  );
+
+  it.each([
+    "An unrelated code (ABCD-EFGH) copied to clipboard",
+    "! One-time code (ABCD-EFGHX) copied to clipboard",
+    "! One-time code (ABCD-EFGH) was not copied",
+    `${"x".repeat(64 * 1024)}! One-time code (ABCD-EFGH) copied to clipboard`,
+  ])("refuses unrelated, malformed or oversized clipboard output", (output) => {
+    expect(extractDeviceFlowCode(output)).toBeUndefined();
   });
 
   it("releases command-owned interactive children on server shutdown", () => {

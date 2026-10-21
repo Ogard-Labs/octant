@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   CANVAS_DESIGN_ASSET_MAX_BYTES,
   CanvasDesignAssetId,
+  decodeBrowserCaptureId,
   decodeImageArtifactId,
   type CanvasDesignBlock,
 } from "@octant/contracts";
@@ -48,6 +49,10 @@ function filePorts(
     status: "unavailable",
     reason: "missing",
   }),
+  browserCapture: CanvasDesignAssetPorts["browserCapture"] = async () => ({
+    status: "unavailable",
+    reason: "missing",
+  }),
 ): CanvasDesignAssetPorts & { readonly projectFile: ReturnType<typeof vi.fn> } {
   const projectFile = vi.fn(async (input: Parameters<CanvasDesignAssetPorts["projectFile"]>[0]) =>
     readCanvasDesignAssetFile({
@@ -57,7 +62,7 @@ function filePorts(
       maximumBytes: input.maximumBytes,
     }),
   );
-  return { generatedImage: generated, projectFile };
+  return { generatedImage: generated, browserCapture, projectFile };
 }
 
 function design(assets: NonNullable<CanvasDesignBlock["assets"]>) {
@@ -109,8 +114,55 @@ describe("resolveCanvasDesignAssets", () => {
     expect(ports.projectFile).not.toHaveBeenCalled();
   });
 
+  describe("captured pages", () => {
+    const captureId = decodeBrowserCaptureId("55555555-5555-4555-8555-555555555555");
+    const shot = design([
+      {
+        assetId: decodeCanvasDesignAssetId("before"),
+        source: { kind: "browser-capture", captureId },
+      },
+    ]);
+
+    it("draws the screenshot a Work or Code thread kept, asked for by that thread alone", async () => {
+      for (const mode of ["work", "code"] as const) {
+        const capture = vi.fn(async (_input: { readonly threadId: string }) => ({
+          status: "read" as const,
+          bytes: PNG,
+        }));
+        const resolved = await resolveCanvasDesignAssets(
+          shot,
+          { mode, projectId: projectId as never, threadId: threadId as never },
+          filePorts(undefined, capture),
+        );
+        expect(resolved[0]).toMatchObject({ assetId: "before", status: "resolved" });
+        expect(capture).toHaveBeenCalledWith(expect.objectContaining({ captureId, threadId }));
+      }
+    });
+
+    it("refuses a capture in a Chat Canvas without asking for it", async () => {
+      const capture = vi.fn(async () => ({ status: "read" as const, bytes: PNG }));
+      const resolved = await resolveCanvasDesignAssets(
+        shot,
+        { mode: "chat", projectId: null, threadId: threadId as never },
+        filePorts(undefined, capture),
+      );
+      expect(resolved).toEqual([{ assetId: "before", status: "unavailable", reason: "refused" }]);
+      expect(capture).not.toHaveBeenCalled();
+    });
+
+    it("reports a capture the thread does not hold as missing so the design keeps its other assets", async () => {
+      const resolved = await resolveCanvasDesignAssets(
+        design([...(shot.assets ?? []), file("home", "screens/home.png")]),
+        { mode: "work", projectId: projectId as never, threadId: threadId as never },
+        filePorts(),
+      );
+      expect(resolved.map((entry) => entry.status)).toEqual(["unavailable", "resolved"]);
+      expect(resolved[0]).toEqual({ assetId: "before", status: "unavailable", reason: "missing" });
+    });
+  });
+
   it("draws a generated image in a Chat Canvas only when its Project says so", async () => {
-    const generated = vi.fn(async (input: { readonly projectId: string }) =>
+    const generated = vi.fn(async (input: { readonly projectId: string | null }) =>
       input.projectId === projectId
         ? ({ status: "read", bytes: PNG } as const)
         : ({ status: "unavailable", reason: "refused" } as const),
@@ -134,6 +186,31 @@ describe("resolveCanvasDesignAssets", () => {
       filePorts(generated),
     );
     expect(theirs).toEqual([{ assetId: "hero", status: "unavailable", reason: "refused" }]);
+  });
+
+  it("asks for a generated image by thread, not Project, in a Canvas owned by its thread, and refuses a file path there", async () => {
+    const generated = vi.fn(async (_input: { readonly projectId: string | null }) => ({
+      status: "read" as const,
+      bytes: PNG,
+    }));
+    const resolved = await resolveCanvasDesignAssets(
+      design([
+        {
+          assetId: decodeCanvasDesignAssetId("hero"),
+          source: { kind: "generated-image", imageId },
+        },
+        file("home", "screens/home.png"),
+      ]),
+      { mode: "chat", projectId: null, threadId: threadId as never },
+      filePorts(generated),
+    );
+    expect(generated).toHaveBeenCalledWith(
+      expect.objectContaining({ imageId, projectId: null, threadId }),
+    );
+    expect(resolved).toEqual([
+      expect.objectContaining({ assetId: "hero", status: "resolved" }),
+      { assetId: "home", status: "unavailable", reason: "refused" },
+    ]);
   });
 
   it("refuses traversal, an absolute path, and a symlink out of the folder, and never returns the bytes", async () => {

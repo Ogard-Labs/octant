@@ -248,6 +248,7 @@ export type ShellActions = {
   readonly setProjectArchived: ProjectController["setArchived"];
   readonly setProjectColor: ProjectController["setColor"];
   readonly setProjectProviderPolicy: ProjectController["setProviderPolicy"];
+  readonly setProjectBrandKit: ProjectController["setBrandKit"];
   readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];
   readonly setProjectsListOpen: Dispatch<SetStateAction<boolean>>;
   readonly setRailPlaceholder: Dispatch<

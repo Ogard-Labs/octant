@@ -216,6 +216,8 @@ export type ClaudeStreamEvent =
       readonly usage: ClaudeUsage;
     }
   | { readonly kind: "message-stop" }
+  /** The streaming API's keep-alive; it carries nothing and only shows the stream is alive. */
+  | { readonly kind: "ping" }
   | {
       readonly kind: "content-start";
       readonly index: number;
@@ -903,7 +905,16 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               };
             const invocationOptions: ClaudeAgentSdkInvocationOptions = {
               cwd: input.projectRoot,
-              env: { ...input.authEnvironment, MCP_TOOL_TIMEOUT: "660000" },
+              env: {
+                ...input.authEnvironment,
+                MCP_TOOL_TIMEOUT: "660000",
+                // Claude Code 2.1.211 replaces its `TodoWrite` checklist with
+                // `TaskCreate`/`TaskUpdate` unless this is off (observed
+                // 2026-10-20 in the init tool list). The checklist keeps
+                // `TodoWrite`, which restates the whole list in every call,
+                // so the task panel never has to piece it together.
+                CLAUDE_CODE_ENABLE_TASKS: "false",
+              },
               model: input.model,
               // Claude Code upgrades Haiku to Sonnet in Plan unless Sonnet is
               // excluded. Keep the explicit selection local to this query.
