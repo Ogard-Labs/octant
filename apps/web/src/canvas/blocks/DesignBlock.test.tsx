@@ -379,6 +379,10 @@ describe("design block", () => {
       enter(region);
       expect(within(region).getByRole("button", { name: "Exit full screen" })).toBeVisible();
       expect(within(region).getByRole("button", { name: "Stop" })).toBeVisible();
+
+      // Stopping leaves the section full screen, so the way back stays.
+      fireEvent.click(within(region).getByRole("button", { name: "Stop" }));
+      expect(within(region).getByRole("button", { name: "Exit full screen" })).toBeVisible();
     });
 
     it("offers no full screen button where the browser cannot", () => {

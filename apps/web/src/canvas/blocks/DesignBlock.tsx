@@ -707,18 +707,25 @@ function RunningDesignBlock({
                 Stop
               </OctantButton>
             </>
-          ) : runtime === undefined ? null : (
-            <OctantButton
-              disabled={state.kind === "starting"}
-              onClick={() => void run()}
-              ref={runButton}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              <Play aria-hidden="true" size={12} strokeWidth={2} />
-              {state.kind === "stopped" ? "Run again" : "Run"}
-            </OctantButton>
+          ) : (
+            <>
+              {/* Stopping, by hand or by the watchdog, leaves the section full
+                  screen; the exit control stays until full screen ends. */}
+              {fullscreen.active ? <FullscreenButton fullscreen={fullscreen} /> : null}
+              {runtime === undefined ? null : (
+                <OctantButton
+                  disabled={state.kind === "starting"}
+                  onClick={() => void run()}
+                  ref={runButton}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  <Play aria-hidden="true" size={12} strokeWidth={2} />
+                  {state.kind === "stopped" ? "Run again" : "Run"}
+                </OctantButton>
+              )}
+            </>
           )}
         </div>
       </header>
