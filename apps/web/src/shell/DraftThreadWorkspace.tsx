@@ -1077,6 +1077,12 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         <div className="draft-thread__composer composer-stack">
           {createFromControl}
           <ThreadComposer
+            planUsage={{
+              providerInstanceId:
+                props.selectedProviderInstanceId === undefined
+                  ? undefined
+                  : String(props.selectedProviderInstanceId),
+            }}
             startContext={
               <div className="composer-tray composer-tray--inside" aria-label="Thread context">
                 {props.mode === "chat" ? <WorkKindSwitch /> : null}

@@ -129,9 +129,9 @@ describe("the thread stats line", () => {
     const line = screen.getByTestId("thread-stats-line");
     expect(within(line).getByText("5h")).toBeInTheDocument();
     expect(within(line).getByText("88%")).toBeInTheDocument();
-    expect(within(line).getByText("Week")).toBeInTheDocument();
+    expect(within(line).getByText("wk")).toBeInTheDocument();
     expect(within(line).getByText("38%")).toBeInTheDocument();
-    expect(line).toHaveTextContent("88% · Week");
+    expect(line).toHaveTextContent("5h88%wk38%");
     expect(
       screen.getByRole("button", {
         name: /^Thread stats: 5-hour limit 88% left, 7-day limit 38% left/,

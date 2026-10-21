@@ -33,21 +33,14 @@ export function railUsageReadings(
           : undefined;
     if (limits === undefined) return [];
     const windows = composerLimitWindows({ now, snapshot: { serviceLimits: limits } });
-    // Arcs are chosen by how long each window is, not by its name: Codex
-    // scopes its ids ("codex:secondary_7d"), Claude adds per-model weeks
-    // ("seven_day_opus"). The first window of a length wins a tie, which keeps
-    // the plain week ahead of a per-model one.
-    const byLength = [...windows].sort((a, b) => windowHours(a.window) - windowHours(b.window));
-    const shortest = byLength[0];
-    const longestHours = windowHours(byLength[byLength.length - 1]?.window ?? "");
-    const longest = windows.find((window) => windowHours(window.window) === longestHours);
-    if (shortest === undefined || longest === undefined) return [];
+    const span = windowSpan(windows);
+    if (span === undefined) return [];
     return [
       {
         providerInstanceId: String(entry.providerInstanceId),
         windows,
-        outer: longest,
-        ...(windowHours(shortest.window) < longestHours ? { inner: shortest } : {}),
+        outer: span.outer,
+        ...(span.inner === undefined ? {} : { inner: span.inner }),
         resetsAt: new Map(
           (limits.rateLimitWindows ?? []).flatMap((window) =>
             window.resetsAt === undefined ? [] : [[window.window, window.resetsAt] as const],
@@ -56,6 +49,28 @@ export function railUsageReadings(
       },
     ];
   });
+}
+
+/**
+ * The longest window and, when the provider reported a shorter one, the
+ * shortest. Chosen by how long each window is, not by its name: Codex scopes
+ * its ids ("codex:secondary_7d"), Claude adds per-model weeks
+ * ("seven_day_opus"). The first window of a length wins a tie, which keeps the
+ * plain week ahead of a per-model one. The rail's two arcs and the composer's
+ * two meters both read this.
+ */
+export function windowSpan(
+  windows: ReadonlyArray<ComposerLimitWindow>,
+): { readonly outer: ComposerLimitWindow; readonly inner?: ComposerLimitWindow } | undefined {
+  const byLength = [...windows].sort((a, b) => windowHours(a.window) - windowHours(b.window));
+  const shortest = byLength[0];
+  const longestHours = windowHours(byLength[byLength.length - 1]?.window ?? "");
+  const longest = windows.find((window) => windowHours(window.window) === longestHours);
+  if (shortest === undefined || longest === undefined) return undefined;
+  return {
+    outer: longest,
+    ...(windowHours(shortest.window) < longestHours ? { inner: shortest } : {}),
+  };
 }
 
 const NAMED_WINDOW_HOURS: Readonly<Record<string, number>> = {

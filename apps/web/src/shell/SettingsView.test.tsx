@@ -228,6 +228,17 @@ describe("SettingsView", () => {
     expect(props.onSettingsChange).toHaveBeenCalledWith({ showThreadStats: false });
   });
 
+  it("draws the usage bars smooth until Pixelated is chosen in Appearance", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    navigateTo("Appearance");
+
+    expect(screen.getByRole("button", { name: "Smooth" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Pixelated" }));
+
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ usageBars: "pixelated" });
+  });
+
   it("shows the stats line switch off when the saved preference is off", () => {
     renderSettings({ settings: { ...defaultShellSettings(), showThreadStats: false } });
     navigateTo("Appearance");
