@@ -5886,6 +5886,38 @@ mechanisms are:
   itself. That boundary is accepted: the mark gates Octant's own tools only,
   and Claude's and Codex's built-in tools run under the runtime's own sandbox
   and approvals.
+  A Claude launch sets no `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+  umbrella: blanket-blocking every non-essential channel of the runtime's
+  was stricter than Octant needs, so each channel that matters is kept off
+  by its own switch on every launch, the version read included
+  (`ISOLATED_CLAUDE_LAUNCH_GUARDS`; maintainer decision, 2026-10-20): usage
+  metrics (`DISABLE_TELEMETRY`), error reports (`DISABLE_ERROR_REPORTING`),
+  the runtime's self-update (`DISABLE_AUTOUPDATER`), `/bug` and `/feedback`,
+  which upload the conversation (`DISABLE_BUG_COMMAND`,
+  `DISABLE_FEEDBACK_COMMAND`; the second is not in the public reference, but
+  both installed binaries carry it beside the first), the session-quality
+  survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`), auto-memory, the SDK's
+  built-in agents, and marketplace auto-install. The runtime's release-note,
+  PR-badge, and availability checks are therefore its own traffic to
+  Anthropic under the person's account; they carry no Project content.
+  Feature-flag fetching stays off: Anthropic's environment-variable reference
+  says `DISABLE_TELEMETRY` also disables it, so the runtime evaluates its
+  flags from the defaults it ships with. A channel with no switch of its own is closed by the
+  launch shape instead: `/share`, like any slash command, runs only when the
+  person types it, as in the runtime's own terminal (the model cannot invoke
+  one, and Octant sends none but `/compact`); a plugin's background `command`
+  cannot run because the query is opened with no setting sources, plugins,
+  skills, agents, or MCP servers, so no plugin is loaded, and
+  `strictMcpConfig` keeps the account's claude.ai connectors out (2.1.304
+  lists them without it, setting sources or not); Remote Control starts only
+  on a flag or command Octant never passes; and the advisor, like every other
+  tool the runtime might add, stays out because the port holds the
+  initialized tool list to the requested set. The runtime's `Artifact` tool
+  is not a reason either way: measured the same day, the runtime offers it
+  only when launched by Anthropic's own desktop app (it keys on the launching
+  entrypoint), so from Octant it is absent with or without the umbrella. A
+  host that exports `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` itself keeps
+  the umbrella on every launch; only that disabling value crosses.
   A confined Claude Plan launch reads the assigned leaf of that account's
   state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
   writes only `sessions/` and its own session in `projects/`: the
