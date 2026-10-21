@@ -6,6 +6,8 @@ import type { CanvasDiagramNodeIcon } from "@octant/contracts/canvas";
  * held as data so the board in the thread and the exported SVG draw the same
  * picture: an export has no component to render and cannot ship an image.
  * Drawn as an outline, 2 units wide with round caps and joins, in a single ink.
+ * The path data comes from that icon set and keeps its ISC licence, shipped in
+ * `apps/web/public/ICONS-LICENSE.txt`.
  */
 export const CANVAS_DIAGRAM_ICON_PATHS: Readonly<
   Record<CanvasDiagramNodeIcon, ReadonlyArray<string>>
