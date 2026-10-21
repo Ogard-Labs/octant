@@ -10,6 +10,7 @@ import {
   OctantMenuTrigger,
 } from "../ui/base/OctantMenu";
 import type { SidebarNavigationDescriptorId } from "./navigationModel";
+import { OctantTooltip } from "../ui/base/OctantTooltip";
 import { secondaryIcons, type SidebarSecondaryAction } from "./SidebarProfile";
 
 export interface SidebarMoreProps {
@@ -31,16 +32,19 @@ export function SidebarMore(props: SidebarMoreProps) {
   return (
     <OctantMenuRoot>
       {props.presentation === "rail" ? (
-        <OctantMenuTrigger
-          aria-current={holdsActive ? "page" : undefined}
-          aria-label="More destinations"
-          className="sidebar-rail__button window-no-drag"
-          title="More"
-        >
-          <span aria-hidden="true" className="sidebar-rail__face">
-            <Ellipsis size={16} strokeWidth={1.7} />
-          </span>
-        </OctantMenuTrigger>
+        // Named beside the rail on hover and keyboard focus, like every other
+        // rail control; a native title shows on hover only.
+        <OctantTooltip label="More" side="right">
+          <OctantMenuTrigger
+            aria-current={holdsActive ? "page" : undefined}
+            aria-label="More destinations"
+            className="sidebar-rail__button window-no-drag"
+          >
+            <span aria-hidden="true" className="sidebar-rail__face">
+              <Ellipsis size={16} strokeWidth={1.7} />
+            </span>
+          </OctantMenuTrigger>
+        </OctantTooltip>
       ) : (
         <OctantMenuTrigger
           aria-current={holdsActive ? "page" : undefined}

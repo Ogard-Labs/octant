@@ -307,6 +307,19 @@ export function ShellSidebar(props: ShellSidebarProps) {
   // Activity, where the rail keeps its Project controls.
   const projectsShown =
     destinationRows.includes("projects") && navigationActions.projects !== undefined;
+  // The More menu is the only way to the menu-only destinations once they have
+  // left the account menu, so either rail carries it.
+  const railMore =
+    moreActions.length === 0 ? undefined : (
+      <SidebarMore
+        {...(props.activeDestination === undefined
+          ? {}
+          : { activeDestination: props.activeDestination })}
+        items={moreActions}
+        onCustomizeSidebar={customizeSidebar}
+        presentation="rail"
+      />
+    );
   const besideRail =
     props.railBeside === undefined ? null : (
       <SidebarRail
@@ -323,20 +336,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
               projectsActive: props.activeDestination === "projects",
             }
           : {})}
-        {...(moreActions.length === 0
-          ? {}
-          : {
-              more: (
-                <SidebarMore
-                  {...(props.activeDestination === undefined
-                    ? {}
-                    : { activeDestination: props.activeDestination })}
-                  items={moreActions}
-                  onCustomizeSidebar={customizeSidebar}
-                  presentation="rail"
-                />
-              ),
-            })}
+        {...(railMore === undefined ? {} : { more: railMore })}
         onOpenSettings={() => props.onOpenSettings()}
         usage={props.railUsage}
         onSelectMode={props.onSelectMode}
@@ -381,6 +381,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
           ? {}
           : { onOpenProjects: navigationActions.projects })}
         {...(props.onOpenSearch === undefined ? {} : { onOpenSearch: props.onOpenSearch })}
+        {...(railMore === undefined ? {} : { more: railMore })}
         onOpenSettings={() => props.onOpenSettings()}
         usage={props.railUsage}
         onSelectMode={props.onSelectMode}
