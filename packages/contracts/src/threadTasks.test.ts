@@ -79,4 +79,24 @@ describe("the thread task progress contract", () => {
     // An unchanged plan returns the same list, so callers skip a needless journal write.
     expect(restateThreadTaskList(list, ["task-1", "task-2", "task-3"])).toBe(list);
   });
+
+  it("makes room in a full plan for the new tasks its restatement lists", () => {
+    const full = decodeThreadTaskProgressList(
+      Array.from({ length: MAX_THREAD_TASKS_PER_TURN }, (_unused, index) => ({
+        taskId: `task-${String(index)}`,
+        state: "pending" as const,
+        summary: `Task ${String(index)}`,
+      })),
+    );
+    const renamed = { taskId: "task-new", state: "running" as const, summary: "Renamed step" };
+    // The full plan turns the new task away before the restatement arrives.
+    expect(upsertThreadTaskProgress(full, renamed)).toBe(full);
+
+    const restated = restateThreadTaskList(
+      full,
+      ["task-0", "task-new"],
+      new Map([[renamed.taskId, renamed]]),
+    );
+    expect(restated).toEqual([full[0], renamed]);
+  });
 });

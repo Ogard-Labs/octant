@@ -21,8 +21,10 @@ import {
   type WorkTurnFailure,
   type WorkTurnRequestId,
   type WorkTurnState,
+  MAX_THREAD_TASKS_PER_TURN,
   restateThreadTaskList,
   upsertThreadTaskProgress,
+  type ThreadTaskProgress,
   type ThreadTaskProgressList,
 } from "@octant/contracts";
 import type { ProviderDriver, ProviderSessionHandle } from "@octant/provider-sdk/driver";
@@ -293,6 +295,9 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
       let handledEvents = 0;
       let response = "";
       let tasks: ThreadTaskProgressList | undefined;
+      // New tasks a full plan turned away, kept until the restatement that
+      // follows them can drop the tasks they replace.
+      const turnedAwayTasks = new Map<string, ThreadTaskProgress>();
       let toolSteps: ThreadToolSteps | undefined;
       let terminal: ProviderRuntimeEvent | undefined;
       const pendingRequestHolds = new Map<string, Deferred.Deferred<void>>();
@@ -355,17 +360,23 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
                 if (endsHarnessRetryWait(event)) input.onRetryCleared?.();
                 if (event.kind === "retrying") input.onRetrying?.(event);
                 if (event.kind === "task-progress") {
-                  const next = upsertThreadTaskProgress(tasks, {
+                  const task: ThreadTaskProgress = {
                     taskId: event.taskId,
                     state: event.status === "in-progress" ? "running" : event.status,
                     summary: event.summary,
-                  });
-                  if (next === tasks) return;
+                  };
+                  const next = upsertThreadTaskProgress(tasks, task);
+                  if (next === tasks) {
+                    if (turnedAwayTasks.size < MAX_THREAD_TASKS_PER_TURN)
+                      turnedAwayTasks.set(task.taskId, task);
+                    return;
+                  }
                   tasks = next;
                   input.onTasks?.(next);
                 }
                 if (event.kind === "task-list") {
-                  const next = restateThreadTaskList(tasks, event.taskIds);
+                  const next = restateThreadTaskList(tasks, event.taskIds, turnedAwayTasks);
+                  turnedAwayTasks.clear();
                   if (next === tasks) return;
                   tasks = next;
                   input.onTasks?.(next);
