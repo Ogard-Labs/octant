@@ -1118,6 +1118,83 @@ describe("servers and plugins found on this computer", () => {
   });
 });
 
+describe("signing in to a hosted server from Settings", () => {
+  const target = { extensionId, componentId: "mcp-docs" };
+  const signIn = {
+    status: vi.fn(async () => ({ kind: "signed-out" })),
+    begin: vi.fn(async (_e: string, _c: string, principal: string) =>
+      principal === "local-window"
+        ? {
+            kind: "awaiting-consent",
+            attemptId: "55000000-0000-4000-8000-000000000001",
+            authorizationUrl: "https://auth.example/authorize?x=1",
+            expiresAt: "2026-10-20T12:10:00.000Z",
+          }
+        : {
+            kind: "refused",
+            reason: "local-host-required",
+            message: "Sign in from the Octant window on this host.",
+          },
+    ),
+    poll: vi.fn(async () => ({ kind: "signed-in", issuer: "auth.example" })),
+    signOut: vi.fn(async () => ({ kind: "signed-out" })),
+  };
+
+  it("lets a local window begin, poll and sign out, and tells a paired device to use the host", async () => {
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerSignIn: signIn as never,
+      now: () => now,
+    });
+    const status = await handler(request("/api/extensions/sign-in", { kind: "status", ...target }));
+    expect(await status?.json()).toEqual({ kind: "signed-out" });
+    expect(signIn.status).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
+    const begun = await handler(request("/api/extensions/sign-in", { kind: "begin", ...target }));
+    expect(await begun?.json()).toMatchObject({ kind: "awaiting-consent" });
+    expect(signIn.begin).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
+    const polled = await handler(
+      request("/api/extensions/sign-in", {
+        kind: "poll",
+        ...target,
+        attemptId: "55000000-0000-4000-8000-000000000001",
+      }),
+    );
+    expect(await polled?.json()).toEqual({ kind: "signed-in", issuer: "auth.example" });
+    const out = await handler(request("/api/extensions/sign-in", { kind: "sign-out", ...target }));
+    expect(await out?.json()).toEqual({ kind: "signed-out" });
+
+    await handler(pairedDeviceRequest("/api/extensions/sign-in", { kind: "status", ...target }));
+    expect(signIn.status).toHaveBeenLastCalledWith(extensionId, "mcp-docs", "remote-device");
+    const remote = await handler(
+      pairedDeviceRequest("/api/extensions/sign-in", { kind: "begin", ...target }),
+    );
+    expect(remote?.status).toBe(200);
+    expect(await remote?.json()).toMatchObject({ kind: "refused", reason: "local-host-required" });
+    expect(signIn.begin).toHaveBeenLastCalledWith(extensionId, "mcp-docs", "remote-device");
+  });
+
+  it("answers 503 on a host without the sign-in service and 400 for a malformed request", async () => {
+    const without = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      now: () => now,
+    });
+    expect(
+      (await without(request("/api/extensions/sign-in", { kind: "status", ...target })))?.status,
+    ).toBe(503);
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerSignIn: signIn as never,
+      now: () => now,
+    });
+    expect(
+      (await handler(request("/api/extensions/sign-in", { kind: "poll", ...target })))?.status,
+    ).toBe(400);
+  });
+});
+
 function registeredWindowStore(): WindowAuthorityStore {
   const windowAuthorityStore = new WindowAuthorityStore();
   windowAuthorityStore.register({ windowId: windowId as never, capability, now });

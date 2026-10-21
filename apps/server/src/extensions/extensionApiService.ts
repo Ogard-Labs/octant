@@ -59,7 +59,10 @@ export class ExtensionApiService {
     | undefined;
   readonly #inspections = new Map<string, InspectedExtensionPackage>();
   readonly #userAddedMcpServers:
-    | { owns(sourceRef: string): boolean; remove(sourceRef: string): Promise<void> }
+    | {
+        owns(sourceRef: string): boolean;
+        remove(sourceRef: string, extensionId: string): Promise<void>;
+      }
     | undefined;
 
   constructor(options: {
@@ -75,7 +78,7 @@ export class ExtensionApiService {
     /** Removes the folder and secrets of a server the person added by hand, once its package is gone. */
     readonly userAddedMcpServers?: {
       owns(sourceRef: string): boolean;
-      remove(sourceRef: string): Promise<void>;
+      remove(sourceRef: string, extensionId: string): Promise<void>;
     };
   }) {
     this.#lifecycle = options.lifecycle;
@@ -145,7 +148,7 @@ export class ExtensionApiService {
             this.#userAddedMcpServers?.owns(source.sourceRef) === true &&
             !snapshot.packages.some((candidate) => candidate.extensionId === command.extensionId)
           ) {
-            await this.#userAddedMcpServers?.remove(source.sourceRef);
+            await this.#userAddedMcpServers?.remove(source.sourceRef, command.extensionId);
           }
           return await this.#stateUpdated(snapshot, command);
         }

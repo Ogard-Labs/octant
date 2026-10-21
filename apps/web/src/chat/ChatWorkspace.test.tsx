@@ -497,6 +497,7 @@ function extensionClient(): ExtensionClient {
     execute: vi.fn() as never,
     importLocalPluginReceipt: vi.fn() as never,
     listDiscoveredTooling: vi.fn() as never,
+    mcpServerSignIn: vi.fn() as never,
     applyDiscoveredTooling: vi.fn() as never,
     addUserMcpServer: vi.fn() as never,
     listToolApprovals: vi.fn(async () => []) as never,

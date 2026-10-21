@@ -12,8 +12,10 @@ import {
   decodeExtensionToolApprovalDecision,
   decodeExtensionToolGrantRequest,
   decodeDiscoveredAgentToolingRequest,
+  decodeMcpServerSignInRequest,
   decodeUserAddedMcpServerRequest,
   type DiscoveredAgentToolingListing,
+  type McpServerSignInView,
   type UserAddedMcpServerRequest,
 } from "@octant/contracts/extension-rpc";
 import { isAbsolute } from "node:path";
@@ -48,6 +50,30 @@ export function createExtensionRouteHandler(options: {
   readonly userAddedMcpServers?: {
     add(request: UserAddedMcpServerRequest): Promise<{ readonly source: ExtensionSource }>;
     remove(sourceRef: string): Promise<void>;
+  };
+  /** Sign-in to a hosted server a person added, through the host OAuth runner. */
+  readonly mcpServerSignIn?: {
+    status(
+      extensionId: string,
+      componentId: string,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
+    begin(
+      extensionId: string,
+      componentId: string,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
+    poll(
+      extensionId: string,
+      componentId: string,
+      attemptId: string,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
+    signOut(
+      extensionId: string,
+      componentId: string,
+      principalKind: "local-window" | "remote-device",
+    ): Promise<McpServerSignInView>;
   };
   /** Lists what other agent tools on this computer know, for the person to add. */
   readonly agentToolingDiscovery?: {
@@ -319,6 +345,68 @@ export function createExtensionRouteHandler(options: {
         origin,
       );
     }
+    if (url.pathname === "/api/extensions/sign-in") {
+      // A sign-in opens the system browser on this host and stores a grant
+      // in its broker; a paired device may read the state but never start,
+      // finish, or end one.
+      if (options.mcpServerSignIn === undefined) {
+        return response(
+          failure("unavailable", "Signing in to a server is unavailable."),
+          503,
+          origin,
+        );
+      }
+      const body = await readBody(request, maximumBodySize);
+      if (body.kind === "too-large") {
+        return response(failure("invalid", "Extension request is too large."), 413, origin);
+      }
+      let signIn;
+      try {
+        if (body.kind !== "ok") throw new Error("invalid");
+        signIn = decodeMcpServerSignInRequest(body.value);
+      } catch {
+        return response(failure("invalid", "The sign-in request is invalid."), 400, origin);
+      }
+      const principalKind =
+        principalContext.principal.kind === "local-window" ? "local-window" : "remote-device";
+      const extensionId = String(signIn.extensionId);
+      const componentId = String(signIn.componentId);
+      try {
+        if (signIn.kind === "status") {
+          return response(
+            await options.mcpServerSignIn.status(extensionId, componentId, principalKind),
+            200,
+            origin,
+          );
+        }
+        if (signIn.kind === "begin") {
+          return response(
+            await options.mcpServerSignIn.begin(extensionId, componentId, principalKind),
+            200,
+            origin,
+          );
+        }
+        if (signIn.kind === "poll") {
+          return response(
+            await options.mcpServerSignIn.poll(
+              extensionId,
+              componentId,
+              signIn.attemptId,
+              principalKind,
+            ),
+            200,
+            origin,
+          );
+        }
+        return response(
+          await options.mcpServerSignIn.signOut(extensionId, componentId, principalKind),
+          200,
+          origin,
+        );
+      } catch {
+        return response(failure("failed", "The sign-in could not be read."), 500, origin);
+      }
+    }
     if (url.pathname === "/api/extensions/discovered") {
       // What another tool on this computer knows is read for a local window
       // only, like the folder import it leads to; a paired device sees none
@@ -540,7 +628,8 @@ function response(
     | ReadonlyArray<ExtensionToolGrant>
     | { readonly accepted: boolean }
     | { readonly revoked: boolean }
-    | DiscoveredAgentToolingListing,
+    | DiscoveredAgentToolingListing
+    | McpServerSignInView,
   status: number,
   origin: string | null,
 ) {

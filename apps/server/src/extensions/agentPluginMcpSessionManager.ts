@@ -107,6 +107,7 @@ export interface AgentPluginMcpSessionManagerOptions {
   readonly isUserAddedSource?: (sourceRef: string) => boolean;
   readonly resolveUserAddedSecrets?: (
     launch: AgentPluginsMcpLaunchSpec,
+    target: { readonly extensionId: string; readonly componentId: string },
   ) => Promise<AgentPluginsMcpLaunchSpec>;
 }
 
@@ -500,7 +501,10 @@ export class AgentPluginMcpSessionManager {
     }
     const withSecrets =
       target.userAdded && this.#resolveUserAddedSecrets !== undefined
-        ? await this.#resolveUserAddedSecrets(selectedLaunch)
+        ? await this.#resolveUserAddedSecrets(selectedLaunch, {
+            extensionId: target.extensionId,
+            componentId: target.componentId,
+          })
         : selectedLaunch;
     const launch =
       withSecrets.transport === "stdio" && !isAbsolute(withSecrets.command)

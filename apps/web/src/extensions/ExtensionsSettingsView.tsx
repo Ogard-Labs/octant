@@ -22,6 +22,7 @@ import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { AddMcpServerDialog } from "./AddMcpServerDialog";
 import { DiscoveredToolingSection } from "./DiscoveredToolingSection";
+import { McpServerSignInControl } from "./McpServerSignInControl";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -731,6 +732,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                       key={`${pkg.extensionId}:${pkg.packageId}`}
                       packageState={pkg}
                       busy={busyPackageId === `${pkg.extensionId}:${pkg.packageId}`}
+                      {...(props.client.toolGrantsAvailable ? { signIn: props.client } : {})}
                       onTrust={(trusted) =>
                         runLifecycle(
                           {
@@ -1636,6 +1638,8 @@ function StandaloneSkillCard(props: StandaloneSkillCardProps) {
 interface InstalledPackageCardProps {
   readonly packageState: ExtensionSnapshot["packages"][number];
   readonly busy: boolean;
+  /** Present in the Octant window on this host, where a hosted server can be signed in to. */
+  readonly signIn?: Pick<ExtensionClient, "mcpServerSignIn">;
   readonly onTrust: (trusted: boolean) => Promise<boolean>;
   readonly onPluginDesired: (desired: boolean) => Promise<boolean>;
   readonly onComponentDesired: (
@@ -1763,6 +1767,16 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
                     ? "Disable component"
                     : "Enable component"}
                 </OctantButton>
+                {props.signIn !== undefined &&
+                pkg.source.kind === "user-added" &&
+                componentState.component.kind === "mcp-server" ? (
+                  <McpServerSignInControl
+                    client={props.signIn}
+                    componentId={String(componentState.component.id)}
+                    disabled={props.busy}
+                    extensionId={String(pkg.extensionId)}
+                  />
+                ) : null}
               </div>
             );
           })}
