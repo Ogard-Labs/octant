@@ -132,7 +132,8 @@ that integration's connection controls; opening a page does not connect an accou
 For GitHub, choose **Set up GitHub**. Octant displays the CLI's one-time code
 whether the CLI copied it to the clipboard or asks you to copy it. Open the
 displayed GitHub device-login link, complete authorization, then choose
-**Refresh status** in Octant.
+**Refresh status** in Octant. When issue access is available, the Issues
+destination appears without reloading the workspace.
 
 Choose the provider, model, and access posture in the new-thread composer.
 Execution profiles are no longer offered in Settings or the command palette

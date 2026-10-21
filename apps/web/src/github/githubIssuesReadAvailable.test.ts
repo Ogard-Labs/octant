@@ -30,6 +30,22 @@ function makeClient(snapshot: GithubAuthenticationSnapshot): GithubClient {
 }
 
 describe("github issues-read capability sync", () => {
+  it("updates issue availability when status refresh observes completed sign-in or lost access", async () => {
+    const onAvailable = vi.fn();
+    const authenticationSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(readySnapshot)
+      .mockResolvedValueOnce(unauthorizedSnapshot);
+    const client = withGithubIssuesReadSync(
+      { ...makeClient(readySnapshot), authenticationSnapshot },
+      onAvailable,
+    );
+    expect(await client.authenticationSnapshot()).toBe(readySnapshot);
+    expect(onAvailable).toHaveBeenLastCalledWith(true);
+    expect(await client.authenticationSnapshot()).toBe(unauthorizedSnapshot);
+    expect(onAvailable).toHaveBeenLastCalledWith(false);
+  });
+
   it("treats a snapshot as available only when issues-read is present and true", () => {
     expect(githubIssuesReadAvailable(readySnapshot)).toBe(true);
     expect(githubIssuesReadAvailable(unauthorizedSnapshot)).toBe(false);
@@ -63,6 +79,21 @@ describe("github issues-read capability sync", () => {
         confirmation: "confirm-github-setup",
       }),
     ).rejects.toThrow("GitHub is unavailable.");
+    expect(onAvailable).not.toHaveBeenCalled();
+  });
+
+  it("does not invent issue availability when a status read fails", async () => {
+    const onAvailable = vi.fn();
+    const client = withGithubIssuesReadSync(
+      {
+        ...makeClient(readySnapshot),
+        authenticationSnapshot: async () => {
+          throw new Error("GitHub is unavailable.");
+        },
+      },
+      onAvailable,
+    );
+    await expect(client.authenticationSnapshot()).rejects.toThrow("GitHub is unavailable.");
     expect(onAvailable).not.toHaveBeenCalled();
   });
 });

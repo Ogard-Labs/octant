@@ -539,7 +539,9 @@ the host's placement. Touch and keyboard use never hold, because neither hovers.
 `sidebar.destination` (`github-issues`) that opens a host-scoped, read-only
 issue browser. The sidebar row is shown only when the contribution is present,
 its action is wired, and the authentication snapshot reports `issues-read`
-available. Catalogue reads stay on the existing GitHub catalogue read
+available. Settings status reads update that availability as well as authentication
+commands, so completing device sign-in does not require a workspace reload.
+Catalogue reads stay on the existing GitHub catalogue read
 ([route](host-reads-and-commands.md#github-issues)): the issue list includes
 optional server-composed search, and an issue returns a bounded detail. The
 browser renders title, body, and comments as plain text; links stay inert full

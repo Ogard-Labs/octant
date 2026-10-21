@@ -8,16 +8,20 @@ export function githubIssuesReadAvailable(snapshot: GithubAuthenticationSnapshot
 }
 
 /**
- * Settings authentication commands return a fresh snapshot. The App-level
- * Issues row has to see that snapshot, because the GitHub client identity
- * itself does not change on setup or logout.
+ * Device sign-in can finish after setup returns. Settings status reads and
+ * commands must both update the Issues row, since the client identity does
+ * not change when the account becomes ready or loses access.
  */
 export function withGithubIssuesReadSync(
   client: GithubClient,
   onAvailable: (available: boolean) => void,
 ): GithubClient {
   return {
-    authenticationSnapshot: () => client.authenticationSnapshot(),
+    authenticationSnapshot: async () => {
+      const snapshot = await client.authenticationSnapshot();
+      onAvailable(githubIssuesReadAvailable(snapshot));
+      return snapshot;
+    },
     executeAuthenticationCommand: async (command) => {
       const snapshot = await client.executeAuthenticationCommand(command);
       onAvailable(githubIssuesReadAvailable(snapshot));
