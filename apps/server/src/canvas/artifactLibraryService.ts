@@ -84,6 +84,9 @@ export class ArtifactLibraryService {
     const all: ArtifactLibraryEntry[] = [];
     for (const entry of snapshot.values()) {
       const definition = entry.currentVersion.definition;
+      // The library lists artifacts by Project; a Canvas owned by a Chat
+      // thread outside every Project is reached from its thread instead.
+      if (definition.provenance.projectId === null) continue;
       const project = projects.get(String(definition.provenance.projectId));
       // An artifact whose Project this caller may not see is absent, not
       // greyed out: the library must not disclose that it exists.
@@ -152,7 +155,9 @@ export class ArtifactLibraryService {
    */
   entry(canvasId: CanvasId): ArtifactLibraryEntry | undefined {
     const held = this.#dependencies.projection.snapshot().get(canvasId);
-    if (held === undefined) return undefined;
+    if (held === undefined || held.currentVersion.definition.provenance.projectId === null) {
+      return undefined;
+    }
     const project = this.#dependencies
       .projects()
       .find(

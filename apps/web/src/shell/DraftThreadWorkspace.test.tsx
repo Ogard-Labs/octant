@@ -161,7 +161,7 @@ describe("DraftThreadWorkspace", () => {
     },
   );
   it("keeps the context chips as the composer's first row with model controls below the prompt", () => {
-    const { container } = render(<DraftThreadWorkspace {...baseProps} />);
+    const { container } = render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
     const composer = container.querySelector(".composer");
     const contextBar = container.querySelector(".composer-tray");
     expect(
@@ -176,9 +176,7 @@ describe("DraftThreadWorkspace", () => {
 
   it("renders mode-specific welcome copy for chat", () => {
     render(<DraftThreadWorkspace {...baseProps} />);
-    expect(
-      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
     expect(screen.queryByText("Octant Chat")).not.toBeInTheDocument();
     expect(screen.queryByText(/Start a calm, focused conversation/)).not.toBeInTheDocument();
   });
@@ -269,17 +267,13 @@ describe("DraftThreadWorkspace", () => {
 
   it("renders mode-specific welcome copy for code", () => {
     render(<DraftThreadWorkspace {...baseProps} mode="code" />);
-    expect(
-      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
     expect(screen.getByRole("button", { name: "Provider and model" })).toBeDisabled();
   });
 
   it("renders mode-specific welcome copy for work", () => {
     render(<DraftThreadWorkspace {...baseProps} mode="work" />);
-    expect(
-      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
     expect(screen.queryByText("Octant Work")).not.toBeInTheDocument();
   });
 
@@ -302,47 +296,28 @@ describe("DraftThreadWorkspace", () => {
     expect(onCreateThread).not.toHaveBeenCalled();
   });
 
-  it("offers Open terminal on Code's start screen but never on Work's", async () => {
-    const user = userEvent.setup();
-    const onOpenTerminal = vi.fn();
-    const homeStart = {
-      reviewCount: 2,
-      runningCount: 3,
-      onReview: vi.fn(),
-      cardCustomization: { order: [], visibility: [] },
-      onCardCustomizationChange: vi.fn(),
-      onOpenTerminal,
-    };
-    const { unmount } = render(
-      <DraftThreadWorkspace
-        {...baseProps}
-        homeStart={homeStart}
-        mode="code"
-        onAttachFolder={vi.fn()}
-        projectId={codeProjectId}
-        projects={projects}
-      />,
-    );
-    expect(screen.getByText(/ · 3 running · 2 waiting for your review$/)).toBeVisible();
-    const tiles = within(screen.getByRole("group", { name: "Quick actions" }));
-    expect(tiles.getByRole("button", { name: /Review 2 changes/ })).toBeVisible();
-    await user.click(tiles.getByRole("button", { name: /Open terminal/ }));
-    expect(onOpenTerminal).toHaveBeenCalledExactlyOnceWith(codeProjectId);
-    unmount();
-
-    render(
-      <DraftThreadWorkspace
-        {...baseProps}
-        homeStart={homeStart}
-        mode="work"
-        onAttachFolder={vi.fn()}
-        projectId={workProjectId}
-        projects={projects}
-      />,
-    );
-    const workTiles = within(screen.getByRole("group", { name: "Quick actions" }));
-    expect(workTiles.getByRole("button", { name: /Add a folder/ })).toBeVisible();
-    expect(workTiles.queryByRole("button", { name: /Open terminal/ })).not.toBeInTheDocument();
+  it("asks the question and offers the composer without folder or terminal tiles or a Running tab", () => {
+    for (const mode of ["code", "work"] as const) {
+      const { unmount } = render(
+        <DraftThreadWorkspace
+          {...baseProps}
+          homeStart={{
+            cardCustomization: { order: [], visibility: [] },
+            onCardCustomizationChange: vi.fn(),
+          }}
+          mode={mode}
+          onAttachFolder={vi.fn()}
+          projectId={mode === "code" ? codeProjectId : workProjectId}
+          projects={projects}
+        />,
+      );
+      expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+      expect(screen.getByRole("textbox", { name: /message|prompt|describe/i })).toBeVisible();
+      expect(screen.queryByRole("group", { name: "Quick actions" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Add a folder|Open terminal/ })).toBeNull();
+      expect(screen.queryByRole("tab", { name: /Running/ })).toBeNull();
+      unmount();
+    }
   });
 
   it("paints the composer before the cards under it and keeps the composer first in the page", async () => {
@@ -351,8 +326,6 @@ describe("DraftThreadWorkspace", () => {
       <DraftThreadWorkspace
         {...baseProps}
         homeStart={{
-          reviewCount: 0,
-          runningCount: 0,
           cards: [
             {
               id: "fixture",
@@ -371,6 +344,7 @@ describe("DraftThreadWorkspace", () => {
         onAttachFolder={vi.fn()}
         projectId={workProjectId}
         projects={projects}
+        startPresentation="home"
       />,
     );
 
@@ -381,28 +355,30 @@ describe("DraftThreadWorkspace", () => {
     expect(composer.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("shows the card area and its Customize control under the Chat composer while Chat threads exist", async () => {
-    render(
+  it("shows the card area and its Customize control under the Code composer on Home, and none on New task", async () => {
+    const homeStart = {
+      cards: [
+        {
+          id: "fixture",
+          title: "Fixture card",
+          icon: Activity,
+          defaultOn: true,
+          available: true,
+          emptyLabel: "Nothing here.",
+          useContent: () => ({ status: "ready" as const, count: 0, body: null }),
+        },
+      ],
+      cardCustomization: { order: [], visibility: [] },
+      onCardCustomizationChange: vi.fn(),
+    };
+    const view = render(
       <DraftThreadWorkspace
         {...baseProps}
-        homeStart={{
-          reviewCount: 0,
-          runningCount: 0,
-          cards: [
-            {
-              id: "fixture",
-              title: "Fixture card",
-              icon: Activity,
-              defaultOn: true,
-              available: true,
-              emptyLabel: "Nothing here.",
-              useContent: () => ({ status: "ready", count: 0, body: null }),
-            },
-          ],
-          cardCustomization: { order: [], visibility: [] },
-          onCardCustomizationChange: vi.fn(),
-        }}
-        recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
+        homeStart={homeStart}
+        mode="code"
+        projectId={codeProjectId}
+        projects={projects}
+        startPresentation="home"
       />,
     );
 
@@ -410,77 +386,42 @@ describe("DraftThreadWorkspace", () => {
     const cards = await screen.findByRole("region", { name: "Home cards" });
     expect(composer.compareDocumentPosition(cards) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByRole("button", { name: /Customize/ })).toBeVisible();
-    expect(screen.queryByRole("group", { name: "Quick actions" })).not.toBeInTheDocument();
-    expect(screen.getByText("Latency telemetry")).toBeVisible();
-  });
+    view.unmount();
 
-  it.each([
-    ["work", workProjectId],
-    ["code", codeProjectId],
-  ] as const)(
-    "keeps a half-written %s task when the person looks at the Running tab and comes back",
-    async (mode, projectId) => {
-      const user = userEvent.setup();
-      render(
-        <DraftThreadWorkspace
-          {...baseProps}
-          homeStart={{
-            reviewCount: 0,
-            runningCount: 0,
-            cardCustomization: { order: [], visibility: [] },
-            onCardCustomizationChange: vi.fn(),
-            composerTabs: { runningCount: 2, running: <p>Two things are running.</p> },
-          }}
-          mode={mode}
-          onAttachFolder={vi.fn()}
-          projectId={projectId}
-          projects={projects}
-        />,
-      );
-
-      const composer = screen.getByRole("textbox", { name: /message|prompt|describe/i });
-      await user.type(composer, "Tidy the release notes");
-      await user.click(screen.getByRole("tab", { name: "Running 2" }));
-      expect(screen.getByText("Two things are running.")).toBeVisible();
-      expect(composer).not.toBeVisible();
-
-      await user.click(screen.getByRole("tab", { name: "New task" }));
-      expect(screen.getByRole("textbox", { name: /message|prompt|describe/i })).toHaveValue(
-        "Tidy the release notes",
-      );
-    },
-  );
-
-  it("keeps a half-written chat when the person looks at the Running tab of the screen that lists recent threads", async () => {
-    const user = userEvent.setup();
     render(
       <DraftThreadWorkspace
         {...baseProps}
-        homeStart={{
-          reviewCount: 0,
-          runningCount: 0,
-          cardCustomization: { order: [], visibility: [] },
-          onCardCustomizationChange: vi.fn(),
-          composerTabs: { runningCount: 2, running: <p>Two things are running.</p> },
-        }}
-        recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
+        homeStart={homeStart}
+        mode="code"
+        projectId={codeProjectId}
+        projects={projects}
       />,
     );
+    expect(screen.getByRole("textbox", { name: "First message" })).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Home cards" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Customize/ })).not.toBeInTheDocument();
+  });
 
-    const composer = screen.getByRole("textbox", { name: "First message" });
-    await user.type(composer, "Tidy the release notes");
-    await user.click(screen.getByRole("tab", { name: "Running 2" }));
-    expect(screen.getByText("Two things are running.")).toBeVisible();
-    expect(composer).not.toBeVisible();
-
-    await user.click(screen.getByRole("tab", { name: "New task" }));
-    expect(screen.getByRole("textbox", { name: "First message" })).toHaveValue(
-      "Tidy the release notes",
-    );
+  it("shows only the question and the composer on New task, in every mode", () => {
+    for (const mode of ["chat", "work", "code"] as const) {
+      const { unmount } = render(
+        <DraftThreadWorkspace
+          {...baseProps}
+          mode={mode}
+          projects={projects}
+          recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
+        />,
+      );
+      expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
+      expect(screen.getByRole("textbox", { name: "First message" })).toBeVisible();
+      expect(screen.queryByRole("group", { name: "Suggested actions" })).not.toBeInTheDocument();
+      expect(screen.queryByText("Latency telemetry")).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
   it("renders intent cards for the active mode", () => {
-    const { container } = render(<DraftThreadWorkspace {...baseProps} />);
+    const { container } = render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
     expect(screen.getByRole("group", { name: "Suggested actions" })).toBeVisible();
     expect(screen.getByText("Explain a concept")).toBeVisible();
     expect(screen.getByText("Draft text")).toBeVisible();
@@ -495,6 +436,7 @@ describe("DraftThreadWorkspace", () => {
       <DraftThreadWorkspace
         {...baseProps}
         recentThreads={[{ id: "thread-a", title: "Latency telemetry", onOpen: vi.fn() }]}
+        startPresentation="home"
       />,
     );
 
@@ -511,6 +453,7 @@ describe("DraftThreadWorkspace", () => {
           { id: "thread-a", title: "Latency telemetry", detail: "2 hours ago", onOpen },
           { id: "thread-b", title: "Cache hit ratio", onOpen: vi.fn() },
         ]}
+        startPresentation="home"
       />,
     );
 
@@ -528,7 +471,7 @@ describe("DraftThreadWorkspace", () => {
 
   it("fills the composer when an intent card is clicked", async () => {
     const user = userEvent.setup();
-    render(<DraftThreadWorkspace {...baseProps} />);
+    render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
     await user.click(screen.getByText("Explain a concept"));
     const textarea = screen.getByRole("textbox", { name: "First message" });
     expect(textarea).toHaveValue("Explain a concept: ");
@@ -536,7 +479,7 @@ describe("DraftThreadWorkspace", () => {
 
   it("does not overwrite existing prompt text when an intent card is clicked", async () => {
     const user = userEvent.setup();
-    render(<DraftThreadWorkspace {...baseProps} />);
+    render(<DraftThreadWorkspace {...baseProps} startPresentation="home" />);
     const textarea = screen.getByRole("textbox", { name: "First message" });
     await user.type(textarea, "My custom prompt");
     await user.click(screen.getByText("Explain a concept"));
@@ -627,6 +570,7 @@ describe("DraftThreadWorkspace", () => {
         onCreateCodeThread={onCreateCodeThread}
         projectId={"20000000-0000-4000-8000-000000000001" as never}
         projects={projects}
+        startPresentation="home"
       />,
     );
 

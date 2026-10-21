@@ -80,6 +80,42 @@ describe("Claude failure sanitizer", () => {
   });
 });
 
+describe("Stream keep-alive", () => {
+  const active = { kind: "active", sessionId: "session-1" } as const;
+  const streamed = (event: unknown, session_id = "session-1") => ({
+    type: "stream_event",
+    uuid: "u-ping",
+    session_id,
+    parent_tool_use_id: null,
+    event,
+  });
+  const refusal = (message: unknown): string | undefined => {
+    try {
+      decodeMessage(message, openInput, active);
+      return undefined;
+    } catch (error) {
+      return (error as { readonly failure?: { readonly message?: string } }).failure?.message;
+    }
+  };
+
+  it("reads the API's keep-alive ping as a stream event that carries nothing", () => {
+    expect(decodeMessage(streamed({ type: "ping" }), openInput, active)).toEqual({
+      kind: "stream-event",
+      sessionId: "session-1",
+      event: { kind: "ping" },
+    });
+  });
+
+  it("still refuses a stream event it does not know, and a ping for another session", () => {
+    expect(refusal(streamed({ type: "heartbeat" }))).toBe(
+      "Claude returned an unsupported runtime message.",
+    );
+    expect(refusal(streamed({ type: "ping" }, "session-2"))).toBe(
+      "Claude returned an unsupported runtime message.",
+    );
+  });
+});
+
 describe("Disabled Plan file tools", () => {
   const active = { kind: "active", sessionId: "session-1" } as const;
   const stream = (name: string, input: unknown = {}) => ({

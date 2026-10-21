@@ -21,6 +21,7 @@ import {
 } from "@octant/client-runtime";
 import { mobilePinnedListenerTransport } from "../runtime/mobilePinnedListenerTransport";
 import { PairingCodeScanner } from "./PairingCodeScanner";
+import { pairingCodeAfterTogglingDetails } from "./pairingScanGate";
 import {
   pairingFailureMessage,
   pairingPollDelayMs,
@@ -417,7 +418,10 @@ export function PairingPanel(props: PairingPanelProps) {
         : null}
       <Pressable
         accessibilityRole="button"
-        onPress={() => setShowDetails((open) => !open)}
+        onPress={() => {
+          setPairingCode((code) => pairingCodeAfterTogglingDetails(code, !showDetails));
+          setShowDetails(!showDetails);
+        }}
         style={styles.link}
         testID="mobile-pairing-type-details"
       >

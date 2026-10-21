@@ -52,6 +52,7 @@ import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers"
 import type { ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { FoundationsWiring } from "./foundations";
+import { createThreadIsListed } from "./windowThreadListing";
 import type { IntegrationsWiring } from "./integrations";
 import type { WorkspaceWiring } from "./workspace";
 import type { HarnessStateWiring } from "./harnessState";
@@ -93,7 +94,8 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
     | "nativeHarnessSessions"
   > &
   Pick<WorkRequestStateWiring, "runningWorkTurnAccess"> &
-  Pick<FoundationsWiring, "workThreadProjection">;
+  Pick<FoundationsWiring, "workThreadProjection"> &
+  Pick<WorkspaceWiring, "projectService">;
 
 export function wireHarness(deps: HarnessDependencies) {
   const {
@@ -256,6 +258,11 @@ export function wireHarness(deps: HarnessDependencies) {
     ...followUpActions,
     windowAuthorityStore,
     authorizeThread: authorizeFollowUpThread,
+    authorizeListing: createThreadIsListed({
+      persistence,
+      workThreadProjection,
+      projectService: deps.projectService,
+    }),
   });
   const sideTaskRoutes = createSideTaskRouteHandler({
     store: sideTasks,

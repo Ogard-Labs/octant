@@ -76,7 +76,7 @@ export type RemoteDependencies = Pick<
   > &
   Pick<CodeToolingWiring, "remoteServerGrants"> &
   Pick<WorkWiring, "threadExportService" | "threadMessageQueue"> &
-  Pick<CanvasWiring, "canvasRoutes"> &
+  Pick<CanvasWiring, "canvasRoutes" | "canvasPublicShareService"> &
   Pick<AutomationWiring, "pushNotificationTokenStore"> &
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
@@ -87,6 +87,7 @@ export function wireRemote(deps: RemoteDependencies) {
     agentMessageService,
     authenticatedProductDispatch,
     browserCaptureStore,
+    canvasPublicShareService,
     canvasRoutes,
     chatAttachmentStore,
     codeAttachments,
@@ -374,6 +375,11 @@ export function wireRemote(deps: RemoteDependencies) {
     forgetCanvases: (canvasIds) => {
       persistence.canvasProjection.evict(canvasIds);
       persistence.replicaArtifactProjection.evict(canvasIds);
+      // A purged Canvas's public links are withdrawn at the service too. The
+      // owed revoke names only the link, so it survives the erase and is
+      // retried until the service confirms the link is gone.
+      canvasPublicShareService.revokeForPurge(canvasIds);
+      canvasPublicShareService.forget(canvasIds);
     },
     purgeCanvasFiles: (canvasIds) => removeMirrorFiles(persistence.connection, canvasIds),
     forgetProjectData: (projectId) => toolEgressRules.forgetProject(projectId),

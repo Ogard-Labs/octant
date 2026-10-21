@@ -4,6 +4,32 @@ import { describe, expect, it, vi } from "vitest";
 import { ShellState } from "./ShellState";
 
 describe("ShellState", () => {
+  it("speaks for the whole window with a dotted mark, a title, one line and a text link back", async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    const { container } = render(
+      <ShellState
+        action={{ label: "Sign in again", onClick }}
+        eyebrow="Browser session"
+        message="Click Sign in again to refresh your session."
+        presentation="page"
+        role="alert"
+        state="warning"
+        title="Your session expired"
+      />,
+    );
+
+    const page = screen.getByRole("alert");
+    expect(page).toHaveClass("shell-state--page");
+    expect(screen.getByRole("heading", { name: "Your session expired" })).toBeVisible();
+    expect(screen.getByText("Click Sign in again to refresh your session.")).toBeVisible();
+    // The title says what happened; the eyebrow is left out.
+    expect(screen.queryByText("Browser session")).toBeNull();
+    expect(container.querySelector("svg.shell-state__mark")).not.toBeNull();
+    await user.click(screen.getByRole("button", { name: "Sign in again" }));
+    expect(onClick).toHaveBeenCalledOnce();
+  });
+
   it("renders a compact named status without turning its icon into content", () => {
     const { container } = render(
       <ShellState

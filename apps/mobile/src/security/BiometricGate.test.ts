@@ -47,6 +47,18 @@ describe("BiometricGate", () => {
     expect(() => assertBiometricConfirmed(result, "Revoke")).toThrow(/blocked/);
   });
 
+  it("reports unavailable when the device credential probe fails", async () => {
+    const result = await requireBiometricConfirmation({
+      authenticator: authenticator({
+        hasDeviceCredential: vi.fn(async () => {
+          throw new Error("native auth unavailable");
+        }),
+      }),
+      reason: "approve",
+    });
+    expect(result.status).toBe("unavailable");
+  });
+
   it("marks app-owned high-risk authentication as active until the prompt settles", async () => {
     let resolveAuthentication:
       | ((outcome: "confirmed" | "denied" | "unavailable") => void)

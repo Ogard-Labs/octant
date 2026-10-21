@@ -368,6 +368,26 @@ not reintroduce a setup token.
 
 ## Step 3 — Telemetry on subscription launches
 
+**Superseded in part on 2026-10-20.** The maintainer decided that
+Octant's rule of blanket-blocking all of the runtime's non-essential
+traffic was stricter than needed and loosened it: the
+`CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` umbrella is no longer set on
+any Claude launch, and each channel that matters stays off with its own
+switch. The dedicated switches below stay (with
+`DISABLE_FEEDBACK_COMMAND=1` and `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1`
+added), `DISABLE_TELEMETRY` and `DISABLE_ERROR_REPORTING` stay on every
+launch for now, and a host's own disable-only umbrella value passes
+through. The channels with no switch of their own are argued acceptable
+in
+[Architecture: security and authority](../architecture.md#security-and-authority)
+rather than kept behind the umbrella. The runtime's `Artifact` tool
+played no part: measured the same day on Claude Code 2.1.211 and
+2.1.304, the runtime offers it only when launched by Anthropic's own
+desktop app, so from Octant it is absent with or without the umbrella.
+The rest of this step, including the `settings.json` seeding and the
+telemetry re-enablement, is still open and is read with that decision
+in mind.
+
 On subscription launches of the unmodified binary, stop setting
 `DISABLE_TELEMETRY` and `DISABLE_ERROR_REPORTING`. Drop
 `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` only when every

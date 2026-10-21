@@ -9,7 +9,7 @@ import { useThreadStatsScope } from "./threadStatsScope";
 import "./threadStats.css";
 
 /**
- * The thread's quiet stats line under the composer. It reads the host's
+ * The thread's quiet stats line above the composer. It reads the host's
  * recorded turns, so every provider and mode shows the same figures worded by
  * one shared module. The provider's account windows lead the line when it
  * reported any, so a person sees how much of the 5-hour or weekly limit is

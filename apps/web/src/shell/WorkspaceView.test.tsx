@@ -98,7 +98,7 @@ describe("WorkspaceView welcome", () => {
     render(<WorkspaceView {...propsFor(welcome)} projects={[codeProject("archived")]} />);
 
     expect(
-      await screen.findByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+      await screen.findByRole("heading", { name: "What are we building today?" }),
     ).toBeVisible();
     expect(screen.queryByRole("region", { name: "Code welcome" })).not.toBeInTheDocument();
   });
@@ -404,7 +404,7 @@ describe("WorkspaceView welcome", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+      await screen.findByRole("heading", { name: "What are we building today?" }),
     ).toBeVisible();
     expect(screen.getByText("Octant")).toBeVisible();
     expect(screen.queryByRole("region", { name: "Code welcome" })).not.toBeInTheDocument();
@@ -1112,7 +1112,7 @@ function localServersWiring(
 }
 
 describe("WorkspaceView pane title facts", () => {
-  it("names the thread's pull request and Project/branch beside the pane title", async () => {
+  it("names the thread's pull request and its Project as the breadcrumb before the pane title", async () => {
     const base = propsFor(codeTab("code-overview", "Faster issue validation"));
     const project = {
       id: ids.project,
@@ -1180,7 +1180,9 @@ describe("WorkspaceView pane title facts", () => {
     expect(chip).toHaveAttribute("data-checks", "failing");
     // The Project and the branch ride in the title row as two chips.
     expect(within(header).getByText("Octant")).toBeVisible();
-    expect(within(header).getByText("fix/validation")).toHaveClass("workspace-pane__branch");
+    // The branch lives in the composer's strip, not repeated in the header.
+    expect(within(header).queryByText("fix/validation")).not.toBeInTheDocument();
+    expect(within(header).getByText("/")).toHaveClass("workspace-pane__crumb");
 
     // The pane tab's mention is a control, not a mark: it hands the shell the
     // request's full identity so the dock can open it.
@@ -2848,49 +2850,7 @@ describe("WorkspaceView Chat surfaces", () => {
     expect(within(quickStart).getByRole("button", { name: "Start thread" })).toBeDisabled();
   });
 
-  it("opens a recent Chat Project thread from the Chat start screen", async () => {
-    const project = {
-      id: "00000000-0000-4000-8000-000000000914",
-      type: "chat",
-      name: "Launch planning",
-      lifecycle: "active",
-      pinned: true,
-      rank: "0/1",
-      version: 1,
-      createdAt: now,
-      updatedAt: now,
-    } as never as ProjectSummary;
-    const thread = {
-      id: "00000000-0000-4000-8000-000000000915",
-      projectId: project.id,
-      title: "Resume planning",
-    };
-    const tab = {
-      id: ids.tab,
-      kind: "draft-thread",
-      mode: "chat",
-      title: "New Chat",
-      projectId: project.id,
-    } as WorkspaceTab;
-    const base = propsFor(tab);
-    const onOpenChatThread = vi.fn();
-    render(
-      <WorkspaceView
-        {...base}
-        chatController={
-          { ...base.chatController, bootstrap: { threads: [thread] }, status: "ready" } as never
-        }
-        mode="chat"
-        onOpenChatThread={onOpenChatThread}
-        projects={[project]}
-      />,
-    );
-
-    fireEvent.click(await screen.findByRole("button", { name: /Resume planning/i }));
-    expect(onOpenChatThread).toHaveBeenCalledWith(thread.id, thread.title, project.id);
-  });
-
-  it("keeps archived and deleted Chat threads out of Continue", async () => {
+  it("offers starter ideas while only archived and deleted Chat threads exist, and lists no threads", async () => {
     const project = {
       id: "00000000-0000-4000-8000-000000000917",
       type: "chat",
@@ -2902,12 +2862,6 @@ describe("WorkspaceView Chat surfaces", () => {
       createdAt: now,
       updatedAt: now,
     } as never as ProjectSummary;
-    const active = {
-      id: "00000000-0000-4000-8000-000000000918",
-      projectId: project.id,
-      title: "Keep me",
-      lifecycle: "active",
-    };
     const archived = {
       id: "00000000-0000-4000-8000-000000000919",
       projectId: project.id,
@@ -2920,20 +2874,19 @@ describe("WorkspaceView Chat surfaces", () => {
       title: "Hide deleted",
       lifecycle: "deleted",
     };
-    const tab = {
-      id: ids.tab,
-      kind: "draft-thread",
+    const tab: WorkspaceTab = {
+      id: decodeWorkspaceTabId(ids.tab),
+      kind: "welcome",
       mode: "chat",
       title: "New Chat",
-      projectId: project.id,
-    } as WorkspaceTab;
+    };
     render(
       <WorkspaceView
         {...propsFor(tab)}
         chatController={
           {
             ...propsFor(tab).chatController,
-            bootstrap: { threads: [archived, active, deleted] },
+            bootstrap: { threads: [archived, deleted] },
             status: "ready",
           } as never
         }
@@ -2942,9 +2895,10 @@ describe("WorkspaceView Chat surfaces", () => {
         projects={[project]}
       />,
     );
-    expect(await screen.findByRole("button", { name: "Keep me" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Hide archived" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Hide deleted" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("group", { name: "Starter ideas" })).toBeVisible();
+    for (const title of ["Hide archived", "Hide deleted"]) {
+      expect(screen.queryByRole("button", { name: title })).not.toBeInTheDocument();
+    }
   });
 
   it("routes bounded Chat Overview sections to the Project thread hierarchy", async () => {

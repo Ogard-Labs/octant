@@ -6,7 +6,12 @@ import { DockCanvasTool } from "./DockCanvasTool";
 vi.mock("../canvas/CanvasWorkspaceTab", () => ({
   CanvasWorkspaceTab: (props: {
     readonly tab: { readonly canvasId: string; readonly title: string };
-  }) => <p>{`canvas:${props.tab.canvasId}:${props.tab.title}`}</p>,
+    readonly queueClient?: unknown;
+  }) => (
+    <p>
+      {`canvas:${props.tab.canvasId}:${props.tab.title}${props.queueClient === undefined ? "" : ":can-send"}`}
+    </p>
+  ),
 }));
 
 const threadId = "11111111-1111-4111-8111-111111111111";
@@ -133,6 +138,40 @@ describe("the dock Canvas tool", () => {
     expect(await screen.findByRole("button", { name: "Open Quarterly summary" })).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Open Roadmap" }));
     expect(screen.getByText(`canvas:${secondId}:Roadmap`)).toBeVisible();
+  });
+
+  it("offers sending a comment to the agent only when the window can reach the host", async () => {
+    const client = {
+      threadReferenceCards: vi.fn(async () => ({
+        mode: "chat",
+        threadId,
+        projectId,
+        cards: [card()],
+      })),
+    } as never;
+    const { unmount } = render(
+      <DockCanvasTool
+        client={client}
+        mode="chat"
+        projectId={projectId as never}
+        serverUrl="http://127.0.0.1:4000"
+        threadId={threadId}
+        windowCapability="capability"
+      />,
+    );
+    expect(await screen.findByText(`canvas:${canvasId}:Quarterly summary:can-send`)).toBeVisible();
+    unmount();
+
+    render(
+      <DockCanvasTool
+        client={client}
+        mode="chat"
+        projectId={projectId as never}
+        serverUrl="http://127.0.0.1:4000"
+        threadId={threadId}
+      />,
+    );
+    expect(await screen.findByText(`canvas:${canvasId}:Quarterly summary`)).toBeVisible();
   });
 
   it("does not copy an unauthorized Canvas into the dock", async () => {

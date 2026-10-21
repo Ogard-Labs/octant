@@ -17,6 +17,7 @@ import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
 import { registerNativeHarnessEvents } from "./nativeHarnessEvents";
 import { NativeHarnessSessionStore } from "./nativeHarnessSessionStore";
+import { NativeHarnessTurnObserver } from "./nativeHarnessTurnObserver";
 
 const directories: string[] = [];
 const now = "2026-10-06T12:00:00.000Z";
@@ -87,6 +88,62 @@ function turn(
 }
 
 describe("native harness session totals", () => {
+  it("replays one interrupted turn when cancellation follows a completed response", async () => {
+    const connection = openConnection();
+    try {
+      const sessions = storeOn(connection);
+      const subject = new NativeHarnessTurnObserver({
+        sessions,
+        router: {
+          resolve: () => ({
+            kind: "unroutable",
+            job: "advisor",
+            rejected: [],
+            decidedAt: now as never,
+            slotId: "default" as never,
+            reason: "slot-empty",
+          }),
+        },
+        isHarnessProvider: () => true,
+        resolveDriver: () => undefined,
+        hostId: String(lead.hostId),
+        scratchRoot: "/tmp",
+        uuid,
+        clock: () => now,
+      });
+      const scope = {
+        threadId,
+        mode: "code" as const,
+        providerInstanceId: lead.providerInstanceId,
+        modelId: lead.modelId,
+      };
+      const summary = {
+        stopReason: "cancelled" as const,
+        startedAt: now,
+        endedAt: now,
+        usage: { inputTokens: 47_418, outputTokens: 427, cacheReadInputTokens: 45_440 },
+        metrics: { precision: "unavailable" as const, wallMs: 0 },
+      };
+      subject.turnStarted(scope);
+      await subject.turnCompleted({
+        ...scope,
+        text: "Done",
+        toolCalls: 4,
+        turn: { ...summary, stopReason: "end-of-turn" },
+      });
+      subject.turnEnded(scope, summary);
+      for (const store of [sessions, storeOn(connection)]) {
+        const view = store.read(threadId);
+        expect(view?.session.turnsRun).toBe(1);
+        expect(view?.session.usage).toMatchObject(summary.usage);
+        expect(view?.turns).toHaveLength(1);
+        expect(view?.turns[0]).toMatchObject({ stopReason: "user-interrupt", toolCalls: 4 });
+      }
+    } finally {
+      connection.close();
+    }
+  });
+
   it("rebuilds the same usage and timing totals after a restart", () => {
     const connection = openConnection();
     const live = storeOn(connection);
