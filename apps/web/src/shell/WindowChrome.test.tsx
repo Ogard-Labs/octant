@@ -730,13 +730,21 @@ describe("WindowChrome", () => {
       .replace(/\s+/g, " ");
     const glass =
       systemStyles.match(
-        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) \.shell--app-backdrop :is\(\.turn-user \.bubble, \.composer\) \{([^}]*)\}/,
+        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) \.shell--app-backdrop :is\(\.turn-user \.bubble, \.composer:not\(\.composer--follow-up\)\) \{([^}]*)\}/,
       )?.[1] ?? "";
     // The floor goes under the tint, as on Zen's cards: without it body text
     // over a white photo falls under 3:1.
     expect(glass).toContain("background-color: var(--oct-glass-floor);");
     expect(glass).toContain("background-image: linear-gradient(var(--oct-glass-thick)");
     expect(glass).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
+    // A follow-up composer's strip sits on the page: its wrapper takes no
+    // glass, and the surface where the person types takes the whole material.
+    const surface =
+      systemStyles.match(
+        /html:not\(\[data-octant-reduced-transparency="true"\]\) \.shell--app-backdrop \.thread-composer__surface \{([^}]*)\}/,
+      )?.[1] ?? "";
+    expect(surface).toContain("background-color: var(--oct-glass-floor);");
+    expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
   });
 
   it("clears the workspace and pane fills under a translucent workspace so the glass shows", () => {
