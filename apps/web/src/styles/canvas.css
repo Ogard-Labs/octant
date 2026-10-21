@@ -2350,6 +2350,22 @@
   dominant-baseline: middle;
 }
 
+/* An icon is an outline in the secondary ink, so it reads as a label for the
+   node rather than a second colour. Its strokes are drawn on a 24-unit grid
+   and scaled to 16px, so the width is set in grid units. */
+.canvas-block__diagram-icon {
+  fill: none;
+  stroke: var(--oct-fg-2);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.canvas-block__diagram-node text.canvas-block__diagram-node-detail {
+  fill: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .canvas-block__diagram-group rect {
   fill: none;
   stroke: var(--oct-border);
@@ -2409,6 +2425,14 @@
   .canvas-block__diagram-group[data-tone] rect {
     fill: Canvas;
     stroke: CanvasText;
+  }
+
+  .canvas-block__diagram-icon {
+    stroke: CanvasText;
+  }
+
+  .canvas-block__diagram-node text.canvas-block__diagram-node-detail {
+    fill: CanvasText;
   }
 }
 
@@ -3455,6 +3479,16 @@
   gap: var(--oct-space-1);
 }
 
+.canvas-public-links {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+}
+
+.canvas-public-links__url {
+  overflow-wrap: anywhere;
+}
+
 .canvas-share__row-audience {
   color: var(--oct-muted);
 }
@@ -4293,11 +4327,16 @@
   gap: var(--oct-space-5) var(--oct-space-4);
 }
 
+/* A frame is as wide as its size allows and never wider than the board, so a
+   deck in a narrow side panel is not clipped on the right. The board measures
+   the same width to scale the page inside. */
 .canvas-design__frame {
   display: grid;
   gap: var(--oct-space-2);
   margin: 0;
+  width: min(var(--canvas-design-frame-cap, 440px), 100%);
   min-width: 0;
+  max-width: 100%;
 }
 
 .canvas-design__caption {
@@ -4321,9 +4360,16 @@
   white-space: nowrap;
 }
 
+/* On the board the box takes the frame's width and the page's aspect ratio, so
+   it is the right size before the page inside it loads. */
+.canvas-design__frame > .canvas-design__preview {
+  width: 100%;
+}
+
 .canvas-design__preview {
   position: relative;
   overflow: hidden;
+  max-width: 100%;
   border: 1px solid var(--oct-border);
   border-radius: var(--oct-radius-md);
   background: var(--oct-surface);
@@ -4345,9 +4391,14 @@
 
 .canvas-design__page {
   position: absolute;
+  z-index: 1;
   inset: 0 auto auto 0;
   border: 0;
   transform-origin: 0 0;
+}
+
+.canvas-design__page--beneath {
+  z-index: 0;
 }
 
 .canvas-design__cover {
@@ -4411,6 +4462,23 @@
   min-width: 0;
 }
 
+/* A running window played full screen: the header stays so Stop is reachable,
+   and the stage takes the rest so the window is scaled to its height too. */
+.canvas-design:fullscreen {
+  display: flex;
+  flex-direction: column;
+  padding: var(--oct-space-4);
+  background: var(--oct-surface);
+}
+
+.canvas-design:fullscreen .canvas-design__stage {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+
 .octant-dialog__popup.canvas-design-player {
   --octant-dialog-width: 96vw;
   --octant-dialog-height: 94vh;
@@ -4421,8 +4489,29 @@
 
 .canvas-design-player__body {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   height: 100%;
+}
+
+.canvas-design-player__notes {
+  max-height: 30vh;
+  padding: var(--oct-space-3) var(--oct-space-4);
+  overflow-y: auto;
+  border-top: 1px solid var(--oct-border);
+  font-size: var(--oct-text-sm);
+}
+
+.canvas-design-player__notes p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.canvas-design-player__notes-empty {
+  color: var(--oct-meta);
+}
+
+.canvas-design-player__body:fullscreen {
+  background: var(--oct-surface);
 }
 
 .canvas-design-player__bar {
@@ -4515,6 +4604,21 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--oct-space-1);
+}
+
+.canvas-export__link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-2);
+}
+
+.canvas-export__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--oct-space-1);
+  font-size: var(--oct-text-xs);
+  color: var(--oct-muted);
 }
 
 .canvas-export__payload {

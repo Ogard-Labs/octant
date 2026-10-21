@@ -46,6 +46,16 @@ Projects support the following operations:
 - **Relink**: when a bound root becomes unavailable (moved or removed), the Project shows `Relink required`. Use audited relink to point to the new location. Root availability is observed at bootstrap and is not journaled, so relinking does not rewrite durable history.
 - **Remember Full access** (Code Projects): `octant project access <name> full-access` on the host lets new Code threads that choose Remember for this Project start with Full access without a per-thread confirmation, or raise an existing thread to it — a Code thread `octant agent` starts in that Project follows the same choice; `octant project access <name> approval-gated` returns to the default.
 
+## Brand kit
+
+Every Project, Chat, Work or Code, can hold a **brand kit**: your colours, fonts, corner radius, and page gutter, set once. Open the Project overview, choose **Manage** next to **Brand kit**, fill in the values you care about, and select **Save brand kit**. **Clear** removes the kit.
+
+- Colours are hex values (`#0a7d5a`) or `rgb()`, `hsl()`, `oklch()`, or `oklab()` functions.
+- Fonts are system faces or generic families, such as `georgia, serif`. Octant never downloads a font.
+- Radius and gutter are lengths in `px`, `rem`, `em`, or `%`.
+
+When an agent makes a design in a Project that has a kit, it is told the kit exists and draws the design with it, so every screen, slide, and page looks like your product. The design then looks the same in the Canvas, Present, Play, a share, and an HTML export, in light and dark workspaces alike. A kit grants no access to files or the shell. A Chat thread outside a Chat Project has no kit.
+
 ## Project quick start
 
 Chat and Work Project overviews can start a thread directly. Their model pickers offer the selected model's declared reasoning or effort levels. The chosen level is applied before the first message and remains part of that thread's model settings. Choosing **Default** leaves the provider default in effect; changing the provider or model restores its last supported quick-start reasoning choice, or the provider default when none was remembered.

@@ -397,6 +397,10 @@ export class ReplicaArtifactSyncService {
     this.#resolving.delete(String(version.canvasId));
     try {
       if (!this.#queues() || this.#ports.planMode(version)) return;
+      // The store files an artifact by its Project and binds it to a thread
+      // of that Project on another computer; a Canvas owned by a Chat thread
+      // outside every Project has none, so it stays on this computer.
+      if (version.definition.provenance.projectId === null) return;
       // A version another computer wrote, now open in a thread here, is
       // already in the store under its writer's slot; it is not published
       // again under this computer's.
@@ -521,6 +525,7 @@ export class ReplicaArtifactSyncService {
       const artifact = synced ?? queuedVersion?.artifact;
       if (artifact === undefined) return;
       const change = commentChangeOf(input.event);
+      if (change === undefined) return;
       if (!replicaCommentTextLeavesSafely(change)) {
         this.#ports.journal.append({
           eventName: REPLICA_ARTIFACT_EVENT_NAMES.publishRefused,
@@ -939,10 +944,14 @@ export function replicaCommentEntryFor(
 
 /**
  * The change a comment event a person made here becomes in the store. The
- * device it came through stays on this computer.
+ * device it came through stays on this computer, and so does a send to the
+ * agent: the thread it went to lives on this host alone, so another computer
+ * has nothing to do with the request.
  */
-function commentChangeOf(event: CanvasCommentEvent): ReplicaCommentChange {
+function commentChangeOf(event: CanvasCommentEvent): ReplicaCommentChange | undefined {
   switch (event.kind) {
+    case "sent-to-agent":
+      return undefined;
     case "added": {
       const comment = event.event.comment;
       return {

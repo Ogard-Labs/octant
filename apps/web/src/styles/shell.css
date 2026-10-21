@@ -1208,8 +1208,11 @@ html[data-octant-native-host="true"]
   opacity: 0.78;
 }
 
+/* Names in navigation are medium weight: the weight, not a bigger size, is
+   what separates a name from the facts under it. */
 .sidebar-navigation__thread-title {
   color: var(--octant-text-primary);
+  font-weight: var(--oct-weight-medium);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

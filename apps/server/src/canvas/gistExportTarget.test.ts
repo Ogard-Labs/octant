@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { GithubAuthenticationSnapshot } from "@octant/contracts/github-onboarding";
-import {
-  decodeCanvasExportRenderedOutput,
-  type CanvasExportRenderedOutput,
-} from "@octant/contracts/canvas-export";
+import { Schema } from "effect";
+import { CanvasExportRenderedText } from "@octant/contracts/canvas-export";
 import {
   GIST_EXPORT_TARGET_ID,
   GIST_PUBLIC_NOTE,
@@ -21,9 +19,9 @@ function document(input: {
   readonly title?: string;
   readonly body?: string;
   readonly format?: "markdown" | "html";
-}): CanvasExportRenderedOutput {
+}): CanvasExportRenderedText {
   const body = input.body ?? "# Launch plan\n";
-  return decodeCanvasExportRenderedOutput({
+  return Schema.decodeUnknownSync(CanvasExportRenderedText)({
     schemaVersion: 1,
     kind: "canvas-export-output",
     format: input.format ?? "markdown",
