@@ -243,12 +243,11 @@ export class ProviderUsageLimitsService {
       if (observation === undefined || observation.limits === undefined) {
         // A restored reading is the only evidence there is until a turn or a
         // refresh a person asked for reports again, so a pass that found
-        // nothing leaves it as it was. A live runtime report with rolling
-        // windows is merged into it when the snapshot is built.
+        // nothing leaves it as it was. Any live runtime report replaces it.
         if (
           previous?.status === "available" &&
           this.#restored.has(key) &&
-          (runtimeLimits === undefined || runtimeLimits.rateLimitWindows !== undefined)
+          runtimeLimits === undefined
         ) {
           return previous;
         }
@@ -384,8 +383,17 @@ export class ProviderUsageLimitsService {
     }
   }
 
+  /**
+   * Called when a live session reports new limit evidence, so the reading is
+   * saved when it arrives rather than when something next asks for the list.
+   */
+  noteRuntimeEvidence(): void {
+    this.#snapshot(this.#options.now());
+  }
+
   #snapshot(refreshedAt: UtcTimestamp): ProviderUsageLimitsSnapshot {
     this.#settleRestored(refreshedAt);
+    this.#supersedeRestored(refreshedAt);
     const entries = new Map(this.#entries);
     const runtimeLimits = this.#options.runtimeLimits;
     if (runtimeLimits !== undefined) {
@@ -501,6 +509,31 @@ export class ProviderUsageLimitsService {
     }
   }
 
+  /**
+   * Fresh runtime evidence replaces a restored reading whole, so no bucket,
+   * quota, or retry hold from before the restart outlives the report that
+   * supersedes it.
+   */
+  #supersedeRestored(now: UtcTimestamp): void {
+    const runtimeLimits = this.#options.runtimeLimits;
+    if (runtimeLimits === undefined) return;
+    for (const key of this.#restored) {
+      const entry = this.#entries.get(key);
+      if (entry?.status !== "available") continue;
+      const limits = runtimeLimits(entry.providerInstanceId, now);
+      if (limits === undefined) continue;
+      this.#entries.set(key, {
+        providerInstanceId: entry.providerInstanceId,
+        status: "available",
+        source: "provider-runtime",
+        observedAt: limits.updatedAt,
+        limits,
+      });
+      this.#runtimeOrigins.set(key, "runtime-only");
+      this.#restored.delete(key);
+    }
+  }
+
   #persist(entries: ReadonlyArray<ProviderUsageLimitsEntry>): void {
     const persist = this.#options.persistEntries;
     if (persist === undefined) return;
@@ -602,13 +635,10 @@ function withoutExpiredEvidence(
         : limits.retry,
     ...(windows === undefined || windows.length === 0 ? {} : { rateLimitWindows: windows }),
   };
-  const hasFigure =
-    next.rateLimitWindows !== undefined ||
-    next.requests.status === "available" ||
-    next.tokens.status === "available" ||
-    next.concurrency.status === "available" ||
-    next.retry.status === "active";
-  if (!hasFigure) return undefined;
+  // A reading that never held more than a quota state is still a reading;
+  // one that lost its windows or buckets to expiry has nothing left to show.
+  const survives = hasFigure(next) || (!hasFigure(limits) && hasServiceLimitEvidence(next));
+  if (!survives) return undefined;
   const unchanged =
     next.requests === limits.requests &&
     next.tokens === limits.tokens &&
@@ -616,6 +646,16 @@ function withoutExpiredEvidence(
     next.retry === limits.retry &&
     (next.rateLimitWindows?.length ?? 0) === (limits.rateLimitWindows?.length ?? 0);
   return unchanged ? limits : next;
+}
+
+function hasFigure(limits: ProviderServiceLimits): boolean {
+  return (
+    (limits.rateLimitWindows?.length ?? 0) > 0 ||
+    limits.requests.status === "available" ||
+    limits.tokens.status === "available" ||
+    limits.concurrency.status === "available" ||
+    limits.retry.status === "active"
+  );
 }
 
 function withoutWindows(limits: ProviderServiceLimits): ProviderServiceLimits {

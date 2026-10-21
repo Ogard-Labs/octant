@@ -399,8 +399,14 @@ export function wireProviders(deps: ProvidersDependencies) {
       join(providerDataDirectory, "providers", "plan-usage.json"),
     );
     void providerAccountPlanUsageStore.load().catch(() => undefined);
+    let providerUsageLimitsServiceRef: ProviderUsageLimitsService | undefined;
     const recordProviderRuntimeUsage = (event: ProviderRuntimeEvent): void => {
       providerRuntimeUsageLimitsStore.record(event);
+      if (event.kind === "rate-limit-window" || event.kind === "rate-limit-bucket") {
+        // Saved as it arrives, so a host that closes before the next poll
+        // keeps the reading.
+        providerUsageLimitsServiceRef?.noteRuntimeEvidence();
+      }
       if (event.kind !== "rate-limit-window") return;
       const instance = persistence
         .readProviderInstances()
@@ -1325,6 +1331,7 @@ export function wireProviders(deps: ProvidersDependencies) {
           : providerAccountPlanUsageStore.serviceLimits(instanceId, directory, observedAt);
       },
     });
+    providerUsageLimitsServiceRef = providerUsageLimitsService;
     providerUsageLimitsService.start();
     void providerUsageLimitsService.refresh().catch(() => undefined);
     const providerUsageLimitsRoutes = createProviderUsageLimitsRouteHandler({
