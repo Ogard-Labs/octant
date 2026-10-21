@@ -136,6 +136,10 @@ export class UserAddedMcpServerStore {
             name: slug,
             version: "1.0.0",
             description: `${request.name} (added in Settings)`,
+            // Inspection requires every package to state its license. This one
+            // is the person's own server entry, not third-party code, and the
+            // label says so rather than inventing an SPDX identifier.
+            license: "Your own server settings",
           },
           null,
           2,

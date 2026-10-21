@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ProviderCredentialStore } from "../providers/credentialBrokerClient";
+import { normalizeAgentPluginPackage } from "./agentPluginIngestion";
 import { LocalPluginFolderRegistry } from "./localPluginFolderRegistry";
+import { inspectExtensionPackage } from "./packageInspector";
 import { UserAddedMcpServerStore, packageSlug } from "./userAddedMcpServers";
 
 const directories: string[] = [];
@@ -109,6 +111,23 @@ describe("MCP servers added by hand", () => {
       }),
     ).rejects.toMatchObject({ category: "invalid" });
     expect(secrets.values.size).toBe(0);
+  });
+
+  it("writes a package the host's inspection accepts, so adding it can finish", async () => {
+    // Observed in a rendered run: every add from Settings failed with
+    // "Package inspection failed." because the generated package named no
+    // license, which inspection requires of every package.
+    const { store: servers, registry } = await store();
+    const { source } = await servers.add({
+      name: "Local tools",
+      server: { type: "stdio", command: "/usr/local/bin/local-tools", args: ["mcp"], env: [] },
+    });
+    const registered = registry.get(source.sourceRef);
+    if (registered === undefined) throw new Error("Expected the registered folder.");
+    const inspected = inspectExtensionPackage(normalizeAgentPluginPackage(registered.packageInput));
+    expect(inspected.manifest.components).toEqual(
+      expect.arrayContaining([expect.objectContaining({ kind: "mcp-server" })]),
+    );
   });
 
   it("refuses a secret value on a host that has no credential store", async () => {
