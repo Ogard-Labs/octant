@@ -132,6 +132,11 @@ export type ProviderSettingsListProps = Pick<
   readonly discoverySnapshot: DiscoverySnapshot | undefined;
   readonly presentationObservedByInstance?: ReadonlyMap<ProviderInstanceId, ProviderObservedState>;
   readonly createForm?: ReactNode;
+  /**
+   * Claude and Codex cards offer "Add account" when this is given: it opens
+   * the create form for another account of the same driver.
+   */
+  readonly onAddAccount?: (instance: ProviderInstance) => void;
   readonly heading?: string;
   readonly note?: string;
   /** What the list says when it holds no instance yet. */
@@ -254,6 +259,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           : { usageLimitsClient: props.usageLimitsClient })}
         instance={instance}
         key={instance.id}
+        {...(props.onAddAccount === undefined ? {} : { onAddAccount: props.onAddAccount })}
         {...(props.discoverySnapshot === undefined
           ? {}
           : { discoverySnapshot: props.discoverySnapshot })}
@@ -585,6 +591,7 @@ interface ProviderRowProps {
   readonly index: number;
   readonly count: number;
   readonly onMove: (index: number, direction: -1 | 1) => void;
+  readonly onAddAccount?: (instance: ProviderInstance) => void;
   readonly onRename: ProviderSettingsViewProps["onRename"];
   readonly onChangeBinary: ProviderSettingsViewProps["onChangeBinary"];
   readonly onLocateBinary?: ProviderSettingsViewProps["onLocateBinary"];
@@ -985,6 +992,18 @@ function ProviderRow(props: ProviderRowProps) {
                 variant="outline"
               >
                 {locating ? "Checking binary…" : "Locate binary…"}
+              </OctantButton>
+            ) : null}
+            {props.onAddAccount !== undefined && (isClaude || isCodex) ? (
+              <OctantButton
+                aria-label={`Add account for ${name}`}
+                disabled={props.busy}
+                onClick={() => props.onAddAccount?.(props.instance)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Add account
               </OctantButton>
             ) : null}
             <OctantButton
