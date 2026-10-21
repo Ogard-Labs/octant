@@ -12,9 +12,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { Schema } from "effect";
 import {
-  decodeCanvasExportRenderedOutput,
-  type CanvasExportRenderedOutput,
+  CanvasExportRenderedPictures,
+  CanvasExportRenderedText,
 } from "@octant/contracts/canvas-export";
 import { createCanvasExportFilePort } from "./canvasExportFilePort";
 import { createFolderExportTarget, type FolderExportAvailability } from "./folderExportTarget";
@@ -47,9 +48,9 @@ function document(input: {
   readonly title?: string;
   readonly body?: string;
   readonly format?: "markdown" | "html";
-}): CanvasExportRenderedOutput {
+}): CanvasExportRenderedText {
   const body = input.body ?? "# Launch plan\n";
-  return decodeCanvasExportRenderedOutput({
+  return Schema.decodeUnknownSync(CanvasExportRenderedText)({
     schemaVersion: 1,
     kind: "canvas-export-output",
     format: input.format ?? "markdown",
@@ -60,6 +61,23 @@ function document(input: {
       versionId,
       sequence: 1,
       byteLength: new TextEncoder().encode(body).length,
+      contentDigest: `sha256:${"a".repeat(64)}`,
+    },
+  });
+}
+
+function slides(names: ReadonlyArray<string>): CanvasExportRenderedPictures {
+  return Schema.decodeUnknownSync(CanvasExportRenderedPictures)({
+    schemaVersion: 1,
+    kind: "canvas-export-output",
+    format: "png",
+    title: "Launch deck",
+    files: names.map((name) => ({ name, bytes: new TextEncoder().encode(`new ${name}`) })),
+    metadata: {
+      canvasId,
+      versionId,
+      sequence: 1,
+      byteLength: 10,
       contentDigest: `sha256:${"a".repeat(64)}`,
     },
   });
@@ -190,6 +208,50 @@ describe("the folder export destination", () => {
     expect(delivery).toMatchObject({ kind: "receipt" });
     expect(readFileSync(join(folder, "Launch plan.md"), "utf8")).toBe("what the person kept");
     expect(readFileSync(join(folder, "Launch plan (2).md"), "utf8")).toBe(output.body);
+  });
+
+  it("names each existing picture file the card would replace and no other", () => {
+    const folder = privateFolder();
+    const target = folderTarget(() => ({ kind: "ready", folder }));
+    writeFileSync(join(folder, "b.png"), "old b", "utf8");
+
+    expect(target.describeDestination?.(slides(["a.png", "b.png", "c.png"]))).toEqual({
+      path: join(folder, "a.png"),
+      replacesExisting: false,
+      alsoReplaces: [join(folder, "b.png")],
+    });
+  });
+
+  it("replaces exactly the picture files the card named and copies beside any other", async () => {
+    const folder = privateFolder();
+    const target = folderTarget(() => ({ kind: "ready", folder }));
+    const output = slides(["a.png", "b.png", "c.png"]);
+    writeFileSync(join(folder, "b.png"), "old b", "utf8");
+    const described = target.describeDestination?.(output);
+    // c.png appears after the card was built, so the card never named it.
+    writeFileSync(join(folder, "c.png"), "kept c", "utf8");
+
+    const delivery = await target.exportDocument(output, described);
+
+    expect(delivery).toMatchObject({ kind: "receipt" });
+    expect(readFileSync(join(folder, "a.png"), "utf8")).toBe("new a.png");
+    expect(readFileSync(join(folder, "b.png"), "utf8")).toBe("new b.png");
+    expect(readFileSync(join(folder, "c.png"), "utf8")).toBe("kept c");
+    expect(readFileSync(join(folder, "c (2).png"), "utf8")).toBe("new c.png");
+  });
+
+  it("does not let a card that named a new first picture replace a later file", async () => {
+    const folder = privateFolder();
+    const target = folderTarget(() => ({ kind: "ready", folder }));
+    const output = slides(["a.png", "b.png"]);
+    const described = target.describeDestination?.(output);
+    expect(described?.replacesExisting).toBe(false);
+    writeFileSync(join(folder, "b.png"), "kept b", "utf8");
+
+    await target.exportDocument(output, described);
+
+    expect(readFileSync(join(folder, "b.png"), "utf8")).toBe("kept b");
+    expect(readFileSync(join(folder, "b (2).png"), "utf8")).toBe("new b.png");
   });
 
   it("refuses to write into a folder the approval card never named", async () => {

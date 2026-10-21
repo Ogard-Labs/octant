@@ -156,7 +156,8 @@ export interface CanvasTabInput {
   readonly mode: OctantMode;
   readonly title: string;
   readonly canvasId: CanvasId;
-  readonly projectId: ProjectId;
+  /** The Canvas's Project, or null for a Chat Canvas owned by its thread. */
+  readonly projectId: ProjectId | null;
 }
 
 /**
@@ -1016,8 +1017,11 @@ export function useShellController(options: ShellControllerOptions) {
         announce("Preview belongs to a different Project. Open it there instead.");
         return;
       }
+      // A Canvas owned by its thread names no Project, so it drops into any
+      // Chat pane.
       if (
         surface.kind === "canvas" &&
+        surface.projectId !== null &&
         targetMode !== undefined &&
         workspace.contextByMode[targetMode].projectId !== null &&
         workspace.contextByMode[targetMode].projectId !== surface.projectId

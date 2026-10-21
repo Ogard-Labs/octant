@@ -113,6 +113,7 @@ import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { ThreadHarnessApproval } from "../harness/ThreadHarnessApproval";
 import { ThreadHarnessSteering } from "../harness/ThreadHarnessSteering";
+import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { useWorkResearchController } from "../work/useWorkResearchController";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
@@ -1887,6 +1888,14 @@ function renderNonCodeTab(
           client={props.canvasClient}
           tab={tab}
           onAttachContext={canvasContext.onAttachCanvasContext}
+          {...(props.projectServerUrl === undefined || props.projectWindowCapability === undefined
+            ? {}
+            : {
+                queueClient: createThreadMessageQueueClient({
+                  serverUrl: props.projectServerUrl,
+                  windowCapability: props.projectWindowCapability,
+                }),
+              })}
           {...(props.onPinCanvasInFocusZone === undefined
             ? {}
             : { onPinCanvasInFocusZone: props.onPinCanvasInFocusZone })}

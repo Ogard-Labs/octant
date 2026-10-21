@@ -21,6 +21,7 @@ import { HostId } from "./host";
 import { ProjectId } from "./projects";
 import { ProviderInstanceId, ProviderModelId } from "./providers";
 import { ImageArtifactId } from "./imageGeneration";
+import { BrowserCaptureId } from "./browserAutomation";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -36,8 +37,11 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 // id, version 14 the funnel, radar, and sankey chart types, version 15 the
 // dashboard layout block, version 16 the design document size and workspace
 // theme, version 17 a design's declared image assets, version 18 a design
-// that runs script, and version 19 the tabs and columns layout groups, diagram
-// styles, and the plan's Gantt view, which the
+// that runs script, version 19 the tabs and columns layout groups, diagram
+// styles, and the plan's Gantt view, version 20 a Chat Canvas owned by
+// its thread rather than a Chat Project, and version 21 design frame notes,
+// brand tokens, captured-page assets, and diagram node icons, details, and
+// nested groups, which the
 // definition filters below admit only under those declared versions.
 
 // These are renderer-facing aggregate limits. Per-field structural limits are
@@ -98,7 +102,24 @@ export const CANVAS_MAX_HEATMAP_CELLS = 16_384;
 export const CANVAS_MAX_HEATMAP_DAYS = 3 * 366;
 export const CANVAS_MAX_HEATMAP_NOTE_LENGTH = 120;
 export const CANVAS_MAX_DESIGN_FRAMES = 24;
-export const CANVAS_MAX_DESIGN_MARKUP_LENGTH = 32_768;
+// A frame, and the shared stylesheet, hold one whole screen: a running app
+// window at 1440x900 puts its sidebar, panes, tabs, and its script in one
+// frame, and a finished one ran past the old 32 KiB. 64 KiB holds that with
+// room. The 256 KiB text budget still bounds the design as a whole (about
+// three frames this large, or many smaller screens).
+export const CANVAS_MAX_DESIGN_MARKUP_LENGTH = 65_536;
+// Speaker or screen notes are prose a presenter reads, not markup: a page of
+// text per frame.
+export const CANVAS_MAX_DESIGN_NOTES_LENGTH = 2_000;
+// A brand is a handful of named values (a palette, two font stacks, a radius,
+// a spacing step), not a stylesheet.
+export const CANVAS_MAX_DESIGN_BRAND_TOKENS = 32;
+export const CANVAS_MAX_DESIGN_BRAND_VALUE_LENGTH = 128;
+// A diagram node's detail is a subtitle under its label, not a paragraph.
+export const CANVAS_MAX_DIAGRAM_DETAIL_LENGTH = 120;
+// A group inside a group inside a group: deeper boundaries stop reading as
+// zones and start reading as noise.
+export const CANVAS_MAX_DIAGRAM_GROUP_DEPTH = 3;
 // A design shows a few real pictures: a screenshot in a phone frame, a hero
 // image, a team photo. The host reads and inlines every declared image each
 // time the design is drawn, so the count and bytes are bounded per design.
@@ -219,8 +240,28 @@ export const CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION = 19;
 // Diagram styling (closed node roles, edge styles and tones, group tones) and
 // the plan's Gantt view shipped with the layout groups and share their floor.
 export const CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION = CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION;
+// A Chat Canvas whose provenance names its thread and no Project
+// (`projectId: null`): the Canvas belongs to the thread, as a Chat thread
+// outside a Chat Project has no Project to hold it.
+export const CANVAS_THREAD_OWNED_SCHEMA_VERSION = 20;
+// The design fields wave 2 shares: a frame's notes, a design's brand tokens
+// (`theme: "brand"`), a captured page as a design asset, and a diagram node's
+// icon and detail with a group's parent group.
+export const CANVAS_DESIGN_FIELDS_SCHEMA_VERSION = 21;
 // The metric's sparkline, goodDirection, and caption arrived with the bar list.
 export const CANVAS_METRIC_TREND_SCHEMA_VERSION = 7;
+
+/**
+ * Whether a provenance names a thread and no Project: a Chat Canvas that
+ * belongs to its thread. Reads loose fields so the domain's declared-version
+ * check can ask before the document decodes.
+ */
+export function canvasProvenanceIsThreadOwned(provenance: {
+  readonly mode?: unknown;
+  readonly projectId?: unknown;
+}): boolean {
+  return provenance.mode === "chat" && provenance.projectId === null;
+}
 
 /** Whether a block uses a metric field introduced at the metric-trend version. */
 export function canvasMetricUsesTrendFields(block: {
@@ -381,9 +422,13 @@ const CanvasProvenanceCommon = {
 } as const;
 
 export const CanvasProvenance = Schema.Union(
+  // A Chat Canvas belongs to its thread's Chat Project, or, when the thread
+  // is in none, to the thread alone (`projectId: null`, from
+  // `CANVAS_THREAD_OWNED_SCHEMA_VERSION`). Work and Code always have a Project.
   Schema.Struct({
     ...CanvasProvenanceCommon,
     mode: Schema.Literal("chat"),
+    projectId: Schema.NullOr(ProjectId),
     threadId: ChatThreadId,
   }).annotations(strict),
   Schema.Struct({
@@ -1383,10 +1428,39 @@ export const CanvasDiagramTone = Schema.Literal(
 );
 export type CanvasDiagramTone = typeof CanvasDiagramTone.Type;
 
+/**
+ * The generic infrastructure glyphs a diagram node may carry. The list is
+ * closed and names kinds of thing, never a vendor or a product, so a renderer
+ * draws its own glyph for each and an export needs no image.
+ */
+export const CANVAS_DIAGRAM_NODE_ICONS = [
+  "client",
+  "browser",
+  "mobile",
+  "server",
+  "service",
+  "database",
+  "cache",
+  "queue",
+  "storage",
+  "cdn",
+  "gateway",
+  "auth",
+  "function",
+  "external",
+  "user",
+  "analytics",
+] as const;
+export const CanvasDiagramNodeIcon = Schema.Literal(...CANVAS_DIAGRAM_NODE_ICONS);
+export type CanvasDiagramNodeIcon = typeof CanvasDiagramNodeIcon.Type;
+
 export const CanvasDiagramNode = Schema.Struct({
   nodeId: CanvasNodeId,
   label: CanvasLabel,
   role: Schema.optional(boundedToken("CanvasNodeRole")),
+  icon: Schema.optional(CanvasDiagramNodeIcon),
+  /** A short subtitle under the label, such as a technology or a port. */
+  detail: Schema.optional(boundedNonEmptyText(CANVAS_MAX_DIAGRAM_DETAIL_LENGTH)),
   x: Schema.optional(FiniteNumber),
   y: Schema.optional(FiniteNumber),
   positioned: Schema.optional(Schema.Literal(true)),
@@ -1420,8 +1494,44 @@ export const CanvasDiagramGroup = Schema.Struct({
   nodeIds: Schema.Array(CanvasNodeId).pipe(Schema.maxItems(CANVAS_MAX_DIAGRAM_NODES)),
   /** A region's tone, so a zone map reads as areas rather than outlines. */
   tone: Schema.optional(CanvasDiagramTone),
+  /**
+   * The group this one sits inside, so a cloud region can hold its zones. The
+   * domain policy refuses an unknown parent, a cycle, and nesting deeper than
+   * `CANVAS_MAX_DIAGRAM_GROUP_DEPTH`.
+   */
+  parentGroupId: Schema.optional(boundedToken("CanvasGroupId")),
 }).annotations(strict);
 export type CanvasDiagramGroup = typeof CanvasDiagramGroup.Type;
+
+/**
+ * Whether a block uses a diagram field introduced at the design-fields
+ * version. Reads loose fields so the domain's declared-version check can ask
+ * the same question of a document that did not decode.
+ */
+export function canvasDiagramUsesRichFields(block: {
+  readonly kind?: unknown;
+  readonly nodes?: unknown;
+  readonly groups?: unknown;
+}): boolean {
+  if (block.kind !== "diagram") return false;
+  return (
+    anyItemCarries(block.nodes, ["icon", "detail"]) ||
+    anyItemCarries(block.groups, ["parentGroupId"])
+  );
+}
+
+/** Whether any item of a loosely read list sets one of the named fields. */
+function anyItemCarries(items: unknown, fields: ReadonlyArray<string>): boolean {
+  return (
+    Array.isArray(items) &&
+    items.some(
+      (item) =>
+        typeof item === "object" &&
+        item !== null &&
+        fields.some((field) => (item as Record<string, unknown>)[field] !== undefined),
+    )
+  );
+}
 
 /** Whether a block uses a diagram field introduced at the diagram-styles version. */
 export function canvasDiagramUsesStyles(block: {
@@ -1430,15 +1540,7 @@ export function canvasDiagramUsesStyles(block: {
   readonly groups?: unknown;
 }): boolean {
   if (block.kind !== "diagram") return false;
-  const carries = (items: unknown, fields: ReadonlyArray<string>): boolean =>
-    Array.isArray(items) &&
-    items.some(
-      (item) =>
-        typeof item === "object" &&
-        item !== null &&
-        fields.some((field) => (item as Record<string, unknown>)[field] !== undefined),
-    );
-  return carries(block.edges, ["style", "tone"]) || carries(block.groups, ["tone"]);
+  return anyItemCarries(block.edges, ["style", "tone"]) || anyItemCarries(block.groups, ["tone"]);
 }
 
 /** Whether a role is one the layout draws as a shape. */
@@ -2012,9 +2114,9 @@ export type CanvasDesignDeviceSize = Exclude<CanvasDesignSize, "document">;
  * tokens, light or dark as the workspace is, its fonts, and the frame kit's
  * classes) or as the author's page alone (`none`). A document defaults to
  * `workspace`; a device size defaults to `none`, so a product screen keeps its
- * own brand.
+ * own brand. `brand` draws the page with the design's own `brand` tokens.
  */
-export const CanvasDesignTheme = Schema.Literal("workspace", "none");
+export const CanvasDesignTheme = Schema.Literal("workspace", "none", "brand");
 export type CanvasDesignTheme = typeof CanvasDesignTheme.Type;
 
 /**
@@ -2054,6 +2156,33 @@ export function canvasDesignRunsScript(block: {
   return block.kind === "design" && block.runsScript !== undefined;
 }
 
+/**
+ * Whether a design uses anything version 21 introduced: a frame's notes, the
+ * brand theme or tokens, or a captured page as an asset. Reads loose fields
+ * so the domain's declared-version check can ask the same question of a
+ * document that did not decode.
+ */
+export function canvasDesignUsesDesignFields(block: {
+  readonly kind?: unknown;
+  readonly theme?: unknown;
+  readonly brand?: unknown;
+  readonly frames?: unknown;
+  readonly assets?: unknown;
+}): boolean {
+  if (block.kind !== "design") return false;
+  if (block.theme === "brand" || block.brand !== undefined) return true;
+  if (anyItemCarries(block.frames, ["notes"])) return true;
+  return (
+    Array.isArray(block.assets) &&
+    block.assets.some(
+      (asset: unknown) =>
+        typeof asset === "object" &&
+        asset !== null &&
+        (asset as { source?: { kind?: unknown } }).source?.kind === "browser-capture",
+    )
+  );
+}
+
 /** The CSS viewport each device size is drawn at. Authors lay frames out against it. */
 export const CANVAS_DESIGN_VIEWPORT: Readonly<
   Record<CanvasDesignDeviceSize, { readonly width: number; readonly height: number }>
@@ -2077,8 +2206,32 @@ export const CanvasDesignFrame = Schema.Struct({
   frameId: CanvasDesignFrameId,
   title: CanvasMockupText,
   html: CanvasDesignMarkup,
+  /** Plain-text notes for the presenter or reviewer; shown as text, never as markup. */
+  notes: Schema.optional(boundedNonEmptyText(CANVAS_MAX_DESIGN_NOTES_LENGTH)),
 }).annotations(strict);
 export type CanvasDesignFrame = typeof CanvasDesignFrame.Type;
+
+/**
+ * A design's own brand: named values a frame reads when `theme` is `brand`.
+ * A name is a kind and a slug (`color-primary`, `font-heading`, `radius-card`,
+ * `space-gutter`). Colours, font families, and lengths are checked by the
+ * domain policy against the frame token safety rules, so a value can never end
+ * a declaration or load anything.
+ */
+export const CANVAS_DESIGN_BRAND_TOKEN_KINDS = ["color", "font", "radius", "space"] as const;
+export type CanvasDesignBrandTokenKind = (typeof CANVAS_DESIGN_BRAND_TOKEN_KINDS)[number];
+export const CanvasDesignBrandTokenName = Schema.String.pipe(
+  Schema.pattern(/^(?:color|font|radius|space)-[a-z0-9][a-z0-9-]{0,31}$/),
+);
+export const CanvasDesignBrand = Schema.Record({
+  key: CanvasDesignBrandTokenName,
+  value: boundedNonEmptyText(CANVAS_MAX_DESIGN_BRAND_VALUE_LENGTH),
+}).pipe(
+  Schema.filter((brand) => Object.keys(brand).length <= CANVAS_MAX_DESIGN_BRAND_TOKENS, {
+    message: () => `A brand holds at most ${String(CANVAS_MAX_DESIGN_BRAND_TOKENS)} tokens.`,
+  }),
+);
+export type CanvasDesignBrand = typeof CanvasDesignBrand.Type;
 
 /**
  * The name markup gives a declared asset after the scheme: `octant-asset:hero`.
@@ -2098,7 +2251,9 @@ export type CanvasDesignAssetId = typeof CanvasDesignAssetId.Type;
  * thread is bound to or the checkout a Code thread is bound to; a Chat
  * Project has no folder, so it never resolves one. The definition holds only
  * the reference: the host resolves it under the thread's authority each time
- * the design is drawn, and the bytes are never journaled.
+ * the design is drawn, and the bytes are never journaled. A `browser-capture`
+ * names a screenshot the Browser kept for the Canvas's own thread; the Browser
+ * is a Work and Code tool, so a Chat Canvas refuses it.
  */
 export const CanvasDesignAssetSource = Schema.Union(
   Schema.Struct({
@@ -2108,6 +2263,10 @@ export const CanvasDesignAssetSource = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("project-file"),
     path: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(1_024)),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("browser-capture"),
+    captureId: BrowserCaptureId,
   }).annotations(strict),
 );
 export type CanvasDesignAssetSource = typeof CanvasDesignAssetSource.Type;
@@ -2134,6 +2293,7 @@ export const CanvasDesignBlock = Schema.Struct({
   title: CanvasMockupText,
   size: CanvasDesignSize,
   theme: Schema.optional(CanvasDesignTheme),
+  brand: Schema.optional(CanvasDesignBrand),
   runsScript: Schema.optional(Schema.Literal(true)),
   styles: Schema.optional(CanvasDesignMarkup),
   assets: Schema.optional(
@@ -2523,8 +2683,10 @@ export const CanvasDefinition = Schema.Struct({
     // version 13, the funnel, radar, and sankey charts from version 14, the
     // dashboard from version 15, a design document or theme from version 16,
     // design assets from version 17, a design that runs script from version
-    // 18, and the tabs and columns layout groups, diagram styles, and the
-    // Gantt view from version 19. A rolled-back runtime that never learned a
+    // 18, the tabs and columns layout groups, diagram styles, and the
+    // Gantt view from version 19, a Chat Canvas owned by its thread from
+    // version 20, and frame notes, brand tokens, captured-page assets, and the
+    // richer diagram fields from version 21. A rolled-back runtime that never learned a
     // kind or hint must see a document carrying it as a declared future
     // version, not as a document that failed to decode. Each keeps its own
     // floor so an earlier document stays valid.
@@ -2535,6 +2697,15 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `Mockup blocks require Canvas schema version ${String(CANVAS_MOCKUP_SCHEMA_VERSION)} or newer.`,
+      },
+    ),
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_THREAD_OWNED_SCHEMA_VERSION ||
+        !canvasProvenanceIsThreadOwned(definition.provenance),
+      {
+        message: () =>
+          `A Canvas owned by its thread requires Canvas schema version ${String(CANVAS_THREAD_OWNED_SCHEMA_VERSION)}.`,
       },
     ),
     Schema.filter(
@@ -2703,6 +2874,20 @@ export const CanvasDefinition = Schema.Struct({
       {
         message: () =>
           `Diagram edge styles and tones, group tones, and the plan's Gantt view require Canvas schema version ${String(CANVAS_DIAGRAM_STYLES_SCHEMA_VERSION)}.`,
+      },
+    ),
+  )
+  // `pipe` takes at most twenty combinators, so the newest floor chains on.
+  .pipe(
+    Schema.filter(
+      (definition) =>
+        definition.schemaVersion >= CANVAS_DESIGN_FIELDS_SCHEMA_VERSION ||
+        !definition.blocks.some(
+          (block) => canvasDesignUsesDesignFields(block) || canvasDiagramUsesRichFields(block),
+        ),
+      {
+        message: () =>
+          `Frame notes, brand tokens, captured-page assets, and diagram icons, details, and nested groups require Canvas schema version ${String(CANVAS_DESIGN_FIELDS_SCHEMA_VERSION)}.`,
       },
     ),
   );

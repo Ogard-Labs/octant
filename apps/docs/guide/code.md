@@ -74,6 +74,10 @@ earlier ones exist; it has no Load earlier, so read those on the desktop.
 `octant agent` shows a Code thread's newest 50 turns, and its footer then
 counts them as **newest 50 turns**.
 
+In `octant agent`, Stop reports an interruption only when the host confirms it.
+If the turn finishes before Stop arrives, it reports that nothing is running;
+if the host refuses, the terminal shows the reason.
+
 ## Export
 
 **Export…** downloads a portable JSON cut of this Code thread: the

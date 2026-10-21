@@ -670,7 +670,8 @@
 }
 
 .app-backdrop__builtin,
-.app-backdrop__photo {
+.app-backdrop__photo,
+.app-backdrop__characters {
   position: absolute;
   inset: 0;
   display: block;

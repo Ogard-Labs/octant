@@ -18,7 +18,20 @@ its first call: what a Canvas is and when to deliver work as one instead of a
 long reply, the operations, the authoring and safety rules (structured blocks,
 markup only in a design's frames, no file, shell, Git, or network authority,
 no invented references), where the thread shows it, and to call `describe`
-before authoring. Per-block guidance is answered by `describe`. Unscoped
+before authoring. The delivery rule is a test of the answer, not of the verb
+the person used: anything the person will keep, share, present, or come back
+to (a report, memo, plan, spec, review, audit, comparison, article, slide
+deck, dashboard, web page, design or mockup, diagram, or prototype), and any
+reply that needs headings, tables, or charts or runs past a few paragraphs, is
+a Canvas with a one- or two-sentence reply pointing at it; what is read once
+(a short answer, a one-off snippet or command, a clarifying question,
+conversation) stays in the reply. When in doubt the agent makes the Canvas
+rather than asking, because a person who wanted the document otherwise had to
+ask twice, and one who wanted text can say so once. The description also asks
+for a finished look: typed blocks for data, a design frame only for the look.
+The description serialises with its input schema inside a 6,000-byte budget
+that `canvasAgentTools.test.ts` holds, so a rule added here is paid for by a
+rule trimmed. Per-block guidance is answered by `describe`. Unscoped
 describe names the three tiers (typed blocks carry data, a static design frame
 carries the look, a running design frame carries behaviour) and the rule to
 use the lowest tier that delivers the result, then lists the closed block
@@ -31,17 +44,34 @@ guidance names the frame kit classes, the images the thread's mode can show
 (generated images in every mode, and Project files in Work and Code), when a
 design should declare that it runs script, and the limits its bridge keeps;
 its examples are a phone flow, a deck, a themed spec, and a prototype that
-runs, one finished example of each frame tier. Unscoped
+runs, one finished example of each frame tier. The same guidance lays a
+slide out in fixed pixels at its 1920x1080 size, never in `vh` or `vw`
+(a slide is drawn in that viewport and scaled as a picture, so a viewport
+unit tracks whatever draws it; the deck example once used `100vh`), with body
+text at or above 32px, titles of 64 to 96px, one idea per slide, and the same
+header and footer on every slide; it gives a website or landing page a
+desktop size and the page's real sections in order; and it draws a UI kit's
+component sheet as a document in the kit's own palette with each control in
+every state. The `diagram` guidance lays a system diagram out by tier (one
+group per tier, flow left to right, short node labels, the protocol on each
+edge). Unscoped
 describe also lists document recipes: an id, a title, when to use one, and a
 skeleton of block kinds that already exist, where a `design` slot may name
 the `size` it is drawn at. The
-host offers an implementation plan, a design spec, an architecture review (its
-options in a comparison matrix), a code review, an audit or test report, a
-postmortem, a research brief, a dashboard, a repository map, a design
-prototype, a slide deck, a data model, an article (one themed document), a
+host offers an implementation plan, a memo (a one-page report from typed
+blocks alone: summary, facts, detail, and the ask), a design spec, an
+architecture review (its options in a comparison matrix), a code review, an
+audit or test report, a postmortem, a research brief, a dashboard, a
+repository map, a design prototype (screens, a website, or a landing page at a
+device size), a slide deck, a data model, an architecture diagram (the parts
+grouped by tier as a diagram, the main flow as a sequence, and a key-decisions
+table), an article (one themed document), a
 product or game design brief (a themed pitch, then typed blocks in tabs), a
-design system (a themed document and a token table), and a clickable
-prototype (a design that runs). A trusted, enabled, unscoped skill
+design system (a themed document and a token table), a UI kit (a token table
+and a component sheet in the kit's own palette with every state), and a
+clickable prototype (a design that runs). Together they cover the deliverables
+people ask an assistant for most: a web page, a one-page document, a deck, a
+dashboard, a system diagram, and a prototype or small app. A trusted, enabled, unscoped skill
 may add recipes through its Canvas contribution; a skill that is not enabled
 contributes none, and a contributed recipe cannot replace an in-tree id. A
 recipe is a starting shape, not a document and not authority. Describe reads no
@@ -63,10 +93,71 @@ it in: after the Canvas exists, the renderer sends an ordinary turn on the
 thread with the new Canvas attached as whole-canvas context, so the agent
 revises it with its own tools under the thread's existing authority.
 
-A Chat thread outside a Chat Project, and a managed child run in Chat mode or with
-no Project, are not offered `octant_canvas`: a Canvas there has nowhere to belong
-and every call would be refused. The refusal for a window without a Chat
-Project stays as the backstop.
+Every Chat thread is offered `octant_canvas`, as people expect of an
+assistant that makes documents. A Chat thread in a Chat Project writes into
+that Project, through the window's active Chat Project as before. A Chat
+thread in no Chat Project owns its Canvas itself: the Canvas's provenance
+names the thread and no Project (`projectId: null`, Canvas schema version 20,
+so an older runtime refuses it as a future version rather than reading the
+missing Project as corruption), its workspace scope is `chat-virtual` with no
+Project, and the tool's description says it is bound to this Chat thread. The
+host decides the owner from the thread alone and never reads the window's
+Project for it; the create request names no Project, the window must have
+none open, and the thread must be active and in no Chat Project, or the
+create is refused `unavailable`. Such a Canvas carries exactly what a Chat
+Project Canvas carries and no more: no file, shell, Git, or network
+authority (`chat-implicit-authority` refuses any of them), a design that
+names a Project file is refused, and a design's generated images resolve
+only from the thread itself rather than from a Project's threads. A managed
+child run in Chat mode or with no Project is still not offered the tool: a
+child's Canvas appears in its parent thread's dock, and a Chat parent has no
+workspace the host resolves for the run.
+
+A thread-owned Canvas belongs to its thread for life, and the thread's data
+rules decide it: it is listed in the thread's cards and dock wherever the
+thread is, and a thread moved into a Chat Project keeps showing the
+Canvases it owned, revisable by that thread's agent, while they never join
+the Project's inventory or memory scope and are never re-homed (a Canvas's
+provenance is immutable). It is reached only by its own thread's agent and
+by a person's window in Chat, whatever Project that window shows, because
+the thread itself has no Project authority to match; another thread's agent
+cannot read it by id, since no Project makes it a neighbour's. A Clear of
+the thread's outside-content mark leaves the Canvas's own recorded mark, as
+for any Canvas. Deleting the thread takes the Canvas out of reach, and the
+thread's purge erases it with the thread, as it erases every Canvas the
+thread authored. A thread export carries it beside the Project's Canvases
+the thread shows. It exports to the host's export folder, the one chosen for
+everything without a Project of its own, so the export-folder view reports
+scope `host` and refuses a `project` choice, and a host export carries it
+whole with no Project named, its owner being the thread in its provenance
+(the host-export Canvas record once required a Project, which left every
+such Canvas out of the cut). It is never mirrored (the
+mirror files artifacts by Project; the receipt says so and journals
+`skipped`), never published to an artifact replica, absent from the
+Project-grouped artifact library, and not shared (see [Shares](#shares)). A
+Canvas tab that opens it names no Project and rests in the Chat layout
+whatever Project the pane's context binds. The shell opens and restores that
+tab under the rule the Canvas routes authorize by: the Canvas still belongs
+to its thread, and the thread, read from the Canvas's own provenance, exists
+and is not deleted or deleting; otherwise the pane shows the welcome surface,
+because a tab restored past that rule opened to a refusal once the thread was
+deleted but not yet purged.
+
+The delivery rule also reaches the model as an instruction, not only as the
+tool description. Every turn that offers `octant_canvas` (Work, Code, and
+every Chat thread) carries one short, provider-neutral,
+budgeted entry in its required context: deliver a document, report, memo,
+plan, deck, dashboard, page, or prototype the person will keep or share as a
+Canvas with `octant_canvas`, not as a file written with the runtime's own file
+tools and not as a long reply, unless the person asks for a file or for plain
+text. The entry grants no tools or authority, is attributed as Octant policy
+like the Work artifact instruction, and is absent from every turn that does
+not offer the tool. Work's artifact instruction defers to it: a document goes
+in the task folder when the person asked for a file or no Canvas tool is
+offered. The rule moved into required context because, in a live Work turn, a
+runtime with its own file tools read the tool description and still wrote the
+memo as a Markdown file, then pasted it into the reply after the write was
+denied.
 
 ## Presentation and schema versions
 
@@ -80,10 +171,51 @@ version 11, the mockup catalog at version 12, a table row's `id` at
 version 13, the funnel, radar, and sankey chart types at version 14, the
 dashboard block at version 15, a design's `document` size or `theme` at
 version 16, a design's image `assets` at version 17, a design's
-`runsScript` at version 18, and the `tabs` and `columns` layout groups,
-diagram styles, and the plan's `gantt` view at version 19, so a
-document that declares an earlier version and carries one is
-refused as a declared future version. The optional table column
+`runsScript` at version 18, the `tabs` and `columns` layout groups,
+diagram styles, and the plan's `gantt` view at version 19, and a Chat
+Canvas owned by its thread (a chat provenance with no Project) at version
+20, and the design and diagram fields below at version 21, so a document that
+declares an earlier version and carries one is refused as a declared future
+version. Version 20 adds no block or field a share carries, so a share names a
+block authored at 20 as 19 under share version 10. Version 21 adds the
+following, all optional, so every version 20 document still decodes:
+
+| Field                            | Where             | Limit                                                                                                                                                                                                                              |
+| -------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `notes`                          | each design frame | Non-empty plain text, at most 2,000 characters; shown as text, never as markup                                                                                                                                                     |
+| `theme: "brand"` with `brand`    | design block      | At most 32 tokens named `color-*`, `font-*`, `radius-*`, or `space-*` (lowercase slug), each value at most 128 characters                                                                                                          |
+| `source.kind: "browser-capture"` | design asset      | A `captureId`; allowed in Work and Code, refused in Chat like a Project file (`design-asset-refused`)                                                                                                                              |
+| `icon`, `detail`                 | diagram node      | `icon` is one of `client`, `browser`, `mobile`, `server`, `service`, `database`, `cache`, `queue`, `storage`, `cdn`, `gateway`, `auth`, `function`, `external`, `user`, `analytics`; `detail` is non-empty, at most 120 characters |
+| `parentGroupId`                  | diagram group     | A group of the same diagram, nested at most 3 levels                                                                                                                                                                               |
+
+The domain policy refuses an unknown parent group
+(`unknown-diagram-parent-group`), a cycle (`diagram-group-nesting-cycle`), and
+nesting deeper than three levels (`diagram-group-depth-exceeded`). A brand is
+chosen with `theme: "brand"`: either half without the other is refused, as is
+a brand on a design that runs script, because a running design is its own page
+and the reader's renderer writes no tokens into it (`design-brand-refused`,
+`design-run-refused`). Each token must pass the frame token safety rule
+(`designFrameTokenValueIsSafe`: no `;`, braces, angle brackets, backslash,
+`url(`, `@import`, or `expression(`) and its kind's shape: a colour is a hex
+value or an `rgb`, `hsl`, `oklch`, or `oklab` function, a font is a comma list
+drawn from a closed list of system faces and generic families (a brand never
+loads a font), and a radius or spacing step is a non-negative length in `px`,
+`rem`, `em`, or `%`. The renderers ignore these fields for now: a `brand`
+design is drawn as an unthemed page, notes and icons are not drawn, and a
+nested group draws as a top-level one. A `browser-capture` asset resolves
+under the owning thread's authority (see the design-asset rules below).
+
+A share carries a brand (validated again before it leaves) and the diagram
+fields, so share version 11 names blocks up to Canvas version 21 and a share
+under version 10 that carries one is refused as a future version. Frame notes
+are the presenter's, like speaker notes in a deck: a share, a public link, and
+an export carry the slides and drop the notes, and what notes hold never blocks
+a share because it never leaves. Present shows the current slide's notes in a
+panel under the slide when the presenter turns on Notes (the `N` key does the
+same); the choice is remembered for the browser session, starts off, and the
+control is absent from a deck with no notes. Notes render as plain text. A
+PDF notes page is not offered, as this host renders no PDF. A captured-page asset is not shared, as no
+declared image is. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
 version, but the strict definition schema refuses an unknown field, so a
@@ -124,7 +256,18 @@ minute, and an image no wider than 1,600 px and no taller than 4,096 px. When no
 Chromium is present, the build carries no preview page, the page fails to
 settle, or the model driving the turn does not accept images in a tool result,
 the warnings still return and the result names which (`no-browser`,
-`no-renderer`, `render-failed`, `provider-cannot-take-images`). A `design` is markup, so how its frames read
+`no-renderer`, `render-failed`, `provider-cannot-take-images`) beside one plain
+sentence (`imageOmittedNote`) saying that no picture was taken, why, and that
+the listed warnings are the whole reading. The code alone was not enough: shown
+a bare `no-renderer`, a live model reported "no picture" in one turn and
+described the picture it never saw in the next. A development host has the
+page too: `bun run dev` and `octant web --dev` build it before the host starts,
+again whenever the renderer's sources or the contracts, domain or theme
+packages it bundles are newer, and point the host at
+`apps/web/dist` through `OCTANT_WEB_DIST_PATH`, since a host run from source
+does not find the web build on its own. `/health` reports `canvasPreviewPage`,
+whether the host finds the page, so `octant web --dev` attaching to a host left
+running without the web build warns that it must be restarted. A `design` is markup, so how its frames read
 is measured in the drawn page rather than computed from the document: after
 the page settles the host reads each drawn frame and adds a
 `design-frame-overflow` warning for a frame whose content is wider than its
@@ -372,6 +515,14 @@ version 6.
 
 ## Shares
 
+A share names the Project it is taken from, and a reader's access is judged
+against that Project, so a Canvas owned by a Chat thread outside every
+Project is not shared: the share overview answers no authority for it, and a
+share request is refused `scope-mismatch` with the reason. It stays in its
+thread; export is how it leaves.
+
+A public link carries the same blocks without host, Project, thread, or
+source identity; its rules are in [Canvas public links](canvas-public-links.md).
 A share carries every block kind and field a Canvas holds except source ids,
 a design's declared images, and the action block it refuses (see the `design`
 block). A table
@@ -382,9 +533,10 @@ version 6 named a block authored at version 13 as version 12. Share version 7
 carried the version-14 chart types, so it named blocks up to version 14, share
 version 8 carries the version-15 dashboard, so it named blocks up to version
 15, and share version 9 carries tabs, columns, diagram styles, and the Gantt
-view, so it names blocks up to version 19
-(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`). Share version 10 carries a design's
-frames and accompanies no Canvas version.
+view, so it names blocks up to version 19. Share version 10 carries a design's
+frames and accompanies no Canvas version, and share version 11 carries the
+version-21 design and diagram fields, so it names blocks up to version 21
+(`CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION`).
 Share documents version independently of Canvas documents: a treemap, a
 heatmap, a bar list, a chart's or a table column's number format, a table
 column's display, and a board's layout arrive with share version 3, and a
@@ -393,7 +545,8 @@ mockup catalog with share version 6, the funnel, radar, and sankey charts
 with share version 7 (whose blocks may name Canvas version 14), the dashboard
 with share version 8, and tabs, columns, a diagram's edge styles and tones,
 its group tones, and a plan's `gantt` view with share version 9, and a
-design's frames with share version 10, so a share
+design's frames with share version 10, and a brand and the richer diagram
+fields with share version 11 (frame notes never leave), so a share
 that declares an older version
 and carries one is refused as a future version.
 A `tabs` block has 2 to 12 panes, each a short label and the block ids it
@@ -530,6 +683,30 @@ unauthorized reads with no bodies, and stamps each comment's origin (`host` or
 the authenticated `remote-device`) beside its `local-user` author. The host
 stamps that author (and a resolve's or delete's actor) itself and ignores the
 actor the request names, so a renderer can never author a comment as an agent.
+A person can send an open comment, with its replies, to the Canvas's owning
+thread as a focused revision request (**Send to agent**, event
+`canvas.comment-sent-to-agent@1`, command `canvas-comment-send-to-agent`). The
+renderer queues one follow-up turn through the thread's message queue, so the
+turn runs under that thread's own authority and no new authority exists; the
+prompt names the Canvas, the anchor by block, node, edge, row or region id, and
+the text, and asks for a change to that part alone with every other block kept
+identical. A Chat thread also carries the Canvas as a context selection. The
+action is absent when the Canvas has no thread the person can reach, when a
+version older than the head is on screen, and while a request is already with
+the agent. The host marks the comment sent only after the thread took the
+turn, stamping the Canvas head it holds. The turn's request, message and
+selection ids are derived from the comment and the send it replaces, so a
+retry after the host refused the sent marker (a concurrent comment change) is
+the same send: the queue answers it as a duplicate and no second turn runs.
+The Canvas tool's read lists open requests as `requestedChanges` to the
+Canvas's owning thread only (and its managed children), never to another
+thread that can read the same Canvas, and a revise result carries a `warning`
+when blocks outside every requested anchor changed; the warning does not refuse
+the revision. A request stays open, and the warning stays on, across a
+person's own edit made after the send and before the agent ran. A comment reads
+"Addressed in vN" once an agent-authored version after the one it was sent
+against exists; a person's own layout edit does not answer it, and only that
+agent version closes the request in the tool as well. A send stays on this computer and is not carried by artifact sync.
 A table row is either a list of cells or `{ id, cells }`; the id is the
 author's, unique within the table (the domain policy refuses a repeat as
 `duplicate-table-row-id`), and arrives with Canvas schema version 13. A `row`
@@ -552,7 +729,7 @@ markup: the frames of one design at one size, `phone` (390×844), `tablet`
 (820×1180), `desktop` (1440×900), or `slide` (1920×1080), each a page of
 static HTML, plus one shared stylesheet. Version 16 adds the `document` size,
 whose frames are sections of one page as wide as the Canvas column and as tall
-as its content, and an optional `theme`: `workspace` or `none`, defaulting to
+as its content, and an optional `theme`: `workspace`, `none`, or (from version 21) `brand`, defaulting to
 `workspace` for a document and `none` for a device size, so a product screen
 keeps its own brand. The renderer draws each frame in an `iframe` with a
 `srcdoc` page whose policy loads nothing but inline styles and `data:` images
@@ -583,8 +760,10 @@ construct; the event store and revise policy return that reason to the
 author rather than a generic failure. The sandbox is the boundary and the
 link rule is part of it, because a link is the one way a page with no script
 can leave. Version 17 lets a design declare up to 12 image `assets`, each a
-`generated-image` (a completed image job's attachment id) or a `project-file`
+`generated-image` (a completed image job's attachment id), a `project-file`
 (a path relative to the Work thread's folder or the Code thread's checkout),
+or, from version 21, a `browser-capture` (the id of a screenshot the Browser
+kept; see below),
 and markup names one as `octant-asset:<id>` in `src`, `srcset`, a `url()`, or
 an `image-set()` candidate. The markup policy admits a reference only for a
 declared id spelled literally and refuses a Project file in a Chat Canvas or
@@ -596,7 +775,19 @@ resolves each asset under that version's provenance, with nothing cached: a
 generated image only when its job's thread belongs to the Canvas's Project
 (never the host-wide image library), a Work file through the Work confinement
 sequence under the Project root while the thread is bound to its current
-revision, and a Code file the same way under the thread's checkout. Bytes are
+revision, and a Code file the same way under the thread's checkout. A
+`browser-capture` resolves only for a Work or Code Canvas, and only to a
+capture the Canvas's own thread kept and its journal still retains
+([Browser captures](browser-captures.md)): another thread's capture id, a
+dropped capture, and any capture in Chat are not found or refused, and a
+missing one draws the usual placeholder with the `design-asset-unavailable`
+warning. The picture is the screenshot the capture already stores (the model
+envelope, about 40 KiB), so the 3 MiB asset cap needs no change and the
+capture size cap stays as it is. Website redesign is a document recipe
+(`website-redesign`): the agent opens the page in the Browser, takes a
+screenshot, declares the capture, shows it in a before frame, and draws the
+after frame as HTML and CSS; it never fetches the site's images, styles, or
+fonts into a frame. Bytes are
 sniffed as PNG, JPEG, GIF, or WebP; SVG is refused because an SVG file is
 markup a sniff cannot tell from other text, and inline SVG already serves
 vector art. Each image is capped at 3 MiB and a design at 5 MiB, which keeps
@@ -613,7 +804,7 @@ acknowledges that its markup is shared as written
 (`acknowledgedMarkupSharedAsWritten`); without it the share is refused as
 `consent-required`, and markup that holds a token or key in a recognisable
 shape is refused as `unsafe-payload` even then. A shared design carries no
-declared images: an asset names a Project file or an image job, which resolve
+declared images: an asset names a Project file, an image job, or a browser capture, which resolve
 only under this host's authority, so a frame that named one draws a
 placeholder. The snapshot viewer draws a shared design with the same block
 the live Canvas uses, so its frames get the same sandbox and page policy, and
@@ -636,7 +827,27 @@ a prototype that set its own address loaded another page, which reached a
 local listener; the document's policy refuses that navigation, and a `srcdoc`
 frame, which is not one, still draws. A `srcdoc` page inherits the document's
 policy, so the document admits inline script only when it draws a running
-frame. The export approval card says when the document writes design markup
+frame. Present and Play open a near-full-window dialog with a full-screen
+toggle (`requestFullscreen` on the player; Esc leaves, and the arrow keys keep
+moving slides). **PNG and PDF export** draw the same standalone pages in the host's
+browser, under the preview's no-route switches and request interception. A
+Canvas that holds device-size or slide designs is drawn one frame to a sheet at
+the frame's own size: a PNG per frame, named `Title 1.png`, `Title 2.png` and so
+on (padded to the count), or one PDF with a page per frame at that size. A PDF
+holds each frame as a picture drawn at twice its size, because print mode drops
+backgrounds inside frames and flattens blur and large shadows; text in design
+frames is not selectable there. A
+running design is drawn as a single sheet after the preview's settle wait. A
+Canvas with no such frames is drawn as the thread draws it: one PNG (cut off at
+a fixed height) or an A4 PDF the browser paginates. A set is placed like a
+single file: the card names which files of the set are already there, approving
+it replaces exactly those, and any other file already taken, including one that
+appeared after the card, is numbered.
+The Gist destination declares Markdown only, so it is never offered either
+form. Pictures of design frames are as unreadable to the share filter as the
+markup, so their card sets `drawsDesignFrames` for the person to acknowledge,
+and a themed design needs the window's `frameTheme` as in HTML export.
+The export approval card says when the document writes design markup
 (`writesDesignMarkup`), so approving it is the person's acknowledgement that
 markup leaves as written. A declared image draws a placeholder. A design in
 the workspace theme is exported in the theme the person's window draws it
@@ -666,6 +877,34 @@ Chromium stops painting sandboxed frames that are `inert` or have
 `pointer-events: none`, so a frame shown as a picture stays hit-testable and a
 cover over it takes the pointer
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](../decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
+A whole app window is a `desktop` design that runs script, and it is built in
+steps. A frame and the shared stylesheet each hold up to 65,536 characters
+(`CANVAS_MAX_DESIGN_MARKUP_LENGTH`, raised from 32,768): a finished window at
+1440×900, with its sidebar, panes, tabs, and script in one frame, ran past the
+old number, and 64 KiB holds one with room. The limits that keep a document sane
+are unchanged: 24 frames, 128 blocks, 256 KiB of text across the whole Canvas
+(so about three frames this large, or many smaller screens), and a 1 MiB
+payload. Widening a limit needs no schema version: a reader that predates it
+refuses the larger frame as invalid rather than drawing it wrongly. An agent
+does not send the window in one call. `revise` takes `designEdits` instead of
+`blocks`: for each named design block, a replacement `styles`, `frames` added
+or replaced by `frameId`, and `removeFrameIds`. The host reads the current
+version, requires `expectedSequence` to equal its sequence so a person's change
+in between is not overwritten, marks the reading thread as a read does, applies
+the edits, decodes the edited design whole, and revises with the full block list,
+so every other block and frame is kept and the markup policy, budgets, and
+authority are the ordinary revise path's. Describe's `design` guidance teaches
+the order (shell first, then a frame per screen), the `app-redesign-prototype`
+recipe names the shape, and the worked `app-window` example shows state without
+a framework: one `state` object, one `render()` that writes it to the page and
+sets CSS variables such as `--accent` on the root, and one delegated listener.
+In the thread a running prototype is drawn at its design size, scaled to the
+column; **Full screen** (where the browser offers it) takes the prototype and its
+header, so **Stop** stays reachable, and scales it to the screen's height as well
+as its width. Play for a static design has the same control. A lone static desktop
+window takes the board's full width instead of the thumbnail width a row of
+screens shares.
+
 Version 18 lets a design declare `runsScript: true`, which makes it a running
 prototype. For it alone, the markup policy admits inline `<script>` elements
 and event handlers; a script file, every remote load, `meta`, `base`,
@@ -813,5 +1052,12 @@ page in a frame of the app's own process does look them up.
   (for example `canvasPolicy.test.ts`, `canvasDiagramLayout.test.ts`,
   `canvasMathPolicy.test.ts`, `canvasRecipeStarter.test.ts`).
 - Service, revision routes, and comments: `apps/server/src/canvas/canvasService.test.ts`.
+- A Chat thread's own Canvas: offered and bound in
+  `apps/server/src/canvas/canvasAgentTools.test.ts`, created, listed,
+  revised, and replayed in `canvasService.test.ts` and
+  `canvasProjection.test.ts`, served and listed over the API in
+  `apps/server/src/canvasRoutes.test.ts`, erased with its thread in
+  `apps/server/src/threadRetentionService.test.ts`, and its tab restored in
+  `apps/server/src/shellService.test.ts`.
 - Preview: `apps/server/src/canvas/canvasPreviewService.test.ts`,
   `canvasPreviewWarnings.test.ts`, and `canvasPreviewBrowser.smoke.ts`.

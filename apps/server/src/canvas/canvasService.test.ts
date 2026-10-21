@@ -211,6 +211,7 @@ function createService(
   skillAuthorized?: import("./canvasService").CanvasServiceDependencies["skillAuthorized"],
   parameterAuthorized?: import("./canvasService").CanvasServiceDependencies["parameterAuthorized"],
   resolveSkillContribution?: import("./canvasService").CanvasServiceDependencies["resolveSkillContribution"],
+  threadMayOwnCanvas?: import("./canvasService").CanvasServiceDependencies["threadMayOwnCanvas"],
 ) {
   const projection = new CanvasProjection();
   const registry = new EventRegistry()
@@ -247,6 +248,7 @@ function createService(
       ...(skillAuthorized === undefined ? {} : { skillAuthorized }),
       ...(parameterAuthorized === undefined ? {} : { parameterAuthorized }),
       ...(resolveSkillContribution === undefined ? {} : { resolveSkillContribution }),
+      ...(threadMayOwnCanvas === undefined ? {} : { threadMayOwnCanvas }),
     },
   );
   eventStore.appendCreate({ canvasId, version: initialVersion, occurredAt: now as never });
@@ -550,6 +552,128 @@ describe("CanvasService", () => {
         .byThread({ mode: "chat", projectId: ids.project as never, threadId: ids.thread })
         .some((entry) => String(entry.canvasId) === String(result.card.canvasId)),
     ).toBe(true);
+  });
+
+  it("opens a Canvas owned by a Chat thread outside every Project, lists it with the thread wherever it goes, revises it, and replays it", () => {
+    const threadOwnedService = () =>
+      createService(
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        (threadId) => threadId === ids.thread,
+      );
+    const { service, projection, journal } = threadOwnedService();
+    const context = { mode: "chat", projectId: null, originThreadId: ids.thread } as const;
+    const result = service.create(
+      { ...createRequest(), workspace: { kind: "chat-virtual", projectId: null } },
+      context,
+      undefined,
+    );
+    expect(result.kind).toBe("accepted");
+    if (result.kind !== "accepted") return;
+    const created = String(result.receipt.canvasId);
+    expect(result.card.scope.workspace).toEqual({ kind: "chat-virtual", projectId: null });
+    expect(projection.getById(result.receipt.canvasId)?.currentVersion.definition).toMatchObject({
+      schemaVersion: CANVAS_SCHEMA_VERSION,
+      provenance: { mode: "chat", projectId: null, threadId: ids.thread },
+    });
+
+    // The thread lists it with no Project, and keeps listing it after a move
+    // into a Chat Project; the Project's own inventory never gains it.
+    const cardIds = (projectId: string | null) =>
+      service
+        .threadReferenceCards({ mode: "chat", threadId: ids.thread, projectId })
+        .map((card) => String(card.canvasId));
+    expect(cardIds(null)).toEqual([created]);
+    expect(cardIds(ids.project)).toContain(created);
+    expect(
+      projection.byProject(ids.project as never).map((entry) => String(entry.canvasId)),
+    ).not.toContain(created);
+
+    const revised = service.revise(
+      {
+        ...reviseRequest(),
+        requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        canvasId: created,
+      },
+      context,
+      undefined,
+      [
+        {
+          blockId: "memo",
+          schemaVersion: CANVAS_SCHEMA_VERSION,
+          kind: "rich-text",
+          text: "The memo.",
+        } as never,
+      ],
+    );
+    expect(revised).toMatchObject({ kind: "accepted", receipt: { sequence: 2 } });
+
+    // The journal is authoritative: a fresh projection reads the same thread
+    // index back, so a restart neither loses nor re-homes the Canvas.
+    const rebuilt = new CanvasProjection();
+    for (const event of journal.replay({ afterSequence: 0 as never, limit: 100 })) {
+      rebuilt.apply({} as never, event);
+    }
+    expect(
+      rebuilt
+        .byThread({ mode: "chat", projectId: null, threadId: ids.thread })
+        .map((entry) => [String(entry.canvasId), entry.currentVersion.sequence]),
+    ).toEqual([[created, 2]]);
+  });
+
+  it("gives a Chat thread's own Canvas no file, shell, or Git authority and no Canvas at all when the thread is in a Project", () => {
+    const owning = createService(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (threadId) => threadId === ids.thread,
+    );
+    const request = { ...createRequest(), workspace: { kind: "chat-virtual", projectId: null } };
+    const context = { mode: "chat", projectId: null, originThreadId: ids.thread } as const;
+    expect(
+      owning.service.create(
+        { ...request, requestedAuthority: { ...request.requestedAuthority, filesystem: true } },
+        context,
+        undefined,
+      ),
+    ).toMatchObject({ kind: "denied", denialCode: "chat-implicit-authority" });
+    // A window with a Chat Project open writes into that Project, never into
+    // a Canvas that belongs to no Project.
+    expect(
+      owning.service.create(
+        request,
+        { mode: "chat", projectId: ids.project },
+        { id: ids.project, type: "chat", lifecycle: "active" },
+      ),
+    ).toMatchObject({ kind: "denied", denialCode: "scope-mismatch" });
+    // A host that places the thread in a Project, or cannot find it, refuses.
+    const inProject = createService(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => false,
+    );
+    expect(inProject.service.create(request, context, undefined)).toMatchObject({
+      kind: "denied",
+      denialCode: "unavailable",
+    });
+    expect(createService().service.create(request, context, undefined)).toMatchObject({
+      kind: "denied",
+      denialCode: "unavailable",
+    });
   });
 
   it("opens a Canvas started from an offered recipe with that recipe's starter document", () => {

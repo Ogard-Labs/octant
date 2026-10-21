@@ -695,16 +695,15 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               imageGenerationClient={imageGenerationClient}
               {...(imageGenerationProfiles === undefined ? {} : { imageGenerationProfiles })}
               onOpenCanvasInSidebar={openCanvasInSidebar}
-              onOpenCanvasReference={(card) => {
-                const projectId = card.scope.workspace.projectId;
-                if (projectId === null) return;
+              onOpenCanvasReference={(card) =>
                 void openCanvas({
                   mode: card.scope.mode,
                   title: card.title,
                   canvasId: card.canvasId,
-                  projectId,
-                });
-              }}
+                  // Null for a Canvas owned by a Chat thread outside a Project.
+                  projectId: card.scope.workspace.projectId,
+                })
+              }
               onCanvasReferencesObserved={noteCanvasReferences}
               onThreadHandedOff={(threadId: string, outcome: ThreadHandOffOutcome) => {
                 if (outcome.kind === "handed-off") {
