@@ -470,11 +470,13 @@ function piecesFor(block: CanvasBlock): ReadonlyArray<Piece> {
         {
           kind: "list",
           items: [
-            ...layout.nodes.map((node) =>
-              node.shape === "plain"
-                ? reading(node.label)
-                : `${reading(node.label)} (${node.shape})`,
-            ),
+            ...layout.nodes.map((node) => {
+              const named =
+                node.shape === "plain"
+                  ? reading(node.label)
+                  : `${reading(node.label)} (${node.shape})`;
+              return node.detail === undefined ? named : `${named} — ${reading(node.detail)}`;
+            }),
             ...block.edges.map((edge) => {
               const from = names.get(String(edge.source)) ?? "node";
               const to = names.get(String(edge.target)) ?? "node";

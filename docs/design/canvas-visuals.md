@@ -225,10 +225,27 @@ generic infrastructure names (`client`, `browser`, `mobile`, `server`,
 `function`, `external`, `user`, `analytics`); the list is closed and names no
 product, so a renderer draws its own glyph. `detail` is at most 120 characters
 and sits under the label. A group nests inside another up to three levels; the
-domain policy refuses an unknown parent, a cycle, and a deeper chain. Drawing
-the icon, the detail, and nested bands is a later change: until then the board
-ignores the three fields and draws the node and group as before, and the share
+domain policy refuses an unknown parent, a cycle, and a deeper chain. The share
 carries them (share version 11).
+
+The board, the preview, the HTML and sidecar exports, and a share draw them
+from one domain layout. The icon is a 16px outline in the secondary ink at the
+left of the node, drawn from stroke data held in the domain so an export needs
+no image; the label centres in the room beside it. The detail is a smaller
+second line in the muted ink, cut with an ellipsis where it would leave the box
+(the full text is the node's tooltip and the Markdown reading's "label —
+detail"). A decision draws its label alone: a diamond has no room at its
+corners. A nested group is framed around its own nodes and its child frames, so
+a child sits inside its parent however the nodes were placed; each level adds
+one padding and one label height, a parent is painted beneath its children, and
+sibling frames never overlap. A parent's own nodes take a band before its
+children's bands.
+
+Layout reduces crossings: nodes inside one group and rank are reordered by
+barycenter sweeps down and up the ranks (twelve at most, over at most 1,024
+edges), and the order with the fewest crossings is kept, so a diagram that
+already has none keeps the order it was written in. The groups themselves keep
+their declared order. The result is deterministic and pure.
 
 **Gantt.** A plan's Gantt view is bars on days in a horizontally scrolling
 frame: a 200px title gutter, week ticks (four-week ticks, or a multiple of four

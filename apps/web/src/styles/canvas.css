@@ -2350,6 +2350,22 @@
   dominant-baseline: middle;
 }
 
+/* An icon is an outline in the secondary ink, so it reads as a label for the
+   node rather than a second colour. Its strokes are drawn on a 24-unit grid
+   and scaled to 16px, so the width is set in grid units. */
+.canvas-block__diagram-icon {
+  fill: none;
+  stroke: var(--oct-fg-2);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.canvas-block__diagram-node text.canvas-block__diagram-node-detail {
+  fill: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .canvas-block__diagram-group rect {
   fill: none;
   stroke: var(--oct-border);
@@ -2409,6 +2425,14 @@
   .canvas-block__diagram-group[data-tone] rect {
     fill: Canvas;
     stroke: CanvasText;
+  }
+
+  .canvas-block__diagram-icon {
+    stroke: CanvasText;
+  }
+
+  .canvas-block__diagram-node text.canvas-block__diagram-node-detail {
+    fill: CanvasText;
   }
 }
 
