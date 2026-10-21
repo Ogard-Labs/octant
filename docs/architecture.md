@@ -7632,7 +7632,6 @@ in this document describe the build as it ships. The steps, the open questions, 
 | `apps/desktop`            | Electron shell: windows, menus, native credential-store integration, pickers, signed updates, server process lifecycle, packaging                       | contracts, domain, host-runtime                                   |
 | `apps/web`                | React renderer for desktop and paired browsers                                                                                                          | client-runtime, contracts, domain, plugin-host, theme             |
 | `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                                  | client-runtime, contracts, domain                                 |
-| `apps/share`              | Public Canvas share service: link API, viewer pages, user-content frames, storage, expiry, limits                                                       | contracts, domain                                                 |
 
 Dependencies point inward: no package imports an app, and `contracts` imports
 nothing first-party.
@@ -7730,8 +7729,8 @@ storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account. See
 [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
 
-The public Canvas share service (`apps/share`, `https://canvas.octant.sh`) is
-in scope: an Octant-operated service that stores, and can read, the Canvases
+The public Canvas share service (`https://canvas.octant.sh`, in the
+`octant-webapp` repository) is in scope: an Octant-operated service that stores, and can read, the Canvases
 people publish as public links, under the rules in
 [Canvas public links](design/canvas-public-links.md). It is not an Octant
 account, a relay, or a sync store; nothing reaches it until the person turns
