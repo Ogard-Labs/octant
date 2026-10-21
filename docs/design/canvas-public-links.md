@@ -3,7 +3,8 @@
 This topic specification owns public share links for a Canvas: the Settings
 switch, publishing through the export approval card, what leaves the host,
 the link's terms, the host's record of each link, and the public Canvas share
-service (`apps/share`) that stores and serves them. Architecture owns the
+service that stores and serves them, which lives in the `octant-webapp`
+repository. Architecture owns the
 boundary: the external call it adds
 ([Overview and principles](../architecture.md#overview-and-principles)), what
 a share carries
@@ -155,8 +156,16 @@ only from a local window against the version the window read.
 
 ## The service
 
-`apps/share` is a Bun app with no dependencies beyond the workspace packages.
-It serves two origins from two listeners: the public origin
+The service is a Bun app in the `octant-webapp` repository, beside Octant's
+other web services, because it is deployed with the website rather than
+shipped with the desktop app. It reads the share document with this
+repository's contracts and draws blocks with its domain layout code, bundled
+from one pinned commit of this repository (`packages/share-kit` there, with the
+commit and versions in its `source.json`); it has no other dependency. A host
+that publishes a share format or wire version the running service does not
+know is refused, and nothing is stored, so a change to either version here
+needs the kit synced and the service deployed before the desktop release that
+publishes it. It serves two origins from two listeners: the public origin
 (`https://canvas.octant.sh`) for the API and viewer pages, and a separate
 user-content origin (`https://canvas-usercontent.octant.sh`) for design frames.
 It refuses to start when the two origins are the same. TLS is terminated in
@@ -220,7 +229,7 @@ frame-ancestors 'none'`. The page loads one first-party stylesheet and
 - **Abuse.** Every page links to a report form (`POST /api/v1/shares/<id>/reports`,
   a reason from a closed list and an optional note of at most 1,000
   characters), stored without the reporter's address. The operator takes a
-  link down with `bun run takedown <id>` in `apps/share`, which asks the
+  link down with `bun run takedown <id>` in the service's folder, which asks the
   running service to delete the payload and leave a tombstone that answers 410
   "removed". The request goes to an operator listener bound to 127.0.0.1 and
   started only when `OCTANT_SHARE_OPERATOR_TOKEN` (at least 32 characters) is
@@ -269,8 +278,8 @@ keeps Update unambiguous; a second link for the same Canvas is a revoke away.
   exports, or publishes.
 - `packages/host-runtime` `credentialBroker.test.ts`: the owner secrets'
   namespace is out of reach of the provider and sync key routes.
-- `apps/share` tests: ids are 128-bit, owner secret, expiry, revocation (410),
+- The service's tests (in `octant-webapp`): ids are 128-bit, owner secret, expiry, revocation (410),
   and password are enforced, viewer headers carry `noindex` and the policy,
   and frames are drawn from the user-content origin.
-- A local end-to-end smoke starts `apps/share` on `127.0.0.1`, publishes,
+- The service's local end-to-end smoke starts it on `127.0.0.1`, publishes,
   views, revokes, and reads 410.
