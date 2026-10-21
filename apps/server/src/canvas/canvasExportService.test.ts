@@ -43,6 +43,7 @@ import {
   type CanvasExportTargetBinding,
 } from "./canvasExportService";
 import { createCanvasExportFilePort } from "./canvasExportFilePort";
+import type { CanvasExportPictureRequest, CanvasExportRenderer } from "./canvasPreviewRenderer";
 import {
   canvasExportTargetBindings,
   type CanvasExportTargetRegistration,
@@ -202,7 +203,7 @@ function binding(
 
 function harness(
   bindings?: () => ReadonlyArray<CanvasExportTargetBinding>,
-  options?: { readonly doc?: CanvasExportDocument },
+  options?: { readonly doc?: CanvasExportDocument; readonly renderer?: CanvasExportRenderer },
 ) {
   const calls: CanvasExportRenderedOutput[] = [];
   const held = bindings ?? (() => [binding("reading-copy", calls)]);
@@ -227,6 +228,7 @@ function harness(
     eventStore,
     uuid: nextId,
     clock: () => decodeUtcTimestamp(new Date(clockMs).toISOString()),
+    ...(options?.renderer === undefined ? {} : { renderer: options.renderer }),
   });
   const envelopes = (): ReadonlyArray<EventEnvelope> =>
     journal.replay(decodeReplayCursor({ afterSequence: 0, limit: 100 }));
@@ -254,11 +256,172 @@ function prepareRequest(targetId = "reading-copy") {
   });
 }
 
+/** A three-slide deck: a design of three static frames. */
+function deck(): CanvasExportDocument {
+  return {
+    ...document(),
+    blocks: [
+      {
+        blockId: "deck",
+        schemaVersion: 18,
+        kind: "design",
+        title: "Deck",
+        size: "slide",
+        theme: "none",
+        frames: ["one", "two", "three"].map((name) => ({
+          frameId: name,
+          title: name,
+          html: `<h1>${name}</h1>`,
+        })),
+      },
+    ] as unknown as ReadonlyArray<CanvasBlock>,
+  };
+}
+
+/** The browser seam, faked: one PNG per frame, or one PDF. */
+function fakeRenderer(requests: CanvasExportPictureRequest[]): CanvasExportRenderer {
+  return {
+    available: async () => true,
+    renderPictures: async (request) => {
+      requests.push(request);
+      const count = request.subject.kind === "frames" ? request.subject.frames.length : 1;
+      return {
+        kind: "rendered",
+        files:
+          request.format === "pdf"
+            ? [new TextEncoder().encode("%PDF-fake")]
+            : Array.from({ length: count }, (_, index) => Uint8Array.of(137, 80, 78, 71, index)),
+      };
+    },
+  };
+}
+
+function pictureRequest(format: "png" | "pdf") {
+  return decodeCanvasExportPrepareRequest({
+    ...prepareRequest(FOLDER_EXPORT_TARGET_ID),
+    format,
+  });
+}
+
 describe("canvas export service", () => {
+  it("writes one PNG per slide into the folder once the person approves", async () => {
+    const { folder, registration } = exportFolder();
+    const requests: CanvasExportPictureRequest[] = [];
+    const { service, connection } = harness(
+      () => canvasExportTargetBindings(registration, canvasId),
+      { doc: deck(), renderer: fakeRenderer(requests) },
+    );
+
+    const prepared = await service.prepare(pictureRequest("png"), true);
+    expect(prepared.kind).toBe("approval");
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+    expect(prepared.card.files?.map((file) => file.name)).toEqual([
+      "Launch plan 1.png",
+      "Launch plan 2.png",
+      "Launch plan 3.png",
+    ]);
+    expect(prepared.card.drawsDesignFrames).toBe(true);
+    expect(prepared.card).not.toHaveProperty("payload");
+    expect(readdirSync(folder)).toEqual([]);
+
+    const exported = await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(exported.kind).toBe("exported");
+    expect(readdirSync(folder).sort()).toEqual([
+      "Launch plan 1.png",
+      "Launch plan 2.png",
+      "Launch plan 3.png",
+    ]);
+    expect(requests).toHaveLength(1);
+    connection.close();
+  });
+
+  it("writes one PDF with a page for every slide", async () => {
+    const { folder, registration } = exportFolder();
+    const { service, connection } = harness(
+      () => canvasExportTargetBindings(registration, canvasId),
+      { doc: deck(), renderer: fakeRenderer([]) },
+    );
+
+    const prepared = await service.prepare(pictureRequest("pdf"), true);
+    expect(prepared.kind).toBe("approval");
+    if (prepared.kind !== "approval") {
+      connection.close();
+      return;
+    }
+    expect(prepared.card.pages).toBe(3);
+    expect(prepared.card.files?.map((file) => file.name)).toEqual(["Launch plan.pdf"]);
+
+    await service.decide({
+      canvasId,
+      approvalId: prepared.card.approvalId,
+      decision: "approved",
+      permitted: true,
+      actor: localActor,
+    });
+
+    expect(readFileSync(join(folder, "Launch plan.pdf"), "utf8")).toBe("%PDF-fake");
+    connection.close();
+  });
+
+  it("refuses a picture export when the host has no browser, holding nothing", async () => {
+    const { registration } = exportFolder();
+    const noBrowser: CanvasExportRenderer = {
+      available: async () => false,
+      renderPictures: async () => ({ kind: "unavailable", reason: "no-browser" }),
+    };
+    const { service, connection } = harness(
+      () => canvasExportTargetBindings(registration, canvasId),
+      { doc: deck(), renderer: noBrowser },
+    );
+
+    const prepared = await service.prepare(pictureRequest("png"), true);
+
+    expect(prepared).toMatchObject({ kind: "refused", code: "unavailable" });
+    connection.close();
+  });
+
+  it("refuses a picture export when this build has no renderer at all", async () => {
+    const { registration } = exportFolder();
+    const { service, connection } = harness(
+      () => canvasExportTargetBindings(registration, canvasId),
+      { doc: deck() },
+    );
+
+    const prepared = await service.prepare(pictureRequest("pdf"), true);
+
+    expect(prepared).toMatchObject({ kind: "refused", code: "unavailable" });
+    connection.close();
+  });
+
+  it("does not offer a picture format to a destination that declared only text", async () => {
+    const { service, connection } = harness(undefined, {
+      doc: deck(),
+      renderer: fakeRenderer([]),
+    });
+
+    const prepared = await service.prepare(
+      decodeCanvasExportPrepareRequest({ ...prepareRequest(), format: "png" }),
+      true,
+    );
+
+    expect(prepared).toMatchObject({ kind: "refused", code: "refused" });
+    connection.close();
+  });
+
   it("does not call a destination or journal an export without approval", async () => {
     const { calls, service, eventStore, connection } = harness();
 
-    const prepared = service.prepare(prepareRequest(), true);
+    const prepared = await service.prepare(prepareRequest(), true);
     expect(prepared.kind).toBe("approval");
     expect(calls).toHaveLength(0);
     expect(eventStore.replay()).toEqual([]);
@@ -290,7 +453,7 @@ describe("canvas export service", () => {
     connection.close();
   });
 
-  it("writes a prototype's frame into an HTML export and names its markup on the card the person approves", () => {
+  it("writes a prototype's frame into an HTML export and names its markup on the card the person approves", async () => {
     const doc = {
       ...document(),
       blocks: [
@@ -311,7 +474,7 @@ describe("canvas export service", () => {
     const request = (format: "html" | "markdown") =>
       decodeCanvasExportPrepareRequest({ ...prepareRequest(), format });
 
-    const html = service.prepare(request("html"), true);
+    const html = await service.prepare(request("html"), true);
     expect(html.kind).toBe("approval");
     if (html.kind === "approval") {
       // Approving this card is the acknowledgement that markup leaves as written.
@@ -321,7 +484,7 @@ describe("canvas export service", () => {
     }
 
     // The Markdown form carries titles only, so its card names no markup.
-    const markdown = service.prepare(request("markdown"), true);
+    const markdown = await service.prepare(request("markdown"), true);
     expect(markdown.kind).toBe("approval");
     if (markdown.kind === "approval") {
       expect(markdown.card).not.toHaveProperty("writesDesignMarkup");
@@ -332,7 +495,7 @@ describe("canvas export service", () => {
 
   it("calls the destination only after approval and journals the receipt under the local actor", async () => {
     const { calls, service, eventStore, envelopes, connection } = harness();
-    const prepared = service.prepare(prepareRequest(), true);
+    const prepared = await service.prepare(prepareRequest(), true);
     expect(prepared.kind).toBe("approval");
     if (prepared.kind !== "approval") {
       connection.close();
@@ -359,7 +522,7 @@ describe("canvas export service", () => {
 
   it("journals a remote approval as that device, never as the local user", async () => {
     const { service, envelopes, connection } = harness();
-    const prepared = service.prepare(prepareRequest(), true);
+    const prepared = await service.prepare(prepareRequest(), true);
     expect(prepared.kind).toBe("approval");
     if (prepared.kind !== "approval") {
       connection.close();
@@ -377,9 +540,9 @@ describe("canvas export service", () => {
     connection.close();
   });
 
-  it("refuses a format this host does not render without calling the destination", () => {
+  it("refuses a format the destination did not declare without calling it", async () => {
     const { calls, service, connection } = harness();
-    const refused = service.prepare(
+    const refused = await service.prepare(
       decodeCanvasExportPrepareRequest({
         schemaVersion: 1,
         kind: "canvas-export-prepare",
@@ -392,7 +555,7 @@ describe("canvas export service", () => {
       true,
     );
 
-    expect(refused).toMatchObject({ kind: "refused", code: "unsupported-format" });
+    expect(refused).toMatchObject({ kind: "refused", code: "refused" });
     expect(calls).toHaveLength(0);
     connection.close();
   });
@@ -410,7 +573,7 @@ describe("canvas export service", () => {
     expect(offers?.targets.map((offer) => String(offer.targetId))).toEqual([]);
 
     // Preparing it is refused, so no card can name one while the other sends.
-    const prepared = service.prepare(prepareRequest("shared-target"), true);
+    const prepared = await service.prepare(prepareRequest("shared-target"), true);
     expect(prepared).toMatchObject({ kind: "refused", code: "not-offered" });
 
     // A unique id beside the ambiguity is still offered and delivered.
@@ -422,7 +585,7 @@ describe("canvas export service", () => {
     expect(both.service.offers(canvasId)?.targets.map((offer) => String(offer.targetId))).toEqual([
       "unique-target",
     ]);
-    const preparedUnique = both.service.prepare(prepareRequest("unique-target"), true);
+    const preparedUnique = await both.service.prepare(prepareRequest("unique-target"), true);
     expect(preparedUnique.kind).toBe("approval");
     if (preparedUnique.kind === "approval") {
       const exported = await both.service.decide({
@@ -442,7 +605,7 @@ describe("canvas export service", () => {
 
   it("refuses an approval answered after its deadline and releases it", async () => {
     const { calls, service, connection, advanceClock } = harness();
-    const prepared = service.prepare(prepareRequest(), true);
+    const prepared = await service.prepare(prepareRequest(), true);
     expect(prepared.kind).toBe("approval");
     if (prepared.kind !== "approval") {
       connection.close();
@@ -479,13 +642,13 @@ describe("canvas export service", () => {
     const { calls, service, connection } = harness();
     const approvalIds: string[] = [];
     for (let index = 0; index < CANVAS_EXPORT_MAX_PENDING_PER_CANVAS; index += 1) {
-      const prepared = service.prepare(prepareRequest(), true);
+      const prepared = await service.prepare(prepareRequest(), true);
       expect(prepared.kind).toBe("approval");
       if (prepared.kind === "approval") {
         approvalIds.push(String(prepared.card.approvalId));
       }
     }
-    const extra = service.prepare(prepareRequest(), true);
+    const extra = await service.prepare(prepareRequest(), true);
     expect(extra.kind).toBe("approval");
 
     // The oldest approval was evicted; answering it refuses, never delivers.
@@ -515,7 +678,7 @@ describe("canvas export service", () => {
 
   it("answering the same approval twice delivers once and journals once", async () => {
     const { calls, service, eventStore, connection } = harness();
-    const prepared = service.prepare(prepareRequest(), true);
+    const prepared = await service.prepare(prepareRequest(), true);
     expect(prepared.kind).toBe("approval");
     if (prepared.kind !== "approval") {
       connection.close();
@@ -544,7 +707,7 @@ describe("canvas export service", () => {
 
   it("reports a delivered export the journal could not record instead of failing it", async () => {
     const { calls, service, eventStore, connection } = harness();
-    const prepared = service.prepare(prepareRequest(), true);
+    const prepared = await service.prepare(prepareRequest(), true);
     expect(prepared.kind).toBe("approval");
     if (prepared.kind !== "approval") {
       connection.close();
@@ -577,15 +740,15 @@ describe("canvas export service", () => {
     connection.close();
   });
 
-  it("measures the payload in UTF-8 bytes, not code units", () => {
+  it("measures the payload in UTF-8 bytes, not code units", async () => {
     const { service, connection } = harness(undefined, { doc: document("Préparons 🚀 le Café") });
-    const prepared = service.prepare(prepareRequest(), true);
+    const prepared = await service.prepare(prepareRequest(), true);
     expect(prepared.kind).toBe("approval");
     if (prepared.kind !== "approval") {
       connection.close();
       return;
     }
-    const payload = prepared.card.payload;
+    const payload = prepared.card.payload ?? "";
     const bytes = new TextEncoder().encode(payload).length;
     expect(prepared.card.byteLength).toBe(bytes);
     expect(bytes).toBeGreaterThan(payload.length);
@@ -594,7 +757,7 @@ describe("canvas export service", () => {
 
   it("refuses an unauthorized decide without delivering", async () => {
     const { calls, service, connection } = harness();
-    const prepared = service.prepare(prepareRequest(), true);
+    const prepared = await service.prepare(prepareRequest(), true);
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -617,7 +780,7 @@ describe("canvas export service", () => {
       canvasExportTargetBindings(registration, canvasId),
     );
 
-    const prepared = service.prepare(prepareRequest(FOLDER_EXPORT_TARGET_ID), true);
+    const prepared = await service.prepare(prepareRequest(FOLDER_EXPORT_TARGET_ID), true);
     expect(prepared.kind).toBe("approval");
     if (prepared.kind !== "approval") {
       connection.close();
@@ -653,7 +816,7 @@ describe("canvas export service", () => {
       canvasExportTargetBindings(registration, canvasId),
     );
 
-    const prepared = service.prepare(prepareRequest(FOLDER_EXPORT_TARGET_ID), true);
+    const prepared = await service.prepare(prepareRequest(FOLDER_EXPORT_TARGET_ID), true);
     expect(prepared.kind).toBe("approval");
     if (prepared.kind !== "approval") {
       connection.close();
@@ -683,7 +846,7 @@ describe("canvas export service", () => {
     const { service, eventStore, connection } = harness(() =>
       canvasExportTargetBindings(registration, canvasId),
     );
-    const prepared = service.prepare(prepareRequest(FOLDER_EXPORT_TARGET_ID), true);
+    const prepared = await service.prepare(prepareRequest(FOLDER_EXPORT_TARGET_ID), true);
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -714,7 +877,7 @@ describe("canvas export service", () => {
       ?.targets.find((candidate) => String(candidate.targetId) === FOLDER_EXPORT_TARGET_ID);
 
     expect(offer?.status).toBe("not-connected");
-    expect(offer?.formats).toEqual(["markdown", "html"]);
+    expect(offer?.formats).toEqual(["markdown", "html", "png", "pdf"]);
     connection.close();
   });
 
@@ -755,7 +918,7 @@ describe("canvas export service", () => {
       canvasExportTargetBindings(registration, canvasId),
     );
 
-    const prepared = service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
+    const prepared = await service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
     expect(prepared.kind).toBe("approval");
     if (prepared.kind !== "approval") {
       connection.close();
@@ -786,7 +949,7 @@ describe("canvas export service", () => {
     const { service, eventStore, connection } = harness(() =>
       canvasExportTargetBindings(registration, canvasId),
     );
-    const prepared = service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
+    const prepared = await service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
     if (prepared.kind !== "approval") {
       connection.close();
       return;
@@ -842,7 +1005,7 @@ describe("canvas export service", () => {
       },
     };
     const { service, connection } = harness(() => [silent]);
-    const prepared = service.prepare(prepareRequest("silent-destination"), true);
+    const prepared = await service.prepare(prepareRequest("silent-destination"), true);
     expect(prepared.kind).toBe("approval");
     if (prepared.kind !== "approval") {
       connection.close();
@@ -871,7 +1034,7 @@ describe("canvas export service", () => {
     const { service, connection } = harness(() =>
       canvasExportTargetBindings(registration, canvasId),
     );
-    const prepared = service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
+    const prepared = await service.prepare(prepareRequest(GIST_EXPORT_TARGET_ID), true);
     if (prepared.kind !== "approval") {
       connection.close();
       return;

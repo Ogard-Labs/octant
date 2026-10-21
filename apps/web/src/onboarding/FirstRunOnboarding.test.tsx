@@ -184,9 +184,9 @@ describe("FirstRunOnboarding", () => {
     expect(railStep("Model")).toBeVisible();
     expect(screen.queryByRole("button", { name: /About you|Workspace|Navigator/ })).toBeNull();
     expect(screen.queryByLabelText("Name")).toBeNull();
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Set up a provider" })).toHaveFocus(),
-    );
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Providers" })).toHaveFocus());
+    await userEvent.setup().tab();
+    expect(screen.getByRole("button", { name: "Set up a provider" })).toHaveFocus();
   });
 
   it("walks providers, then Project, then model with Continue and back again", async () => {

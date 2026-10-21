@@ -104,7 +104,12 @@ export const CANVAS_MAX_HEATMAP_CELLS = 16_384;
 export const CANVAS_MAX_HEATMAP_DAYS = 3 * 366;
 export const CANVAS_MAX_HEATMAP_NOTE_LENGTH = 120;
 export const CANVAS_MAX_DESIGN_FRAMES = 24;
-export const CANVAS_MAX_DESIGN_MARKUP_LENGTH = 32_768;
+// A frame, and the shared stylesheet, hold one whole screen: a running app
+// window at 1440x900 puts its sidebar, panes, tabs, and its script in one
+// frame, and a finished one ran past the old 32 KiB. 64 KiB holds that with
+// room. The 256 KiB text budget still bounds the design as a whole (about
+// three frames this large, or many smaller screens).
+export const CANVAS_MAX_DESIGN_MARKUP_LENGTH = 65_536;
 // Speaker or screen notes are prose a presenter reads, not markup: a page of
 // text per frame.
 export const CANVAS_MAX_DESIGN_NOTES_LENGTH = 2_000;

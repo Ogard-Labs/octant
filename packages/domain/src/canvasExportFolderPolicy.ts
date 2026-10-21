@@ -128,8 +128,19 @@ export function canvasExportStem(title: string): string {
 }
 
 /** The extension a rendered format is written with. */
-export function canvasExportFileExtension(format: CanvasExportImplementedFormat): "md" | "html" {
-  return format === "html" ? "html" : "md";
+export function canvasExportFileExtension(
+  format: CanvasExportImplementedFormat,
+): "md" | "html" | "png" | "pdf" {
+  switch (format) {
+    case "html":
+      return "html";
+    case "png":
+      return "png";
+    case "pdf":
+      return "pdf";
+    case "markdown":
+      return "md";
+  }
 }
 
 /** The name this document wants, before anything is known about what is there. */
@@ -138,6 +149,25 @@ export function canvasExportPlannedName(
   format: CanvasExportImplementedFormat,
 ): string {
   return `${canvasExportStem(title)}.${canvasExportFileExtension(format)}`;
+}
+
+/**
+ * The names a picture export writes, in picture order: one PDF, one PNG of a
+ * document, or one numbered PNG per frame. The number is padded to the count
+ * so a folder lists a deck in slide order.
+ */
+export function canvasExportPictureFileNames(
+  title: string,
+  format: "png" | "pdf",
+  count: number,
+): ReadonlyArray<string> {
+  const stem = canvasExportStem(title);
+  if (format === "pdf" || count <= 1) return [`${stem}.${format}`];
+  const digits = String(count).length;
+  return Array.from(
+    { length: count },
+    (_, index) => `${stem} ${String(index + 1).padStart(digits, "0")}.png`,
+  );
 }
 
 export interface CanvasExportNameFacts {
@@ -160,14 +190,30 @@ export interface CanvasExportNameFacts {
  * turning one export into a long scan.
  */
 export function planCanvasExportFileName(facts: CanvasExportNameFacts): string | undefined {
-  const planned = canvasExportPlannedName(facts.title, facts.format);
-  if (facts.replacesConfirmed) return planned;
-  if (!facts.taken(planned)) return planned;
-  const base = canvasExportStem(facts.title);
-  const extension = canvasExportFileExtension(facts.format);
+  return freeCanvasExportFileName(
+    canvasExportPlannedName(facts.title, facts.format),
+    facts.taken,
+    facts.replacesConfirmed,
+  );
+}
+
+/**
+ * The same rule for a name already planned — each file of a picture set is
+ * placed this way, so a set never eats a file the person kept either.
+ */
+export function freeCanvasExportFileName(
+  planned: string,
+  taken: (fileName: string) => boolean,
+  replacesConfirmed: boolean,
+): string | undefined {
+  if (replacesConfirmed) return planned;
+  if (!taken(planned)) return planned;
+  const dot = planned.lastIndexOf(".");
+  const base = dot > 0 ? planned.slice(0, dot) : planned;
+  const extension = dot > 0 ? planned.slice(dot) : "";
   for (let copy = 2; copy <= MAX_CANVAS_EXPORT_NAME_COPIES + 1; copy += 1) {
-    const candidate = `${base} (${copy}).${extension}`;
-    if (!facts.taken(candidate)) return candidate;
+    const candidate = `${base} (${copy})${extension}`;
+    if (!taken(candidate)) return candidate;
   }
   return undefined;
 }

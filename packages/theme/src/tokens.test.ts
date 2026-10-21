@@ -125,19 +125,19 @@ describe("theme semantic token catalog", () => {
       "app-background": "#fafaf9",
       workspace: "#ffffff",
       floating: "#fdfdfc",
-      "text-primary": "#1b1b1b",
-      accent: "#1b1b1b",
+      "text-primary": "#141414",
+      accent: "#141414",
       "accent-foreground": "#ffffff",
-      "accent-text": "#1b1b1b",
+      "accent-text": "#141414",
     });
     expect(DEFAULT_DARK_TOKENS).toMatchObject({
       "app-background": "#151515",
       workspace: "#1a1a1a",
       floating: "#232323",
-      "text-primary": "#f0f0f0",
-      accent: "#f0f0f0",
+      "text-primary": "#f5f5f7",
+      accent: "#f5f5f7",
       "accent-foreground": "#171717",
-      "accent-text": "#f0f0f0",
+      "accent-text": "#f5f5f7",
     });
   });
 
