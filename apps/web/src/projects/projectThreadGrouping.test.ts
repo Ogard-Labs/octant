@@ -3,6 +3,7 @@ import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import {
   groupThreadsByCheckout,
   groupThreadsByProject,
+  nestFollowUpThreads,
   orderThreadsByRecency,
   threadsInProject,
 } from "./projectThreadGrouping";
@@ -81,6 +82,44 @@ describe("orderThreadsByRecency", () => {
       "older",
       "untimed-a",
       "untimed-b",
+    ]);
+  });
+});
+
+describe("nestFollowUpThreads", () => {
+  const onMain = { checkoutKind: "existing-worktree", label: "main" } as const;
+  const onFeature = { checkoutKind: "managed-worktree", label: "feature/readme" } as const;
+  const parent = { threadId: "parent", title: "Redesign", checkoutChip: onMain };
+  const other = { threadId: "other", title: "Docs", checkoutChip: onMain };
+  const child = { threadId: "child", title: "Add a README", checkoutChip: onFeature };
+
+  it("puts a started task right under the thread that suggested it, even on its own worktree", () => {
+    const nesting = nestFollowUpThreads([parent, other, child], new Map([["child", "parent"]]));
+    expect(nesting.topLevel.map((thread) => thread.threadId)).toEqual(["parent", "other"]);
+    // Grouped by checkout, the worktree child still follows its parent.
+    expect(groupThreadsByCheckout(nesting.topLevel)).toBeUndefined();
+    expect(nesting.expand(nesting.topLevel).map((thread) => thread.threadId)).toEqual([
+      "parent",
+      "child",
+      "other",
+    ]);
+  });
+
+  it("leaves a task in place when its parent is not in the list, and never repeats a row", () => {
+    expect(nestFollowUpThreads([other, child], new Map([["child", "parent"]])).topLevel).toEqual([
+      other,
+      child,
+    ]);
+    const cycle = nestFollowUpThreads(
+      [parent, child],
+      new Map([
+        ["child", "parent"],
+        ["parent", "child"],
+      ]),
+    );
+    expect(cycle.expand(cycle.topLevel).map((thread) => thread.threadId)).toEqual([
+      "parent",
+      "child",
     ]);
   });
 });

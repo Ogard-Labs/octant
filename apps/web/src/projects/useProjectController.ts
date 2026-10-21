@@ -17,6 +17,7 @@ import {
   type ProjectProviderPolicy,
   type WorkProjectStatusFile,
 } from "@octant/contracts/projects";
+import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { AggregateVersion } from "@octant/contracts/events";
 import { LOCAL_HOST_ID, type HostId } from "@octant/contracts/host";
 import { createProjectClient, type ProjectClient } from "@octant/client-runtime/project-client";
@@ -291,6 +292,21 @@ export function useProjectController(options: ProjectControllerOptions) {
         statusFile,
       },
       statusFile === "enabled" ? "Status file turned on." : "Status file turned off.",
+    );
+  }
+
+  /** Set, replace, or (with an empty kit) clear the Project's brand kit. */
+  async function setBrandKit(projectId: ProjectId, brandKit: CanvasDesignBrand): Promise<boolean> {
+    const project = projectById.get(projectId);
+    if (project === undefined) return false;
+    return execute(
+      {
+        kind: "change-project-brand-kit",
+        projectId,
+        expectedVersion: project.version,
+        brandKit,
+      },
+      Object.keys(brandKit).length === 0 ? "Brand kit cleared." : "Brand kit saved.",
     );
   }
 
@@ -662,6 +678,7 @@ export function useProjectController(options: ProjectControllerOptions) {
     setCodeNewThreadWorkspace,
     setCodePullRequestBackgroundRefresh,
     setProviderPolicy,
+    setBrandKit,
     setWorkStatusFile,
     setArchived,
     status,

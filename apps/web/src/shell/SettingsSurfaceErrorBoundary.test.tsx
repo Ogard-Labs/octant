@@ -21,6 +21,8 @@ describe("SettingsSurfaceErrorBoundary", () => {
       );
 
       expect(screen.getByRole("alert")).toHaveTextContent("Settings unavailable");
+      // The failure is the whole window, so it takes the page presentation.
+      expect(screen.getByRole("alert")).toHaveClass("shell-state--page");
       await user.click(screen.getByRole("button", { name: "Reload Octant" }));
       expect(onReload).toHaveBeenCalledOnce();
     } finally {

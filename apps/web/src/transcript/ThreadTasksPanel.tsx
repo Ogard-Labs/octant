@@ -47,9 +47,13 @@ function taskIcon(state: ThreadTaskRow["state"]): ReactNode {
  * each turn's machinery, and the per-step detail stays in the transcript rows.
  */
 export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
-  const [open, setOpen] = useState(false);
-  const listId = useId();
   const { tasks, running } = props.tasks;
+  // The list stays open while the agent works through it, so the step in
+  // hand is readable without a click, and folds to its summary once the turn
+  // settles. Opening or folding it by hand wins over both.
+  const [chosenOpen, setChosenOpen] = useState<boolean>();
+  const open = chosenOpen ?? running;
+  const listId = useId();
   const completed = tasks.filter((task) => task.state === "completed").length;
   const failed = tasks.filter((task) => task.state === "failed").length;
   const waiting = tasks.filter((task) => task.state === "waiting").length;
@@ -86,7 +90,7 @@ export function ThreadTasksPanel(props: ThreadTasksPanelProps) {
         aria-controls={open ? listId : undefined}
         aria-expanded={open}
         className="thread-tasks__header"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => setChosenOpen(!open)}
         size="xs"
         type="button"
         variant="ghost"

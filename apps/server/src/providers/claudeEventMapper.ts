@@ -35,6 +35,8 @@ const APPROVAL_TARGET_MAX_CHARACTERS = 120;
 const SECRET_SHAPED =
   /(?:bearer\s+[A-Za-z0-9._-]{20,}|(?:refresh_token|access_token|api[_-]?key|token)\s*[=:]\s*\S+|authorization\s*:\s*[^\r\n]+|\b(?:sk-[A-Za-z0-9_-]{16,}|gh[opusr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|lin_api_[A-Za-z0-9_]+|xox[abp]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})\b)/gi;
 const SUMMARY_MAX_CHARACTERS = 1_024;
+/** Claude's own checklist tool: it rewrites the whole list on every call. */
+export const CLAUDE_CHECKLIST_TOOL = "TodoWrite";
 const PATH_MAX_CHARACTERS = 4_096;
 /** Claude's own tools that bring outside content to the model, and the input naming what. */
 const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
@@ -48,6 +50,7 @@ const OUTSIDE_CONTENT_TOOLS: ReadonlyMap<
 // in one tool call; more than that is not a shape the SDK can answer.
 const MAX_QUESTIONS = 4;
 const DIGEST_INPUT_MAX_CHARACTERS = 1_048_576;
+const LIVENESS_INTERVAL_MS = 5_000;
 const MAX_RETRY_AFTER_MS = 3_600_000;
 const DECODED_MESSAGE_KINDS = new Set([
   "initialized",
@@ -125,6 +128,8 @@ export interface ClaudeEventContext {
    * person typed into the session is not.
    */
   compactionRequested?: boolean;
+  /** When the last liveness event went out, in epoch milliseconds. */
+  lastLivenessAt?: number;
   /**
    * Each model call's usage this turn, by Claude message id. An assistant
    * message reports only its own call, so the turn's usage so far is their
@@ -133,6 +138,13 @@ export interface ClaudeEventContext {
   readonly callUsage: Map<string, ClaudeUsage>;
   readonly requestIds: Map<string, ClaudeRequestCorrelation>;
   readonly taskIds: Map<string, ClaudeTaskState>;
+  /**
+   * The task id of each checklist position. Claude restates the whole list on
+   * every `TodoWrite`, and the task panel keeps a task's first-seen place, so
+   * keying by position keeps the panel in Claude's latest order and wording
+   * when an item is renamed, reordered, or inserted.
+   */
+  readonly todoTaskIds: Map<number, string>;
   readonly toolStates: Map<string, ClaudeToolState>;
   readonly makeRequestId: () => string;
   readonly makeTaskId: () => string;
@@ -210,6 +222,16 @@ function truncate(value: string, maximum: number): string {
 function normalized(value: string, maximum: number): string | undefined {
   const trimmed = value.trim();
   return trimmed.length === 0 ? undefined : truncate(trimmed, maximum);
+}
+
+/** At most one liveness event per interval, however fast the stream moves. */
+function livenessEvents(context: ClaudeEventContext): ReadonlyArray<ClaudeMappedMessage> {
+  const now = Date.now();
+  if (context.lastLivenessAt !== undefined && now - context.lastLivenessAt < LIVENESS_INTERVAL_MS) {
+    return [{ kind: "ignored" }];
+  }
+  context.lastLivenessAt = now;
+  return [event(context, { kind: "liveness" })];
 }
 
 function streamedEvents(
@@ -393,7 +415,8 @@ function toolState(
   const state: ClaudeToolState = {
     toolCallId: context.makeToolCallId(),
     toolName: normalizedToolName,
-    emitsActivity: toolName !== "AskUserQuestion",
+    // The checklist shows as the thread's task panel, not as a tool row.
+    emitsActivity: toolName !== "AskUserQuestion" && toolName !== CLAUDE_CHECKLIST_TOOL,
     ...(disabled === true ? { disabled } : {}),
     lifecycle: "active",
   };
@@ -427,6 +450,13 @@ function mapToolUse(
     }
     resolved.state.fileChange = authoritativeFileChange;
   }
+  if (
+    authoritativeInput &&
+    content.disabled !== true &&
+    content.toolName === CLAUDE_CHECKLIST_TOOL
+  ) {
+    return checklistEvents(context, content.input);
+  }
   if (!resolved.created || !resolved.state.emitsActivity) return [{ kind: "ignored" }];
   const start = event(context, {
     kind: "tool-start",
@@ -449,6 +479,49 @@ function mapToolUse(
       ...(target === undefined ? {} : { target }),
     }),
   ];
+}
+
+const CHECKLIST_STATUSES: Readonly<Record<string, "pending" | "in-progress" | "completed">> = {
+  pending: "pending",
+  in_progress: "in-progress",
+  completed: "completed",
+};
+
+/**
+ * One `task-progress` event per item of a `TodoWrite` list, in its order. An
+ * item without text or with a status Claude does not document is left out
+ * rather than failing the turn: Claude validates the call itself and refuses
+ * it, and the next list it writes replaces this one. A closing `task-list`
+ * names the positions still in the list, so a shorter list drops its old
+ * last rows; an empty list clears the panel.
+ */
+function checklistEvents(
+  context: ClaudeEventContext,
+  input: { readonly [key: string]: ClaudeJsonValue },
+): ReadonlyArray<ClaudeMappedMessage> {
+  const todos = input.todos;
+  if (!Array.isArray(todos)) return [{ kind: "ignored" }];
+  const results: ClaudeMappedMessage[] = [];
+  const taskIds: string[] = [];
+  let position = 0;
+  for (const todo of todos) {
+    if (typeof todo !== "object" || todo === null || Array.isArray(todo)) continue;
+    const text = jsonString(todo, "content");
+    const status = CHECKLIST_STATUSES[jsonString(todo, "status") ?? ""];
+    const summary = text === undefined ? undefined : normalized(text, SUMMARY_MAX_CHARACTERS);
+    if (summary === undefined || status === undefined) continue;
+    let taskId = context.todoTaskIds.get(position);
+    if (taskId === undefined) {
+      taskId = context.makeTaskId();
+      context.todoTaskIds.set(position, taskId);
+    }
+    position += 1;
+    taskIds.push(taskId);
+    results.push(event(context, { kind: "task-progress", taskId, status, summary }));
+  }
+  // A list with items but none readable is one Claude refuses; keep the panel.
+  if (results.length === 0 && todos.length > 0) return [{ kind: "ignored" }];
+  return [...results, event(context, { kind: "task-list", taskIds })];
 }
 
 function withoutIgnored(
@@ -979,8 +1052,12 @@ function mapStreamEvent(
       return usageIsSafe(message.event.usage)
         ? [{ kind: "ignored" }]
         : [failure("Claude returned invalid usage metadata.")];
-    case "message-stop":
+    // A tool call's input streams for minutes with nothing to show; the
+    // runner's idle clock would read that as a dead session.
+    case "ping":
     case "tool-input-delta":
+      return livenessEvents(context);
+    case "message-stop":
     case "reasoning-signature":
     case "citation-delta":
     case "compaction-delta":

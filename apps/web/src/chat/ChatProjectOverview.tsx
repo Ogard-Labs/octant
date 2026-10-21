@@ -192,14 +192,8 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
               />
             }
             row={{
-              leading: (
+              trailing: (
                 <>
-                  <ComposerVoiceButton
-                    disabled={!createAvailable || submitting}
-                    onTranscript={(transcript) =>
-                      setDraft((current) => appendTranscript(current, transcript))
-                    }
-                  />
                   <ComposerModelPicker
                     ariaLabel="Provider and model"
                     disabled={!createAvailable || submitting}
@@ -227,6 +221,12 @@ export function ChatProjectOverview(props: ChatProjectOverviewProps) {
                       : {
                           selectedProviderInstanceId: props.selectedProviderInstanceId,
                         })}
+                  />
+                  <ComposerVoiceButton
+                    disabled={!createAvailable || submitting}
+                    onTranscript={(transcript) =>
+                      setDraft((current) => appendTranscript(current, transcript))
+                    }
                   />
                 </>
               ),

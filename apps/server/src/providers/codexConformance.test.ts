@@ -124,6 +124,7 @@ describe("Codex provider conformance", () => {
         "usage",
         "diff",
         "task-progress",
+        "task-list",
         "approval-request",
         "interrupted",
       ],

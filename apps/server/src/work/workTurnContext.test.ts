@@ -231,6 +231,51 @@ describe("planWorkTurnContext", () => {
     );
   });
 
+  it("tells the model to deliver kept work as a Canvas only when the Canvas tool is offered", () => {
+    let n = 0;
+    const uuid = () => `aaaaaaaa-aaaa-4aaa-8aaa-${String(++n).padStart(12, "0")}`;
+    const plan = planWorkTurnContext({
+      threadId,
+      providerInstanceId: provider,
+      modelId: model,
+      uuid,
+      createdAt: "2026-08-11T12:00:00.000Z",
+      contributions: [],
+    });
+    if (plan.kind !== "ok") throw new Error("The Work guide fits its budget");
+    const withCanvas = includeWorkToolDefinitions({
+      plan,
+      uuid,
+      safeInputBudget: 2_000,
+      tools: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+    });
+    if (withCanvas.kind !== "ok") throw new Error("The instructions fit their budget");
+    expect(withCanvas.context).toEqual([
+      { kind: "instructions", text: expect.stringContaining("as a Canvas with the octant_canvas") },
+      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+    ]);
+    expect(withCanvas.manifest.entries).toContainEqual(
+      expect.objectContaining({
+        category: "octant-policy",
+        state: "included",
+        source: { kind: "instruction", referenceId: "octant-canvas-delivery" },
+      }),
+    );
+    expect(JSON.stringify(withCanvas.manifest)).not.toContain("as a Canvas");
+
+    const withoutCanvas = includeWorkToolDefinitions({
+      plan,
+      uuid,
+      safeInputBudget: 2_000,
+      tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
+    });
+    if (withoutCanvas.kind !== "ok") throw new Error("The instructions fit their budget");
+    expect(withoutCanvas.context).toEqual([
+      { kind: "instructions", text: expect.stringContaining("Octant's Files") },
+    ]);
+    expect(JSON.stringify(withoutCanvas.context)).not.toContain("octant_canvas");
+  });
+
   it("refuses required file mentions that cannot fit the context budget", () => {
     let n = 0;
     const huge = "a".repeat(8_000);

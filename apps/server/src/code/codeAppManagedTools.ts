@@ -1690,6 +1690,9 @@ function browserResult(snapshot: BrowserAutomationSnapshot, includeScreenshot = 
               ...(includeScreenshot && image === undefined
                 ? { screenshotOmitted: "invalid-or-too-large" as const }
                 : {}),
+              ...(snapshot.observation.capture?.status === "kept"
+                ? { captureId: snapshot.observation.capture.captureId }
+                : {}),
               ...(snapshot.observation.capture?.status === "not-kept"
                 ? { captureNotKept: snapshot.observation.capture.reason }
                 : {}),
