@@ -6,7 +6,7 @@
  * is off. The coarse path is a choice, not a ceiling on the clean one.
  */
 
-function displayPixelRatio(): number {
+export function displayPixelRatio(): number {
   if (typeof window === "undefined") return 1;
   const ratio = window.devicePixelRatio;
   return Number.isFinite(ratio) && ratio > 0 ? ratio : 1;

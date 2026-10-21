@@ -1,6 +1,11 @@
 import type { CanvasDiagramBlock } from "@octant/contracts/canvas";
 import type { CanvasDiagramNodePosition } from "@octant/contracts/canvas-board";
-import { layoutCanvasDiagram, type CanvasDiagramNodeBox } from "@octant/domain";
+import {
+  CANVAS_DIAGRAM_ICON_PATHS,
+  canvasDiagramNodeContent,
+  layoutCanvasDiagram,
+  type CanvasDiagramNodeBox,
+} from "@octant/domain";
 import {
   useCallback,
   useEffect,
@@ -361,7 +366,12 @@ export function DiagramBoard(props: DiagramBoardProps) {
           </defs>
         )}
         {layout.groups.map((group) => (
-          <g key={group.groupId} className="canvas-block__diagram-group" data-tone={group.tone}>
+          <g
+            key={group.groupId}
+            className="canvas-block__diagram-group"
+            data-depth={group.depth}
+            data-tone={group.tone}
+          >
             <rect x={group.x} y={group.y} width={group.width} height={group.height} rx={8} />
             <text x={group.x + 10} y={group.y + 15}>
               {group.label}
@@ -400,9 +410,7 @@ export function DiagramBoard(props: DiagramBoardProps) {
             tabIndex={editable ? 0 : undefined}
           >
             <DiagramNodeShape node={node} />
-            <text x={node.x + node.width / 2} y={node.y + node.height / 2}>
-              {node.label}
-            </text>
+            <DiagramNodeContent node={node} />
           </g>
         ))}
       </svg>
@@ -412,6 +420,43 @@ export function DiagramBoard(props: DiagramBoardProps) {
         </OctantAlert>
       )}
     </div>
+  );
+}
+
+/**
+ * A node's label, with the icon beside it and the subtitle beneath it when it
+ * has them. Where each sits is the domain's, so the board and an export agree.
+ * The full subtitle is the node's description, as the drawn one may be cut.
+ */
+export function DiagramNodeContent({ node }: { readonly node: CanvasDiagramNodeBox }) {
+  const content = canvasDiagramNodeContent(node);
+  return (
+    <>
+      {node.detail === undefined ? null : <title>{`${node.label}: ${node.detail}`}</title>}
+      {content.icon === undefined ? null : (
+        <g
+          className="canvas-block__diagram-icon"
+          data-icon={content.icon.name}
+          transform={`translate(${content.icon.x} ${content.icon.y}) scale(${content.icon.size / 24})`}
+        >
+          {CANVAS_DIAGRAM_ICON_PATHS[content.icon.name].map((d) => (
+            <path d={d} key={d} />
+          ))}
+        </g>
+      )}
+      <text x={content.labelX} y={content.labelY}>
+        {node.label}
+      </text>
+      {content.detail === undefined ? null : (
+        <text
+          className="canvas-block__diagram-node-detail"
+          x={content.detail.x}
+          y={content.detail.y}
+        >
+          {content.detail.text}
+        </text>
+      )}
+    </>
   );
 }
 

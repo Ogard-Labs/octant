@@ -285,6 +285,29 @@ describe("ThreadRetentionService", () => {
     );
     expect(runtime.canvasProjection.getById(decodeCanvasId(canvasId))).toBeUndefined();
   });
+
+  it("erases the Canvas a purged Chat thread outside every Project owned, from the journal and the live projection", async () => {
+    const { connection, journal, runtime, service } = openHarness();
+    const canvasId = "c1000000-0000-4000-8000-0000000000a5";
+    seedChatThread(journal, connection, ids.thread, "Has its own canvas", "body");
+    appendCanvas(journal, canvasId, null, ids.thread);
+    expect(
+      runtime.canvasProjection.byThread({ mode: "chat", projectId: null, threadId: ids.thread }),
+    ).toHaveLength(1);
+    await service.purge(
+      { scope: { kind: "thread", mode: "chat", threadId: ids.thread }, confirm: true },
+      "local-window",
+    );
+    expect(runtime.canvasProjection.getById(decodeCanvasId(canvasId))).toBeUndefined();
+    expect(
+      connection
+        .prepare(
+          `SELECT count(*) AS remaining FROM event_journal
+           WHERE aggregate_type = 'canvas' AND aggregate_id = ?`,
+        )
+        .get(canvasId),
+    ).toEqual({ remaining: 0 });
+  });
 });
 
 function seedProject(connection: SqliteConnection, projectId: string): void {
@@ -326,7 +349,7 @@ function memoryEntry(projectId: string) {
 function appendCanvas(
   journal: Journal,
   canvasId: string,
-  projectId: string,
+  projectId: string | null,
   threadId: string = "c1000000-0000-4000-8000-0000000000c1",
 ): void {
   const provenance = {

@@ -1,4 +1,4 @@
-import { SYSTEM_UI_FAMILY, savedUiFamily } from "@octant/theme";
+import { GEIST_UI_FAMILY, SYSTEM_UI_FAMILY, savedUiFamily } from "@octant/theme";
 import { Check, ChevronsUpDown } from "lucide-react";
 import {
   OctantCombobox,
@@ -32,12 +32,8 @@ interface FontOption {
 // named a family Octant does not bundle, so choosing it fell back to the
 // system face.
 const UI_FONTS: ReadonlyArray<FontOption> = [
-  {
-    label: "Geist",
-    family:
-      "'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
-  },
   { label: "System interface", family: SYSTEM_UI_FAMILY },
+  { label: "Geist", family: GEIST_UI_FAMILY },
   { label: "SF Pro", family: "'SF Pro Text', -apple-system, system-ui, sans-serif" },
   { label: "Inter", family: "Inter, system-ui, sans-serif" },
   { label: "Helvetica Neue", family: "'Helvetica Neue', Helvetica, Arial, sans-serif" },

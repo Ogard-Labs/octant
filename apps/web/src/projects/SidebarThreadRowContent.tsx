@@ -1,5 +1,5 @@
 import type { ThreadBoardPullRequestSummaries } from "@octant/contracts";
-import { Folder, GitBranch, GitPullRequest } from "lucide-react";
+import { Check, Folder, GitBranch, GitPullRequest } from "lucide-react";
 import type { ReactNode } from "react";
 import { ProviderGlyph } from "../providers/ProviderGlyph";
 import type { ThreadCheckoutChip, ThreadProviderIdentity } from "../shell/navigationModel";
@@ -71,14 +71,22 @@ export function SidebarThreadRowContent(props: {
             )}
             {props.pullRequest === undefined ? null : (
               <span
-                aria-label={`Pull request #${String(props.pullRequest.identity.number)} · ${props.pullRequest.state}`}
+                aria-label={`Pull request #${String(props.pullRequest.identity.number)} · ${props.pullRequest.state}${props.pullRequest.checks === "passing" ? " · checks passing" : ""}`}
                 className="sidebar-navigation__thread-pr sidebar-navigation__thread-pr-mark"
                 data-state={props.pullRequest.state}
                 role="img"
-                title={`Pull request #${String(props.pullRequest.identity.number)} · ${props.pullRequest.state}`}
+                title={`Pull request #${String(props.pullRequest.identity.number)} · ${props.pullRequest.state}${props.pullRequest.checks === "passing" ? " · checks passing" : ""}`}
               >
                 <GitPullRequest aria-hidden="true" size={12} strokeWidth={1.8} />#
                 {String(props.pullRequest.identity.number)}
+                {props.pullRequest.checks === "passing" ? (
+                  <Check
+                    aria-hidden="true"
+                    className="sidebar-navigation__thread-pr-checks"
+                    size={12}
+                    strokeWidth={2}
+                  />
+                ) : null}
               </span>
             )}
             {props.checkout === undefined ? null : (

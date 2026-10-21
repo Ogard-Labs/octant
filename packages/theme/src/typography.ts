@@ -60,7 +60,10 @@ export const SYSTEM_UI_FAMILY =
  * whichever face was the default when they saved.
  */
 export function savedUiFamily(family: string): string {
-  return family === LEGACY_DEFAULT_UI_FAMILY || family === UNBUNDLED_GEIST_FAMILY
+  // The old Geist entry was an explicit pick of Geist, so it keeps Geist now
+  // that Geist is no longer the default.
+  if (family === UNBUNDLED_GEIST_FAMILY) return GEIST_UI_FAMILY;
+  return family === LEGACY_DEFAULT_UI_FAMILY || family === GEIST_DEFAULT_UI_FAMILY
     ? DEFAULT_UI_TYPOGRAPHY.fontFamily
     : family;
 }
@@ -70,6 +73,15 @@ export function savedUiFamily(family: string): string {
  * the system face instead; they asked for Geist, so they get the bundled one.
  */
 const UNBUNDLED_GEIST_FAMILY = "Geist, system-ui, sans-serif";
+/**
+ * The interface stack saved while bundled Geist was the default. Like the
+ * stack before it, it meant "the default", so it follows the default to the
+ * platform face. Appearance's Geist entry now saves `GEIST_UI_FAMILY`, so a
+ * person who picks Geist from here on keeps it.
+ */
+const GEIST_DEFAULT_UI_FAMILY =
+  "'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+export const GEIST_UI_FAMILY = "'Geist Variable', system-ui, sans-serif";
 /**
  * The code and terminal stacks saved while they were the defaults. They named
  * a JetBrains face Octant never bundled, so they always fell back to SF Mono;

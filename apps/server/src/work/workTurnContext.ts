@@ -13,6 +13,10 @@ import {
   type WorkThreadId,
 } from "@octant/contracts";
 import { reduceContextToBudget } from "@octant/domain/context-policy";
+import {
+  CANVAS_DELIVERY_INSTRUCTIONS,
+  offersCanvasTool,
+} from "../canvas/canvasDeliveryInstructions";
 
 /**
  * Conservative Work input budget used when the selected model has not
@@ -22,7 +26,7 @@ import { reduceContextToBudget } from "@octant/domain/context-policy";
 export const WORK_TURN_SAFE_INPUT_TOKENS = 24_000;
 
 const WORK_ARTIFACT_INSTRUCTIONS =
-  "You are working in an Octant Work task. When the user requests a document or artifact, use your available file tools to create it inside the bound task folder and report its real relative paths. Octant's Files tool lets the user open those files; observed Markdown and plain-text documents can also appear in Document beside the conversation. Creating a file does not prove a preview opened. Use appropriate format-specific tooling for binary documents. Never invent download URLs or host artifact ids. Use only tools actually offered to this task; these instructions grant no additional access.";
+  "You are working in an Octant Work task. When a document belongs in the task folder (the user asked for a file, or no Canvas tool is offered), use your available file tools to create it inside the bound task folder and report its real relative paths. Octant's Files tool lets the user open those files; observed Markdown and plain-text documents can also appear in Document beside the conversation. Creating a file does not prove a preview opened. Use appropriate format-specific tooling for binary documents. Never invent download URLs or host artifact ids. Use only tools actually offered to this task; these instructions grant no additional access.";
 
 export type WorkTurnContextPlan =
   | {
@@ -165,15 +169,51 @@ export function includeWorkToolDefinitions(input: {
       preview: { redacted: true, label: "Tool definition hidden" },
     });
   });
+  // The Canvas tool is known only here, so its delivery rule joins the plan
+  // with the tools and leads the context like the other Work instructions.
+  const canvasEntries = offersCanvasTool(input.tools)
+    ? [
+        decodeContextEntry({
+          id: input.uuid(),
+          source: { kind: "instruction", referenceId: "octant-canvas-delivery" },
+          category: "octant-policy",
+          label: "Work instructions",
+          eligibility: {
+            providerInstanceId: input.plan.manifest.providerInstanceId,
+            status: "eligible",
+            reason: "selected-provider",
+          },
+          posture: "required",
+          retention: "active",
+          priority: 100,
+          originalSize: canvasInstructionTokens,
+          includedSize: canvasInstructionTokens,
+          tokens: {
+            kind: "known",
+            tokens: canvasInstructionTokens,
+            accuracy: "conservative-heuristic",
+          },
+          state: "included",
+          introducedAtTurn: 1,
+          reuseCount: 0,
+          preview: { redacted: true, label: "octant-policy hidden" },
+        }),
+      ]
+    : [];
+  for (const entry of canvasEntries) {
+    blocks.set(String(entry.id), { kind: "instructions", text: CANVAS_DELIVERY_INSTRUCTIONS });
+  }
   return reduceWorkContext(
     decodeContextManifest({
       ...input.plan.manifest,
-      entries: [...input.plan.manifest.entries, ...toolEntries],
+      entries: [...canvasEntries, ...input.plan.manifest.entries, ...toolEntries],
     }),
     blocks,
     input.safeInputBudget,
   );
 }
+
+const canvasInstructionTokens = Math.max(16, Math.ceil(CANVAS_DELIVERY_INSTRUCTIONS.length / 4));
 
 /**
  * Whether a planned entry has a block in the plan's `context`, which lists

@@ -47,7 +47,12 @@ describe("ThreadComposer", () => {
     const toolbar = container.querySelector(".composer-row");
     expect(surface).toContainElement(field);
     expect(feedback?.nextElementSibling).toBe(toolbar);
-    expect(surface?.nextElementSibling).toHaveClass("thread-composer__context");
+    // The strip above the box holds the checkout context; the box itself holds
+    // only the message and its controls.
+    expect(surface?.previousElementSibling).toHaveClass("thread-composer__strip");
+    expect(surface?.previousElementSibling).toContainElement(
+      container.querySelector(".thread-composer__context"),
+    );
     rerender(<ThreadComposer presentation="follow-up" context={context} input={input} row={row} />);
     expect(container.querySelector(".thread-composer__feedback")).toBe(feedback);
     expect(screen.getByRole("textbox", { name: "Message" })).toBe(field);

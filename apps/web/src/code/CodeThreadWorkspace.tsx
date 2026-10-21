@@ -2030,23 +2030,39 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   threadKind="code-thread"
                 />
               )}
-              <ComposerVoiceButton
-                disabled={busy}
-                onTranscript={(transcript) => {
-                  const next = appendTranscript(draft, transcript);
-                  draftRevisionRef.current += 1;
-                  setDraft(next);
-                  props.controller.setPendingDraft?.(next, next.length);
-                }}
-              />
               {plan == null || plan.status === "withdrawn" ? (
                 <ThreadPlanProposal key={String(thread.id)} />
               ) : null}
-              {/* Two groups with space between: what the person adds sits left,
-                  how the turn runs sits right beside send. The model used to
-                  hug the attach button, so it jumped sides between a new task
-                  and the thread it became. */}
-              <span aria-hidden="true" className="composer-gap" />
+              <CodeAccessPicker
+                {...(props.harnessAutoReviewSupported === true
+                  ? {
+                      autoApprove: {
+                        checked: thread.autoApprove === true,
+                        onChange: (checked: boolean) => void changeAutoApprove(checked),
+                      },
+                    }
+                  : {})}
+                {...(profileName === undefined ? {} : { profileName })}
+                ceiling={thread.executionPolicy}
+                disabled={accessChanging}
+                harnessAsksUnderFullAccess={harnessAsksUnderFullAccess}
+                nativeConfirmationAvailable={
+                  props.requestFullAccessApproval !== undefined ||
+                  props.projectRemembersFullAccess === true
+                }
+                onLowerThread={(next) => void changeAccess(next)}
+                onRaiseThread={(next) => void changeAccess(next)}
+                onSelect={setTurnAccessOverride}
+                value={nextTurnAccess}
+              />
+            </>
+          ),
+          // Two groups: what the person adds and may do sits left, how the
+          // turn runs sits right beside send. The model used to hug the attach
+          // button, so it jumped sides between a new task and the thread it
+          // became.
+          trailing: (
+            <>
               <ComposerModelPicker
                 ariaLabel="Provider and model"
                 disabled={busy}
@@ -2066,31 +2082,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                 selectedModelId={thread.modelId}
                 selectedProviderInstanceId={thread.providerInstanceId}
               />
+              <ComposerVoiceButton
+                disabled={busy}
+                onTranscript={(transcript) => {
+                  const next = appendTranscript(draft, transcript);
+                  draftRevisionRef.current += 1;
+                  setDraft(next);
+                  props.controller.setPendingDraft?.(next, next.length);
+                }}
+              />
             </>
-          ),
-          trailing: (
-            <CodeAccessPicker
-              {...(props.harnessAutoReviewSupported === true
-                ? {
-                    autoApprove: {
-                      checked: thread.autoApprove === true,
-                      onChange: (checked: boolean) => void changeAutoApprove(checked),
-                    },
-                  }
-                : {})}
-              {...(profileName === undefined ? {} : { profileName })}
-              ceiling={thread.executionPolicy}
-              disabled={accessChanging}
-              harnessAsksUnderFullAccess={harnessAsksUnderFullAccess}
-              nativeConfirmationAvailable={
-                props.requestFullAccessApproval !== undefined ||
-                props.projectRemembersFullAccess === true
-              }
-              onLowerThread={(next) => void changeAccess(next)}
-              onRaiseThread={(next) => void changeAccess(next)}
-              onSelect={setTurnAccessOverride}
-              value={nextTurnAccess}
-            />
           ),
           actions: {
             kind: "send-or-stop",

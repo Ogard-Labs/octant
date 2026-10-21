@@ -36,6 +36,7 @@ import type { useProjectController } from "../projects/useProjectController";
 import type { ReviewActionOutcome } from "../review/ReviewPage";
 import type { ArchivedThreadEntry } from "../shell/ArchiveView";
 import type { DockThreadOverviewContent } from "../shell/DockThreadOverviewContent";
+import type { WrittenDocument } from "../shell/writtenDocuments";
 import type { RightUtilityDockSurfaceId } from "../shell/rightUtilityDockModel";
 import type { ThreadUtilityDockKey } from "../shell/rightUtilityDockSelection";
 import type { useShellController } from "../shell/useShellController";
@@ -137,7 +138,6 @@ export type ShellActions = {
   readonly openDraftInProject: (projectId: ProjectId) => Promise<void>;
   readonly openDraftThread: ShellController["openDraftThread"];
   readonly openGithubIssues: () => void;
-  readonly openHomeTerminal: (projectId: ProjectId) => void;
   readonly openImageLibrary: () => void;
   readonly openInbox: () => void;
   readonly openLinearIssues: () => void;
@@ -174,6 +174,8 @@ export type ShellActions = {
   readonly openThreadSearch: () => void;
   readonly openThreadBrowser: ShellController["openThreadBrowser"];
   readonly openWorkThread: ShellController["openWorkThread"];
+  /** Opens one of the dock thread's outputs in the tool that shows it. */
+  readonly openWrittenDocument: (document: WrittenDocument) => void;
   readonly persistBottomPanelPresentation: ThreadUtilityPresentation["persistBottomPanelPresentation"];
   readonly pinChatThreadInPane: (threadId: string) => void;
   readonly pinCodeThread: CodeController["pinThread"];
@@ -249,6 +251,7 @@ export type ShellActions = {
   readonly setProjectArchived: ProjectController["setArchived"];
   readonly setProjectColor: ProjectController["setColor"];
   readonly setProjectProviderPolicy: ProjectController["setProviderPolicy"];
+  readonly setProjectBrandKit: ProjectController["setBrandKit"];
   readonly setProjectWorkStatusFile: ProjectController["setWorkStatusFile"];
   readonly setProjectsListOpen: Dispatch<SetStateAction<boolean>>;
   readonly setRailPlaceholder: Dispatch<
