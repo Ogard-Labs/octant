@@ -447,7 +447,9 @@ behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 First-run setup asks only what a first task needs — a usable provider, a
 Project folder, and a model — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
-the first one. Skipping preserves settled answers, waits for pending writes,
+the first one. Opening setup focuses the current step's heading so a long
+provider list does not scroll past its introduction; Tab then reaches the
+step's controls. Skipping preserves settled answers, waits for pending writes,
 grants no authority, and creates no thread: provider, Project, model, and
 permission readiness are checked again when work is requested. After Skip, or
 in a later session with no ready instance, the New task composer in Work and
