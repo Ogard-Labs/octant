@@ -3,7 +3,9 @@ import { Effect, type Scope } from "effect";
 
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 import {
+  ISOLATED_CLAUDE_LAUNCH_GUARDS,
   ensureClaudeAccountConfigDirectory,
+  hostDisableOnlySwitches,
   isolatedClaudeAccountEnvironment,
 } from "./claudeAccountIsolation";
 
@@ -44,17 +46,12 @@ const PASSTHROUGH_VARIABLES = new Set([
   "USER",
 ]);
 
-/** Static switches every Claude launch sets; the version read keeps them too. */
-export const REQUIRED_GUARDS = {
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
-  CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
-  CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS: "1",
-  CLAUDE_CODE_DISABLE_OFFICIAL_MARKETPLACE_AUTOINSTALL: "1",
-  DISABLE_TELEMETRY: "1",
-  DISABLE_ERROR_REPORTING: "1",
-  DISABLE_AUTOUPDATER: "1",
-  DISABLE_BUG_COMMAND: "1",
-} as const;
+/**
+ * Static switches every Claude launch sets; the version read keeps them too.
+ * One table for both launch shapes, so the isolated and the host-directory
+ * launch cannot drift apart on what they turn off.
+ */
+export const REQUIRED_GUARDS = ISOLATED_CLAUDE_LAUNCH_GUARDS;
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
   return { category, message };
@@ -123,7 +120,7 @@ export function sanitizeClaudeEnvironment(
     environment.ANTHROPIC_API_KEY = overrides.apiKey;
   }
 
-  return { ...environment, ...REQUIRED_GUARDS };
+  return { ...environment, ...hostDisableOnlySwitches(hostEnvironment), ...REQUIRED_GUARDS };
 }
 
 export function makeClaudeEnvironmentScope(

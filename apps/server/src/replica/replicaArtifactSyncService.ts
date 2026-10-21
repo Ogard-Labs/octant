@@ -521,6 +521,7 @@ export class ReplicaArtifactSyncService {
       const artifact = synced ?? queuedVersion?.artifact;
       if (artifact === undefined) return;
       const change = commentChangeOf(input.event);
+      if (change === undefined) return;
       if (!replicaCommentTextLeavesSafely(change)) {
         this.#ports.journal.append({
           eventName: REPLICA_ARTIFACT_EVENT_NAMES.publishRefused,
@@ -939,10 +940,14 @@ export function replicaCommentEntryFor(
 
 /**
  * The change a comment event a person made here becomes in the store. The
- * device it came through stays on this computer.
+ * device it came through stays on this computer, and so does a send to the
+ * agent: the thread it went to lives on this host alone, so another computer
+ * has nothing to do with the request.
  */
-function commentChangeOf(event: CanvasCommentEvent): ReplicaCommentChange {
+function commentChangeOf(event: CanvasCommentEvent): ReplicaCommentChange | undefined {
   switch (event.kind) {
+    case "sent-to-agent":
+      return undefined;
     case "added": {
       const comment = event.event.comment;
       return {

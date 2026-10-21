@@ -76,9 +76,13 @@ task. In Chat, Work, and Code, and for a managed child run bound to its own
 workspace, `octant_canvas` creates and revises structured
 plans, designs, reports, reviews, diagrams, tables, and dashboards. A Chat thread
 outside a Chat Project, and a managed child run in Chat mode, are not offered the
-tool, because a Canvas there has no Project to belong to. When you ask
-for something substantial, the agent builds it as a Canvas and replies with a
-short pointer; brief answers stay in the conversation. A follow-up such as "add
+tool, because a Canvas there has no Project to belong to. When the answer is
+something you will keep, share, present, or come back to (a report, memo, plan,
+slide deck, dashboard, web page, design, or prototype, or any reply long enough
+to need headings, tables, or charts), the agent builds it as a Canvas and
+replies with a short pointer; brief answers, one-off snippets, and questions
+stay in the conversation. When it could go either way, the agent makes the
+Canvas; ask for plain text if you would rather read it in the thread. A follow-up such as "add
 a risks section" revises the existing Canvas: the read-only `list` operation
 returns the thread's Canvases and `read` returns one's current blocks and
 sequence. The tool's always-visible description stays short; its read-only
@@ -87,9 +91,10 @@ three ways a Canvas carries work (typed blocks for data, a design frame for the
 look, and a running design for a prototype you can try) and tells the agent to
 use the simplest one that does the job. It then lists the
 supported kinds and when to use the structured ones, the document recipes an agent should
-start from, and a creation example. Asking to write a plan, review a pull
-request, summarise research, write an article, pitch a product, show a design
-system, or build a prototype you can try starts from the matching recipe. Requesting up
+start from, and a creation example. Asking to write a plan or a memo, review a
+pull request, summarise research, write an article, make slides, show the key
+numbers, design a website, pitch a product, show a design system, or build a
+prototype you can try starts from the matching recipe. Requesting up
 to three `blockKinds` returns their exact schemas from the host's block
 contracts, plus how to author and worked examples for the kinds that carry
 them (plain kinds such as `rich-text` return their schema alone):
@@ -107,8 +112,8 @@ appear only in a design's frames.
 ### Start a Canvas from a recipe
 
 In a Chat thread, choose **Show canvas** from the **Thread actions** menu. Under
-**Start from**, pick **Blank** or a recipe: an implementation plan, a design
-spec, an architecture review, a code review, an audit or test report, a
+**Start from**, pick **Blank** or a recipe: an implementation plan, a memo, a
+design spec, an architecture review, a code review, an audit or test report, a
 postmortem, a research brief, a dashboard, an article, a design brief, a
 design system, a clickable prototype, and the others the host offers,
 including any an enabled skill adds. Each shows one line about what it holds
@@ -372,6 +377,13 @@ agent asks for your theme.
   or make Octant look up a host name, and if Octant cannot set that up, the
   prototype does not run and says why. If it stops responding, or tries to
   open another page, Octant stops it and offers **Run again**. Script errors appear as text under it.
+- Ask to redesign a whole app, and the agent can build a prototype of its
+  window at desktop size, with a sidebar of threads, tabs, panes, and an accent
+  colour you can change. It builds the window in steps, adding a screen at a
+  time, rather than in one long request, so a large prototype appears sooner and
+  your own changes to the Canvas are kept in between. Press **Full screen**
+  above a running prototype, or in **Play**, to see it as large as your screen
+  allows. Octant scales it to fit, and **Stop** stays in view.
 - A running prototype is part of the Tab order, right after **Stop**, whether
   it started when you opened it or when you pressed **Run**. Octant does not
   move the keyboard into it by itself; press **Tab** from **Stop** to enter it.

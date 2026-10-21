@@ -29,6 +29,23 @@ const inTreeCanvasDocumentRecipeDocuments = [
     ],
   },
   {
+    id: "memo",
+    title: "Memo",
+    summary: "A one-page memo or report: the summary, the facts, the detail, and the ask.",
+    whenToUse:
+      "When someone asks for a memo, a one-pager, a status report, a summary to decide from, or a short write-up to share.",
+    skeleton: [
+      { kind: "heading", role: "Summary" },
+      { kind: "rich-text", role: "The answer in a few sentences, and why it matters." },
+      { kind: "heading", role: "Facts" },
+      { kind: "key-value", role: "The facts the reader needs, one per row." },
+      { kind: "heading", role: "Detail" },
+      { kind: "table", role: "The supporting detail, one row per item." },
+      { kind: "heading", role: "Next steps" },
+      { kind: "callout", role: "The decision or action asked of the reader, and by when." },
+    ],
+  },
+  {
     id: "audit-report",
     title: "Audit report",
     summary: "Scope, the overall result, findings with evidence, and what remains open.",
@@ -271,6 +288,25 @@ const inTreeCanvasDocumentRecipeDocuments = [
       },
       { kind: "heading", role: "Notes" },
       { kind: "rich-text", role: "What the prototype shows, what is faked, and what to try." },
+    ],
+  },
+  {
+    id: "app-redesign-prototype",
+    title: "App redesign prototype",
+    summary: "A whole app window you can click through, with real navigation and a live accent.",
+    whenToUse:
+      "When someone asks to redesign an app, show a full app window, or try a layout with real navigation, state, and a colour they can change, such as a sidebar of threads, panes, tabs, and an accent picker.",
+    skeleton: [
+      {
+        kind: "design",
+        size: "desktop",
+        role: "Desktop window, runsScript true, accent as a :root variable; grow it with designEdits revisions.",
+      },
+      { kind: "heading", role: "Notes" },
+      {
+        kind: "rich-text",
+        role: "What the window shows, what is faked, and what to try, such as changing the accent.",
+      },
     ],
   },
 ] as const;

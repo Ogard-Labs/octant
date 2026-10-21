@@ -185,6 +185,13 @@ const DeltaNotification = Schema.Struct({
   delta: Schema.String,
 });
 
+/**
+ * Tool-execution progress. Only the correlation is decoded: the output, the
+ * progress message and the patch are content the adapter must not carry, and
+ * it uses these notifications as proof of life alone.
+ */
+const ToolProgressNotification = Schema.Struct(CorrelatedItemParams);
+
 const ReasoningSummaryDeltaNotification = Schema.Struct({
   ...CorrelatedItemParams,
   delta: Schema.String,
@@ -421,6 +428,9 @@ const stableNotificationSchemas = {
   "item/completed": ItemCompletedNotification,
   "item/agentMessage/delta": DeltaNotification,
   "item/plan/delta": DeltaNotification,
+  "item/commandExecution/outputDelta": ToolProgressNotification,
+  "item/mcpToolCall/progress": ToolProgressNotification,
+  "item/fileChange/patchUpdated": ToolProgressNotification,
   "item/reasoning/summaryTextDelta": ReasoningSummaryDeltaNotification,
   "item/reasoning/textDelta": ReasoningTextDeltaNotification,
   "turn/diff/updated": TurnDiffNotification,
@@ -451,6 +461,9 @@ const stableNotificationDecoders: Record<
   "item/completed": decode(ItemCompletedNotification),
   "item/agentMessage/delta": decode(DeltaNotification),
   "item/plan/delta": decode(DeltaNotification),
+  "item/commandExecution/outputDelta": decode(ToolProgressNotification),
+  "item/mcpToolCall/progress": decode(ToolProgressNotification),
+  "item/fileChange/patchUpdated": decode(ToolProgressNotification),
   "item/reasoning/summaryTextDelta": decode(ReasoningSummaryDeltaNotification),
   "item/reasoning/textDelta": decode(ReasoningTextDeltaNotification),
   "turn/diff/updated": decode(TurnDiffNotification),

@@ -55,12 +55,14 @@ export type KeychainHelperExecutor = (
 export type KeychainCredentialNamespace =
   | "provider"
   | "replica-device-key"
-  | "replica-store-credential";
+  | "replica-store-credential"
+  | "canvas-public-share-secret";
 
 /** The request field that names an item in a namespace of its own. */
 const NAMESPACE_ID_FIELD = {
   "replica-device-key": "instanceId",
   "replica-store-credential": "credentialRef",
+  "canvas-public-share-secret": "credentialRef",
 } as const;
 
 export function keychainHelperSpec(
