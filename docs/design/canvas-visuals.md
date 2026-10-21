@@ -312,8 +312,16 @@ callouts are ink marks on their node with the notes listed under the frame. In
 forced colours every hairline is the system frame and a filled mark is system
 text. A design is the author's own screens or slides: Octant draws
 only the frame around them (a hairline, the surface behind, and a numbered
-caption) and never restyles what is inside. Its player is a near-full-window
-dialog that scales the screen to fit with the stage padding around it. A
+caption) and never restyles what is inside. On the board each frame is as wide
+as its size allows (440px for a slide or desktop screen) and never wider than
+the column, so a deck in a narrow side panel is not clipped; the box keeps the
+page's aspect ratio from the first paint, and the page inside is scaled once
+the board is measured. A frame's page loads only when the frame, or the frame
+beside it, has come into view, and stays loaded after; a long deck therefore
+opens as fast as a short one. Its player is a near-full-window dialog that
+scales the screen to fit with the stage padding around it; a deck keeps the
+current slide and its two neighbours loaded, the neighbours hidden, so a step
+shows a page already drawn. A
 design of `document` size is read in place instead: no caption, no player, the
 full width of the Canvas column, and exactly as tall as its page, so it never
 scrolls inside itself below a 12,000px cap.
