@@ -220,7 +220,9 @@ function computer(
   const comments = new CanvasCommentService(
     {
       journal,
-      projection: { getById: () => ({}) as never },
+      // The service reads the head sequence to stamp a send-to-agent
+      // request; comments here never send one, so any head will do.
+      projection: { getById: () => ({ currentVersion: { sequence: 1 } }) as never },
       uuid: nextUuid,
       actor,
       committed: (canvasId, event) => {
