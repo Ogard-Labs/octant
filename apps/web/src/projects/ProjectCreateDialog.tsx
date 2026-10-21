@@ -302,6 +302,9 @@ function BoundProjectAddFolderDialog(props: ProjectCreateDialogProps) {
   async function chooseCloneDestination(): Promise<GithubCloneDestinationChoice | undefined> {
     const bridge = props.hostBridge;
     if (bridge !== undefined) {
+      // A new pick starts clean, as the folder form's does, so a failure from
+      // an earlier attempt is not still announced over a folder that worked.
+      setStatus("");
       let selection: Awaited<ReturnType<OctantHostBridge["selectProjectRoot"]>>;
       try {
         selection = await bridge.selectProjectRoot("code");

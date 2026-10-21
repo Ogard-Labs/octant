@@ -473,7 +473,8 @@ describe("ProjectCreateDialog GitHub source", () => {
     });
     const selectProjectRoot = vi
       .fn()
-      .mockRejectedValueOnce(new Error("/private/secret/path desktop-token"));
+      .mockRejectedValueOnce(new Error("/private/secret/path desktop-token"))
+      .mockResolvedValueOnce({ kind: "selected", receiptId: bindingReceipt, displayName: "Code" });
     render(
       <ProjectCreateDialog
         github={{
@@ -498,6 +499,14 @@ describe("ProjectCreateDialog GitHub source", () => {
     expect(commands.filter((command) => command.kind === "request-clone")).toHaveLength(0);
     // The destination step stays idle and offers the chooser again.
     expect(screen.getByRole("button", { name: "Choose a folder" })).toBeEnabled();
+
+    // A pick that then succeeds takes the failure notice away with it.
+    await user.click(screen.getByRole("button", { name: "Choose a folder" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Project creation could not be completed."),
+      ).not.toBeInTheDocument(),
+    );
   });
 });
 
