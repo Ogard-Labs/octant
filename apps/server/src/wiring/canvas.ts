@@ -7,6 +7,7 @@ import {
   type CanvasRefreshSkill,
   decodeCanvasDefinition,
   decodeAgentRunId,
+  decodeBrowserThreadId,
   decodeCanvasId,
   decodeChatThreadId,
   decodeCodeThreadId,
@@ -136,7 +137,7 @@ export function sameCanvasSkillScope(
 }
 
 export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<AuthorityWiring, "agentRunPersistence" | "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "agentRunPersistence" | "browserCaptures" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "contributeChildTools" | "managedWorktreeReceipts"> &
   Pick<IntegrationsWiring, "gistConnection" | "threadOutsideContentMarks"> &
   Pick<WorkspaceWiring, "projectService" | "shellService"> &
@@ -150,6 +151,7 @@ export type CanvasDependencies = Pick<ServerStart, "options" | "persistence"> &
 export function wireCanvas(deps: CanvasDependencies) {
   const {
     agentRunPersistence,
+    browserCaptures,
     chatDataDirectory,
     contributeChildTools,
     extensionApiService,
@@ -383,6 +385,18 @@ export function wireCanvas(deps: CanvasDependencies) {
       return read === undefined
         ? { status: "unavailable", reason: "missing" }
         : { status: "read", bytes: read.bytes };
+    },
+    browserCapture: async ({ captureId, threadId, maximumBytes }) => {
+      // The service lists only the captures this thread kept, so another
+      // thread's capture id is simply not found, and so is one already dropped.
+      const kept = await browserCaptures
+        .read(decodeBrowserThreadId(threadId), captureId)
+        .catch(() => undefined);
+      if (kept === undefined) return { status: "unavailable", reason: "missing" };
+      if (kept.bytes.byteLength > maximumBytes) {
+        return { status: "unavailable", reason: "too-large" };
+      }
+      return { status: "read", bytes: kept.bytes };
     },
     projectFile: async ({ mode, projectId, threadId, path, maximumBytes }) => {
       let root: string | undefined;

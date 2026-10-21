@@ -38,6 +38,16 @@ describe("in-tree Canvas document recipes", () => {
     expect(recipes.get("clickable-prototype")?.skeleton[0]?.role).toContain("runsScript");
   });
 
+  it("offers a website redesign that starts from a screenshot the Browser kept and fetches nothing remote", () => {
+    const redesign = inTreeCanvasDocumentRecipes().find(
+      (recipe) => String(recipe.id) === "website-redesign",
+    );
+    if (redesign === undefined) throw new Error("The website redesign recipe is not offered.");
+    expect(redesign.skeleton[0]).toMatchObject({ kind: "design" });
+    expect(redesign.skeleton[0]?.role).toContain("screenshot");
+    expect(redesign.skeleton[0]?.role).toContain("Never fetch");
+  });
+
   it("offers an architecture diagram and a UI kit built only from block kinds the catalogue has", () => {
     const recipes = new Map(
       inTreeCanvasDocumentRecipes().map((recipe) => [String(recipe.id), recipe] as const),
