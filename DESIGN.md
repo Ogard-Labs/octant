@@ -263,6 +263,10 @@ draw the same hairline.
 
 Every Settings page is built from one kit, in `settings/primitives.tsx`:
 
+Selecting a page replaces its controls as well as its heading. Plugin pages
+resolve the currently selected entry point; a missing entry point shows an
+error instead of retaining another integration's account controls.
+
 - **Page header.** A 42px icon tile (`--oct-radius-inset`, a faint 8% ink fill, a
   hairline) holding the page's own navigation icon at 20px, the page title
   (`.oct-title`, 28px), a one-line subtitle with the page scope, and an
