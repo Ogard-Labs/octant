@@ -25,6 +25,7 @@ describe("turn budget", () => {
     expect(countsTowardTurnEventBudget({ kind: "text-delta" })).toBe(false);
     expect(countsTowardTurnEventBudget({ kind: "reasoning-delta" })).toBe(false);
     expect(countsTowardTurnEventBudget({ kind: "tool-progress" })).toBe(false);
+    expect(countsTowardTurnEventBudget({ kind: "liveness" })).toBe(false);
     expect(countsTowardTurnEventBudget({ kind: "tool-start" })).toBe(true);
     expect(countsTowardTurnEventBudget({ kind: "approval-request" })).toBe(true);
     expect(countsTowardTurnEventBudget({ kind: "completed" })).toBe(true);
