@@ -142,9 +142,11 @@ appear just after the composer, so the screen is ready to type in first.
 ### Suggested follow-ups
 
 Any model, on any provider and in every mode, may end a reply by suggesting
-up to three next tasks. They appear as chips at the top of the thread's
-composer; a later reply that suggests nothing clears them, and the × hides
-them for now. Choosing one shows what it would do — put the prompt in this
+up to three next tasks. They appear as cards at the end of the thread, just
+above the composer, and again under **Suggested tasks** in the thread's
+Environment panel so they stay in reach after you scroll; a later reply that
+suggests nothing clears them, and the × hides them for now. **Start…** on a
+card shows what it would do — put the prompt in this
 composer, start a new thread in the same mode and Project, or, in Code,
 start a thread on its own worktree — and nothing happens until you choose
 **Start** (or **Use prompt**). The new thread opens on the same model with

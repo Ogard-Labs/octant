@@ -147,7 +147,6 @@ export function ThreadComposer(props: ThreadComposerProps) {
     <>
       {props.startContext}
       {props.queue}
-      <ComposerFollowUpSuggestions />
       {props.chips}
       {props.label === undefined ? (
         props.input
@@ -179,8 +178,11 @@ export function ThreadComposer(props: ThreadComposerProps) {
       />
     </div>
   );
+  // Suggested tasks stand above the composer, as the last thing in the
+  // thread; inside the surface they made the box read as one tall composer.
   const body = followUp ? (
     <>
+      <ComposerFollowUpSuggestions />
       <div className="thread-composer__surface">
         <ComposerOutsideContentNotice busy={props.threadBusy === true} />
         {message}
@@ -197,6 +199,7 @@ export function ThreadComposer(props: ThreadComposerProps) {
     </>
   ) : (
     <>
+      <ComposerFollowUpSuggestions />
       {message}
       {controls}
       {compactingNote}

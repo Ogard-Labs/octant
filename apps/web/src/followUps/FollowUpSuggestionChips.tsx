@@ -1,4 +1,12 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { X } from "lucide-react";
 import type {
   NativeHarnessFollowUpCreation,
@@ -15,6 +23,7 @@ import type { SideTaskClient } from "@octant/client-runtime/side-task-client";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { scheduleVisibleInterval } from "../polling/documentVisibility";
 import { SideTaskCards } from "./SideTaskCards";
+import { EnvironmentCard } from "../environment/EnvironmentGroup";
 import "./follow-up-suggestions.css";
 import { OctantAlert } from "../ui/base/OctantAlert";
 
@@ -32,6 +41,17 @@ export interface FollowUpSuggestionChipsProps {
     readonly prompt: string;
   }) => void;
   readonly refreshIntervalMs?: number;
+  /**
+   * Wraps the cards when there are any, for a surface that frames them
+   * (Environment's "Suggested tasks" card). Nothing is framed when the latest
+   * reply offered nothing.
+   */
+  readonly frame?: (cards: ReactNode) => ReactNode;
+  /**
+   * Whether this surface reads the host itself. Environment's copy shows what
+   * the composer's cards read, so the thread is polled once.
+   */
+  readonly reads?: boolean;
 }
 
 export interface ComposerOffers extends FollowUpSuggestionChipsProps {
@@ -75,6 +95,110 @@ export function ComposerFollowUpSuggestions() {
   );
 }
 
+/**
+ * Which suggestion set the person dismissed on each thread, shared by every
+ * surface that shows it: dismissing at the foot of the thread also hides the
+ * Environment copy, and a remount does not bring it back. It lives for the
+ * window; a later reply's new set shows again.
+ */
+const dismissedTurnByThread = new Map<string, string>();
+const dismissalListeners = new Set<() => void>();
+
+function dismissFollowUps(threadId: string, turnId: string): void {
+  dismissedTurnByThread.set(threadId, turnId);
+  for (const listener of dismissalListeners) listener();
+}
+
+function useDismissedTurn(threadId: string): string | undefined {
+  return useSharedValue(dismissalListeners, () => dismissedTurnByThread.get(threadId), [threadId]);
+}
+
+/**
+ * Follows one value of a window-wide store. It sets state only when the value
+ * moved: a no-op update still renders the component, and the Environment copy
+ * sits outside the transcript, so it would add a commit the turn never asked for.
+ */
+function useSharedValue<T>(
+  listeners: Set<() => void>,
+  read: () => T,
+  keys: ReadonlyArray<unknown>,
+): T {
+  const [value, setValue] = useState(read);
+  const shown = useRef(value);
+  shown.current = value;
+  const latestRead = useRef(read);
+  latestRead.current = read;
+  useEffect(() => {
+    const follow = () => {
+      const next = latestRead.current();
+      if (!Object.is(next, shown.current)) setValue(() => next);
+    };
+    follow();
+    listeners.add(follow);
+    return () => {
+      listeners.delete(follow);
+    };
+  }, [listeners, ...keys]);
+  return value;
+}
+
+/**
+ * The latest suggestions read for each thread, shared by every surface that
+ * shows them. With Environment open, the composer's cards and Environment's
+ * copy each read on their own, and while a turn streamed every read landed as
+ * a second commit of the thread pane. One read now feeds both, in one commit.
+ */
+type SuggestionReader = Pick<FollowUpSuggestionClient, "suggestions">;
+
+interface SuggestionStore {
+  readonly byThread: Map<string, ThreadFollowUpSuggestions | null>;
+  readonly inFlight: Map<string, Promise<void>>;
+}
+
+// One store per host connection: another client is another host, whose
+// threads share nothing with this one's even when an id matches.
+const suggestionStores = new WeakMap<SuggestionReader, SuggestionStore>();
+
+function suggestionStore(client: SuggestionReader): SuggestionStore {
+  let store = suggestionStores.get(client);
+  if (store === undefined) {
+    store = { byThread: new Map(), inFlight: new Map() };
+    suggestionStores.set(client, store);
+  }
+  return store;
+}
+const suggestionListeners = new Set<() => void>();
+
+function readSuggestions(client: SuggestionReader, threadId: string): Promise<void> {
+  const store = suggestionStore(client);
+  const inFlight = store.inFlight.get(threadId);
+  if (inFlight !== undefined) return inFlight;
+  const read = client
+    .suggestions(threadId)
+    .then((next) => {
+      // A poll that returns what is already shown changes nothing on screen,
+      // so it must not commit either surface again.
+      const previous = store.byThread.get(threadId);
+      if (previous !== undefined && JSON.stringify(previous) === JSON.stringify(next)) return;
+      store.byThread.set(threadId, next);
+      for (const listener of suggestionListeners) listener();
+    })
+    .finally(() => store.inFlight.delete(threadId));
+  store.inFlight.set(threadId, read);
+  return read;
+}
+
+function useThreadSuggestions(
+  client: SuggestionReader,
+  threadId: string,
+): ThreadFollowUpSuggestions | null {
+  return useSharedValue(
+    suggestionListeners,
+    () => suggestionStore(client).byThread.get(threadId) ?? null,
+    [client, threadId],
+  );
+}
+
 function describeCreation(creation: NativeHarnessFollowUpCreation): string {
   if (creation.kind === "same-thread") return "goes in this composer for you to send";
   if (creation.kind === "new-worktree") return "starts a new Code thread on its own worktree";
@@ -83,37 +207,40 @@ function describeCreation(creation: NativeHarnessFollowUpCreation): string {
 }
 
 /**
- * The next tasks the latest reply suggested, as chips over the composer.
- * Choosing one only shows what it would create; nothing is created until the
- * person confirms, and the prompt then waits in the new thread's composer.
+ * The next tasks the latest reply suggested, as cards at the foot of the
+ * thread, just above the composer. Start… only shows what a card would
+ * create; nothing is created until the person confirms, and the prompt then
+ * waits in the new thread's composer.
  */
 export function FollowUpSuggestionChips(props: FollowUpSuggestionChipsProps) {
-  const [suggestions, setSuggestions] = useState<ThreadFollowUpSuggestions | null>(null);
   const [preview, setPreview] = useState<NativeHarnessFollowUpPreview>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const [dismissedTurnId, setDismissedTurnId] = useState<string>();
-  const requestGeneration = useRef(0);
   const { client, threadId } = props;
+  const suggestions = useThreadSuggestions(client, threadId);
+  const dismissedTurnId = useDismissedTurn(threadId);
   // The pane can move to another thread while a preview is on its way.
   const currentThread = useRef(threadId);
   currentThread.current = threadId;
 
   const load = useCallback(async () => {
-    // A response for a thread the composer has left must not paint over the
-    // one it shows now.
-    const generation = ++requestGeneration.current;
+    // Each thread keeps its own read, so a response for a thread the composer
+    // has left never paints over the one it shows now.
     try {
-      const next = await client.suggestions(threadId);
-      if (requestGeneration.current === generation) setSuggestions(next);
+      await readSuggestions(client, threadId);
     } catch {
       // Chips are an offer, not state the person is waiting on; a failed read
       // keeps what was shown and the next tick tries again.
     }
   }, [client, threadId]);
 
+  const reads = props.reads !== false;
   useEffect(() => {
-    setSuggestions(null);
+    // Opened before the composer's first read landed: read once, never poll.
+    if (!reads) {
+      if (!suggestionStore(client).byThread.has(threadId)) void load();
+      return;
+    }
     setPreview(undefined);
     setError(undefined);
     let inFlight = false;
@@ -126,11 +253,8 @@ export function FollowUpSuggestionChips(props: FollowUpSuggestionChipsProps) {
     };
     tick();
     const stop = scheduleVisibleInterval(tick, props.refreshIntervalMs ?? 4_000);
-    return () => {
-      requestGeneration.current += 1;
-      stop();
-    };
-  }, [load, props.refreshIntervalMs]);
+    return stop;
+  }, [client, load, props.refreshIntervalMs, reads, threadId]);
 
   const open =
     suggestions?.followUps.suggestions.filter(
@@ -201,59 +325,102 @@ export function FollowUpSuggestionChips(props: FollowUpSuggestionChipsProps) {
     }
   };
 
-  return (
-    <div className="composer-follow-ups">
-      {preview === undefined ? (
-        <div aria-label="Suggested follow-ups" className="composer-follow-ups__row" role="group">
-          <span className="composer-follow-ups__label">Next</span>
-          {open.map((suggestion) => (
-            <OctantButton
-              className="max-w-full truncate rounded-full"
-              key={String(suggestion.id)}
-              onClick={() => void choose(suggestion)}
-              size="xs"
-              title={suggestion.prompt}
-              type="button"
-              variant="outline"
-            >
-              {suggestion.title}
-            </OctantButton>
-          ))}
-          <OctantIconButton
-            label="Dismiss suggestions"
-            onClick={() => setDismissedTurnId(String(turnId))}
-            size="icon-xs"
-            type="button"
+  const cards = (
+    <section aria-label="Suggested follow-ups" className="follow-up-cards">
+      {open.map((suggestion) => {
+        const previewing =
+          preview !== undefined && String(preview.suggestion.id) === String(suggestion.id);
+        return (
+          <article
+            aria-label={suggestion.title}
+            className="follow-up-card"
+            data-previewing={previewing ? "true" : undefined}
+            key={String(suggestion.id)}
           >
-            <X aria-hidden="true" size={12} />
-          </OctantIconButton>
-        </div>
-      ) : (
-        <div aria-label="Follow-up preview" className="composer-follow-ups__preview" role="group">
-          <p className="composer-follow-ups__summary">
-            <strong>{preview.suggestion.title}</strong> {describeCreation(preview.wouldCreate)}.
-          </p>
-          <p className="composer-follow-ups__prompt">{preview.suggestion.prompt}</p>
-          <div className="composer-follow-ups__actions">
-            <OctantButton disabled={busy} onClick={() => void confirm()} size="xs" type="button">
-              {preview.wouldCreate.kind === "same-thread" ? "Use prompt" : "Start"}
-            </OctantButton>
-            <OctantButton
-              onClick={() => setPreview(undefined)}
-              size="xs"
-              type="button"
-              variant="ghost"
-            >
-              Cancel
-            </OctantButton>
-          </div>
-        </div>
-      )}
+            <div className="follow-up-card__head">
+              <span className="follow-up-card__kind">{targetLabel(suggestion)}</span>
+              <OctantIconButton
+                label={`Dismiss ${suggestion.title}`}
+                onClick={() => dismissFollowUps(threadId, String(turnId))}
+                size="icon-xs"
+                type="button"
+              >
+                <X aria-hidden="true" size={12} />
+              </OctantIconButton>
+            </div>
+            <p className="follow-up-card__title">{suggestion.title}</p>
+            <p className="follow-up-card__prompt">{suggestion.prompt}</p>
+            {previewing && preview !== undefined ? (
+              <div aria-label="Follow-up preview" className="follow-up-card__confirm" role="group">
+                <p className="follow-up-card__summary">
+                  This {describeCreation(preview.wouldCreate)}.
+                </p>
+                <div className="follow-up-card__actions">
+                  <OctantButton
+                    onClick={() => setPreview(undefined)}
+                    size="xs"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Cancel
+                  </OctantButton>
+                  <OctantButton
+                    disabled={busy}
+                    onClick={() => void confirm()}
+                    size="xs"
+                    type="button"
+                  >
+                    {preview.wouldCreate.kind === "same-thread" ? "Use prompt" : "Start"}
+                  </OctantButton>
+                </div>
+              </div>
+            ) : (
+              <div className="follow-up-card__actions">
+                <OctantButton
+                  aria-label={`Start ${suggestion.title}`}
+                  onClick={() => void choose(suggestion)}
+                  size="xs"
+                  type="button"
+                  variant="outline"
+                >
+                  {suggestion.target === "same-thread" ? "Use here…" : "Start…"}
+                </OctantButton>
+              </div>
+            )}
+          </article>
+        );
+      })}
       {error === undefined ? null : (
-        <OctantAlert className="composer-follow-ups__error" tone="danger">
+        <OctantAlert className="follow-up-cards__error" tone="danger">
           {error}
         </OctantAlert>
       )}
-    </div>
+    </section>
   );
+  return props.frame === undefined ? cards : props.frame(cards);
+}
+
+/**
+ * The same open suggestions in the Environment panel, so an offer the
+ * conversation has scrolled past stays in reach. It reads the thread the
+ * pane shows, through the composer's context.
+ */
+export function EnvironmentSuggestedTasks() {
+  const context = useContext(FollowUpSuggestionContext);
+  if (context === undefined) return null;
+  const { sideTaskClient: _sideTasks, ...chips } = context;
+  return (
+    <FollowUpSuggestionChips
+      {...chips}
+      frame={(cards) => <EnvironmentCard caption="Suggested tasks">{cards}</EnvironmentCard>}
+      reads={false}
+    />
+  );
+}
+
+/** Where a suggestion would run, as the card's small heading. */
+function targetLabel(suggestion: NativeHarnessFollowUpSuggestion): string {
+  if (suggestion.target === "same-thread") return "Next step here";
+  if (suggestion.target === "new-worktree") return "New task · own worktree";
+  return "New task";
 }

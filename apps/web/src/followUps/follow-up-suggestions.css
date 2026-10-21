@@ -1,65 +1,94 @@
 /*
- * Follow-up chips sit at the top of the composer, inside its surface, so an
- * offer reads as part of what the person types next rather than as another
- * transcript row.
+ * Follow-up suggestions are cards at the foot of the thread, just above the
+ * composer, so the next task reads as the last thing the agent offered rather
+ * than as a row of chips inside what the person types.
  */
-.composer-follow-ups {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 12px 0;
+.follow-up-cards {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin-bottom: var(--oct-space-2);
 }
 
-.composer-follow-ups__row {
+.follow-up-card {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding: var(--oct-space-2) var(--oct-space-3) var(--oct-space-3);
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--oct-surface);
+}
+
+.follow-up-card__head {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  justify-content: space-between;
+  gap: var(--oct-space-2);
 }
 
-.composer-follow-ups__label {
-  margin-inline-end: 4px;
+.follow-up-card__kind {
   color: var(--octant-text-muted);
   font-size: var(--oct-text-xs);
 }
 
-.composer-follow-ups__preview {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.follow-up-card__title,
+.follow-up-card__prompt,
+.follow-up-card__summary {
+  margin: 0;
 }
 
-.composer-follow-ups__summary,
-.composer-follow-ups__prompt,
-.composer-follow-ups__error {
+.follow-up-card__title {
+  color: var(--octant-text-primary);
+  font-weight: var(--oct-weight-medium);
+}
+
+.follow-up-card__prompt {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.follow-up-card__confirm {
+  display: grid;
+  gap: var(--oct-space-2);
+  margin-top: var(--oct-space-1);
+}
+
+.follow-up-card__summary {
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+}
+
+.follow-up-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--oct-space-1);
+  margin-top: var(--oct-space-1);
+}
+
+.follow-up-cards__error {
   margin: 0;
   font-size: var(--oct-text-xs);
 }
 
-.composer-follow-ups__summary {
-  color: var(--octant-text-secondary);
+/* In Environment the card frame is the panel's own; the suggestions sit in it
+   without a second border. */
+.environment-card .follow-up-cards {
+  margin-bottom: 0;
 }
 
-.composer-follow-ups__prompt {
-  display: -webkit-box;
-  overflow: hidden;
-  color: var(--octant-text-muted);
-  white-space: pre-wrap;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-.composer-follow-ups__actions {
-  display: flex;
-  gap: 4px;
-}
-
-.composer-follow-ups__error {
-  color: var(--octant-danger-text);
+.environment-card .follow-up-card {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  padding-inline: 0;
 }
 
 /*
- * Side-task cards stack above the chips: each is its own offer the person
+ * Side-task cards stack above the suggested-task cards: each is its own offer the person
  * starts or dismisses, so it reads as an object rather than a row of text.
  */
 .composer-side-tasks {
