@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CanvasDesignRunTickets,
   issueSharedDesignRun,
+  renderCanvasDesignExportFrames,
   renderCanvasDesignPage,
 } from "./canvasDesignPage";
 
@@ -107,5 +108,45 @@ describe("a shared prototype's page", () => {
       }),
     ).toBeUndefined();
     expect(issueSharedDesignRun(undefined, document, { blockId: "cart" as never })).toBeUndefined();
+  });
+});
+
+describe("a brand design's export", () => {
+  const branded = (brand: Record<string, string>): CanvasDesignBlock =>
+    ({
+      blockId: "site",
+      kind: "design",
+      title: "Site",
+      size: "desktop",
+      theme: "brand",
+      brand,
+      frames: [{ frameId: "home", title: "Home", html: '<div class="oct-card">Hello</div>' }],
+    }) as unknown as CanvasDesignBlock;
+
+  it("draws the brand tokens and the frame kit without any window's theme", () => {
+    const frames = renderCanvasDesignExportFrames(
+      branded({ "color-primary": "#0a7d5a", "font-heading": "georgia, serif" }),
+    );
+    const page = frames?.[0]?.page ?? "";
+    expect(page).toContain("--brand-color-primary: #0a7d5a;");
+    expect(page).toContain("--oct-accent: #0a7d5a;");
+    expect(page).toContain("--brand-font-heading: georgia, serif;");
+    expect(page).toContain(".oct-card");
+    expect(page).toContain('class="oct-card"');
+  });
+
+  it("never writes a brand value that could close the rule or load something", () => {
+    const page =
+      renderCanvasDesignExportFrames(
+        branded({
+          "color-primary": "red; } body { display: none",
+          "color-secondary": "url(https://example.com/a.png)",
+          "radius-card": "12px",
+        }),
+      )?.[0]?.page ?? "";
+    expect(page).not.toContain("red; }");
+    expect(page).not.toContain("--brand-color-primary");
+    expect(page).not.toContain("example.com");
+    expect(page).toContain("--brand-radius-card: 12px;");
   });
 });

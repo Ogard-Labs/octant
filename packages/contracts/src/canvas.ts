@@ -13,7 +13,9 @@ import {
 } from "./canvasIdentity";
 import { CanvasActionBlock } from "./canvasActionBlock";
 
+export * from "./canvasBrand";
 export * from "./canvasIdentity";
+import { CanvasDesignBrand } from "./canvasBrand";
 import { ChatThreadId } from "./chat";
 import { CodeThreadId } from "./code";
 import { WorkThreadId } from "./workThreads";
@@ -106,10 +108,6 @@ export const CANVAS_MAX_DESIGN_MARKUP_LENGTH = 32_768;
 // Speaker or screen notes are prose a presenter reads, not markup: a page of
 // text per frame.
 export const CANVAS_MAX_DESIGN_NOTES_LENGTH = 2_000;
-// A brand is a handful of named values (a palette, two font stacks, a radius,
-// a spacing step), not a stylesheet.
-export const CANVAS_MAX_DESIGN_BRAND_TOKENS = 32;
-export const CANVAS_MAX_DESIGN_BRAND_VALUE_LENGTH = 128;
 // A diagram node's detail is a subtitle under its label, not a paragraph.
 export const CANVAS_MAX_DIAGRAM_DETAIL_LENGTH = 120;
 // A group inside a group inside a group: deeper boundaries stop reading as
@@ -2205,28 +2203,6 @@ export const CanvasDesignFrame = Schema.Struct({
   notes: Schema.optional(boundedNonEmptyText(CANVAS_MAX_DESIGN_NOTES_LENGTH)),
 }).annotations(strict);
 export type CanvasDesignFrame = typeof CanvasDesignFrame.Type;
-
-/**
- * A design's own brand: named values a frame reads when `theme` is `brand`.
- * A name is a kind and a slug (`color-primary`, `font-heading`, `radius-card`,
- * `space-gutter`). Colours, font families, and lengths are checked by the
- * domain policy against the frame token safety rules, so a value can never end
- * a declaration or load anything.
- */
-export const CANVAS_DESIGN_BRAND_TOKEN_KINDS = ["color", "font", "radius", "space"] as const;
-export type CanvasDesignBrandTokenKind = (typeof CANVAS_DESIGN_BRAND_TOKEN_KINDS)[number];
-export const CanvasDesignBrandTokenName = Schema.String.pipe(
-  Schema.pattern(/^(?:color|font|radius|space)-[a-z0-9][a-z0-9-]{0,31}$/),
-);
-export const CanvasDesignBrand = Schema.Record({
-  key: CanvasDesignBrandTokenName,
-  value: boundedNonEmptyText(CANVAS_MAX_DESIGN_BRAND_VALUE_LENGTH),
-}).pipe(
-  Schema.filter((brand) => Object.keys(brand).length <= CANVAS_MAX_DESIGN_BRAND_TOKENS, {
-    message: () => `A brand holds at most ${String(CANVAS_MAX_DESIGN_BRAND_TOKENS)} tokens.`,
-  }),
-);
-export type CanvasDesignBrand = typeof CanvasDesignBrand.Type;
 
 /**
  * The name markup gives a declared asset after the scheme: `octant-asset:hero`.

@@ -8,6 +8,7 @@ import {
   decodeCanvasBlock,
   decodeCanvasId,
   type CanvasActor,
+  type CanvasDesignBrand,
   type CanvasDocumentRecipe,
   type CanvasId,
   type CanvasPresentation,
@@ -184,6 +185,13 @@ export interface CanvasAgentToolPort {
   ) => Promise<
     { readonly id: string; readonly type: string; readonly lifecycle: string } | undefined
   >;
+  /**
+   * The brand kit of the thread's own Project, when the person defined one.
+   * Keyed by the Project the host bound the thread to, never by anything the
+   * model names, and read without a window so describe stays free of window
+   * state. Absent on a host without Projects' kits.
+   */
+  readonly brandKit?: (projectId: string) => CanvasDesignBrand | undefined;
   readonly canvas: Pick<CanvasService, "create" | "revise" | "get" | "threadReferenceCards">;
   /**
    * Marks the thread or managed child about to read a Canvas, when the
@@ -548,10 +556,18 @@ function blockGuide(): Readonly<Record<string, string>> {
   );
 }
 
+/**
+ * Written only when the Project has a brand kit, so a thread without one is
+ * never told to look for it.
+ */
+const BRAND_KIT_GUIDANCE =
+  'This Project has a brand kit, returned as brandKit. A design that should look like the person\'s product or company sets "theme": "brand" and "brand" to those tokens unchanged (copy the whole object; do not invent colours or fonts). Frames then read --brand-<token> custom properties (for example var(--brand-color-primary) and var(--brand-font-heading)) and the kit classes pick up the colour, font, and radius roles. Without "theme": "brand" the design keeps the workspace theme or its own palette. A brand design cannot run script.';
+
 function describedGuidance(
   kinds: ReadonlyArray<string>,
   mode: "chat" | "work" | "code",
   chatOwner: ChatCanvasOwner = "project",
+  brandKit?: CanvasDesignBrand,
 ): Readonly<Record<string, string>> {
   const guidance: Record<string, string> = {};
   for (const kind of kinds) {
@@ -561,7 +577,12 @@ function describedGuidance(
     // part is written per describe rather than stored with the kind.
     guidance[kind] =
       kind === "design"
-        ? `${detail} ${designAssetGuidance(mode, chatOwner)} ${DESIGN_PROTOTYPE_GUIDANCE}`
+        ? [
+            detail,
+            designAssetGuidance(mode, chatOwner),
+            DESIGN_PROTOTYPE_GUIDANCE,
+            ...(brandKit === undefined ? [] : [BRAND_KIT_GUIDANCE]),
+          ].join(" ")
         : detail;
   }
   return guidance;
@@ -879,6 +900,10 @@ export function createCanvasAgentTools(
     readerId: owner.thread.id,
     providerInstanceId: owner.thread.providerInstanceId,
     modelId: owner.thread.modelId,
+    brandKit: () =>
+      owner.thread.projectId === undefined
+        ? undefined
+        : options.port.brandKit?.(owner.thread.projectId),
     resolveTarget: () => resolveCanvasTarget(options.windowId, owner, options.port),
   });
 }
@@ -917,6 +942,7 @@ export function createChildCanvasAgentTools(options: {
     };
   }
   const author = childAuthor(options.run.id);
+  const projectId = options.run.projectId;
   return canvasToolSet({
     mode: options.run.mode,
     scope: "run",
@@ -927,6 +953,7 @@ export function createChildCanvasAgentTools(options: {
     providerInstanceId: options.run.providerInstanceId,
     modelId: options.run.modelId,
     ...(author === undefined ? {} : { author }),
+    brandKit: () => options.port.brandKit?.(projectId),
     resolveTarget: () => resolveChildCanvasTarget(options),
   });
 }
@@ -1002,6 +1029,8 @@ function canvasToolSet(options: {
   readonly providerInstanceId: CanvasAuthoringThread["providerInstanceId"];
   readonly modelId: CanvasAuthoringThread["modelId"];
   readonly author?: CanvasActor;
+  /** The thread's Project's brand kit, when it has one; read by describe alone. */
+  readonly brandKit?: () => CanvasDesignBrand | undefined;
   readonly resolveTarget: () => Promise<ResolvedCanvasTarget>;
 }): AppManagedToolSet {
   return {
@@ -1018,9 +1047,13 @@ function canvasToolSet(options: {
       const input = parseInput(inputJson);
       if ("error" in input) return { result: { error: input.error }, isError: true };
       if (input.operation === "describe") {
+        const brandKit = options.brandKit?.();
+        const brand = brandKit === undefined ? {} : { brandKit };
         if (input.blockKinds === undefined) {
           return {
             result: {
+              ...brand,
+              ...(brandKit === undefined ? {} : { brandKitGuidance: BRAND_KIT_GUIDANCE }),
               blockKinds,
               blockGuide: blockGuide(),
               tierGuide: TIER_GUIDE,
@@ -1051,7 +1084,13 @@ function canvasToolSet(options: {
         return {
           result: {
             blockSchema: JSONSchema.make(Schema.Union(...selected)),
-            guidance: describedGuidance(input.blockKinds ?? [], options.mode, options.chatOwner),
+            guidance: describedGuidance(
+              input.blockKinds ?? [],
+              options.mode,
+              options.chatOwner,
+              brandKit,
+            ),
+            ...(input.blockKinds?.includes("design") === true ? brand : {}),
             ...(examples.length === 0 ? {} : { examples }),
           },
         };

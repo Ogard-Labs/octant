@@ -463,6 +463,33 @@ describe("design block", () => {
     expect(themed?.srcdoc).toContain(".oct-tabs");
     expect(themed?.srcdoc).toContain("background: var(--oct-bg);");
   });
+
+  it("draws a brand design in its own tokens and never writes an unsafe value into the frame", () => {
+    const block = decodeCanvasBlock({
+      ...onboardingFlowExampleBlock,
+      schemaVersion: 21,
+      theme: "brand",
+      brand: {
+        "color-primary": "#0a7d5a",
+        "font-heading": "georgia, serif",
+        "color-secondary": "red; } body { display: none",
+      },
+    });
+    if (block.kind !== "design") throw new Error("Fixture is not a design.");
+    document.documentElement.dataset.octantThemeMode = "dark";
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [block] }} />);
+    const [drawn] = frames(screen.getByRole("region", { name: "Onboarding, Phone design" }));
+    const srcdoc = drawn?.srcdoc ?? "";
+    expect(drawn?.getAttribute("sandbox")).toBe("");
+    expect(srcdoc).toContain("--brand-color-primary: #0a7d5a;");
+    expect(srcdoc).toContain("--oct-accent: #0a7d5a;");
+    expect(srcdoc).toContain("--brand-font-heading: georgia, serif;");
+    expect(srcdoc).toContain(".oct-tabs");
+    // The brand reads the same in a dark workspace as in a light one.
+    expect(srcdoc).toContain("color-scheme: light;");
+    expect(srcdoc).not.toContain("red; }");
+    expect(srcdoc).not.toContain("--brand-color-secondary");
+  });
 });
 
 describe("running prototype", () => {

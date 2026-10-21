@@ -10,6 +10,7 @@ import { getDefaultToken } from "@octant/theme";
 import {
   DESIGN_FRAME_KIT,
   DESIGN_FRAME_THEME_TOKENS,
+  designBrandDeclarations,
   designFrameTokenValueIsSafe,
   type DesignFrameThemeValues,
 } from "@octant/domain";
@@ -231,7 +232,7 @@ function withAssets(markup: string, urls: ReadonlyMap<string, string> | undefine
 }
 
 export function designDocument(
-  block: Pick<CanvasDesignBlock, "size" | "theme" | "styles" | "frames">,
+  block: Pick<CanvasDesignBlock, "size" | "theme" | "brand" | "styles" | "frames">,
   options: {
     readonly frameIds?: ReadonlyArray<string>;
     readonly startFrameId?: string;
@@ -262,13 +263,35 @@ export function designDocument(
     `<meta http-equiv="Content-Security-Policy" content="${FRAME_POLICY}">`,
     `<meta name="viewport" content="width=${viewportWidth}">`,
     `<style>${isDocument ? DOCUMENT_FRAME_RULES : DEVICE_FRAME_RULES}</style>`,
-    designFrameTheme(block) === "workspace"
-      ? workspaceStyles(options.theme, isDocument)
-      : `<style>${UNTHEMED_PAGE}</style>`,
+    themeStyles(block, options.theme, isDocument),
     // The host refuses a stylesheet that closes its element; this keeps that
     // true for a document that reached the renderer some other way.
     `<style>${withAssets(block.styles ?? "", options.assetUrls).replace(/<\/style/gi, "<\\/style")}</style>`,
     `</head><body>${frames}</body></html>`,
+  ].join("");
+}
+
+function themeStyles(
+  block: Pick<CanvasDesignBlock, "size" | "theme" | "brand">,
+  workspaceTheme: DesignFrameThemeValues | undefined,
+  isDocument: boolean,
+): string {
+  const theme = designFrameTheme(block);
+  if (theme === "workspace") return workspaceStyles(workspaceTheme, isDocument);
+  if (theme === "brand" && block.brand !== undefined) return brandStyles(block.brand);
+  return `<style>${UNTHEMED_PAGE}</style>`;
+}
+
+/**
+ * The design's own brand tokens, then the frame kit. The brand never reads the
+ * workspace theme, so it draws the same in every window, share, and export,
+ * and it paints its own ground in a document too.
+ */
+function brandStyles(brand: Readonly<Record<string, string>>): string {
+  return [
+    `<style>:root { color-scheme: light; ${designBrandDeclarations(brand)} }`,
+    "html { background: var(--oct-bg); }</style>",
+    `<style>${DESIGN_FRAME_KIT}</style>`,
   ].join("");
 }
 

@@ -47,7 +47,7 @@ import type { PreviewClient } from "@octant/client-runtime/preview-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { CanvasInventoryEntry, ImageGenerationProfileView } from "@octant/contracts";
-import type { CanvasId } from "@octant/contracts/canvas";
+import type { CanvasDesignBrand, CanvasId } from "@octant/contracts/canvas";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type {
@@ -414,6 +414,10 @@ export interface WorkspaceViewProps {
   readonly onProviderPolicyChange?: (
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
+  ) => Promise<boolean>;
+  readonly onBrandKitChange?: (
+    projectId: ProjectId,
+    brandKit: CanvasDesignBrand,
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
@@ -2164,6 +2168,9 @@ function renderNonCodeTab(
         {...(props.onProviderPolicyChange === undefined
           ? {}
           : { onProviderPolicyChange: props.onProviderPolicyChange })}
+        {...(props.onBrandKitChange === undefined
+          ? {}
+          : { onBrandKitChange: props.onBrandKitChange })}
         {...(props.onWorkStatusFileChange === undefined
           ? {}
           : { onWorkStatusFileChange: props.onWorkStatusFileChange })}

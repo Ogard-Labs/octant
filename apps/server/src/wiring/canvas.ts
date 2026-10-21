@@ -843,6 +843,7 @@ export function wireCanvas(deps: CanvasDependencies) {
         ? undefined
         : { id: String(project.id), type: project.type, lifecycle: project.lifecycle };
     },
+    brandKit: (projectId) => persistence.readProject(decodeProjectId(projectId))?.brandKit,
     canvas: canvasService,
     markReader: ({ readerId, canvasId }) => {
       const entry = persistence.canvasProjection.getById(canvasId);
