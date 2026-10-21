@@ -55,6 +55,8 @@ export interface SidebarRailProps {
   readonly onOpenProjects?: () => void;
   readonly onOpenActivity?: () => void;
   readonly onOpenSettings: () => void;
+  /** Plan usage rings, drawn at the foot above Settings. */
+  readonly usage?: ReactNode;
 }
 
 const TILE_RAIL: Readonly<
@@ -175,6 +177,7 @@ export function SidebarRail(props: SidebarRailProps) {
           <RailButton icon={History} label="Activity feed" onSelect={props.onOpenActivity} />
         )}
         <span aria-hidden="true" className="sidebar-rail__spacer" />
+        {props.usage}
         <RailButton icon={Settings} label="Settings" onSelect={props.onOpenSettings} />
       </nav>
     </aside>

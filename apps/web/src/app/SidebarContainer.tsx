@@ -6,7 +6,7 @@ import { decodeCodeThreadId, type CodeThreadId } from "@octant/contracts/code";
 import { decodeUtcTimestamp, decodeWorkThreadId } from "@octant/contracts";
 import type { EnvironmentSelection } from "@octant/client-runtime/environment-selection";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
-import { memo, useMemo } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import type {
   ChatController,
   ChatThreadRestOutcome,
@@ -160,6 +160,8 @@ export interface SidebarContainerProps {
   };
   readonly sidebarRail: boolean;
   readonly sidebarRailBeside: boolean;
+  /** Plan usage rings for the icon rail. */
+  readonly railUsage?: ReactNode;
   readonly sidebarTileCounts: ReturnType<typeof countSidebarTiles>;
   readonly threadErrorMessage?: string;
   readonly threadExportClient: ReturnType<typeof resolveThreadExportClient>;
@@ -221,6 +223,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
     sidebarListRequest,
     sidebarRail,
     sidebarRailBeside,
+    railUsage,
     sidebarTileCounts,
     threadErrorMessage,
     threadExportClient,
@@ -565,6 +568,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       {...(sidebarRailBeside
         ? { railBeside: { onOpenActivity: () => openSidebarList("activity") } }
         : {})}
+      {...(railUsage === undefined ? {} : { railUsage })}
       {...(sidebarRail
         ? {
             rail: {

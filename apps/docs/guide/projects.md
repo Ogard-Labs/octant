@@ -82,7 +82,9 @@ finished threads**.
 
 A narrow rail of icons stands to the left of the sidebar: Inbox, Running, To
 review and Done with their counts, your other places (Board, Pull requests and
-so on), Projects, the Activity feed, and Settings. **Hide sidebar** (or
+so on), the Activity feed, and Settings. Above Settings, a ring for each
+provider that reports plan limits shows how much of its week (outer) and five
+hours (inner) is left; hover it for every window and when it resets. **Hide sidebar** (or
 **⌘\**) shrinks the sidebar down to that rail, which then also shows the
 modes, New thread, Search, and your Projects as letter tiles. Click **Show
 sidebar** at the top of the rail, or press *_⌘\*_ again, to bring it back. In
