@@ -13,7 +13,7 @@ import {
   type SurfaceStylePreference,
 } from "../../design-system";
 import { createExpoSecureStringStorage } from "../hosts/expoSecureStorage";
-import { wallpaperFileExists } from "./wallpaperFile";
+import { removeManagedWallpaperFile, wallpaperFileExists } from "./wallpaperFile";
 import {
   createAppearanceStore,
   DEFAULT_APPEARANCE,
@@ -43,6 +43,7 @@ export function AppearanceProvider(props: {
       props.store ??
       createAppearanceStore(createExpoSecureStringStorage({ persistWeb: true }), {
         fileExists: wallpaperFileExists,
+        removeFile: removeManagedWallpaperFile,
       }),
     [props.store],
   );
