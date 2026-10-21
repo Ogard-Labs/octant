@@ -3435,6 +3435,57 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   padding-inline: var(--oct-space-3);
 }
 
+/* A state that is the whole window: a large dotted mark in the primary ink,
+   a centred title, one line under it, and the way back as a text link in the
+   accent ink. It reads as the window speaking, not as a panel's note, so it
+   has none of the compact state's columns. */
+.shell-state.shell-state--page {
+  display: grid;
+  width: min(100% - 40px, 440px);
+  max-width: 440px;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: center;
+  gap: var(--oct-space-3);
+  margin: auto;
+  padding: var(--oct-space-6) 0;
+  text-align: center;
+}
+
+.shell-state__mark {
+  width: 96px;
+  height: 96px;
+  margin-bottom: var(--oct-space-4);
+  color: var(--octant-text-primary);
+}
+
+.shell-state__page-title {
+  margin: 0;
+  color: var(--octant-text-primary);
+  font-size: var(--oct-text-xl);
+  font-weight: var(--oct-weight-strong);
+  line-height: 1.3;
+  text-wrap: balance;
+}
+
+.shell-state__page-message {
+  max-width: 44ch;
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-sm);
+  line-height: 1.5;
+}
+
+.shell-state__page-action {
+  height: auto;
+  margin-top: var(--oct-space-2);
+}
+
+/* The link variant paints nothing of its own; the label carries the accent. */
+.shell-state__page-action-label {
+  color: var(--octant-accent-text);
+  font-size: var(--oct-text-sm);
+}
+
 /* Loading is not an object on the page; it is the page not being there yet.
    The raised card with an icon well, a title, and a sentence read as a
    finished empty state ("Loading pull requests / Reading the last authorized

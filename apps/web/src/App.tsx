@@ -524,6 +524,7 @@ export function App(props: AppProps) {
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Browser session"
           message={locationLaunch.message}
           state="warning"
@@ -554,6 +555,7 @@ export function App(props: AppProps) {
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Desktop session"
           message="Open this renderer from the Octant desktop application."
           state="warning"
@@ -568,6 +570,7 @@ export function App(props: AppProps) {
       return (
         <main className="shell-boundary">
           <ShellState
+            presentation="page"
             eyebrow="Browser session"
             message="Establishing the authenticated Octant browser session."
             state="loading"
@@ -583,6 +586,7 @@ export function App(props: AppProps) {
       return (
         <main className="shell-boundary">
           <ShellState
+            presentation="page"
             eyebrow="Browser session"
             message="Octant opens a browser session only from the one-time link that the desktop app or `octant web` creates; typing the address is not enough."
             state="warning"
@@ -597,6 +601,7 @@ export function App(props: AppProps) {
         return (
           <main className="shell-boundary">
             <ShellState
+              presentation="page"
               eyebrow="Project authority"
               message="Octant could not establish the window identity for this browser session."
               state="warning"
@@ -621,6 +626,7 @@ export function App(props: AppProps) {
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Project authority"
           message={
             launchSession.failureMessage ??
@@ -637,6 +643,7 @@ export function App(props: AppProps) {
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Project authority"
           message="Retry from the Octant desktop application to establish this window session."
           state="warning"
@@ -650,6 +657,7 @@ export function App(props: AppProps) {
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Desktop session"
           message="Open this renderer from the Octant desktop application."
           state="warning"
@@ -4583,6 +4591,7 @@ function LaunchedShell(
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Workspace"
           message="Loading authoritative shell state."
           state="loading"
@@ -4595,6 +4604,7 @@ function LaunchedShell(
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Workspace"
           message="A command outcome may have changed this workspace. Loading authoritative state."
           state="loading"
@@ -4607,6 +4617,7 @@ function LaunchedShell(
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           action={{ label: "Retry after recovery", onClick: controller.retry }}
           eyebrow="Local storage"
           message={controller.errorMessage ?? "Octant storage needs recovery before continuing."}
@@ -4621,6 +4632,7 @@ function LaunchedShell(
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           action={{ label: "Retry connection", onClick: controller.retry }}
           eyebrow="Connection"
           message={controller.errorMessage ?? "The local Octant server is unavailable."}
@@ -4639,6 +4651,7 @@ function LaunchedShell(
     return (
       <main className="shell-boundary">
         <ShellState
+          presentation="page"
           eyebrow="Workspace"
           message="Loading authoritative shell state."
           state="loading"
