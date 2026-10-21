@@ -188,6 +188,10 @@ import {
   type CodeDeviceApprovalEffect,
 } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import {
+  CANVAS_DELIVERY_INSTRUCTIONS,
+  offersCanvasTool,
+} from "../canvas/canvasDeliveryInstructions";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import {
   BROWSER_SELECTION_GUIDANCE,
@@ -3500,25 +3504,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     this.#options.nativeHarness?.turnStarted(harnessScope);
     let endedTurn: TurnEndSummary | undefined;
     const browserSelected = active.extensionSelections?.some(isBrowserUseSelection) === true;
-    const fullContext = [
-      ...harnessContext,
+    const appManagedTools = this.#appManagedTools(active);
+    const hostGuidance = [
       ...(browserSelected
         ? [{ kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE }]
         : []),
-      ...(context ?? []),
+      ...(offersCanvasTool(appManagedTools?.definitions)
+        ? [{ kind: "instructions" as const, text: CANVAS_DELIVERY_INSTRUCTIONS }]
+        : []),
     ];
+    const fullContext = [...harnessContext, ...hostGuidance, ...(context ?? [])];
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
-    const appManagedTools = this.#appManagedTools(active);
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
       turn: estimateSentContextParts({
         sent: {
-          instructions: [
-            ...(browserSelected
-              ? [{ kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE }]
-              : []),
-            ...(active.sentContext?.instructions ?? []),
-          ],
+          instructions: [...hostGuidance, ...(active.sentContext?.instructions ?? [])],
           skills: active.sentContext?.skills ?? [],
         },
         attachments,

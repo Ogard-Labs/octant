@@ -29,6 +29,23 @@ const inTreeCanvasDocumentRecipeDocuments = [
     ],
   },
   {
+    id: "memo",
+    title: "Memo",
+    summary: "A one-page memo or report: the summary, the facts, the detail, and the ask.",
+    whenToUse:
+      "When someone asks for a memo, a one-pager, a status report, a summary to decide from, or a short write-up to share.",
+    skeleton: [
+      { kind: "heading", role: "Summary" },
+      { kind: "rich-text", role: "The answer in a few sentences, and why it matters." },
+      { kind: "heading", role: "Facts" },
+      { kind: "key-value", role: "The facts the reader needs, one per row." },
+      { kind: "heading", role: "Detail" },
+      { kind: "table", role: "The supporting detail, one row per item." },
+      { kind: "heading", role: "Next steps" },
+      { kind: "callout", role: "The decision or action asked of the reader, and by when." },
+    ],
+  },
+  {
     id: "audit-report",
     title: "Audit report",
     summary: "Scope, the overall result, findings with evidence, and what remains open.",

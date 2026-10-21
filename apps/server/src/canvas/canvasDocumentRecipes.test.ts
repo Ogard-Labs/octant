@@ -10,6 +10,7 @@ describe("in-tree Canvas document recipes", () => {
     const ids = recipes.map((recipe) => String(recipe.id));
     for (const planned of [
       "implementation-plan",
+      "memo",
       "design-spec",
       "architecture-review",
       "code-review",
@@ -35,6 +36,17 @@ describe("in-tree Canvas document recipes", () => {
     expect(recipes.get("design-brief")?.skeleton.map((block) => block.kind)).toContain("tabs");
     expect(recipes.get("clickable-prototype")?.skeleton[0]).toMatchObject({ kind: "design" });
     expect(recipes.get("clickable-prototype")?.skeleton[0]?.role).toContain("runsScript");
+  });
+
+  it("shapes a memo from typed blocks alone, so the reader can comment on and revise each part", () => {
+    const memo = inTreeCanvasDocumentRecipes().find((recipe) => String(recipe.id) === "memo");
+    if (memo === undefined) throw new Error("The memo recipe is not offered.");
+    expect(memo.whenToUse).toContain("one-pager");
+    const kinds = memo.skeleton.map((block) => block.kind);
+    expect(kinds).not.toContain("design");
+    expect(kinds[0]).toBe("heading");
+    expect(kinds).toContain("key-value");
+    expect(kinds.at(-1)).toBe("callout");
   });
 
   it("offers an app redesign prototype drawn as a running desktop window", () => {
