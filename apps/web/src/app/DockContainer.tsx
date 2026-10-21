@@ -145,7 +145,6 @@ export interface DockContainerProps {
   readonly launchableDockSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly navigation: ShellNavigationModel;
   readonly now: number;
-  readonly observedByInstance: ProviderController["observedByInstance"];
   readonly overviewThread?: DockOverviewThread;
   readonly projectNames: ReadonlyMap<string, string>;
   readonly projectPullRequestReviewOpen: boolean;
@@ -213,7 +212,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     launchableDockSurfaces,
     navigation,
     now,
-    observedByInstance,
     overviewThread,
     projectNames,
     projectPullRequestReviewOpen,
@@ -422,13 +420,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     const thread = overviewThread;
     const projectName =
       thread === undefined ? undefined : projectNames.get(String(thread.projectId));
-    const modelLabel =
-      thread === undefined
-        ? undefined
-        : (observedByInstance
-            .get(thread.providerInstanceId)
-            ?.models.find((listed) => String(listed.id) === String(thread.modelId))?.displayName ??
-          String(thread.modelId));
     const occupancy = composerContextOccupancy({
       snapshot: contextSnapshot,
       fallback: mode === "code" ? activeCodeThreadUsageFallback : undefined,
@@ -439,7 +430,6 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         : undefined;
     return (
       <DockThreadOverviewContent
-        access={thread?.access}
         boardRevision={codeNavigationRevision}
         {...(occupancy === undefined
           ? {}
@@ -450,7 +440,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         {...(dockThreadHost === undefined ? {} : { host: dockThreadHost })}
         loadBoard={actions.loadCodeBoard}
         mode={mode}
-        model={modelLabel}
+        onOpenEnvironment={() => actions.addDockTab("environment")}
         onOpenReview={() => actions.addDockTab("review")}
         onOpenRunning={(running) => {
           if (running.mode === "chat") actions.selectChatThread(running.threadId);
@@ -459,6 +449,8 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
         }}
         projectId={thread?.projectId}
         projectName={projectName}
+        serverUrl={serverUrl}
+        windowCapability={windowCapability}
         running={runningNowThreads({
           rows: {
             chat: navigation.markedChatNavigation,

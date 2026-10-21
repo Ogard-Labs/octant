@@ -1378,28 +1378,25 @@ offer never moves focus from the composer, a rewrite never reopens a tab, and a
 tab the person closed stays closed. Document
 reads the file through the same host-authorized open the editor uses and
 renders Markdown with the preview's own viewer. With no open tab, the dock
-opens on a thread overview above the tool tiles, sections spaced apart and each
-omitted when the window has nothing to put in it: Running now lists the other
-threads the window knows are working (any mode, at most five, newest first,
-never the thread on screen), each as a spinner, title, a neutral Project dot and
-name, and age, and opens that thread. This thread is one raised card: a header
-with a folder icon plate, the Project name, and a meta line of the branch (with
-Worktree when the thread runs in one) and the host it runs on; under it a two
-by two grid of fact boxes on a soft inner fill, each a small muted label over a
-medium-weight value: Model, Access, Context (a neutral ring beside the share,
-with used of total under it, from the composer meter's own source), and Changes
-(Code only, from the board's observed changed files, never a stale observation;
-`+`/`-` totals in diff colours over the file count). The Changes box is the
-button that opens the Review tool. Every box is a fact the window already
-holds; an unknown value is left out, not shown as a placeholder. Below the card,
-the tools are tiles, not a list: a small muted caption per group (Thread tools,
-Workspace, Devices, shown when more than one group has a tool), then a grid of
-cards each holding a 26px icon plate over the tool's name. Thread tools run two
-columns; the other groups fit as many columns as the dock's width allows, with a
-minimum tile of 88px. A tile changes its surface on hover and keyboard focus and
-nothing else: no accent, no ring. Only capability-valid tools appear. The head's
-Add tool action appears once a tab is open, since with none open the body is
-already the tiles to add. Add tool opens a menu in a portal anchored to the plus
+opens on a stack of cards, one fact group each and each omitted when the window
+has nothing true to put in it. A card is the overview's own recipe: the surface
+fill, a hairline, a medium-weight title, and rows at the 28px step, with a
+figure or word in meta ink at the title's right. **Environment** names where
+the thread runs (the host, the Project, the branch with Worktree when it runs
+in one) and the mode at its right; **Local servers** lists the servers this
+thread's checkout is serving, each a dot (the success ink when it answers) and
+its name with the port, from one observation when the overview opens, never a
+poll; both titles open the Environment tool. **Context** shows the share used
+at its right beside a short neutral bar, with used of total under it, from the
+composer meter's own source. **Changes** (Code only) shows the board's observed
+`+`/`-` totals over the file count, never a stale observation, as the row that
+opens Review, and the thread's pull request with its checks in words.
+**Running now** lists the other threads the window knows are working (any
+mode, at most five, newest first, never the thread on screen), each a spinner,
+title, Project, and age, and opens that thread. Model and access are not
+repeated here: they are on the composer. Tools open from the dock's title band
+(its quick tools or tab strip) or Add tool, which lists every tool that is not
+open. Add tool opens a menu in a portal anchored to the plus
 that was clicked, aligned to its start edge and kept inside the window by
 collision handling; it takes focus on its first tool, closes on Escape or an
 outside press, and returns focus to the plus. The bottom panel uses

@@ -3,7 +3,6 @@ import { useEffect, useRef, type ReactNode, type Ref } from "react";
 import { DockUtilityLauncher, type DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import { DockToolIcon } from "./dockToolIcons";
 import { DockToolStrip } from "./DockToolStrip";
-import { groupDockTools } from "./dockToolGroups";
 import { IconButton } from "./IconButton";
 import { OctantButton } from "../ui/base/OctantButton";
 import { ShellState } from "./ShellState";
@@ -109,13 +108,11 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               tabs={props.tabs}
             />
           )}
-          {/* With no tool open the body already lists every tool, so a second
-              tool list beside an empty strip adds nothing. The task's own pull
-              requests are not in that body, so the launcher still appears for
-              those alone. */}
+          {/* The title band offers a few tools by face; Add tool lists every
+              other one, and the task's own pull requests. */}
           <DockUtilityLauncher
             onOpen={props.onOpenTab}
-            surfaces={props.tabs.length === 0 ? [] : remaining}
+            surfaces={remaining}
             {...(props.launchableReferences === undefined
               ? {}
               : { references: props.launchableReferences })}
@@ -134,16 +131,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
       </header>
       <div className="dock-body right-utility-dock__content">
         {props.resolution.kind === "closed" ? (
-          <div className="dock-start">
-            {props.overview}
-            <DockWorkMap
-              onOpen={(surface) => {
-                focusOpenedTool.current = true;
-                props.onOpenTab(surface);
-              }}
-              surfaces={props.launchableSurfaces}
-            />
-          </div>
+          <div className="dock-start">{props.overview}</div>
         ) : props.resolution.kind === "unavailable" ? (
           <ShellState
             message={unavailableMessage()}
@@ -186,83 +174,6 @@ function dockTabDescriptor(
 ): RightUtilityDockTabDescriptor {
   if ("surface" in tab) return tab;
   return { id: tab.id, label: tab.label, surface: tab };
-}
-
-function DockWorkMap(props: {
-  readonly onOpen: (surface: RightUtilityDockSurfaceId) => void;
-  readonly surfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
-}) {
-  const groups = groupDockTools(props.surfaces);
-  return (
-    <section aria-labelledby="dock-work-map-title" className="dock-work-map">
-      {/* The panel is plainly the list of tools, and the groups plainly go
-          together; a visible "Tools" over the facts block said both again. The
-          names stay for readers who navigate by heading and group. */}
-      <h2 className="visually-hidden" id="dock-work-map-title">
-        Tools
-      </h2>
-      {props.surfaces.length === 0 ? (
-        <p className="dock-work-map__empty">This thread has no additional tools available.</p>
-      ) : (
-        <div className="dock-work-map__groups">
-          {groups.map((group) => (
-            <div
-              aria-label={groups.length > 1 ? group.label : undefined}
-              className="dock-work-map__list"
-              key={group.label}
-              role={groups.length > 1 ? "group" : undefined}
-            >
-              {groups.length > 1 ? (
-                <span className="dock-work-map__group-title">{group.label}</span>
-              ) : null}
-              <div className="dock-work-map__tiles" data-columns={group.columns}>
-                {group.surfaces.map((surface) => (
-                  // The name alone sits under the icon, with what it opens on
-                  // hover. With a sentence under every name each tile grew tall
-                  // and the one a person wanted took reading the whole grid.
-                  <OctantButton
-                    aria-label={surface.label}
-                    className="dock-work-map__item"
-                    key={surface.id}
-                    onClick={() => props.onOpen(surface.id)}
-                    title={workMapDetail(surface.id)}
-                    type="button"
-                    variant="bare"
-                  >
-                    <span aria-hidden="true" className="dock-tile">
-                      <DockToolIcon surface={surface.id} />
-                    </span>
-                    <span className="dock-work-map__name">{surface.label}</span>
-                  </OctantButton>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function workMapDetail(surface: RightUtilityDockSurfaceId): string {
-  if (surface === "agents") return "Read and control this thread's subagents";
-  if (surface === "environment") return "Inspect this thread's working context";
-  if (surface === "browser") return "Inspect live web activity";
-  if (surface === "canvas") return "Open the thread Canvas";
-  if (surface === "review") return "Review checkout changes";
-  if (surface === "pull-requests") return "List the active Project's pull requests";
-  if (surface === "delivery") return "Inspect the delivery target";
-  if (surface === "files") return "Browse the active checkout";
-  if (surface === "document") return "Read the document this thread wrote";
-  if (surface === "ios-simulator") return "Open the active Simulator";
-  if (surface === "android-emulator") return "Open the Android emulator";
-  if (surface === "plan") return "Inspect the current plan";
-  if (surface === "side-chat") return "Ask about this thread";
-  if (surface === "terminal") return "Open the repository shell";
-  if (surface === "tests") return "Run this checkout's tests";
-  // Every surface above names what it does; a row that says "Open this tool"
-  // beside twelve that mean something is a placeholder, not a description.
-  return "Open this tool";
 }
 
 /** The tools the title band offers before any is open, in this order. */
