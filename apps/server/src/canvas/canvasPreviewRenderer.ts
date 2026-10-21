@@ -148,6 +148,8 @@ export const CANVAS_EXPORT_DOCUMENT_PICTURE_MAX_HEIGHT = 16_384;
  */
 export const CANVAS_EXPORT_DOCUMENT_PDF_WIDTH = 700;
 const CANVAS_EXPORT_DOCUMENT_PDF_MARGIN = "12mm";
+/** Design frames in a PDF are pictures; drawn at twice their size they stay crisp. */
+const CANVAS_EXPORT_PDF_FRAME_SCALE = 2;
 
 /**
  * The origin the preview page is loaded under. `.invalid` never resolves, so
@@ -269,11 +271,12 @@ export function createPlaywrightCanvasPreviewRenderer(
       readonly theme: "light" | "dark";
       readonly page: { readonly name: string; readonly html: string };
       readonly designPages: ReadonlyArray<{ readonly html: string }>;
+      readonly deviceScaleFactor?: number;
     },
   ): Promise<BrowserContext> {
     const context = await browser.newContext({
       viewport: { width: input.viewport.width, height: input.viewport.height },
-      deviceScaleFactor: 1,
+      deviceScaleFactor: input.deviceScaleFactor ?? 1,
       colorScheme: input.theme,
       serviceWorkers: "block",
       acceptDownloads: false,
@@ -426,12 +429,14 @@ export function createPlaywrightCanvasPreviewRenderer(
         };
         designPages = pages;
       }
+      const drawsFramesAsImages = request.format === "pdf" && opened.kind === "sheets";
       let browser: Browser | undefined;
       try {
         browser = await launch(executable);
         const context = await openContext(browser, {
           viewport,
           theme: request.theme,
+          deviceScaleFactor: drawsFramesAsImages ? CANVAS_EXPORT_PDF_FRAME_SCALE : 1,
           page:
             opened.kind === "sheets"
               ? { name: CANVAS_EXPORT_SHEETS_PAGE, html: opened.html }
@@ -456,24 +461,44 @@ export function createPlaywrightCanvasPreviewRenderer(
           if (tab === undefined) return { kind: "unavailable", reason: "failed" };
         }
         let files: Uint8Array[];
-        if (request.format === "pdf") {
+        if (request.format === "pdf" && opened.kind === "sheets") {
+          // Each sheet is drawn as the screen draws it and the PDF holds those
+          // pictures, one page per sheet (see the sheets page for why).
+          const pictures: Uint8Array[] = [];
+          for (let index = 0; index < opened.frames.length; index += 1) {
+            pictures.push(
+              await tab
+                .locator(".octant-sheet")
+                .nth(index)
+                .screenshot({ type: "png", timeout: SETTLE_TIMEOUT_MS }),
+            );
+          }
+          const printTab = await context.newPage();
+          await printTab.setContent(canvasExportSheetsPage(opened.frames, pictures), {
+            waitUntil: "load",
+            timeout: SETTLE_TIMEOUT_MS,
+          });
+          // Each sheet declares its own page size, so the PDF has one page per
+          // frame at the frame's size and no margin.
           files = [
-            await tab.pdf(
-              opened.kind === "sheets"
-                ? // Each sheet declares its own page size, so the PDF has one
-                  // page per frame at the frame's size and no margin.
-                  { printBackground: true, preferCSSPageSize: true, margin: NO_MARGIN }
-                : {
-                    printBackground: true,
-                    format: "A4",
-                    margin: {
-                      top: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
-                      right: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
-                      bottom: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
-                      left: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
-                    },
-                  },
-            ),
+            await printTab.pdf({
+              printBackground: true,
+              preferCSSPageSize: true,
+              margin: NO_MARGIN,
+            }),
+          ];
+        } else if (request.format === "pdf") {
+          files = [
+            await tab.pdf({
+              printBackground: true,
+              format: "A4",
+              margin: {
+                top: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
+                right: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
+                bottom: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
+                left: CANVAS_EXPORT_DOCUMENT_PDF_MARGIN,
+              },
+            }),
           ];
         } else if (opened.kind === "sheets") {
           files = [];
@@ -519,8 +544,16 @@ const NO_MARGIN = { top: "0", right: "0", bottom: "0", left: "0" } as const;
  * page of its own size when printed — a named `@page` per distinct size,
  * because frames of two designs can differ — and the box a PNG is cut from
  * on screen. The page loads nothing but those frames; its policy says so.
+ *
+ * With `pictures` (one PNG per frame) each sheet holds the frame's picture
+ * instead, inline: a PDF printed from that page keeps what the screen drew,
+ * where print mode drops backgrounds inside child frames and flattens blur
+ * filters and large shadows.
  */
-export function canvasExportSheetsPage(frames: ReadonlyArray<CanvasExportPictureFrame>): string {
+export function canvasExportSheetsPage(
+  frames: ReadonlyArray<CanvasExportPictureFrame>,
+  pictures?: ReadonlyArray<Uint8Array>,
+): string {
   const sizes = new Map<string, { readonly width: number; readonly height: number }>();
   const pageNames: string[] = [];
   for (const frame of frames) {
@@ -537,18 +570,24 @@ export function canvasExportSheetsPage(frames: ReadonlyArray<CanvasExportPicture
   const sheets = frames
     .map((frame, index) => {
       const style = `width:${String(frame.width)}px;height:${String(frame.height)}px;page:${pageNames[index] ?? "auto"}`;
-      return `<div class="octant-sheet" style="${style}"><iframe sandbox="${frame.sandbox}" src="${CANVAS_PREVIEW_DESIGN_PAGE_PREFIX}${String(index)}" style="width:${String(frame.width)}px;height:${String(frame.height)}px"></iframe></div>`;
+      const size = `width:${String(frame.width)}px;height:${String(frame.height)}px`;
+      const picture = pictures?.[index];
+      const content =
+        picture === undefined
+          ? `<iframe sandbox="${frame.sandbox}" src="${CANVAS_PREVIEW_DESIGN_PAGE_PREFIX}${String(index)}" style="${size}"></iframe>`
+          : `<img alt="" src="data:image/png;base64,${Buffer.from(picture).toString("base64")}" style="${size}">`;
+      return `<div class="octant-sheet" style="${style}">${content}</div>`;
     })
     .join("");
   return [
     "<!doctype html>",
     '<html><head><meta charset="utf-8">',
-    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; frame-src 'self'">`,
+    `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; ${pictures === undefined ? "frame-src 'self'" : "img-src data:"}">`,
     "<style>",
     "html, body { margin: 0; background: white; }",
     ".octant-sheet { overflow: hidden; break-after: page; page-break-after: always; }",
     ".octant-sheet:last-child { break-after: auto; page-break-after: auto; }",
-    ".octant-sheet iframe { display: block; border: 0; }",
+    ".octant-sheet iframe, .octant-sheet img { display: block; border: 0; }",
     pageRules,
     "</style></head>",
     `<body>${sheets}</body></html>`,

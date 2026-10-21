@@ -642,7 +642,10 @@ moving slides). **PNG and PDF export** draw the same standalone pages in the hos
 browser, under the preview's no-route switches and request interception. A
 Canvas that holds device-size or slide designs is drawn one frame to a sheet at
 the frame's own size: a PNG per frame, named `Title 1.png`, `Title 2.png` and so
-on (padded to the count), or one PDF with a page per frame at that size. A
+on (padded to the count), or one PDF with a page per frame at that size. A PDF
+holds each frame as a picture drawn at twice its size, because print mode drops
+backgrounds inside frames and flattens blur and large shadows; text in design
+frames is not selectable there. A
 running design is drawn as a single sheet after the preview's settle wait. A
 Canvas with no such frames is drawn as the thread draws it: one PNG (cut off at
 a fixed height) or an A4 PDF the browser paginates. A set is placed like a
