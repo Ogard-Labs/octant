@@ -17,7 +17,7 @@ import type {
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
 import type { ToolActionRequest } from "@octant/contracts/tool-actions";
 import { decodeCodeThreadId } from "@octant/contracts/code";
-import type { LocalServerSnapshot } from "@octant/contracts";
+import type { LocalServerOpenTarget, LocalServerSnapshot } from "@octant/contracts";
 import type { ProjectId } from "@octant/contracts/projects";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import {
@@ -299,7 +299,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     );
   }
 
-  async function start(address: string = url): Promise<void> {
+  async function start(address: string = url, prepared?: LocalServerOpenTarget): Promise<void> {
     if (startInFlight.current) return;
     startInFlight.current = true;
     localFailure.current = false;
@@ -309,7 +309,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     try {
       const targetUrl = validTargetUrl(address);
       if (targetUrl === undefined) return;
-      const origin = new URL(targetUrl).origin;
+      const origin = prepared?.allowedOrigin ?? new URL(targetUrl).origin;
       setUrl(targetUrl);
       const resolved = await props.client.resolve({
         threadId: props.tab.threadId!,
@@ -325,6 +325,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           credentialFieldProtection: true,
           maxConcurrentTabs: MAX_BROWSER_TABS_PER_CONTEXT,
           sessionTimeoutMs: 300_000,
+          ...(prepared?.acceptsLocalCertificate === true ? { acceptsLocalCertificate: true } : {}),
         },
       });
       setScope(resolved);
@@ -485,9 +486,34 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       );
   }
 
+  /**
+   * Open a suggested server through the host's Open preparation, as Local
+   * servers does: an HTTPS dev server's self-signed localhost certificate is
+   * accepted only for a target the host prepared, so the raw URL would stop on
+   * a certificate error.
+   */
+  async function openServer(server: LocalServerSnapshot["currentCheckout"][number]): Promise<void> {
+    if (startInFlight.current) return;
+    setUrl(server.url);
+    const target = await localServers.open(server.listenerId);
+    if (target === undefined) {
+      localFailure.current = true;
+      setStatus("failed");
+      setMessage("Octant could not prepare this server to open. Check Local servers.");
+      return;
+    }
+    await start(target.url, target);
+  }
+
+  /** The address the person left on a suggested server still opens as that server. */
+  async function startFromAddress(): Promise<void> {
+    const server = serverSuggestions.find((suggestion) => suggestion.url === url);
+    await (server === undefined ? start() : openServer(server));
+  }
+
   async function navigate(): Promise<void> {
     if (!activeContext) {
-      await start();
+      await startFromAddress();
       return;
     }
     const target = validTargetUrl(url);
@@ -715,41 +741,64 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           {notice}
         </OctantAlert>
       )}
-      {!activeContext ? (
-        <div className="browser-workspace__empty">
-          <ShieldCheck aria-hidden="true" size={20} />
-          <h2>Open a private Browser session</h2>
-          <p>The page is isolated to this thread and shared with its agent.</p>
-          {serverSuggestions.length === 0 ? null : (
-            <ul aria-label="Running servers" className="browser-workspace__servers">
-              {serverSuggestions.map((server) => (
-                <li key={server.listenerId}>
+      {!activeContext && serverSuggestions.length > 0 ? (
+        <section aria-label="Local servers" className="browser-workspace__local">
+          <header className="browser-workspace__local-header">
+            <h2>Local</h2>
+            <OctantButton
+              aria-label="Refresh local servers"
+              onClick={() => void localServers.refresh()}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <RotateCw aria-hidden="true" size={14} />
+            </OctantButton>
+          </header>
+          <ul aria-label="Running servers" className="browser-workspace__servers">
+            {serverSuggestions.map((server) => {
+              const kind = server.framework ?? server.processName;
+              const name = server.workspaceLabel ?? kind;
+              const address = serverAddressLabel(server.url);
+              return (
+                <li className="browser-workspace__server-row" key={server.listenerId}>
                   <OctantButton
+                    aria-label={`Open ${name} at ${address}`}
                     disabled={starting}
-                    onClick={() => {
-                      setUrl(server.url);
-                      void start(server.url);
-                    }}
+                    onClick={() => void openServer(server)}
                     type="button"
                     variant="ghost"
                   >
                     <span className="browser-workspace__server">
-                      <span className="browser-workspace__server-address">
-                        {serverAddressLabel(server.url)}
+                      <span className="browser-workspace__server-text">
+                        <span className="browser-workspace__server-name">{name}</span>
+                        <span className="browser-workspace__server-meta">
+                          <span className="browser-workspace__server-address">{address}</span>
+                          {name === kind ? null : <span>{` · ${kind}`}</span>}
+                        </span>
                       </span>
-                      <span className="browser-workspace__server-meta">
-                        {server.framework ?? server.processName}
-                      </span>
+                      {/* Every listed server answered the host's probe, so the
+                          dot marks it running rather than telling rows apart. */}
+                      <span aria-hidden="true" className="browser-workspace__server-dot" />
                     </span>
                   </OctantButton>
                 </li>
-              ))}
-            </ul>
-          )}
+              );
+            })}
+          </ul>
+          <p className="browser-workspace__local-note">
+            A page opens isolated to this thread and shared with its agent.
+          </p>
+        </section>
+      ) : !activeContext ? (
+        <div className="browser-workspace__empty">
+          <ShieldCheck aria-hidden="true" size={20} />
+          <h2>Open a private Browser session</h2>
+          <p>The page is isolated to this thread and shared with its agent.</p>
           <OctantButton
             aria-label="Start browser"
             disabled={starting || url.trim() === ""}
-            onClick={() => void start()}
+            onClick={() => void startFromAddress()}
             type="button"
           >
             {starting ? "Starting…" : "Open page"}

@@ -9,9 +9,16 @@ import { describe, expect, it, vi } from "vitest";
 import { BrowserWorkspace } from "./BrowserWorkspace";
 import { boundsInsideViewport } from "./useNativeBrowserSurface";
 
-const localServers = vi.hoisted(() => ({ snapshot: undefined as unknown }));
+const localServers = vi.hoisted(() => ({
+  snapshot: undefined as unknown,
+  open: async (_listenerId: string): Promise<unknown> => undefined,
+}));
 vi.mock("../environment/useLocalServersController", () => ({
-  useLocalServersController: () => ({ status: "ready", snapshot: localServers.snapshot }),
+  useLocalServersController: () => ({
+    status: "ready",
+    snapshot: localServers.snapshot,
+    open: (listenerId: string) => localServers.open(listenerId),
+  }),
 }));
 
 const threadId = "10000000-0000-4000-8000-000000000001";
@@ -238,7 +245,7 @@ describe("BrowserWorkspace", () => {
     expect(browser.inspectThread).toHaveBeenCalledTimes(2);
   });
 
-  it("offers the checkout's running servers and opens the one the person picks", async () => {
+  it("offers the checkout's running servers and opens the one the person picks as the host prepared it", async () => {
     const listener = (port: number, extra: object) => ({
       listenerId: `lsn_${String(port).padStart(32, "0")}`,
       port,
@@ -259,8 +266,18 @@ describe("BrowserWorkspace", () => {
         listener(5173, { framework: "vite" }),
         listener(9229, { health: "unresponsive", openAvailable: false }),
       ],
-      other: [listener(3000, { framework: "next" })],
+      // An HTTPS dev server on a self-signed localhost certificate.
+      other: [listener(3000, { framework: "next", url: "https://localhost:3000/" })],
       observedAt: "2026-07-27T20:00:00.000Z",
+    };
+    const opened: string[] = [];
+    localServers.open = async (listenerId) => {
+      opened.push(listenerId);
+      return {
+        url: "https://localhost:3000/",
+        allowedOrigin: "https://localhost:3000",
+        acceptsLocalCertificate: true,
+      };
     };
     const browser = client();
     try {
@@ -282,20 +299,25 @@ describe("BrowserWorkspace", () => {
         "http://localhost:5173/",
       );
       const servers = screen.getByRole("list", { name: "Running servers" });
-      expect(servers).toHaveTextContent("localhost:5173vite");
-      expect(servers).toHaveTextContent("localhost:3000next");
-      expect(servers).not.toHaveTextContent("9229");
+      expect(
+        Array.from(servers.querySelectorAll("button"), (row) => row.getAttribute("aria-label")),
+      ).toEqual(["Open vite at localhost:5173", "Open next at localhost:3000"]);
 
-      fireEvent.click(screen.getByRole("button", { name: /localhost:3000/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Open next at localhost:3000" }));
       await waitFor(() =>
         expect(browser.create).toHaveBeenCalledWith(
           expect.objectContaining({
-            policy: expect.objectContaining({ allowedOrigins: ["http://localhost:3000"] }),
+            policy: expect.objectContaining({
+              allowedOrigins: ["https://localhost:3000"],
+              acceptsLocalCertificate: true,
+            }),
           }),
         ),
       );
+      expect(opened).toEqual([`lsn_${"3000".padStart(32, "0")}`]);
     } finally {
       localServers.snapshot = undefined;
+      localServers.open = async () => undefined;
     }
   });
 

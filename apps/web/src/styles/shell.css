@@ -3489,26 +3489,95 @@ form > .work-composer-adapter__attachments {
   line-height: 1.5;
 }
 
+.browser-workspace__local {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+}
+
+.browser-workspace__local-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.browser-workspace__local-header h2 {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+}
+
 .browser-workspace__servers {
   display: grid;
-  gap: 2px;
+  gap: 8px;
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.browser-workspace__server {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
+.browser-workspace__server-row {
+  border: 1px solid var(--oct-border);
+  border-radius: var(--oct-radius-md);
+  background: var(--octant-surface-raised);
 }
 
-.browser-workspace__server-address {
+.browser-workspace__server-row > button {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  justify-content: stretch;
+  padding: 8px 12px;
+}
+
+.browser-workspace__server {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.browser-workspace__server-text {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  text-align: start;
+}
+
+.browser-workspace__server-name {
+  overflow: hidden;
   color: var(--oct-fg);
-  font-family: var(--oct-font-mono);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-display);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .browser-workspace__server-meta {
+  overflow: hidden;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-workspace__server-address {
+  font-family: var(--oct-font-mono);
+}
+
+.browser-workspace__server-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--oct-success);
+}
+
+.browser-workspace__local-note {
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
 }
