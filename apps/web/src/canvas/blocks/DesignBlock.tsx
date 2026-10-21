@@ -9,7 +9,16 @@ import {
   type RefObject,
   type SyntheticEvent,
 } from "react";
-import { ChevronLeft, ChevronRight, Play, RotateCcw, Square, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Maximize,
+  Minimize,
+  Play,
+  RotateCcw,
+  Square,
+  X,
+} from "lucide-react";
 import {
   CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS,
   CANVAS_DESIGN_VIEWPORT,
@@ -201,11 +210,25 @@ function DesignBoard({
   const [playing, setPlaying] = useState<string | undefined>(undefined);
   const playButton = useRef<HTMLButtonElement>(null);
   const [boardRef, board] = useSize();
-  const boardWidth = board?.width;
   const viewport = CANVAS_DESIGN_VIEWPORT[size];
-  const frameWidth = Math.min(BOARD_FRAME_WIDTH[size], boardWidth ?? Infinity);
-  const scale = frameWidth / viewport.width;
   const count = block.frames.length;
+  // One desktop window is the whole design, so it takes the board's width
+  // instead of the thumbnail width a row of screens shares.
+  const cap = size === "desktop" && count === 1 ? viewport.width : BOARD_FRAME_WIDTH[size];
+  // The stylesheet draws each box as wide as the board allows, up to its cap,
+  // from the first paint. The page inside is scaled to the same width once the
+  // board is measured, and waits until then: a page scaled for the cap in a
+  // narrower column was clipped on the right. Where nothing can measure, the
+  // cap stands.
+  const frameWidth =
+    board === undefined
+      ? typeof ResizeObserver === "undefined"
+        ? cap
+        : undefined
+      : Math.min(cap, board.width);
+  const scale = frameWidth === undefined ? undefined : frameWidth / viewport.width;
+  const frameStyle = { "--canvas-design-frame-cap": `${String(cap)}px` } as CSSProperties;
+  const [watchFrame, frameIsNear] = useFramesNearView(block.frames.map((f) => String(f.frameId)));
   const noun = slides ? (count === 1 ? "slide" : "slides") : count === 1 ? "screen" : "screens";
   const first = String(block.frames[0]?.frameId ?? "");
 
@@ -236,7 +259,13 @@ function DesignBoard({
       </header>
       <div className="canvas-design__board" ref={boardRef}>
         {block.frames.map((frame, index) => (
-          <figure className="canvas-design__frame" key={String(frame.frameId)}>
+          <figure
+            className="canvas-design__frame"
+            data-canvas-design-frame={String(frame.frameId)}
+            key={String(frame.frameId)}
+            ref={watchFrame}
+            style={frameStyle}
+          >
             <figcaption className="canvas-design__caption">
               <span className="canvas-design__index">{String(index + 1)}</span>
               <span className="canvas-design__frame-title">{frame.title}</span>
@@ -245,17 +274,19 @@ function DesignBoard({
                 button lies over the picture instead of holding it. */}
             <div
               className="canvas-design__preview"
-              style={{ width: frameWidth, height: viewport.height * scale }}
+              style={{ aspectRatio: `${String(viewport.width)} / ${String(viewport.height)}` }}
             >
-              <FrameView
-                block={block}
-                frameIds={[String(frame.frameId)]}
-                size={size}
-                still
-                scale={scale}
-                frame={inputs}
-                title={`${frame.title}, ${SIZE_NAME[block.size]} ${slides ? "slide" : "screen"}`}
-              />
+              {scale === undefined || !frameIsNear(index) ? null : (
+                <FrameView
+                  block={block}
+                  frameIds={[String(frame.frameId)]}
+                  size={size}
+                  still
+                  scale={scale}
+                  frame={inputs}
+                  title={`${frame.title}, ${SIZE_NAME[block.size]} ${slides ? "slide" : "screen"}`}
+                />
+              )}
               <OctantButton
                 aria-label={`${slides ? "Present from" : "Play from"} ${frame.title}`}
                 className="canvas-design__open"
@@ -302,10 +333,20 @@ function DesignPlayer({
     block.frames.findIndex((frame) => String(frame.frameId) === startFrameId),
   );
   const [index, setIndex] = useState(startIndex);
+  const [notesShown, setNotesShown] = useState(readNotesShown);
+  // A deck without a single note offers no toggle, so a presenter sharing a
+  // screen is never shown a control that does nothing.
+  const hasNotes = slides && block.frames.some((frame) => frame.notes !== undefined);
+  const toggleNotes = () =>
+    setNotesShown((shown) => {
+      writeNotesShown(!shown);
+      return !shown;
+    });
   // A restart reloads the page, which is the only way back to the start frame
   // of a page that runs no script.
   const [restarts, setRestarts] = useState(0);
   const [stageRef, stage] = useSize();
+  const fullscreen = useFullscreen<HTMLDivElement>();
   const viewport = CANVAS_DESIGN_VIEWPORT[size];
   const scale =
     stage === undefined
@@ -317,7 +358,16 @@ function DesignPlayer({
   const step = (by: number) => setIndex((value) => Math.min(last, Math.max(0, value + by)));
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!slides) return;
-    if (event.key === "ArrowRight" || event.key === "PageDown") {
+    if (
+      hasNotes &&
+      (event.key === "n" || event.key === "N") &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey
+    ) {
+      event.preventDefault();
+      toggleNotes();
+    } else if (event.key === "ArrowRight" || event.key === "PageDown") {
       event.preventDefault();
       step(1);
     } else if (event.key === "ArrowLeft" || event.key === "PageUp") {
@@ -335,7 +385,7 @@ function DesignPlayer({
       restoreFocus={restoreFocus}
     >
       {/* Keys reach the deck here; a slide frame takes no focus or pointer. */}
-      <div className="canvas-design-player__body" onKeyDown={onKeyDown}>
+      <div className="canvas-design-player__body" onKeyDown={onKeyDown} ref={fullscreen.ref}>
         <header className="canvas-design-player__bar">
           <span className="canvas-design-player__title">{block.title}</span>
           {slides ? (
@@ -348,6 +398,18 @@ function DesignPlayer({
           <div className="canvas-design-player__actions">
             {slides ? (
               <>
+                {hasNotes ? (
+                  <OctantButton
+                    aria-keyshortcuts="N"
+                    aria-pressed={notesShown}
+                    onClick={toggleNotes}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    Notes
+                  </OctantButton>
+                ) : null}
                 <OctantButton
                   aria-label="Previous slide"
                   disabled={index === 0}
@@ -380,6 +442,7 @@ function DesignPlayer({
                 Restart
               </OctantButton>
             )}
+            <FullscreenButton fullscreen={fullscreen} />
             <OctantButton
               aria-label="Close"
               onClick={onClose}
@@ -397,21 +460,28 @@ function DesignPlayer({
             style={{ width: viewport.width * scale, height: viewport.height * scale }}
           >
             {slides ? (
-              current === undefined ? null : (
-                <>
-                  <FrameView
-                    block={block}
-                    frameIds={[String(current.frameId)]}
-                    key={String(current.frameId)}
-                    scale={scale}
-                    size={size}
-                    still
-                    frame={inputs}
-                    title={`${current.title}, slide ${String(index + 1)}`}
-                  />
-                  <div aria-hidden="true" className="canvas-design__cover" />
-                </>
-              )
+              <>
+                {/* The slides either side are loaded and drawn beneath the shown
+                    one, so a step shows a page that is already painted; the rest
+                    of the deck waits, so a long deck opens as fast as a short
+                    one. */}
+                {block.frames.map((slide, at) =>
+                  Math.abs(at - index) > 1 ? null : (
+                    <FrameView
+                      block={block}
+                      frameIds={[String(slide.frameId)]}
+                      beneath={at !== index}
+                      key={String(slide.frameId)}
+                      scale={scale}
+                      size={size}
+                      still
+                      frame={inputs}
+                      title={`${slide.title}, slide ${String(at + 1)}`}
+                    />
+                  ),
+                )}
+                <div aria-hidden="true" className="canvas-design__cover" />
+              </>
             ) : (
               <FrameView
                 block={block}
@@ -425,9 +495,38 @@ function DesignPlayer({
             )}
           </div>
         </div>
+        {hasNotes && notesShown ? (
+          <aside aria-label="Presenter notes" className="canvas-design-player__notes">
+            {current?.notes === undefined ? (
+              <p className="canvas-design-player__notes-empty">No notes for this slide.</p>
+            ) : (
+              <p>{current.notes}</p>
+            )}
+          </aside>
+        ) : null}
       </div>
     </OctantDialog>
   );
+}
+
+const NOTES_SHOWN_KEY = "octant.canvas.presenterNotes";
+
+// Remembered for the browser session only: whether the screen is shared is the
+// presenter's call each time, and storage can be blocked.
+function readNotesShown(): boolean {
+  try {
+    return window.sessionStorage.getItem(NOTES_SHOWN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeNotesShown(shown: boolean): void {
+  try {
+    window.sessionStorage.setItem(NOTES_SHOWN_KEY, shown ? "1" : "0");
+  } catch {
+    // The toggle still works for this open player.
+  }
 }
 
 /**
@@ -446,6 +545,7 @@ function FrameView({
   scale,
   title,
   still = false,
+  beneath = false,
 }: {
   readonly block: CanvasDesignBlock;
   readonly size: CanvasDesignDeviceSize;
@@ -455,6 +555,12 @@ function FrameView({
   readonly scale: number;
   readonly title: string;
   readonly still?: boolean;
+  /**
+   * Loaded and painted under the shown page, not hidden: `hidden` is
+   * `display: none`, which leaves the page unlaid and unpainted until it is
+   * revealed, so a step would still wait on rendering.
+   */
+  readonly beneath?: boolean;
 }) {
   const viewport = CANVAS_DESIGN_VIEWPORT[size];
   // Keyed by the ids, not the array, so a parent's new array of the same ids
@@ -473,7 +579,10 @@ function FrameView({
   const themed = designFrameTheme(block) === "workspace";
   return (
     <iframe
-      className="canvas-design__page"
+      aria-hidden={beneath ? true : undefined}
+      className={
+        beneath ? "canvas-design__page canvas-design__page--beneath" : "canvas-design__page"
+      }
       onLoad={themed ? (event) => installFrameFonts(event.currentTarget) : undefined}
       referrerPolicy="no-referrer"
       sandbox={designFrameSandbox(block)}
@@ -591,6 +700,7 @@ function RunningDesignBlock({
   const stopButton = useRef<HTMLButtonElement>(null);
   const runButton = useRef<HTMLButtonElement>(null);
   const frameRef = useRef<HTMLElement | null>(null);
+  const fullscreen = useFullscreen<HTMLElement>();
   // Each start or stop is a new generation, so a page asked for earlier
   // never replaces what the person did since.
   const generation = useRef(0);
@@ -662,6 +772,7 @@ function RunningDesignBlock({
       aria-roledescription="design"
       className="canvas-design"
       data-canvas-design={String(block.blockId)}
+      ref={fullscreen.ref}
     >
       <header className="canvas-design__header">
         <div className="canvas-design__heading">
@@ -675,6 +786,7 @@ function RunningDesignBlock({
                 <span aria-hidden="true" className="canvas-design__running-dot" />
                 Running
               </span>
+              {block.size === "document" ? null : <FullscreenButton fullscreen={fullscreen} />}
               <OctantButton
                 onClick={() => {
                   stop({ kind: "stopped" });
@@ -689,18 +801,25 @@ function RunningDesignBlock({
                 Stop
               </OctantButton>
             </>
-          ) : runtime === undefined ? null : (
-            <OctantButton
-              disabled={state.kind === "starting"}
-              onClick={() => void run()}
-              ref={runButton}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              <Play aria-hidden="true" size={12} strokeWidth={2} />
-              {state.kind === "stopped" ? "Run again" : "Run"}
-            </OctantButton>
+          ) : (
+            <>
+              {/* Stopping, by hand or by the watchdog, leaves the section full
+                  screen; the exit control stays until full screen ends. */}
+              {fullscreen.active ? <FullscreenButton fullscreen={fullscreen} /> : null}
+              {runtime === undefined ? null : (
+                <OctantButton
+                  disabled={state.kind === "starting"}
+                  onClick={() => void run()}
+                  ref={runButton}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  <Play aria-hidden="true" size={12} strokeWidth={2} />
+                  {state.kind === "stopped" ? "Run again" : "Run"}
+                </OctantButton>
+              )}
+            </>
           )}
         </div>
       </header>
@@ -740,6 +859,7 @@ function RunningDesignBlock({
       {state.kind === "running" ? (
         <RunningFrame
           block={block}
+          fitHeight={fullscreen.active}
           onDesktopSurface={onDesktopSurface}
           frameRef={frameRef}
           key={state.url}
@@ -838,6 +958,7 @@ const UNMEASURED_DOCUMENT_WIDTH = 640;
 function RunningFrame({
   block,
   url,
+  fitHeight,
   onDesktopSurface,
   frameRef,
   onStop,
@@ -846,6 +967,8 @@ function RunningFrame({
 }: {
   readonly block: CanvasDesignBlock;
   readonly url: string;
+  /** Full screen: the window is scaled to the stage's height too, not only its width. */
+  readonly fitHeight: boolean;
   readonly onDesktopSurface: boolean;
   readonly frameRef: RefObject<HTMLElement | null>;
   readonly onStop: (why: RunStopReason) => void;
@@ -943,7 +1066,14 @@ function RunningFrame({
     );
   }
   const viewport = CANVAS_DESIGN_VIEWPORT[block.size];
-  const scale = stage === undefined ? 1 : Math.min(1, stage.width / viewport.width);
+  const scale =
+    stage === undefined
+      ? 1
+      : Math.min(
+          1,
+          stage.width / viewport.width,
+          fitHeight ? stage.height / viewport.height : Infinity,
+        );
   return (
     <div className="canvas-design__stage" ref={stageRef}>
       <div
@@ -961,6 +1091,50 @@ function RunningFrame({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Full screen for one element, where the browser offers it. A refusal (a
+ * window that may not, a gesture the browser did not count) leaves the page as
+ * it was.
+ */
+function useFullscreen<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    const sync = () =>
+      setActive(ref.current !== null && document.fullscreenElement === ref.current);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
+  const toggle = () => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    else void ref.current?.requestFullscreen().catch(() => undefined);
+  };
+  return { ref, active, toggle, available: document.fullscreenEnabled === true };
+}
+
+function FullscreenButton({
+  fullscreen,
+}: {
+  readonly fullscreen: Pick<ReturnType<typeof useFullscreen>, "active" | "available" | "toggle">;
+}) {
+  if (!fullscreen.available) return null;
+  return (
+    <OctantButton
+      aria-label={fullscreen.active ? "Exit full screen" : "Full screen"}
+      onClick={fullscreen.toggle}
+      size="icon-sm"
+      type="button"
+      variant="ghost"
+    >
+      {fullscreen.active ? (
+        <Minimize aria-hidden="true" size={16} strokeWidth={1.8} />
+      ) : (
+        <Maximize aria-hidden="true" size={16} strokeWidth={1.8} />
+      )}
+    </OctantButton>
   );
 }
 
@@ -1005,6 +1179,68 @@ function useWorkspaceFrameTheme(enabled: boolean): DesignFrameThemeValues | unde
     };
   }, [enabled]);
   return theme;
+}
+
+/**
+ * Which frames of a board load their page: those that have come into view and
+ * their neighbours, so the next slide is drawn before a reader scrolls to it. A
+ * frame once loaded stays loaded, so scrolling back reloads nothing. The viewport
+ * is watched, not the panel that scrolls, because a frame clipped by a scrolling
+ * ancestor does not intersect the viewport either; the neighbour rule is what
+ * loads ahead. Where nothing can watch the viewport, every page loads at once.
+ * (A six-slide deck took seconds to paint when every slide loaded on mount.)
+ */
+function useFramesNearView(
+  frameIds: ReadonlyArray<string>,
+): readonly [
+  watch: (element: HTMLElement | null) => (() => void) | undefined,
+  near: (index: number) => boolean,
+] {
+  const lazy = typeof IntersectionObserver !== "undefined";
+  const [seen, setSeen] = useState<ReadonlySet<string>>(() => new Set());
+  const observer = useRef<IntersectionObserver | null>(null);
+  const watched = useRef(new Set<Element>());
+  useEffect(() => {
+    if (!lazy) return;
+    const next = new IntersectionObserver((entries) => {
+      const shown = entries.flatMap((entry) => {
+        const id = entry.isIntersecting
+          ? entry.target.getAttribute("data-canvas-design-frame")
+          : null;
+        return id === null ? [] : [id];
+      });
+      if (shown.length === 0) return;
+      setSeen((current) => {
+        if (shown.every((id) => current.has(id))) return current;
+        return new Set([...current, ...shown]);
+      });
+    });
+    for (const element of watched.current) next.observe(element);
+    observer.current = next;
+    return () => {
+      next.disconnect();
+      observer.current = null;
+    };
+  }, [lazy]);
+  const watch = useCallback((element: HTMLElement | null) => {
+    if (element === null) return undefined;
+    watched.current.add(element);
+    observer.current?.observe(element);
+    return () => {
+      watched.current.delete(element);
+      observer.current?.unobserve(element);
+    };
+  }, []);
+  const near = useCallback(
+    (index: number) =>
+      !lazy ||
+      [index - 1, index, index + 1].some((at) => {
+        const id = frameIds[at];
+        return id !== undefined && seen.has(id);
+      }),
+    [frameIds, lazy, seen],
+  );
+  return [watch, near];
 }
 
 /**

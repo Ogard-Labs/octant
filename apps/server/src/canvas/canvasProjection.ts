@@ -31,7 +31,8 @@ export interface CanvasProjectionEntry {
 }
 
 export interface CanvasProvenanceKey {
-  readonly projectId: ProjectId;
+  /** The Canvas's Project, or null for a Chat Canvas that belongs to its thread alone. */
+  readonly projectId: ProjectId | null;
   readonly threadId: string;
   readonly mode: "chat" | "work" | "code";
 }
@@ -176,10 +177,14 @@ export class CanvasProjection implements Projection {
       versionCount: versions.length,
       updatedAt,
     });
-    const projectId = String(version.definition.provenance.projectId);
-    const projectSet = this.#byProject.get(projectId) ?? new Set<CanvasId>();
-    projectSet.add(canvasId);
-    this.#byProject.set(projectId, projectSet);
+    // A Canvas owned by its thread belongs to no Project, so no Project
+    // inventory lists it; its thread index is the only way to it.
+    const projectId = version.definition.provenance.projectId;
+    if (projectId !== null) {
+      const projectSet = this.#byProject.get(String(projectId)) ?? new Set<CanvasId>();
+      projectSet.add(canvasId);
+      this.#byProject.set(String(projectId), projectSet);
+    }
     const tk = threadKey(toProvenanceKey(version));
     const threadSet = this.#byThread.get(tk) ?? new Set<CanvasId>();
     threadSet.add(canvasId);
@@ -216,5 +221,5 @@ function toProvenanceKey(version: CanvasVersion): CanvasProvenanceKey {
 }
 
 function threadKey(key: CanvasProvenanceKey): string {
-  return `${key.mode}:${String(key.projectId)}:${key.threadId}`;
+  return `${key.mode}:${key.projectId === null ? "thread" : String(key.projectId)}:${key.threadId}`;
 }

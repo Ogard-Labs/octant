@@ -1,4 +1,6 @@
+import type { CanvasDesignBrand } from "@octant/contracts/canvas";
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
+import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import {
   decodeProjectRank,
   type BindingRevisionId,
@@ -24,6 +26,7 @@ export type ProjectPolicyRejectionCode =
   | "binding-not-allowed"
   | "binding-revision-conflict"
   | "binding-unchanged"
+  | "invalid-brand-kit"
   | "invalid-lifecycle"
   | "invalid-name"
   | "invalid-neighbor"
@@ -301,6 +304,35 @@ export function changeWorkProjectStatusFile(
     reject("invalid-lifecycle", "Work Project status file setting is already selected");
   }
   return { ...project, statusFile, version: nextVersion(project), updatedAt };
+}
+
+/**
+ * Set, replace, or (with an empty kit) clear the Project's brand kit. Every
+ * value must pass the rule a design's own brand passes, so nothing a kit holds
+ * can end a stylesheet declaration or name something to load. Chat Projects
+ * hold a kit too; it grants no folder or shell authority.
+ */
+export function changeProjectBrandKit(
+  project: Project,
+  brandKit: CanvasDesignBrand,
+  updatedAt: UtcTimestamp,
+): Project {
+  const entries = Object.entries(brandKit);
+  for (const [name, value] of entries) {
+    const refusal = designBrandTokenRefusal(name, value);
+    if (refusal !== undefined) reject("invalid-brand-kit", `Brand kit ${refusal}`);
+  }
+  const current = JSON.stringify(Object.entries(project.brandKit ?? {}).sort());
+  if (current === JSON.stringify(entries.sort())) {
+    reject("invalid-lifecycle", "Project brand kit is already selected");
+  }
+  const { brandKit: _previous, ...rest } = project;
+  return {
+    ...rest,
+    ...(entries.length === 0 ? {} : { brandKit }),
+    version: nextVersion(project),
+    updatedAt,
+  };
 }
 
 /** Whether Octant reads, seeds, and asks tasks to keep this Project's `STATUS.md`. */

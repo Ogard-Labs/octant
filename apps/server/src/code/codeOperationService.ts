@@ -4165,6 +4165,7 @@ function isDurableProviderLaunchEvidence(event: CodeOperationEvent): boolean {
     case "file-change":
     case "diff":
     case "task-progress":
+    case "task-list":
     case "usage":
     case "child-activity":
     case "conversation-turn-changed-files":

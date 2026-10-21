@@ -3,7 +3,8 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { decodeProjectId, type ThreadBoardPullRequestSummaries } from "@octant/contracts";
 import type { SidebarRowPropertyVisibility } from "@octant/contracts/shell";
-import { ProjectThreadRows } from "./ProjectThreadList";
+import { ProjectThreadList, ProjectThreadRows } from "./ProjectThreadList";
+import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarRowPropertiesContext } from "../shell/sidebarRowProperties";
 
 const thread = {
@@ -33,6 +34,23 @@ function pullRequest(
 
 const identity12 = { projectId, repositoryOwner: "octant", repositoryName: "octant", number: 12 };
 
+describe("ProjectThreadList nesting", () => {
+  it("lists a started task right under the thread that suggested it, marked as nested", () => {
+    const parent = { threadId: "parent", title: "Redesign the shell" };
+    const other = { threadId: "other", title: "Write the docs" };
+    const child = { threadId: "child", title: "Add a README" };
+    render(
+      <FollowUpLineageContext value={new Map([["child", "parent"]])}>
+        <ProjectThreadList onSelectThread={vi.fn()} threads={[parent, other, child]} />
+      </FollowUpLineageContext>,
+    );
+    const rows = [...document.querySelectorAll<HTMLElement>("[data-thread-id]")];
+    expect(rows.map((row) => row.dataset.threadId)).toEqual(["parent", "child", "other"]);
+    expect(rows[1]?.dataset.nestedTask).toBe("true");
+    expect(rows[0]?.dataset.nestedTask).toBeUndefined();
+  });
+});
+
 describe("ProjectThreadRows", () => {
   it("shows a thread's age and its pull request on the row itself, not only in the card", () => {
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
@@ -53,10 +71,9 @@ describe("ProjectThreadRows", () => {
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     expect(within(row).getByText("#12")).toBeVisible();
     expect(within(row).getByText("2h")).toBeVisible();
-    expect(within(row).getByRole("img", { name: "Pull request #12 · open" })).toHaveAttribute(
-      "data-state",
-      "open",
-    );
+    expect(
+      within(row).getByRole("img", { name: "Pull request #12 · open · checks passing" }),
+    ).toHaveAttribute("data-state", "open");
   });
 
   it("keeps a long thread list bounded to the visible window", async () => {
@@ -1203,7 +1220,9 @@ describe("ProjectThreadRows display properties", () => {
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     expect(within(row).getByText("#12")).toBeVisible();
     expect(within(row).getByText("feature/x")).toBeVisible();
-    expect(within(row).getByRole("img", { name: "Pull request #12 · open" })).toBeVisible();
+    expect(
+      within(row).getByRole("img", { name: "Pull request #12 · open · checks passing" }),
+    ).toBeVisible();
     expect(within(row).getByText("2h")).toBeVisible();
     expect(row.querySelector(".sidebar-navigation__thread-status")).not.toBeNull();
   });
@@ -1220,7 +1239,9 @@ describe("ProjectThreadRows display properties", () => {
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     expect(within(row).queryByText("#12")).toBeNull();
     expect(within(row).queryByText("feature/x")).toBeNull();
-    expect(within(row).queryByRole("img", { name: "Pull request #12 · open" })).toBeNull();
+    expect(
+      within(row).queryByRole("img", { name: "Pull request #12 · open · checks passing" }),
+    ).toBeNull();
     expect(within(row).queryByText("2h")).toBeNull();
     expect(row.querySelector(".sidebar-navigation__thread-status")).toBeNull();
     // Nothing is left in their place: the copy holds the title alone.

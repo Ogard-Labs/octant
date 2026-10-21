@@ -9,12 +9,12 @@ describe("approvalSurfacePalette", () => {
     expect(approvalSurfacePalette(resolved)).toEqual({
       mode: "dark",
       surface: "#232323",
-      text: "#f0f0f0",
-      muted: "#a9a9a9",
+      text: "#f5f5f7",
+      muted: "#bcbcc2",
       border: "#303030",
       control: "#2b2b2b",
       controlHover: "#333333",
-      accent: "#f0f0f0",
+      accent: "#f5f5f7",
       accentForeground: "#171717",
     });
   });

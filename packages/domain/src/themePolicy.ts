@@ -71,7 +71,7 @@ export function resolveEffectiveSidebarBackground(
 }
 
 export interface ResolvedAppBackground {
-  readonly kind: "builtin" | "photo" | "none";
+  readonly kind: "builtin" | "photo" | "characters" | "none";
   readonly backgroundId: string | null;
   /** Public asset used by a first-party built-in, or null for other grounds. */
   readonly backgroundUrl: string | null;
@@ -79,7 +79,7 @@ export interface ResolvedAppBackground {
   readonly backgroundStillUrl: string | null;
   /** The built-in's light-theme picture, or null when it has one picture for both. */
   readonly backgroundLightUrl: string | null;
-  /** Whether the selected built-in asset is allowed to animate. */
+  /** Whether the selected built-in asset, or the character field, is allowed to move. */
   readonly backgroundAnimated: boolean;
   /** How the picture is printed: as it is, pixelated, or dithered. */
   readonly effect: {
@@ -93,9 +93,11 @@ export interface ResolvedAppBackground {
   readonly coversSidebar: boolean;
 }
 
-// The ground is a picture, printed plain or through one still effect, or
-// nothing. It used to carry a drawn dot pattern that could drift, roll in
-// waves, or pulse; that read as noise behind the work and is gone. Rows that
+// The ground is a picture, printed plain or through one still effect, a field
+// of pulsing characters, or nothing. It used to carry a drawn dot pattern that
+// could drift, roll in waves, or pulse; that read as noise behind the work and
+// is gone. The character field came back on request as its own choice: it is
+// opt-in, never the default, and stops moving under reduced motion. Rows that
 // chose the pattern ("theme") still decode and resolve to the plain page, and
 // their pattern and motion dials are read by nothing.
 // Increased contrast turns the ground off: a printed picture behind the page
@@ -147,6 +149,18 @@ export function resolveAppBackground(
       backgroundStillUrl: stillUrl,
       backgroundLightUrl: "lightSrc" in preset ? preset.lightSrc : null,
       backgroundAnimated,
+    };
+  }
+  if (background.kind === "characters") {
+    return {
+      ...tuning,
+      effect: { ...effect, kind: "none" },
+      kind: "characters",
+      backgroundId: null,
+      backgroundUrl: null,
+      backgroundStillUrl: null,
+      backgroundLightUrl: null,
+      backgroundAnimated: motionAllowed,
     };
   }
   return {

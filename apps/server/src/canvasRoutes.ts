@@ -59,6 +59,13 @@ import type { CanvasCommentService } from "./canvas/canvasCommentService";
 import type { CanvasShareService } from "./canvas/canvasShareService";
 import type { CanvasExportService } from "./canvas/canvasExportService";
 import type { CanvasExportFolderService } from "./canvas/canvasExportFolderService";
+import type { CanvasPublicShareService } from "./canvas/canvasPublicShareService";
+import {
+  decodeCanvasPublicLinkSettingsCommand,
+  decodeCanvasPublicLinkSettingsResult,
+  decodeCanvasPublicShareRevokeRequest,
+  decodeCanvasPublicShareRevokeResult,
+} from "@octant/contracts/canvas-public-share";
 import { canvasExportEventActor } from "./canvas/canvasExportActor";
 import {
   canvasDesignPageHeaders,
@@ -90,6 +97,11 @@ export interface CanvasRouteDependencies {
   readonly canvasShareService?: CanvasShareService;
   /** Destination export. Absent when the host cannot journal an export. */
   readonly canvasExportService?: CanvasExportService;
+  /**
+   * Public links: the Settings switch, each Canvas's links, and revoke.
+   * Publishing goes through the export routes, never here.
+   */
+  readonly canvasPublicShareService?: CanvasPublicShareService;
   /**
    * Brings the export destinations' connection state current before they are
    * listed or prepared. The offer list itself is synchronous, so a destination
@@ -206,6 +218,9 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
       route !== "export-prepare" &&
       route !== "export-decide" &&
       route !== "export-folder" &&
+      route !== "public-shares" &&
+      route !== "public-share-revoke" &&
+      route !== "public-link-settings" &&
       route !== "thread-reference-cards"
     ) {
       return undefined;
@@ -1110,7 +1125,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           if (context.kind === "ok") await dependencies.refreshCanvasExportTargets?.();
           return jsonResponse(
             decodeCanvasExportPrepareResult(
-              exportService.prepare(requestBody, context.kind === "ok"),
+              await exportService.prepare(requestBody, context.kind === "ok", principal.kind),
             ),
             200,
             origin,
@@ -1137,6 +1152,7 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
               ...(requestBody.visibility === undefined
                 ? {}
                 : { visibility: requestBody.visibility }),
+              ...(requestBody.link === undefined ? {} : { link: requestBody.link }),
               // The envelope names the transport principal this host
               // authenticated for the approval, never a fixed local user.
               actor: canvasExportEventActor(principal, OCTANT_LOCAL_ACTOR_ID),
@@ -1145,6 +1161,116 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           200,
           origin,
         );
+      }
+
+      if (
+        route === "public-shares" ||
+        route === "public-share-revoke" ||
+        route === "public-link-settings"
+      ) {
+        const links = dependencies.canvasPublicShareService;
+        if (links === undefined) {
+          return failureResponse("Public links are unavailable on this host.", 404, origin);
+        }
+        if (route === "public-link-settings" && request.method === "GET") {
+          if (url.searchParams.size !== 0) {
+            return failureResponse("Public link settings request is invalid.", 400, origin);
+          }
+          return jsonResponse(links.settings(), 200, origin);
+        }
+        if (route === "public-link-settings" && request.method === "POST") {
+          // Turning public links on or pointing them at another service is
+          // the person's choice at this Mac, never a paired device's.
+          if (principal.kind !== "local-window") {
+            return jsonResponse(
+              decodeCanvasPublicLinkSettingsResult({
+                kind: "canvas-public-link-settings-refused",
+                reason: "unauthorized",
+                message: "Public link settings can be changed only from a window on this Mac.",
+              }),
+              200,
+              origin,
+            );
+          }
+          const body = await readJson(request);
+          let command;
+          try {
+            if (body.kind !== "ok") throw new Error("malformed");
+            command = decodeCanvasPublicLinkSettingsCommand(body.value);
+          } catch {
+            return jsonResponse(
+              decodeCanvasPublicLinkSettingsResult({
+                kind: "canvas-public-link-settings-refused",
+                reason: "malformed",
+                message: "Public link settings request is malformed.",
+              }),
+              200,
+              origin,
+            );
+          }
+          return jsonResponse(links.changeSettings(command), 200, origin);
+        }
+        if (route === "public-shares" && request.method === "GET") {
+          if (url.searchParams.size !== 1 || !url.searchParams.has("canvasId")) {
+            return failureResponse("Public links request is invalid.", 400, origin);
+          }
+          let canvasId;
+          try {
+            canvasId = decodeCanvasId(url.searchParams.get("canvasId") ?? "");
+          } catch {
+            return failureResponse("Canvas ID is invalid.", 400, origin);
+          }
+          const context = await resolveAuthorizedContext(
+            dependencies,
+            authenticatedWindowId,
+            canvasId,
+          );
+          if (context.kind !== "ok") {
+            return failureResponse(
+              "Public links are not available for this canvas.",
+              context.kind === "unauthorized" ? 403 : 404,
+              origin,
+            );
+          }
+          return jsonResponse(links.list(canvasId), 200, origin);
+        }
+        if (route === "public-share-revoke" && request.method === "POST") {
+          const refusedRevoke = (code: "unauthorized" | "malformed", message: string) =>
+            jsonResponse(
+              decodeCanvasPublicShareRevokeResult({ kind: "refused", code, message }),
+              200,
+              origin,
+            );
+          // Revoking is recorded as the owner's act, like an authenticated share's.
+          if (principal.kind !== "local-window") {
+            return refusedRevoke(
+              "unauthorized",
+              "A public link can be revoked only from a window on this Mac.",
+            );
+          }
+          const body = await readJson(request);
+          let revokeRequest;
+          try {
+            if (body.kind !== "ok") throw new Error("malformed");
+            revokeRequest = decodeCanvasPublicShareRevokeRequest(body.value);
+          } catch {
+            return refusedRevoke("malformed", "Public link revoke request is malformed.");
+          }
+          const context = await resolveAuthorizedContext(
+            dependencies,
+            authenticatedWindowId,
+            revokeRequest.canvasId,
+          );
+          if (context.kind !== "ok") {
+            return refusedRevoke("unauthorized", "Public links are not available for this canvas.");
+          }
+          return jsonResponse(
+            await links.revoke(revokeRequest.canvasId, revokeRequest.publicShareId),
+            200,
+            origin,
+          );
+        }
+        return failureResponse("Public links request is invalid.", 405, origin);
       }
 
       if (route === "export-folder" && (request.method === "GET" || request.method === "POST")) {
@@ -1194,10 +1320,13 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           }
           // A Canvas carries its Project, so a choice made here is remembered
           // for that Project. The host folder is the same choice made for a
-          // thread filed nowhere, and travels through the same command.
-          const scope: CanvasExportFolderScope = "project";
+          // thread filed nowhere, and travels through the same command; a
+          // Canvas owned by a Chat thread outside every Project uses it.
           const provenance = entry.currentVersion.definition.provenance;
-          const folder = folders.folderFor(String(provenance.projectId));
+          const scope: CanvasExportFolderScope = provenance.projectId === null ? "host" : "project";
+          const folder = folders.folderFor(
+            provenance.projectId === null ? undefined : String(provenance.projectId),
+          );
           const view = {
             kind: "canvas-export-folder-view",
             settings: folders.settings(),
@@ -1271,12 +1400,19 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             "That folder is no longer available to choose.",
           );
         }
+        const exportProjectId = entry.currentVersion.definition.provenance.projectId;
+        if (command.scope === "project" && exportProjectId === null) {
+          return refusedFolder(
+            "malformed",
+            "This Canvas belongs to no Project; choose the folder for the host instead.",
+          );
+        }
         return jsonResponse(
           folders.choose({
             scope: command.scope,
-            ...(command.scope === "host"
+            ...(command.scope === "host" || exportProjectId === null
               ? {}
-              : { projectId: String(entry.currentVersion.definition.provenance.projectId) }),
+              : { projectId: String(exportProjectId) }),
             folder,
             expectedVersion: command.expectedVersion,
           }),
@@ -1350,11 +1486,14 @@ type AuthorizedCanvasContext =
   | {
       readonly kind: "ok";
       readonly activeContext: CanvasActiveContext;
-      readonly project: {
-        readonly id: string;
-        readonly type: "chat" | "work" | "code";
-        readonly lifecycle: "active" | "archived";
-      };
+      /** Absent for a Canvas owned by a Chat thread outside every Project. */
+      readonly project:
+        | {
+            readonly id: string;
+            readonly type: "chat" | "work" | "code";
+            readonly lifecycle: "active" | "archived";
+          }
+        | undefined;
     }
   | { readonly kind: "unauthorized" }
   | { readonly kind: "unavailable"; readonly reason: string };
@@ -1397,8 +1536,14 @@ async function resolveCreateContext(
   } catch {
     return { kind: "unauthorized" };
   }
-  if (activeContext === undefined || activeContext.projectId === null) {
-    return { kind: "unauthorized" };
+  if (activeContext === undefined) return { kind: "unauthorized" };
+  // A Chat window with no Project open creates a Canvas owned by the thread
+  // the request names; the service checks that thread before anything is
+  // journaled. Every other mode needs its active Project.
+  if (activeContext.projectId === null) {
+    return activeContext.mode === "chat"
+      ? { kind: "ok", activeContext, project: undefined }
+      : { kind: "unauthorized" };
   }
   const bootstrap = await dependencies.projects.bootstrap(windowId);
   const project = bootstrap.active.find((candidate) => candidate.id === activeContext.projectId);
@@ -1424,7 +1569,19 @@ async function resolveThreadReferenceCards(
   threadId: string,
   projectId: ProjectId | null,
 ) {
-  if (projectId === null) return [];
+  // A Chat thread in no Project lists the Canvases it owns itself; they are
+  // read wherever the thread is, so a window in Chat is all it takes.
+  if (projectId === null) {
+    if (mode !== "chat") return [];
+    let activeContext: CanvasActiveContext | undefined;
+    try {
+      activeContext = await dependencies.activeContextResolver(windowId);
+    } catch {
+      return [];
+    }
+    if (activeContext?.mode !== "chat") return [];
+    return dependencies.canvasService.threadReferenceCards({ mode, threadId, projectId: null });
+  }
   const authority = await resolveInventoryAuthority(dependencies, windowId, projectId);
   if (authority.kind !== "ok" || authority.mode !== mode) return [];
   return dependencies.canvasService.threadReferenceCards({
@@ -1452,20 +1609,25 @@ async function resolveAuthorizedContext(
   } catch {
     return { kind: "unauthorized" };
   }
-  if (activeContext === undefined || activeContext.projectId === null) {
-    return { kind: "unauthorized" };
+  if (activeContext === undefined) return { kind: "unauthorized" };
+  const provenance = entry.currentVersion.definition.provenance;
+  // A Canvas owned by a Chat thread outside every Project has no Project to
+  // match the window against: any window in Chat reaches it, and the Canvas
+  // authority itself checks that its thread still exists.
+  if (provenance.projectId === null) {
+    return activeContext.mode === "chat"
+      ? { kind: "ok", activeContext, project: undefined }
+      : { kind: "unauthorized" };
   }
+  if (activeContext.projectId === null) return { kind: "unauthorized" };
   const bootstrap = await dependencies.projects.bootstrap(windowId);
-  const project = bootstrap.active.find(
-    (candidate) => candidate.id === entry.currentVersion.definition.provenance.projectId,
-  );
+  const project = bootstrap.active.find((candidate) => candidate.id === provenance.projectId);
   if (project === undefined || project.lifecycle !== "active") {
     return {
       kind: "unavailable",
       reason: "Canvas is unavailable. Reopen it from the Project.",
     };
   }
-  const provenance = entry.currentVersion.definition.provenance;
   if (
     !authorizeCanvasInventoryAccess({
       requestedProjectId: provenance.projectId,
@@ -1496,7 +1658,10 @@ function inventoryEntriesForProject(
   return projection
     .byProject(projectId)
     .filter((entry) => entry.currentVersion.definition.provenance.mode === mode)
-    .map(toInventoryEntry);
+    .flatMap((entry) => {
+      const inventoryProjectId = entry.currentVersion.definition.provenance.projectId;
+      return inventoryProjectId === null ? [] : [toInventoryEntry(entry, inventoryProjectId)];
+    });
 }
 
 async function resolveCanvasGet(
@@ -1680,12 +1845,15 @@ async function serveDesignPage(
   });
 }
 
-function toInventoryEntry(entry: CanvasProjectionEntry): CanvasInventoryEntry {
+function toInventoryEntry(
+  entry: CanvasProjectionEntry,
+  projectId: ProjectId,
+): CanvasInventoryEntry {
   const version = entry.currentVersion;
   const provenance = version.definition.provenance;
   return projectInventoryEntryFromProjection({
     canvasId: entry.canvasId,
-    projectId: provenance.projectId,
+    projectId,
     mode: provenance.mode,
     title: version.definition.title,
     versionCount: entry.versionCount,

@@ -19,6 +19,8 @@ export type DesktopCredentialBackend =
       readonly replicaDeviceKeys: CredentialStore;
       /** Sync buckets' key pairs, in their own Keychain service. */
       readonly replicaStoreCredentials: CredentialStore;
+      /** Public links' owner secrets, in their own Keychain service. */
+      readonly canvasPublicShareSecrets: CredentialStore;
       /** Secrets given to MCP servers a person added by hand, in their own Keychain service. */
       readonly mcpServerCredentials: CredentialStore;
     }
@@ -30,6 +32,8 @@ export type DesktopCredentialBackend =
       readonly replicaDeviceKeys: CredentialStore;
       /** Sync buckets' key pairs, under their own Secret Service attribute. */
       readonly replicaStoreCredentials: CredentialStore;
+      /** Public links' owner secrets, under their own Secret Service attribute. */
+      readonly canvasPublicShareSecrets: CredentialStore;
       /** Secrets given to MCP servers a person added by hand, under their own attribute. */
       readonly mcpServerCredentials: CredentialStore;
     }
@@ -39,6 +43,7 @@ export type DesktopCredentialBackend =
       readonly purgeStore?: undefined;
       readonly replicaDeviceKeys?: undefined;
       readonly replicaStoreCredentials?: undefined;
+      readonly canvasPublicShareSecrets?: undefined;
       readonly mcpServerCredentials?: undefined;
     }
   | {
@@ -47,6 +52,7 @@ export type DesktopCredentialBackend =
       readonly purgeStore?: undefined;
       readonly replicaDeviceKeys?: undefined;
       readonly replicaStoreCredentials?: undefined;
+      readonly canvasPublicShareSecrets?: undefined;
       readonly mcpServerCredentials?: undefined;
     };
 
@@ -80,6 +86,10 @@ export async function resolveDesktopCredentialBackend(options: {
         storeScope: options.storeScope,
         namespace: "replica-store-credential",
       }),
+      canvasPublicShareSecrets: makeKeychainCredentialStore(options.keychainHelperPath, {
+        storeScope: options.storeScope,
+        namespace: "canvas-public-share-secret",
+      }),
       mcpServerCredentials: makeKeychainCredentialStore(options.keychainHelperPath, {
         storeScope: options.storeScope,
         namespace: "mcp-server-credential",
@@ -95,6 +105,9 @@ export async function resolveDesktopCredentialBackend(options: {
       replicaDeviceKeys: makeSecretServiceCredentialStore({ namespace: "replica-device-key" }),
       replicaStoreCredentials: makeSecretServiceCredentialStore({
         namespace: "replica-store-credential",
+      }),
+      canvasPublicShareSecrets: makeSecretServiceCredentialStore({
+        namespace: "canvas-public-share-secret",
       }),
       mcpServerCredentials: makeSecretServiceCredentialStore({
         namespace: "mcp-server-credential",

@@ -6,6 +6,7 @@ import { decodeCanvasDefinition } from "@octant/contracts/canvas";
 import {
   CANVAS_PREVIEW_BROWSER_ARGS,
   CANVAS_PREVIEW_ORIGIN,
+  canvasExportSheetsPage,
   canvasPreviewAssetPath,
   canvasPreviewDesignPageIndex,
   canvasPreviewPageWithInput,
@@ -149,5 +150,105 @@ describe("canvas preview page input", () => {
     } finally {
       await rm(assets, { recursive: true, force: true });
     }
+  });
+});
+
+describe("picture export of a design", () => {
+  const frames = [
+    { page: "<p>a</p>", sandbox: "" as const, width: 390, height: 844 },
+    { page: "<p>b</p>", sandbox: "" as const, width: 390, height: 844 },
+  ];
+
+  /** A browser whose pages record what they are asked to do. */
+  function recordingBrowser(log: string[]) {
+    let tabs = 0;
+    const newPage = async () => {
+      const id = `tab${String(tabs)}`;
+      tabs += 1;
+      log.push(`open ${id}`);
+      return {
+        goto: async () => undefined,
+        evaluate: async () => undefined,
+        waitForTimeout: async () => undefined,
+        locator: () => ({
+          nth: (index: number) => ({
+            screenshot: async () => {
+              log.push(`${id} screenshot ${String(index)}`);
+              return new Uint8Array([index]);
+            },
+          }),
+        }),
+        setContent: async (html: string) => {
+          log.push(`${id} setContent ${html.includes("<iframe") ? "frames" : "images"}`);
+        },
+        pdf: async () => {
+          log.push(`${id} pdf`);
+          return new Uint8Array([37]);
+        },
+      };
+    };
+    return {
+      newContext: async (options: { deviceScaleFactor?: number }) => {
+        log.push(`scale ${String(options.deviceScaleFactor)}`);
+        return { route: async () => undefined, newPage, close: async () => undefined };
+      },
+      close: async () => undefined,
+    };
+  }
+
+  async function exportAs(format: "png" | "pdf", log: string[]) {
+    const assets = await mkdtemp(join(tmpdir(), "octant-canvas-export-"));
+    try {
+      const renderer = createPlaywrightCanvasPreviewRenderer({
+        webAssetsPath: assets,
+        executableCandidates: ["/nonexistent/chromium"],
+        executable: async () => true,
+        // The fake carries only the calls an export makes.
+        launch: async () => recordingBrowser(log) as never,
+      });
+      return await renderer.renderPictures({
+        format,
+        theme: "light",
+        subject: { kind: "frames", frames },
+      });
+    } finally {
+      await rm(assets, { recursive: true, force: true });
+    }
+  }
+
+  it("prints a PDF from a page of the frames' pictures instead of from the live frames", async () => {
+    const log: string[] = [];
+    await expect(exportAs("pdf", log)).resolves.toEqual({
+      kind: "rendered",
+      files: [new Uint8Array([37])],
+    });
+    expect(log).toEqual([
+      "scale 2",
+      "open tab0",
+      "tab0 screenshot 0",
+      "tab0 screenshot 1",
+      "open tab1",
+      "tab1 setContent images",
+      "tab1 pdf",
+    ]);
+  });
+
+  it("keeps PNG export a picture per frame at the screen's scale", async () => {
+    const log: string[] = [];
+    await expect(exportAs("png", log)).resolves.toEqual({
+      kind: "rendered",
+      files: [new Uint8Array([0]), new Uint8Array([1])],
+    });
+    expect(log[0]).toBe("scale 1");
+    expect(log.some((entry) => entry.includes("pdf"))).toBe(false);
+  });
+
+  it("holds each frame's picture inline, with no frame and no way to load anything", () => {
+    const page = canvasExportSheetsPage(frames, [new Uint8Array([1, 2]), new Uint8Array([3])]);
+    expect(page).not.toContain("<iframe");
+    expect(page).toContain("data:image/png;base64,AQI=");
+    expect(page).toContain("img-src data:");
+    expect(page).not.toContain("frame-src");
+    expect(canvasExportSheetsPage(frames)).toContain("<iframe");
   });
 });

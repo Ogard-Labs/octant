@@ -101,7 +101,7 @@ const eventKindsByCapability: ReadonlyArray<
   ["toolActivity", ["tool-start", "tool-progress", "tool-success", "tool-failure"]],
   ["fileChanges", ["file-change"]],
   ["diffs", ["diff"]],
-  ["taskProgress", ["task-progress"]],
+  ["taskProgress", ["task-progress", "task-list"]],
   ["nativeChildAgents", ["child-agent-activity"]],
   ["approvals", ["approval-request"]],
   ["userQuestions", ["user-input-request"]],

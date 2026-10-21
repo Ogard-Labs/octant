@@ -74,23 +74,46 @@ export interface SidebarActivityView {
   readonly groups: ReadonlyArray<SidebarActivityGroup>;
 }
 
-export function readActivityViewEnabled(
+/**
+ * How a mode's sidebar arranges its threads: by Project, by when they last
+ * moved (the Activity feed), or by what each one needs (Status).
+ */
+export type SidebarThreadArrangement = "projects" | "activity" | "status";
+
+// The stored words predate Status: "on" was the feed and "off" the tree, so
+// they keep those meanings and an existing choice survives.
+const STORED_ARRANGEMENT: Readonly<Record<string, SidebarThreadArrangement>> = {
+  on: "activity",
+  off: "projects",
+  status: "status",
+};
+const ARRANGEMENT_WORD: Readonly<Record<SidebarThreadArrangement, string>> = {
+  activity: "on",
+  projects: "off",
+  status: "status",
+};
+
+/**
+ * The arrangement this mode's sidebar shows. A mode nobody has chosen for
+ * opens on Status, as does any storage that cannot be read.
+ */
+export function readThreadArrangement(
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">,
   storageHolder: { readonly localStorage?: Storage } = globalThis,
   mode: SidebarActivityMode = "chat",
-): boolean {
+): SidebarThreadArrangement {
   try {
     const resolved = resolveStorage(storage, storageHolder);
-    if (resolved === undefined) return false;
+    if (resolved === undefined) return "status";
     migrateLegacyActivityView(resolved);
-    return resolved.getItem(activityViewStorageKey(mode)) === "on";
+    return STORED_ARRANGEMENT[resolved.getItem(activityViewStorageKey(mode)) ?? ""] ?? "status";
   } catch {
-    return false;
+    return "status";
   }
 }
 
-export function writeActivityViewEnabled(
-  enabled: boolean,
+export function writeThreadArrangement(
+  arrangement: SidebarThreadArrangement,
   storage?: Pick<Storage, "getItem" | "setItem" | "removeItem">,
   storageHolder: { readonly localStorage?: Storage } = globalThis,
   mode: SidebarActivityMode = "chat",
@@ -99,7 +122,7 @@ export function writeActivityViewEnabled(
     const resolved = resolveStorage(storage, storageHolder);
     if (resolved === undefined) return;
     migrateLegacyActivityView(resolved);
-    resolved.setItem(activityViewStorageKey(mode), enabled ? "on" : "off");
+    resolved.setItem(activityViewStorageKey(mode), ARRANGEMENT_WORD[arrangement]);
   } catch {
     // Presentation persistence is best-effort; the current session still toggles.
   }
@@ -174,6 +197,49 @@ export function buildSidebarActivityView(input: {
     const threads = buckets.get(bucket.id);
     if (threads === undefined || threads.length === 0) continue;
     groups.push({ id: bucket.id, label: bucket.label, threads });
+  }
+  return { groups };
+}
+
+/**
+ * The Status arrangement: what each thread needs from the person, in the
+ * order they would act on it. Pinned comes first, as in the feed. A thread
+ * waiting on an approval or an answer needs input; a finished turn nobody has
+ * looked at is ready for review; a running turn is working; everything else is
+ * idle. Each group lists its newest threads first.
+ */
+export function buildSidebarStatusView(input: {
+  readonly projects: ReadonlyArray<SidebarActivityProject>;
+  readonly unfiledLabel?: "No project" | "Unfiled" | "Recents" | "Chats";
+  readonly threads: ReadonlyArray<ChatThreadNavigationItem>;
+}): SidebarActivityView {
+  const projectNames = new Map(input.projects.map((project) => [project.id, project.name]));
+  const rows = input.threads
+    .map((thread) => toActivityThread(thread, projectNames, input.unfiledLabel ?? "No project"))
+    .sort(compareActivityThreads);
+  const buckets: ReadonlyArray<{
+    readonly id: string;
+    readonly label: string;
+    readonly holds: (thread: SidebarActivityThread) => boolean;
+  }> = [
+    { id: "pinned", label: "Pinned", holds: (thread) => thread.pinned === true },
+    { id: "needs-input", label: "Needs input", holds: (thread) => thread.activity === "attention" },
+    {
+      id: "ready-for-review",
+      label: "Ready for review",
+      holds: (thread) => thread.activity === "unread",
+    },
+    { id: "working", label: "Working", holds: (thread) => thread.activity === "working" },
+    { id: "idle", label: "Idle", holds: () => true },
+  ];
+  const placed = new Set<string>();
+  const groups: SidebarActivityGroup[] = [];
+  for (const bucket of buckets) {
+    const threads = rows.filter(
+      (thread) => !placed.has(thread.navigationId) && bucket.holds(thread),
+    );
+    for (const thread of threads) placed.add(thread.navigationId);
+    if (threads.length > 0) groups.push({ id: bucket.id, label: bucket.label, threads });
   }
   return { groups };
 }
