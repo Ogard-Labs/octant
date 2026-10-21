@@ -9,6 +9,11 @@ import { describe, expect, it, vi } from "vitest";
 import { BrowserWorkspace } from "./BrowserWorkspace";
 import { boundsInsideViewport } from "./useNativeBrowserSurface";
 
+const localServers = vi.hoisted(() => ({ snapshot: undefined as unknown }));
+vi.mock("../environment/useLocalServersController", () => ({
+  useLocalServersController: () => ({ status: "ready", snapshot: localServers.snapshot }),
+}));
+
 const threadId = "10000000-0000-4000-8000-000000000001";
 const authority = {
   hostId: "20000000-0000-4000-8000-000000000001",
@@ -187,6 +192,7 @@ describe("BrowserWorkspace", () => {
 
     await act(async () => undefined);
     expect(browser.inspectThread).not.toHaveBeenCalled();
+    enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     await waitFor(() => expect(onContextCreated).toHaveBeenCalledWith(context.contextId));
   });
@@ -230,6 +236,67 @@ describe("BrowserWorkspace", () => {
       expect(screen.getByLabelText("Browser URL")).toHaveValue("https://example.com/agent-updated"),
     );
     expect(browser.inspectThread).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers the checkout's running servers and opens the one the person picks", async () => {
+    const listener = (port: number, extra: object) => ({
+      listenerId: `lsn_${String(port).padStart(32, "0")}`,
+      port,
+      url: `http://localhost:${port}/`,
+      processName: "node",
+      attribution: "current-checkout",
+      startSource: "terminal",
+      bindScope: "loopback",
+      health: "listening",
+      openAvailable: true,
+      stop: { kind: "unavailable" },
+      ...extra,
+    });
+    localServers.snapshot = {
+      threadId,
+      projectId: authority.projectId,
+      currentCheckout: [
+        listener(5173, { framework: "vite" }),
+        listener(9229, { health: "unresponsive", openAvailable: false }),
+      ],
+      other: [listener(3000, { framework: "next" })],
+      observedAt: "2026-07-27T20:00:00.000Z",
+    };
+    const browser = client();
+    try {
+      render(
+        <BrowserWorkspace
+          client={browser}
+          projectId={authority.projectId as any}
+          tab={{
+            kind: "browser",
+            id: "90000000-0000-4000-8000-000000000040" as any,
+            mode: "code",
+            title: "Browser",
+            threadId: threadId as any,
+          }}
+        />,
+      );
+
+      expect(screen.getByRole("textbox", { name: "Browser URL" })).toHaveValue(
+        "http://localhost:5173/",
+      );
+      const servers = screen.getByRole("list", { name: "Running servers" });
+      expect(servers).toHaveTextContent("localhost:5173vite");
+      expect(servers).toHaveTextContent("localhost:3000next");
+      expect(servers).not.toHaveTextContent("9229");
+
+      fireEvent.click(screen.getByRole("button", { name: /localhost:3000/ }));
+      await waitFor(() =>
+        expect(browser.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            policy: expect.objectContaining({ allowedOrigins: ["http://localhost:3000"] }),
+          }),
+        ),
+      );
+    } finally {
+      localServers.snapshot = undefined;
+    }
   });
 
   it("renders unavailable truthfully when the tab has no owning thread", () => {
@@ -510,6 +577,7 @@ describe("BrowserWorkspace", () => {
     );
 
     expect(await screen.findByRole("button", { name: "Stop" })).toBeVisible();
+    enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     await waitFor(() =>
       expect(browser.act).toHaveBeenCalledWith(
@@ -672,6 +740,7 @@ describe("BrowserWorkspace", () => {
       />,
     );
 
+    enterAddress("https://example.com");
     const start = screen.getByRole("button", { name: "Start browser" });
     fireEvent.click(start);
     fireEvent.click(start);
@@ -726,6 +795,7 @@ describe("BrowserWorkspace", () => {
         }}
       />,
     );
+    enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     await screen.findByText("Browser failed");
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
@@ -773,6 +843,7 @@ describe("BrowserWorkspace", () => {
       />,
     );
 
+    enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The host browser could not start.");
     await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledTimes(2), { timeout: 2_000 });
@@ -821,6 +892,7 @@ describe("BrowserWorkspace", () => {
         }}
       />,
     );
+    enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     await screen.findByText("Browser running");
     fireEvent.submit(screen.getByRole("textbox", { name: "Browser URL" }).closest("form")!);
@@ -1019,3 +1091,7 @@ describe("BrowserWorkspace", () => {
     expect(over.y + over.height).toBe(600);
   });
 });
+
+function enterAddress(value: string): void {
+  fireEvent.change(screen.getByRole("textbox", { name: "Browser URL" }), { target: { value } });
+}

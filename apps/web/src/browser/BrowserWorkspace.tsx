@@ -16,6 +16,9 @@ import type {
 } from "@octant/contracts/browser-automation";
 import { MAX_BROWSER_TABS_PER_CONTEXT } from "@octant/contracts/browser-automation";
 import type { ToolActionRequest } from "@octant/contracts/tool-actions";
+import { decodeCodeThreadId } from "@octant/contracts/code";
+import type { LocalServerSnapshot } from "@octant/contracts";
+import type { ProjectId } from "@octant/contracts/projects";
 import type { WorkspaceTab } from "@octant/contracts/shell";
 import {
   ArrowLeft,
@@ -30,7 +33,7 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MiddleTruncatedText } from "../lib/MiddleTruncatedText";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantInput } from "../ui/base/OctantInput";
@@ -40,6 +43,7 @@ import { useProductFeedback } from "./useProductFeedback";
 import type { OctantHostBridge } from "../shell/hostBridge";
 import { useNativeBrowserSurface } from "./useNativeBrowserSurface";
 import { OctantAlert } from "../ui/base/OctantAlert";
+import { useLocalServersController } from "../environment/useLocalServersController";
 
 /**
  * Renderer chrome a native page must never be painted over. A native view is a
@@ -66,6 +70,11 @@ export interface BrowserWorkspaceProps {
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   /**
+   * The Code thread's Project. With it, a Browser that has no page yet offers
+   * the servers running for that checkout instead of a placeholder address.
+   */
+  readonly projectId?: ProjectId;
+  /**
    * Dock this thread's research browser into the focus zone. Absent when this
    * window has no zone to dock into. The dock shows the same thread's browsing
    * context under the same authority; docking moves where the page is shown
@@ -82,7 +91,9 @@ export interface BrowserWorkspaceProps {
 }
 
 export function BrowserWorkspace(props: BrowserWorkspaceProps) {
-  const [url, setUrl] = useState("https://example.com");
+  const [url, setUrl] = useState("");
+  // A server suggestion fills the address only until the person types one.
+  const [addressTyped, setAddressTyped] = useState(false);
   const [scope, setScope] = useState<BrowserThreadScope>();
   const [snapshot, setSnapshot] = useState<BrowserAutomationSnapshot>();
   const [status, setStatus] = useState<BrowserWorkspaceStatus>(
@@ -130,6 +141,36 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     overlaySelector: RENDERER_OVERLAY_SELECTOR,
   });
   const nativeState = nativeSurface.state;
+  const codeThreadId = useMemo(
+    () =>
+      props.tab.mode === "code" && props.tab.threadId !== undefined
+        ? decodeCodeThreadId(String(props.tab.threadId))
+        : undefined,
+    [props.tab.mode, props.tab.threadId],
+  );
+  // Watched only while no page is open: once one is, the address bar is the
+  // person's, and the Environment tab is where servers are watched live.
+  const localServers = useLocalServersController({
+    enabled: codeThreadId !== undefined && !activeContext,
+    poll: !activeContext,
+    ...(codeThreadId === undefined ? {} : { threadId: codeThreadId }),
+    ...(props.projectId === undefined ? {} : { projectId: props.projectId }),
+    ...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl }),
+    ...(props.windowCapability === undefined ? {} : { windowCapability: props.windowCapability }),
+  });
+  const serverSuggestions = useMemo(
+    () =>
+      codeThreadId !== undefined &&
+      localServers.snapshot !== undefined &&
+      String(localServers.snapshot.threadId) === String(codeThreadId)
+        ? openableServers(localServers.snapshot)
+        : [],
+    [codeThreadId, localServers.snapshot],
+  );
+  const firstSuggestion = serverSuggestions[0]?.url;
+  useEffect(() => {
+    if (!addressTyped && !activeContext && firstSuggestion !== undefined) setUrl(firstSuggestion);
+  }, [activeContext, addressTyped, firstSuggestion]);
 
   const committedAddress = activeContext
     ? ((nativeContext ? nativeState?.url : undefined) ?? snapshot?.observation?.url)
@@ -258,7 +299,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     );
   }
 
-  async function start(): Promise<void> {
+  async function start(address: string = url): Promise<void> {
     if (startInFlight.current) return;
     startInFlight.current = true;
     localFailure.current = false;
@@ -266,7 +307,7 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
     setStatus("waiting");
     setMessage(undefined);
     try {
-      const targetUrl = validTargetUrl(url);
+      const targetUrl = validTargetUrl(address);
       if (targetUrl === undefined) return;
       const origin = new URL(targetUrl).origin;
       setUrl(targetUrl);
@@ -571,7 +612,11 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           <span className="browser-workspace__address">
             <OctantInput
               aria-label="Browser URL"
-              onChange={(event) => setUrl(event.target.value)}
+              onChange={(event) => {
+                setAddressTyped(true);
+                setUrl(event.target.value);
+              }}
+              placeholder="Enter an address"
               spellCheck={false}
               type="text"
               value={url}
@@ -675,9 +720,35 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           <ShieldCheck aria-hidden="true" size={20} />
           <h2>Open a private Browser session</h2>
           <p>The page is isolated to this thread and shared with its agent.</p>
+          {serverSuggestions.length === 0 ? null : (
+            <ul aria-label="Running servers" className="browser-workspace__servers">
+              {serverSuggestions.map((server) => (
+                <li key={server.listenerId}>
+                  <OctantButton
+                    disabled={starting}
+                    onClick={() => {
+                      setUrl(server.url);
+                      void start(server.url);
+                    }}
+                    type="button"
+                    variant="ghost"
+                  >
+                    <span className="browser-workspace__server">
+                      <span className="browser-workspace__server-address">
+                        {serverAddressLabel(server.url)}
+                      </span>
+                      <span className="browser-workspace__server-meta">
+                        {server.framework ?? server.processName}
+                      </span>
+                    </span>
+                  </OctantButton>
+                </li>
+              ))}
+            </ul>
+          )}
           <OctantButton
             aria-label="Start browser"
-            disabled={starting}
+            disabled={starting || url.trim() === ""}
             onClick={() => void start()}
             type="button"
           >
@@ -835,6 +906,25 @@ function previewPoint(
 function boundedWheelDelta(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(-2000, Math.min(2000, Math.round(value)));
+}
+
+/**
+ * Servers worth opening, this checkout's first. A listener the host could not
+ * reach is left out: it would open onto an error page.
+ */
+function openableServers(snapshot: LocalServerSnapshot): LocalServerSnapshot["currentCheckout"] {
+  const seen = new Set<string>();
+  return [...snapshot.currentCheckout, ...snapshot.other].filter((server) => {
+    if (!server.openAvailable || seen.has(server.url)) return false;
+    seen.add(server.url);
+    return true;
+  });
+}
+
+function serverAddressLabel(value: string): string {
+  const url = new URL(value);
+  const path = url.pathname === "/" ? "" : url.pathname;
+  return `${url.host}${path}`;
 }
 
 export function normalizeBrowserUrl(value: string): string {

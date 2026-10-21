@@ -3489,6 +3489,30 @@ form > .work-composer-adapter__attachments {
   line-height: 1.5;
 }
 
+.browser-workspace__servers {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.browser-workspace__server {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.browser-workspace__server-address {
+  color: var(--oct-fg);
+  font-family: var(--oct-font-mono);
+}
+
+.browser-workspace__server-meta {
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
 .browser-workspace__native {
   position: relative;
   min-width: 0;
