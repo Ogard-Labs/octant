@@ -973,6 +973,14 @@ bar is `--oct-statusbar-h`.
 While a route or tool is still loading, its state is one quiet line (spinner,
 then the title) on the page ground, never a raised card: a card with a title
 and a sentence reads as a finished empty state.
+A state that is the whole window (a refused launch address, a launch session
+that expired, Project authority that is unavailable, a lost connection, storage
+recovery) is the page presentation of `ShellState`: centred on the page, a 96px
+mark that is the state's glyph drawn as an open grid of dots in the primary ink
+(a warning is a filled triangle with its mark cut out), a title at the
+`--oct-text-xl` step, one line in the secondary ink, and the way back as a text
+link in the accent ink, with no eyebrow. A state inside a pane or panel keeps
+the compact layout: glyph, eyebrow, title, sentence, and a button.
 
 Navigation panes stay compact hairline rails. Routine form layouts stay open
 and unshadowed; setup objects and cards use the card recipe (`OctantCard`), and
