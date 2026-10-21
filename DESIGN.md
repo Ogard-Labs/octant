@@ -1319,7 +1319,11 @@ than a manual form: the card's details carry an outlined "Locate binary…"
 action beside Check connection, shown only where the desktop's file picker
 exists and only for a runtime whose version probe the host can run. Its
 answer is one quiet line under the actions (the version the host read), or a
-warning box saying why the host refused the file.
+warning box saying why the host refused the file. A card whose saved binary is
+missing or incompatible, while the latest scan found that runtime elsewhere,
+adds a second outlined action, "Use the one found at ~/.local/bin/claude
+(2.1.306)", that gives the same answer without the picker; see
+[Providers and model endpoints](docs/design/model-endpoints.md).
 
 Provider catalog and the Octant Harness model endpoints (rows, detail
 sub-pages, and Add endpoint) follow

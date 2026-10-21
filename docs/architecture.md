@@ -2499,6 +2499,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   configured instance when one exists. Opening the catalog starts nothing. A
   scan, connect, enable, or connection check runs only from its step's button,
   and sign-in, Locate binary, and credentials stay on the runtime's own card.
+  The card may also point its runtime at a binary the latest scan found, when
+  its saved one is missing or incompatible: the `locate-binary` command then
+  names a scanned path instead of a picker receipt, and the host takes it only
+  if it is a candidate of that driver kind from its own scan, checking it
+  exactly as it checks a picked file.
   Discovery keeps one provider per driver family, as auto-registration does:
   a discovery connect for a driver that already has a provider returns that
   provider instead of creating a second one, and leaves its switch unchanged.
