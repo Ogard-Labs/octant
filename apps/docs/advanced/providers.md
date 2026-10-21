@@ -391,8 +391,8 @@ session or treats the 2.x version as the legacy runtime.
 ### API endpoints
 
 Direct API endpoints are added in **Settings → Octant Harness → Model
-endpoints → Add endpoint**. After the one-click sign-ins, the dialog walks
-through five steps:
+endpoints → Add endpoint**. After the one-click sign-ins and the presets, the
+dialog walks through five steps:
 
 1. **Kind**: Azure AI Foundry, OpenAI-compatible, Anthropic-compatible, or
    Local (Ollama).
@@ -558,6 +558,24 @@ as a sign-in finishes. An endpoint you added yourself whose base URL is
 one of these offers the same sign-in beside its API key. The host refuses a
 sign-in started from a paired device; sign in from the Octant app or a browser
 on the host.
+
+### Presets added with a key
+
+Some services take an ordinary API key but are easier to add by name. The
+same list offers each as a row with **Add with key**, which opens Connect with
+the name, address and protocol filled in and a link to the page where the key
+is created; the address stays editable, and the result is an ordinary
+OpenAI-compatible endpoint.
+
+- **OpenCode Go** — `https://opencode.ai/inference/go/v1`, the OpenCode Go
+  subscription. The key comes from the OpenCode console; without the Go plan
+  the models list but every request is refused, which Verify tools shows.
+- **OpenCode Zen** — `https://opencode.ai/inference/v1`, OpenCode's gateway
+  paid per request from console credits, with the same kind of key.
+- **Mistral** — `https://api.mistral.ai/v1` with a Mistral API key from
+  Mistral Studio, the same key the Vibe CLI uses.
+- **Requesty** — `https://router.requesty.ai/v1` with a key from the Requesty
+  app.
 
 While Octant checks your saved account, the Sign-in section says **Checking
 sign-in**. After you choose Sign in, it shows the browser progress and a link to

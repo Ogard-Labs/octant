@@ -10,7 +10,9 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ModelToolCheck } from "../../providers/useProviderController";
+import { endpointPreset } from "./addEndpointSteps";
 import { AddEndpointFlow, type AddEndpointFlowProps, type AddedEndpoint } from "./AddEndpointFlow";
+import { EndpointChoices } from "./AddModelEndpoint";
 import type { EndpointStatus, ModelEndpointInstance } from "./endpointStatus";
 
 const id = decodeProviderInstanceId("80000000-0000-4000-8000-0000000004a7");
@@ -769,5 +771,64 @@ describe("Add endpoint, step by step", () => {
       expect.objectContaining({ kind: "azure-foundry-openai-http" }),
       expect.objectContaining({ value: "" }),
     );
+  });
+});
+
+describe("Add endpoint presets", () => {
+  it("fills in OpenCode Go's name, address and protocol from its row, and links to where the key is made", async () => {
+    const user = userEvent.setup();
+    const props = renderFlow({
+      signIns: (flow) => (
+        <EndpointChoices
+          credentialManagementAvailable
+          disabled={false}
+          onAddWithKey={flow.choosePreset}
+          onSignIn={vi.fn()}
+        />
+      ),
+    });
+    await user.click(screen.getByRole("button", { name: "Add with key, OpenCode Go" }));
+
+    const form = screen.getByRole("form", { name: "Connect OpenCode Go" });
+    expect(within(form).getByLabelText("Name")).toHaveValue("OpenCode Go");
+    expect(within(form).getByRole("textbox", { name: /address/i })).toHaveValue(
+      "https://opencode.ai/inference/go/v1",
+    );
+    expect(within(form).getByRole("link", { name: "the OpenCode console" })).toHaveAttribute(
+      "href",
+      "https://opencode.ai/console/go",
+    );
+    await user.type(within(form).getByLabelText("API key"), "private-value");
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+
+    expect(props.onCreateOpenAiCompatible).toHaveBeenCalledWith(
+      "OpenCode Go",
+      {
+        kind: "openai-compatible-http",
+        baseUrl: "https://opencode.ai/inference/go/v1",
+        authentication: "bearer",
+        protocol: "auto",
+        manualModelIds: [],
+      },
+      expect.objectContaining({ value: "private-value" }),
+    );
+  });
+
+  it("opens on Connect, filled in, for a preset chosen on the page", () => {
+    renderFlow({ initialPreset: endpointPreset("mistral") });
+    const form = screen.getByRole("form", { name: "Connect Mistral" });
+    expect(within(form).getByRole("textbox", { name: /address/i })).toHaveValue(
+      "https://api.mistral.ai/v1",
+    );
+    expect(screen.queryByRole("list", { name: "Kinds of endpoint" })).not.toBeInTheDocument();
+  });
+
+  it("links to where a preset's key is made even where the browser cannot store keys", () => {
+    renderFlow({ credentialManagementAvailable: false, initialPreset: endpointPreset("mistral") });
+    const form = screen.getByRole("form", { name: "Connect Mistral" });
+    expect(within(form).getByTestId("endpoint-key-later")).toBeVisible();
+    expect(
+      within(form).getByRole("link", { name: endpointPreset("mistral").keyPage.label }),
+    ).toHaveAttribute("href", endpointPreset("mistral").keyPage.url);
   });
 });
