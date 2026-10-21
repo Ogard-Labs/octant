@@ -5552,8 +5552,34 @@ import for review and install; the folder loader reads all three layouts
 Agent Plugins package in memory, keeping its skills and MCP servers and
 leaving its commands, agents and hooks behind, with a note saying so. This
 is the one place the home folder's `.claude` is read, and only for this
-explicit listing; it is still never a skill root. A first-party connectors catalog and
-Project pins each arrive as their own change on these same seams.
+explicit listing; it is still never a skill root. Project pins arrive as their own change on these same seams.
+
+**Connectors catalog.** Settings › Skills & Extensions has a Connectors view:
+a bundled, first-party list of hosted MCP servers (`connectorCatalog` in
+`@octant/domain`), each with a name, one line, a category, the vendor's own
+address and how it is reached: sign-in through the MCP authorization flow,
+a key the vendor issues sent in one header, or nothing. Nothing is fetched
+to show the list, so it adds no request and no marketplace disclosure; the
+catalog relates to the plugin marketplace only in that both end in an
+installed package under the one activation ladder. Connect makes an
+ordinary user-added server for the entry's address and then starts the
+sign-in, or takes the key (kept in the broker like any user-added secret),
+or just connects. The add request carries the entry's id; the host accepts it
+only for an id in the bundled catalog at that entry's own address, and names
+the package `connector-<id>`, a name it refuses to a hand-added server. The
+view recognizes a connected entry by that package name, never by a display
+name, so a server a person happened to call "Linear" neither shows as
+Connected nor receives its sign-in. The add's answer names the package it
+created (`addedPackage`), and the sign-in starts on that package rather than
+on whichever one a snapshot diff shows. An entry is listed only after a probe showed the address
+behaving as its kind claims (a sign-in server: 401 with resource metadata,
+an authorization server with PKCE S256 and dynamic client registration); a
+vendor whose issuer offers no registration is listed as a key entry or not
+at all, never as a sign-in that would fail. Hide keeps an entry out of
+sight on this computer and Show hidden brings every entry back; that
+preference lives in the renderer's storage, since it changes nothing on the
+host. Connecting works only from the Octant window on the host, like Add
+MCP server.
 
 **Sign-in to a hosted server.** A user-added server reached over Streamable
 HTTP shows Sign in under its component in Settings. The host runs the MCP

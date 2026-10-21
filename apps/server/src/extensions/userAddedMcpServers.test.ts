@@ -198,6 +198,42 @@ describe("MCP servers added by hand", () => {
     await expect(add()).rejects.toMatchObject({ category: "conflict" });
   });
 
+  it("keeps the connector package name for a catalog add and refuses it to a hand add", async () => {
+    const { store: servers, registry } = await store();
+    const handAdded = (name: string) =>
+      servers.add({
+        name,
+        server: { type: "streamable-http", url: "https://example.com/mcp", headers: [] },
+      });
+    await handAdded("Linear");
+    const connector = await servers.add({
+      name: "Linear",
+      connectorId: "linear",
+      server: { type: "streamable-http", url: "https://mcp.linear.app/mcp", headers: [] },
+    });
+    expect(registry.get(connector.source.sourceRef)?.packageInput.source).toEqual(connector.source);
+    const manifest = await readFile(
+      join(registry.get(connector.source.sourceRef)?.absolutePath ?? "", "plugin.json"),
+      "utf8",
+    );
+    expect(JSON.parse(manifest)).toMatchObject({ name: "connector-linear" });
+    await expect(handAdded("Connector Notion")).rejects.toMatchObject({ category: "invalid" });
+    await expect(
+      servers.add({
+        name: "Linear",
+        connectorId: "linear",
+        server: { type: "streamable-http", url: "https://example.com/mcp", headers: [] },
+      }),
+    ).rejects.toMatchObject({ category: "invalid" });
+    await expect(
+      servers.add({
+        name: "Nope",
+        connectorId: "not-in-catalog",
+        server: { type: "streamable-http", url: "https://example.com/mcp", headers: [] },
+      }),
+    ).rejects.toMatchObject({ category: "invalid" });
+  });
+
   it("turns a display name into a package name and refuses one with nothing usable", () => {
     expect(packageSlug("  Docs Search (v2) ")).toBe("docs-search-v2");
     expect(() => packageSlug("___")).toThrow(/at least one letter or digit/);

@@ -128,6 +128,12 @@ const userAddedSecretValue = Schema.Struct({
 }).annotations(strict);
 export const UserAddedMcpServerRequest = Schema.Struct({
   name: boundedText(64),
+  /**
+   * The catalog connector this server is, when it was added from Connectors.
+   * The host checks it against the bundled catalog and names the package after
+   * it, so the package stays recognizable whatever its display name is.
+   */
+  connectorId: Schema.optional(boundedText(64)),
   server: Schema.Union(
     Schema.Struct({
       type: Schema.Literal("stdio"),
@@ -473,6 +479,13 @@ export const ExtensionCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("extension-state-updated"),
     snapshot: ExtensionSnapshot,
+    /** Set only when the update was a user-added server: the package that add created. */
+    addedPackage: Schema.optional(
+      Schema.Struct({
+        extensionId: ToolExtensionId,
+        componentId: Schema.optional(ExtensionComponentId),
+      }).annotations(strict),
+    ),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("extension-effective-state"),

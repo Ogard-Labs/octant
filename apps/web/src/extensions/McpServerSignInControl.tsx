@@ -10,6 +10,8 @@ export interface McpServerSignInControlProps {
   readonly disabled: boolean;
   /** How often an open sign-in is asked about, in milliseconds. */
   readonly pollIntervalMs?: number;
+  /** Start the sign-in as soon as the host says the server is signed out; the person just asked to connect. */
+  readonly autoBegin?: boolean;
 }
 
 /**
@@ -51,7 +53,12 @@ export function McpServerSignInControl(props: McpServerSignInControlProps) {
     client
       .mcpServerSignIn({ kind: "status", ...target })
       .then((next) => {
-        if (!cancelled) setView(next);
+        if (cancelled) return;
+        if (next.kind === "signed-out" && props.autoBegin === true) {
+          void ask({ kind: "begin", ...target });
+          return;
+        }
+        setView(next);
       })
       .catch(() => {
         if (!cancelled) setView(undefined);

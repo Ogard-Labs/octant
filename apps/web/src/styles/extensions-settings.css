@@ -523,3 +523,63 @@
   color: var(--oct-meta);
   font-size: var(--oct-text-xs);
 }
+
+/* Connectors: a category heading, then one row per hosted service. */
+.connectors__category {
+  margin: var(--oct-space-4) 0 var(--oct-space-1);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-weight: var(--oct-weight-medium);
+}
+
+.connectors {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.connectors__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--oct-space-3);
+  padding: var(--oct-space-2) 0;
+  border-top: 1px solid var(--oct-hairline);
+}
+
+.connectors__row[data-hidden="true"] {
+  opacity: 0.6;
+}
+
+.connectors__text {
+  display: grid;
+  flex: 1;
+  gap: var(--oct-space-1);
+  min-width: 0;
+}
+
+.connectors__name {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
+}
+
+.connectors__detail {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  overflow-wrap: anywhere;
+}
+
+.connectors__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+  white-space: nowrap;
+}
+
+.connectors__key {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}

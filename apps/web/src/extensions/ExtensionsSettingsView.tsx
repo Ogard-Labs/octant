@@ -23,6 +23,7 @@ import { SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { AddMcpServerDialog } from "./AddMcpServerDialog";
 import { DiscoveredToolingSection } from "./DiscoveredToolingSection";
 import { McpServerSignInControl } from "./McpServerSignInControl";
+import { ConnectorsView } from "./ConnectorsView";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -256,9 +257,9 @@ const INSTALLED_SKILL_PREVIEW_LIMIT = 12;
 export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const scope = props.scope ?? DEFAULT_EXTENSION_SETTINGS_SCOPE;
   const marketplaceFetchesEnabled = props.marketplaceFetchesEnabled ?? true;
-  const [view, setView] = useState<"installed" | "marketplace">("installed");
+  const [view, setView] = useState<"installed" | "marketplace" | "connectors">("installed");
   const viewSwitch = (
-    <OctantToggleGroup<"installed" | "marketplace">
+    <OctantToggleGroup<"installed" | "marketplace" | "connectors">
       aria-label="View"
       onValueChange={(value) => {
         const selected = value[0];
@@ -268,6 +269,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     >
       <OctantToggleGroupItem value="installed">Installed</OctantToggleGroupItem>
       <OctantToggleGroupItem value="marketplace">Marketplace</OctantToggleGroupItem>
+      <OctantToggleGroupItem value="connectors">Connectors</OctantToggleGroupItem>
     </OctantToggleGroup>
   );
   const [status, setStatus] = useState<LoadStatus>("loading");
@@ -982,6 +984,18 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             </SettingsDisclosure>
           ) : null}
         </>
+      ) : view === "connectors" ? (
+        <ConnectorsView
+          actions={viewSwitch}
+          client={props.client}
+          disabled={installing || importingLocal}
+          localHost={props.client.toolGrantsAvailable}
+          onConnected={() => {
+            setDiscoveredRevision((revision) => revision + 1);
+            void reload();
+          }}
+          snapshot={snapshot}
+        />
       ) : (
         <>
           <SettingsSection
