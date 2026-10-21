@@ -410,15 +410,16 @@ export function CanvasWorkspaceTab(props: CanvasWorkspaceTabProps): ReactNode {
     // Project has no folder to bind, so a Chat Canvas offers no start.
     const startMode =
       props.tab.mode === "work" || props.tab.mode === "code" ? props.tab.mode : undefined;
+    const startProjectId = props.tab.projectId;
     const onStartPlanTask = props.onStartPlanTask;
     const start: Pick<PlanTaskRuntime, "onStartTask"> =
-      onStartPlanTask === undefined || startMode === undefined
+      onStartPlanTask === undefined || startMode === undefined || startProjectId === null
         ? {}
         : {
             onStartTask: (planTitle, task) =>
               onStartPlanTask({
                 mode: startMode,
-                projectId: props.tab.projectId,
+                projectId: startProjectId,
                 prompt: planTaskPrompt(planTitle, task),
               }),
           };

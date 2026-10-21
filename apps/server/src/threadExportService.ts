@@ -544,20 +544,23 @@ export class ThreadExportService {
     projectId: ProjectId | undefined,
     threadId: string,
   ): ReadonlyArray<ThreadExportArtifactSource> {
-    if (projectId === undefined) return [];
-    return this.#canvases
-      .byThread({ projectId, threadId, mode })
-      .map((entry: CanvasProjectionEntry) => ({
-        canvasId: String(entry.canvasId),
-        versionId: String(entry.currentVersion.versionId),
-        sequence: entry.currentVersion.sequence,
+    // A Chat thread's export carries the Canvases it owns itself as well as
+    // its Project's, the same set the thread shows.
+    const entries = [
+      ...(mode === "chat" ? this.#canvases.byThread({ projectId: null, threadId, mode }) : []),
+      ...(projectId === undefined ? [] : this.#canvases.byThread({ projectId, threadId, mode })),
+    ];
+    return entries.map((entry: CanvasProjectionEntry) => ({
+      canvasId: String(entry.canvasId),
+      versionId: String(entry.currentVersion.versionId),
+      sequence: entry.currentVersion.sequence,
+      title: entry.currentVersion.definition.title,
+      updatedAt: entry.updatedAt,
+      definition: {
         title: entry.currentVersion.definition.title,
-        updatedAt: entry.updatedAt,
-        definition: {
-          title: entry.currentVersion.definition.title,
-          blocks: entry.currentVersion.definition.blocks,
-        },
-      }));
+        blocks: entry.currentVersion.definition.blocks,
+      },
+    }));
   }
 }
 

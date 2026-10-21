@@ -262,8 +262,15 @@ export interface CanvasAuthoringThread {
 }
 
 type CanvasToolOwner =
-  | { readonly mode: "chat"; readonly thread: Omit<CanvasAuthoringThread, "projectId"> }
+  | {
+      readonly mode: "chat";
+      /** A Chat thread; `projectId` is absent when it is in no Chat Project. */
+      readonly thread: Omit<CanvasAuthoringThread, "projectId"> & { readonly projectId?: string };
+    }
   | { readonly mode: "work" | "code"; readonly thread: CanvasAuthoringThread };
+
+/** Which owner a Chat thread's Canvases have: its Chat Project, or the thread alone. */
+type ChatCanvasOwner = "project" | "thread";
 
 type ResolvedCanvasTarget =
   | {
@@ -275,15 +282,19 @@ type ResolvedCanvasTarget =
         | { readonly kind: "chat-virtual"; readonly projectId: string };
       readonly context: {
         readonly mode: "chat" | "work" | "code";
-        readonly projectId: string;
+        /** Null for a Canvas owned by a Chat thread outside a Chat Project. */
+        readonly projectId: string | null;
         readonly workspace?: CanvasWorkspaceScope;
         readonly originThreadId?: string;
       };
-      readonly project: {
-        readonly id: string;
-        readonly type: "chat" | "work" | "code";
-        readonly lifecycle: "active";
-      };
+      /** Absent for a Canvas owned by its thread: there is no Project to name. */
+      readonly project:
+        | {
+            readonly id: string;
+            readonly type: "chat" | "work" | "code";
+            readonly lifecycle: "active";
+          }
+        | undefined;
     }
   | { readonly kind: "refused"; readonly error: string };
 
@@ -332,17 +343,27 @@ function describedExamples(kinds: ReadonlyArray<string>): ReadonlyArray<unknown>
  * Where a thread's Canvas belongs, decided by the host rather than the agent.
  *
  * A Chat Canvas is bounded by virtual memory, so the window's active Chat
- * Project determines it. A Work or Code Canvas is bounded by the confined root
- * or worktree the thread is bound to now; the thread's own Project and the
- * host's resolution of that binding decide it, so a turn running while the
- * window shows another mode still writes into its own scope and never into
- * whatever the window happens to show.
+ * Project determines it; a Chat thread in no Chat Project owns its Canvas
+ * itself, with no Project to name. A Work or Code Canvas is bounded by the
+ * confined root or worktree the thread is bound to now; the thread's own
+ * Project and the host's resolution of that binding decide it, so a turn
+ * running while the window shows another mode still writes into its own
+ * scope and never into whatever the window happens to show.
  */
 async function resolveCanvasTarget(
   windowId: WindowId,
   owner: CanvasToolOwner,
   port: CanvasAgentToolPort,
 ): Promise<ResolvedCanvasTarget> {
+  if (owner.mode === "chat" && owner.thread.projectId === undefined) {
+    return {
+      kind: "ready",
+      mode: "chat",
+      workspace: { kind: "chat-virtual", projectId: null },
+      context: { mode: "chat", projectId: null, originThreadId: owner.thread.id },
+      project: undefined,
+    };
+  }
   if (owner.mode === "chat") {
     const active = await port.activeContext(windowId);
     if (active === undefined || active.projectId === null || active.mode !== "chat") {
@@ -359,7 +380,9 @@ async function resolveCanvasTarget(
       kind: "ready",
       mode: "chat",
       workspace: { kind: "chat-virtual", projectId: active.projectId },
-      context: { mode: "chat", projectId: active.projectId },
+      // The thread names itself so a Canvas it owned before it was moved
+      // into this Project still answers to it, and to no other thread.
+      context: { mode: "chat", projectId: active.projectId, originThreadId: owner.thread.id },
       project: { id: project.id, type: "chat", lifecycle: "active" },
     };
   }
@@ -394,12 +417,16 @@ const LAYOUT_GROUP_GUIDE =
 
 /**
  * How a design shows a real image, in the words of the thread's mode: a Chat
- * Project has no folder, so its designs reach only images generated in it.
+ * Project has no folder, so its designs reach only images generated in it,
+ * and a Chat thread outside a Project reaches only its own.
  */
-function designAssetGuidance(mode: "chat" | "work" | "code"): string {
+function designAssetGuidance(
+  mode: "chat" | "work" | "code",
+  chatOwner: ChatCanvasOwner = "project",
+): string {
   const sources =
     mode === "chat"
-      ? 'Each asset is a generated image made in this Chat Project, {"kind": "generated-image", "imageId": "<attachment id of a completed image>"}; a Chat Project has no folder, so a file path is refused.'
+      ? `Each asset is a generated image made in ${chatOwner === "thread" ? "this Chat thread" : "this Chat Project"}, {"kind": "generated-image", "imageId": "<attachment id of a completed image>"}; Chat has no folder, so a file path is refused.`
       : `Each asset is a generated image made in this Project, {"kind": "generated-image", "imageId": "<attachment id of a completed image>"}, or a file in ${mode === "work" ? "this thread's folder" : "this thread's checkout"}, {"kind": "project-file", "path": "screens/home.png"} relative to its root (no .., no absolute path, no link that leaves it).`;
   return `To show a real screenshot, a generated image, or a Project image in a design, declare it in the design's assets as {"assetId": "home-shot", "source": ...} and name it in a frame or in styles as octant-asset:home-shot in src, srcset, url(), or image-set(), written exactly like that. ${sources} The host reads PNG, JPEG, GIF, or WebP (not SVG; draw vector art inline) up to ${String(CANVAS_DESIGN_ASSET_MAX_BYTES / (1024 * 1024))} MB each and ${String(CANVAS_DESIGN_ASSETS_MAX_BYTES / (1024 * 1024))} MB per design, at most ${String(CANVAS_MAX_DESIGN_ASSETS)} per design, and draws a placeholder for one it cannot read; preview names it. The frame itself still loads nothing.`;
 }
@@ -447,7 +474,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     diagram: {
       use: "A generic graph of nodes and edges.",
       detail:
-        "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
+        "Use diagram for a generic graph of nodes and edges, such as a flowchart or a zone map: a node's role is process (a box), decision (a diamond), or terminator (a pill), or left out for a plain box; an edge's style is line, arrow, or dashed (a dashed arrow, for an optional or asynchronous step); an edge or a group may take a tone of neutral, accent, success, warning, or danger, and a toned group reads as a region. Tones are theme roles, never colours, and a label still says what the tone means. Lay out a system or architecture diagram by tier: one group per tier (clients, services, data), the flow left to right, node labels of a few words, and the protocol or data on each edge label. Prefer sequence, state, er, swimlane, or mindmap when the drawing is one of those.",
     },
     chart: {
       use: "A pie, donut, stacked or grouped bar, bar-line, funnel, radar, or sankey chart.",
@@ -472,7 +499,7 @@ const BLOCK_GUIDANCE: Readonly<Record<string, { readonly use: string; readonly d
     design: {
       use: "Finished-looking app screens, a website or landing page, or a slide deck.",
       detail:
-        'A finished-looking design is a design block: app screens, a website or landing page, a slide deck, or a document such as an article, spec, or design system. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, slide 1920x1080, or document, as wide as the Canvas and as tall as its content), put shared CSS in styles, and write each screen, slide, or document section as a frame of static HTML. Link frames with href="#frameId"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs. A document is drawn in the workspace theme (theme workspace, its default; a device size defaults to none and keeps its own palette): it gets Octant\'s fonts and --oct-* colour tokens and the kit classes oct-article, oct-eyebrow, oct-lede, oct-grid, oct-card, oct-metrics with oct-metric (__label, __value, __delta--good or --bad), oct-badge (--accent, --success, --warn, --danger), oct-callout (--success, --warn, --danger), oct-table in oct-table-wrap, oct-code, and oct-tabs (radio inputs with labels, then one div.oct-tab-panel per tab, at most eight tabs). In a document, use the kit and tokens rather than your own colours or fonts, and never size anything with vh. Make a device design look finished: real copy, a clear type scale, and a deliberate palette. Describe design to get a phone flow, a deck, a themed spec, and a running cart.',
+        "A finished-looking design is a design block: app screens, a website or landing page, a slide deck, or a document such as an article, spec, or design system. Pick one size for the block (phone 390x844, tablet 820x1180, desktop 1440x900, slide 1920x1080, or document, as wide as the Canvas and as tall as its content), put shared CSS in styles, and write each screen, slide, or document section as a frame of static HTML. Link frames with href=\"#frameId\"; a link may only name a frame or a section. Frames run no JavaScript and load nothing: no script, event handlers, external links, remote images, fonts, or imports. Draw images with inline SVG, CSS gradients, or data:image URLs. A document is drawn in the workspace theme (theme workspace, its default; a device size defaults to none and keeps its own palette): it gets Octant's fonts and --oct-* colour tokens and the kit classes oct-article, oct-eyebrow, oct-lede, oct-grid, oct-card, oct-metrics with oct-metric (__label, __value, __delta--good or --bad), oct-badge (--accent, --success, --warn, --danger), oct-callout (--success, --warn, --danger), oct-table in oct-table-wrap, oct-code, and oct-tabs (radio inputs with labels, then one div.oct-tab-panel per tab, at most eight tabs). In a document, use the kit and tokens rather than your own colours or fonts, and never size anything with vh. Make a device design look finished: real copy, a clear type scale, and a deliberate palette. Lay a slide out in fixed pixels at its 1920x1080 size, never in vh or vw: body text at or above 32px, titles 64 to 96px, one idea per slide, and the same header and footer in the same place on every slide. A website or landing page is a desktop design whose page has its real sections in order (header, hero, features, proof, call to action, footer) in real copy. A UI kit's component sheet is a document with theme none that shows each control in its rest, hover, focus, disabled, and error states, each labelled. Describe design to get a phone flow, a deck, a themed spec, and a running cart.",
     },
     "bar-list": {
       use: "A ranking, such as hottest files or slowest tests.",
@@ -527,7 +554,7 @@ const TIER_GUIDE =
   'A Canvas carries work in three tiers; use the lowest tier that delivers the result, and mix them in one Canvas when the work needs it. 1. Typed blocks (headings, text, tables, metrics, charts, plans, the diagram kinds, and tabs and columns to arrange them) carry data: people comment on them, a revision edits them, and a share keeps their structure. 2. A static design frame carries the look: a design block of HTML and CSS that runs nothing, either a document in the workspace theme (an article, a spec, a design system) or screens and slides at a device size. 3. A running design frame carries behaviour: a design with "runsScript": true, for a prototype whose state changes as the person uses it. Describe design for the frame kit classes, how a frame shows real images, the limits a running frame keeps, and a finished example of each frame tier.';
 
 const RECIPE_GUIDE =
-  'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "write a memo or a one-page report" uses memo, "review this PR" uses code-review, "summarise research" uses research-brief, "decide between designs" uses architecture-review, "write an article" uses article, "make slides" uses slide-deck, "show the key numbers" uses dashboard, "design a website or landing page" uses design-prototype, "pitch a product or a game" uses design-brief, "show the design system" uses design-system, "a prototype I can try" uses clickable-prototype, and "redesign the whole app window" uses app-redesign-prototype. A design slot names the size it is drawn at. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
+  'Match the request to a document recipe before inventing a shape: "write a plan" uses implementation-plan, "write a memo or a one-page report" uses memo, "review this PR" uses code-review, "summarise research" uses research-brief, "decide between designs" uses architecture-review, "write an article" uses article, "make slides" uses slide-deck, "show the key numbers" uses dashboard, "design or redesign a website or landing page" uses design-prototype at desktop size with the page\'s real sections, "pitch a product or a game" uses design-brief, "show the design system" uses design-system, "a UI kit or component sheet" uses ui-kit, "diagram the architecture or how the system fits together" uses architecture-diagram, "a prototype I can try" uses clickable-prototype, and "redesign the whole app window" uses app-redesign-prototype. A design slot names the size it is drawn at. Fill a recipe\'s roles from block kinds that exist today, and do not invent a block kind the catalogue does not have.';
 
 const PREVIEW_GUIDE =
   "Preview returns the same picture the person will see and the warnings it can measure: an inline document past its height cap, and on a chart clipped labels, legend overflow, empty series, or ink below its contrast target, on a bar list clipped labels or empty series, and on a design each declared image the host could not draw, with the frames that name it, a frame whose content is wider than its page, text below its contrast target, and each script error a running design threw as it loaded. Every other block kind gets no warnings, so read its picture yourself.";
@@ -552,6 +579,7 @@ function blockGuide(): Readonly<Record<string, string>> {
 function describedGuidance(
   kinds: ReadonlyArray<string>,
   mode: "chat" | "work" | "code",
+  chatOwner: ChatCanvasOwner = "project",
 ): Readonly<Record<string, string>> {
   const guidance: Record<string, string> = {};
   for (const kind of kinds) {
@@ -561,7 +589,7 @@ function describedGuidance(
     // part is written per describe rather than stored with the kind.
     guidance[kind] =
       kind === "design"
-        ? `${detail} ${designAssetGuidance(mode)} ${DESIGN_PROTOTYPE_GUIDANCE} ${DESIGN_APP_WINDOW_GUIDANCE}`
+        ? `${detail} ${designAssetGuidance(mode, chatOwner)} ${DESIGN_PROTOTYPE_GUIDANCE} ${DESIGN_APP_WINDOW_GUIDANCE}`
         : detail;
   }
   return guidance;
@@ -570,12 +598,15 @@ function describedGuidance(
 function toolDescription(
   mode: "chat" | "work" | "code",
   scope: "thread" | "run" = "thread",
+  chatOwner: ChatCanvasOwner = "project",
 ): string {
   const where =
     mode === "chat"
       ? scope === "run"
         ? "this run"
-        : "this Chat Project"
+        : chatOwner === "thread"
+          ? "this Chat thread"
+          : "this Chat Project"
       : mode === "work"
         ? scope === "run"
           ? "this run's folder"
@@ -958,7 +989,8 @@ function parseInput(inputJson: string): CanvasToolInput | { readonly error: stri
  * Lend one thread's agent the ability to author a Canvas in its own scope.
  *
  * The scope is never the agent's choice: a Chat Canvas belongs to the window's
- * Chat Project, and a Work or Code Canvas to the root or worktree the host
+ * Chat Project, or to the thread itself when the thread is in no Chat
+ * Project, and a Work or Code Canvas to the root or worktree the host
  * resolves for that thread now. A thread whose binding the host cannot resolve
  * is refused rather than given an assumed one.
  */
@@ -974,23 +1006,23 @@ export function createCanvasAgentTools(
   const owner: CanvasToolOwner =
     options.mode === "work" || options.mode === "code"
       ? { mode: options.mode, thread: options.thread }
-      : { mode: "chat", thread: options.thread };
-  // A Chat thread outside a Chat Project has nowhere for a Canvas to live, so
-  // every call would be refused. Offer nothing rather than a tool that cannot
-  // succeed; the refusal in `resolveCanvasTarget` stays as the backstop.
-  if (
-    options.mode !== "work" &&
-    options.mode !== "code" &&
-    options.thread.projectId === undefined
-  ) {
-    return {
-      definitions: [],
-      execute: async () => ({ result: { error: "tool-unavailable" }, isError: true }),
-    };
-  }
+      : {
+          mode: "chat",
+          thread: {
+            id: options.thread.id,
+            providerInstanceId: options.thread.providerInstanceId,
+            modelId: options.thread.modelId,
+            ...(options.thread.projectId === undefined
+              ? {}
+              : { projectId: String(options.thread.projectId) }),
+          },
+        };
   return canvasToolSet({
     mode: owner.mode,
     scope: "thread",
+    ...(owner.mode === "chat" && owner.thread.projectId === undefined
+      ? { chatOwner: "thread" }
+      : {}),
     port: options.port,
     originThreadId: owner.thread.id,
     readerId: owner.thread.id,
@@ -1110,6 +1142,8 @@ async function resolveChildCanvasTarget(options: {
 function canvasToolSet(options: {
   readonly mode: "chat" | "work" | "code";
   readonly scope: "thread" | "run";
+  /** Who owns a Chat thread's Canvases; a Chat Project unless said otherwise. */
+  readonly chatOwner?: ChatCanvasOwner;
   readonly port: CanvasAgentToolPort;
   readonly originThreadId: string;
   /** The thread or run whose model reads what this tool returns. */
@@ -1123,7 +1157,7 @@ function canvasToolSet(options: {
     definitions: [
       {
         name: CANVAS_TOOL_NAME,
-        description: toolDescription(options.mode, options.scope),
+        description: toolDescription(options.mode, options.scope, options.chatOwner),
         inputSchema: canvasDefinitionSchema,
       },
     ],
@@ -1167,7 +1201,7 @@ function canvasToolSet(options: {
         return {
           result: {
             blockSchema: JSONSchema.make(Schema.Union(...selected)),
-            guidance: describedGuidance(requested, options.mode),
+            guidance: describedGuidance(requested, options.mode, options.chatOwner),
             ...(examples.length === 0 ? {} : { examples }),
           },
         };

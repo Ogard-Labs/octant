@@ -44,7 +44,17 @@ guidance names the frame kit classes, the images the thread's mode can show
 (generated images in every mode, and Project files in Work and Code), when a
 design should declare that it runs script, and the limits its bridge keeps;
 its examples are a phone flow, a deck, a themed spec, and a prototype that
-runs, one finished example of each frame tier. Unscoped
+runs, one finished example of each frame tier. The same guidance lays a
+slide out in fixed pixels at its 1920x1080 size, never in `vh` or `vw`
+(a slide is drawn in that viewport and scaled as a picture, so a viewport
+unit tracks whatever draws it; the deck example once used `100vh`), with body
+text at or above 32px, titles of 64 to 96px, one idea per slide, and the same
+header and footer on every slide; it gives a website or landing page a
+desktop size and the page's real sections in order; and it draws a UI kit's
+component sheet as a document in the kit's own palette with each control in
+every state. The `diagram` guidance lays a system diagram out by tier (one
+group per tier, flow left to right, short node labels, the protocol on each
+edge). Unscoped
 describe also lists document recipes: an id, a title, when to use one, and a
 skeleton of block kinds that already exist, where a `design` slot may name
 the `size` it is drawn at. The
@@ -53,12 +63,15 @@ blocks alone: summary, facts, detail, and the ask), a design spec, an
 architecture review (its options in a comparison matrix), a code review, an
 audit or test report, a postmortem, a research brief, a dashboard, a
 repository map, a design prototype (screens, a website, or a landing page at a
-device size), a slide deck, a data model, an article (one themed document), a
+device size), a slide deck, a data model, an architecture diagram (the parts
+grouped by tier as a diagram, the main flow as a sequence, and a key-decisions
+table), an article (one themed document), a
 product or game design brief (a themed pitch, then typed blocks in tabs), a
-design system (a themed document and a token table), and a clickable
-prototype (a design that runs). Together they cover the deliverables people
-ask an assistant for most: a web page, a one-page document, a deck, a
-dashboard, and a prototype or small app. A trusted, enabled, unscoped skill
+design system (a themed document and a token table), a UI kit (a token table
+and a component sheet in the kit's own palette with every state), and a
+clickable prototype (a design that runs). Together they cover the deliverables
+people ask an assistant for most: a web page, a one-page document, a deck, a
+dashboard, a system diagram, and a prototype or small app. A trusted, enabled, unscoped skill
 may add recipes through its Canvas contribution; a skill that is not enabled
 contributes none, and a contributed recipe cannot replace an in-tree id. A
 recipe is a starting shape, not a document and not authority. Describe reads no
@@ -80,14 +93,59 @@ it in: after the Canvas exists, the renderer sends an ordinary turn on the
 thread with the new Canvas attached as whole-canvas context, so the agent
 revises it with its own tools under the thread's existing authority.
 
-A Chat thread outside a Chat Project, and a managed child run in Chat mode or with
-no Project, are not offered `octant_canvas`: a Canvas there has nowhere to belong
-and every call would be refused. The refusal for a window without a Chat
-Project stays as the backstop.
+Every Chat thread is offered `octant_canvas`, as people expect of an
+assistant that makes documents. A Chat thread in a Chat Project writes into
+that Project, through the window's active Chat Project as before. A Chat
+thread in no Chat Project owns its Canvas itself: the Canvas's provenance
+names the thread and no Project (`projectId: null`, Canvas schema version 20,
+so an older runtime refuses it as a future version rather than reading the
+missing Project as corruption), its workspace scope is `chat-virtual` with no
+Project, and the tool's description says it is bound to this Chat thread. The
+host decides the owner from the thread alone and never reads the window's
+Project for it; the create request names no Project, the window must have
+none open, and the thread must be active and in no Chat Project, or the
+create is refused `unavailable`. Such a Canvas carries exactly what a Chat
+Project Canvas carries and no more: no file, shell, Git, or network
+authority (`chat-implicit-authority` refuses any of them), a design that
+names a Project file is refused, and a design's generated images resolve
+only from the thread itself rather than from a Project's threads. A managed
+child run in Chat mode or with no Project is still not offered the tool: a
+child's Canvas appears in its parent thread's dock, and a Chat parent has no
+workspace the host resolves for the run.
+
+A thread-owned Canvas belongs to its thread for life, and the thread's data
+rules decide it: it is listed in the thread's cards and dock wherever the
+thread is, and a thread moved into a Chat Project keeps showing the
+Canvases it owned, revisable by that thread's agent, while they never join
+the Project's inventory or memory scope and are never re-homed (a Canvas's
+provenance is immutable). It is reached only by its own thread's agent and
+by a person's window in Chat, whatever Project that window shows, because
+the thread itself has no Project authority to match; another thread's agent
+cannot read it by id, since no Project makes it a neighbour's. A Clear of
+the thread's outside-content mark leaves the Canvas's own recorded mark, as
+for any Canvas. Deleting the thread takes the Canvas out of reach, and the
+thread's purge erases it with the thread, as it erases every Canvas the
+thread authored. A thread export carries it beside the Project's Canvases
+the thread shows. It exports to the host's export folder, the one chosen for
+everything without a Project of its own, so the export-folder view reports
+scope `host` and refuses a `project` choice, and a host export carries it
+whole with no Project named, its owner being the thread in its provenance
+(the host-export Canvas record once required a Project, which left every
+such Canvas out of the cut). It is never mirrored (the
+mirror files artifacts by Project; the receipt says so and journals
+`skipped`), never published to an artifact replica, absent from the
+Project-grouped artifact library, and not shared (see [Shares](#shares)). A
+Canvas tab that opens it names no Project and rests in the Chat layout
+whatever Project the pane's context binds. The shell opens and restores that
+tab under the rule the Canvas routes authorize by: the Canvas still belongs
+to its thread, and the thread, read from the Canvas's own provenance, exists
+and is not deleted or deleting; otherwise the pane shows the welcome surface,
+because a tab restored past that rule opened to a refusal once the thread was
+deleted but not yet purged.
 
 The delivery rule also reaches the model as an instruction, not only as the
-tool description. Every turn that offers `octant_canvas` (Work, Code, and a
-Chat thread in a Chat Project) carries one short, provider-neutral,
+tool description. Every turn that offers `octant_canvas` (Work, Code, and
+every Chat thread) carries one short, provider-neutral,
 budgeted entry in its required context: deliver a document, report, memo,
 plan, deck, dashboard, page, or prototype the person will keep or share as a
 Canvas with `octant_canvas`, not as a file written with the runtime's own file
@@ -113,10 +171,12 @@ version 11, the mockup catalog at version 12, a table row's `id` at
 version 13, the funnel, radar, and sankey chart types at version 14, the
 dashboard block at version 15, a design's `document` size or `theme` at
 version 16, a design's image `assets` at version 17, a design's
-`runsScript` at version 18, and the `tabs` and `columns` layout groups,
-diagram styles, and the plan's `gantt` view at version 19, so a
-document that declares an earlier version and carries one is
-refused as a declared future version. The optional table column
+`runsScript` at version 18, the `tabs` and `columns` layout groups,
+diagram styles, and the plan's `gantt` view at version 19, and a Chat
+Canvas owned by its thread (a chat provenance with no Project) at version
+20, so a document that declares an earlier version and carries one is
+refused as a declared future version. Version 20 adds no block or field a
+share carries, so a share still names a block authored at 20 as 19. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema
 version, but the strict definition schema refuses an unknown field, so a
@@ -415,6 +475,12 @@ block whole. The catalog arrives with Canvas schema version 12 and share
 version 6.
 
 ## Shares
+
+A share names the Project it is taken from, and a reader's access is judged
+against that Project, so a Canvas owned by a Chat thread outside every
+Project is not shared: the share overview answers no authority for it, and a
+share request is refused `scope-mismatch` with the reason. It stays in its
+thread; export is how it leaves.
 
 A public link carries the same blocks without host, Project, thread, or
 source identity; its rules are in [Canvas public links](canvas-public-links.md).
@@ -931,5 +997,12 @@ page in a frame of the app's own process does look them up.
   (for example `canvasPolicy.test.ts`, `canvasDiagramLayout.test.ts`,
   `canvasMathPolicy.test.ts`, `canvasRecipeStarter.test.ts`).
 - Service, revision routes, and comments: `apps/server/src/canvas/canvasService.test.ts`.
+- A Chat thread's own Canvas: offered and bound in
+  `apps/server/src/canvas/canvasAgentTools.test.ts`, created, listed,
+  revised, and replayed in `canvasService.test.ts` and
+  `canvasProjection.test.ts`, served and listed over the API in
+  `apps/server/src/canvasRoutes.test.ts`, erased with its thread in
+  `apps/server/src/threadRetentionService.test.ts`, and its tab restored in
+  `apps/server/src/shellService.test.ts`.
 - Preview: `apps/server/src/canvas/canvasPreviewService.test.ts`,
   `canvasPreviewWarnings.test.ts`, and `canvasPreviewBrowser.smoke.ts`.

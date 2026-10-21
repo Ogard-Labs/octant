@@ -15,6 +15,7 @@ import {
   CANVAS_MAX_DESIGN_MARKUP_LENGTH,
   CANVAS_DESIGN_SCHEMA_VERSION,
   CANVAS_DIAGRAM_KINDS_SCHEMA_VERSION,
+  CANVAS_THREAD_OWNED_SCHEMA_VERSION,
   CANVAS_EVENT_NAMES,
   CANVAS_FLOW_CHARTS_SCHEMA_VERSION,
   CANVAS_MAX_CHART_CATEGORY_LABEL_LENGTH,
@@ -141,6 +142,32 @@ describe("Canvas contracts", () => {
       decodeCanvasDefinition({
         ...definition,
         blocks: [{ ...heading, schemaVersion: CANVAS_SCHEMA_VERSION + 1 }],
+      }),
+    ).toThrow();
+  });
+
+  it("admits a Chat Canvas owned by its thread only from the version that declared it", () => {
+    const threadOwned = {
+      ...definition,
+      provenance: { ...provenance, projectId: null },
+      sourceManifest: [],
+    } as const;
+    expect(decodeCanvasDefinition(threadOwned)).toEqual(threadOwned);
+    // A rolled-back runtime refuses it as a future version rather than
+    // reading the missing Project as corruption.
+    const older = CANVAS_THREAD_OWNED_SCHEMA_VERSION - 1;
+    expect(() =>
+      decodeCanvasDefinition({
+        ...threadOwned,
+        schemaVersion: older,
+        blocks: [{ ...heading, schemaVersion: older }],
+      }),
+    ).toThrow();
+    // Work and Code always have a Project to belong to.
+    expect(() =>
+      decodeCanvasDefinition({
+        ...threadOwned,
+        provenance: { ...threadOwned.provenance, mode: "work" },
       }),
     ).toThrow();
   });
@@ -2269,11 +2296,11 @@ describe("tabs and columns layout groups", () => {
     expect(decoded.blocks[0]).toEqual(tabs);
     expect(decoded.blocks[1]).toEqual(columns);
     expect(CANVAS_LAYOUT_GROUPS_SCHEMA_VERSION).toBe(19);
-    expect(CANVAS_SCHEMA_VERSION).toBe(19);
+    expect(CANVAS_SCHEMA_VERSION).toBe(CANVAS_THREAD_OWNED_SCHEMA_VERSION);
   });
 
   it("keeps every version through the current one decodable when it gates nothing new", () => {
-    for (const schemaVersion of [15, 16, 17, 18, 19]) {
+    for (const schemaVersion of [15, 16, 17, 18, 19, 20]) {
       const decoded = decodeCanvasDefinition({
         ...definition,
         schemaVersion,

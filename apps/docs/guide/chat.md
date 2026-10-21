@@ -35,6 +35,8 @@ Chat Projects support shared scoped memory that persists across threads within t
 
 A Chat thread not assigned to a Project uses an explicit unfiled Chat context. It does not inherit a filesystem, repository, or another Project's authority.
 
+An unfiled thread can still ask its agent for a document, deck, or dashboard: the Canvas it makes belongs to the thread itself rather than to a Project. It opens from the thread, stays with the thread if you later file it in a Project, is erased when you purge the thread, exports to the host's export folder, and is not mirrored, synced, shared, or listed in the Project-grouped library. See [Agent-authored documents and canvases](/advanced/files#agent-authored-documents-and-canvases).
+
 ## Cross-Project boundaries
 
 When you drag or drop a Chat thread into another workspace, the server resolves the action against the context key (host, mode, Project, bound root). A cross-Project drop does not silently change authority; it offers to open the thread in a new window instead.

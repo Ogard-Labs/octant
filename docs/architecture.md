@@ -380,7 +380,7 @@ queued jobs, and work proposals from opened previews or completed work.
 Work also includes a short, budgeted artifact instruction in its required
 context, so runtimes that use their own file tools know how written documents
 appear in Files and Document, and every turn that offers `octant_canvas` (Work,
-Code, and a Chat thread in a Chat Project) includes a short, budgeted Canvas
+Code, and every Chat thread) includes a short, budgeted Canvas
 delivery instruction, so a runtime delivers kept or shared work as a Canvas
 rather than as its own file or a long reply; its text is owned by
 [Canvas](design/canvas.md#agent-tool-and-recipes). Neither instruction offers
@@ -476,6 +476,18 @@ rule holds. Each tier is a Canvas schema bump, so an older runtime refuses the
 document as a future version. Frames follow the
 [Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md).
 
+- **A Canvas belongs to its thread's Project, or to the thread.** A Work or
+  Code Canvas belongs to the thread's Project and the root or worktree the
+  host resolves for it; a Chat Canvas to the thread's Chat Project, or, when
+  the thread is in none, to the thread alone, with no Project in its
+  provenance (Canvas schema version 20). A thread-owned Canvas holds what a
+  Chat Project Canvas holds and no more (no file, shell, Git, or network
+  authority; images only from its own thread), is reached by its own thread's
+  agent and by a window in Chat, follows its thread into a Chat Project
+  without joining that Project's inventory or memory, is erased with the
+  thread's purge, exports to the host folder, and is never mirrored, shared,
+  or published to a replica. [Canvas](design/canvas.md#agent-tool-and-recipes)
+  owns the rule. This has shipped.
 - **Typed blocks carry data.** Metrics, tables, charts, plans, and the diagram
   family stay the catalog, because comments anchor to them, revision edits
   them, and shares keep their structure. Shipped at schema version 19 (see
@@ -901,7 +913,8 @@ lands in first (`Synced from …`). A version taken from another computer is
 recorded under its own author, an agent whose id is the version's id, and the
 Canvas carries that author whenever the thread it lands in is marked, so a
 person's clear of that thread never makes the synced text the thread's own. A version taken before it recorded its own author is named the same way at host start, from the thread's journaled ingestion of it (`replica-artifact:<canvas>:<version>`), which a clear does not erase. The Canvas tool's `read` and `preview` are how
-another thread's model reaches a Canvas (any Canvas of its Project, by id), so
+another thread's model reaches a Canvas (any Canvas of its Project, by id; a
+Canvas a Chat thread owns outside every Project answers only that thread), so
 both mark the reader (label `canvas`, content reference `canvas-<canvas>`)
 after the Canvas is read and before anything from it is returned, when the
 Canvas records a writer other than the reader or the thread it belongs to is
@@ -2127,7 +2140,8 @@ flowchart LR
   journal are listed as omissions. The thread's generated images and retained
   Browser captures appear as attachment records without bytes. A local owner
   can also take one `octant.host-export/1` cut of what this host holds: a thread bundle for
-  every thread of every mode, Projects, Project memory, Canvases, a
+  every thread of every mode, Projects, Project memory, every Canvas (one a
+  Chat thread owns outside every Project names no Project), a
   non-secret settings summary, usage export rows, and retention windows
   with purge tombstones. That call is a host-control read on the loopback
   route chain. A remote principal and a paired device are refused, and the
@@ -2190,7 +2204,9 @@ flowchart LR
   recreate threads, Projects, or settings. Binding an imported version to a
   local Project follows the existing artifact import rule and is not widened
   here. Scope is artifact and Canvas versions and tombstones, and changes to
-  a Canvas's comment threads under the same rules. Threads and settings are
+  a Canvas's comment threads under the same rules; a Canvas owned by a Chat
+  thread outside every Project has no Project to file under and is never
+  published. Threads and settings are
   not in this log. A
   replica-store contribution offers list, get, and put-if-absent. A folder
   store and an S3-compatible store ship in-tree on that seam. Direct cloud
@@ -6493,8 +6509,9 @@ mechanisms are:
 - **Canvas design images.** A design frame never loads anything itself. The
   server resolves the images a design declares on every read, through the
   authorized Canvas read and under the version's mode, Project, and thread: a
-  Chat Project reaches only images generated in its own threads, and Work and
-  Code files pass the Work confinement sequence. Only sniffed raster images
+  Chat Project reaches only images generated in its own threads, a Chat
+  thread outside every Project only images generated in that thread, and Work
+  and Code files pass the Work confinement sequence. Only sniffed raster images
   within the per-image and per-design budgets are returned, the renderer
   inlines them as `data:` images, and the journal holds references only
   ([Canvas HTML frames threat model](security/canvas-html-frames-threat-model.md), F5).

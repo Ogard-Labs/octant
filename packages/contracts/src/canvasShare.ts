@@ -124,7 +124,9 @@ export const CANVAS_SHARE_SCHEMA_VERSION = 10 as const;
 // through 18 add only design fields (the document size and theme, image
 // assets, then running script), and a share refuses a design, so they changed
 // nothing a share carries. Version 19 adds tabs and columns, so share version
-// 9 names blocks up to 19. A later Canvas bump that adds something a share
+// 9 names blocks up to 19. Version 20 changes only a Canvas's provenance (a
+// Chat Canvas owned by its thread, which is never shared), so a block authored
+// at 20 is shared as 19. A later Canvas bump that adds something a share
 // carries bumps the share version again.
 export const CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION = 19 as const;
 export const CanvasShareSchemaVersion = Schema.Literal(

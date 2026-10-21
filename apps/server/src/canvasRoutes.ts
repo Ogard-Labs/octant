@@ -1320,10 +1320,13 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
           }
           // A Canvas carries its Project, so a choice made here is remembered
           // for that Project. The host folder is the same choice made for a
-          // thread filed nowhere, and travels through the same command.
-          const scope: CanvasExportFolderScope = "project";
+          // thread filed nowhere, and travels through the same command; a
+          // Canvas owned by a Chat thread outside every Project uses it.
           const provenance = entry.currentVersion.definition.provenance;
-          const folder = folders.folderFor(String(provenance.projectId));
+          const scope: CanvasExportFolderScope = provenance.projectId === null ? "host" : "project";
+          const folder = folders.folderFor(
+            provenance.projectId === null ? undefined : String(provenance.projectId),
+          );
           const view = {
             kind: "canvas-export-folder-view",
             settings: folders.settings(),
@@ -1397,12 +1400,19 @@ export function createCanvasRouteHandler(dependencies: CanvasRouteDependencies) 
             "That folder is no longer available to choose.",
           );
         }
+        const exportProjectId = entry.currentVersion.definition.provenance.projectId;
+        if (command.scope === "project" && exportProjectId === null) {
+          return refusedFolder(
+            "malformed",
+            "This Canvas belongs to no Project; choose the folder for the host instead.",
+          );
+        }
         return jsonResponse(
           folders.choose({
             scope: command.scope,
-            ...(command.scope === "host"
+            ...(command.scope === "host" || exportProjectId === null
               ? {}
-              : { projectId: String(entry.currentVersion.definition.provenance.projectId) }),
+              : { projectId: String(exportProjectId) }),
             folder,
             expectedVersion: command.expectedVersion,
           }),
@@ -1476,11 +1486,14 @@ type AuthorizedCanvasContext =
   | {
       readonly kind: "ok";
       readonly activeContext: CanvasActiveContext;
-      readonly project: {
-        readonly id: string;
-        readonly type: "chat" | "work" | "code";
-        readonly lifecycle: "active" | "archived";
-      };
+      /** Absent for a Canvas owned by a Chat thread outside every Project. */
+      readonly project:
+        | {
+            readonly id: string;
+            readonly type: "chat" | "work" | "code";
+            readonly lifecycle: "active" | "archived";
+          }
+        | undefined;
     }
   | { readonly kind: "unauthorized" }
   | { readonly kind: "unavailable"; readonly reason: string };
@@ -1523,8 +1536,14 @@ async function resolveCreateContext(
   } catch {
     return { kind: "unauthorized" };
   }
-  if (activeContext === undefined || activeContext.projectId === null) {
-    return { kind: "unauthorized" };
+  if (activeContext === undefined) return { kind: "unauthorized" };
+  // A Chat window with no Project open creates a Canvas owned by the thread
+  // the request names; the service checks that thread before anything is
+  // journaled. Every other mode needs its active Project.
+  if (activeContext.projectId === null) {
+    return activeContext.mode === "chat"
+      ? { kind: "ok", activeContext, project: undefined }
+      : { kind: "unauthorized" };
   }
   const bootstrap = await dependencies.projects.bootstrap(windowId);
   const project = bootstrap.active.find((candidate) => candidate.id === activeContext.projectId);
@@ -1550,7 +1569,19 @@ async function resolveThreadReferenceCards(
   threadId: string,
   projectId: ProjectId | null,
 ) {
-  if (projectId === null) return [];
+  // A Chat thread in no Project lists the Canvases it owns itself; they are
+  // read wherever the thread is, so a window in Chat is all it takes.
+  if (projectId === null) {
+    if (mode !== "chat") return [];
+    let activeContext: CanvasActiveContext | undefined;
+    try {
+      activeContext = await dependencies.activeContextResolver(windowId);
+    } catch {
+      return [];
+    }
+    if (activeContext?.mode !== "chat") return [];
+    return dependencies.canvasService.threadReferenceCards({ mode, threadId, projectId: null });
+  }
   const authority = await resolveInventoryAuthority(dependencies, windowId, projectId);
   if (authority.kind !== "ok" || authority.mode !== mode) return [];
   return dependencies.canvasService.threadReferenceCards({
@@ -1578,20 +1609,25 @@ async function resolveAuthorizedContext(
   } catch {
     return { kind: "unauthorized" };
   }
-  if (activeContext === undefined || activeContext.projectId === null) {
-    return { kind: "unauthorized" };
+  if (activeContext === undefined) return { kind: "unauthorized" };
+  const provenance = entry.currentVersion.definition.provenance;
+  // A Canvas owned by a Chat thread outside every Project has no Project to
+  // match the window against: any window in Chat reaches it, and the Canvas
+  // authority itself checks that its thread still exists.
+  if (provenance.projectId === null) {
+    return activeContext.mode === "chat"
+      ? { kind: "ok", activeContext, project: undefined }
+      : { kind: "unauthorized" };
   }
+  if (activeContext.projectId === null) return { kind: "unauthorized" };
   const bootstrap = await dependencies.projects.bootstrap(windowId);
-  const project = bootstrap.active.find(
-    (candidate) => candidate.id === entry.currentVersion.definition.provenance.projectId,
-  );
+  const project = bootstrap.active.find((candidate) => candidate.id === provenance.projectId);
   if (project === undefined || project.lifecycle !== "active") {
     return {
       kind: "unavailable",
       reason: "Canvas is unavailable. Reopen it from the Project.",
     };
   }
-  const provenance = entry.currentVersion.definition.provenance;
   if (
     !authorizeCanvasInventoryAccess({
       requestedProjectId: provenance.projectId,
@@ -1622,7 +1658,10 @@ function inventoryEntriesForProject(
   return projection
     .byProject(projectId)
     .filter((entry) => entry.currentVersion.definition.provenance.mode === mode)
-    .map(toInventoryEntry);
+    .flatMap((entry) => {
+      const inventoryProjectId = entry.currentVersion.definition.provenance.projectId;
+      return inventoryProjectId === null ? [] : [toInventoryEntry(entry, inventoryProjectId)];
+    });
 }
 
 async function resolveCanvasGet(
@@ -1806,12 +1845,15 @@ async function serveDesignPage(
   });
 }
 
-function toInventoryEntry(entry: CanvasProjectionEntry): CanvasInventoryEntry {
+function toInventoryEntry(
+  entry: CanvasProjectionEntry,
+  projectId: ProjectId,
+): CanvasInventoryEntry {
   const version = entry.currentVersion;
   const provenance = version.definition.provenance;
   return projectInventoryEntryFromProjection({
     canvasId: entry.canvasId,
-    projectId: provenance.projectId,
+    projectId,
     mode: provenance.mode,
     title: version.definition.title,
     versionCount: entry.versionCount,
