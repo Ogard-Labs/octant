@@ -88,6 +88,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
   const {
     agentRunSettingsClient,
     automationNotificationClient,
+    canvasClient,
     diagnosticsExportClient,
     extensionClient,
     folderBrowseClient,
@@ -185,6 +186,7 @@ export const SettingsContainer = memo(function SettingsContainer(props: Settings
       themeController={themeController}
       diagnosticsExportClient={diagnosticsExportClient}
       hostControlClient={hostControlClient}
+      {...(canvasClient === undefined ? {} : { canvasClient })}
       {...(replicaStoreSettingsClient === undefined ? {} : { replicaStoreSettingsClient })}
       {...(replicaMembershipClient === undefined ? {} : { replicaMembershipClient })}
       replicaSyncStatusClient={replicaSyncStatusClient}

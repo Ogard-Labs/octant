@@ -7,6 +7,9 @@ import type { ProviderRuntimeTurnReport } from "./providerRuntimeUsageLimitsStor
  *
  * - `usage-windows`: the CLI runtime narrates rolling usage windows during a
  *   turn (Claude Code, Codex app-server).
+ * - `account-endpoint`: Octant reads the account's plan windows from the
+ *   provider's usage endpoint with the sign-in the CLI saved (Devin,
+ *   OpenCode Go). No figures means that sign-in is missing.
  * - `response-headers`: the HTTP endpoint attaches quota headers to the
  *   responses Octant already requests.
  * - `runtime-does-not-report`: the protocol has no limits channel; the
@@ -15,6 +18,7 @@ import type { ProviderRuntimeTurnReport } from "./providerRuntimeUsageLimitsStor
  */
 export type ProviderLimitsReporting =
   | "usage-windows"
+  | "account-endpoint"
   | "response-headers"
   | "runtime-does-not-report"
   | "local-runtime";
@@ -24,17 +28,18 @@ export function providerLimitsReporting(kind: ProviderDriverKind): ProviderLimit
     case "claude":
     case "codex":
       return "usage-windows";
+    case "opencode":
+    case "devin":
+      return "account-endpoint";
     case "openai-compatible":
     case "anthropic-compatible":
     case "azure-foundry":
       return "response-headers";
     case "ollama":
       return "local-runtime";
-    case "opencode":
     case "pi":
     case "oh-my-pi":
     case "kilo":
-    case "devin":
     case "mistral-vibe":
     case "kimi-code":
     case "grok":
@@ -65,6 +70,8 @@ export function unavailableLimitsReason(
   switch (providerLimitsReporting(kind)) {
     case "usage-windows":
       return "unsupported";
+    case "account-endpoint":
+      return "not-ready";
     case "response-headers":
       return lastCompletedTurn === "silent" ? "endpoint-silent" : "unsupported";
     case "runtime-does-not-report":

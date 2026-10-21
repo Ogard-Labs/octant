@@ -559,7 +559,7 @@ describe("a Chat lead's question in the terminal", () => {
   });
 });
 
-describe("reading a long Code thread in the terminal", () => {
+describe("Code threads in the terminal", () => {
   const threadId = "84000000-0000-4000-8000-000000000001";
   const threadView = {
     thread: {
@@ -685,6 +685,112 @@ describe("reading a long Code thread in the terminal", () => {
       { length: CODE_THREAD_TURNS },
       (_, index) => `prompt-${total - CODE_THREAD_TURNS + index + 1}`,
     );
+
+  function interruptHost(
+    reply: (request: LocalControlRequest) => unknown,
+    running = true,
+  ): OpenedLocalControlSession {
+    const base = longThreadHost(() => 0, true).session;
+    return {
+      ...base,
+      send: async (request) => {
+        if (request.path.includes("/conversation/window")) {
+          return {
+            status: 200,
+            body: {
+              version: 1,
+              threadId,
+              turns: running ? [{ ...turn(1), status: "incomplete" }] : [],
+              hasEarlier: false,
+              hasLater: false,
+            },
+          };
+        }
+        if (request.path === "/api/code/commands") {
+          return { status: 200, body: reply(request) };
+        }
+        return base.send(request);
+      },
+    };
+  }
+
+  it("stops a running turn without replaying its start or an earlier stop", async () => {
+    const commands: unknown[] = [];
+    const session = interruptHost((request) => {
+      const command = request.body as { operationId: string };
+      commands.push(request.body);
+      // The host replays an operation's original result when its ID is reused.
+      return {
+        kind: "provider-turn-state",
+        operationId: command.operationId,
+        state: command.operationId === turn(1).operationId ? "running" : "interrupted",
+      };
+    });
+    const port = agentThreadPort(session, "code", threadId);
+    await expect(port.interrupt()).resolves.toEqual({ kind: "interrupted" });
+    await expect(port.interrupt()).resolves.toEqual({ kind: "interrupted" });
+    expect(commands).toHaveLength(2);
+    expect(commands[0]).toMatchObject({
+      kind: "cancel-provider-turn",
+      threadId,
+      checkoutId: ids.checkout,
+      operationId: expect.not.stringMatching(turn(1).operationId),
+    });
+    expect(commands[0]).not.toEqual(commands[1]);
+  });
+
+  it.each([
+    { kind: "provider-turn-state", state: "running" },
+    {
+      kind: "provider-turn-state",
+      state: "failed",
+      failure: { category: "unavailable", message: "The checkout is unavailable." },
+    },
+    { kind: "operation-accepted" },
+    {
+      kind: "operation-failed",
+      failure: { category: "unavailable", message: "The checkout is unavailable." },
+    },
+  ])("does not report a stopped turn when the host replies $kind $state", async (result) => {
+    const session = interruptHost((request) => ({
+      ...result,
+      operationId: (request.body as { operationId: string }).operationId,
+    }));
+    await expect(agentThreadPort(session, "code", threadId).interrupt()).resolves.toMatchObject({
+      kind: "refused",
+    });
+  });
+
+  it("reports nothing running when the turn finishes before its stop arrives", async () => {
+    const session = interruptHost((request) => ({
+      kind: "provider-turn-state",
+      operationId: (request.body as { operationId: string }).operationId,
+      state: "failed",
+    }));
+    await expect(agentThreadPort(session, "code", threadId).interrupt()).resolves.toEqual({
+      kind: "nothing-running",
+    });
+  });
+
+  it("does not report another operation's interruption as this stop", async () => {
+    const session = interruptHost(() => ({
+      kind: "provider-turn-state",
+      state: "interrupted",
+      operationId: turn(1).operationId,
+    }));
+    await expect(agentThreadPort(session, "code", threadId).interrupt()).resolves.toMatchObject({
+      kind: "refused",
+    });
+  });
+
+  it("does not send a stop when the conversation has no running turn", async () => {
+    const session = interruptHost(() => {
+      throw new Error("No cancellation should be sent.");
+    }, false);
+    await expect(agentThreadPort(session, "code", threadId).interrupt()).resolves.toEqual({
+      kind: "nothing-running",
+    });
+  });
 
   it("shows the newest turns of a thread longer than one page and says earlier ones exist", async () => {
     const fake = longThreadHost(() => 130, true);

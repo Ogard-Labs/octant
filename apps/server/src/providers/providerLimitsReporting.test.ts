@@ -13,13 +13,16 @@ describe("provider limits reporting", () => {
     expect(unavailableLimitsReason("azure-foundry", "silent")).toBe("endpoint-silent");
   });
 
+  it("waits for the CLI sign-in before a provider read from its account can show limits", () => {
+    expect(unavailableLimitsReason("devin", undefined)).toBe("not-ready");
+    expect(unavailableLimitsReason("opencode", "silent")).toBe("not-ready");
+  });
+
   it("closes the question for runtimes that never report and for local models", () => {
     for (const kind of [
-      "opencode",
       "pi",
       "oh-my-pi",
       "kilo",
-      "devin",
       "mistral-vibe",
       "goose",
       "glm",

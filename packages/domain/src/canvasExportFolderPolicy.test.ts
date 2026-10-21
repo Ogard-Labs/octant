@@ -6,6 +6,7 @@ import {
 import {
   MAX_CANVAS_EXPORT_NAME_COPIES,
   canvasExportFolderRefusalText,
+  canvasExportPictureFileNames,
   canvasExportPlannedName,
   canvasExportStem,
   judgeCanvasExportFolder,
@@ -156,5 +157,14 @@ describe("canvas export folder policy", () => {
     });
 
     expect(fileName).toBe("Launch plan.html");
+  });
+
+  it("numbers a deck's pictures in slide order and names a PDF once", () => {
+    const numbered = canvasExportPictureFileNames("Launch plan", "png", 12);
+
+    expect(numbered[0]).toBe("Launch plan 01.png");
+    expect(numbered[11]).toBe("Launch plan 12.png");
+    expect(canvasExportPictureFileNames("Launch plan", "png", 1)).toEqual(["Launch plan.png"]);
+    expect(canvasExportPictureFileNames("Launch plan", "pdf", 12)).toEqual(["Launch plan.pdf"]);
   });
 });

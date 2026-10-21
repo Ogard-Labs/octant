@@ -28,11 +28,14 @@ The design rests on a small set of invariants that every package obeys:
   Octant operates none of it; an S3-compatible store is contacted only at the
   endpoint the person configured and only while the Settings › Sync switch is
   on. Remote access is host-to-device over the user's
-  own network. Three host-initiated
+  own network. Four host-initiated
   HTTPS calls exist in code: desktop update checks against a signed feed, managed
-  device-tool update checks against the npm registry, and server marketplace
+  device-tool update checks against the npm registry, server marketplace
   fetches when the person searches, inspects, previews, or installs from the
-  catalog. All have a Settings off switch: marketplace off means no catalog
+  catalog, and calls to the public Canvas share service when the person
+  publishes, updates, or revokes a public link (and the host retries a revoke
+  it could not complete). All have a Settings off switch: Public links starts
+  off and off means no share-service request except finishing a revoke; marketplace off means no catalog
   request; Updates off disables automatic update checks (manual Check for
   updates may still contact the signed feed); device tools' automatic updates
   start off, and off means no registry request (a manual check may still
@@ -529,7 +532,13 @@ document as a future version. Frames follow the
   HTML export writes frames as sandboxed `srcdoc` pages with the policy
   inside, the approval card names the markup it writes, and a themed design
   is drawn in the theme the person's window hands over; this has shipped.
-  Markdown export writes the title. Public links stay out.
+  Markdown export writes the title. A public link is an export too: off until
+  the person turns on Settings › Data & privacy › Public links, published only from
+  the approval card in a local window and never by an agent, it carries the
+  share filter's blocks without host, Project, thread, or source identity to
+  the public Canvas share service, which can read it, draws design frames only
+  from a separate user-content origin, and deletes it on revoke or expiry (see
+  [Canvas public links](design/canvas-public-links.md)).
 
 _Rationale:_ a `srcdoc` frame inherits the app policy (`script-src 'self'`),
 so a running frame needs a page the host serves, and a frame sandboxed without
@@ -1662,9 +1671,26 @@ or stops a thread.
 ## Agent task display
 
 Providers that report their own task plans (Claude, Codex, ACP, OpenCode) emit
-`task-progress` runtime events, and the host journals them. Each thread surface
-shows the agent's restated plan as a live "N of M tasks completed" panel while
-any task is open or the turn is still writing: Code from its journaled
+`task-progress` runtime events, and the host journals them. Claude's checklist
+is its `TodoWrite` tool: the driver offers it in every posture, Plan included,
+and lets it run unasked, because it changes only Claude's own session state
+(no file, shell, network, or person). Each call restates the whole list, and
+a task id follows a list position, so the panel keeps Claude's latest order and
+wording.
+
+`task-progress` adds or updates one task. Because every one of these providers
+restates its whole plan, each restatement ends with a `task-list` event naming
+the ids the plan now holds, in order (at most 64, the per-turn task cap). Each
+surface keeps only those tasks, in that order, so a step the provider drops
+leaves the panel, a moved step moves, and an empty list clears it. `task-list`
+belongs to the `taskProgress` capability: a driver that reports it supported
+may send either kind. Code journals it as its own operation event; Chat and
+Work fold it into the list they already journal whole. A journal written before
+`task-list` existed holds only `task-progress` and replays exactly as it did,
+dropped steps included.
+
+Each thread surface shows the agent's restated plan as a live "N of M tasks
+completed" panel while any task is open or the turn is still writing: Code from its journaled
 operation events, Chat from `ChatAttempt.tasks` carried on
 `chat.attempt-updated@1`, and Work from `WorkTurnState.tasks` journaled on
 `work.turn-updated@1` with a live `turn-tasks` stream frame. The panel is a
@@ -2325,9 +2351,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   model picker, thread pinning, and usage history are written against
   that profile. Octant never reads, stores, or injects that provider's
   credentials ([0005](decisions/0005-provider-sdk-contract.md)).
-  Plan usage limits (rolling windows, per-model weekly, overage) come
-  only from the provider's own process: session `rate-limit-window`
-  events, or a process reading a person asks for. That reading starts
+  Claude and Codex plan usage limits (rolling windows, per-model weekly,
+  overage) come only from the provider's own process: session
+  `rate-limit-window` events, or a process reading a person asks for.
+  Devin and OpenCode Go have no such channel in their runtimes, so their
+  plan windows come from the account usage endpoint under the
+  account usage endpoint rule in
+  [Security and authority](#security-and-authority). The Claude
+  reading starts
   the provider's process, so it is made only on an explicit refresh
   (`onDemand` on the context-facts input), never on the schedule or
   before a turn. Observed with Claude Code 2.1.296, a process started
@@ -2337,8 +2368,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   `rate_limits_available: false` in that cold process. For a subscription
   account this means unavailable usage, not that a plan does not apply.
   Only explicit API-key authentication establishes the no-plan state.
-  Octant never reads a token or credential file to
-  fetch those numbers, and never calls a vendor usage endpoint
+  For Claude and Codex, Octant never reads a token or credential file
+  to fetch those numbers, and never calls a vendor usage endpoint
   itself. Each account keeps its own snapshot, keyed by
   the instance and the state directory that session ran under. The
   snapshots live in `providers/plan-usage.json` in the host store,
@@ -3061,7 +3092,11 @@ only the ledger carries (request shape, category, host, quality). A harness
 turn record carries the same usage, timing, start and stop reason, and the
 session's `usage` and `metrics` totals fold them, so a Code turn on a direct
 endpoint no longer records zero tokens. Chat, Work and Code on every provider
-journal the frame; the harness additionally keeps its own record.
+journal the frame; the harness additionally keeps its own record. The native
+record is written at final host settlement, after provider completion and
+cleanup. If cancellation wins that interval, the record carries the final
+interrupted outcome and usage once; it does not also retain a successful record
+for the same turn. Advisor review starts only for a successfully settled turn.
 
 **Compacting a session on request.** Built so far: the host path for Chat and
 Work on a direct endpoint — the `compact-session` command, its receipt,
@@ -3984,7 +4019,11 @@ native harness in `apps/server/src/harness`:
   session and its conversation stay live, so the next `send` continues it
   without a resume or a journal rebuild, and a cancel during a tool step first
   closes the calls its runner never answered with the same interrupted results
-  a resume would write. Only `stop` releases the session. Chat and Work still
+  a resume would write. Only `stop` or connection teardown releases the session.
+  Opening an endpoint belongs to the pending start or resume: if that operation
+  is cancelled or its connection closes before opening finishes, the late
+  endpoint is released without admitting a session or changing its transcript.
+  It cannot restore an active-session count after cleanup. Chat and Work still
   rebuild their history on the host and
   start a fresh session each turn.
 - **Forks.** A Code fork on a harness model starts its first session from a
@@ -5353,13 +5392,17 @@ same. This holds in Chat, Work, and Code.
 offers it only when the package is installed, trusted, enabled, and effective;
 a disabled or uninstalled target is omitted, not listed as refused. The server
 renders the Canvas to Markdown or HTML, shows an approval card with that
-payload and the destination, and calls the target only after approval. The
+payload and the destination, and calls the target only after approval. PNG and
+PDF are drawn in the host's own browser, the one the Canvas preview uses
+([Canvas visuals](design/canvas-visuals.md)): a card for them names each file
+and its size instead of showing a body, and a destination receives named files
+only if it declared the format. A host with no browser refuses a picture export
+as a value (`unavailable`) before anything is held. The
 call returns a receipt (a link, a path, or a remote id) or a typed refusal.
 Each completed export is a `canvas.export@1` journal event and is rebuilt by
 replay. When the destination was called but the journal could not take the
 record, the answer is `unrecorded` and carries the destination's outcome; it is
-never reported as a failed export. PDF and PNG are named formats the seam can carry later; this host does
-not render them. A target that passed activation is still reported honestly as
+never reported as a failed export. A target that passed activation is still reported honestly as
 `not-connected`, `ready`, or `refused`. A local target may describe the exact
 file it would write, and the card then names that path: approving a card that
 names an existing file is the confirmation to replace it, and a call without
@@ -5878,6 +5921,38 @@ mechanisms are:
   itself. That boundary is accepted: the mark gates Octant's own tools only,
   and Claude's and Codex's built-in tools run under the runtime's own sandbox
   and approvals.
+  A Claude launch sets no `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+  umbrella: blanket-blocking every non-essential channel of the runtime's
+  was stricter than Octant needs, so each channel that matters is kept off
+  by its own switch on every launch, the version read included
+  (`ISOLATED_CLAUDE_LAUNCH_GUARDS`; maintainer decision, 2026-10-20): usage
+  metrics (`DISABLE_TELEMETRY`), error reports (`DISABLE_ERROR_REPORTING`),
+  the runtime's self-update (`DISABLE_AUTOUPDATER`), `/bug` and `/feedback`,
+  which upload the conversation (`DISABLE_BUG_COMMAND`,
+  `DISABLE_FEEDBACK_COMMAND`; the second is not in the public reference, but
+  both installed binaries carry it beside the first), the session-quality
+  survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`), auto-memory, the SDK's
+  built-in agents, and marketplace auto-install. The runtime's release-note,
+  PR-badge, and availability checks are therefore its own traffic to
+  Anthropic under the person's account; they carry no Project content.
+  Feature-flag fetching stays off: Anthropic's environment-variable reference
+  says `DISABLE_TELEMETRY` also disables it, so the runtime evaluates its
+  flags from the defaults it ships with. A channel with no switch of its own is closed by the
+  launch shape instead: `/share`, like any slash command, runs only when the
+  person types it, as in the runtime's own terminal (the model cannot invoke
+  one, and Octant sends none but `/compact`); a plugin's background `command`
+  cannot run because the query is opened with no setting sources, plugins,
+  skills, agents, or MCP servers, so no plugin is loaded, and
+  `strictMcpConfig` keeps the account's claude.ai connectors out (2.1.304
+  lists them without it, setting sources or not); Remote Control starts only
+  on a flag or command Octant never passes; and the advisor, like every other
+  tool the runtime might add, stays out because the port holds the
+  initialized tool list to the requested set. The runtime's `Artifact` tool
+  is not a reason either way: measured the same day, the runtime offers it
+  only when launched by Anthropic's own desktop app (it keys on the launching
+  entrypoint), so from Octant it is absent with or without the umbrella. A
+  host that exports `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` itself keeps
+  the umbrella on every launch; only that disabling value crosses.
   A confined Claude Plan launch reads the assigned leaf of that account's
   state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
   writes only `sessions/` and its own session in `projects/`: the
@@ -7270,6 +7345,32 @@ mechanisms are:
   deleted, and a request the plan route's profile cannot express is refused
   before send. The wire details are in
   [Provider runtimes](design/provider-runtimes.md#subscription-sign-in-dialects).
+- **Account usage endpoints.** Devin and OpenCode Go report plan windows only from an account endpoint, so the
+  host reads the sign-in their own CLI saved and asks that endpoint. Devin:
+  `windsurf_api_key` (and an `https` `api_server_url`, else
+  `server.codeium.com`) from `~/.local/share/devin/credentials.toml`, sent in
+  the body of a Connect `POST` to
+  `SeatManagementService/GetUserStatus`; daily and weekly remaining
+  percentages become windows, and the overage balance is not shown. OpenCode
+  Go: the `opencode-go` key from the `credential` table of OpenCode 2's
+  `opencode*.db` in its data directory (`$XDG_DATA_HOME/opencode`, default
+  `~/.local/share/opencode`), opened read-only with no pragmas, else
+  `auth.json` when no database keeps sign-ins; sent as a bearer token to
+  `GET opencode.ai/zen/go/v1/usage`, whose 5-hour, weekly, and monthly
+  used percentages become windows. The reads run in the host process, only
+  for an enabled instance of that provider. Only a refresh a person asks for
+  waits on the endpoint. Every other caller, the limits service's
+  five-minute schedule and the service-limits read before each Chat turn,
+  gets the last reading at once and starts at most one background read per
+  five minutes, so a turn never waits on the endpoint and frequent turns
+  never multiply the calls. The request sends nothing else and follows no
+  redirect. Octant never writes, copies, or stores either key. It
+  stays out of logs, the journal, snapshots, and errors: every failure carries
+  a fixed message. A missing sign-in reads as not ready, an OpenCode sign-in
+  without Go as plan limits not applying, a refused key as unauthenticated,
+  and a 429 keeps its `Retry-After`. The Devin call is not a published
+  interface; an answer whose shape stops matching fails as a protocol change
+  and keeps the last reading rather than guessing.
 - **Update feed signing keys are per ring.** The desktop updater verifies a
   feed's Ed25519 signature against the compiled-in keys of the ring the signed
   release names, before any other field is believed. Stable trusts only the
@@ -7341,6 +7442,7 @@ in this document describe the build as it ships. The steps, the open questions, 
 | `apps/desktop`            | Electron shell: windows, menus, native credential-store integration, pickers, signed updates, server process lifecycle, packaging                       | contracts, domain, host-runtime                                   |
 | `apps/web`                | React renderer for desktop and paired browsers                                                                                                          | client-runtime, contracts, domain, plugin-host, theme             |
 | `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                                  | client-runtime, contracts, domain                                 |
+| `apps/share`              | Public Canvas share service: link API, viewer pages, user-content frames, storage, expiry, limits                                                       | contracts, domain                                                 |
 
 Dependencies point inward: no package imports an app, and `contracts` imports
 nothing first-party.
@@ -7418,7 +7520,10 @@ macOS-only.
   signed in, not installed, or disabled never holds an install back: quitting
   asks on the same terms, because both read the one `workInFlight` reading of
   the host rather than its `attentionRequired` flag, which also marks the menu
-  bar for provider readiness. Automatic checks are a setting; the host starts with them
+  bar for provider readiness. This conservative reading currently counts open
+  provider sessions, including idle sessions kept for another turn, so the quit
+  warning describes sessions rather than claiming that each is running work.
+  Automatic checks are a setting; the host starts with them
   off until the persisted choice arrives, then checks daily. A check is a
   plain GET carrying only version, platform, and architecture (the ring is in
   the path); it is not a telemetry channel.
@@ -7434,6 +7539,15 @@ person owns — a synced folder or an S3-compatible bucket. Octant operates no
 storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account. See
 [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
+
+The public Canvas share service (`apps/share`, `https://canvas.octant.sh`) is
+in scope: an Octant-operated service that stores, and can read, the Canvases
+people publish as public links, under the rules in
+[Canvas public links](design/canvas-public-links.md). It is not an Octant
+account, a relay, or a sync store; nothing reaches it until the person turns
+Public links on and approves a publish, and a self-hosted service URL is a
+Settings choice. Deploying it, its DNS and TLS, and its operator contact are
+release steps of their own.
 
 The start gates for the connector / OAuth marketplace and full LSP /
 extension host / debugger holds are in
@@ -7461,7 +7575,12 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   startup the dev script rebuilds `apps/desktop/dist/entry.mjs` whenever
   `apps/desktop/src` is newer, so `apps/desktop/src` edits need only a
   restart of `bun run dev` rather than a manual
-  `bun run --cwd apps/desktop build`.
+  `bun run --cwd apps/desktop build`. It rebuilds the Canvas preview page
+  (`apps/web/dist/canvas-preview/`) the same way whenever `apps/web` or the contracts, domain or theme packages
+  are newer,
+  and hands the host it starts `OCTANT_WEB_DIST_PATH=apps/web/dist`, so an
+  agent's Canvas preview returns a picture on a development host; `octant web
+--dev` does both as well.
 - The server is composed by a root in `apps/server/src/server.ts` that calls
   the per-area wiring modules under `apps/server/src/wiring/` in a fixed
   order, and every module declares the reach it has as a `Pick` of the

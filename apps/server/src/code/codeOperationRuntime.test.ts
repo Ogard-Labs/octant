@@ -3323,6 +3323,46 @@ describe("CodeOperationRuntime", () => {
     }
   });
 
+  it("journals a restated task plan so a replayed turn drops the tasks the provider left out", async () => {
+    const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+    const connection = providerConnection(queue);
+    const fixture = runtimeFixture({ provider: providerDriver(connection) });
+    const startOperation = operationId(1381);
+    try {
+      await fixture.runtime.execute(windowId, {
+        kind: "start-provider-turn",
+        operationId: startOperation,
+        threadId,
+        checkoutId,
+        sessionId,
+        prompt: fixture.prompt,
+      });
+      await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+      for (const event of [
+        { kind: "task-progress", taskId: "t1", status: "completed", summary: "Read" },
+        { kind: "task-progress", taskId: "t2", status: "in-progress", summary: "Write" },
+        { kind: "task-list", taskIds: ["t2"] },
+      ] as const)
+        await Effect.runPromise(Queue.offer(queue, providerEvent(event)));
+      await vi.waitFor(async () => {
+        const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+        expect(
+          frames.flatMap((frame) =>
+            frame.event.kind === "task-progress" || frame.event.kind === "task-list"
+              ? [frame.event]
+              : [],
+          ),
+        ).toEqual([
+          { kind: "task-progress", taskId: "t1", state: "completed", summary: "Read" },
+          { kind: "task-progress", taskId: "t2", state: "running", summary: "Write" },
+          { kind: "task-list", taskIds: ["t2"] },
+        ]);
+      });
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("refuses a conversation window for a Project the window cannot access, before reading it", async () => {
     const fixture = runtimeFixture({ projectAccess: false });
     try {

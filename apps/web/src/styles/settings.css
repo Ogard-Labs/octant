@@ -568,6 +568,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   min-height: 28px;
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
+  font-weight: var(--oct-weight-medium);
   line-height: 1.2;
   justify-content: flex-start;
 }
@@ -575,10 +576,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-navigation .setnav-item > .icon,
 .settings-view__back > .icon {
   color: var(--octant-text-muted);
-}
-
-.settings-navigation .setnav-item[aria-current="page"] {
-  font-weight: 500;
 }
 
 /* --- Settings primitives: open routine groups, raised discrete objects --- */
