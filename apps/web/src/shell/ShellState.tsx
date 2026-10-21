@@ -124,7 +124,8 @@ function PageShellState(props: ShellStateProps) {
  * is its icon's own strokes, thickened so the dots can fill them.
  */
 function DottedMark(props: { readonly state: ShellStateKind }) {
-  const id = useId();
+  // useId yields characters a url(#…) reference cannot carry.
+  const id = `shell-state-${useId().replace(/[^A-Za-z0-9_-]/g, "")}`;
   const pattern = `${id}-dots`;
   const mask = `${id}-shape`;
   const StateIcon = stateIcons[props.state];
