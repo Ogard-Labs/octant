@@ -119,7 +119,9 @@ nothing essential sits under 12px at the default. The roles live in
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
-labels and controls, 600 (`--oct-weight-strong`) for emphasis (section labels,
+labels, controls, and every name in navigation (thread titles, sidebar rows,
+Settings sections), so a name stands apart from the facts under it by weight
+rather than size, 600 (`--oct-weight-strong`) for emphasis (section labels,
 card titles, counts, `strong`, the app's name), and 700 (`--oct-weight-title`)
 only for the page title and the welcome greeting. `bun run ui:check` counts a
 weight above 600 outside the title roles in `styles/surface.css` as a
