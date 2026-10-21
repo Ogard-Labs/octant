@@ -197,7 +197,11 @@ fields, so share version 11 names blocks up to Canvas version 21 and a share
 under version 10 that carries one is refused as a future version. Frame notes
 are the presenter's, like speaker notes in a deck: a share, a public link, and
 an export carry the slides and drop the notes, and what notes hold never blocks
-a share because it never leaves. A captured-page asset is not shared, as no
+a share because it never leaves. Present shows the current slide's notes in a
+panel under the slide when the presenter turns on Notes (the `N` key does the
+same); the choice is remembered for the browser session, starts off, and the
+control is absent from a deck with no notes. Notes render as plain text. A
+PDF notes page is not offered, as this host renders no PDF. A captured-page asset is not shared, as no
 declared image is. The optional table column
 `display` and the chart, table, and metric `format` fields are the one ungated
 exception: they only change how a value is drawn, so they carry no schema

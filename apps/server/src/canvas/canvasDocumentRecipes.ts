@@ -151,7 +151,12 @@ const inTreeCanvasDocumentRecipeDocuments = [
     title: "Slide deck",
     summary: "One slide-size frame per slide, in order.",
     whenToUse: "When someone asks for a presentation, a deck, or slides.",
-    skeleton: [{ kind: "design", role: "One slide-size frame per slide, in order." }],
+    skeleton: [
+      {
+        kind: "design",
+        role: "One slide-size frame per slide, in order, each with short speaker notes in its notes field.",
+      },
+    ],
   },
   {
     id: "data-model",

@@ -307,6 +307,47 @@ describe("design block", () => {
     expect(within(player).getByRole("button", { name: "Next slide" })).toBeDisabled();
   });
 
+  it("shows the current slide's notes as plain text when the presenter turns them on, and hides them again", () => {
+    window.sessionStorage.clear();
+    const deck = decodeCanvasBlock({
+      blockId: "talk",
+      schemaVersion: 21,
+      kind: "design",
+      title: "Talk",
+      size: "slide",
+      frames: [
+        { frameId: "one", title: "One", html: "<h1>One</h1>", notes: "Say <b>hello</b> first." },
+        { frameId: "two", title: "Two", html: "<h1>Two</h1>" },
+      ],
+    });
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [deck] }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Present" }));
+    const player = screen.getByRole("dialog", { name: "Presenting Talk" });
+    expect(within(player).queryByLabelText("Presenter notes")).toBeNull();
+
+    fireEvent.click(within(player).getByRole("button", { name: "Notes" }));
+    const notes = within(player).getByLabelText("Presenter notes");
+    expect(notes).toHaveTextContent("Say <b>hello</b> first.");
+    expect(notes.querySelector("b")).toBeNull();
+
+    fireEvent.click(within(player).getByRole("button", { name: "Next slide" }));
+    expect(notes).toHaveTextContent("No notes for this slide.");
+
+    fireEvent.keyDown(within(player).getByRole("button", { name: "Next slide" }), { key: "n" });
+    expect(within(player).queryByLabelText("Presenter notes")).toBeNull();
+    expect(window.sessionStorage.getItem("octant.canvas.presenterNotes")).toBe("0");
+  });
+
+  it("offers no Notes control for a deck without notes", () => {
+    window.sessionStorage.clear();
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [launchDeckExampleBlock] }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Present" }));
+    const player = screen.getByRole("dialog", { name: "Presenting Launch plan" });
+    expect(within(player).queryByRole("button", { name: "Notes" })).toBeNull();
+  });
+
   it("never draws a frame that may run script beside Octant's own origin", () => {
     // Same origin is safe only for a page that runs nothing; together with
     // script it would hand the page Octant itself. Every size and theme, on the

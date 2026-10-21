@@ -1414,6 +1414,12 @@ describe("createCanvasAgentTools", () => {
       return (described.result as { guidance?: Record<string, string> }).guidance?.design ?? "";
     };
 
+    it("teaches an agent to put short speaker notes in each slide's notes field", async () => {
+      const guidance = await designGuidance(tools().set);
+      expect(guidance).toContain("speaker notes in each frame's notes field");
+      expect(guidance).toContain("drop them");
+    });
+
     it("teaches a Work or Code agent to show a Project file in a design, and a Chat agent only generated images", async () => {
       for (const mode of ["work", "code"] as const) {
         const guidance = await designGuidance(boundTools(mode).set);
