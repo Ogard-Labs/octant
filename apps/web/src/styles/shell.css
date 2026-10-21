@@ -4098,6 +4098,13 @@ form > .work-composer-adapter__attachments {
   color: var(--oct-meta);
 }
 
+/* Passing checks ride on the PR number as one more mark in the success ink,
+   so a thread ready to merge reads as ready without opening it. */
+.sidebar-navigation__thread-pr-checks {
+  margin-inline-start: 2px;
+  color: var(--octant-success-text);
+}
+
 /* PR state carries the same meaning in navigation, boards, and pane headers. */
 .pull-request-chip[data-tone="draft"],
 .pull-request-chip[data-tone="unknown"] {
