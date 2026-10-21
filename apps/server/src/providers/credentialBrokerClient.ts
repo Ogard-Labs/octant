@@ -72,6 +72,7 @@ export function makeCanvasPublicShareSecretBrokerClient(
   return makeBrokerCredentialClient(options, "/v1/canvas-public-share-secrets/", "credentialRef");
 }
 
+/**
  * The secret values a person gives an MCP server they added by hand, through
  * the broker's own routes for them, keyed by the secret id the package
  * references. Those routes reach a separate credential namespace, so neither

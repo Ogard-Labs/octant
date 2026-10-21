@@ -99,6 +99,7 @@ export async function startCredentialBroker(
    * reference, so no provider, device key, or sync key can reach one.
    */
   canvasPublicShareSecrets?: CredentialStore,
+  /**
    * The secret values a person gives an MCP server they added by hand (a
    * header, an environment variable), in a credential namespace of their own.
    * They are served only on `/v1/mcp-server-credentials/*`, keyed by the secret id
@@ -246,9 +247,6 @@ async function handleIncoming(
         replicaDeviceKeys,
         replicaStoreCredentials,
         canvasPublicShareSecrets,
-    );
-  }
-
         mcpServerCredentials,
       ),
     ),
@@ -312,6 +310,9 @@ async function handleBrokerRequest(
       "credentialRef",
       request,
       canvasPublicShareSecrets,
+    );
+  }
+
   if (url.pathname.startsWith(MCP_SERVER_CREDENTIAL_PREFIX)) {
     if (mcpServerCredentials === undefined) return failure("not-found", 404);
     return handleNamespacedRoute(
