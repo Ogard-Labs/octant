@@ -294,9 +294,10 @@ its Git subprocesses are network-denied and its data is an ephemeral read,
 not a second journal. Pages anchor to immutable Git tips, and commit details
 compare immutable object IDs with an explicit parent for merges.
 The top-right control reveals the dock only when the active pane has a bound thread
-or a valid launchable tool. An available empty dock opens on a thread overview (running threads and a thread card with its facts and
-changes; see [DESIGN.md](../../DESIGN.md#shell-and-layout))
-above a grid of tool tiles; an open dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
+or a valid launchable tool. An available empty dock opens on a stack of fact cards (Environment, Local
+servers, Context, Changes, Running now; see [DESIGN.md](../../DESIGN.md#shell-and-layout));
+its title band offers the common tools, Add tool lists the rest, and an open
+dock shows a tool strip. Direct tools are Side Chat, Browser, Files,
 Document, Canvas, artifact-gated Plan, conditional Delivery, Review, Terminal,
 Tests, iOS Simulator, and Android emulator, as mode and capability allow. Chat
 admits only the [Agents dock](#subagents) and has no bottom panel. Side

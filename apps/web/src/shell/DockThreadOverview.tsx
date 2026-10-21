@@ -1,13 +1,12 @@
-import { Folder, GitBranch, LoaderCircle } from "lucide-react";
-import { Fragment, type ReactNode } from "react";
+import { Check, ChevronRight, Folder, GitBranch, LoaderCircle, Monitor } from "lucide-react";
+import type { ReactNode } from "react";
+import type { ThreadBoardPullRequestSummary } from "@octant/contracts";
 import { OctantButton } from "../ui/base/OctantButton";
 import type { RunningThreadFact } from "./dockThreadOverviewModel";
 
 export interface DockThreadFacts {
   readonly project?: string;
   readonly checkout?: { readonly branch?: string; readonly worktree: boolean };
-  readonly model?: string;
-  readonly access?: string;
   readonly context?: { readonly label: string; readonly percent: number };
   /** Where the thread runs, by the host's own display name. */
   readonly host?: string;
@@ -20,229 +19,253 @@ export interface DockThreadChanges {
   readonly onOpenReview: () => void;
 }
 
+/** One server this thread's checkout is serving, as the card lists it. */
+export interface DockThreadServer {
+  readonly id: string;
+  readonly label: string;
+  readonly port: number;
+  readonly listening: boolean;
+}
+
 export interface DockThreadOverviewProps {
+  /** The mode the thread is in, named at the Environment card's right edge. */
+  readonly modeLabel: string;
   readonly running: ReadonlyArray<RunningThreadFact>;
   readonly onOpenRunning: (thread: RunningThreadFact) => void;
   readonly facts: DockThreadFacts;
   /** Code only, and only once the host has observed changed files. */
   readonly changes?: DockThreadChanges | undefined;
+  /** The pull request the thread carries, when the board has one. */
+  readonly pullRequest?: ThreadBoardPullRequestSummary | undefined;
+  /** Code only, and only once the host has observed this checkout's servers. */
+  readonly servers?: ReadonlyArray<DockThreadServer> | undefined;
+  readonly onOpenEnvironment?: (() => void) | undefined;
 }
 
 /**
- * What a thread dock opens on before any tool is chosen: what else is running,
- * what this thread is, and what it has changed.
- *
- * Every row is a fact the window already holds. A value the window does not
- * have is left out rather than shown as a placeholder, and a section with no
- * rows is not drawn, so a quiet thread gets a short overview and not a form of
- * blanks.
+ * What a thread dock opens on before any tool is chosen: a stack of cards,
+ * each one fact group the window already holds — where the thread runs, what
+ * it serves, how full its context is, what it changed, and what else is
+ * running. A card with nothing true to say is not drawn, so a quiet thread
+ * gets a short stack and not a form of blanks. Tools open from the title band
+ * above, not from here.
  */
 export function DockThreadOverview(props: DockThreadOverviewProps) {
-  const facts = props.facts;
-  const meta = [
+  const { facts } = props;
+  const environmentRows = [
+    ...(facts.host === undefined
+      ? []
+      : [{ key: "host", icon: Monitor, label: facts.host, meta: undefined }]),
+    ...(facts.project === undefined
+      ? []
+      : [{ key: "project", icon: Folder, label: facts.project, meta: undefined }]),
     ...(facts.checkout?.branch === undefined
       ? []
-      : [{ key: "branch", text: facts.checkout.branch }]),
-    ...(facts.checkout?.worktree === true ? [{ key: "worktree", text: "Worktree" }] : []),
-    ...(facts.host === undefined ? [] : [{ key: "host", text: facts.host }]),
+      : [
+          {
+            key: "branch",
+            icon: GitBranch,
+            label: facts.checkout.branch,
+            meta: facts.checkout.worktree ? "Worktree" : undefined,
+          },
+        ]),
   ];
-  const hasThreadCard =
-    facts.project !== undefined ||
-    meta.length > 0 ||
-    facts.model !== undefined ||
-    facts.access !== undefined ||
-    facts.context !== undefined ||
-    props.changes !== undefined;
-  if (props.running.length === 0 && !hasThreadCard) return null;
+  const servers = props.servers ?? [];
+  const showChanges = props.changes !== undefined || props.pullRequest !== undefined;
+  if (
+    environmentRows.length === 0 &&
+    servers.length === 0 &&
+    facts.context === undefined &&
+    !showChanges &&
+    props.running.length === 0
+  ) {
+    return null;
+  }
 
   return (
     <div aria-label="Thread overview" className="dock-overview" role="region">
-      {props.running.length === 0 ? null : (
-        <section aria-labelledby="dock-overview-running" className="dock-overview__section">
-          <h2 className="dock-overview__label" id="dock-overview-running">
-            Running now
-          </h2>
-          <ul className="dock-overview__running">
-            {props.running.map((thread) => (
-              <li key={`${thread.mode}:${thread.threadId}`}>
-                <OctantButton
-                  className="dock-overview__running-row"
-                  onClick={() => props.onOpenRunning(thread)}
-                  type="button"
-                  variant="ghost"
-                >
-                  <LoaderCircle
-                    aria-hidden="true"
-                    className="dock-overview__spinner"
-                    size={14}
-                    strokeWidth={1.7}
-                  />
-                  <span className="dock-overview__running-title">{thread.title}</span>
-                  {thread.projectName === undefined ? null : (
-                    <span className="dock-overview__project">
-                      <span aria-hidden="true" className="dock-overview__dot" />
-                      <span className="dock-overview__project-name">{thread.projectName}</span>
-                    </span>
-                  )}
-                  {thread.age === undefined ? null : (
-                    <span className="dock-overview__age">{thread.age}</span>
-                  )}
-                </OctantButton>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {environmentRows.length === 0 ? null : (
+        <DockCard
+          meta={props.modeLabel}
+          {...(props.onOpenEnvironment === undefined ? {} : { onOpen: props.onOpenEnvironment })}
+          title="Environment"
+        >
+          {environmentRows.map((row) => (
+            <div className="dock-card__row" data-row={row.key} key={row.key}>
+              <row.icon
+                aria-hidden="true"
+                className="dock-card__icon"
+                size={14}
+                strokeWidth={1.7}
+              />
+              <span className="dock-card__label" title={row.label}>
+                {row.label}
+              </span>
+              {row.meta === undefined ? null : <span className="dock-card__meta">{row.meta}</span>}
+            </div>
+          ))}
+        </DockCard>
       )}
-      {hasThreadCard ? (
-        <section aria-labelledby="dock-overview-thread" className="dock-overview__section">
-          <h2 className="dock-overview__label" id="dock-overview-thread">
-            This thread
-          </h2>
-          <div className="dock-thread-card">
-            {facts.project === undefined && meta.length === 0 ? null : (
-              <div className="dock-thread-card__head">
-                <span aria-hidden="true" className="dock-tile">
-                  <Folder size={14} strokeWidth={1.5} />
-                </span>
-                <div className="dock-thread-card__title">
-                  {facts.project === undefined ? null : (
-                    <span className="dock-thread-card__project" title={facts.project}>
-                      {facts.project}
-                    </span>
-                  )}
-                  {meta.length === 0 ? null : (
-                    <span className="dock-thread-card__meta">
-                      {facts.checkout?.branch === undefined ? null : (
-                        <GitBranch
-                          aria-hidden="true"
-                          className="dock-thread-card__branch-mark"
-                          size={12}
-                          strokeWidth={1.7}
-                        />
-                      )}
-                      {meta.map((segment, index) => (
-                        <Fragment key={segment.key}>
-                          {index === 0 ? null : (
-                            <span aria-hidden="true" className="dock-thread-card__separator">
-                              ·
-                            </span>
-                          )}
-                          <span
-                            className="dock-thread-card__segment"
-                            data-segment={segment.key}
-                            title={segment.text}
-                          >
-                            {segment.text}
-                          </span>
-                        </Fragment>
-                      ))}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-            <dl className="dock-thread-card__facts">
-              {facts.model === undefined ? null : (
-                <Fact label="Model">
-                  <span className="dock-thread-card__value">{facts.model}</span>
-                </Fact>
+      {servers.length === 0 ? null : (
+        <DockCard
+          {...(props.onOpenEnvironment === undefined ? {} : { onOpen: props.onOpenEnvironment })}
+          title="Local servers"
+        >
+          {servers.map((server) => (
+            <div className="dock-card__row" key={server.id}>
+              <span
+                aria-hidden="true"
+                className="dock-card__dot"
+                data-listening={server.listening ? "true" : "false"}
+              />
+              <span className="dock-card__label">{server.label}</span>
+              <span className="dock-card__meta">{`:${String(server.port)}`}</span>
+            </div>
+          ))}
+        </DockCard>
+      )}
+      {facts.context === undefined ? null : (
+        <DockCard
+          meta={`${String(Math.round(facts.context.percent))}%`}
+          title="Context"
+          aside={<ContextBar percent={facts.context.percent} />}
+        >
+          <span className="dock-card__detail">{facts.context.label}</span>
+        </DockCard>
+      )}
+      {!showChanges ? null : (
+        <DockCard title="Changes">
+          {props.changes === undefined ? null : (
+            <OctantButton
+              aria-label="Open review"
+              className="dock-card__row dock-card__action"
+              onClick={props.changes.onOpenReview}
+              type="button"
+              variant="bare"
+            >
+              <span className="diffstat dock-card__label">
+                <span className="add">{`+${props.changes.insertions.toLocaleString()}`}</span>{" "}
+                <span className="del">{`−${props.changes.deletions.toLocaleString()}`}</span>
+              </span>
+              <span className="dock-card__meta">
+                {`${props.changes.files.toLocaleString()} ${props.changes.files === 1 ? "file" : "files"}`}
+              </span>
+            </OctantButton>
+          )}
+          {props.pullRequest === undefined ? null : (
+            <div className="dock-card__row" data-row="pull-request">
+              <span className="dock-card__label" title={props.pullRequest.title}>
+                {`#${String(props.pullRequest.identity.number)} ${props.pullRequest.title}`}
+              </span>
+              <span className="dock-card__meta" data-checks={props.pullRequest.checks}>
+                {props.pullRequest.checks === "passing" ? (
+                  <Check aria-hidden="true" size={12} strokeWidth={2} />
+                ) : null}
+                {checksWords(props.pullRequest.checks)}
+              </span>
+            </div>
+          )}
+        </DockCard>
+      )}
+      {props.running.length === 0 ? null : (
+        <DockCard title="Running now">
+          {props.running.map((thread) => (
+            <OctantButton
+              className="dock-card__row dock-card__action"
+              key={`${thread.mode}:${thread.threadId}`}
+              onClick={() => props.onOpenRunning(thread)}
+              type="button"
+              variant="bare"
+            >
+              <LoaderCircle
+                aria-hidden="true"
+                className="dock-card__spinner"
+                size={14}
+                strokeWidth={1.7}
+              />
+              <span className="dock-card__label">{thread.title}</span>
+              {thread.projectName === undefined ? null : (
+                <span className="dock-card__meta">{thread.projectName}</span>
               )}
-              {facts.access === undefined ? null : (
-                <Fact label="Access">
-                  <span className="dock-thread-card__value">{facts.access}</span>
-                </Fact>
+              {thread.age === undefined ? null : (
+                <span className="dock-card__meta">{thread.age}</span>
               )}
-              {facts.context === undefined ? null : (
-                <Fact label="Context">
-                  <span className="dock-thread-card__context">
-                    <ContextRing percent={facts.context.percent} />
-                    <span className="dock-thread-card__value">
-                      {`${String(Math.round(facts.context.percent))}%`}
-                    </span>
-                  </span>
-                  <span className="dock-thread-card__detail">{facts.context.label}</span>
-                </Fact>
-              )}
-              {props.changes === undefined ? null : (
-                <Fact label="Changes">
-                  <OctantButton
-                    aria-describedby="dock-overview-changes-stat"
-                    aria-label="Open review"
-                    className="dock-thread-card__changes"
-                    onClick={props.changes.onOpenReview}
-                    type="button"
-                    variant="bare"
-                  >
-                    <span
-                      className="diffstat dock-thread-card__value"
-                      id="dock-overview-changes-stat"
-                    >
-                      <span className="add">{`+${props.changes.insertions.toLocaleString()}`}</span>{" "}
-                      <span className="del">{`−${props.changes.deletions.toLocaleString()}`}</span>
-                    </span>
-                    <span className="dock-thread-card__detail">
-                      {`${props.changes.files.toLocaleString()} ${props.changes.files === 1 ? "file" : "files"}`}
-                    </span>
-                  </OctantButton>
-                </Fact>
-              )}
-            </dl>
-          </div>
-        </section>
-      ) : null}
+            </OctantButton>
+          ))}
+        </DockCard>
+      )}
     </div>
   );
 }
 
-function Fact(props: { readonly label: string; readonly children: ReactNode }) {
-  return (
-    <div className="dock-thread-card__fact">
-      <dt className="dock-thread-card__fact-label">{props.label}</dt>
-      <dd className="dock-thread-card__fact-value">{props.children}</dd>
-    </div>
-  );
+function checksWords(checks: ThreadBoardPullRequestSummary["checks"]): string {
+  switch (checks) {
+    case "passing":
+      return "Checks pass";
+    case "failing":
+      return "Checks fail";
+    case "pending":
+      return "Checks running";
+    default:
+      return "No checks";
+  }
 }
-
-const RING_SIZE = 20;
-const RING_RADIUS = 8;
 
 /**
- * The window's fill as a gauge: a full neutral groove with the used share
- * drawn clockwise from twelve o'clock. The composer's ring wears a hue; the
- * dock stays monochrome, and the figure beside it carries the exact value.
+ * One card: a title, an optional figure or word at the right, and its rows. A
+ * card that opens a tool says so with a chevron on its title, the whole title
+ * row being the control.
  */
-function ContextRing(props: { readonly percent: number }) {
-  const used = Math.max(0, Math.min(100, props.percent));
-  const centre = RING_SIZE / 2;
+function DockCard(props: {
+  readonly title: string;
+  readonly meta?: string;
+  readonly aside?: ReactNode;
+  readonly onOpen?: () => void;
+  readonly children: ReactNode;
+}) {
+  const head = (
+    <>
+      <span className="dock-card__title">{props.title}</span>
+      {props.onOpen === undefined ? null : (
+        <ChevronRight aria-hidden="true" className="dock-card__chevron" size={12} />
+      )}
+      {props.meta === undefined ? null : <span className="dock-card__figure">{props.meta}</span>}
+      {props.aside}
+    </>
+  );
   return (
-    <svg
+    <section aria-label={props.title} className="dock-card">
+      {props.onOpen === undefined ? (
+        <div className="dock-card__head">{head}</div>
+      ) : (
+        <OctantButton
+          aria-label={`Open ${props.title}`}
+          className="dock-card__head dock-card__action"
+          onClick={props.onOpen}
+          type="button"
+          variant="bare"
+        >
+          {head}
+        </OctantButton>
+      )}
+      <div className="dock-card__rows">{props.children}</div>
+    </section>
+  );
+}
+
+/** The context window's fill as a short bar in the meta ink, beside the figure. */
+function ContextBar(props: { readonly percent: number }) {
+  const used = Math.max(0, Math.min(100, props.percent));
+  return (
+    <span
       aria-label="Context used"
       aria-valuemax={100}
       aria-valuemin={0}
       aria-valuenow={Math.round(used)}
-      className="dock-thread-card__ring"
+      className="dock-card__bar"
       role="meter"
-      viewBox={`0 0 ${String(RING_SIZE)} ${String(RING_SIZE)}`}
     >
-      <circle
-        className="dock-thread-card__ring-track"
-        cx={centre}
-        cy={centre}
-        fill="none"
-        r={RING_RADIUS}
-      />
-      {used > 0 ? (
-        <circle
-          className="dock-thread-card__ring-used"
-          cx={centre}
-          cy={centre}
-          fill="none"
-          pathLength={100}
-          r={RING_RADIUS}
-          strokeDasharray={`${String(used)} 100`}
-          transform={`rotate(-90 ${String(centre)} ${String(centre)})`}
-        />
-      ) : null}
-    </svg>
+      <span style={{ width: `${String(used)}%` }} />
+    </span>
   );
 }

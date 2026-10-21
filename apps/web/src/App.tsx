@@ -6609,7 +6609,6 @@ function LaunchedShell(
                 launchableDockSurfaces={launchableDockSurfaces}
                 navigation={navigationModel}
                 now={minuteNow.getTime()}
-                observedByInstance={providerController.observedByInstance}
                 {...(dockOverviewThread === undefined
                   ? {}
                   : { overviewThread: dockOverviewThread })}
