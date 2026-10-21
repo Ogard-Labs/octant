@@ -43,6 +43,26 @@ export async function runMutation<T>(input: {
   return "done";
 }
 
+/**
+ * Send, then reload what the host now holds. Once the send resolves the host
+ * has accepted the turn, so `onSent` runs before the reload and a failed reload
+ * yields `undefined` instead of failing the send: retrying would submit the
+ * same turn twice. The event stream catches the view up.
+ */
+export async function sendThenReload<T>(input: {
+  readonly send: () => Promise<unknown>;
+  readonly onSent: () => void;
+  readonly reload: () => Promise<T>;
+}): Promise<T | undefined> {
+  await input.send();
+  input.onSent();
+  try {
+    return await input.reload();
+  } catch {
+    return undefined;
+  }
+}
+
 /** Read-side twin of `runMutation`: a quiet reload never shows busy or errors. */
 export async function runLoad<T>(input: {
   readonly guard: SelectedThreadGuard;
