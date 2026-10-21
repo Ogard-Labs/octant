@@ -46,6 +46,23 @@ function prototype(size: CanvasDesignBlock["size"] = "phone"): CanvasDesignBlock
   return block;
 }
 
+function staticWindow(screens: number): CanvasDesignBlock {
+  const block = decodeCanvasBlock({
+    blockId: "window",
+    schemaVersion: 9,
+    kind: "design",
+    title: "Window",
+    size: "desktop",
+    frames: Array.from({ length: screens }, (_, index) => ({
+      frameId: `screen-${String(index)}`,
+      title: `Screen ${String(index + 1)}`,
+      html: "<p>Home</p>",
+    })),
+  });
+  if (block.kind !== "design") throw new Error("Fixture is not a design.");
+  return block;
+}
+
 function runRuntime(fields: Partial<DesignRunRuntime> = {}) {
   const start = vi.fn<DesignRunRuntime["start"]>(async () => ({ kind: "ready", url: PAGE }));
   return {
@@ -289,6 +306,88 @@ describe("design block", () => {
     // and blanks the frame; the link must name the page itself.
     expect(prototype.srcdoc).toContain('href="about:srcdoc#address"');
     expect(prototype.srcdoc).not.toContain('href="#address"');
+  });
+
+  it("draws a lone desktop window large on the board, and a row of desktop screens as thumbnails", () => {
+    const { container, rerender } = render(
+      <CanvasDocument definition={{ ...canvasFixture, blocks: [staticWindow(1)] }} />,
+    );
+    const previewWidth = () =>
+      (container.querySelector(".canvas-design__preview") as HTMLElement).style.width;
+    expect(previewWidth()).toBe(`${String(CANVAS_DESIGN_VIEWPORT.desktop.width)}px`);
+
+    rerender(<CanvasDocument definition={{ ...canvasFixture, blocks: [staticWindow(2)] }} />);
+    expect(previewWidth()).toBe("440px");
+  });
+
+  describe("full screen", () => {
+    const original = Object.getOwnPropertyDescriptor(document, "fullscreenEnabled");
+    afterEach(() => {
+      if (original === undefined) {
+        delete (document as { fullscreenEnabled?: unknown }).fullscreenEnabled;
+      } else Object.defineProperty(document, "fullscreenEnabled", original);
+      delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+      delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+    });
+
+    function allowFullscreen() {
+      Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: true });
+      const request = vi.fn(async () => undefined);
+      HTMLElement.prototype.requestFullscreen = request;
+      return request;
+    }
+
+    function enter(element: Element | null) {
+      Object.defineProperty(document, "fullscreenElement", { configurable: true, value: element });
+      act(() => {
+        document.dispatchEvent(new Event("fullscreenchange"));
+      });
+    }
+
+    it("plays a design full screen where the browser allows it, and offers the way back", () => {
+      const request = allowFullscreen();
+      render(<CanvasDocument definition={{ ...canvasFixture, blocks: [staticWindow(1)] }} />);
+      fireEvent.click(screen.getByRole("button", { name: "Play" }));
+      const player = screen.getByRole("dialog", { name: "Playing Window" });
+
+      fireEvent.click(within(player).getByRole("button", { name: "Full screen" }));
+
+      const body = player.querySelector(".canvas-design-player__body");
+      expect(request.mock.contexts[0]).toBe(body);
+      enter(body);
+      expect(within(player).getByRole("button", { name: "Exit full screen" })).toBeVisible();
+    });
+
+    it("runs a desktop prototype full screen with Stop still reachable", async () => {
+      const request = allowFullscreen();
+      const { runtime } = runRuntime();
+      render(
+        <CanvasDocument
+          definition={{ ...canvasFixture, blocks: [prototype("desktop")] }}
+          designRunRuntime={runtime}
+          placement="thread"
+        />,
+      );
+      const region = screen.getByRole("region", { name: "Checkout, Desktop prototype" });
+      expect(within(region).queryByRole("button", { name: "Full screen" })).toBeNull();
+      fireEvent.click(within(region).getByRole("button", { name: "Run" }));
+      await within(region).findByTitle("Checkout, running prototype");
+
+      fireEvent.click(within(region).getByRole("button", { name: "Full screen" }));
+
+      expect(request.mock.contexts[0]).toBe(region);
+      enter(region);
+      expect(within(region).getByRole("button", { name: "Exit full screen" })).toBeVisible();
+      expect(within(region).getByRole("button", { name: "Stop" })).toBeVisible();
+    });
+
+    it("offers no full screen button where the browser cannot", () => {
+      Object.defineProperty(document, "fullscreenEnabled", { configurable: true, value: false });
+      render(<CanvasDocument definition={{ ...canvasFixture, blocks: [staticWindow(1)] }} />);
+      fireEvent.click(screen.getByRole("button", { name: "Play" }));
+
+      expect(screen.queryByRole("button", { name: "Full screen" })).toBeNull();
+    });
   });
 
   it("presents slides in order and moves with the arrow keys", () => {
