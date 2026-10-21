@@ -494,10 +494,12 @@ describe("WindowChrome", () => {
     const increasedContrast = increasedContrastRules();
 
     expect(styles).not.toContain("prefers-contrast");
-    // The whole window is one surface, so reduced transparency makes that one
-    // surface opaque rather than repainting each column.
+    // The frame and the sheet are painted from three surfaces on the shell
+    // root, so reduced transparency makes those opaque rather than
+    // repainting each column.
     expect(reducedTransparency).toContain(".shell.shell-frame");
-    expect(reducedTransparency).toContain("--octant-window-surface: var(--octant-workspace);");
+    expect(reducedTransparency).toContain("--octant-window-surface: var(--octant-sidebar-opaque);");
+    expect(reducedTransparency).toContain("--octant-sheet-surface: var(--octant-workspace);");
     expect(reducedTransparency).not.toContain("--octant-border-strong");
     expect(reducedTransparency).not.toContain("--octant-text-");
     expect(reducedTransparency).not.toContain("box-shadow:");
@@ -689,7 +691,10 @@ describe("WindowChrome", () => {
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("background: transparent;");
     expect(cssRule(".shell.shell-frame")).toContain("background: var(--octant-window-surface);");
     expect(cssRule(".shell.shell-frame.shell--material-translucent")).toContain(
-      "--octant-window-surface: var(--octant-workspace-translucent);",
+      "--octant-window-surface: var(--octant-sidebar-translucent);",
+    );
+    expect(cssRule(".shell.shell-frame.shell--material-translucent")).toContain(
+      "--octant-sheet-surface: var(--octant-workspace-translucent);",
     );
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("overflow: clip;");
     expect(cssRule(".shell.shell-frame--standalone")).toContain("position: fixed;");
@@ -759,7 +764,7 @@ describe("WindowChrome", () => {
       "color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent)",
     );
     expect(atRuleBlock("@media (prefers-reduced-transparency: reduce)")).toContain(
-      "--octant-window-surface: var(--octant-workspace);",
+      "--octant-window-surface: var(--octant-sidebar-opaque);",
     );
   });
 

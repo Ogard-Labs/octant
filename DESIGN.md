@@ -206,20 +206,25 @@ focus; an invalid field keeps its danger border in every state. A feature's
 stylesheet lays a field out (width, height, type size) and never repaints it,
 so the three react alike in light and dark.
 
-The window is one surface. The rail, the sidebar, the primary workspace, the
-right dock, the bottom panel, and the Settings page share one colour, the
-workspace colour, painted once at the shell root, and sit edge to edge with
-no gutters, told apart only by the hairlines their resize handles draw. No
-column paints a fill of its own, so whatever the root shows reaches every one:
-the opaque workspace colour, or with Glass on the tint over the window's
-native material, which frosts the desktop behind the whole window rather than
-a sidebar strip. (The frame used to set rounded cards 8px apart on a back of
-the sidebar's material; the glass then showed only in the sidebar and an
-opaque card covered everything a person worked in, so the cards went.) Reader
-pages inside the workspace are clear too. Behind every page the application
-ground lies between the window surface and the content, from the workspace's
-leading edge, or under the whole window with Cover the sidebar on. A pane header and the dock head share the
-title rail (`--oct-title-rail-h`), and the card draws the one hairline under both. At 680px and below the
+The window is a frame and one sheet. The rail and the title band form one
+L-shaped frame in the window surface (the sidebar colour), with no line where
+they meet. The sidebar, the stage (the primary workspace), the right dock, and
+the bottom panel sit inside it as one sheet: it starts under the title band,
+stops 8px short of the window's right and bottom edges, rounds its outer
+corners (`--oct-radius-md`) where the frame turns and along the bottom, and
+divides its parts with hairlines. The sidebar's side is the workspace colour,
+a step lighter than the stage's application background, so the turn of the
+frame reads. Pane headers and dock tabs stay in the title band. With Glass on,
+the frame and the sheet are the Tint over the window's native material, so
+the desktop frosts behind the whole window rather than a sidebar strip. (The
+frame used to set rounded cards 8px apart on a back of the sidebar's material;
+the glass then showed only in the sidebar and an opaque card covered
+everything a person worked in, so the cards went.) Reader pages inside the
+stage are clear. Behind every page the application ground lies on the stage's
+piece of the sheet, under the content, taking the sheet's corners; with Cover
+the sidebar on it runs under the sidebar's piece too, which then lets a
+little of it through. A pane header and the dock head share the
+title rail (`--oct-title-rail-h`), and the pane draws the one hairline under both. At 680px and below the
 workspace sidebar is an overlay drawer and the frame stays flat, with a scrim
 (`--octant-scrim`) dimming the page behind it. The drawer
 starts closed on every load, closes on Escape, on a tap outside it, and on
@@ -1077,9 +1082,9 @@ Window glass is the `sidebarMaterial` shell setting with the theme's vibrancy
 level, shown as the Window section's Glass control (Off, Subtle, Strong) and
 its Tint slider. It takes effect only when the host resolved the material
 translucent, so every accessibility, performance, and host-support gate
-applies; then the window surface is the workspace colour at the Tint's
-opacity over the native material, and reduced transparency or an unsupported
-host leaves it opaque. Menus, dialogs, popovers, and other controls drawn
+applies; then the frame (the sidebar colour) and the sheet (the workspace
+colour) are each at the Tint's opacity over the native material, and reduced
+transparency or an unsupported host leaves them opaque. Menus, dialogs, popovers, and other controls drawn
 over it stay opaque semantic surfaces. The older `workspaceMaterial` setting
 is still read and stored but no longer changes anything: the whole window is
 glass or none of it is.

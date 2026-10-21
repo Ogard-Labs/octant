@@ -23,14 +23,16 @@
   grid-template-rows: 34px minmax(0, 1fr);
   overflow: hidden;
   position: relative;
-  /* The window is one surface. The rail, the sidebar, and the workspace share
-     one colour, told apart by hairlines rather than by cards floating on a
-     back, and it is painted here once so every column above stays clear.
-     When the host resolved glass, the surface is the tint over the window's
-     native material, so the frost reaches the whole window and not the
-     sidebar alone: with the old cards the glass showed only in a sidebar
-     strip, and an opaque card covered everything a person worked in. */
-  --octant-window-surface: var(--octant-workspace);
+  /* The window is a frame and one sheet. The rail and the title band are the
+     frame, painted here once; the sidebar, the stage, and the dock sit inside
+     it as one sheet (see "The frame and the sheet" below). When the host
+     resolved glass, both are the tint over the window's native material, so
+     the frost reaches the whole window and not the sidebar alone: with the
+     old floating cards the glass showed only in a sidebar strip, and an
+     opaque card covered everything a person worked in. */
+  --octant-window-surface: var(--octant-sidebar-opaque);
+  --octant-sheet-surface: var(--octant-workspace);
+  --octant-stage-surface: var(--octant-app-background);
   background: var(--octant-window-surface);
   border: 0;
   border-radius: 0;
@@ -38,27 +40,37 @@
 }
 
 .shell.shell-frame.shell--material-translucent {
-  --octant-window-surface: var(--octant-workspace-translucent);
+  --octant-window-surface: var(--octant-sidebar-translucent);
+  --octant-sheet-surface: var(--octant-workspace-translucent);
+  --octant-stage-surface: var(--octant-workspace-translucent);
 }
 
 .shell.shell-frame.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"] {
-  --octant-window-surface: var(--octant-workspace-translucent-subtle);
+  --octant-window-surface: var(--octant-sidebar-translucent-subtle);
+  --octant-sheet-surface: var(--octant-workspace-translucent-subtle);
+  --octant-stage-surface: var(--octant-workspace-translucent-subtle);
 }
 
 .shell.shell-frame.shell--material-translucent[data-octant-sidebar-vibrancy="strong"] {
-  --octant-window-surface: var(--octant-workspace-translucent-strong);
+  --octant-window-surface: var(--octant-sidebar-translucent-strong);
+  --octant-sheet-surface: var(--octant-workspace-translucent-strong);
+  --octant-stage-surface: var(--octant-workspace-translucent-strong);
 }
 
 /* The material class already carries the host's contrast and
    reduced-transparency gates; these cover the person's own Reduced
    transparency switch and the system setting, which a page can see first. */
 html[data-octant-reduced-transparency="true"] .shell.shell-frame {
-  --octant-window-surface: var(--octant-workspace);
+  --octant-window-surface: var(--octant-sidebar-opaque);
+  --octant-sheet-surface: var(--octant-workspace);
+  --octant-stage-surface: var(--octant-app-background);
 }
 
 @media (prefers-reduced-transparency: reduce) {
   .shell.shell-frame {
-    --octant-window-surface: var(--octant-workspace);
+    --octant-window-surface: var(--octant-sidebar-opaque);
+    --octant-sheet-surface: var(--octant-workspace);
+    --octant-stage-surface: var(--octant-app-background);
   }
 }
 
@@ -244,7 +256,6 @@ html[data-octant-native-host="true"]
   grid-row: 1 / -1;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--octant-border-soft);
   background: transparent;
 }
 
@@ -554,7 +565,6 @@ html[data-octant-native-host="true"]
   grid-row: 1 / -1;
   padding: 0;
   overflow: hidden;
-  border-right: 1px solid var(--octant-border-soft);
   background: transparent;
 }
 
@@ -1728,13 +1738,104 @@ html[data-octant-native-host="true"]
   background: transparent;
 }
 
-/* Columns on one surface. The sidebar, the primary workspace, the right dock,
-   and the bottom panel sit edge to edge on the window surface, told apart by
-   the hairlines their resize handles already draw. They were rounded cards
-   floating 8px apart on a back of the sidebar's material, which spent a
-   gutter on every edge and kept the glass out of everything a person works
-   in. A narrow window keeps its overlay drawer. */
+/* The frame and the sheet. The rail and the title band are one L-shaped
+   frame in the window surface, with no line where they meet. Inside it the
+   sidebar, the stage, and the dock form one sheet: it starts under the title
+   band, stops 8px short of the window's right and bottom edges, rounds the
+   corners where the frame turns and along the bottom, and divides its parts
+   with hairlines. The sidebar's side is a step lighter than the stage so the
+   turn of the frame reads. (They used to be separate rounded cards floating
+   8px apart on a back, which the glass could not reach.) Each part paints its
+   piece of the sheet below the title band from a pseudo-element, so headers
+   and dock tabs keep sitting in the band. The ground lies over the stage's
+   paint and under everything else. A narrow window keeps its overlay
+   drawer. */
 @media (min-width: 681px) {
+  .shell.shell-frame {
+    --octant-sheet-inset: var(--oct-space-2);
+  }
+
+  .shell-frame > .sidebar {
+    position: relative;
+    isolation: isolate;
+    padding-bottom: var(--octant-sheet-inset);
+  }
+
+  .shell-frame > .sidebar::before {
+    --octant-sheet-lift: color-mix(in srgb, var(--oct-fg) 3%, transparent);
+    position: absolute;
+    z-index: -1;
+    inset: var(--oct-title-rail-h) 0 var(--octant-sheet-inset) 0;
+    border-radius: var(--oct-radius-md) 0 0 var(--oct-radius-md);
+    background-color: var(--octant-sheet-surface);
+    background-image: linear-gradient(var(--octant-sheet-lift), var(--octant-sheet-lift));
+    box-shadow: inset 0 0 0 1px var(--octant-border-soft);
+    content: "";
+    pointer-events: none;
+  }
+
+  /* Under a ground that covers the sidebar too, the sidebar's piece of the
+     sheet lets a little of it through. */
+  .shell--app-backdrop-sidebar.shell-frame > .sidebar::before {
+    background-color: color-mix(in srgb, var(--octant-sheet-surface) 84%, transparent);
+  }
+
+  /* Positioned for its sheet piece, but with no stacking context of its own:
+     the piece sits under the ground, which sits under the panes. */
+  .shell-frame > .workspace-layer {
+    position: relative;
+    padding: 0 var(--octant-sheet-inset) var(--octant-sheet-inset) 0;
+  }
+
+  .shell-frame > .workspace-layer::before {
+    position: absolute;
+    z-index: -2;
+    inset: var(--oct-title-rail-h) var(--octant-sheet-inset) var(--octant-sheet-inset) 0;
+    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
+    background: var(--octant-stage-surface);
+    box-shadow:
+      inset 0 1px 0 var(--octant-border-soft),
+      inset 0 -1px 0 var(--octant-border-soft),
+      inset -1px 0 0 var(--octant-border-soft);
+    content: "";
+    pointer-events: none;
+  }
+
+  .shell--sidebar-collapsed.shell-frame > .workspace-layer::before {
+    border-radius: var(--oct-radius-md);
+    box-shadow: inset 0 0 0 1px var(--octant-border-soft);
+  }
+
+  .shell-frame .right-utility-dock {
+    isolation: isolate;
+    background: transparent;
+  }
+
+  .shell-frame .right-utility-dock::before {
+    position: absolute;
+    z-index: -1;
+    inset: var(--oct-title-rail-h) 0 0 0;
+    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
+    background: var(--octant-sheet-surface);
+    box-shadow:
+      inset 0 1px 0 var(--octant-border-soft),
+      inset 0 -1px 0 var(--octant-border-soft),
+      inset -1px 0 0 var(--octant-border-soft);
+    content: "";
+    pointer-events: none;
+  }
+
+  /* The dock's hairline divides the sheet, not the title band. */
+  .shell-frame .right-utility-dock__resize::before {
+    top: var(--oct-title-rail-h);
+  }
+
+  .shell-frame .bottom-utility-panel {
+    border-radius: 0 0 var(--oct-radius-md) var(--oct-radius-md);
+    background: var(--octant-sheet-surface);
+    box-shadow: inset 0 1px 0 var(--octant-border-soft);
+  }
+
   /* The window controls float over the workspace's first rail. A reader
      page's title and its Back to workspace action started inside that rail
      and crowded the controls, so the page starts below it. */
