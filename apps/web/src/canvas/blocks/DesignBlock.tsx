@@ -9,7 +9,16 @@ import {
   type RefObject,
   type SyntheticEvent,
 } from "react";
-import { ChevronLeft, ChevronRight, Play, RotateCcw, Square, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Maximize,
+  Minimize,
+  Play,
+  RotateCcw,
+  Square,
+  X,
+} from "lucide-react";
 import {
   CANVAS_DESIGN_HEARTBEAT_INTERVAL_MS,
   CANVAS_DESIGN_VIEWPORT,
@@ -202,7 +211,10 @@ function DesignBoard({
   const playButton = useRef<HTMLButtonElement>(null);
   const [boardRef, board] = useSize();
   const viewport = CANVAS_DESIGN_VIEWPORT[size];
-  const cap = BOARD_FRAME_WIDTH[size];
+  const count = block.frames.length;
+  // One desktop window is the whole design, so it takes the board's width
+  // instead of the thumbnail width a row of screens shares.
+  const cap = size === "desktop" && count === 1 ? viewport.width : BOARD_FRAME_WIDTH[size];
   // The stylesheet draws each box as wide as the board allows, up to its cap,
   // from the first paint. The page inside is scaled to the same width once the
   // board is measured, and waits until then: a page scaled for the cap in a
@@ -217,7 +229,6 @@ function DesignBoard({
   const scale = frameWidth === undefined ? undefined : frameWidth / viewport.width;
   const frameStyle = { "--canvas-design-frame-cap": `${String(cap)}px` } as CSSProperties;
   const [watchFrame, frameIsNear] = useFramesNearView(block.frames.map((f) => String(f.frameId)));
-  const count = block.frames.length;
   const noun = slides ? (count === 1 ? "slide" : "slides") : count === 1 ? "screen" : "screens";
   const first = String(block.frames[0]?.frameId ?? "");
 
@@ -326,6 +337,7 @@ function DesignPlayer({
   // of a page that runs no script.
   const [restarts, setRestarts] = useState(0);
   const [stageRef, stage] = useSize();
+  const fullscreen = useFullscreen<HTMLDivElement>();
   const viewport = CANVAS_DESIGN_VIEWPORT[size];
   const scale =
     stage === undefined
@@ -354,7 +366,7 @@ function DesignPlayer({
       restoreFocus={restoreFocus}
     >
       {/* Keys reach the deck here; a slide frame takes no focus or pointer. */}
-      <div className="canvas-design-player__body" onKeyDown={onKeyDown}>
+      <div className="canvas-design-player__body" onKeyDown={onKeyDown} ref={fullscreen.ref}>
         <header className="canvas-design-player__bar">
           <span className="canvas-design-player__title">{block.title}</span>
           {slides ? (
@@ -399,6 +411,7 @@ function DesignPlayer({
                 Restart
               </OctantButton>
             )}
+            <FullscreenButton fullscreen={fullscreen} />
             <OctantButton
               aria-label="Close"
               onClick={onClose}
@@ -627,6 +640,7 @@ function RunningDesignBlock({
   const stopButton = useRef<HTMLButtonElement>(null);
   const runButton = useRef<HTMLButtonElement>(null);
   const frameRef = useRef<HTMLElement | null>(null);
+  const fullscreen = useFullscreen<HTMLElement>();
   // Each start or stop is a new generation, so a page asked for earlier
   // never replaces what the person did since.
   const generation = useRef(0);
@@ -698,6 +712,7 @@ function RunningDesignBlock({
       aria-roledescription="design"
       className="canvas-design"
       data-canvas-design={String(block.blockId)}
+      ref={fullscreen.ref}
     >
       <header className="canvas-design__header">
         <div className="canvas-design__heading">
@@ -711,6 +726,7 @@ function RunningDesignBlock({
                 <span aria-hidden="true" className="canvas-design__running-dot" />
                 Running
               </span>
+              {block.size === "document" ? null : <FullscreenButton fullscreen={fullscreen} />}
               <OctantButton
                 onClick={() => {
                   stop({ kind: "stopped" });
@@ -725,18 +741,25 @@ function RunningDesignBlock({
                 Stop
               </OctantButton>
             </>
-          ) : runtime === undefined ? null : (
-            <OctantButton
-              disabled={state.kind === "starting"}
-              onClick={() => void run()}
-              ref={runButton}
-              size="sm"
-              type="button"
-              variant="secondary"
-            >
-              <Play aria-hidden="true" size={12} strokeWidth={2} />
-              {state.kind === "stopped" ? "Run again" : "Run"}
-            </OctantButton>
+          ) : (
+            <>
+              {/* Stopping, by hand or by the watchdog, leaves the section full
+                  screen; the exit control stays until full screen ends. */}
+              {fullscreen.active ? <FullscreenButton fullscreen={fullscreen} /> : null}
+              {runtime === undefined ? null : (
+                <OctantButton
+                  disabled={state.kind === "starting"}
+                  onClick={() => void run()}
+                  ref={runButton}
+                  size="sm"
+                  type="button"
+                  variant="secondary"
+                >
+                  <Play aria-hidden="true" size={12} strokeWidth={2} />
+                  {state.kind === "stopped" ? "Run again" : "Run"}
+                </OctantButton>
+              )}
+            </>
           )}
         </div>
       </header>
@@ -776,6 +799,7 @@ function RunningDesignBlock({
       {state.kind === "running" ? (
         <RunningFrame
           block={block}
+          fitHeight={fullscreen.active}
           onDesktopSurface={onDesktopSurface}
           frameRef={frameRef}
           key={state.url}
@@ -874,6 +898,7 @@ const UNMEASURED_DOCUMENT_WIDTH = 640;
 function RunningFrame({
   block,
   url,
+  fitHeight,
   onDesktopSurface,
   frameRef,
   onStop,
@@ -882,6 +907,8 @@ function RunningFrame({
 }: {
   readonly block: CanvasDesignBlock;
   readonly url: string;
+  /** Full screen: the window is scaled to the stage's height too, not only its width. */
+  readonly fitHeight: boolean;
   readonly onDesktopSurface: boolean;
   readonly frameRef: RefObject<HTMLElement | null>;
   readonly onStop: (why: RunStopReason) => void;
@@ -979,7 +1006,14 @@ function RunningFrame({
     );
   }
   const viewport = CANVAS_DESIGN_VIEWPORT[block.size];
-  const scale = stage === undefined ? 1 : Math.min(1, stage.width / viewport.width);
+  const scale =
+    stage === undefined
+      ? 1
+      : Math.min(
+          1,
+          stage.width / viewport.width,
+          fitHeight ? stage.height / viewport.height : Infinity,
+        );
   return (
     <div className="canvas-design__stage" ref={stageRef}>
       <div
@@ -997,6 +1031,50 @@ function RunningFrame({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Full screen for one element, where the browser offers it. A refusal (a
+ * window that may not, a gesture the browser did not count) leaves the page as
+ * it was.
+ */
+function useFullscreen<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    const sync = () =>
+      setActive(ref.current !== null && document.fullscreenElement === ref.current);
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
+  const toggle = () => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined);
+    else void ref.current?.requestFullscreen().catch(() => undefined);
+  };
+  return { ref, active, toggle, available: document.fullscreenEnabled === true };
+}
+
+function FullscreenButton({
+  fullscreen,
+}: {
+  readonly fullscreen: Pick<ReturnType<typeof useFullscreen>, "active" | "available" | "toggle">;
+}) {
+  if (!fullscreen.available) return null;
+  return (
+    <OctantButton
+      aria-label={fullscreen.active ? "Exit full screen" : "Full screen"}
+      onClick={fullscreen.toggle}
+      size="icon-sm"
+      type="button"
+      variant="ghost"
+    >
+      {fullscreen.active ? (
+        <Minimize aria-hidden="true" size={16} strokeWidth={1.8} />
+      ) : (
+        <Maximize aria-hidden="true" size={16} strokeWidth={1.8} />
+      )}
+    </OctantButton>
   );
 }
 
