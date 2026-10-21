@@ -127,7 +127,7 @@ import type {
   RunningService,
   ThreadBoardPullRequestIdentity,
 } from "@octant/contracts";
-import { type PaneId, type WindowId } from "@octant/contracts/shell";
+import { decodeWorkspaceTabId, type PaneId, type WindowId } from "@octant/contracts/shell";
 import type { ProductSurfaceSettings } from "@octant/contracts/modes";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ThemeTypography } from "@octant/contracts/theme";
@@ -149,6 +149,7 @@ import {
   buildModelPickerGroups,
   preselectCreateHost,
   resolveDraftProviderSelection,
+  workspaceWelcomeSurface,
 } from "@octant/domain";
 import type { CreateHostViewScope, ModelPickerSelection } from "@octant/domain";
 import { assertCreateDestinationFromHosts } from "./shell/assertCreateDestination";
@@ -5259,6 +5260,10 @@ function LaunchedShell(
     // work modes dismisses it.
     if (mode === "chat") setAutomationCenterOpen(false);
     if (mode === "chat") return;
+    if (mode === "code") {
+      landCodeOnHome();
+      return;
+    }
     // `projects` is the mode currently on screen. Switching Work → Code must
     // see Code Projects that already exist, or Switch to Code also opens an
     // unscoped draft over the Code workspace.
@@ -5268,6 +5273,27 @@ function LaunchedShell(
     if (!hasProject) {
       void controller.openDraftThread(mode);
     }
+  }
+
+  // Code lands on Code Home with nothing chosen. Code's welcome tab already
+  // renders the composer, so switching to Code opens no draft of its own; a
+  // New task draft left without text or images counts as nothing chosen and
+  // gives its pane back to the welcome tab. Without this, the first New task
+  // or a first visit with no Code Project kept a draft as Code's surface and
+  // Code Home was never shown again.
+  function landCodeOnHome() {
+    const workspace = controller.workspace;
+    if (workspace === undefined) return;
+    const paneId = workspace.activePaneIds.code;
+    const surface = findWorkspacePane(workspace.layouts.code, paneId)?.surface;
+    if (surface?.kind !== "draft-thread") return;
+    const scope = `code:${String(paneId)}`;
+    if (newTaskDrafts.read(scope).trim().length > 0) return;
+    if (newTaskDrafts.readImages(scope).length > 0) return;
+    void controller.replacePaneSurface(
+      paneId,
+      workspaceWelcomeSurface("code", decodeWorkspaceTabId(crypto.randomUUID())),
+    );
   }
 
   // The destinations a plugin's sidebar row may open, and the readers the

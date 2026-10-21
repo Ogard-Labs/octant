@@ -3896,6 +3896,29 @@ describe("App", () => {
     expect(screen.queryByText("Ai slop callouts")).toBeNull();
   });
 
+  it("lands Code on Code Home again after a New task draft is left empty", async () => {
+    const user = userEvent.setup();
+    render(
+      <App
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects({ ...projectBootstrap(), availability: [] })}
+        projectWindowCapability={projectWindowCapability}
+        shellClient={client(codeHomeShellBootstrap())}
+      />,
+    );
+    const modes = () => within(screen.getByRole("group", { name: "Workspace mode" }));
+
+    await screen.findByRole("button", { name: "Customize" });
+    await user.click(screen.getByRole("button", { name: "New task" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Customize" })).toBeNull());
+
+    await user.click(modes().getByRole("button", { name: "Work" }));
+    await user.click(modes().getByRole("button", { name: "Code" }));
+
+    expect(await screen.findByRole("button", { name: "Customize" })).toBeVisible();
+  });
+
   it("keeps the draft composer's chosen Project after a visit to Settings", async () => {
     const user = userEvent.setup();
     const projectApi = projects({ ...projectBootstrap(), availability: [] });
