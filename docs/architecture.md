@@ -3988,7 +3988,11 @@ native harness in `apps/server/src/harness`:
   session and its conversation stay live, so the next `send` continues it
   without a resume or a journal rebuild, and a cancel during a tool step first
   closes the calls its runner never answered with the same interrupted results
-  a resume would write. Only `stop` releases the session. Chat and Work still
+  a resume would write. Only `stop` or connection teardown releases the session.
+  Opening an endpoint belongs to the pending start or resume: if that operation
+  is cancelled or its connection closes before opening finishes, the late
+  endpoint is released without admitting a session or changing its transcript.
+  It cannot restore an active-session count after cleanup. Chat and Work still
   rebuild their history on the host and
   start a fresh session each turn.
 - **Forks.** A Code fork on a harness model starts its first session from a
@@ -5886,6 +5890,38 @@ mechanisms are:
   itself. That boundary is accepted: the mark gates Octant's own tools only,
   and Claude's and Codex's built-in tools run under the runtime's own sandbox
   and approvals.
+  A Claude launch sets no `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+  umbrella: blanket-blocking every non-essential channel of the runtime's
+  was stricter than Octant needs, so each channel that matters is kept off
+  by its own switch on every launch, the version read included
+  (`ISOLATED_CLAUDE_LAUNCH_GUARDS`; maintainer decision, 2026-10-20): usage
+  metrics (`DISABLE_TELEMETRY`), error reports (`DISABLE_ERROR_REPORTING`),
+  the runtime's self-update (`DISABLE_AUTOUPDATER`), `/bug` and `/feedback`,
+  which upload the conversation (`DISABLE_BUG_COMMAND`,
+  `DISABLE_FEEDBACK_COMMAND`; the second is not in the public reference, but
+  both installed binaries carry it beside the first), the session-quality
+  survey (`CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`), auto-memory, the SDK's
+  built-in agents, and marketplace auto-install. The runtime's release-note,
+  PR-badge, and availability checks are therefore its own traffic to
+  Anthropic under the person's account; they carry no Project content.
+  Feature-flag fetching stays off: Anthropic's environment-variable reference
+  says `DISABLE_TELEMETRY` also disables it, so the runtime evaluates its
+  flags from the defaults it ships with. A channel with no switch of its own is closed by the
+  launch shape instead: `/share`, like any slash command, runs only when the
+  person types it, as in the runtime's own terminal (the model cannot invoke
+  one, and Octant sends none but `/compact`); a plugin's background `command`
+  cannot run because the query is opened with no setting sources, plugins,
+  skills, agents, or MCP servers, so no plugin is loaded, and
+  `strictMcpConfig` keeps the account's claude.ai connectors out (2.1.304
+  lists them without it, setting sources or not); Remote Control starts only
+  on a flag or command Octant never passes; and the advisor, like every other
+  tool the runtime might add, stays out because the port holds the
+  initialized tool list to the requested set. The runtime's `Artifact` tool
+  is not a reason either way: measured the same day, the runtime offers it
+  only when launched by Anthropic's own desktop app (it keys on the launching
+  entrypoint), so from Octant it is absent with or without the umbrella. A
+  host that exports `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` itself keeps
+  the umbrella on every launch; only that disabling value crosses.
   A confined Claude Plan launch reads the assigned leaf of that account's
   state directory (`~/.claude` or `~/.claude-accounts/<instanceId>`) and
   writes only `sessions/` and its own session in `projects/`: the
@@ -7426,7 +7462,10 @@ macOS-only.
   signed in, not installed, or disabled never holds an install back: quitting
   asks on the same terms, because both read the one `workInFlight` reading of
   the host rather than its `attentionRequired` flag, which also marks the menu
-  bar for provider readiness. Automatic checks are a setting; the host starts with them
+  bar for provider readiness. This conservative reading currently counts open
+  provider sessions, including idle sessions kept for another turn, so the quit
+  warning describes sessions rather than claiming that each is running work.
+  Automatic checks are a setting; the host starts with them
   off until the persisted choice arrives, then checks daily. A check is a
   plain GET carrying only version, platform, and architecture (the ring is in
   the path); it is not a telemetry channel.
@@ -7469,7 +7508,12 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   startup the dev script rebuilds `apps/desktop/dist/entry.mjs` whenever
   `apps/desktop/src` is newer, so `apps/desktop/src` edits need only a
   restart of `bun run dev` rather than a manual
-  `bun run --cwd apps/desktop build`.
+  `bun run --cwd apps/desktop build`. It rebuilds the Canvas preview page
+  (`apps/web/dist/canvas-preview/`) the same way whenever `apps/web` or the contracts, domain or theme packages
+  are newer,
+  and hands the host it starts `OCTANT_WEB_DIST_PATH=apps/web/dist`, so an
+  agent's Canvas preview returns a picture on a development host; `octant web
+--dev` does both as well.
 - The server is composed by a root in `apps/server/src/server.ts` that calls
   the per-area wiring modules under `apps/server/src/wiring/` in a fixed
   order, and every module declares the reach it has as a `Pick` of the

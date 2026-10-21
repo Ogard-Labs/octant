@@ -158,7 +158,7 @@ const CANVAS_EXPORT_PDF_FRAME_SCALE = 2;
 export const CANVAS_PREVIEW_ORIGIN = "http://canvas-preview.octant.invalid";
 /** The preview page's folder inside the built web assets. */
 export const CANVAS_PREVIEW_ASSET_FOLDER = "canvas-preview";
-const CANVAS_PREVIEW_PAGE = "canvas-preview.html";
+export const CANVAS_PREVIEW_PAGE = "canvas-preview.html";
 /** The page that lays a design's frames out one to a sheet, built in memory. */
 const CANVAS_EXPORT_SHEETS_PAGE = "canvas-export-sheets.html";
 /** Where the preview page finds a running design's page, by its position. */
