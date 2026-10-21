@@ -697,6 +697,34 @@ Chromium stops painting sandboxed frames that are `inert` or have
 `pointer-events: none`, so a frame shown as a picture stays hit-testable and a
 cover over it takes the pointer
 ([decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md](../decisions/0164-canvas-designs-are-html-in-a-frame-that-runs-nothing.md)).
+A whole app window is a `desktop` design that runs script, and it is built in
+steps. A frame and the shared stylesheet each hold up to 65,536 characters
+(`CANVAS_MAX_DESIGN_MARKUP_LENGTH`, raised from 32,768): a finished window at
+1440×900, with its sidebar, panes, tabs, and script in one frame, ran past the
+old number, and 64 KiB holds one with room. The limits that keep a document sane
+are unchanged: 24 frames, 128 blocks, 256 KiB of text across the whole Canvas
+(so about three frames this large, or many smaller screens), and a 1 MiB
+payload. Widening a limit needs no schema version: a reader that predates it
+refuses the larger frame as invalid rather than drawing it wrongly. An agent
+does not send the window in one call. `revise` takes `designEdits` instead of
+`blocks`: for each named design block, a replacement `styles`, `frames` added
+or replaced by `frameId`, and `removeFrameIds`. The host reads the current
+version, requires `expectedSequence` to equal its sequence so a person's change
+in between is not overwritten, marks the reading thread as a read does, applies
+the edits, decodes the edited design whole, and revises with the full block list,
+so every other block and frame is kept and the markup policy, budgets, and
+authority are the ordinary revise path's. Describe's `design` guidance teaches
+the order (shell first, then a frame per screen), the `app-redesign-prototype`
+recipe names the shape, and the worked `app-window` example shows state without
+a framework: one `state` object, one `render()` that writes it to the page and
+sets CSS variables such as `--accent` on the root, and one delegated listener.
+In the thread a running prototype is drawn at its design size, scaled to the
+column; **Full screen** (where the browser offers it) takes the prototype and its
+header, so **Stop** stays reachable, and scales it to the screen's height as well
+as its width. Play for a static design has the same control. A lone static desktop
+window takes the board's full width instead of the thumbnail width a row of
+screens shares.
+
 Version 18 lets a design declare `runsScript: true`, which makes it a running
 prototype. For it alone, the markup policy admits inline `<script>` elements
 and event handlers; a script file, every remote load, `meta`, `base`,
