@@ -143,8 +143,92 @@ function design(fields: Partial<Pick<CanvasDesignBlock, "size" | "theme">>): Can
   return block;
 }
 
+/** A deck long enough that drawing every slide at once would be felt. */
+function deck(slides: number): CanvasDesignBlock {
+  const block = decodeCanvasBlock({
+    ...launchDeckExampleBlock,
+    frames: Array.from({ length: slides }, (_, index) => ({
+      frameId: `slide-${String(index + 1)}`,
+      title: `Slide ${String(index + 1)}`,
+      html: `<section class="slide"><h2>Slide ${String(index + 1)}</h2></section>`,
+    })),
+  });
+  if (block.kind !== "design") throw new Error("Fixture is not a design.");
+  return block;
+}
+
+/**
+ * Layout, which jsdom has none of: a board the test gives a width, and a
+ * viewport the test scrolls figures into. Each stub records what is watched
+ * and lets the test report for it.
+ */
+function stubLayoutObservers() {
+  const boards: Array<{ element: Element; report: (width: number) => void }> = [];
+  const watched: Array<Element> = [];
+  let reveal: (entries: ReadonlyArray<{ target: Element; isIntersecting: boolean }>) => void = () =>
+    undefined;
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      readonly #callback: ResizeObserverCallback;
+      constructor(callback: ResizeObserverCallback) {
+        this.#callback = callback;
+      }
+      observe(element: Element) {
+        boards.push({
+          element,
+          report: (width) =>
+            this.#callback(
+              [{ target: element, contentRect: { width, height: 0 } } as ResizeObserverEntry],
+              this as unknown as ResizeObserver,
+            ),
+        });
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      constructor(callback: IntersectionObserverCallback) {
+        reveal = (entries) =>
+          callback(
+            entries as unknown as Array<IntersectionObserverEntry>,
+            this as unknown as IntersectionObserver,
+          );
+      }
+      observe(element: Element) {
+        watched.push(element);
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  return {
+    boards,
+    watched,
+    scrollTo: (elements: ReadonlyArray<Element>) =>
+      reveal(elements.map((target) => ({ target, isIntersecting: true }))),
+  };
+}
+
+function figures(container: ParentNode): ReadonlyArray<HTMLElement> {
+  return Array.from(container.querySelectorAll<HTMLElement>(".canvas-design__frame"));
+}
+
+function previews(container: ParentNode): ReadonlyArray<HTMLElement> {
+  return Array.from(container.querySelectorAll<HTMLElement>(".canvas-design__preview"));
+}
+
+function scaleOf(frame: HTMLIFrameElement): number {
+  const match = /scale\(([\d.]+)\)/.exec(frame.style.transform);
+  return match?.[1] === undefined ? Number.NaN : Number(match[1]);
+}
+
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
   delete (window as { octantHost?: unknown }).octantHost;
   prototypeHost.reset();
   const root = document.documentElement;
@@ -305,6 +389,108 @@ describe("design block", () => {
     expect(within(player).getByText("2 / 2")).toBeVisible();
     expect(within(player).getByTitle("Goals, slide 2")).toHaveAttribute("tabindex", "-1");
     expect(within(player).getByRole("button", { name: "Next slide" })).toBeDisabled();
+  });
+
+  it("draws every slide no wider than the column it sits in, and sizes its box before the column is measured", () => {
+    const layout = stubLayoutObservers();
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [deck(3)] }} />);
+    const board = screen.getByRole("region", { name: "Launch plan, Slide design" });
+    layout.scrollTo(layout.watched);
+
+    // Before the board is measured, each box already has the slide's shape
+    // and the width the stylesheet caps at the board; the page waits.
+    expect(figures(board)).toHaveLength(3);
+    for (const figure of figures(board)) {
+      expect(figure.style.getPropertyValue("--canvas-design-frame-cap")).toBe("440px");
+      expect(figure.style.width).toBe("");
+    }
+    for (const preview of previews(board)) expect(preview.style.aspectRatio).toBe("1920 / 1080");
+    expect(frames(board)).toHaveLength(0);
+
+    // A side panel narrower than a slide's full board width.
+    act(() => layout.boards[0]?.report(320));
+    expect(frames(board)).toHaveLength(3);
+    for (const page of frames(board)) {
+      expect(scaleOf(page) * CANVAS_DESIGN_VIEWPORT.slide.width).toBeLessThanOrEqual(320);
+    }
+
+    // A full tab: the cap, not the board, bounds a slide.
+    act(() => layout.boards[0]?.report(1200));
+    for (const page of frames(board)) {
+      expect(scaleOf(page) * CANVAS_DESIGN_VIEWPORT.slide.width).toBeCloseTo(440);
+    }
+  });
+
+  it("loads a slide's page only when the slide or its neighbour is near the visible part of the board", () => {
+    const layout = stubLayoutObservers();
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [deck(12)] }} />);
+    const board = screen.getByRole("region", { name: "Launch plan, Slide design" });
+    act(() => layout.boards[0]?.report(640));
+
+    // Every slide has its box and caption; no page has loaded yet.
+    expect(previews(board)).toHaveLength(12);
+    expect(within(board).getByText("Slide 12")).toBeInTheDocument();
+    expect(frames(board)).toHaveLength(0);
+    expect(layout.watched).toHaveLength(12);
+
+    // The first two slides scroll into view: they and the slide after them load.
+    act(() => layout.scrollTo(layout.watched.slice(0, 2)));
+    const loaded = frames(board);
+    expect(loaded).toHaveLength(3);
+    expect(loaded.map((page) => page.title)).toEqual([
+      "Slide 1, Slide slide",
+      "Slide 2, Slide slide",
+      "Slide 3, Slide slide",
+    ]);
+    expect(loaded[0]?.srcdoc).toContain("<h2>Slide 1</h2>");
+
+    // Scrolling on loads more, and a slide once loaded stays loaded.
+    act(() => layout.scrollTo(layout.watched.slice(6, 7)));
+    expect(frames(board).map((page) => page.title)).toEqual([
+      "Slide 1, Slide slide",
+      "Slide 2, Slide slide",
+      "Slide 3, Slide slide",
+      "Slide 6, Slide slide",
+      "Slide 7, Slide slide",
+      "Slide 8, Slide slide",
+    ]);
+  });
+
+  it("presents every slide of a long deck in turn, keeping only the neighbours loaded", () => {
+    stubLayoutObservers();
+    render(<CanvasDocument definition={{ ...canvasFixture, blocks: [deck(12)] }} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Present" }));
+    const player = screen.getByRole("dialog", { name: "Presenting Launch plan" });
+    const next = within(player).getByRole("button", { name: "Next slide" });
+    for (let slide = 1; slide <= 12; slide += 1) {
+      expect(within(player).getByText(`${String(slide)} / 12`)).toBeVisible();
+      const shown = within(player).getByTitle<HTMLIFrameElement>(
+        `Slide ${String(slide)}, slide ${String(slide)}`,
+      );
+      expect(shown).not.toHaveAttribute("hidden");
+      expect(shown).not.toHaveAttribute("aria-hidden");
+      expect(shown.srcdoc).toContain(`<h2>Slide ${String(slide)}</h2>`);
+      const mounted = frames(player);
+      expect(mounted.length).toBeLessThanOrEqual(3);
+      for (const page of mounted) {
+        // A neighbour is drawn beneath the shown page, never display: none,
+        // so it is already painted when a step reveals it.
+        if (page !== shown) {
+          expect(page).not.toHaveAttribute("hidden");
+          expect(page).toHaveAttribute("aria-hidden", "true");
+          expect(page).toHaveClass("canvas-design__page--beneath");
+        }
+      }
+      if (slide < 12) {
+        // The next slide is already loaded, so stepping shows it at once.
+        expect(
+          within(player).getByTitle(`Slide ${String(slide + 1)}, slide ${String(slide + 1)}`),
+        ).toBeInTheDocument();
+        fireEvent.keyDown(next, { key: "ArrowRight" });
+      }
+    }
+    expect(next).toBeDisabled();
   });
 
   it("never draws a frame that may run script beside Octant's own origin", () => {
