@@ -116,7 +116,9 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   const unsettledWrites = useRef<Array<Promise<boolean>>>([]);
   const answerLost = useRef(false);
   const [answerRefused, setAnswerRefused] = useState(false);
-  const providerAction = useRef<HTMLButtonElement>(null);
+  // Focusing the action below a long provider list scrolls the step title out
+  // of view on open. Start at the heading; Tab still reaches the step's controls.
+  const stepHeading = useRef<HTMLHeadingElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   const blocked = controller.blockedMessage !== undefined;
 
@@ -298,7 +300,7 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
   return (
     <OctantDialog
       className="first-run"
-      initialFocus={providerAction}
+      initialFocus={stepHeading}
       label="Welcome to Octant"
       labelledBy={titleId}
       onClose={skip}
@@ -347,11 +349,15 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
             // another setup step, so it carries a title and no count.
             // Untitled, it read as a page the counter had forgotten.
             <header className="first-run__step-header">
-              <h3 className="first-run__step-title">Your first task</h3>
+              <h3 className="first-run__step-title" ref={stepHeading} tabIndex={-1}>
+                Your first task
+              </h3>
             </header>
           ) : (
             <header className="first-run__step-header">
-              <h3 className="first-run__step-title">{currentStep?.title ?? "Setup"}</h3>
+              <h3 className="first-run__step-title" ref={stepHeading} tabIndex={-1}>
+                {currentStep?.title ?? "Setup"}
+              </h3>
               <span className="first-run__step-count">
                 Step {String(currentStepIndex + 1)} of {String(steps.length)}
               </span>
@@ -364,7 +370,6 @@ export function FirstRunOnboarding(props: FirstRunOnboardingProps) {
               onOpenProviderSettings={leaveForProviderSettings}
               onRescan={props.onRescan}
               readiness={props.readiness}
-              ref={providerAction}
               scanning={props.scanning}
               {...(props.onSetProviderEnabled === undefined
                 ? {}

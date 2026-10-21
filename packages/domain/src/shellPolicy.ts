@@ -160,7 +160,7 @@ export function defaultShellSettings(): ShellSettings {
     sidebarMoreEnabled: true,
     sidebarCountTiles: true,
     sidebarSearchPresentation: "icon",
-    sidebarCollapsedPresentation: "rail",
+    sidebarCollapsedPresentation: "always",
     environmentPresentationByMode: defaultEnvironmentPresentationByMode(),
     firstRunOnboarding: "pending",
     automaticUpdateChecks: true,
@@ -803,7 +803,14 @@ function validateTabContext(
     }
   }
   if (tab.kind === "canvas") {
-    if (context.projectId === null) {
+    // A tab naming no Project shows a Canvas owned by a Chat thread outside
+    // every Project; it rests in Chat whatever Project the context binds,
+    // because the Canvas itself has none to match.
+    if (tab.projectId === null) {
+      if (mode !== "chat") {
+        reject("invalid-layout", "a canvas tab naming no Project rests only in the chat layout");
+      }
+    } else if (context.projectId === null) {
       reject(
         "invalid-layout",
         `canvas tabs require a bound Project in the ${mode} workspace context`,

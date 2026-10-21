@@ -28,6 +28,7 @@ export class SettingsSurfaceErrorBoundary extends Component<
           action={{ label: "Reload Octant", onClick: this.props.onReload }}
           eyebrow="Settings"
           message="Reload Octant to retry loading the Settings surface."
+          presentation="page"
           role="alert"
           state="warning"
           title="Settings unavailable"

@@ -6,6 +6,7 @@ import {
   WifiOff,
   type LucideIcon,
 } from "lucide-react";
+import { useId } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   OctantEmptyContent,
@@ -34,9 +35,18 @@ export interface ShellStateProps {
   readonly role?: "alert" | "status";
   readonly state: ShellStateKind;
   readonly title: string;
+  /**
+   * **page** is a state that is the whole window (a refused launch, a lost
+   * connection): a large dotted mark, a centred title, one line, and the way
+   * back as a text link. Without it the state sits inside a pane or panel.
+   */
+  readonly presentation?: "page";
 }
 
 export function ShellState(props: ShellStateProps) {
+  if (props.presentation === "page" && props.state !== "loading") {
+    return <PageShellState {...props} />;
+  }
   const StateIcon = stateIcons[props.state];
   return (
     <OctantEmptyRoot
@@ -73,5 +83,73 @@ export function ShellState(props: ShellStateProps) {
         </OctantEmptyContent>
       )}
     </OctantEmptyRoot>
+  );
+}
+
+/**
+ * A whole-window state. The mark is the state's glyph drawn as a field of dots,
+ * the same grain as the pulsing character ground, in the primary ink; the
+ * eyebrow is left out, since the title already says what happened.
+ */
+function PageShellState(props: ShellStateProps) {
+  return (
+    <section
+      aria-label={props.title}
+      className="shell-state shell-state--page"
+      data-state={props.state}
+      role={props.role}
+    >
+      <DottedMark state={props.state} />
+      <h1 className="shell-state__page-title">{props.title}</h1>
+      {props.message === undefined ? null : (
+        <p className="shell-state__page-message">{props.message}</p>
+      )}
+      {props.action === undefined ? null : (
+        <OctantButton
+          className="shell-state__page-action"
+          onClick={props.action.onClick}
+          type="button"
+          variant="link"
+        >
+          <span className="shell-state__page-action-label">{props.action.label}</span>
+        </OctantButton>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The state's glyph as dots: a dot grid shown only where the glyph is. A
+ * warning is a filled triangle with its mark cut out of it; every other state
+ * is its icon's own strokes, thickened so the dots can fill them.
+ */
+function DottedMark(props: { readonly state: ShellStateKind }) {
+  // useId yields characters a url(#…) reference cannot carry.
+  const id = `shell-state-${useId().replace(/[^A-Za-z0-9_-]/g, "")}`;
+  const pattern = `${id}-dots`;
+  const mask = `${id}-shape`;
+  const StateIcon = stateIcons[props.state];
+  return (
+    <svg aria-hidden="true" className="shell-state__mark" viewBox="0 0 24 24">
+      <defs>
+        {/* About a dot every 6px at the mark's 96px, each under 2px: the
+            open grain of the reference, not a halftone. */}
+        <pattern height="1.5" id={pattern} patternUnits="userSpaceOnUse" width="1.5">
+          <circle cx="0.75" cy="0.75" fill="currentColor" r="0.22" />
+        </pattern>
+        <mask id={mask}>
+          {props.state === "warning" ? (
+            <>
+              <path d="M12 2.5 L22.5 21 L1.5 21 Z" fill="white" />
+              <rect fill="black" height="7" rx="0.6" width="2.2" x="10.9" y="8.5" />
+              <rect fill="black" height="2.2" rx="0.6" width="2.2" x="10.9" y="17" />
+            </>
+          ) : (
+            <StateIcon color="white" height={24} strokeWidth={3} width={24} />
+          )}
+        </mask>
+      </defs>
+      <rect fill={`url(#${pattern})`} height="24" mask={`url(#${mask})`} width="24" />
+    </svg>
   );
 }

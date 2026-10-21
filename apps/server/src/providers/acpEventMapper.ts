@@ -308,6 +308,7 @@ export function mapAcpNotification(
       if (entries === undefined)
         return [protocolFailure(`${context.displayName} plan update was invalid.`)];
       const results: AcpMappedNotification[] = [];
+      const taskIds: string[] = [];
       for (const candidate of entries) {
         const item = record(candidate);
         const summary = normalized(item?.content, SUMMARY_MAX_CHARACTERS);
@@ -327,15 +328,19 @@ export function mapAcpNotification(
         if (normalizedStatus === undefined) {
           return [protocolFailure(`${context.displayName} plan status was invalid.`)];
         }
+        const id = taskId(summary);
+        taskIds.push(id);
         results.push(
           event(context, {
             kind: "task-progress",
-            taskId: taskId(summary),
+            taskId: id,
             status: normalizedStatus,
             summary,
           }),
         );
       }
+      // Each plan update is the complete list, so an entry it omits is gone.
+      results.push(event(context, { kind: "task-list", taskIds }));
       return results;
     }
     case "config_option_update":

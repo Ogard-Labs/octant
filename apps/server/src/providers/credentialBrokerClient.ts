@@ -61,6 +61,17 @@ export function makeReplicaStoreCredentialBrokerClient(
 }
 
 /**
+ * Public links' owner secrets, through the broker's own routes for them, keyed
+ * by each link's credential reference. They sit apart from provider
+ * credentials, so a provider purge never strands a link its owner can no
+ * longer revoke.
+ */
+export function makeCanvasPublicShareSecretBrokerClient(
+  options: CredentialBrokerClientOptions,
+): ProviderCredentialStore {
+  return makeBrokerCredentialClient(options, "/v1/canvas-public-share-secrets/", "credentialRef");
+}
+
  * The secret values a person gives an MCP server they added by hand, through
  * the broker's own routes for them, keyed by the secret id the package
  * references. Those routes reach a separate credential namespace, so neither
@@ -78,6 +89,7 @@ function makeBrokerCredentialClient(
     | "/v1/credentials/"
     | "/v1/replica-device-keys/"
     | "/v1/replica-store-credentials/"
+    | "/v1/canvas-public-share-secrets/"
     | "/v1/mcp-server-credentials/",
   field: "providerInstanceId" | "instanceId" | "credentialRef" | "secretId",
 ): ProviderCredentialStore {

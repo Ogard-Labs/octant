@@ -300,7 +300,8 @@ export interface BuildCreateVersionInput {
   readonly admitted: AdmitCanvasCreateResult;
   readonly canvasId: CanvasId;
   readonly versionId: CanvasVersionId;
-  readonly projectId: ProjectId;
+  /** The Project the Canvas belongs to; null for a Chat Canvas owned by its thread. */
+  readonly projectId: ProjectId | null;
   readonly actor: CanvasActor;
   readonly providerInstanceId: ProviderInstanceId;
   readonly modelId: ProviderModelId;

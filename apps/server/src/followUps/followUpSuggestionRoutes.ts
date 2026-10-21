@@ -1,5 +1,6 @@
 import {
   decodeActivateNativeHarnessFollowUp,
+  MAX_FOLLOW_UP_LINEAGE_LINKS,
   decodeNativeHarnessFollowUpPreview,
   type NativeHarnessFollowUpActivationResult,
   type NativeHarnessFollowUpCreation,
@@ -19,7 +20,7 @@ const HEADERS = "content-type, x-octant-window-capability";
 const PREFIX = "/api/follow-up-suggestions/";
 
 export interface FollowUpSuggestionActionDependencies {
-  readonly store: Pick<ThreadFollowUpSuggestionStore, "read" | "activate" | "activation">;
+  readonly store: Pick<ThreadFollowUpSuggestionStore, "read" | "activate" | "activation" | "links">;
   /**
    * Creates what a confirmed follow-up names, on the confirming window. Absent
    * on a host that only records the activation.
@@ -35,6 +36,15 @@ export interface FollowUpSuggestionRouteDependencies extends FollowUpSuggestionA
   readonly windowAuthorityStore: WindowAuthorityStore;
   /** Whether this window may read the thread and act on it; never a body field. */
   readonly authorizeThread: (input: {
+    readonly threadId: string;
+    readonly windowId: string;
+  }) => boolean | Promise<boolean>;
+  /**
+   * Whether this window may list a thread in its sidebar, which unlike
+   * `authorizeThread` does not need the thread open. Lineage asks this first
+   * and falls back to `authorizeThread`.
+   */
+  readonly authorizeListing?: (input: {
     readonly threadId: string;
     readonly windowId: string;
   }) => boolean | Promise<boolean>;
@@ -185,6 +195,10 @@ export function createFollowUpSuggestionRouteHandler(
       return json({ error: "Follow-up suggestion request is invalid." }, 400, origin);
     }
     const [threadId = "", action = ""] = url.pathname.slice(PREFIX.length).split("/");
+    if (threadId === LINEAGE && action === "") {
+      const [body, status] = await lineage(dependencies, request, windowId);
+      return json(body, status, origin);
+    }
     if (threadId.length === 0) return json({ error: "Thread id is required." }, 400, origin);
     if (!(await dependencies.authorizeThread({ threadId, windowId }))) {
       return json({ error: "Follow-up suggestion request is unauthorized." }, 403, origin);
@@ -207,6 +221,42 @@ export function createFollowUpSuggestionRouteHandler(
     });
     return json(settled.body, settled.status, origin);
   };
+}
+
+const LINEAGE = "lineage";
+
+/**
+ * Which thread each started follow-up came from. A link is answered only when
+ * this window may read both threads, so the answer never names a thread the
+ * window cannot open.
+ */
+async function lineage(
+  dependencies: FollowUpSuggestionRouteDependencies,
+  request: Request,
+  windowId: string,
+): Promise<readonly [unknown, number]> {
+  if (request.method !== "GET") return [{ error: "Method not allowed." }, 405];
+  return [{ links: await readableFollowUpLinks(dependencies, windowId) }, 200];
+}
+
+/** The newest follow-up links whose child and parent this window may both read. */
+export async function readableFollowUpLinks(
+  dependencies: Pick<
+    FollowUpSuggestionRouteDependencies,
+    "store" | "authorizeThread" | "authorizeListing"
+  >,
+  windowId: string,
+): Promise<ReadonlyArray<{ readonly threadId: string; readonly parentThreadId: string }>> {
+  const readable = async (threadId: string) =>
+    (await dependencies.authorizeListing?.({ threadId, windowId })) === true ||
+    (await dependencies.authorizeThread({ threadId, windowId }));
+  const links = [];
+  for (const link of dependencies.store.links()) {
+    if (links.length >= MAX_FOLLOW_UP_LINEAGE_LINKS) break;
+    const both = (await readable(link.threadId)) && (await readable(link.parentThreadId));
+    if (both) links.push(link);
+  }
+  return links;
 }
 
 function refused(

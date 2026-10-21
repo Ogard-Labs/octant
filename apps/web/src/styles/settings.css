@@ -568,6 +568,7 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
   min-height: 28px;
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
+  font-weight: var(--oct-weight-medium);
   line-height: 1.2;
   justify-content: flex-start;
 }
@@ -575,10 +576,6 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 .settings-navigation .setnav-item > .icon,
 .settings-view__back > .icon {
   color: var(--octant-text-muted);
-}
-
-.settings-navigation .setnav-item[aria-current="page"] {
-  font-weight: 500;
 }
 
 /* --- Settings primitives: open routine groups, raised discrete objects --- */
@@ -3578,4 +3575,45 @@ html[data-octant-increased-contrast="true"]
 .journal-growth__table th:last-child {
   text-align: end;
   font-variant-numeric: tabular-nums;
+}
+
+/* Appearance › Accent: one round swatch per colour, the chosen one ringed in
+   the primary ink. The dot inside paints the shape and the ring, so the
+   shared button recipe is placed but never repainted. */
+.settings-accent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--oct-space-2);
+}
+
+.settings-accent__swatch {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  min-height: 0;
+  padding: 0;
+  place-items: center;
+}
+
+.settings-accent__dot {
+  display: block;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--oct-radius-pill);
+  background: var(--settings-accent-swatch);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--oct-fg) 18%, transparent);
+}
+
+.settings-accent__swatch[aria-checked="true"] .settings-accent__dot {
+  box-shadow:
+    0 0 0 2px var(--oct-bg),
+    0 0 0 4px var(--oct-fg);
+}
+
+/* Touch keeps the 16px dot but widens the hit area to the 44px target. */
+@media (pointer: coarse), (max-width: 560px) {
+  .settings-accent__swatch {
+    width: 44px;
+    height: 44px;
+  }
 }

@@ -62,6 +62,8 @@ describe("octantSettingsRegistry", () => {
     expect(data?.settings.map((setting) => setting.id)).toEqual([
       "data-map",
       "thread-retention",
+      "public-links",
+      "public-link-service",
       "browser-site-approvals",
       "tool-approvals",
     ]);
