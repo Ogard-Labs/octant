@@ -115,6 +115,13 @@ afterEach(() => {
   }
 });
 
+/** Status is the default sidebar arrangement; tests that read the Project tree choose it. */
+function chooseProjectTree(modes: ReadonlyArray<string> = ["chat", "work", "code"]): void {
+  for (const mode of modes) {
+    window.localStorage.setItem(`octant.sidebar.activity-view.v1.${mode}`, "off");
+  }
+}
+
 /** Tests that need a visible dock ask for it through the ordinary shell action. */
 async function showRightUtilityDock(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   if (screen.queryByRole("complementary", { name: "Right Utility Dock" }) !== null) return;
@@ -972,6 +979,7 @@ describe("App", () => {
   });
 
   it("shows the Chat add-project control while ready before any threads exist", async () => {
+    chooseProjectTree();
     render(
       <App
         chatClient={chats()}
@@ -1828,6 +1836,7 @@ describe("App", () => {
   });
 
   it("opens a newly created chat while its first provider turn is still pending", async () => {
+    chooseProjectTree();
     const user = userEvent.setup();
     const chatApi = chats();
     const shellApi = client(chatShellBootstrap());
@@ -2575,6 +2584,7 @@ describe("App", () => {
   });
 
   it("hides and restores a sidebar thread-row property through Sidebar settings", async () => {
+    chooseProjectTree();
     const user = userEvent.setup();
     const shellApi = client();
     const codeApi = codes();

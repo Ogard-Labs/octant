@@ -45,8 +45,15 @@ The Project tree places each active thread under its listed Project or under
 the Projects with no horizontal divider or separate section heading. It is
 absent when empty and does not create a Project or filesystem authority.
 Sidebar search reveals matches inside collapsed groups and restores their
-collapse state when cleared. The Activity feed is an alternative view of the
-same threads; it is not shown as a duplicate list beneath the Project tree.
+collapse state when cleared. Status and the Activity feed are alternative views
+of the same threads; neither is shown as a duplicate list beneath the Project
+tree. **Status** is each mode's default until a person picks another
+arrangement, and each mode keeps its own pick (a pick made before Status
+existed is kept). It lists the threads flat under counted headings in the
+order a person acts on them: **Pinned**, **Needs input** (waiting on an
+approval or an answer), **Ready for review** (a finished turn nobody has
+looked at), **Working**, and **Idle** (everything else), newest first within
+each. A thread appears once, under the first heading that holds it.
 
 Chat, Work, and Code keep the active mode's sidebar current with projection-only
 navigation reads ([routes](host-reads-and-commands.md#sidebar-navigation-reads)).
@@ -71,7 +78,10 @@ Project heading, a filter, and a sort all resolve through that policy, so they
 cannot rank the same facts differently.
 
 - Nothing to report is the absence of a status (`undefined`), not a word: no
-  "Idle" label, mark, filter value, or sort rank exists.
+  "Idle" mark, filter value, or sort rank exists. The Status arrangement's
+  **Idle** heading only gathers the threads with no status; it is not one of
+  the words, and its headings are phrased as what the person does next rather
+  than as the status labels.
 - Only facts the sidebar already carries are statuses. A failed run or blocked
   check is not inferred from silence; adding a status is a wire change that
   requires the sidebar to carry the fact first. This vocabulary answers what is

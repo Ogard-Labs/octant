@@ -1197,7 +1197,7 @@ checkouts first: a branch glyph, the branch in a small mono chip, and a quiet
 button, so keyboard focus skips it; its threads take one more step of indent on
 their content, never on their fill, and drop the branch fact the heading already
 states. A Project with a single checkout shows no heading. The Activity feed
-stays flat. A hovered row takes the soft ink wash and the row
+and Status stay flat. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
 being there. Provider identity remains at the leading edge. A Project row leads with a 20px
@@ -1244,10 +1244,13 @@ threads: the header's Search icon opens a Filter threads field under the
 header, Escape or its close control clears and hides it, and Settings ›
 Sidebar › Thread filter can keep the field always shown. Enter in the field
 hands its text to the command-style overlay, which searches every thread of
-the mode; the overlay also stays in the command palette. The list's two
-arrangements, the Project tree and the Activity feed, are a visible
-Projects/Activity switch on the row the Project view picker uses, not an icon
-in the header.
+the mode; the overlay also stays in the command palette. The list's three
+arrangements, Status (the default), the Project tree, and the Activity feed,
+are a visible Status/Projects/Activity switch on the row the Project view
+picker uses, not an icon in the header. Status headings carry their count in
+meta ink after the label ("Needs input 2"), the same face as the feed's folded
+Earlier count. A row whose pull request's checks pass adds a 12px check in the
+success ink after the PR number.
 
 Settings is a grouped form page. The shared resizable navigation rail
 stays fixed while one centred, bounded 920px reading column scrolls. A 32–64px

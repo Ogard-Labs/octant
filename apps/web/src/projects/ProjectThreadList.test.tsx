@@ -71,10 +71,9 @@ describe("ProjectThreadRows", () => {
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     expect(within(row).getByText("#12")).toBeVisible();
     expect(within(row).getByText("2h")).toBeVisible();
-    expect(within(row).getByRole("img", { name: "Pull request #12 · open" })).toHaveAttribute(
-      "data-state",
-      "open",
-    );
+    expect(
+      within(row).getByRole("img", { name: "Pull request #12 · open · checks passing" }),
+    ).toHaveAttribute("data-state", "open");
   });
 
   it("keeps a long thread list bounded to the visible window", async () => {
@@ -1221,7 +1220,9 @@ describe("ProjectThreadRows display properties", () => {
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     expect(within(row).getByText("#12")).toBeVisible();
     expect(within(row).getByText("feature/x")).toBeVisible();
-    expect(within(row).getByRole("img", { name: "Pull request #12 · open" })).toBeVisible();
+    expect(
+      within(row).getByRole("img", { name: "Pull request #12 · open · checks passing" }),
+    ).toBeVisible();
     expect(within(row).getByText("2h")).toBeVisible();
     expect(row.querySelector(".sidebar-navigation__thread-status")).not.toBeNull();
   });
@@ -1238,7 +1239,9 @@ describe("ProjectThreadRows display properties", () => {
     const row = screen.getByRole("button", { name: /Controller foundation/ });
     expect(within(row).queryByText("#12")).toBeNull();
     expect(within(row).queryByText("feature/x")).toBeNull();
-    expect(within(row).queryByRole("img", { name: "Pull request #12 · open" })).toBeNull();
+    expect(
+      within(row).queryByRole("img", { name: "Pull request #12 · open · checks passing" }),
+    ).toBeNull();
     expect(within(row).queryByText("2h")).toBeNull();
     expect(row.querySelector(".sidebar-navigation__thread-status")).toBeNull();
     // Nothing is left in their place: the copy holds the title alone.
