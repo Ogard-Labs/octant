@@ -57,7 +57,7 @@ export function createRunningServicesCard(source: RunningServicesCardSource): Ho
     id: RUNNING_SERVICES_CARD_ID,
     title: "Running services",
     icon: Server,
-    defaultOn: true,
+    defaultOn: false,
     available: source.client !== undefined,
     emptyLabel: "No servers are running in your Code Projects.",
     useContent: () => useRunningServicesContent(source),

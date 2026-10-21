@@ -4015,119 +4015,15 @@ form > .work-composer-adapter__attachments {
   background: color-mix(in srgb, currentcolor 10%, transparent);
 }
 
-/* ── Start-screen action tiles and cards ──────────────────────────────────
-   Both sit on the composer's measure under it. The tile buttons are the link
-   recipe, which paints nothing; the face inside each one carries the fill and
-   edge, so the shared button recipe is never repainted from here. The cards
-   live in home/home.css. */
+/* ── Start-screen cards ───────────────────────────────────────────────────
+   The card area sits on the composer's measure, close under the docked
+   composer. The cards live in home/home.css. */
 
 .home-start {
   display: grid;
   width: min(100%, 704px);
   gap: var(--oct-space-6);
-  margin: var(--oct-space-8) auto 0;
-}
-
-/* Always three columns, so one or two tiles keep a tile's width instead of
-   stretching across the row; a phone-width column stacks them. */
-.home-tiles {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--oct-space-2);
-}
-
-@media (max-width: 560px) {
-  .home-tiles {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.home-tile {
-  display: block;
-  width: 100%;
-  height: auto;
-  min-height: 0;
-  padding: 0;
-  text-align: start;
-  white-space: normal;
-}
-
-.home-tile__face {
-  display: grid;
-  box-sizing: border-box;
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
-  background: var(--octant-card);
-  color: var(--oct-fg);
-}
-
-.home-tile:hover:not(:disabled) .home-tile__face,
-.home-tile:focus-visible .home-tile__face {
-  border-color: var(--octant-border-strong);
-}
-
-.home-tile__face {
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: var(--oct-space-3);
-  padding: var(--oct-space-3);
-}
-
-.home-tile__icon {
-  display: grid;
-  width: 36px;
-  height: 36px;
-  place-items: center;
-  border-radius: var(--oct-radius-sm);
-  background: color-mix(in oklab, var(--oct-fg) 8%, transparent);
-  color: var(--oct-fg-2);
-}
-
-.home-tile__text {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.home-tile__title {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* A third of the composer's measure is about 200px, which cut a detail like
-   "Bind a repository as a Project" at "Bind a repository as a Pr…". Two lines
-   keep the sentence readable and the tiles one height. */
-.home-tile__detail {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-}
-
-/* Vivid: the action tiles' icon squares take palette hues. The light theme's
-   palette roles are dark enough to carry primary-foreground on a solid
-   square; the dark theme's are light, so there the square is a tint and the
-   hue moves to the glyph. */
-.home-tile[data-action="add-folder"] {
-  --home-tile-hue: var(--octant-palette-blue, currentColor);
-}
-.home-tile[data-action="open-terminal"] {
-  --home-tile-hue: var(--octant-palette-orange, currentColor);
-}
-.home-tile[data-action="review"] {
-  --home-tile-hue: var(--octant-palette-purple, currentColor);
-}
-
-:root[data-octant-style="vivid"] .home-tile__icon {
-  background: color-mix(in oklab, var(--home-tile-hue) 18%, transparent);
-  color: var(--home-tile-hue);
-}
-
-:root[data-octant-style="vivid"][data-octant-theme-mode="light"] .home-tile__icon {
-  background: var(--home-tile-hue);
-  color: var(--octant-primary-foreground, currentColor);
+  margin: var(--oct-space-3) auto 0;
 }
 
 /* One pull-request mark wherever a request is named (home list, pane title,

@@ -418,8 +418,6 @@ export interface WorkspaceViewProps {
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
   readonly welcomeBackdrop?: ReactNode;
-  /** The person's name from their profile, for the greeting on every start screen. */
-  readonly greetingName?: string | undefined;
   /** Session record of which tabs the person activated, opened, or created. */
   readonly tabActivation?: TabActivationRegistry;
   /** Starts a fresh thread in a Project, offered when a checkout is unusable. */
@@ -1487,7 +1485,6 @@ function renderNonCodeTab(
     return (
       <NewTaskDraftScopeContext.Provider value={`${tab.mode}:${String(paneId)}`}>
         <DraftThreadWorkspace
-          greetingName={props.greetingName}
           key={`${String(paneId)}:${tab.mode}:${String(props.draftResetRevisions?.[String(paneId)] ?? 0)}`}
           {...(recentThreads.length === 0 ? {} : { recentThreads })}
           mode={tab.mode}
@@ -2222,14 +2219,11 @@ function renderNonCodeTab(
     return (
       <NewTaskDraftScopeContext.Provider value={`chat-welcome:${String(paneId)}`}>
         <ChatWelcome
-          greetingName={props.greetingName}
-          {...(home?.composerTabs === undefined ? {} : { composerTabs: home.composerTabs })}
           {...(home?.cards === undefined
             ? {}
             : {
                 homeStart: (
                   <HomeStart
-                    actions={[]}
                     dashboard={
                       <HomeDashboard
                         cards={home.cards}
@@ -2288,9 +2282,6 @@ function renderNonCodeTab(
         (project) => project.type === tab.mode && project.lifecycle === "active",
       )}
       mode={tab.mode === "code" ? "code" : "work"}
-      greetingName={props.greetingName}
-      reviewCount={props.homeStart?.reviewCount}
-      runningCount={props.homeStart?.runningCount}
       onAddFolder={props.onAttachFolder ?? (() => {})}
       {...(props.onOpenDraftThread === undefined
         ? {}

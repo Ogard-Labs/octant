@@ -98,7 +98,7 @@ describe("WorkspaceView welcome", () => {
     render(<WorkspaceView {...propsFor(welcome)} projects={[codeProject("archived")]} />);
 
     expect(
-      await screen.findByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+      await screen.findByRole("heading", { name: "What are we building today?" }),
     ).toBeVisible();
     expect(screen.queryByRole("region", { name: "Code welcome" })).not.toBeInTheDocument();
   });
@@ -404,7 +404,7 @@ describe("WorkspaceView welcome", () => {
     );
 
     expect(
-      await screen.findByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
+      await screen.findByRole("heading", { name: "What are we building today?" }),
     ).toBeVisible();
     expect(screen.getByText("Octant")).toBeVisible();
     expect(screen.queryByRole("region", { name: "Code welcome" })).not.toBeInTheDocument();

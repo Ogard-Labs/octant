@@ -121,6 +121,17 @@ async function showRightUtilityDock(user: ReturnType<typeof userEvent.setup>): P
   await user.click(await screen.findByRole("button", { name: "Open Right sidebar" }));
 }
 
+/** Every start-screen card starts off; a test that drives one turns it on. */
+function withCiFailuresCardOn(value: ShellBootstrap): ShellBootstrap {
+  return {
+    ...value,
+    settings: {
+      ...value.settings,
+      homeCards: { order: [], visibility: [{ id: "ci-failures", visible: true }] },
+    },
+  };
+}
+
 function navigatorAssistantClient(
   transcript: NavigatorAssistantSnapshot["transcript"] = [],
 ): NavigatorAssistantClient {
@@ -3797,38 +3808,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "New task" }));
 
     expect(await screen.findByRole("button", { name: "Project: Choose a Project" })).toBeVisible();
-    expect(
-      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
-    ).toBeVisible();
-  });
-
-  it("shows the sidebar's own Running count on the start screen's Running tab and lists that thread there", async () => {
-    const user = userEvent.setup();
-    const codeApi = codes();
-    const listed = await codeApi.navigation();
-    vi.mocked(codeApi.navigation).mockResolvedValue({
-      ...listed,
-      runtime: [{ threadId: codeThreadId, executing: true }],
-    } as never);
-    render(
-      <App
-        codeClient={codeApi}
-        isNarrow={false}
-        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
-        projectClient={projects({ ...projectBootstrap(), availability: [] })}
-        projectWindowCapability={projectWindowCapability}
-        shellClient={client(codeShellBootstrap())}
-      />,
-    );
-
-    await user.click(await screen.findByRole("button", { name: "New task" }));
-    const tile = await screen.findByRole("button", { name: "Running, 1" });
-    const tab = await screen.findByRole("tab", { name: "Running 1" });
-    expect(tile).toBeVisible();
-
-    await user.click(tab);
-    const list = await screen.findByRole("list", { name: "Running now" });
-    expect(within(list).getByText("Controller foundation")).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
   });
 
   it("keeps the threads to continue on screen when a new task starts over", async () => {
@@ -3883,9 +3863,7 @@ describe("App", () => {
 
     const kept = screen.getByRole("region", { name: "Continue" });
     expect(within(kept).getByText("Ai slop callouts")).toBeVisible();
-    expect(
-      screen.getByRole("heading", { name: /^Good (morning|afternoon|evening)/ }),
-    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "What are we building today?" })).toBeVisible();
   });
 
   it("keeps the draft composer's chosen Project after a visit to Settings", async () => {
@@ -4049,7 +4027,7 @@ describe("App", () => {
           launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
           projectClient={projects({ ...projectBootstrap(), availability: [] })}
           projectWindowCapability={projectWindowCapability}
-          shellClient={client(codeShellBootstrap())}
+          shellClient={client(withCiFailuresCardOn(codeShellBootstrap()))}
         />,
       );
 

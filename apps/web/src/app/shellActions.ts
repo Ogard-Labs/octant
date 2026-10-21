@@ -137,7 +137,6 @@ export type ShellActions = {
   readonly openDraftInProject: (projectId: ProjectId) => Promise<void>;
   readonly openDraftThread: ShellController["openDraftThread"];
   readonly openGithubIssues: () => void;
-  readonly openHomeTerminal: (projectId: ProjectId) => void;
   readonly openImageLibrary: () => void;
   readonly openInbox: () => void;
   readonly openLinearIssues: () => void;

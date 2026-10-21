@@ -41,7 +41,7 @@ export function createCiFailuresCard(source: CiFailuresCardSource): HomeCardDefi
     id: CI_FAILURES_CARD_ID,
     title: "CI failures",
     icon: CircleX,
-    defaultOn: true,
+    defaultOn: false,
     available: source.available,
     hideWhenEmpty: true,
     emptyLabel: "Nothing is failing.",

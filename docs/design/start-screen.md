@@ -1,48 +1,28 @@
 # Start screen
 
 This is the detailed specification for what a Chat, Work, or Code start screen
-shows around its composer: the action tiles, the New task and Running tabs, the
-card area, and Code's agent home. The rule set a contributor needs first is in
-[Workspace: start-screen cards](workspace.md#start-screen-cards); the greeting
+shows around its composer: the card area and Code's agent home. The rule set a
+contributor needs first is in
+[Workspace: start-screen cards](workspace.md#start-screen-cards); the question
 and the composer are in [DESIGN.md](../../DESIGN.md#welcome-and-composer).
 Update this specification with an approved change, following the
 [design workflow](README.md#changing-the-design).
 
 ## Presentation
 
-### Action tiles
+### Layout
 
-Under the composer, Work and Code start screens offer a row of action tiles and
-then the card area (Chat's start screens carry the card area alone), both on the composer's measure and ahead of Code's prompt
-suggestions, so a running thread is never under the fold. The tiles are
-always a three-column grid, one column under 560px, so one or two tiles keep a
-tile's width instead of stretching across the row; a detail line wraps to a
-second line before it is cut. A tile is a card
-button: a 36px icon square, the action as a row label, and one detail line.
-Code offers **Add a folder** (Bind a repository as a Project), **Open
-terminal** (A shell on this computer, in Octant) once a Project is selected,
-and **Review N changes** (Finished threads that wait for you) when N is above
-zero, where N counts unread threads that are not running or rested, the
-sidebar's To review rule. Open terminal starts a Project terminal and pins it in
-Zen, the only place one lives. Work offers the same tiles without a terminal,
-because Work has no shell. Review opens the Review page. The tiles leave when they
-have nothing to show.
-
-### New task and Running tabs
-
-Above the composer, the two start-screen tabs (**New task**, **Running** with
-the sidebar's count as tabular meta text) use the plain-text underline tabs
-(`surface-tabs`) on the composer's top-left edge. They never wrap, and the
-selected tab is carried by ink and the underline, with no fill or hue. The
-Running tab's body is one hairline-ringed list on the card fill: each row is the
-Working now row face with **Open** and **Stop** ghost buttons at the extra-small
-step, and the stop question takes its own line under the row with a destructive
-**Stop** and a ghost **Keep running**. See [Running tab](#running-tab) for
-behavior.
+A start screen is the question in the middle of the page, the composer docked
+at its foot, and under the composer the card area. It has no tabs and no action
+tiles: adding a folder lives in the composer's Project picker, a terminal in
+the workspace tools, and what is running or waiting for review in the
+sidebar. Code also keeps its agent home under the composer (see
+[Code agent home](#code-agent-home)); with it the page scrolls and the
+composer sits under the question rather than at the foot.
 
 ### Card area
 
-The card area is a ghost **Customize** button right-aligned under the tiles
+The card area is a ghost **Customize** button right-aligned under the composer
 (icon at the 14px step and the label), then a grid of cards, two columns and one
 under 560px. A card uses the card recipe (`OctantCard`: hairline ring, no
 shadow, the card fill) at a compact 12px rhythm. Its header is an icon at the
@@ -81,8 +61,7 @@ whose latest refresh failed carries its age as meta text. **CI failures**
 lists up to five failing checks from that same read, the check name, the
 repository or branch, and how long ago it failed. It is absent when nothing is
 failing, and absent when that read is not allowed. **Start a fix** opens a
-draft; it does not send. Under the Vivid style the tiles'
-icon squares take the blue, orange, and purple palette hues. Code's five prompt
+draft; it does not send. Code's five prompt
 suggestions are one compact row of label-only chips under the cards, and
 Work's Write, Learn, Plan, and Explore starters use the same chip (the outline
 button: hairline, resting fill, hover and focus fill); the prompt rides as the
@@ -115,7 +94,8 @@ the issue as the thread's Create from context.
 Under the composer, every start screen carries a card area: Chat, Work, and
 Code, in each variant a mode has, including the Chat screen that also lists the
 threads to continue. It is the same area with the same stored setting on all of
-them; Chat has no folder tiles. The area is a **Customize** control on the
+them. Every card starts off, so a fresh start screen is the question and the
+composer alone. The area is a **Customize** control on the
 right, then cards in a grid (two columns, one at phone width). The composer paints first; the area mounts on the frame after the
 first commit, and each card begins its reads only then, so a start screen never
 waits on a card. A card that is off or unavailable is never mounted and reads
@@ -151,7 +131,7 @@ changes the contract. A store from before the cards decodes to the defaults.
 
 ### Needs you
 
-**Needs you** is the card before Working now, on by default. It lists the
+**Needs you** is the card before Working now, off by default. It lists the
 approvals and questions a provider is waiting on, and the decisions finished
 Work and Code turns asked, from one host list of everything this window can
 answer across Chat, Work, and Code and across Projects, oldest waiting first. Work's start screen shows Chat and Work
@@ -203,7 +183,7 @@ start a host read per delta.
 
 ### Working now
 
-**Working now** follows Needs you, on by default, never unavailable. It lists
+**Working now** follows Needs you, off by default, never unavailable. It lists
 the threads executing now (the navigation rows the host projects as `working`,
 the sidebar's Running rule, so a snoozed or completed row is never listed) and
 the agent runs in progress from the AgentRun projection, most recently moved
@@ -225,7 +205,7 @@ Running view (the Board; Chat's Running tile opens Activity). A row opens its
 thread. The card reads what the window's controllers already hold; the run list
 is one read when the card mounts and again when the thread lists change, so it
 adds no timer, and a window sees only what its own authority returns. Working
-now, the Running tab, and the Computers card share that one read: at most one is
+now and the Computers card share that one read: at most one is
 in flight, and the changes that arrive meanwhile (a streaming Chat reply moves
 the thread lists on every delta) become one more read once it lands. The turn
 start and step ride on the same navigation rows as the executing flag (see
@@ -235,7 +215,7 @@ list.
 
 ### Running services
 
-**Running services** follows Working now, on by default. It lists the dev servers
+**Running services** follows Working now, off by default. It lists the dev servers
 and other listeners running in the host's Code Projects: the Code Environment's
 Local servers read host-wide, across every active Code Project the Project
 bootstrap lists, which today does not vary by window (see
@@ -279,7 +259,7 @@ Project sees an empty card.
 
 ### Pull requests
 
-**Pull requests** follows Running services, on by default, and only on a Code
+**Pull requests** follows Running services, off by default, and only on a Code
 start screen. It is hidden — and left out of Customize — unless the Pull requests
 destination is offered and its read is allowed: no connection, insecure token
 storage, or a missing pull-request capability hides it, the same gate that
@@ -313,7 +293,7 @@ and CI failures share one read of the snapshot when they mount together.
 
 ### CI failures
 
-**CI failures** follows Pull requests, on by default, and only on a Code start
+**CI failures** follows Pull requests, off by default, and only on a Code start
 screen. It uses the same gate as Pull requests: no connection, insecure token
 storage, or a missing pull-request capability hides it and leaves it out of
 Customize. It lists failing checks the pull-request refresh already recorded,
@@ -343,7 +323,7 @@ Pull requests reads and adds no poll.
 
 ### Computers
 
-**Computers** follows CI failures, on by default, on Chat, Work, and Code. It
+**Computers** follows CI failures, off by default, on Chat, Work, and Code. It
 leaves the grid while the only computer is this one and no agent is running
 on it, including while that count is still landing, so a quiet start screen
 does not open on host gauges. It comes back when a second computer is
@@ -367,34 +347,6 @@ hidden; a window that is visible but not focused still reads. It never polls in
 the background. A host whose last read has not answered is not asked again, a
 read that takes longer than five seconds is abandoned and leaves that host
 without figures, and leaving the start screen cancels the reads in flight.
-
-## Running tab
-
-Above the composer the same screens, the Chat screen that lists the threads to
-continue among them, carry two tabs on its top-left edge, **New task** and
-**Running**. New task is selected first and is the composer as
-it was: the Running tab never takes the focus the composer takes on arrival. The
-Running label carries the sidebar's own Running count for the current mode, read
-from the same place as the tile (nothing is added at zero), so the two cannot
-disagree; the list can run longer by an agent run whose thread is resting, which
-the sidebar does not count either. The tabs are a tablist: Arrow keys move
-between them, Enter or Space chooses, and Tab goes on to the composer. Choosing
-Running hides the composer without unmounting it, so the draft, the chosen
-Project, model, and attachments are all there when New task comes back; the list
-mounts, and reads, only while it is open. It shows the Working now rows
-without the five-row limit, compact, each with **Open** (the thread, as a Working
-now row does) and **Stop**. A start screen has no thread open, and the
-navigation rows carry no turn or attempt identity, so Stop sends the command its
-mode already uses for the Stop control inside the thread (interrupt a Chat
-attempt, cancel a Work turn, cancel a Code provider turn, or cancel an agent run
-for a row that is only a run). A thread with no running turn is sent nothing;
-how each mode tells is in
-[Host reads and commands](host-reads-and-commands.md#stopping-from-the-running-tab).
-It asks first, in the row: "Stop this turn?" ("Stop this agent run?"
-on a row that is only a run) with **Stop** and **Keep running**, the safe
-answer holding the focus. In every mode a turn that finished
-meanwhile is reported ("Already finished.") and never cancelled twice, and a
-host refusal shows in the row in the host's words. The tabs and list add no persisted state or authority.
 
 ## Needs you across surfaces
 

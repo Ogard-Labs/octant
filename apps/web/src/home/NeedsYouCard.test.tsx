@@ -10,6 +10,7 @@ import {
   workDecision,
 } from "../palette/pendingRequests.test-fixtures";
 import { HomeDashboard } from "./HomeDashboard";
+import { cardsTurnedOn } from "./homeCardsTestSupport";
 import { createNeedsYouCard, type NeedsYouCardSource } from "./NeedsYouCard";
 
 const NOW = Date.parse("2026-10-06T10:00:00.000Z");
@@ -133,7 +134,7 @@ function renderCard(card: ReturnType<typeof createNeedsYouCard>) {
   return render(
     <HomeDashboard
       cards={[card]}
-      customization={{ order: [], visibility: [] }}
+      customization={cardsTurnedOn([card])}
       onCustomizationChange={vi.fn()}
     />,
   );
@@ -559,7 +560,7 @@ describe("the Needs you card", () => {
     view.rerender(
       <HomeDashboard
         cards={[createNeedsYouCard({ ...first, now: NOW + 60_000 })]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([createNeedsYouCard({ ...first, now: NOW + 60_000 })])}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -618,7 +619,7 @@ describe("the Needs you card", () => {
     view.rerender(
       <HomeDashboard
         cards={[createNeedsYouCard({ ...first, now: NOW + 60_000 })]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([createNeedsYouCard({ ...first, now: NOW + 60_000 })])}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -626,7 +627,7 @@ describe("the Needs you card", () => {
     view.rerender(
       <HomeDashboard
         cards={[createNeedsYouCard({ ...first, feedRevision: 1 })]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([createNeedsYouCard({ ...first, feedRevision: 1 })])}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -652,7 +653,7 @@ describe("the Needs you card", () => {
       view.rerender(
         <HomeDashboard
           cards={[createNeedsYouCard({ ...first, feedRevision })]}
-          customization={{ order: [], visibility: [] }}
+          customization={cardsTurnedOn([createNeedsYouCard({ ...first, feedRevision })])}
           onCustomizationChange={vi.fn()}
         />,
       );
@@ -681,8 +682,8 @@ describe("the Needs you card", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: "Home cards" })).toBeNull());
   });
 
-  it("is on by default and drops out of the grid when empty", () => {
+  it("starts off and drops out of the grid when empty", () => {
     const card = createNeedsYouCard(source());
-    expect(card).toMatchObject({ id: "needs-you", defaultOn: true, hideWhenEmpty: true });
+    expect(card).toMatchObject({ id: "needs-you", defaultOn: false, hideWhenEmpty: true });
   });
 });

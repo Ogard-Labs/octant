@@ -37,7 +37,11 @@ export interface HomeCardDefinition {
   readonly id: string;
   readonly title: string;
   readonly icon: LucideIcon;
-  /** Whether the card is on until the person turns it off. */
+  /**
+   * Whether the card is on until the person turns it off. Every built-in card
+   * starts off: the start screen opens on its question and the composer, and
+   * Customize is where a person puts cards under it.
+   */
   readonly defaultOn: boolean;
   /**
    * False when what the card needs is missing here (no GitHub connection, no

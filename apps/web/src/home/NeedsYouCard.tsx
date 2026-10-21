@@ -40,7 +40,7 @@ export function createNeedsYouCard(source: NeedsYouCardSource): HomeCardDefiniti
     id: NEEDS_YOU_CARD_ID,
     title: "Needs you",
     icon: BellRing,
-    defaultOn: true,
+    defaultOn: false,
     available: source.pendingRequestClient !== undefined,
     hideWhenEmpty: true,
     emptyLabel: "Nothing is waiting for you.",

@@ -108,7 +108,7 @@ nothing essential sits under 12px at the default. The roles live in
 
 | Role          | Size | Weight | Leading | Colour      | Where                                                                               |
 | ------------- | ---- | ------ | ------- | ----------- | ----------------------------------------------------------------------------------- |
-| Hero          | 36   | 700    | 1.1     | primary     | Welcome greeting only (`oct-title--hero`, `--oct-text-3xl`)                         |
+| Hero          | 36   | 700    | 1.1     | primary     | Welcome question only (`oct-title--hero`, `--oct-text-3xl`)                         |
 | Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens)                 |
 | Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label |
 | Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option                                                      |
@@ -122,7 +122,7 @@ Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
 labels and controls, 600 (`--oct-weight-strong`) for emphasis (section labels,
 card titles, counts, `strong`, the app's name), and 700 (`--oct-weight-title`)
-only for the page title and the welcome greeting. `bun run ui:check` counts a
+only for the page title and the welcome question. `bun run ui:check` counts a
 weight above 600 outside the title roles in `styles/surface.css` as a
 `heavy-weight` finding and ratchets it against the baseline.
 
@@ -151,7 +151,7 @@ greys and the same hairline carry the hierarchy on a white or graphite ground.
 
 Settings › Appearance › Style chooses how much of that palette the chrome
 uses. **Default** is the monochrome described above. **Vivid** lets the
-places that name something carry colour: the welcome greeting, the sidebar's
+places that name something carry colour: the welcome question, the sidebar's
 count tiles, board column marks, a Project's accent, and a thread's Canvases,
 which take the hue of what they hold (a plan purple, a chart or figures
 amber, a diagram teal, a mockup pink, a table or document blue). Vivid draws every
@@ -438,15 +438,17 @@ The strip stays mounted while metadata loads, and full paths are available in
 tooltips. Code retains its checkout, branch, diff, and pull-request controls.
 Pane headers show thread titles without repeated project labels.
 
-Chat, Work, and Code open on the same screen: a greeting and one raised
-composer. The hero says only the greeting for the hour and the person's name
-("Good evening, Henrik", the hero role). One quiet line under it, at the
-detail step in muted ink, gives the date in the person's locale, then "N
-running" and "N waiting for your review", with a zero count left out; Chat,
-which counts nothing, shows the date alone. The question each mode used to ask
-in the heading lives in the composer's placeholder instead ("Ask anything…",
-"Describe the work…", "Describe the change…"), and the message field keeps its
-accessible name. The composer is prompt first, four lines tall before it
+Chat, Work, and Code open on the same screen: one question in the middle of
+the page and one raised composer docked at its foot, where it stays once the
+thread starts, so the first message is typed where every later one is. Above
+the question sits the octant mark, a 24px circle with one eighth filled,
+drawn in the primary ink. The hero asks "What are we building today?" (the
+hero role) and one quiet line under it, at the detail step in muted ink, says
+"Pick a project, or just start typing". The start screen names no time of day
+and counts nothing: what is running and what waits for review live in the
+sidebar. Each mode's own prompt stays in the composer's placeholder ("Ask
+anything…", "Describe the work…", "Describe the change…"), and the message
+field keeps its accessible name. The composer is prompt first, four lines tall before it
 grows; its toolbar row holds how the thread runs (attach and image on the
 left; model and access on the right, next to send). Where the thread runs
 (Project, base branch, checkout, Environment, repository) is the first row
@@ -461,10 +463,13 @@ composer keeps its context strip beneath the card. Nothing about delivery is
 asked up front; it is derived from the chips and shown on the thread once it
 exists.
 
-Around the composer, a start screen shows two underline tabs (**New task**,
-**Running**) on its top-left edge, then under it a row of action tiles (Work
-and Code only), the card area, and one row of outline prompt chips (Code's
-suggestions, Work's starters). Their anatomy is in
+Under the composer, a start screen shows only a Customize control, the cards
+a person has turned on there (every card starts off), and, before the first
+thread, one row of outline prompt chips (Code's suggestions, Work's starters).
+It has no tabs and no action tiles: adding a folder lives in the composer's
+Project picker. Code's start screen also keeps its agent home (Up next and
+Continue) under the composer, so there the page scrolls and the composer sits
+under the question rather than at the foot. Their anatomy is in
 [Start screen: presentation](docs/design/start-screen.md#presentation); their
 behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 

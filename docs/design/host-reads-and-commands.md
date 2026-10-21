@@ -58,15 +58,6 @@ third denial in one turn: the provider received that Deny and the host then
 stopped the turn, so it counts as answered. The start-screen card, the command
 palette, and the open Code thread all read Code answers this way.
 
-## Stopping from the Running tab
-
-A start screen has no thread open and the navigation rows carry no turn or
-attempt identity, so the Running tab's Stop sends the command the mode's own
-in-thread Stop uses. Chat and Work first read the thread's running turn and send
-nothing when there is none. Code has no turn to name: its host cancels only the
-turn it is running for that thread and answers a cancel it had no turn for with
-a failed turn state and no reason, which counts as nothing running.
-
 ## Thread windows
 
 A thread opens on its newest turns and loads earlier ones on request. Each

@@ -217,8 +217,9 @@ than its composer, stay pane and attachment behaviour.
 ## Start-screen cards
 
 Every start screen (Chat, Work, and Code, in each variant a mode has, including
-the Chat screen that lists threads to continue) shows its composer and then one
-card area with the same stored setting. These are the rules; each card's rows,
+the Chat screen that lists threads to continue) shows one question in the
+middle of the page, its composer docked at the foot, and under it one card
+area with the same stored setting. It has no tabs and no action tiles. These are the rules; each card's rows,
 wording, and reads are specified in [Start screen](start-screen.md).
 
 - **Paint order.** The composer paints first. The card area mounts on the frame
@@ -226,8 +227,9 @@ wording, and reads are specified in [Start screen](start-screen.md).
   screen never waits on a card. A card that is off or unavailable is never
   mounted and reads nothing.
 - **Cards, in default order.** Needs you, Working now, Running services, Pull
-  requests, CI failures, and Computers, each on by default. Pull requests and CI
-  failures appear only on a Code start screen. Chat has no folder tiles.
+  requests, CI failures, and Computers, each off by default, so a fresh start
+  screen is the question and the composer alone; Customize turns them on. Pull
+  requests and CI failures appear only on a Code start screen.
 - **Unavailable is hidden.** A card this window cannot read is hidden and left
   out of Customize rather than shown broken: Needs you without a
   pending-request reader (a remote window); Pull requests and CI failures
@@ -264,11 +266,6 @@ wording, and reads are specified in [Start screen](start-screen.md).
   card, each change stored at once in the `homeCards` shell setting, and
   **Reset to default**. An id the registry does not know is ignored, and a card
   shipped later arrives with its own default.
-- **New task and Running tabs.** Two tabs above the composer. New task is
-  selected first and keeps the composer's arrival focus. Running lists every
-  executing thread and agent run with **Open** and a confirmed **Stop**, hides
-  the composer without unmounting it, reads only while open, and adds no
-  persisted state or authority.
 - **Needs you elsewhere.** Board cards, the command palette, the Inbox, and the
   Review page read the same host list and answer in place through the same
   commands. The desktop menu bar lists the same waiting threads but only opens

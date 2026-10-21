@@ -43,10 +43,15 @@ into split panes; the active pane is marked, and the right dock follows that
 pane's thread and Project. Work and Code have server-derived thread boards;
 Chat has no board.
 
-### Home cards
+### Start screen and home cards
 
-Under the composer on a new chat or a new Work or Code task, a few cards show what is
-happening now. **Working now** lists what is running across your Projects:
+A new chat or a new Work or Code task opens on one question, **What are we
+building today?**, with the composer at the bottom of the page where the
+conversation will continue. Pick a Project in the composer, or just start
+typing. What is running and what waits for your review are in the sidebar.
+
+Under the composer you can turn on a few cards that show what is happening now.
+They all start off; **Customize** turns them on. **Working now** lists what is running across your Projects:
 each row has the provider mark, the thread's title, a line saying what it is
 doing, and a time. A command or tool shows as it runs, such as `Command: bun run
 test`, or the row says it is waiting for your approval or an answer. The time is
@@ -70,16 +75,6 @@ anything outside your Code Projects. Up to five show, then **+N more
 listening**. The card refreshes about every five seconds while the window is
 showing, and not at all when it is hidden or turned off. When the window shows
 another computer's work, the row names that computer.
-
-Above the composer, two tabs sit on its top-left edge: **New task**, which is the
-composer, and **Running**, with the number of threads running now (the same
-number the sidebar's Running tile shows). Running lists every running row, not
-just five, each with **Open** and **Stop**. Stop asks "Stop this turn?" first,
-or "Stop this agent run?" on an agent run's row; choose **Stop** to end it or
-**Keep running** to leave it. Switching tabs never
-loses what you were typing: the draft, Project, and model are kept while you
-look. The tabs work from the keyboard: arrow keys move between them, and Enter
-chooses.
 
 **Needs you** comes first and appears only while an agent is waiting on you. It
 lists every approval and question across your Projects, oldest first: the

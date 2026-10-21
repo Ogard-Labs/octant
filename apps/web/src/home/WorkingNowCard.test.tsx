@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { createComputersCard } from "./ComputersCard";
 import { HomeDashboard } from "./HomeDashboard";
-import { RunningTab } from "./RunningTab";
+import { cardsTurnedOn } from "./homeCardsTestSupport";
 import { createWorkingNowCard, type WorkingNowCardSource } from "./WorkingNowCard";
 
 const NOW = Date.parse("2026-10-06T10:00:00.000Z");
@@ -44,7 +44,7 @@ function renderCard(card: ReturnType<typeof createWorkingNowCard>) {
   return render(
     <HomeDashboard
       cards={[card]}
-      customization={{ order: [], visibility: [] }}
+      customization={cardsTurnedOn([card])}
       onCustomizationChange={vi.fn()}
     />,
   );
@@ -224,7 +224,7 @@ describe("the Working now card", () => {
     const { rerender } = render(
       <HomeDashboard
         cards={[card(0)]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([card(0)])}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -232,7 +232,7 @@ describe("the Working now card", () => {
     rerender(
       <HomeDashboard
         cards={[card(0)]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([card(0)])}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -240,7 +240,7 @@ describe("the Working now card", () => {
     rerender(
       <HomeDashboard
         cards={[card(1)]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([card(1)])}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -282,10 +282,28 @@ describe("the Working now card", () => {
                 onOpenRunning: vi.fn(),
               }),
             ]}
-            customization={{ order: [], visibility: [] }}
+            customization={cardsTurnedOn([
+              createWorkingNowCard(shared),
+              createComputersCard({
+                hosts: [
+                  {
+                    hostId: "local",
+                    name: "This computer",
+                    connection: "connected",
+                    figuresAllowed: true,
+                    runningAgents: 2,
+                  },
+                ],
+                launchHostId: "local",
+                agentRunClient: reader,
+                runRevision: revision,
+                now: NOW,
+                readResources: vi.fn(async () => ({ status: "unavailable" as const })),
+                onOpenRunning: vi.fn(),
+              }),
+            ])}
             onCustomizationChange={vi.fn()}
           />
-          <RunningTab onStop={vi.fn()} source={shared} />
         </>
       );
     };
@@ -300,27 +318,5 @@ describe("the Working now card", () => {
     await waitFor(() => expect(reader.center).toHaveBeenCalledTimes(2));
     await act(async () => answers.shift()?.());
     expect(reader.center).toHaveBeenCalledTimes(2);
-  });
-
-  it("reads again when the Running tab opens after a refused read, without waiting for the thread lists to change", async () => {
-    const reader = {
-      center: vi.fn().mockRejectedValueOnce(new Error("refused")).mockResolvedValue({ items: [] }),
-    } as unknown as AgentRunClient;
-    const shared = source({ agentRunClient: reader, runRevision: 3 });
-    const { rerender } = renderCard(createWorkingNowCard(shared));
-    await screen.findByRole("region", { name: "Working now" });
-    await waitFor(() => expect(reader.center).toHaveBeenCalledTimes(1));
-    await act(async () => {});
-    rerender(
-      <>
-        <HomeDashboard
-          cards={[createWorkingNowCard(shared)]}
-          customization={{ order: [], visibility: [] }}
-          onCustomizationChange={vi.fn()}
-        />
-        <RunningTab onStop={vi.fn()} source={shared} />
-      </>,
-    );
-    await waitFor(() => expect(reader.center).toHaveBeenCalledTimes(2));
   });
 });

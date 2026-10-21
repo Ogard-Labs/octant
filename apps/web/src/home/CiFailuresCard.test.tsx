@@ -3,6 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { HomeDashboard } from "./HomeDashboard";
+import { cardsTurnedOn } from "./homeCardsTestSupport";
 import { createCiFailuresCard, type CiFailuresCardSource } from "./CiFailuresCard";
 
 const projectId = decodeProjectId("10000000-0000-4000-8000-000000000001");
@@ -76,7 +77,7 @@ describe("the CI failures card", () => {
     render(
       <HomeDashboard
         cards={[createCiFailuresCard(source())]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([createCiFailuresCard(source())])}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -93,7 +94,7 @@ describe("the CI failures card", () => {
     render(
       <HomeDashboard
         cards={[createCiFailuresCard(source({ load, onStartFix }))]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([createCiFailuresCard(source({ load, onStartFix }))])}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -131,7 +132,9 @@ describe("the CI failures card", () => {
     render(
       <HomeDashboard
         cards={[createCiFailuresCard(source({ load: vi.fn(async () => fromFork) }))]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([
+          createCiFailuresCard(source({ load: vi.fn(async () => fromFork) })),
+        ])}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -145,7 +148,7 @@ describe("the CI failures card", () => {
     render(
       <HomeDashboard
         cards={[createCiFailuresCard(source({ available: false, load }))]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([createCiFailuresCard(source({ available: false, load }))])}
         onCustomizationChange={vi.fn()}
       />,
     );
@@ -157,7 +160,9 @@ describe("the CI failures card", () => {
     render(
       <HomeDashboard
         cards={[createCiFailuresCard(source({ load: vi.fn(async () => emptyView()) }))]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([
+          createCiFailuresCard(source({ load: vi.fn(async () => emptyView()) })),
+        ])}
         onCustomizationChange={vi.fn()}
       />,
     );

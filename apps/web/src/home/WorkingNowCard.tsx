@@ -41,7 +41,7 @@ export function createWorkingNowCard(source: WorkingNowCardSource): HomeCardDefi
     id: WORKING_NOW_CARD_ID,
     title: "Working now",
     icon: Activity,
-    defaultOn: true,
+    defaultOn: false,
     available: true,
     emptyLabel: WORKING_NOW_EMPTY_LABEL,
     useContent: () => useWorkingNowContent(source),

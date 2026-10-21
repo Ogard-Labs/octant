@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HomeCard } from "./HomeCard";
 import { HomeDashboard } from "./HomeDashboard";
+import { cardsTurnedOn } from "./homeCardsTestSupport";
 import {
   createComputersCard,
   type ComputersCardSource,
@@ -417,7 +418,13 @@ describe("the Computers card", () => {
             }),
           ),
         ]}
-        customization={{ order: [], visibility: [] }}
+        customization={cardsTurnedOn([
+          createComputersCard(
+            source({
+              hosts: [host({ hostId: "local", name: "This computer", runningAgents: 0 })],
+            }),
+          ),
+        ])}
         onCustomizationChange={vi.fn()}
       />,
     );

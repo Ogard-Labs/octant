@@ -63,7 +63,7 @@ export function createComputersCard(source: ComputersCardSource): HomeCardDefini
     id: COMPUTERS_CARD_ID,
     title: "Computers",
     icon: Monitor,
-    defaultOn: true,
+    defaultOn: false,
     available: true,
     hideWhenEmpty: true,
     emptyLabel: "No computers are connected.",
