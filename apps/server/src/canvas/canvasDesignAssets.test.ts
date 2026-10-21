@@ -109,8 +109,23 @@ describe("resolveCanvasDesignAssets", () => {
     expect(ports.projectFile).not.toHaveBeenCalled();
   });
 
+  it("answers a captured-page asset as refused without reading anything until captures resolve", async () => {
+    const ports = filePorts();
+    const capture = {
+      assetId: "shot",
+      source: { kind: "browser-capture", captureId: "44444444-4444-4444-8444-444444444444" },
+    } as NonNullable<CanvasDesignBlock["assets"]>[number];
+    const resolved = await resolveCanvasDesignAssets(
+      design([capture]),
+      { mode: "work", projectId: projectId as never, threadId: threadId as never },
+      ports,
+    );
+    expect(resolved).toEqual([{ assetId: "shot", status: "unavailable", reason: "refused" }]);
+    expect(ports.projectFile).not.toHaveBeenCalled();
+  });
+
   it("draws a generated image in a Chat Canvas only when its Project says so", async () => {
-    const generated = vi.fn(async (input: { readonly projectId: string }) =>
+    const generated = vi.fn(async (input: { readonly projectId: string | null }) =>
       input.projectId === projectId
         ? ({ status: "read", bytes: PNG } as const)
         : ({ status: "unavailable", reason: "refused" } as const),
@@ -134,6 +149,31 @@ describe("resolveCanvasDesignAssets", () => {
       filePorts(generated),
     );
     expect(theirs).toEqual([{ assetId: "hero", status: "unavailable", reason: "refused" }]);
+  });
+
+  it("asks for a generated image by thread, not Project, in a Canvas owned by its thread, and refuses a file path there", async () => {
+    const generated = vi.fn(async (_input: { readonly projectId: string | null }) => ({
+      status: "read" as const,
+      bytes: PNG,
+    }));
+    const resolved = await resolveCanvasDesignAssets(
+      design([
+        {
+          assetId: decodeCanvasDesignAssetId("hero"),
+          source: { kind: "generated-image", imageId },
+        },
+        file("home", "screens/home.png"),
+      ]),
+      { mode: "chat", projectId: null, threadId: threadId as never },
+      filePorts(generated),
+    );
+    expect(generated).toHaveBeenCalledWith(
+      expect.objectContaining({ imageId, projectId: null, threadId }),
+    );
+    expect(resolved).toEqual([
+      expect.objectContaining({ assetId: "hero", status: "resolved" }),
+      { assetId: "home", status: "unavailable", reason: "refused" },
+    ]);
   });
 
   it("refuses traversal, an absolute path, and a symlink out of the folder, and never returns the bytes", async () => {

@@ -1,7 +1,13 @@
+import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { CONFIGURATION_FAILURE_EXIT_CODE } from "@octant/host-runtime";
 import { describe, expect, it, vi } from "vitest";
-import { resolveServerRunOptions, runServerRunCommand, type ServerRunSpawnSpec } from "./serverRun";
+import {
+  resolveServerRunOptions,
+  runServerRunCommand,
+  startSecretServiceCredentialBroker,
+  type ServerRunSpawnSpec,
+} from "./serverRun";
 
 describe("runServerRunCommand", () => {
   it("starts the checkout server with the absolute runtime and no PATH lookup of the runtime", async () => {
@@ -292,5 +298,35 @@ describe("runServerRunCommand", () => {
 
     expect(captured?.env).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_URL");
     expect(captured?.env).not.toHaveProperty("OCTANT_CREDENTIAL_BROKER_TOKEN");
+  });
+
+  it("keeps public links' owner secrets in the Linux broker it starts", async () => {
+    const namespaces: string[] = [];
+    const broker = await startSecretServiceCredentialBroker((options = {}) => {
+      namespaces.push(options.namespace ?? "provider");
+      const values = new Map<string, string>();
+      return {
+        set: async (id, value) => void values.set(id, value),
+        has: async (id) => values.has(id),
+        resolve: async (id) => values.get(id) ?? "",
+        delete: async (id) => void values.delete(id),
+      };
+    });
+    try {
+      const response = await broker.fetchForTest(
+        new Request(new URL("/v1/canvas-public-share-secrets/set", broker.url), {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-octant-credential-broker-token": broker.token,
+          },
+          body: JSON.stringify({ credentialRef: randomUUID(), credential: "owner-secret" }),
+        }),
+      );
+      expect(response.status).toBe(200);
+      expect(namespaces).toContain("canvas-public-share-secret");
+    } finally {
+      await broker.close();
+    }
   });
 });

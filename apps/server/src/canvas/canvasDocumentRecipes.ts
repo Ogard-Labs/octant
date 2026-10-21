@@ -29,6 +29,23 @@ const inTreeCanvasDocumentRecipeDocuments = [
     ],
   },
   {
+    id: "memo",
+    title: "Memo",
+    summary: "A one-page memo or report: the summary, the facts, the detail, and the ask.",
+    whenToUse:
+      "When someone asks for a memo, a one-pager, a status report, a summary to decide from, or a short write-up to share.",
+    skeleton: [
+      { kind: "heading", role: "Summary" },
+      { kind: "rich-text", role: "The answer in a few sentences, and why it matters." },
+      { kind: "heading", role: "Facts" },
+      { kind: "key-value", role: "The facts the reader needs, one per row." },
+      { kind: "heading", role: "Detail" },
+      { kind: "table", role: "The supporting detail, one row per item." },
+      { kind: "heading", role: "Next steps" },
+      { kind: "callout", role: "The decision or action asked of the reader, and by when." },
+    ],
+  },
+  {
     id: "audit-report",
     title: "Audit report",
     summary: "Scope, the overall result, findings with evidence, and what remains open.",
@@ -191,6 +208,25 @@ const inTreeCanvasDocumentRecipeDocuments = [
     ],
   },
   {
+    id: "architecture-diagram",
+    title: "Architecture diagram",
+    summary: "The system as grouped tiers, one flow through it, and the decisions that shaped it.",
+    whenToUse:
+      "When someone asks to diagram a system, draw the architecture, show how the parts connect, or explain how a request or data moves through them.",
+    skeleton: [
+      { kind: "heading", role: "System" },
+      { kind: "rich-text", role: "What the system does, and where its boundary is." },
+      {
+        kind: "diagram",
+        role: "The parts grouped by tier (clients, services, data), left to right, with short labels and the protocol on each edge.",
+      },
+      { kind: "heading", role: "Flow" },
+      { kind: "sequence", role: "The main request or data flow through the parts, in order." },
+      { kind: "heading", role: "Key decisions" },
+      { kind: "table", role: "Each decision: what was chosen, why, and what it rules out." },
+    ],
+  },
+  {
     id: "dashboard",
     title: "Dashboard",
     summary: "Headline metrics, a trend chart, a ranking, and what needs attention.",
@@ -259,6 +295,26 @@ const inTreeCanvasDocumentRecipeDocuments = [
     ],
   },
   {
+    id: "ui-kit",
+    title: "UI kit",
+    summary:
+      "Design tokens as a table, and a component sheet in the kit's own palette with every state.",
+    whenToUse:
+      "When someone asks for a UI kit, a component sheet, a set of controls with their states, or the building blocks of an interface.",
+    skeleton: [
+      { kind: "heading", role: "Tokens" },
+      { kind: "table", role: "Each token: its name, its value, and where it is used." },
+      { kind: "heading", role: "Components" },
+      {
+        kind: "design",
+        size: "document",
+        role: "The sheet in the kit's own palette (theme none): buttons, inputs, toggles, badges, and cards, labelled in every state.",
+      },
+      { kind: "heading", role: "Rules" },
+      { kind: "rich-text", role: "How to use the kit, and what is still open." },
+    ],
+  },
+  {
     id: "clickable-prototype",
     title: "Clickable prototype",
     summary: "A prototype that reacts and keeps state as you click, with notes on what is real.",
@@ -271,6 +327,25 @@ const inTreeCanvasDocumentRecipeDocuments = [
       },
       { kind: "heading", role: "Notes" },
       { kind: "rich-text", role: "What the prototype shows, what is faked, and what to try." },
+    ],
+  },
+  {
+    id: "app-redesign-prototype",
+    title: "App redesign prototype",
+    summary: "A whole app window you can click through, with real navigation and a live accent.",
+    whenToUse:
+      "When someone asks to redesign an app, show a full app window, or try a layout with real navigation, state, and a colour they can change, such as a sidebar of threads, panes, tabs, and an accent picker.",
+    skeleton: [
+      {
+        kind: "design",
+        size: "desktop",
+        role: "Desktop window, runsScript true, accent as a :root variable; grow it with designEdits revisions.",
+      },
+      { kind: "heading", role: "Notes" },
+      {
+        kind: "rich-text",
+        role: "What the window shows, what is faked, and what to try, such as changing the accent.",
+      },
     ],
   },
 ] as const;

@@ -65,12 +65,12 @@ export interface FreshHostActivitySource {
 const FRESH_ACTIVITY_BOUND_MS = 2_000;
 
 /**
- * What stopping this host now would interrupt, for the two questions that ask
- * it: quitting, and installing a downloaded update. Both read this one value so
- * they cannot disagree.
+ * The conservative activity reading for quitting and installing a downloaded
+ * update. Both read this one value so they cannot disagree.
  *
  * Running agents count, and so does a thread parked on an approval or question,
- * because its session is still live. A provider that merely needs sign-in or is
+ * because its session is still live. The count can also include idle provider
+ * sessions kept for another turn. A provider that merely needs sign-in or is
  * not installed interrupts nothing and does not count. Work the desktop could
  * not confirm sets `activityUnconfirmed`, so the install waits and quit asks
  * rather than trusting a zero it could not check.
