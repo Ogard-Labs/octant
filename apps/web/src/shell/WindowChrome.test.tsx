@@ -708,6 +708,12 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell-frame > .sidebar")).toContain("background: transparent;");
     expect(cssRule(".shell-frame > .sidebar-rail")).toContain("background: transparent;");
     expect(styles).not.toContain("--octant-card-gutter");
+    // The dock's own surface would cover its sheet piece.
+    expect(cssRule(".shell-frame .right-utility-dock__surface")).toContain(
+      "background: transparent;",
+    );
+    // The stage piece sits below the ground, so the shell holds its own level.
+    expect(cssRule(".shell.shell-frame", 2)).toContain("isolation: isolate;");
   });
 
   it("lays a veil over the application ground behind a thread, below the title band", () => {
