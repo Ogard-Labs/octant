@@ -64,6 +64,14 @@ A provider turn is processed where **that provider** processes it, under
 the contract you have with them. That is independent of where your Octant
 store lives. See [Sub-processors](/advanced/sub-processors).
 
+A Canvas you publish as a public link is stored by the public Canvas share
+service. Where it is stored will be announced when the service launches.
+Self-hosting keeps links wherever you run the service.
+
+::: warning Draft
+Hosting region: to be named by the maintainer before the service launches.
+:::
+
 An update check or marketplace fetch is processed where the feed or
 registry you contacted is hosted. Those requests do not relocate the
 journal.

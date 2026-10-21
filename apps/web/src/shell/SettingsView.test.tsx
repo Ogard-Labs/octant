@@ -6,7 +6,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { createElement, useState } from "react";
+import { PluginSettingsSection } from "./PluginSettingsSection";
 import { describe, expect, it, vi } from "vitest";
 import { settingsPastFirstRun } from "../App.test-fixtures";
 import { SettingsView, type SettingsViewProps } from "./SettingsView";
@@ -1616,6 +1617,46 @@ describe("SettingsView", () => {
     navigateTo("GitHub");
     expect(screen.getByText(/managed on the owning host/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh status" })).not.toBeInTheDocument();
+  });
+
+  it("replaces integration account controls when navigating between Settings pages", () => {
+    renderSettings({
+      effectivePlugins: new Map([
+        ["github-integration", true],
+        ["linear-integration", true],
+      ]),
+    });
+    navigateTo("GitHub");
+    expect(screen.getByRole("region", { name: "GitHub" })).toHaveTextContent("inspect the account");
+
+    navigateTo("Linear");
+    expect(screen.queryByRole("region", { name: "GitHub" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Linear" })).toHaveTextContent(
+      "inspect the workspace",
+    );
+
+    navigateTo("GitHub");
+    expect(screen.queryByRole("region", { name: "Linear" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "GitHub" })).toHaveTextContent("inspect the account");
+  });
+
+  it("replaces old controls with an error for an unknown page and recovers on a known page", () => {
+    const { rerender } = render(
+      createElement(PluginSettingsSection, { entryPoint: "builtin:github/settings" }),
+    );
+    expect(screen.getByRole("region", { name: "GitHub" })).toBeInTheDocument();
+
+    rerender(createElement(PluginSettingsSection, { entryPoint: "unknown:plugin/settings" }));
+    expect(screen.queryByRole("region", { name: "GitHub" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Settings section error" })).toHaveTextContent(
+      "Unknown plugin settings-section entry point: unknown:plugin/settings",
+    );
+
+    rerender(createElement(PluginSettingsSection, { entryPoint: "builtin:linear/settings" }));
+    expect(
+      screen.queryByRole("region", { name: "Settings section error" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Linear" })).toBeInTheDocument();
   });
 
   it("omits the GitHub section when the github-integration plugin is not effective", () => {

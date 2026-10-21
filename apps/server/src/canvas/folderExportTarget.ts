@@ -5,8 +5,9 @@ import {
   decodeCanvasExportReceipt,
   type CanvasExportDelivery,
   type CanvasExportRefusal,
+  type CanvasExportRenderedOutput,
 } from "@octant/contracts/canvas-export";
-import { canvasExportPlannedName, planCanvasExportFileName } from "@octant/domain";
+import { canvasExportPlannedName, freeCanvasExportFileName } from "@octant/domain";
 import type { CanvasExportTarget } from "@octant/plugin-api/canvas-export";
 import type { CanvasExportFilePort } from "./canvasExportFilePort";
 
@@ -19,6 +20,12 @@ import type { CanvasExportFilePort } from "./canvasExportFilePort";
  * knowable in advance, so it names the file on the approval card — and that
  * naming is what lets approving the card replace an existing file. Invoked
  * without that confirmation it writes beside the file instead.
+ *
+ * A picture export is a set of files. The card names the first and lists the
+ * rest, and says which of them are already there. Approving it confirms
+ * exactly those: a deck exported again replaces its slides in place, while a
+ * file that is there but was not named on the card, or that appeared after it,
+ * gets a numbered copy beside it, as a single file would.
  */
 
 export const FOLDER_EXPORT_TARGET_ID = "folder-on-this-mac";
@@ -49,19 +56,23 @@ export function createFolderExportTarget(
       kind: "canvas-export-contribution",
       targetId: FOLDER_EXPORT_TARGET_ID,
       label: FOLDER_EXPORT_TARGET_LABEL,
-      formats: ["markdown", "html"],
+      formats: ["markdown", "html", "png", "pdf"],
     }),
 
     describeDestination(output) {
       const availability = dependencies.availability();
       if (availability.kind !== "ready") return undefined;
-      // The name this document wants, not the next free one: naming the file
+      // The names this document wants, not the next free ones: naming the file
       // that is already there is what puts the replacement in front of the
       // person instead of quietly writing a copy they never asked about.
-      const fileName = canvasExportPlannedName(output.title, output.format);
+      const [first, ...rest] = plannedFiles(output);
+      const alsoReplaces = rest
+        .filter((file) => dependencies.files.existsIn(availability.folder, file.name))
+        .map((file) => join(availability.folder, file.name));
       return {
-        path: join(availability.folder, fileName),
-        replacesExisting: dependencies.files.existsIn(availability.folder, fileName),
+        path: join(availability.folder, first.name),
+        replacesExisting: dependencies.files.existsIn(availability.folder, first.name),
+        ...(alsoReplaces.length === 0 ? {} : { alsoReplaces }),
       };
     },
 
@@ -71,8 +82,8 @@ export function createFolderExportTarget(
         return refused("not-connected", "No export folder has been chosen yet.");
       }
       if (availability.kind === "refused") return refused("refused", availability.reason);
-      const planned = canvasExportPlannedName(output.title, output.format);
-      const plannedPath = join(availability.folder, planned);
+      const files = plannedFiles(output);
+      const plannedPath = join(availability.folder, files[0].name);
       // The person approved the place the card named. A confirmed destination
       // that points somewhere else means the folder changed while the card was
       // open, so this delivery is refused rather than written to a folder the
@@ -80,38 +91,77 @@ export function createFolderExportTarget(
       if (confirmed?.path !== undefined && confirmed.path !== plannedPath) {
         return refused("refused", "The export folder changed after this export was approved.");
       }
-      const fileName = planCanvasExportFileName({
-        title: output.title,
-        format: output.format,
-        taken: (candidate) => dependencies.files.existsIn(availability.folder, candidate),
-        // Only a card that said a file was already there counts as confirmed:
-        // the person approved a replacement, not just a path. A file that
-        // appeared at the name after the card was built was never named to the
-        // person, so it gets the numbered copy instead. A call with no
-        // confirmation — a destination reached outside a card — writes a
-        // numbered copy beside an existing file too.
-        replacesConfirmed: confirmed?.path === plannedPath && confirmed.replacesExisting === true,
-      });
-      if (fileName === undefined) {
-        return refused("refused", "There is no free name to write this export to.");
-      }
-      try {
-        await dependencies.files.writeAtomically(
-          availability.folder,
-          fileName,
-          output.body,
-          dependencies.newTempId(),
+      // Only a file the card named as already there counts as confirmed: the
+      // person approved those replacements, not just a path. A file that
+      // appeared at a name after the card was built was never named to the
+      // person, so it gets the numbered copy instead. A call with no
+      // confirmation — a destination reached outside a card — writes a
+      // numbered copy beside an existing file too.
+      const confirmedReplacements = new Set<string>(
+        confirmed?.path === plannedPath
+          ? [
+              ...(confirmed.replacesExisting === true ? [plannedPath] : []),
+              ...(confirmed.alsoReplaces ?? []),
+            ]
+          : [],
+      );
+      const placed: Array<{ readonly fileName: string; readonly contents: string | Uint8Array }> =
+        [];
+      for (const file of files) {
+        const fileName = freeCanvasExportFileName(
+          file.name,
+          (candidate) =>
+            dependencies.files.existsIn(availability.folder, candidate) ||
+            placed.some((entry) => entry.fileName === candidate),
+          confirmedReplacements.has(join(availability.folder, file.name)),
         );
-      } catch {
-        return refused("refused", "The export could not be written to that folder.");
+        if (fileName === undefined) {
+          return refused("refused", "There is no free name to write this export to.");
+        }
+        placed.push({ fileName, contents: file.contents });
+      }
+      // Each file lands whole or not at all; a set that fails part-way leaves
+      // the files already written, and the refusal says the write failed.
+      for (const entry of placed) {
+        try {
+          await dependencies.files.writeAtomically(
+            availability.folder,
+            entry.fileName,
+            entry.contents,
+            dependencies.newTempId(),
+          );
+        } catch {
+          return refused("refused", "The export could not be written to that folder.");
+        }
+      }
+      const first = placed[0];
+      if (first === undefined) {
+        return refused("refused", "There is nothing to write for this export.");
       }
       return decodeCanvasExportDelivery({
         kind: "receipt",
         receipt: decodeCanvasExportReceipt({
           kind: "path",
-          path: join(availability.folder, fileName),
+          path: join(availability.folder, first.fileName),
         }),
       });
     },
   };
+}
+
+/** The files one rendered output wants to be, named by policy, in writing order. */
+function plannedFiles(
+  output: CanvasExportRenderedOutput,
+): readonly [
+  { readonly name: string; readonly contents: string | Uint8Array },
+  ...Array<{ readonly name: string; readonly contents: string | Uint8Array }>,
+] {
+  if ("body" in output) {
+    return [{ name: canvasExportPlannedName(output.title, output.format), contents: output.body }];
+  }
+  const [first, ...rest] = output.files;
+  return [
+    { name: first.name, contents: first.bytes },
+    ...rest.map((file) => ({ name: file.name, contents: file.bytes })),
+  ];
 }

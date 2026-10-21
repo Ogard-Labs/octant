@@ -66,6 +66,22 @@ export const ThreadFollowUpActivated = Schema.Struct({
 }).annotations(strict);
 export type ThreadFollowUpActivated = typeof ThreadFollowUpActivated.Type;
 
+/** How many follow-up links one lineage answer carries, newest first: a sidebar's worth. */
+export const MAX_FOLLOW_UP_LINEAGE_LINKS = 500;
+
+/** A thread a started follow-up created, and the thread whose reply suggested it. */
+export const FollowUpThreadLink = Schema.Struct({
+  threadId: Schema.UUID,
+  parentThreadId: Schema.UUID,
+}).annotations(strict);
+export type FollowUpThreadLink = typeof FollowUpThreadLink.Type;
+
+/** The follow-up links a window may read: which thread started which. */
+export const FollowUpThreadLineage = Schema.Struct({
+  links: Schema.Array(FollowUpThreadLink).pipe(Schema.maxItems(MAX_FOLLOW_UP_LINEAGE_LINKS)),
+}).annotations(strict);
+export type FollowUpThreadLineage = typeof FollowUpThreadLineage.Type;
+
 export const THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE = "thread-follow-up-suggestions";
 export const THREAD_FOLLOW_UP_SUGGESTION_EVENT_NAMES = {
   suggested: "thread-follow-ups-suggested@1",

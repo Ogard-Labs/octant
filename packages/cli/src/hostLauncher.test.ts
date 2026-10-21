@@ -70,6 +70,32 @@ describe("attachOrCreateHost", () => {
     expect(spawn).not.toHaveBeenCalled();
   });
 
+  it("reports whether an attached host finds the Canvas preview page", async () => {
+    const hostThatSays = (canvasPreviewPage: boolean) =>
+      mockFetch(
+        async () =>
+          new Response(
+            JSON.stringify({
+              product: "Octant",
+              status: "ok",
+              storage: "ready",
+              version: "0.0.0-dev",
+              instanceId: "instance-1",
+              canvasPreviewPage,
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+      );
+    await expect(attachOrCreateHost(deps({ fetch: hostThatSays(false) }))).resolves.toMatchObject({
+      kind: "attached",
+      canvasPreviewPage: false,
+    });
+    await expect(attachOrCreateHost(deps({ fetch: hostThatSays(true) }))).resolves.toMatchObject({
+      kind: "attached",
+      canvasPreviewPage: true,
+    });
+  });
+
   it("spawns a host when no healthy host is reachable", async () => {
     const fetch = mockFetch(async () => {
       throw new Error("ECONNREFUSED");

@@ -90,6 +90,7 @@ export type CodeTurnEventCategory =
   | "question"
   | "observation"
   | "task-progress"
+  | "task-list"
   | "usage"
   | "provider-limit"
   | "child-activity"
@@ -113,6 +114,8 @@ export interface CodeTurnEvent {
   readonly requestId?: string;
   /** The labels a provider question offers; absent on every other category. */
   readonly options?: ReadonlyArray<string>;
+  /** The ids a restated plan still lists, in order; only on `task-list`. */
+  readonly taskIds?: ReadonlyArray<string>;
   readonly toolCallId?: string;
   readonly toolName?: string;
   readonly status?: string;
@@ -387,6 +390,8 @@ export class CodeTurnRunner {
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 yield* idle.touch;
+                // Liveness only restarts the idle clock; nothing else sees it.
+                if (event.kind === "liveness") return;
                 timing = observeTurnMetrics(timing, event);
                 if (countsTowardTurnEventBudget(event)) handledEvents += 1;
                 if (event.kind === "outside-content-read") {
@@ -451,7 +456,11 @@ export class CodeTurnRunner {
                 // A compaction changes what the runtime's session holds, not
                 // the checkout or the turn's step: its receipt belongs on the
                 // thread's context ledger, not among the turn's events.
-                if (sanitizedEvent.kind === "context-compacted") return;
+                if (
+                  sanitizedEvent.kind === "context-compacted" ||
+                  sanitizedEvent.kind === "liveness"
+                )
+                  return;
                 // The sanitized copy: the checkout root and the turn's secrets
                 // are already out of it, so the step line starts from what the
                 // journal would be allowed to keep.
@@ -706,7 +715,7 @@ function normalizeProviderEvent(
   input: CodeTurnRunnerInput,
   event: Exclude<
     ProviderRuntimeEvent,
-    { readonly kind: "context-compacted" | "outside-content-read" }
+    { readonly kind: "context-compacted" | "liveness" | "outside-content-read" }
   >,
   /** Whether the runtime compacted the session earlier in this turn. */
   compacted: boolean,
@@ -796,6 +805,12 @@ function normalizeProviderEvent(
         requestId: text(event.taskId),
         status: event.status,
         text: text(event.summary),
+      });
+    case "task-list":
+      return Effect.succeed({
+        ...base,
+        category: "task-list",
+        taskIds: event.taskIds.map(text),
       });
     case "child-agent-activity":
       return Effect.succeed({

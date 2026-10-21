@@ -550,6 +550,48 @@ describe("startCredentialBroker", () => {
     }
   });
 
+  it("keeps a public link's owner secret out of reach of the provider and sync key routes", async () => {
+    const credentialRef = randomUUID();
+    const linkSecrets = memoryStore();
+    const broker = await startCredentialBroker(
+      memoryStore(),
+      undefined,
+      undefined,
+      memoryStore(),
+      memoryStore(),
+      linkSecrets,
+    );
+    try {
+      const call = async (path: string, body: Record<string, string>) =>
+        broker.fetchForTest(
+          brokerRequest(broker.url, broker.token, path, { body: JSON.stringify(body) }),
+        );
+      expect(
+        (
+          await call("/v1/canvas-public-share-secrets/set", {
+            credentialRef,
+            credential: "owner-secret",
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (await call("/v1/credentials/resolve", { providerInstanceId: credentialRef })).status,
+      ).toBe(404);
+      expect((await call("/v1/replica-store-credentials/resolve", { credentialRef })).status).toBe(
+        404,
+      );
+      expect(
+        await (await call("/v1/canvas-public-share-secrets/resolve", { credentialRef })).json(),
+      ).toEqual({ credential: "owner-secret" });
+      expect(
+        await (await call("/v1/canvas-public-share-secrets/delete", { credentialRef })).json(),
+      ).toEqual({ deleted: true });
+      expect(await linkSecrets.has(credentialRef)).toBe(false);
+    } finally {
+      await broker.close();
+    }
+  });
+
   it("replaces and deletes a sync bucket's key pair", async () => {
     const credentialRef = randomUUID();
     const broker = await startCredentialBroker(

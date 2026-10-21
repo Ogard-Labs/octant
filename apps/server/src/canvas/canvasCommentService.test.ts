@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { Schema } from "effect";
-import { CANVAS_SCHEMA_VERSION, decodeCanvasId, decodeCanvasVersion } from "@octant/contracts";
+import {
+  CANVAS_SCHEMA_VERSION,
+  decodeCanvasActor,
+  decodeCanvasId,
+  decodeCanvasVersion,
+} from "@octant/contracts";
 import { EventActor } from "@octant/contracts/events";
 import { AggregateHeadsProjection } from "../persistence/aggregateHeadsProjection";
 import { EventRegistry } from "../persistence/eventRegistry";
@@ -200,6 +205,82 @@ describe("CanvasCommentService", () => {
       author: actor,
       resolvedBy: actor,
     });
+  });
+
+  it("records a send to the agent against the Canvas head the host holds and lists it for the agent tool", () => {
+    const { service } = fixture();
+    const comments = service();
+    comments.comment(add(0), context, project, { kind: "host" });
+    expect(
+      comments.comment(
+        {
+          kind: "canvas-comment-send-to-agent",
+          canvasId: ids.canvas,
+          commentId: ids.comment,
+          // The renderer's actor and version are both replaced by the host's.
+          sentBy: { kind: "agent", actorId: ids.provider },
+          canvasSequence: 9,
+          expectedSequence: 1,
+          issuedAt: now,
+        },
+        context,
+        project,
+        { kind: "host" },
+      ),
+    ).toMatchObject({ kind: "accepted", sequence: 2 });
+
+    const restarted = service();
+    const outcome = restarted.comments(canvasId, context, project);
+    expect(outcome.kind === "ready" && outcome.threads[0]?.comment.sentToAgent).toEqual({
+      canvasSequence: 1,
+      sentAt: now,
+    });
+    expect(restarted.agentRequests(canvasId)).toEqual([
+      {
+        commentId: ids.comment,
+        anchor: { kind: "block", blockId: "block-1" },
+        body: "Rename the API box",
+        replies: [],
+        canvasSequence: 1,
+      },
+    ]);
+  });
+
+  it("keeps a sent comment pending through a person's edit and answers it only with an agent's version", () => {
+    const { projection, service } = fixture();
+    const comments = service();
+    comments.comment(add(0), context, project, { kind: "host" });
+    comments.comment(
+      {
+        kind: "canvas-comment-send-to-agent",
+        canvasId: ids.canvas,
+        commentId: ids.comment,
+        sentBy: actor,
+        canvasSequence: 1,
+        expectedSequence: 1,
+        issuedAt: now,
+      },
+      context,
+      project,
+      { kind: "host" },
+    );
+    const head = projection.getById(canvasId)?.currentVersion;
+    if (head === undefined) throw new Error("fixture has no head");
+    const appended = (sequence: number, createdBy: typeof head.createdBy) =>
+      projection.applyVersion(canvasId, {
+        ...head,
+        versionId: `${String(sequence)}${ids.version.slice(1)}` as typeof head.versionId,
+        sequence,
+        createdBy,
+      });
+
+    appended(2, head.createdBy);
+    expect(comments.agentRequests(canvasId).map((request) => request.commentId)).toEqual([
+      ids.comment,
+    ]);
+
+    appended(3, decodeCanvasActor({ kind: "agent", actorId: ids.provider }));
+    expect(comments.agentRequests(canvasId)).toEqual([]);
   });
 
   it("refuses the second of two comments written against the same sequence", () => {

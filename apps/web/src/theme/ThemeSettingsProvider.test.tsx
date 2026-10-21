@@ -36,6 +36,33 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-workspace-translucent-subtle")).toBe("");
   });
 
+  it("keeps the window's theme when a nested provider, such as Settings, closes", () => {
+    const root = document.documentElement;
+    const settings = { ...DEFAULT_THEME_SETTINGS, mode: "light" as const, increasedContrast: true };
+    const frame = (settingsOpen: boolean) => (
+      <ThemeSettingsProvider settings={settings}>
+        {settingsOpen ? (
+          <ThemeSettingsProvider settings={settings}>
+            <div>Settings</div>
+          </ThemeSettingsProvider>
+        ) : (
+          <div>Workspace</div>
+        )}
+      </ThemeSettingsProvider>
+    );
+    const result = render(frame(true));
+    result.rerender(frame(false));
+
+    expect(root.dataset.octantThemeMode).toBe("light");
+    expect(root.style.colorScheme).toBe("light");
+    expect(root.style.getPropertyValue("--octant-workspace")).toBe("#ffffff");
+    expect(root.getAttribute("data-octant-increased-contrast")).toBe("true");
+
+    result.unmount();
+    expect(root.dataset.octantThemeMode).toBeUndefined();
+    expect(root.style.getPropertyValue("--octant-workspace")).toBe("");
+  });
+
   it("lays a chosen glass tint over the sidebar at every level, and keeps it readable under increased contrast", () => {
     const result = render(
       <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light", glassTint: 20 }}>

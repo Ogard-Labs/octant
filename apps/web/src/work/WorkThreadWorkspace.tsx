@@ -2213,12 +2213,6 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   threadKind="work-thread"
                 />
               )}
-              <ComposerVoiceButton
-                disabled={creating || completionLocked}
-                onTranscript={(transcript) =>
-                  rememberDraft(appendTranscript(prompt, transcript), null)
-                }
-              />
               {thread?.lifecycle === "active" && !completionLocked ? (
                 <OctantMenu
                   items={[
@@ -2237,11 +2231,14 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   value=""
                 />
               ) : null}
-              {/* Two groups with space between: what the person adds sits left,
-                  how the task runs (0073) sits right beside send. The model
-                  used to hug the attach button, so it jumped sides between a
-                  new task and the thread it became. */}
-              <span aria-hidden="true" className="composer-gap" />
+            </>
+          ),
+          // Two groups: what the person adds sits left, how the task runs
+          // (0073) sits right beside send. The model used to hug the attach
+          // button, so it jumped sides between a new task and the thread it
+          // became.
+          trailing: (
+            <>
               {thread === undefined ? null : (
                 <span
                   aria-label="Bound provider and model"
@@ -2284,6 +2281,12 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
                   />
                 </span>
               )}
+              <ComposerVoiceButton
+                disabled={creating || completionLocked}
+                onTranscript={(transcript) =>
+                  rememberDraft(appendTranscript(prompt, transcript), null)
+                }
+              />
             </>
           ),
           actions: {

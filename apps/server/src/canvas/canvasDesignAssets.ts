@@ -3,6 +3,7 @@ import {
   CANVAS_DESIGN_ASSETS_MAX_BYTES,
   type CanvasDesignAssetResolution,
   type CanvasDesignAssetUnavailableReason,
+  type BrowserCaptureId,
   type CanvasDesignBlock,
   type CanvasProvenance,
   type ImageArtifactId,
@@ -28,10 +29,25 @@ export type CanvasDesignAssetRead =
  * thread's folder, or the Project an image was made in, reads nothing.
  */
 export interface CanvasDesignAssetPorts {
-  /** A completed generated image, only when it was made in a thread of `projectId`. */
+  /**
+   * A completed generated image, only when it was made in a thread of
+   * `projectId`, or, for a Canvas owned by its thread (`projectId` null), in
+   * `threadId` itself.
+   */
   readonly generatedImage: (input: {
     readonly imageId: ImageArtifactId;
-    readonly projectId: string;
+    readonly projectId: string | null;
+    readonly threadId: string;
+    readonly maximumBytes: number;
+  }) => Promise<CanvasDesignAssetRead>;
+  /**
+   * A screenshot the Browser kept for `threadId` itself. Never called for
+   * Chat, and never answers another thread's capture: a capture belongs to the
+   * thread that took it, whatever Project the Canvas is in.
+   */
+  readonly browserCapture: (input: {
+    readonly captureId: BrowserCaptureId;
+    readonly threadId: string;
     readonly maximumBytes: number;
   }) => Promise<CanvasDesignAssetRead>;
   /**
@@ -79,10 +95,21 @@ export async function resolveCanvasDesignAssets(
     if (asset.source.kind === "generated-image") {
       read = await ports.generatedImage({
         imageId: asset.source.imageId,
-        projectId: String(provenance.projectId),
+        projectId: provenance.projectId === null ? null : String(provenance.projectId),
+        threadId: String(provenance.threadId),
         maximumBytes,
       });
-    } else if (provenance.mode === "chat") {
+    } else if (asset.source.kind === "browser-capture") {
+      // Chat keeps no captures for a design: the Browser is a Work and Code tool.
+      read =
+        provenance.mode === "chat"
+          ? { status: "unavailable", reason: "refused" }
+          : await ports.browserCapture({
+              captureId: asset.source.captureId,
+              threadId: String(provenance.threadId),
+              maximumBytes,
+            });
+    } else if (provenance.mode === "chat" || provenance.projectId === null) {
       // A Chat Project is virtual: it has no folder for a path to name.
       read = { status: "unavailable", reason: "refused" };
     } else {

@@ -30,7 +30,13 @@ export interface SidebarRailProject {
 
 export interface SidebarRailProps {
   readonly nativeHost: boolean;
-  readonly onExpand: () => void;
+  /**
+   * `beside` stands next to the open sidebar, which already offers Show and
+   * Hide, New thread, Search, the modes, and the Projects list, so the rail
+   * keeps only the places and counts. `collapsed` replaces a hidden sidebar.
+   */
+  readonly placement?: "collapsed" | "beside";
+  readonly onExpand?: () => void;
   readonly newThread?: { readonly label: string; readonly onSelect: () => void };
   readonly onOpenSearch?: () => void;
   readonly activeMode: OctantMode;
@@ -49,6 +55,8 @@ export interface SidebarRailProps {
   readonly onOpenProjects?: () => void;
   readonly onOpenActivity?: () => void;
   readonly onOpenSettings: () => void;
+  /** Plan usage rings, drawn at the foot above Settings. */
+  readonly usage?: ReactNode;
 }
 
 const TILE_RAIL: Readonly<
@@ -72,30 +80,36 @@ const RAIL_PROJECT_LIMIT = 6;
 export function SidebarRail(props: SidebarRailProps) {
   const modes = visibleModes(props.modes);
   const activeMode = visibleModeOf(props.activeMode);
-  const visibleProjects = props.projects.slice(0, RAIL_PROJECT_LIMIT);
+  const beside = props.placement === "beside";
+  const visibleProjects = beside ? [] : props.projects.slice(0, RAIL_PROJECT_LIMIT);
   return (
     <aside
-      aria-label="Octant sidebar, collapsed"
-      className="sidebar-rail"
+      aria-label={beside ? "Destinations" : "Octant sidebar, collapsed"}
+      className={beside ? "sidebar-rail sidebar-rail--beside" : "sidebar-rail"}
       data-native-host={props.nativeHost ? "" : undefined}
       data-octant-sidebar-rail
     >
       {props.nativeHost ? (
         <span aria-hidden="true" className="sidebar-rail__traffic-lights window-drag-region" />
       ) : null}
-      <nav aria-label="Collapsed sidebar" className="sidebar-rail__column window-no-drag">
-        <RailButton icon={PanelLeftOpen} label="Show sidebar" onSelect={props.onExpand} />
-        {props.newThread === undefined ? null : (
+      <nav
+        aria-label={beside ? "Destinations" : "Collapsed sidebar"}
+        className="sidebar-rail__column window-no-drag"
+      >
+        {beside || props.onExpand === undefined ? null : (
+          <RailButton icon={PanelLeftOpen} label="Show sidebar" onSelect={props.onExpand} />
+        )}
+        {beside || props.newThread === undefined ? null : (
           <RailButton
             icon={SquarePen}
             label={props.newThread.label}
             onSelect={props.newThread.onSelect}
           />
         )}
-        {props.onOpenSearch === undefined ? null : (
+        {beside || props.onOpenSearch === undefined ? null : (
           <RailButton icon={Search} label="Search" onSelect={props.onOpenSearch} />
         )}
-        {modes.length < 2 ? null : (
+        {beside || modes.length < 2 ? null : (
           <>
             <RailDivider />
             <div aria-label="Workspace mode" className="sidebar-rail__group" role="group">
@@ -113,7 +127,9 @@ export function SidebarRail(props: SidebarRailProps) {
             </div>
           </>
         )}
-        {props.tiles.length === 0 && props.destinations.length === 0 ? null : <RailDivider />}
+        {beside || (props.tiles.length === 0 && props.destinations.length === 0) ? null : (
+          <RailDivider />
+        )}
         {props.tiles.map((tile) => {
           const rail = TILE_RAIL[tile.id];
           return (
@@ -161,6 +177,7 @@ export function SidebarRail(props: SidebarRailProps) {
           <RailButton icon={History} label="Activity feed" onSelect={props.onOpenActivity} />
         )}
         <span aria-hidden="true" className="sidebar-rail__spacer" />
+        {props.usage}
         <RailButton icon={Settings} label="Settings" onSelect={props.onOpenSettings} />
       </nav>
     </aside>

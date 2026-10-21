@@ -198,6 +198,7 @@ export function createNativeHarnessConnection(
   return Effect.gen(function* () {
     const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<string, SessionState>();
+    let closed = false;
     const offer = (event: ProviderRuntimeEvent) => {
       Effect.runFork(PubSub.publish(events, event));
     };
@@ -237,6 +238,7 @@ export function createNativeHarnessConnection(
 
     yield* Effect.addFinalizer(() =>
       Effect.promise(async () => {
+        closed = true;
         for (const state of sessions.values()) state.abortController?.abort();
         await Promise.allSettled(
           [...sessions.values()].flatMap((state) =>
@@ -840,6 +842,18 @@ export function createNativeHarnessConnection(
       }
     };
 
+    const refuseCancelledOpening = (
+      signal: AbortSignal,
+      endpoint?: NativeHarnessTransportSession,
+    ) => {
+      // Transport opening can finish after Effect interruption or scope cleanup.
+      // A late endpoint must never resurrect the session or write its transcript.
+      if (closed || signal.aborted) {
+        endpoint?.release();
+        throw failure("interrupted", "Provider session opening was cancelled.");
+      }
+    };
+
     const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
       fitRequest(state.endpoint, {
         sessionId: state.sessionId,
@@ -853,11 +867,13 @@ export function createNativeHarnessConnection(
       subscribe: Stream.fromPubSub(events, { scoped: true }),
       start: (input) =>
         Effect.tryPromise({
-          try: async () => {
+          try: async (signal) => {
             if (sessions.has(String(input.sessionId))) {
               throw failure("protocol", "Provider session is already active.");
             }
+            refuseCancelledOpening(signal);
             const endpoint = await options.transport.open(input.modelId);
+            refuseCancelledOpening(signal, endpoint);
             try {
               options.transcripts.open(input.sessionId, {
                 instanceId: options.instanceId,
@@ -884,7 +900,7 @@ export function createNativeHarnessConnection(
         }),
       resume: (input) =>
         Effect.tryPromise({
-          try: async () => {
+          try: async (signal) => {
             if (input.resumeCursor.driverKind !== options.driverKind) {
               throw failure(
                 "stale-resume",
@@ -909,7 +925,9 @@ export function createNativeHarnessConnection(
             if (sessions.has(String(input.sessionId))) {
               throw failure("protocol", "Provider session is already active.");
             }
+            refuseCancelledOpening(signal);
             const endpoint = await options.transport.open(transcript.binding.modelId);
+            refuseCancelledOpening(signal, endpoint);
             // A call the process stopped in the middle of is closed before
             // anything else: the model must read what happened to it, and a
             // results message must follow its call for the request to be valid.

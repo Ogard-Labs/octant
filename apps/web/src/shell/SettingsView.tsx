@@ -68,6 +68,7 @@ import { CodeSettingsView } from "../code/CodeSettingsView";
 import { UsageDashboard } from "../usage/UsageDashboard";
 import { ProviderUsageHistoryWorkspace } from "../usage/ProviderUsageHistoryWorkspace";
 import type { LocalUsageHistoryClient } from "@octant/client-runtime/provider-usage-history-client";
+import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { UsageClient } from "@octant/client-runtime/usage-client";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { DiagnosticsExportControl } from "../support/DiagnosticsExportControl";
@@ -85,6 +86,7 @@ import {
 } from "../host/HostSettingsSection";
 import { RememberedToolApprovalsPanel } from "../extensions/RememberedToolApprovalsPanel";
 import { RemoteAccessSettingsSection } from "../host/RemoteAccessSettingsSection";
+import { PublicLinkSettings } from "../settings/PublicLinkSettings";
 import { SyncSettingsSection } from "../settings/SyncSettingsSection";
 import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-client";
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
@@ -194,6 +196,8 @@ export interface SettingsViewProps {
   readonly localUsageHistoryClient?: LocalUsageHistoryClient;
   readonly diagnosticsExportClient?: DiagnosticsExportClient;
   readonly hostControlClient?: HostControlClient;
+  /** Settings › Data & privacy › Public links; absent where the host has no such surface. */
+  readonly canvasClient?: Pick<CanvasClient, "publicLinkSettings" | "setPublicLinkSettings">;
   /** Settings › Sync on this host; absent off it, where store setup is not offered. */
   readonly replicaStoreSettingsClient?: ReplicaStoreSettingsClient;
   /** Creating, joining, and revoking on this host; absent off it. */
@@ -1176,6 +1180,13 @@ function ActiveSectionContent({
               })
             }
           />
+          {props.canvasClient?.publicLinkSettings === undefined ? null : (
+            <SettingsSection title="Public links">
+              <div className="setgroup">
+                <PublicLinkSettings client={props.canvasClient} focusedSetting={focusedSetting} />
+              </div>
+            </SettingsSection>
+          )}
           {props.extensionClient === undefined ? null : (
             <RememberedToolApprovalsPanel
               client={props.extensionClient}
@@ -2080,14 +2091,14 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
           ) : null}
           {isAvailable("sidebar-collapsed") ? (
             <SettingRow
-              description="What Hide sidebar leaves: a narrow rail of icons, or nothing."
+              description="A narrow column of destinations beside the sidebar, only when the sidebar is hidden, or never."
               focused={focusedSetting === settingId("sidebar-collapsed")}
-              label="When collapsed"
+              label="Icon rail"
               scope="app"
               settingId="sidebar-collapsed"
             >
               <OctantToggleGroup<ShellSettings["sidebarCollapsedPresentation"]>
-                aria-label="When collapsed"
+                aria-label="Icon rail"
                 onValueChange={(value) => {
                   const selected = value[0];
                   if (selected !== undefined) {
@@ -2096,8 +2107,9 @@ function SidebarSection({ focusedSetting, props, capabilities }: AppearanceSecti
                 }}
                 value={[props.settings.sidebarCollapsedPresentation]}
               >
-                <OctantToggleGroupItem value="rail">Icon rail</OctantToggleGroupItem>
-                <OctantToggleGroupItem value="hidden">Hidden</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="always">Always</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="rail">When hidden</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="hidden">Never</OctantToggleGroupItem>
               </OctantToggleGroup>
             </SettingRow>
           ) : null}

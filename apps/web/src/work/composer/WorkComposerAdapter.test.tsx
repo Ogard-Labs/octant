@@ -121,7 +121,7 @@ describe("WorkComposerAdapter", () => {
         projectRoot="/home/user/docs"
       />,
     );
-    expect(html).toMatch(/Good (morning|afternoon|evening)/);
+    expect(html).toMatch(/What are we building today\?/);
     expect(html).not.toContain("What are we working on?");
     expect(html).toContain("My Docs");
     expect(html).not.toContain("Octant Work");

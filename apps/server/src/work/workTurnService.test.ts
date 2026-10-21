@@ -1258,6 +1258,65 @@ describe("WorkTurnService", () => {
     expect(turnEnded).toHaveBeenCalledWith(expect.objectContaining({ mode: "work" }), summary);
   });
 
+  it.each(["provider", "completion"] as const)(
+    "keeps cancellation and usage when it wins during %s settlement",
+    async (stage) => {
+      const ready = deferred<void>();
+      const release = deferred<void>();
+      const summary: TurnEndSummary = {
+        stopReason: "end-of-turn",
+        startedAt: "2026-07-29T11:59:00.000Z",
+        endedAt: "2026-07-29T11:59:30.000Z",
+        usage: { inputTokens: 900, outputTokens: 50 },
+        metrics: { precision: "approximate", wallMs: 30_000, modelCalls: 1 },
+      };
+      const run = vi.fn<WorkTurnRuntimePort["run"]>(async (input) => {
+        input.onTurnEnded?.(summary);
+        if (stage === "provider") {
+          ready.resolve();
+          await release.promise;
+        }
+        return { kind: "completed", response: "Provider reply" };
+      });
+      const turnCompleted = vi.fn(async () => {
+        if (stage === "completion") {
+          ready.resolve();
+          await release.promise;
+        }
+      });
+      const turnEnded = vi.fn();
+      const fixture = serviceFixture({
+        turnRuntime: { run },
+        nativeHarness: { contextFor: () => [], turnStarted: vi.fn(), turnCompleted, turnEnded },
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await ready.promise;
+      expect(
+        await fixture.service.cancelFirstTurn(ids.window, {
+          kind: "cancel-work-turn",
+          requestId: ids.request,
+          threadId: ids.thread,
+          turnId: ids.turn,
+        }),
+      ).toMatchObject({ kind: "turn-cancelled" });
+      release.resolve();
+      await fixture.waitForIdle();
+      expect((await fixture.service.transcript(ids.window, ids.thread)).turns[0]?.status).toBe(
+        "cancelled",
+      );
+      await vi.waitFor(() =>
+        expect(turnEnded).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({ mode: "work" }),
+          {
+            ...summary,
+            stopReason: "cancelled",
+          },
+        ),
+      );
+      expect(turnCompleted).toHaveBeenCalledTimes(stage === "provider" ? 0 : 1);
+    },
+  );
+
   it("refuses a saved reasoning level that the model no longer declares before launching", async () => {
     const model = decodeProviderModel({
       id: "model-a",

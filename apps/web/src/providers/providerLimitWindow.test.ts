@@ -12,6 +12,10 @@ describe("provider limit window short names", () => {
     expect(providerLimitWindowShortLabel("secondary_7d")).toBe("Week");
   });
 
+  it("names a calendar-month plan window as the month it meters", () => {
+    expect(providerLimitWindowShortLabel("monthly")).toBe("Month");
+  });
+
   it("keeps the full label for a window whose length is not a plain duration", () => {
     expect(providerLimitWindowShortLabel("gpt-5:weekly-opus")).toBe("weekly-opus limit");
   });

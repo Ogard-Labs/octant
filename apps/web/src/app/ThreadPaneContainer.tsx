@@ -122,6 +122,7 @@ export interface ThreadPaneContainerProps {
     | "setProjectArchived"
     | "setProjectColor"
     | "setProjectProviderPolicy"
+    | "setProjectBrandKit"
     | "setProjectWorkStatusFile"
     | "setThreadStatsVisible"
     | "setUsageOpen"
@@ -372,6 +373,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     setProjectArchived,
     setProjectColor,
     setProjectProviderPolicy,
+    setProjectBrandKit,
     setProjectWorkStatusFile,
     setThreadStatsVisible,
     setUsageOpen,
@@ -459,7 +461,6 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 sideTaskClient,
                 onCreated: openCreatedFollowUp,
               }}
-              greetingName={settings.userProfile.displayName}
               draftResetRevisions={draftResetRevisions}
               draftProjectSelection={draftProjectSelection}
               onDraftSelectProject={(mode, projectId) => {
@@ -655,6 +656,7 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               onRenameProject={renameProject}
               onProjectColorChange={setProjectColor}
               onProviderPolicyChange={setProjectProviderPolicy}
+              onBrandKitChange={setProjectBrandKit}
               onWorkStatusFileChange={(projectId, enabled) =>
                 setProjectWorkStatusFile(projectId, enabled ? "enabled" : "disabled")
               }
@@ -696,16 +698,15 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               imageGenerationClient={imageGenerationClient}
               {...(imageGenerationProfiles === undefined ? {} : { imageGenerationProfiles })}
               onOpenCanvasInSidebar={openCanvasInSidebar}
-              onOpenCanvasReference={(card) => {
-                const projectId = card.scope.workspace.projectId;
-                if (projectId === null) return;
+              onOpenCanvasReference={(card) =>
                 void openCanvas({
                   mode: card.scope.mode,
                   title: card.title,
                   canvasId: card.canvasId,
-                  projectId,
-                });
-              }}
+                  // Null for a Canvas owned by a Chat thread outside a Project.
+                  projectId: card.scope.workspace.projectId,
+                })
+              }
               onCanvasReferencesObserved={noteCanvasReferences}
               onThreadHandedOff={(threadId: string, outcome: ThreadHandOffOutcome) => {
                 if (outcome.kind === "handed-off") {
