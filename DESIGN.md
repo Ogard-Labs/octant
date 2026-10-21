@@ -550,7 +550,8 @@ plain page. Pulsing characters is the one drawn ground, and only when a person
 picks it: a grid of monospace letters and digits in the theme's primary ink,
 at most half opaque, whose brightness drifts in slow patches and breathes as
 a whole at twelve frames a second while a few glyphs swap. A click over it
-sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
+on a start screen (behind every page, only there; a click in a thread or a
+list sends nothing) sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
 it grows, trailed by a fainter echo, and about one click in six draws a heart
 instead, and fades within two seconds. With the default Mono accent the ring
 is the ink, only brighter; a chosen accent colours it. It carries no picture, so the effect controls do not apply, and it
@@ -562,8 +563,9 @@ light theme it fades out sooner, because dark text over a pale picture has
 less contrast headroom than light text over a dark one. A person
 may instead put the ground behind every page, from the workspace's leading
 edge, and under the sidebar too when they ask for it (see Shapes and depth). Conversations
-soften it beneath one continuous reading background so agent replies remain
-bare prose (0155). Increased contrast turns the ground off; reduced motion
+soften it beneath one continuous reading veil, the stage colour at 80%, so it
+shows at about a fifth of its strength behind a thread and agent replies
+remain bare prose (0155). Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›
 Appearance › Background.
 When the ground runs behind everything, a start screen's reading column
@@ -674,8 +676,8 @@ it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, with no card of its own: only the work a turn
 produced is boxed. Over the application ground, the conversation supplies one quiet,
-continuous reading background that admits a little more atmosphere at its
-outer edges (0155). Replies remain bare prose, including on translucent
+continuous reading veil below the title band: the stage colour at 80%, so the
+ground stays faintly visible behind the transcript (0155). Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
 ground (0150). Reduced transparency keeps the reading background opaque.
 The follow-up composer has 24px of space above it outside the transcript

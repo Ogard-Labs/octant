@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { AppBackdrop } from "./AppBackdrop";
+import { acceptsRipple } from "./appBackdropCharacters";
 
 afterEach(cleanup);
 
@@ -162,5 +163,16 @@ describe("AppBackdrop", () => {
       "data-dithered",
       "false",
     );
+  });
+});
+
+describe("which clicks send a ring", () => {
+  it("answers a click on a start screen and ignores one in a thread when limited to start screens", () => {
+    document.body.innerHTML =
+      '<div class="draft-thread"><button id="start">Send</button></div><div class="code-thread-workspace"><p id="reply">Reply</p></div>';
+    const within = ".draft-thread, .work-composer-adapter, .code-composer-adapter";
+    expect(acceptsRipple(document.getElementById("start"), within)).toBe(true);
+    expect(acceptsRipple(document.getElementById("reply"), within)).toBe(false);
+    expect(acceptsRipple(document.getElementById("reply"), undefined)).toBe(true);
   });
 });
