@@ -14,8 +14,10 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureCanvasPreviewPage } from "../packages/cli/src/canvasPreviewPage";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const webRoot = resolve(root, "apps/web");
 const port = Number(process.env.OCTANT_DEV_WEB_PORT ?? "5173");
 const webUrl = `http://localhost:${port}`;
 const children: Array<ReturnType<typeof Bun.spawn>> = [];
@@ -57,6 +59,20 @@ if (desktopBundleStale) {
   if (build.exitCode !== 0) shutdown(build.exitCode ?? 1);
 }
 
+// Vite serves the renderer, but the host screenshots a Canvas from the preview
+// page built beside the web app, so the page is built here when it is missing
+// or older than the renderer's sources. A failed build is not fatal: previews
+// report no renderer, the way they did before, until the build succeeds.
+const previewPage = await ensureCanvasPreviewPage({ webRoot });
+if (previewPage.status === "built") {
+  console.log("[dev] built the Canvas preview page (apps/web was newer than the page)");
+}
+if (previewPage.status === "failed") {
+  console.error(
+    `[dev] the Canvas preview page did not build (exit code ${String(previewPage.exitCode)}); previews report no renderer until \`bun run --cwd apps/web build:canvas-preview\` succeeds`,
+  );
+}
+
 console.log(`[dev] starting web renderer on ${webUrl}`);
 const vite = Bun.spawn(
   ["bun", "run", "--cwd", "apps/web", "dev", "--port", String(port), "--strictPort"],
@@ -90,6 +106,9 @@ const electron = Bun.spawn(["bun", "run", "--cwd", "apps/desktop", "start"], {
     ...process.env,
     OCTANT_DEV_WEB_BOOTSTRAP: "1",
     OCTANT_WEB_URL: webUrl,
+    // The host Electron starts from source inherits this and finds the Canvas
+    // preview page under the web build; the renderer itself stays on Vite.
+    OCTANT_WEB_DIST_PATH: resolve(webRoot, "dist"),
   },
   stdio: ["inherit", "inherit", "inherit"],
 });

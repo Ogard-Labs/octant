@@ -5,7 +5,7 @@ import {
   sendMobileCodeTurn,
   type MobileCodeConversation,
 } from "@octant/client-runtime";
-import { runLoad, runMutation } from "./runMutation";
+import { runLoad, runMutation, sendThenReload } from "./runMutation";
 import type { RefreshOptions, ThreadHookInput } from "./threadTypes";
 
 export function useCodeThread(input: ThreadHookInput) {
@@ -60,13 +60,16 @@ export function useCodeThread(input: ThreadHookInput) {
       gate,
       ui,
       failure: "Follow-up failed.",
-      run: async () => {
-        await sendMobileCodeTurn({ transport, threadId, prompt });
-        return loadMobileCodeConversation(transport, threadId);
-      },
+      run: () =>
+        sendThenReload({
+          send: () => sendMobileCodeTurn({ transport, threadId, prompt }),
+          onSent: () => {
+            if (guard.isSelected(identity)) setPrompt("");
+          },
+          reload: () => loadMobileCodeConversation(transport, threadId),
+        }),
       onDone: (loaded) => {
-        setConversation(loaded);
-        setPrompt("");
+        if (loaded !== undefined) setConversation(loaded);
       },
     });
   };

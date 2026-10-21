@@ -760,12 +760,6 @@ export function ChatComposer(props: ChatComposerProps) {
             threadKind="chat-thread"
           />
         )}
-        <ComposerVoiceButton
-          disabled={props.isSending}
-          onTranscript={(transcript) =>
-            props.onDraftChange(appendTranscript(props.draft, transcript))
-          }
-        />
       </div>
       <div className="chat-composer__research">
         <OctantButton
@@ -799,6 +793,13 @@ export function ChatComposer(props: ChatComposerProps) {
           </label>
         ) : null}
       </div>
+    </>
+  );
+
+  // Model, then microphone: the trailing run reads context ring, model, mic,
+  // send, the same on every surface.
+  const rowTrailing = (
+    <>
       <div className="chat-composer__selectors">
         {props.providerGroups !== undefined && props.onSelectModel !== undefined ? (
           <ComposerModelPicker
@@ -899,6 +900,12 @@ export function ChatComposer(props: ChatComposerProps) {
           </div>
         ) : null}
       </div>
+      <ComposerVoiceButton
+        disabled={props.isSending}
+        onTranscript={(transcript) =>
+          props.onDraftChange(appendTranscript(props.draft, transcript))
+        }
+      />
     </>
   );
 
@@ -935,6 +942,7 @@ export function ChatComposer(props: ChatComposerProps) {
         className: "chat-composer__bar",
         toolbar: true,
         leading: rowLeading,
+        trailing: rowTrailing,
         actions: {
           kind: "send-or-stop",
           cellClassName: "chat-composer__actions",

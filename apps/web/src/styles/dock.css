@@ -63,9 +63,26 @@
   text-transform: none;
 }
 
-.right-utility-dock__title-spacer {
+/* Before any tool opens, the band offers the tools a thread reaches for most:
+   Environment by name, the rest as icons, the same faces the strip uses. At
+   the dock's narrowest the band has room for fewer than all of them, and a
+   button pushed past the window controls was clipped half-visible; the row
+   wraps instead, and the band shows only its first line, so a tool that does
+   not fit leaves whole. Every tool is also under Add tool. */
+.dock-quick-tools {
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: wrap;
   min-width: 0;
-  flex: 1 1 auto;
+  height: var(--oct-rail-button-h);
+  overflow: hidden;
+  align-items: center;
+  gap: 2px;
+}
+
+.dock-quick-tools__tool > svg {
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
 }
 
 .right-utility-dock__tabs {
@@ -114,6 +131,12 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Only the open tool names itself; the others are their icons, with the name
+   in the tooltip, so several open tools fit the band without ellipsizing. */
+.dock-tool-strip__select[aria-selected="false"] > span {
+  display: none;
 }
 
 .dock-tool-strip__select > svg {
@@ -176,8 +199,8 @@
   overflow-y: auto;
 }
 
-/* The overview and the tools are one scrolling column. The tools stay whole
-   beneath the overview, so a tool is never further than a scroll away. */
+/* The overview is one scrolling column of cards; the tools open from the
+   title band above it. */
 .dock-start {
   display: grid;
   align-content: start;
@@ -186,413 +209,175 @@
 
 .dock-overview {
   display: grid;
-  gap: 0;
+  gap: var(--oct-space-2);
   padding-top: var(--oct-space-2);
 }
 
-/* Sections share the launcher's left edge: 8px of inset plus the 1px a ghost
-   row draws, so a title lands over the icon column below it. */
-.dock-overview__section {
+/* One fact group per card: a title row, then rows at the 28px step. The card
+   recipe is the overview's own, a hairline on the surface fill. */
+.dock-card {
   display: grid;
   gap: var(--oct-space-1);
   min-width: 0;
+  padding: var(--oct-space-2) var(--oct-space-3);
+  background: var(--oct-surface);
+  border: 1px solid var(--oct-hairline);
+  border-radius: var(--oct-radius-md);
 }
 
-.dock-overview__section + .dock-overview__section {
-  margin-top: var(--oct-space-4);
-}
-
-.dock-overview__label {
-  margin: 0;
-  padding: 0 var(--oct-space-2);
-  border-inline: 1px solid transparent;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-}
-
-.dock-overview__running {
-  display: grid;
-  gap: 0;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-/* One 32px line per running thread: spinner, title, then the Project and age
-   as quiet meta. The title is the only part that yields when the dock is
-   narrow. */
-.dock-overview__running-row {
+.dock-card__head {
   display: flex;
   width: 100%;
-  height: 32px;
+  min-width: 0;
+  height: auto;
+  min-height: 24px;
   align-items: center;
   justify-content: flex-start;
-  gap: var(--oct-space-2);
-  padding: 0 var(--oct-space-2);
+  gap: var(--oct-space-1);
+  padding: 0;
+  font: inherit;
   text-align: left;
 }
 
-.dock-overview__spinner {
-  flex: none;
-  color: var(--oct-muted);
-  animation: dock-overview-spin var(--oct-motion-spin) linear infinite;
+.dock-card__title {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-sm);
+  font-weight: var(--oct-weight-medium);
 }
 
-@keyframes dock-overview-spin {
+.dock-card__chevron {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.dock-card__figure {
+  margin-inline-start: auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.dock-card__rows {
+  display: grid;
+  min-width: 0;
+}
+
+.dock-card__rows:empty {
+  display: none;
+}
+
+.dock-card__row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: 28px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--oct-space-2);
+  padding: 0;
+  font-size: var(--oct-text-sm);
+  text-align: left;
+}
+
+.dock-card__icon {
+  flex: none;
+  color: var(--oct-meta);
+}
+
+.dock-card__label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--oct-fg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-card__label--meta {
+  color: var(--oct-meta);
+}
+
+.dock-card__meta {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: auto;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.dock-card__meta + .dock-card__meta {
+  margin-inline-start: var(--oct-space-2);
+}
+
+.dock-card__meta[data-checks="passing"] {
+  color: var(--octant-success-text);
+}
+
+.dock-card__meta[data-checks="failing"] {
+  color: var(--octant-danger-text);
+}
+
+.dock-card__detail {
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+}
+
+/* A server that answers is marked in the success ink; one that does not is
+   the meta ink, and the Environment tab explains why. */
+.dock-card__dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--oct-meta);
+}
+
+.dock-card__dot[data-listening="true"] {
+  background: var(--octant-success-text);
+}
+
+/* The context window's fill: a short bar in the meta ink, no hue. */
+.dock-card__bar {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: var(--oct-radius-pill);
+  background: var(--oct-fg-soft);
+}
+
+.dock-card__bar > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--oct-muted);
+}
+
+.dock-card__action:hover,
+.dock-card__action:focus-visible {
+  background: var(--octant-control-hover);
+}
+
+.dock-card__spinner {
+  flex: none;
+  color: var(--oct-muted);
+  animation: dock-card-spin var(--oct-motion-spin) linear infinite;
+}
+
+@keyframes dock-card-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dock-overview__spinner {
+  .dock-card__spinner {
     animation: none;
   }
-}
-
-.dock-overview__running-title {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dock-overview__project {
-  display: inline-flex;
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 40%;
-  align-items: center;
-  gap: var(--oct-space-1);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-/* Neutral on purpose: the default theme carries no hue, and a Project has no
-   colour of its own yet. */
-.dock-overview__dot {
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: var(--oct-radius-pill);
-  background: currentColor;
-}
-
-.dock-overview__project-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dock-overview__age {
-  flex: none;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  white-space: nowrap;
-}
-
-/* The card's caption shares the card's edge, not the running list's row inset. */
-.dock-overview__label:has(+ .dock-thread-card) {
-  padding-inline: var(--oct-space-1);
-}
-
-/* A small icon plate: a soft fill and a hairline, one step above the card it
-   sits on. The thread card's header and every tool tile share it. */
-.dock-tile {
-  display: inline-grid;
-  flex: none;
-  width: 26px;
-  height: 26px;
-  place-items: center;
-  background: var(--oct-fg-soft);
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-sm);
-  color: var(--oct-muted);
-}
-
-.dock-thread-card {
-  display: grid;
-  gap: var(--oct-space-3);
-  min-width: 0;
-  padding: var(--oct-space-3);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-md);
-}
-
-.dock-thread-card__head {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.dock-thread-card__title {
-  display: grid;
-  min-width: 0;
-  flex: 1 1 auto;
-  gap: 2px;
-}
-
-.dock-thread-card__project {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* Branch, then where it runs, on one line. Only the branch name yields when
-   the dock is narrow; a host name is short and worth keeping whole. */
-.dock-thread-card__meta {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: var(--oct-space-1);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.dock-thread-card__branch-mark {
-  flex: none;
-}
-
-.dock-thread-card__segment {
-  flex: none;
-  white-space: nowrap;
-}
-
-.dock-thread-card__segment[data-segment="branch"] {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dock-thread-card__separator {
-  flex: none;
-}
-
-.dock-thread-card__facts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--oct-space-2);
-  margin: 0;
-}
-
-.dock-thread-card__fact {
-  display: grid;
-  align-content: start;
-  gap: var(--oct-space-1);
-  min-width: 0;
-  padding: var(--oct-space-2);
-  background: var(--oct-fg-soft);
-  border-radius: var(--oct-radius-sm);
-}
-
-.dock-thread-card__fact-label {
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-}
-
-.dock-thread-card__fact-value {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-  margin: 0;
-}
-
-.dock-thread-card__value {
-  min-width: 0;
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
-  font-weight: var(--oct-weight-medium);
-  overflow-wrap: anywhere;
-}
-
-.dock-thread-card__detail {
-  min-width: 0;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  overflow-wrap: anywhere;
-}
-
-.dock-thread-card__context {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-}
-
-.dock-thread-card__ring {
-  display: block;
-  flex: none;
-  width: 20px;
-  height: 20px;
-  overflow: visible;
-}
-
-/* A neutral groove with the used arc in the muted ink: the Default style
-   carries no hue, and the figure beside the ring says the exact share. */
-.dock-thread-card__ring-track {
-  stroke: color-mix(in oklab, var(--oct-fg) 16%, transparent);
-  stroke-width: 2.5;
-}
-
-.dock-thread-card__ring-used {
-  stroke: var(--oct-muted);
-  stroke-linecap: round;
-  stroke-width: 2.5;
-}
-
-/* The Changes box opens Review, so it is a button laid out as the other
-   boxes; the box around it (the fact) carries the fill. */
-.dock-thread-card__fact:has(> .dock-thread-card__fact-value > .dock-thread-card__changes) {
-  padding: 0;
-}
-
-.dock-thread-card__fact:has(> .dock-thread-card__fact-value > .dock-thread-card__changes)
-  > .dock-thread-card__fact-label {
-  padding: var(--oct-space-2) var(--oct-space-2) 0;
-}
-
-.dock-thread-card__changes {
-  display: grid;
-  width: 100%;
-  height: auto;
-  gap: 2px;
-  justify-content: stretch;
-  justify-items: start;
-  padding: 0 var(--oct-space-2) var(--oct-space-2);
-  border-radius: var(--oct-radius-sm);
-  text-align: left;
-  white-space: normal;
-}
-
-.dock-thread-card__changes:hover,
-.dock-thread-card__changes:focus-visible {
-  background: var(--octant-control-hover);
-}
-
-.dock-work-map {
-  display: grid;
-  align-content: start;
-  gap: var(--oct-space-2);
-}
-
-.dock-work-map__empty {
-  margin: 0;
-  padding: 0 var(--oct-space-2);
-  border-inline: 1px solid transparent;
-  color: var(--oct-meta);
-  font-size: var(--oct-text-detail);
-  line-height: 1.45;
-}
-
-.dock-work-map__groups {
-  display: grid;
-  gap: var(--oct-space-4);
-}
-
-.dock-work-map__list {
-  display: grid;
-  gap: var(--oct-space-2);
-}
-
-.dock-work-map__group-title {
-  padding: 0 var(--oct-space-1);
-  color: var(--oct-meta);
-  font-size: var(--oct-text-xs);
-  font-weight: var(--oct-weight-medium);
-}
-
-/* Thread tools are the ones reached for most, so they get two wide tiles a
-   row; Workspace and Devices fit as many narrow tiles as the dock is wide. */
-/* Workspace and Devices are reached for less, so their tiles are compact: the
-   icon plate beside the name, two a row at the dock's default width of about
-   250px. Three narrow stacked tiles did not fit there and fell back to two
-   tall ones, which pushed Devices below the fold. auto-fill keeps a lone tile
-   at one column's width instead of stretching it across the dock. */
-.dock-work-map__tiles {
-  display: grid;
-  gap: var(--oct-space-2);
-  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
-}
-
-.dock-work-map__tiles[data-columns="fit"] .dock-work-map__item {
-  display: flex;
-  align-items: center;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-1) var(--oct-space-2);
-}
-
-/* A smaller plate and a name that may take a second line: at two a row,
-   "Pull requests" and "Android emulator" were cut to "Pull req…" beside the
-   full-size plate. */
-.dock-work-map__tiles[data-columns="fit"] .dock-tile {
-  width: 20px;
-  height: 20px;
-}
-
-.dock-work-map__tiles[data-columns="fit"] .dock-work-map__name {
-  display: -webkit-box;
-  overflow: hidden;
-  white-space: normal;
-  line-height: var(--oct-leading-tight);
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.dock-work-map__tiles[data-columns="two"] {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-/* A tool tile: the icon plate over the tool's name, on a card. Hover and
-   keyboard focus move the surface one step and nothing else: no accent, no
-   ring. */
-.dock-work-map__item {
-  display: grid;
-  /* The button recipe's size step fixes a control height, which clipped the
-     name under the icon plate and let neighbouring tiles overlap. */
-  height: auto;
-  min-width: 0;
-  align-content: start;
-  /* The recipe centres its contents; without this the icon plate sat centred
-     over the name's width instead of at the tile's start edge. */
-  justify-content: stretch;
-  justify-items: start;
-  gap: var(--oct-space-2);
-  padding: var(--oct-space-2);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-md);
-  font-weight: var(--oct-weight-regular);
-  text-align: left;
-}
-
-.dock-work-map__item:hover,
-.dock-work-map__item:focus-visible {
-  background: var(--octant-control-hover);
-}
-
-.dock-work-map__name {
-  max-width: 100%;
-  min-width: 0;
-  overflow: hidden;
-  color: var(--oct-fg-2);
-  font-size: var(--oct-text-sm);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dock-work-map__item:hover .dock-work-map__name {
-  color: var(--oct-fg);
 }
 
 .right-utility-dock__tool[hidden] {

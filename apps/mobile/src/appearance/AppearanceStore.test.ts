@@ -203,3 +203,49 @@ describe("wallpaper survival", () => {
     ).toBe(false);
   });
 });
+
+describe("wallpaper copies on disk", () => {
+  function storeWithRemovals() {
+    const removed: string[] = [];
+    const store = createAppearanceStore(memoryStorage(), {
+      removeFile: async (uri) => {
+        removed.push(uri);
+      },
+    });
+    return { store, removed };
+  }
+
+  it("deletes the previous copy when a new photo replaces it", async () => {
+    const { store, removed } = storeWithRemovals();
+    await store.saveCustomImage("file:///docs/background-1.jpg");
+    expect(removed).toEqual([]);
+    await store.saveCustomImage("file:///docs/background-2.jpg");
+    expect(removed).toEqual(["file:///docs/background-1.jpg"]);
+  });
+
+  it("deletes the copy when the photo is removed or another picture is chosen", async () => {
+    const { store, removed } = storeWithRemovals();
+    await store.saveCustomImage("file:///docs/background-1.jpg");
+    await store.clearCustomImage();
+    await store.saveCustomImage("file:///docs/background-2.jpg");
+    await store.setPicture("atmosphere");
+    expect(removed).toEqual(["file:///docs/background-1.jpg", "file:///docs/background-2.jpg"]);
+  });
+
+  it("keeps the copy that is still the wallpaper", async () => {
+    const { store, removed } = storeWithRemovals();
+    await store.saveCustomImage("file:///docs/background-1.jpg");
+    await store.setColorSchemePreference("dark");
+    expect(removed).toEqual([]);
+  });
+
+  it("still saves when deleting the old copy fails", async () => {
+    const store = createAppearanceStore(memoryStorage(), {
+      removeFile: async () => Promise.reject(new Error("io")),
+    });
+    await store.saveCustomImage("file:///docs/background-1.jpg");
+    const next = await store.saveCustomImage("file:///docs/background-2.jpg");
+    expect(next.customImageUri).toBe("file:///docs/background-2.jpg");
+    expect((await store.load()).customImageUri).toBe("file:///docs/background-2.jpg");
+  });
+});

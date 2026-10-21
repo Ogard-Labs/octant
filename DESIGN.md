@@ -40,7 +40,8 @@ asks for it (Settings › Appearance › Style):
   repeats another pane's content.
 - Hierarchy comes from typography (size first, then weight), spacing, cards
   for discrete objects, and selection fills. In the Default style the chrome is
-  monochrome; colour names identity (a Project, a provider, a count tile under
+  monochrome apart from the accent a person picks (Mono by default); colour
+  names identity (a Project, a provider, a usage ring, a count tile under
   Vivid) and never stands in for status, which keeps its own warning, failure,
   and diff roles. Categorical data is the other exception: the context ring and
   the parts of the context window keep their hues in every style.
@@ -54,8 +55,8 @@ application ground, to a Vivid tile's face, and to a Project's letter tile;
 chrome stays flat. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground (0091): a first-party picture or a
-person's photo, shown plain or through one still print effect, behind the
-start screens or inside the primary card.
+person's photo, shown plain or through one still print effect, or the field of
+Pulsing characters, behind the start screens or inside the primary card.
 
 ## Language
 
@@ -86,12 +87,15 @@ but they do not own a second palette or visual language.
 
 ### Face
 
-Interface text uses the bundled Geist variable face by default, with the
-platform stack behind it: `'Geist Variable', -apple-system, BlinkMacSystemFont,
-'Segoe UI', system-ui, sans-serif` (0161). The platform face remains an explicit
-Appearance choice, System interface. Code, paths, branches,
-identifiers, and terminal text use the monospace stack. Antialiased,
-`text-rendering: optimizeLegibility`, no synthetic bold.
+Interface text uses the platform face by default (SF Pro on a Mac):
+`system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`. It is
+what makes Octant read as a native app; with bundled Geist and antialiased
+smoothing the interface read as a web page, thin and grey beside the apps
+around it. Geist stays bundled as an explicit Appearance choice. Code, paths,
+branches, identifiers, and terminal text use the monospace stack. Default
+subpixel-style smoothing (no `-webkit-font-smoothing: antialiased`, which thins
+light text on a dark ground), `text-rendering: optimizeLegibility`, no synthetic
+bold.
 
 ### Scale
 
@@ -104,7 +108,7 @@ nothing essential sits under 12px at the default. The roles live in
 
 | Role          | Size | Weight | Leading | Colour      | Where                                                                               |
 | ------------- | ---- | ------ | ------- | ----------- | ----------------------------------------------------------------------------------- |
-| Hero          | 36   | 700    | 1.1     | primary     | Welcome greeting only (`oct-title--hero`, `--oct-text-3xl`)                         |
+| Hero          | 36   | 700    | 1.1     | primary     | Welcome question only (`oct-title--hero`, `--oct-text-3xl`)                         |
 | Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens)                 |
 | Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label |
 | Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option                                                      |
@@ -116,9 +120,11 @@ nothing essential sits under 12px at the default. The roles live in
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
-labels and controls, 600 (`--oct-weight-strong`) for emphasis (section labels,
+labels, controls, and every name in navigation (thread titles, sidebar rows,
+Settings sections), so a name stands apart from the facts under it by weight
+rather than size, 600 (`--oct-weight-strong`) for emphasis (section labels,
 card titles, counts, `strong`, the app's name), and 700 (`--oct-weight-title`)
-only for the page title and the welcome greeting. `bun run ui:check` counts a
+only for the page title and the welcome question. `bun run ui:check` counts a
 weight above 600 outside the title roles in `styles/surface.css` as a
 `heavy-weight` finding and ratchets it against the baseline.
 
@@ -129,17 +135,25 @@ body and detail use none.
 ### Colour
 
 Neutral graphite, a monochrome accent, semantic statuses, and one neutral
-keyboard focus edge. That is the default preset; the bundled colour presets lean every
-surface toward one hue and keep the accent and focus role available for theme
-compatibility. Text is three greys (primary, secondary, muted) and never a
-fourth. Hairlines separate; fills select. Selected and expanded fills carry
+keyboard focus edge: that is the default preset. The bundled colour presets
+lean every surface toward one hue and keep the accent and focus role available
+for theme compatibility. Text is three greys (primary, secondary, muted) and
+never a fourth; the primary ink is near-white (`#f5f5f7`) in dark and
+near-black (`#141414`) in light, and the monochrome accent follows it.
+
+Appearance › Accent offers a one-click accent colour: Mono (the preset's own)
+or Clay, Amber, Green, Blue, Purple. A swatch overrides the accent fill and
+puts dark ink on it (`accent-foreground` and `primary-foreground`), and leaves accent text on the
+preset's ink, because no swatch clears normal-text contrast on the light page.
+The accent colours switches, the send button, selected states, and sliders;
+status colours stay their own. Hairlines separate; fills select. Selected and expanded fills carry
 state; keyboard focus follows the rule in "Accessibility and reliability". See
 "Colour system" for the token table. On the marketing site the same three
 greys and the same hairline carry the hierarchy on a white or graphite ground.
 
 Settings › Appearance › Style chooses how much of that palette the chrome
 uses. **Default** is the monochrome described above. **Vivid** lets the
-places that name something carry colour: the welcome greeting, the sidebar's
+places that name something carry colour: the welcome question, the sidebar's
 count tiles, board column marks, a Project's accent, and a thread's Canvases,
 which take the hue of what they hold (a plan purple, a chart or figures
 amber, a diagram teal, a mockup pink, a table or document blue). Vivid draws every
@@ -262,6 +276,10 @@ Rows in Settings are `SettingRow`; rows everywhere else are `surface-row`. Both
 draw the same hairline.
 
 Every Settings page is built from one kit, in `settings/primitives.tsx`:
+
+Selecting a page replaces its controls as well as its heading. Plugin pages
+resolve the currently selected entry point; a missing entry point shows an
+error instead of retaining another integration's account controls.
 
 - **Page header.** A 42px icon tile (`--oct-radius-inset`, a faint 8% ink fill, a
   hairline) holding the page's own navigation icon at 20px, the page title
@@ -386,17 +404,31 @@ states stay explicit. It offers no staging, discard or parent-checkout editor
 controls. Unavailable capture stays unavailable. Evidence references are disclosed
 on request rather than presented as unsupported navigation links.
 
-A reply's suggested follow-ups sit as outline chips at the top of the
-thread composer, inside its surface, with a quiet "Next" label and a dismiss
-control. Choosing one swaps the row for an inline preview of what it would
-create and its prompt; nothing is created until **Start** (or **Use prompt**).
-Side-task offers stack above the chips as hairline cards: a target icon
+A reply's suggested follow-ups sit as cards at the foot of the thread, just
+above the composer, so the next task reads as the last thing the agent offered.
+Each card is the radius-md bordered card on the surface fill: a small meta line
+naming where it would run ("New task", "New task · own worktree", "Next step
+here"), a dismiss control, the title at medium weight, two clamped lines of the
+prompt in secondary ink, and one outline **Start…** (or **Use here…**) button.
+Start… expands that card into a preview sentence of exactly what it would
+create, with Cancel and **Start** (or **Use prompt**); nothing is created
+before that. The same open suggestions also stand in a "Suggested tasks" card
+at the top of the thread's Environment panel, without a second border, so an
+offer the conversation has scrolled past stays in reach; it shows only while a
+suggestion is open. A thread started from a suggested task nests one step in
+under the thread that suggested it in the sidebar, joined by a thin hairline
+elbow, even when it runs on its own worktree; the host remembers that link
+past later replies and restarts, and answers it to a window only for threads
+its sidebar already lists. A task whose parent is not in the same list stays
+where it is. Side-task offers stack above them as hairline cards: a target icon
 (branch for a worktree, new-message otherwise), the title, a dismiss control,
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
 
-A thread's stats line sits under the follow-up composer, below the context strip
-and inside the same tray: one row of figures at the 12px meta step in the meta ink,
+A thread's stats line sits above the follow-up composer, in one strip with the
+context: where the thread runs (Project and branch) on the left, the stats on the
+right, on the page rather than in the box, so the box holds only the message and
+its controls. The stats are one row of figures at the 12px meta step in the meta ink,
 separated by middle dots, with no hue on any number and no fill on the row. When the
 provider reported account limit windows, they lead the row as short bars (a name such
 as 5h or Week, a three-pixel bar, and the share left), filled in the same
@@ -414,17 +446,21 @@ The strip stays mounted while metadata loads, and full paths are available in
 tooltips. Code retains its checkout, branch, diff, and pull-request controls.
 Pane headers show thread titles without repeated project labels.
 
-Chat, Work, and Code open on the same screen: a greeting and one raised
-composer. The hero says only the greeting for the hour and the person's name
-("Good evening, Henrik", the hero role). One quiet line under it, at the
-detail step in muted ink, gives the date in the person's locale, then "N
-running" and "N waiting for your review", with a zero count left out; Chat,
-which counts nothing, shows the date alone. The question each mode used to ask
-in the heading lives in the composer's placeholder instead ("Ask anything…",
-"Describe the work…", "Describe the change…"), and the message field keeps its
-accessible name. The composer is prompt first, four lines tall before it
-grows; its toolbar row holds how the thread runs (attach and image on the
-left; model and access on the right, next to send). Where the thread runs
+Chat, Work, and Code open on the same screen: one question in the middle of
+the page and one raised composer docked at its foot, where it stays once the
+thread starts, so the first message is typed where every later one is. Above
+the question sits the octant mark, a 24px circle with one eighth filled,
+drawn in the primary ink. The hero asks "What are we building today?" (the
+hero role) and one quiet line under it, at the detail step in muted ink, says
+"Pick a project, or just start typing". The start screen names no time of day
+and counts nothing: what is running and what waits for review live in the
+sidebar. Each mode's own prompt stays in the composer's placeholder ("Ask
+anything…", "Describe the work…", "Describe the change…"), and the message
+field keeps its accessible name. The composer is prompt first, four lines tall before it
+grows; its toolbar row holds how the thread runs (attach, image and access
+on the left; the context ring, model and microphone on the right, next to send).
+The model button names a chosen reasoning effort after the model in muted ink
+("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, base branch, checkout, Environment, repository) is the first row
 inside the card, above the prompt, as small bordered chips on a faint fill
 (the `--oct-radius-sm` step), so the composer stays a single object. Code's
@@ -437,17 +473,23 @@ composer keeps its context strip beneath the card. Nothing about delivery is
 asked up front; it is derived from the chips and shown on the thread once it
 exists.
 
-Around the composer, a start screen shows two underline tabs (**New task**,
-**Running**) on its top-left edge, then under it a row of action tiles (Work
-and Code only), the card area, and one row of outline prompt chips (Code's
-suggestions, Work's starters). Their anatomy is in
+**New task**, in every mode, is the question and the composer and nothing
+else; Chat and Work add one row of outline starter chips only before the
+mode's first thread. **Code Home** is where Code lands with nothing chosen:
+the same question and composer, then Code's prompt suggestions, the card area
+(a **Customize** control and the cards, on by default), and Code's agent home
+(Up next and Continue). There the page scrolls and the composer sits under
+the question. The cards appear on no other start screen. Neither screen has
+tabs or action tiles: adding a folder lives in the composer's Project picker. Their anatomy is in
 [Start screen: presentation](docs/design/start-screen.md#presentation); their
 behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 
 First-run setup asks only what a first task needs — a usable provider, a
 Project folder, and a model — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
-the first one. Skipping preserves settled answers, waits for pending writes,
+the first one. Opening setup focuses the current step's heading so a long
+provider list does not scroll past its introduction; Tab then reaches the
+step's controls. Skipping preserves settled answers, waits for pending writes,
 grants no authority, and creates no thread: provider, Project, model, and
 permission readiness are checked again when work is requested. After Skip, or
 in a later session with no ready instance, the New task composer in Work and
@@ -491,8 +533,8 @@ Model choices and settings wait for an asynchronous model change to finish befor
 accepting another edit, so the next configuration choice uses the confirmed pairing.
 
 The screen sits on the application ground (0091, 0129), set as two plain
-choices. What: one of the first-party Zen pictures, a person's photo, or the
-plain page. A fresh install starts on Soft glow, one of three Gradient
+choices. What: one of the first-party Zen pictures, a person's photo, a field
+of pulsing characters, or the plain page. A fresh install starts on Soft glow, one of three Gradient
 pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
 print, so the ground follows the window's scheme; the stylesheet swaps them
 by `data-octant-theme-mode`. A settings row written before the ground
@@ -500,7 +542,16 @@ existed replays as the plain page it showed. Effect: the picture is shown as it 
 dithered, at a chosen pixel size and colour count; an animated picture is
 printed from its still frame. Nothing is drawn over the picture and nothing
 moves across it; a ground saved with the retired dot pattern resolves to the
-plain page. Behind a
+plain page. Pulsing characters is the one drawn ground, and only when a person
+picks it: a grid of monospace letters and digits in the theme's primary ink,
+at most half opaque, whose brightness drifts in slow patches and breathes as
+a whole at twelve frames a second while a few glyphs swap. A click over it
+sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
+it grows, trailed by a fainter echo, and about one click in six draws a heart
+instead, and fades within two seconds. With the default Mono accent the ring
+is the ink, only brighter; a chosen accent colours it. It carries no picture, so the effect controls do not apply, and it
+pauses while the window is hidden. Reduced motion holds it on one still frame
+and takes no rings. Behind a
 start screen the ground is masked away behind the composer and fades out below
 it, so the prompt and the recent-thread list read on the plain page; in the
 light theme it fades out sooner, because dark text over a pale picture has
@@ -715,15 +766,15 @@ fallback; `Dark` and `Light` are the same values pinned to one mode.
 | Border                 | `--octant-border`                                   | `#303030` | `#e0e0de`   | Hairline separation                                        |
 | Strong border          | `--octant-border-strong`                            | `#4d4d4d` | `#bdbdbb`   | Input and outline-button edges                             |
 | Strong divider         | `--octant-divider-strong`                           | `#808080` | `#6f6f6d`   | Rare structural divider                                    |
-| Primary text           | `--octant-text-primary`                             | `#f0f0f0` | `#1b1b1b`   | Body and control text                                      |
-| Secondary text         | `--octant-text-secondary`                           | `#a9a9a9` | `#4f4f4f`   | Supporting copy                                            |
+| Primary text           | `--octant-text-primary`                             | `#f5f5f7` | `#141414`   | Body and control text                                      |
+| Secondary text         | `--octant-text-secondary`                           | `#bcbcc2` | `#45454a`   | Supporting copy                                            |
 | Muted text             | `--octant-text-muted`                               | `#949494` | `#666666`   | Metadata and hints at 12px; AA on the control fill         |
 | Primary foreground     | `--octant-primary-foreground`                       | `#171717` | `#ffffff`   | Text on primary fill                                       |
 | Focus role             | `--octant-focus-ring`                               | `#4d9ec8` | `#1f6f96`   | Theme compatibility and accent tints                       |
 | Selection              | `--octant-selection` / `--octant-surface-selected`  | `#2c2c2c` | `#ebebea`   | Selected rows and active controls                          |
-| Accent fill            | `--octant-accent`                                   | `#f0f0f0` | `#1b1b1b`   | One primary action or active mark                          |
+| Accent fill            | `--octant-accent`                                   | `#f5f5f7` | `#141414`   | One primary action or active mark                          |
 | Accent foreground      | `--octant-accent-foreground`                        | `#171717` | `#ffffff`   | Text on accent fill                                        |
-| Accent text            | `--octant-accent-text`                              | `#f0f0f0` | `#1b1b1b`   | Accent used as text; normal-text contrast                  |
+| Accent text            | `--octant-accent-text`                              | `#f5f5f7` | `#141414`   | Accent used as text; normal-text contrast                  |
 | Scrim                  | `--octant-scrim`                                    | `#000000` | `#000000`   | Opaque by contract; the bridge mixes it to a wash          |
 
 The ladder is deliberate: in dark the page is near-black, the sidebar a step
@@ -748,7 +799,7 @@ and categorical data may retain semantic colour alongside a label or shape.
 | Meaning       | Surface                                                      | Text/border                                                                                 |
 | ------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------- |
 | Success       | `--octant-success-surface` (`#16281f` dark, `#bfd8cc` light) | `--octant-success-text` (`#6bb299` dark, `#0f6144` light)                                   |
-| Warning       | `--octant-warning-surface` (`#2b2b2b` dark, `#f0f0ef` light) | `--octant-warning-text` (`#f0f0f0` dark, `#1b1b1b` light); border `--octant-warning-border` |
+| Warning       | `--octant-warning-surface` (`#2b2b2b` dark, `#f0f0ef` light) | `--octant-warning-text` (`#f5f5f7` dark, `#141414` light); border `--octant-warning-border` |
 | Danger        | No default surface                                           | `--octant-danger-text` (`#e17d96` dark, `#a8102f` light)                                    |
 | Diff addition | No default surface                                           | `--octant-addition-text`                                                                    |
 | Diff deletion | No default surface                                           | `--octant-deletion-text`                                                                    |
@@ -785,29 +836,32 @@ Typography has distinct jobs:
 
 | Job        | Default                                                                                             | Usage                                                                              |
 | ---------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Interface  | `'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif`            | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
+| Interface  | `system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`                              | App-wide shell, navigation, controls, settings, headings, transcript, and composer |
 | Display    | inherits Interface                                                                                  | Wordmark, section headings, selected navigation labels                             |
 | Transcript | inherits Interface                                                                                  | Long-running conversation and composer; readable at 13–16px, 13px by default       |
 | Editor     | `'Geist Mono Variable', 'SF Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace` | Code, diffs, paths, identifiers, aligned technical values                          |
 | Terminal   | Geist Mono, SF Mono, Nerd Font fallbacks, monospace                                                 | Terminal output and prompt glyphs                                                  |
 
-The default interface is Geist at 13px and weight 400; transcript text defaults
-to 13px. Geist and Geist Mono are one family, both bundled
-(`@fontsource-variable/geist` and `geist-mono`), and the only faces Octant
-ships, so text, code, and paths share one set of proportions on every
-platform; the stylesheet's own first-paint defaults are the same faces, so
-nothing swaps when settings load. The editor defaults to 13px, line height
+The default interface is the platform face at 13px and weight 400; transcript
+text defaults to 13px. Geist and Geist Mono are bundled
+(`@fontsource-variable/geist` and `geist-mono`): Geist Mono sets code by
+default and Geist is an Appearance choice. The stylesheet's own first-paint
+defaults are the same faces as the settings defaults, so nothing swaps when
+settings load. The editor defaults to 13px, line height
 1.5, and enabled ligatures. The terminal defaults to 12px, line height 1.4,
 and disabled ligatures.
 
 A saved stack that only ever meant "the default" reads as today's default
 (`savedUiFamily` in `packages/theme/src/typography.ts`): the old system
-interface stack beginning `-apple-system, BlinkMacSystemFont`, the unbundled
-`Geist, system-ui, sans-serif`, and the JetBrains code and terminal stacks. The
-explicit System interface choice therefore saves a different spelling,
-`system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`, so it
-stays distinct; an old System choice saved under the default's identical string
-cannot be told apart and needs reselecting.
+interface stack beginning `-apple-system, BlinkMacSystemFont`, the bundled-Geist
+default stack that began `'Geist Variable', -apple-system`, and the JetBrains
+code and terminal stacks. The old Geist entry's unbundled
+`Geist, system-ui, sans-serif` was an explicit pick, so it reads as bundled
+Geist.
+The Geist entry now saves `'Geist Variable', system-ui, sans-serif`, so a Geist
+pick made from here on stays distinct; a Geist pick saved under the old
+default's identical string cannot be told apart and moves to the platform face.
+System interface saves the default's own stack.
 
 The persisted typography schema supports independent UI, editor, and terminal
 family, size, weight, line height, and ligatures. Families are sanitized: no
@@ -895,19 +949,41 @@ focused. Icon sizes are 16/19/22px for small/medium/large actions; touch
 surfaces keep 44px targets. The workspace and Settings share the saved sidebar
 width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
-rail clamp or drawer. The workspace sidebar supports resizing. Hide sidebar
-collapses it to a 56px icon rail by default (76px in the desktop app, where
-the native traffic lights sit at its top): Show sidebar, New thread, and
-Search at the top, then the modes, the count tiles as icons with their counts
-as badges, the remaining destination rows, up to six Project letter tiles with
-a Projects button for the rest, the Activity feed, and Settings at the foot.
-Rail icons are 20px on a 40px face. Every rail control names itself in
-its accessible name and in a label that opens beside the rail on hover or
-keyboard focus. Settings ›
-Sidebar › When collapsed can choose Hidden instead, which removes the sidebar
-completely and leaves Show sidebar and New thread in the native title rail.
-The rail never appears below the drawer breakpoint, where a collapsed sidebar
-is a closed drawer. The right dock defaults to 420px when open. A fresh window
+rail clamp or drawer. The workspace sidebar supports resizing.
+
+**Icon rail.** By default (Settings › Sidebar › Icon rail: Always) a 56px
+icon rail (76px in the desktop app, where the native traffic lights sit at its
+top) stands in its own column in front of the open sidebar. Beside the sidebar
+it carries only places and counts: the count tiles as icons with badges, the
+destination rows, the Activity feed, and Settings. The sidebar keeps its
+header (modes, search, new thread, hide), the Projects row with its list,
+More with Customize sidebar, and the profile, so nothing is offered twice.
+Rail icons are 20px on a 40px face; every rail control names itself in its
+accessible name and in a label that opens beside the rail on hover or keyboard
+focus.
+
+**Usage rings.** Above Settings, at the foot of either rail, each provider
+that reports a plan window with a figure gets a ring in its identity colour:
+the outer arc is what is left of the longest window (the week), the inner arc
+what is left of the shortest (five hours), chosen by each window's length, and
+a window near or at its limit takes the danger ink. Hovering or focusing a
+ring opens a card with every window, its share left, and when it resets;
+clicking opens Settings › Usage. A provider with no figure gets no ring,
+because an empty ring would claim a limit nobody reported. The rings read the
+host's last observation every few minutes, never a fresh provider call.
+
+**Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
+the sidebar", answered in text fields too and leaving focus where it was),
+collapses the sidebar to the rail alone, which then also shows Show sidebar,
+New thread, and Search at the top, the modes, and up to six Project letter
+tiles with a Projects button for the rest. Icon rail: When hidden shows the
+rail only in that state; Never removes the sidebar completely when hidden and
+leaves Show sidebar and New thread in the native title rail. Neither rail
+appears below the narrow-window breakpoint (960px): there the width belongs to
+the page, and below the drawer breakpoint a collapsed sidebar is a closed
+drawer.
+
+The right dock defaults to 420px when open. A fresh window
 starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is `--oct-title-rail-h` in the native host and the status
@@ -915,6 +991,14 @@ bar is `--oct-statusbar-h`.
 While a route or tool is still loading, its state is one quiet line (spinner,
 then the title) on the page ground, never a raised card: a card with a title
 and a sentence reads as a finished empty state.
+A state that is the whole window (a refused launch address, a launch session
+that expired, Project authority that is unavailable, a lost connection, storage
+recovery) is the page presentation of `ShellState`: centred on the page, a 96px
+mark that is the state's glyph drawn as an open grid of dots in the primary ink
+(a warning is a filled triangle with its mark cut out), a title at the
+`--oct-text-xl` step, one line in the secondary ink, and the way back as a text
+link in the accent ink, with no eyebrow. A state inside a pane or panel keeps
+the compact layout: glyph, eyebrow, title, sentence, and a button.
 
 Navigation panes stay compact hairline rails. Routine form layouts stay open
 and unshadowed; setup objects and cards use the card recipe (`OctantCard`), and
@@ -1022,8 +1106,12 @@ overview, or Project-level list. An unsplit conversation uses the title band
 for the Project/mode breadcrumb and compact thread strip, so the transcript
 does not repeat a second title block. Split panes and utility surfaces retain
 their own pane headers and lifecycle controls. Capability-gated toggles for
-Open in, bottom panel, and right dock remain window chrome. Environment is
-opened from the dock tab strip or Add tool. Zen
+Open in, bottom panel, and right dock remain window chrome. Above the right
+dock, in the same title band, sit its tools: while none is open, Environment by
+name and Terminal, Browser, Files, and the device tools as icons (each only
+where the thread can open it); once tools are open, the tab strip, where only
+the open tool names itself and the others are their icons with the name in
+the tooltip. Environment is opened from that band or Add tool. Zen
 remains in the bottom-left identity menu.
 
 Zen is a desk. Every card is a window: its title bar moves it, every edge and
@@ -1122,7 +1210,7 @@ checkouts first: a branch glyph, the branch in a small mono chip, and a quiet
 button, so keyboard focus skips it; its threads take one more step of indent on
 their content, never on their fill, and drop the branch fact the heading already
 states. A Project with a single checkout shows no heading. The Activity feed
-stays flat. A hovered row takes the soft ink wash and the row
+and Status stay flat. A hovered row takes the soft ink wash and the row
 the workspace is showing takes the selection fill with a hairline edge, the
 same two states the thread tab strip draws, so pointing never looks like
 being there. Provider identity remains at the leading edge. A Project row leads with a 20px
@@ -1169,10 +1257,13 @@ threads: the header's Search icon opens a Filter threads field under the
 header, Escape or its close control clears and hides it, and Settings ›
 Sidebar › Thread filter can keep the field always shown. Enter in the field
 hands its text to the command-style overlay, which searches every thread of
-the mode; the overlay also stays in the command palette. The list's two
-arrangements, the Project tree and the Activity feed, are a visible
-Projects/Activity switch on the row the Project view picker uses, not an icon
-in the header.
+the mode; the overlay also stays in the command palette. The list's three
+arrangements, Status (the default), the Project tree, and the Activity feed,
+are a visible Status/Projects/Activity switch on the row the Project view
+picker uses, not an icon in the header. Status headings carry their count in
+meta ink after the label ("Needs input 2"), the same face as the feed's folded
+Earlier count. A row whose pull request's checks pass adds a 12px check in the
+success ink after the PR number.
 
 Settings is a grouped form page. The shared resizable navigation rail
 stays fixed while one centred, bounded 920px reading column scrolls. A 32–64px
@@ -1240,7 +1331,7 @@ Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
 input, output, and measurement quality. Its thread table uses the same figures
-as the line under the composer: cache, speed, and first token are columns,
+as the line above the composer: cache, speed, and first token are columns,
 omitted when unavailable, and opening a row lists that thread's turns. The
 table stays a hairline table, not a card. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay
@@ -1296,28 +1387,37 @@ offer never moves focus from the composer, a rewrite never reopens a tab, and a
 tab the person closed stays closed. Document
 reads the file through the same host-authorized open the editor uses and
 renders Markdown with the preview's own viewer. With no open tab, the dock
-opens on a thread overview above the tool tiles, sections spaced apart and each
-omitted when the window has nothing to put in it: Running now lists the other
-threads the window knows are working (any mode, at most five, newest first,
-never the thread on screen), each as a spinner, title, a neutral Project dot and
-name, and age, and opens that thread. This thread is one raised card: a header
-with a folder icon plate, the Project name, and a meta line of the branch (with
-Worktree when the thread runs in one) and the host it runs on; under it a two
-by two grid of fact boxes on a soft inner fill, each a small muted label over a
-medium-weight value: Model, Access, Context (a neutral ring beside the share,
-with used of total under it, from the composer meter's own source), and Changes
-(Code only, from the board's observed changed files, never a stale observation;
-`+`/`-` totals in diff colours over the file count). The Changes box is the
-button that opens the Review tool. Every box is a fact the window already
-holds; an unknown value is left out, not shown as a placeholder. Below the card,
-the tools are tiles, not a list: a small muted caption per group (Thread tools,
-Workspace, Devices, shown when more than one group has a tool), then a grid of
-cards each holding a 26px icon plate over the tool's name. Thread tools run two
-columns; the other groups fit as many columns as the dock's width allows, with a
-minimum tile of 88px. A tile changes its surface on hover and keyboard focus and
-nothing else: no accent, no ring. Only capability-valid tools appear. The head's
-Add tool action appears once a tab is open, since with none open the body is
-already the tiles to add. Add tool opens a menu in a portal anchored to the plus
+opens on a stack of cards, one fact group each and each omitted when the window
+has nothing true to put in it. A card is the overview's own recipe: the surface
+fill, a hairline, a medium-weight title, and rows at the 28px step, with a
+figure or word in meta ink at the title's right. **Environment** names where
+the thread runs (the host, the Project, the branch with Worktree when it runs
+in one) and the mode at its right, and, in the desktop app's own window for a
+thread on this computer, a **Remote access** switch read once from the host's
+listener status: on turns the listener off through the same host action
+Settings uses, and off opens Settings › Remote access, where the address and
+certificate enabling needs are chosen and confirmed; **Local servers** lists the servers this
+thread's checkout is serving, each a dot (the success ink when it answers) and
+its name with the port, from one observation when the overview opens, never a
+poll; both titles open the Environment tool. **Context** shows the share used
+at its right beside a short neutral bar, with used of total under it, from the
+composer meter's own source. **Changes** (Code only) shows the board's observed
+`+`/`-` totals over the file count, never a stale observation, as the row that
+opens Review, and the thread's pull request with its checks in words.
+**Outputs** lists the documents and Canvases the window knows the thread has
+(those it had when opened and those its turns wrote since, never a deleted
+file), newest first and at most five, each a row that opens it in Document or
+Canvas, with the count at the title's right. **Background tasks** lists the
+runs the thread's agent handed work to, from the same read and cadence as the
+Environment tab's Subagents row: each running one a spinner, task, and age,
+with the running count at the title's right, and the finished ones folded under
+one "N finished" row; a row opens that run in Agents.
+**Running now** lists the other threads the window knows are working (any
+mode, at most five, newest first, never the thread on screen), each a spinner,
+title, Project, and age, and opens that thread. Model and access are not
+repeated here: they are on the composer. Tools open from the dock's title band
+(its quick tools or tab strip) or Add tool, which lists every tool that is not
+open. Add tool opens a menu in a portal anchored to the plus
 that was clicked, aligned to its start edge and kept inside the window by
 collision handling; it takes focus on its first tool, closes on Escape or an
 outside press, and returns focus to the plus. The bottom panel uses
@@ -1336,8 +1436,8 @@ A welcome, Project, or other pane with neither a bound thread nor a valid
 launchable tool keeps the dock closed and omits its toggle. Restored presentation
 for another subject never makes unavailable chrome visible.
 
-Environment is a right-dock tool, opened from the dock's tab strip or Add tool
-and nowhere else; the title band carries no second Environment button. It reads
+Environment is a right-dock tool, opened from the dock's title band (its
+quick tools or tab strip) or Add tool and nowhere else; the title band carries no second Environment button. It reads
 top to bottom as cards in the Settings kit's grouped-card look: one header card,
 then two captioned cards of rows. The header card names what the thread works
 in: the name on its own line, then the branch glyph, the branch, a dot, and the
@@ -1481,12 +1581,16 @@ dialog, with keyboard focus restored on cancellation. Submission records a
 proposed artifact and does not approve it or change execution access. The
 entry returns after withdrawal; the dock stays artifact-only.
 
-The provider's recorded task list is a separate, initially collapsed group. Its
-header keeps completed/total progress and failed or waiting counts visible while
-folded. An unfinished list after a settled turn says Incomplete; it does not
-claim that the agent is still running. Expansion shows the recorded ordered
-steps in a bounded, scrollable list. Neither this list nor the journaled plan
-borrows progress, completion, or authority from the subagent group.
+The provider's recorded task list is a separate group. It is open while the
+turn that recorded it runs, so the step in hand reads without a click, and
+folds to its header once the turn settles; a person's own open or fold wins
+over both. The header keeps completed/total progress and failed or waiting
+counts visible while folded. An unfinished list after a settled turn says
+Incomplete; it does not claim that the agent is still running. The open list
+shows the recorded ordered steps in a bounded, scrollable list: the running
+step at Medium (500), finished steps struck through in secondary ink, and no
+fill on any row. Neither this list nor the journaled plan borrows progress,
+completion, or authority from the subagent group.
 
 ### Breakpoints
 
@@ -1496,7 +1600,7 @@ widest viewport its behavior applies to:
 | At or below | Source                                                     | What changes                                                                                                                                                                                                                                     |
 | ----------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 960px       | `useNarrowViewport` (`useShellPresentation.ts`), shell.css | The right dock opens as one narrow modal sheet over the page (a titled dialog, no resize handle, Escape closes it and returns focus) instead of a column; the bottom panel is unavailable; the sidebar stops resizing; Settings uses its drawer. |
-| 680px       | `useSidebarDrawerViewport`, shell.css (`min-width: 681px`) | The workspace sidebar becomes an overlay drawer, the window frame goes flat, and pane headers drop their Project and branch chips.                                                                                                               |
+| 680px       | `useSidebarDrawerViewport`, shell.css (`min-width: 681px`) | The workspace sidebar becomes an overlay drawer, the window frame goes flat, and pane headers drop the Project step of their breadcrumb.                                                                                                         |
 
 Inside a surface, layouts reflow at component breakpoints rather than shell
 ones: `--oct-bp-lg` 920px (two-to-four column grids and the Project overview gutter),
@@ -1646,8 +1750,9 @@ interfaces. Revealing them must not move the transcript.
 
 Functional feedback uses 120–160ms transitions; the base system duration is
 200ms. Use standard easing and no decorative entrance animation. There is no
-ambient motion behind the work; an animated built-in picture is the one
-moving ground, and reduced motion shows its still frame. Running state
+ambient motion behind the work by default; an animated built-in picture and
+the Pulsing characters ground are the moving grounds a person may choose, and
+reduced motion holds each on a still frame. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-
 motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.
@@ -1806,10 +1911,12 @@ request from the person.
   through the providers. Renderer state is presentation only.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
-  confirmation when a turn is active or the desktop cannot confirm what the host
-  is running, then stop only the
+  confirmation when provider sessions remain open or the desktop cannot confirm
+  what the host is running, then stop only the
   desktop-owned host and its child resources. Cancellation leaves both app and
-  host running. Once the person confirms, quitting never waits on a person: a
+  host running. The session count can include idle sessions kept for another turn;
+  the warning names open sessions without claiming they are executing turns.
+  Once the person confirms, quitting never waits on a person: a
   failed or stalled window-state save or host stop is logged rather than shown
   in an alert, and a fixed deadline ends the app (after force-stopping the
   managed server) if shutdown has not finished.

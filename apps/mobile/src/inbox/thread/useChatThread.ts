@@ -19,7 +19,7 @@ import { runChatEventLoop } from "./chatEventLoop";
 import { readUriBytes } from "./imageBytes";
 import { modelOptionForThread, pendingAttachmentsReducer } from "./pendingAttachments";
 import { pickImage } from "./pickImage";
-import { runLoad, runMutation } from "./runMutation";
+import { runLoad, runMutation, sendThenReload } from "./runMutation";
 import type { RefreshOptions, ThreadHookInput } from "./threadTypes";
 
 export function useChatThread(
@@ -189,25 +189,31 @@ export function useChatThread(
       gate,
       ui,
       failure: "Follow-up failed.",
-      run: async () => {
-        await sendMobileChatTurn({
-          transport,
-          threadId: view.thread.id,
-          expectedVersion: view.thread.version,
-          prompt,
-          ...(pendingAttachments.length > 0
-            ? { attachmentIds: pendingAttachments.map((item) => item.id) }
-            : {}),
-          ...(needsChange && decoded !== undefined
-            ? { providerInstanceId: decoded.providerInstanceId, modelId: decoded.modelId }
-            : {}),
-        });
-        return loadMobileChatThread(transport, view.thread.id);
-      },
+      run: () =>
+        sendThenReload({
+          send: () =>
+            sendMobileChatTurn({
+              transport,
+              threadId: view.thread.id,
+              expectedVersion: view.thread.version,
+              prompt,
+              ...(pendingAttachments.length > 0
+                ? { attachmentIds: pendingAttachments.map((item) => item.id) }
+                : {}),
+              ...(needsChange && decoded !== undefined
+                ? { providerInstanceId: decoded.providerInstanceId, modelId: decoded.modelId }
+                : {}),
+            }),
+          onSent: () => {
+            if (!guard.isSelected(identity)) return;
+            setPrompt("");
+            dispatchAttachments({ type: "sent" });
+          },
+          reload: () => loadMobileChatThread(transport, view.thread.id),
+        }),
       onDone: (next) => {
-        setPrompt("");
-        dispatchAttachments({ type: "sent" });
-        setLoaded(next);
+        // The sent turn stays on screen until the reload shows it.
+        if (next !== undefined) setLoaded(next);
         setPendingPrompt(undefined);
       },
       onFailed: (message) => {

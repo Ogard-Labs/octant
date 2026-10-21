@@ -3,6 +3,7 @@ import {
   decodeThreadTaskProgress,
   decodeThreadTaskProgressList,
   MAX_THREAD_TASKS_PER_TURN,
+  restateThreadTaskList,
   upsertThreadTaskProgress,
 } from "./threadTasks";
 
@@ -62,5 +63,40 @@ describe("the thread task progress contract", () => {
     });
     expect(list).toHaveLength(MAX_THREAD_TASKS_PER_TURN);
     expect(list.some((entry) => entry.taskId === "task-extra")).toBe(false);
+  });
+
+  it("keeps only the tasks a restated plan lists, in its order", () => {
+    const list = decodeThreadTaskProgressList([
+      task,
+      { taskId: "task-2", state: "pending", summary: "Write the note" },
+      { taskId: "task-3", state: "pending", summary: "Dropped step" },
+    ]);
+    expect(restateThreadTaskList(list, ["task-2", "task-1"]).map(({ taskId }) => taskId)).toEqual([
+      "task-2",
+      "task-1",
+    ]);
+    expect(restateThreadTaskList(list, [])).toEqual([]);
+    // An unchanged plan returns the same list, so callers skip a needless journal write.
+    expect(restateThreadTaskList(list, ["task-1", "task-2", "task-3"])).toBe(list);
+  });
+
+  it("makes room in a full plan for the new tasks its restatement lists", () => {
+    const full = decodeThreadTaskProgressList(
+      Array.from({ length: MAX_THREAD_TASKS_PER_TURN }, (_unused, index) => ({
+        taskId: `task-${String(index)}`,
+        state: "pending" as const,
+        summary: `Task ${String(index)}`,
+      })),
+    );
+    const renamed = { taskId: "task-new", state: "running" as const, summary: "Renamed step" };
+    // The full plan turns the new task away before the restatement arrives.
+    expect(upsertThreadTaskProgress(full, renamed)).toBe(full);
+
+    const restated = restateThreadTaskList(
+      full,
+      ["task-0", "task-new"],
+      new Map([[renamed.taskId, renamed]]),
+    );
+    expect(restated).toEqual([full[0], renamed]);
   });
 });

@@ -116,6 +116,8 @@ export interface AppearanceStore {
 export interface AppearanceStoreOptions {
   /** Whether a stored file wallpaper still exists on this device. */
   readonly fileExists?: (uri: string) => Promise<boolean>;
+  /** Deletes a wallpaper file the app copied; must ignore files it does not own. */
+  readonly removeFile?: (uri: string) => Promise<void>;
 }
 
 /**
@@ -181,14 +183,29 @@ export function createAppearanceStore(
     return { ...rest, customImageUri: image };
   };
 
+  // The replaced copy is deleted only after the new state is stored, so a
+  // failed save never strands the preferences without their wallpaper. A
+  // failed delete leaves an orphan file, which is better than a failed save.
+  const removeReplacedFile = async (previous: string | null, kept: string | undefined) => {
+    if (previous === null || previous === kept || options.removeFile === undefined) return;
+    try {
+      await options.removeFile(previous);
+    } catch {
+      // Best effort.
+    }
+  };
+
   const save = async (prefs: AppearancePreferences): Promise<void> => {
+    const previous = await storage.getItem(IMAGE_KEY);
     if (prefs.picture === "custom" && prefs.customImageUri !== undefined) {
       await storage.setItem(IMAGE_KEY, prefs.customImageUri);
       await writeMeta(prefs);
+      await removeReplacedFile(previous, prefs.customImageUri);
       return;
     }
     await storage.deleteItem(IMAGE_KEY);
     await writeMeta({ ...prefs, picture: prefs.picture === "custom" ? "plain" : prefs.picture });
+    await removeReplacedFile(previous, undefined);
   };
 
   const update = (change: (current: AppearancePreferences) => AppearancePreferences) =>

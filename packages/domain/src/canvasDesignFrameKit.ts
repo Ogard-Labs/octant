@@ -504,6 +504,187 @@ export interface DesignFrameThemeValues {
 }
 
 /**
+ * The generic families and common system faces a brand font may name. A brand
+ * font is a stack of these, so a design cannot ask for a face the viewer must
+ * download: no web font is ever loaded.
+ */
+const BRAND_FONT_FAMILIES: ReadonlySet<string> = new Set([
+  "serif",
+  "sans-serif",
+  "monospace",
+  "cursive",
+  "system-ui",
+  "ui-serif",
+  "ui-sans-serif",
+  "ui-monospace",
+  "ui-rounded",
+  "arial",
+  "helvetica",
+  "helvetica neue",
+  "verdana",
+  "tahoma",
+  "trebuchet ms",
+  "georgia",
+  "times new roman",
+  "palatino",
+  "garamond",
+  "courier new",
+  "menlo",
+  "monaco",
+  "consolas",
+  "inter",
+]);
+
+const BRAND_COLOR_FUNCTION = /^(?:rgb|rgba|hsl|hsla|oklch|oklab)\(\s*[0-9a-z.,%/\s+-]{1,96}\)$/i;
+const BRAND_HEX_COLOR = /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
+const BRAND_LENGTH = /^(?:0|(?:\d{1,3}(?:\.\d{1,3})?)(?:px|rem|em|%))$/;
+
+/**
+ * Why a brand token is refused, or undefined when it may be written into a
+ * frame's stylesheet. The name's kind decides the value's shape: a colour is a
+ * hex value or a colour function, a font is a comma list of the safe faces and
+ * generic families, and a radius or spacing step is a bounded length. Every
+ * value must also pass the frame token safety rule, so nothing a brand holds
+ * can end a declaration, close a rule, or name something to load.
+ */
+export function designBrandTokenRefusal(name: string, value: string): string | undefined {
+  if (!designFrameTokenValueIsSafe(value)) {
+    return `token ${name} holds a value that could end its declaration or load something`;
+  }
+  const kind = name.slice(0, name.indexOf("-"));
+  const trimmed = value.trim();
+  switch (kind) {
+    case "color":
+      return BRAND_HEX_COLOR.test(trimmed) || BRAND_COLOR_FUNCTION.test(trimmed)
+        ? undefined
+        : `token ${name} is not a hex colour or a colour function`;
+    case "font": {
+      const families = trimmed.split(",").map((family) => family.trim().toLowerCase());
+      return families.every((family) => BRAND_FONT_FAMILIES.has(family))
+        ? undefined
+        : `token ${name} names a font outside the safe list; use a system face or a generic family`;
+    }
+    case "radius":
+    case "space":
+      return BRAND_LENGTH.test(trimmed)
+        ? undefined
+        : `token ${name} is not a length in px, rem, em, or %`;
+    default:
+      return `token ${name} is not a colour, font, radius, or space token`;
+  }
+}
+
+// A brand design is drawn without the workspace theme, so the same brand looks
+// the same in every window, share, and export. These neutral light values fill
+// every role the brand does not name; the kit itself still holds no colour.
+const BRAND_BASE_TOKENS: ReadonlyArray<readonly [string, string]> = [
+  ["--oct-bg", "#ffffff"],
+  ["--oct-surface", "#f6f6f7"],
+  ["--oct-surface-warm", "#f6f6f7"],
+  ["--oct-fg", "#18181b"],
+  ["--oct-fg-2", "#3f3f46"],
+  ["--oct-fg-soft", "#52525b"],
+  ["--oct-muted", "#52525b"],
+  ["--oct-meta", "#71717a"],
+  ["--oct-border", "#d4d4d8"],
+  ["--oct-border-soft", "#e4e4e7"],
+  ["--oct-selection", "rgb(37 99 235 / 0.25)"],
+  ["--oct-accent", "#2563eb"],
+  ["--oct-accent-fg", "#2563eb"],
+  ["--oct-accent-on", "#ffffff"],
+  ["--oct-accent-soft", "color-mix(in srgb, var(--oct-accent) 12%, var(--oct-bg))"],
+  ["--oct-success", "#15803d"],
+  ["--oct-success-fg", "#15803d"],
+  ["--oct-success-soft", "color-mix(in srgb, var(--oct-success) 12%, var(--oct-bg))"],
+  ["--oct-warn", "#b45309"],
+  ["--oct-warn-fg", "#b45309"],
+  ["--oct-warn-soft", "color-mix(in srgb, var(--oct-warn) 12%, var(--oct-bg))"],
+  ["--oct-danger", "#b91c1c"],
+  ["--oct-danger-fg", "#b91c1c"],
+  ["--oct-danger-soft", "color-mix(in srgb, var(--oct-danger) 12%, var(--oct-bg))"],
+  ["--oct-series-1", "var(--oct-accent)"],
+  ["--oct-series-2", "#0f766e"],
+  ["--oct-series-3", "#b45309"],
+  ["--oct-series-4", "#7c3aed"],
+  ["--oct-series-5", "#be185d"],
+  ["--oct-series-6", "#52525b"],
+  ["--oct-font-body", "system-ui, sans-serif"],
+  ["--oct-font-mono", "ui-monospace, monospace"],
+  ["--oct-text-xs", "0.75rem"],
+  ["--oct-text-sm", "0.8125rem"],
+  ["--oct-text-base", "0.9375rem"],
+  ["--oct-text-lg", "1.0625rem"],
+  ["--oct-text-xl", "1.25rem"],
+  ["--oct-text-2xl", "1.5rem"],
+  ["--oct-text-3xl", "2rem"],
+  ["--oct-leading-body", "1.55"],
+  ["--oct-leading-tight", "1.2"],
+  ["--oct-leading-heading", "1.25"],
+  ["--oct-leading-snug", "1.4"],
+  ["--oct-leading-code", "1.5"],
+  ["--oct-weight-medium", "500"],
+  ["--oct-weight-strong", "600"],
+  ["--oct-tracking-tight", "-0.01em"],
+  ["--oct-tracking-snug", "-0.005em"],
+  ["--oct-tracking-wide", "0.04em"],
+  ["--oct-space-1", "4px"],
+  ["--oct-space-2", "8px"],
+  ["--oct-space-3", "12px"],
+  ["--oct-space-4", "16px"],
+  ["--oct-space-6", "24px"],
+  ["--oct-space-8", "32px"],
+  ["--oct-radius-sm", "6px"],
+  ["--oct-radius-md", "10px"],
+  ["--oct-radius-pill", "999px"],
+];
+
+/**
+ * Which kit roles each brand token sets. A brand names what it means
+ * (`color-primary`); the kit's classes read `--oct-*`, so a named token also
+ * sets the roles the kit draws it in. Every token is also written as its own
+ * `--brand-<name>` for a page that styles itself from the brand.
+ */
+const BRAND_ROLES: Readonly<Record<string, ReadonlyArray<string>>> = {
+  "color-background": ["--oct-bg"],
+  "color-surface": ["--oct-surface", "--oct-surface-warm"],
+  "color-text": ["--oct-fg", "--oct-fg-2", "--oct-fg-soft"],
+  "color-muted": ["--oct-muted", "--oct-meta"],
+  "color-border": ["--oct-border", "--oct-border-soft"],
+  "color-primary": ["--oct-accent", "--oct-accent-fg", "--oct-series-1"],
+  "color-on-primary": ["--oct-accent-on"],
+  "color-secondary": ["--oct-series-2"],
+  "color-success": ["--oct-success", "--oct-success-fg"],
+  "color-warning": ["--oct-warn", "--oct-warn-fg"],
+  "color-danger": ["--oct-danger", "--oct-danger-fg"],
+  "font-body": ["--oct-font-body"],
+  "font-mono": ["--oct-font-mono"],
+  "radius-sm": ["--oct-radius-sm"],
+  "radius-md": ["--oct-radius-md"],
+  "radius-card": ["--oct-radius-md"],
+  "radius-pill": ["--oct-radius-pill"],
+};
+
+/**
+ * The declarations a brand design's frames start from, as the body of a
+ * `:root` rule: the neutral base, then each brand token as `--brand-<name>`
+ * and on the kit roles it names. A token the brand rule refuses is left out,
+ * wherever the brand came from, so nothing unsafe is written into a page.
+ */
+export function designBrandDeclarations(brand: Readonly<Record<string, string>>): string {
+  const own: Array<readonly [string, string]> = [];
+  const roles = new Map<string, string>();
+  for (const [name, raw] of Object.entries(brand)) {
+    if (!/^(?:color|font|radius|space)-[a-z0-9][a-z0-9-]{0,31}$/.test(name)) continue;
+    if (designBrandTokenRefusal(name, raw) !== undefined) continue;
+    const value = raw.trim();
+    own.push([`--brand-${name}`, value]);
+    for (const role of BRAND_ROLES[name] ?? []) roles.set(role, value);
+  }
+  const base = BRAND_BASE_TOKENS.filter(([name]) => !roles.has(name));
+  return [...base, ...roles, ...own].map(([name, value]) => `${name}: ${value};`).join(" ");
+}
+
+/**
  * Whether a token's value may be written into a frame's stylesheet. The value
  * is a claim wherever it comes from: the app reads it from its own page, and
  * an export is handed it by a window. One that could end its declaration or

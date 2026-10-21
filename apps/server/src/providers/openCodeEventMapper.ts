@@ -398,6 +398,7 @@ export function mapOpenCodeEvent(
     }
     case "todo.updated": {
       const events: ProviderRuntimeEvent[] = [];
+      const taskIds: string[] = [];
       event.properties.todos.forEach((todo, index) => {
         const summary = normalizeText(todo.content);
         if (summary === undefined) return;
@@ -409,12 +410,14 @@ export function mapOpenCodeEvent(
               : todo.status === "cancelled"
                 ? "failed"
                 : "pending";
+        const taskId = `task-${index + 1}`;
+        taskIds.push(taskId);
         events.push(
           mappedEvent(
             context,
             {
               kind: "task-progress",
-              taskId: `task-${index + 1}`,
+              taskId,
               status,
               summary,
             },
@@ -422,6 +425,10 @@ export function mapOpenCodeEvent(
           ),
         );
       });
+      // OpenCode sends the whole list, so a todo it no longer lists is gone and
+      // an empty list clears the panel. A list with no readable todo says nothing.
+      if (events.length === 0 && event.properties.todos.length > 0) return events;
+      events.push(mappedEvent(context, { kind: "task-list", taskIds }, events.length));
       return events;
     }
     case "permission.asked": {

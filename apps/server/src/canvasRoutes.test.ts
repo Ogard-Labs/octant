@@ -82,7 +82,15 @@ const exportFolderCandidateId = "88888888-8888-4888-8888-888888888888";
 
 const readFolderCandidate = Schema.decodeUnknownSync(Schema.Struct({ candidateId: Schema.String }));
 
-function createRevisionRoute(projection = new CanvasProjection()) {
+function createRevisionRoute(
+  projection = new CanvasProjection(),
+  options: {
+    /** Seed the Canvas as owned by its thread, with no Project, and open the window on no Project. */
+    readonly threadOwned?: boolean;
+    readonly activeMode?: "chat" | "work";
+  } = {},
+) {
+  const canvasProjectId = options.threadOwned === true ? null : projectId;
   const versionEnvelope = {
     schemaVersion: CANVAS_SCHEMA_VERSION,
     canvasId,
@@ -94,7 +102,7 @@ function createRevisionRoute(projection = new CanvasProjection()) {
       provenance: {
         mode: "chat",
         hostId: "local" as never,
-        projectId,
+        projectId: canvasProjectId,
         threadId: threadId as never,
         actor: {
           kind: "local-user",
@@ -131,7 +139,7 @@ function createRevisionRoute(projection = new CanvasProjection()) {
     },
     createdAt: now as never,
   };
-  seedProjection(projection);
+  seedProjection(projection, canvasProjectId);
   const directory = mkdtempSync(join(tmpdir(), "octant-canvas-route-"));
   directories.push(directory);
   const connection = openSqlite(join(directory, "events.sqlite3"));
@@ -176,7 +184,10 @@ function createRevisionRoute(projection = new CanvasProjection()) {
       uuid: () => `dddddddd-dddd-4ddd-8ddd-${(counter += 1).toString(16).padStart(12, "0")}`,
       clock: () => later as never,
     },
-    { authorize: () => true },
+    {
+      authorize: () => true,
+      ...(options.threadOwned === true ? { threadMayOwnCanvas: () => true } : {}),
+    },
   );
   const canvasShareService = new CanvasShareService(
     {
@@ -254,7 +265,10 @@ function createRevisionRoute(projection = new CanvasProjection()) {
         memory: [],
       }),
     },
-    activeContextResolver: async () => ({ mode: "chat", projectId }),
+    activeContextResolver: async () => ({
+      mode: options.activeMode ?? "chat",
+      projectId: options.threadOwned === true ? null : projectId,
+    }),
     now: () => 1,
   });
   return route;
@@ -473,7 +487,10 @@ function bootstrapFor(project: typeof projectId): ShellBootstrap {
   };
 }
 
-function seedProjection(projection: CanvasProjection) {
+function seedProjection(
+  projection: CanvasProjection,
+  canvasProjectId: typeof projectId | null = projectId,
+) {
   projection.applyCreated({
     canvasId,
     version: {
@@ -487,7 +504,7 @@ function seedProjection(projection: CanvasProjection) {
         provenance: {
           mode: "chat",
           hostId: "local" as never,
-          projectId,
+          projectId: canvasProjectId,
           threadId: threadId as never,
           actor: {
             kind: "local-user",
@@ -1229,6 +1246,69 @@ describe("canvas routes", () => {
     );
     const outcome = decodeCanvasThreadReferenceCardsOutcome(JSON.parse(await cards!.text()));
     expect(outcome.cards.map((card) => card.canvasId)).toContain(result.card.canvasId);
+  });
+
+  it("serves a Canvas owned by a Chat thread outside every Project to a Chat window with no Project, lists it on that thread, and files its exports under the host folder", async () => {
+    const route = createRevisionRoute(new CanvasProjection(), { threadOwned: true });
+    const headers = { "x-octant-window-capability": windowCapability };
+
+    const got = await route(
+      new Request(`http://127.0.0.1/api/canvas/get?canvasId=${String(canvasId)}`, {
+        method: "GET",
+        headers,
+      }),
+    );
+    const body = JSON.parse(await got!.text());
+    expect(body.kind).toBe("ready");
+    expect(body.version.definition.provenance.projectId).toBeNull();
+
+    const cards = await route(
+      new Request(
+        `http://127.0.0.1/api/canvas/thread-reference-cards?mode=chat&threadId=${threadId}&projectId=null`,
+        { method: "GET", headers },
+      ),
+    );
+    const outcome = decodeCanvasThreadReferenceCardsOutcome(JSON.parse(await cards!.text()));
+    expect(outcome.cards.map((card) => String(card.canvasId))).toEqual([String(canvasId)]);
+    expect(outcome.cards[0]?.scope.workspace).toEqual({ kind: "chat-virtual", projectId: null });
+
+    const created = await route(
+      new Request("http://127.0.0.1/api/canvas/create", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...headers },
+        body: JSON.stringify({
+          ...createBody(),
+          workspace: { kind: "chat-virtual", projectId: null },
+        }),
+      }),
+    );
+    const result = decodeCanvasCreateResult(JSON.parse(await created!.text()));
+    expect(result.kind).toBe("accepted");
+
+    const folder = await route(
+      new Request(`http://127.0.0.1/api/canvas/export-folder?canvasId=${String(canvasId)}`, {
+        method: "GET",
+        headers,
+      }),
+    );
+    expect(JSON.parse(await folder!.text())).toMatchObject({
+      kind: "canvas-export-folder-view",
+      scope: "host",
+    });
+
+    // The Canvas is the thread's, not Work's: a window in another mode is
+    // refused it the way it would be refused any Chat Canvas.
+    const workRoute = createRevisionRoute(new CanvasProjection(), {
+      threadOwned: true,
+      activeMode: "work",
+    });
+    const refused = await workRoute(
+      new Request(`http://127.0.0.1/api/canvas/get?canvasId=${String(canvasId)}`, {
+        method: "GET",
+        headers,
+      }),
+    );
+    expect(JSON.parse(await refused!.text()).kind).toBe("unauthorized");
   });
 
   it("lists the recipes a person may start a Canvas from, and only to an authenticated window", async () => {

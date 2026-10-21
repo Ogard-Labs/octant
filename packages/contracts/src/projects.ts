@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { CanvasDesignBrand } from "./canvasBrand";
 import { ActorId, AggregateVersion, EventActor, UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { ProviderInstanceId } from "./providers";
@@ -139,6 +140,13 @@ const ProjectFields = {
   name: Schema.NonEmptyTrimmedString,
   /** Absent means no colour was picked; older Projects and events never carried one. */
   color: Schema.optional(ProjectColor),
+  /**
+   * The Project's brand: the colours, fonts, radius and spacing its designs
+   * draw with when they choose the brand theme. Absent means no kit was
+   * defined. It has the shape of a design's own brand, so one rule validates
+   * both.
+   */
+  brandKit: Schema.optional(CanvasDesignBrand),
   lifecycle: ProjectLifecycle,
   pinned: Schema.Boolean,
   rank: ProjectRank,
@@ -447,6 +455,12 @@ export const ProjectCommand = Schema.Union(
     ...ProjectCommandFields,
     statusFile: WorkProjectStatusFile,
   }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("change-project-brand-kit"),
+    ...ProjectCommandFields,
+    /** An empty kit clears it. */
+    brandKit: CanvasDesignBrand,
+  }).annotations(strict),
 );
 export type ProjectCommand = typeof ProjectCommand.Type;
 
@@ -497,6 +511,10 @@ export const ProjectCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("work-project-status-file-changed"),
     project: WorkProject,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("project-brand-kit-changed"),
+    project: Project,
   }).annotations(strict),
 );
 export type ProjectCommandResult = typeof ProjectCommandResult.Type;
@@ -619,6 +637,8 @@ export const WorkProjectStatusFileChanged = Schema.Struct({
   project: WorkProject,
 }).annotations(strict);
 export type WorkProjectStatusFileChanged = typeof WorkProjectStatusFileChanged.Type;
+export const ProjectBrandKitChanged = Schema.Struct({ project: Project }).annotations(strict);
+export type ProjectBrandKitChanged = typeof ProjectBrandKitChanged.Type;
 
 export const MemoryEntryCreated = Schema.Struct({ entry: ActiveMemoryEntry }).annotations(strict);
 export type MemoryEntryCreated = typeof MemoryEntryCreated.Type;
@@ -648,6 +668,7 @@ export const PROJECT_EVENT_NAMES = [
   "project.code-pull-request-background-refresh-changed@1",
   "project.provider-policy-changed@1",
   "project.work-status-file-changed@1",
+  "project.brand-kit-changed@1",
   "memory.entry-created@1",
   "memory.entry-superseded@1",
   "memory.entry-retracted@1",
@@ -690,6 +711,7 @@ export const decodeProjectProviderPolicyChanged = Schema.decodeUnknownSync(
 export const decodeWorkProjectStatusFileChanged = Schema.decodeUnknownSync(
   WorkProjectStatusFileChanged,
 );
+export const decodeProjectBrandKitChanged = Schema.decodeUnknownSync(ProjectBrandKitChanged);
 export const decodeMemoryEntryCreated = Schema.decodeUnknownSync(MemoryEntryCreated);
 export const decodeMemoryEntrySuperseded = Schema.decodeUnknownSync(MemoryEntrySuperseded);
 export const decodeMemoryEntryRetracted = Schema.decodeUnknownSync(MemoryEntryRetracted);
