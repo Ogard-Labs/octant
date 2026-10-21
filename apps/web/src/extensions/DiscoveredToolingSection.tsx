@@ -8,6 +8,7 @@ import type {
 } from "@octant/contracts/extension-rpc";
 import { useCallback, useEffect, useState } from "react";
 import { SettingsSection } from "../settings/primitives";
+import { OctantAlert } from "../ui/base/OctantAlert";
 import { OctantButton } from "../ui/base/OctantButton";
 
 export interface DiscoveredToolingSectionProps {
@@ -156,9 +157,9 @@ export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
                     </span>
                   )}
                   {failure?.id === server.id ? (
-                    <span className="discovered-tooling__detail" role="alert">
+                    <OctantAlert className="provider-settings__alert" tone="warning">
                       {failure.failure.message}
-                    </span>
+                    </OctantAlert>
                   ) : null}
                 </span>
                 <OctantButton
@@ -188,9 +189,9 @@ export function DiscoveredToolingSection(props: DiscoveredToolingSectionProps) {
                     {plugin.enabledThere ? "" : " · off there"}
                   </span>
                   {failure?.id === plugin.id ? (
-                    <span className="discovered-tooling__detail" role="alert">
+                    <OctantAlert className="provider-settings__alert" tone="warning">
                       {failure.failure.message}
-                    </span>
+                    </OctantAlert>
                   ) : null}
                 </span>
                 <OctantButton
