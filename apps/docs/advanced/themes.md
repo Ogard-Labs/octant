@@ -121,17 +121,16 @@ from the font picker as System interface.
 
 ### Glass
 
-**Glass** is the frosted material behind the sidebar and around the workspace
-cards: **Off** paints it solid, **Subtle** or **Strong** uses the system
-material at that strength. **Tint** (0–90%) sets how much colour lies over
-the glass behind the sidebar and around the cards; lower is more see-through,
-and until you move it the slider shows the level's own tint. In the desktop app
-the glass frosts your desktop; with a background shown everywhere it frosts
-that instead. Increased contrast keeps the tint at 80% or more, and Reduced
-transparency makes it solid. **Glass cards** lets the glass show through the
-cards as well. When the material resolves to opaque — for accessibility or
-performance reasons — the interface says so honestly. **Reduced
-Transparency** and **Increased Contrast** resolve the sidebar to opaque.
+**Glass** is the frosted material behind the whole window: the rail, the
+sidebar, and everything you work in. **Off** paints the window solid,
+**Subtle** or **Strong** uses the system material at that strength. **Tint**
+(0–90%) sets how much colour lies over the glass; lower is more see-through,
+and until you move it the slider shows the level's own tint. In the desktop
+app the glass frosts your desktop, and a background shown everywhere sits
+between that frost and your work. Increased contrast keeps the tint at 80% or
+more, and Reduced transparency makes the window solid. When the material
+resolves to opaque — for accessibility or performance reasons — the interface
+says so honestly.
 
 ### Sidebar background
 

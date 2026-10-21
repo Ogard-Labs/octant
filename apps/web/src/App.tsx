@@ -252,7 +252,6 @@ import {
 } from "./shell/workspaceTabLifecycle";
 import {
   readSidebarCollapsed,
-  resolveWorkspaceMaterial,
   useAutomaticUpdateCheckSync,
   useReleaseRingSync,
   useHostReportedSidebarVibrancy,
@@ -767,10 +766,6 @@ function LaunchedShell(
   const material = useResolvedMaterial(
     controller.settings?.sidebarMaterial ?? "opaque",
     props.hostBridge,
-  );
-  const workspaceMaterial = resolveWorkspaceMaterial(
-    controller.settings?.workspaceMaterial ?? "opaque",
-    material,
   );
   const sidebarVibrancySupported = useSidebarVibrancySupported(props.hostBridge);
   useAutomaticUpdateCheckSync(props.hostBridge, controller.settings?.automaticUpdateChecks);
@@ -6394,7 +6389,6 @@ function LaunchedShell(
         bottomPanelHeight={bottomPanelHeight}
         bottomPanelOpen={bottomPanelPresentedOpen}
         material={material}
-        workspaceMaterial={workspaceMaterial}
         onCommitSidebarWidth={(width) => {
           setPreviewSidebarWidth(width);
           void controller.updateSettings({ sidebarWidth: width });

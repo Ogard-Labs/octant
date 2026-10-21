@@ -85,19 +85,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Glass",
           scope: "app",
           keywords:
-            "glass translucent translucency sidebar material vibrancy subtle strong frosted system opaque",
+            "glass translucent translucency window sidebar material vibrancy subtle strong frosted system opaque",
         },
         {
           id: settingId("glass-tint"),
           label: "Glass tint",
           scope: "app",
-          keywords: "glass tint opacity transparency see-through darkness sidebar gutters vibrancy",
-        },
-        {
-          id: settingId("workspace-material"),
-          label: "Glass cards",
-          scope: "app",
-          keywords: "translucent workspace window material vibrancy glass system opaque",
+          keywords: "glass tint opacity transparency see-through darkness window vibrancy",
         },
         {
           id: settingId("transcript-text-size"),

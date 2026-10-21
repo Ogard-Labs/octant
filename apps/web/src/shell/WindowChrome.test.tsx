@@ -494,14 +494,10 @@ describe("WindowChrome", () => {
     const increasedContrast = increasedContrastRules();
 
     expect(styles).not.toContain("prefers-contrast");
-    expect(reducedTransparency).toContain(".shell--material-translucent.shell-frame > .sidebar");
-    expect(reducedTransparency).toContain(
-      '.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame > .sidebar',
-    );
-    expect(reducedTransparency).toContain(
-      '.shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame > .sidebar',
-    );
-    expect(reducedTransparency).toContain("backdrop-filter: none;");
+    // The whole window is one surface, so reduced transparency makes that one
+    // surface opaque rather than repainting each column.
+    expect(reducedTransparency).toContain(".shell.shell-frame");
+    expect(reducedTransparency).toContain("--octant-window-surface: var(--octant-workspace);");
     expect(reducedTransparency).not.toContain("--octant-border-strong");
     expect(reducedTransparency).not.toContain("--octant-text-");
     expect(reducedTransparency).not.toContain("box-shadow:");
@@ -689,10 +685,11 @@ describe("WindowChrome", () => {
     expect(coarse).toMatch(/\.sidebar-navigation__thread-lineage \{\s*right: 50px;/);
   });
 
-  it("exposes the native sidebar canvas and integrated titlebar while keeping workspace surfaces opaque", () => {
+  it("lets the native window glass through one window surface under an integrated titlebar", () => {
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("background: transparent;");
-    expect(cssRule('html[data-octant-native-host="true"] .shell.shell-frame')).toContain(
-      "background: transparent;",
+    expect(cssRule(".shell.shell-frame")).toContain("background: var(--octant-window-surface);");
+    expect(cssRule(".shell.shell-frame.shell--material-translucent")).toContain(
+      "--octant-window-surface: var(--octant-workspace-translucent);",
     );
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("overflow: clip;");
     expect(cssRule(".shell.shell-frame--standalone")).toContain("position: fixed;");
@@ -700,21 +697,15 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
   });
 
-  it("keeps dense sidebar content legible when the background covers it", () => {
-    expect(
-      cssRule(
-        ".shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame > .sidebar",
-      ),
-    ).toContain("background: color-mix(in srgb, var(--octant-sidebar) 88%, transparent);");
-    expect(styles).not.toContain(
-      ".shell--app-backdrop.shell--app-backdrop-sidebar.shell-frame > .sidebar",
-    );
+  it("paints no column of its own over the window surface", () => {
+    // A column with its own fill hides the glass and the ground behind it,
+    // which is how the glass came to show in a sidebar strip alone.
+    expect(cssRule(".shell-frame > .sidebar")).toContain("background: transparent;");
+    expect(cssRule(".shell-frame > .sidebar-rail")).toContain("background: transparent;");
+    expect(styles).not.toContain("--octant-card-gutter");
   });
 
   it("gives conversations one legible reading surface over the application ground", () => {
-    expect(cssRule(".shell--app-backdrop.shell-frame > .workspace-layer")).toContain(
-      "background: transparent;",
-    );
     for (const workspace of [
       ".shell--app-backdrop.shell-frame .chat-workspace",
       ".shell--app-backdrop.shell-frame .work-thread-workspace",
@@ -747,13 +738,14 @@ describe("WindowChrome", () => {
     expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
   });
 
-  it("clears the workspace and pane fills under a translucent workspace so the glass shows", () => {
+  it("clears the workspace, pane, and reader page fills inside the window so the glass shows", () => {
     // Each surface paints the opaque workspace colour on its own, so any one
     // of them left filled hides the glass behind the whole workspace.
-    for (const surface of [".workspace", ".workspace-pane"]) {
-      expect(cssRule(`.shell--workspace-material-translucent.shell-frame ${surface}`)).toContain(
-        "background: transparent;",
-      );
+    for (const surface of [".workspace-layer", " .workspace", " .workspace-pane", " .surface"]) {
+      const selector = surface.startsWith(" ")
+        ? `.shell-frame${surface}`
+        : `.shell-frame > ${surface}`;
+      expect(cssRule(selector)).toContain("background: transparent;");
     }
   });
 
@@ -767,7 +759,7 @@ describe("WindowChrome", () => {
       "color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent)",
     );
     expect(atRuleBlock("@media (prefers-reduced-transparency: reduce)")).toContain(
-      'html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) > .sidebar',
+      "--octant-window-surface: var(--octant-workspace);",
     );
   });
 

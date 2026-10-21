@@ -23,37 +23,47 @@
   grid-template-rows: 34px minmax(0, 1fr);
   overflow: hidden;
   position: relative;
-  background: var(--oct-bg);
+  /* The window is one surface. The rail, the sidebar, and the workspace share
+     one colour, told apart by hairlines rather than by cards floating on a
+     back, and it is painted here once so every column above stays clear.
+     When the host resolved glass, the surface is the tint over the window's
+     native material, so the frost reaches the whole window and not the
+     sidebar alone: with the old cards the glass showed only in a sidebar
+     strip, and an opaque card covered everything a person worked in. */
+  --octant-window-surface: var(--octant-workspace);
+  background: var(--octant-window-surface);
   border: 0;
   border-radius: 0;
   box-shadow: none;
 }
 
-html[data-octant-native-host="true"] .shell.shell-frame,
+.shell.shell-frame.shell--material-translucent {
+  --octant-window-surface: var(--octant-workspace-translucent);
+}
+
+.shell.shell-frame.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"] {
+  --octant-window-surface: var(--octant-workspace-translucent-subtle);
+}
+
+.shell.shell-frame.shell--material-translucent[data-octant-sidebar-vibrancy="strong"] {
+  --octant-window-surface: var(--octant-workspace-translucent-strong);
+}
+
+/* The material class already carries the host's contrast and
+   reduced-transparency gates; these cover the person's own Reduced
+   transparency switch and the system setting, which a page can see first. */
+html[data-octant-reduced-transparency="true"] .shell.shell-frame {
+  --octant-window-surface: var(--octant-workspace);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .shell.shell-frame {
+    --octant-window-surface: var(--octant-workspace);
+  }
+}
+
 html[data-octant-native-host="true"] .shell.shell-frame--standalone {
   background: transparent;
-}
-
-/* The native window is transparent only so the sidebar's glass can frost the
-   desktop. With the ground drawn under the whole shell (0091) the workspace
-   layer over it is translucent too, and through that the transparent window
-   showed whatever sat behind Octant, sharp, under every transcript. The ground
-   needs an opaque page beneath it, glass or not. */
-html[data-octant-native-host="true"] .shell.shell-frame.shell--app-backdrop {
-  background: var(--octant-app-background);
-}
-
-/* Keep native sidebar glass clear while backing the reading area with an
-   opaque ground. A solid root behind both columns hid vibrancy in the main
-   window even though standalone Settings used the same translucent sidebar. */
-html[data-octant-native-host="true"]
-  .shell.shell-frame.shell--app-backdrop.shell--material-translucent {
-  background: linear-gradient(
-    to right,
-    transparent calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width)),
-    var(--octant-app-background)
-      calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width))
-  );
 }
 
 /* The rail beside the sidebar spends width from the same budget, so the
@@ -234,11 +244,8 @@ html[data-octant-native-host="true"]
   grid-row: 1 / -1;
   flex-direction: column;
   overflow: hidden;
-  background: var(--octant-sidebar-translucent);
-}
-
-.shell--material-opaque.shell-frame > .sidebar-rail {
-  background: var(--octant-sidebar-opaque);
+  border-right: 1px solid var(--octant-border-soft);
+  background: transparent;
 }
 
 .sidebar-rail__traffic-lights {
@@ -547,7 +554,8 @@ html[data-octant-native-host="true"]
   grid-row: 1 / -1;
   padding: 0;
   overflow: hidden;
-  background: var(--octant-sidebar-translucent);
+  border-right: 1px solid var(--octant-border-soft);
+  background: transparent;
 }
 
 .sidebar__native-leading {
@@ -618,7 +626,9 @@ html[data-octant-native-host="true"]
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  background: var(--oct-bg);
+  /* Clear like every column: the window surface under it is the workspace
+     colour, or the glass. */
+  background: transparent;
 }
 
 .sidebar__projects-pane > .projects-directory {
@@ -657,40 +667,6 @@ html[data-octant-native-host="true"]
   background: var(--oct-accent-fg);
 }
 
-.shell--material-opaque.shell-frame > .sidebar {
-  background: var(--octant-sidebar-opaque);
-  backdrop-filter: none;
-}
-
-/* Glass sidebar: tint, blur, and a top inner highlight from the shared
-   material tokens. Tune `--octant-glass-*` in styles.css to adjust every glass
-   surface at once; vibrancy modes only scale the sidebar. */
-.shell--material-translucent.shell-frame > .sidebar {
-  background: var(--octant-sidebar-translucent);
-  border-right: 1px solid color-mix(in srgb, var(--octant-border) 72%, transparent);
-  box-shadow: var(--octant-glass-highlight);
-  backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
-}
-
-.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame > .sidebar {
-  --octant-glass-blur: 16px;
-  --octant-glass-saturate: 120%;
-  background: var(--octant-sidebar-translucent-subtle);
-}
-
-.shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame > .sidebar {
-  --octant-glass-blur: 34px;
-  --octant-glass-saturate: 165%;
-  background: var(--octant-sidebar-translucent-strong);
-}
-
-/* Under the native host the window itself is transparent, and CSS
-   backdrop-filter blurs only this page's own pixels — it can never frost
-   another app's window. The resolved material already includes the host's
-   composition, performance, contrast, and reduced-transparency gates, so the
-   renderer can apply the same visual state immediately in the main shell and
-   standalone Settings. */
-
 /* Frost sidebar background art behind a mode-aware glass wash so preset and
    custom backgrounds read as material behind the glass, not paint on top. */
 .shell--material-translucent.shell-frame > .sidebar [data-octant-sidebar-background]::after {
@@ -701,53 +677,13 @@ html[data-octant-native-host="true"]
   backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
 }
 
-/* Workspace translucency (docs/decisions/0047): an opt-in extension of the
-   sidebar glass to the workspace background. It only ever renders when the
-   sidebar is already translucent (the "Translucent workspace" setting is
-   disabled otherwise), so it reuses the sidebar's own intensity tier
-   (data-octant-sidebar-vibrancy) and native-vibrancy-active gate
-   (data-octant-host-vibrancy) rather than tracking a second set of gates. */
-.shell--workspace-material-translucent.shell-frame > .workspace-layer {
-  background: var(--octant-workspace-translucent);
-  backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
-}
-
-.shell--workspace-material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
-  > .workspace-layer {
-  --octant-glass-blur: 16px;
-  --octant-glass-saturate: 120%;
-  background: var(--octant-workspace-translucent-subtle);
-}
-
-.shell--workspace-material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
-  > .workspace-layer {
-  --octant-glass-blur: 34px;
-  --octant-glass-saturate: 165%;
-  background: var(--octant-workspace-translucent-strong);
-}
-
-.shell--workspace-material-translucent.shell-frame > .sidebar > .sidebar__projects-pane {
-  background: var(--octant-workspace-translucent);
-  backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
-}
-
-.shell--workspace-material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
-  > .sidebar
-  > .sidebar__projects-pane {
-  background: var(--octant-workspace-translucent-subtle);
-}
-
-.shell--workspace-material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
-  > .sidebar
-  > .sidebar__projects-pane {
-  background: var(--octant-workspace-translucent-strong);
-}
-
-/* The workspace and its panes each paint the opaque workspace colour. With
-   the layer beneath them translucent, that fill hid
-   the glass entirely, so the setting appeared to do nothing. */
-.shell--workspace-material-translucent.shell-frame .workspace,
-.shell--workspace-material-translucent.shell-frame .workspace-pane {
+/* Every column is clear over the one window surface (see .shell.shell-frame).
+   The workspace and its panes each painted the opaque workspace colour, which
+   hid the window's glass entirely. */
+.shell-frame .workspace,
+.shell-frame .workspace-pane,
+.shell-frame .surface,
+.shell-frame .projects-workspace--detail-only {
   background: transparent;
 }
 
@@ -1785,365 +1721,32 @@ html[data-octant-native-host="true"]
   cursor: pointer;
 }
 
-/* Painted opaque at the layer itself, not only by the surfaces inside it:
-   under the native host the window and the shell frame are transparent, so
-   any pixel this column leaves unpainted — a rounding gutter at the right
-   edge, a surface that forgets its ground — shows whatever window sits
-   behind Octant, sharp. */
 .shell-frame > .workspace-layer {
   grid-column: 2;
   grid-row: 1 / -1;
   border-left: 0;
-  background: var(--oct-bg);
+  background: transparent;
 }
 
-/* Cards on a back layer. The sidebar and the gutters around the workspace are
-   one surface painted with the sidebar's own material, so the glass (or the
-   opaque sidebar colour) reads as the window's back and the primary
-   workspace, the dock, and the bottom panel sit on it as cards. The material
-   class is already resolved against the host's vibrancy, contrast, and
-   reduced-transparency gates, so an opaque back is what an unfrosted window
-   gets — never a transparent one showing the desktop sharp. A narrow window
-   keeps the flat layout: its sidebar is an overlay drawer, not a back. */
+/* Columns on one surface. The sidebar, the primary workspace, the right dock,
+   and the bottom panel sit edge to edge on the window surface, told apart by
+   the hairlines their resize handles already draw. They were rounded cards
+   floating 8px apart on a back of the sidebar's material, which spent a
+   gutter on every edge and kept the glass out of everything a person works
+   in. A narrow window keeps its overlay drawer. */
 @media (min-width: 681px) {
-  .shell.shell-frame {
-    --octant-card-gutter: var(--oct-space-2);
-    /* A rounded rectangle at whatever size the mask is drawn: the primary
-       card's own shape, so the frost reaches into its corners too. */
-    --octant-primary-card-hole: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Crect width='100%25' height='100%25' rx='16'/%3E%3C/svg%3E");
-  }
-
-  .shell--material-translucent.shell-frame > .sidebar {
-    border-right: 0;
-  }
-
-  .shell-frame__sidebar-resize::before {
-    background: transparent;
-  }
-
-  .shell-frame > .workspace-layer {
-    gap: var(--octant-card-gutter);
-    /* A gutter on every side, the sidebar's too: the card floats on the back
-       rather than sitting against the sidebar's edge, so the sidebar reads as
-       part of the back and not as a second column. */
-    padding: var(--octant-card-gutter);
-    background: var(--octant-sidebar-opaque);
-  }
-
-  .shell--material-translucent.shell-frame > .workspace-layer {
-    background: var(--octant-sidebar-translucent);
-  }
-
-  .shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
-    > .workspace-layer {
-    background: var(--octant-sidebar-translucent-subtle);
-  }
-
-  .shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
-    > .workspace-layer {
-    background: var(--octant-sidebar-translucent-strong);
-  }
-
-  .shell-frame
-    > .workspace-layer
-    > :is(.primary-workspace-layer, .right-utility-dock, .bottom-utility-panel) {
-    border: 1px solid var(--octant-border);
-    border-radius: var(--oct-radius-md);
-    background: var(--oct-bg);
-  }
-
-  /* Translucent workspace (0047) now means a glass card rather than a glass
-     column, and the application ground under the whole shell shows through
-     the card the way it showed through the column. */
-  .shell--workspace-material-translucent.shell-frame > .workspace-layer > .primary-workspace-layer {
-    background: var(--octant-workspace-translucent);
-  }
-
-  .shell--app-backdrop.shell-frame > .workspace-layer > .primary-workspace-layer {
-    background: transparent;
-  }
-
-  /* Over the application ground the back is laid only in the gutters. Painted
-     across the whole workspace layer, its tint sat under the see-through
-     primary card too, so the ground inside the card read through a 60% dark
-     film and the dither's cells washed out. The layer below is frosted
-     everywhere except a rounded hole the size of the primary card, measured by
-     ShellFrame, so the outer gutters and the gaps beside the dock and bottom
-     panel frost alike. Before the first measurement the hole falls back to the
-     card's usual place. The masks read alpha only, so currentColor stands in
-     for "keep". */
-  .shell--app-backdrop.shell-frame > .workspace-layer,
-  .shell--app-backdrop.shell-frame[data-octant-sidebar-vibrancy] > .workspace-layer {
-    position: relative;
-    isolation: isolate;
-    background: transparent;
-  }
-
-  .shell--app-backdrop.shell-frame > .workspace-layer::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: -1;
-    background: var(--octant-sidebar-opaque);
-    pointer-events: none;
-    -webkit-mask:
-      var(--octant-primary-card-hole) no-repeat
-        var(--octant-primary-card-x, var(--octant-card-gutter))
-        var(--octant-primary-card-y, var(--octant-card-gutter)) /
-        var(--octant-primary-card-w, calc(100% - var(--octant-card-gutter)))
-        var(--octant-primary-card-h, calc(100% - 2 * var(--octant-card-gutter))),
-      linear-gradient(currentColor 0 0);
-    -webkit-mask-composite: xor;
-    mask:
-      var(--octant-primary-card-hole) no-repeat
-        var(--octant-primary-card-x, var(--octant-card-gutter))
-        var(--octant-primary-card-y, var(--octant-card-gutter)) /
-        var(--octant-primary-card-w, calc(100% - var(--octant-card-gutter)))
-        var(--octant-primary-card-h, calc(100% - 2 * var(--octant-card-gutter))),
-      linear-gradient(currentColor 0 0);
-    mask-composite: exclude;
-  }
-
-  /* Unless the person asked for the ground behind the sidebar too, it lives
-     in the primary card alone, and the sidebar and gutters are one back with
-     the card floating on it. Drawn under the whole shell, the picture ran on
-     behind the sidebar and gutters with Cover sidebar off, and the back read
-     as a muddy second copy of the picture beside the cards.
-
-     The ground carries its own page colour and is cut to the card's rounded
-     rectangle, measured from the window by ShellFrame, so nothing outside the
-     card depends on the window's background. Its fade toward the bottom moves
-     to the pictures inside it, so the page colour under them stays whole. */
-  .shell--app-backdrop.shell-frame:not(.shell--app-backdrop-sidebar)
-    > .app-backdrop[data-placement="shell"] {
-    background: var(--octant-app-background);
-    -webkit-mask: var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-frame-x, 0)
-      var(--octant-primary-card-frame-y, 0) / var(--octant-primary-card-w, 100%)
-      var(--octant-primary-card-h, 100%);
-    mask: var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-frame-x, 0)
-      var(--octant-primary-card-frame-y, 0) / var(--octant-primary-card-w, 100%)
-      var(--octant-primary-card-h, 100%);
-  }
-
-  .shell--app-backdrop.shell-frame:not(.shell--app-backdrop-sidebar)
-    > .app-backdrop[data-placement="shell"]
-    > :is(.app-backdrop__builtin, .app-backdrop__photo) {
-    -webkit-mask: linear-gradient(
-      to bottom,
-      currentColor 40%,
-      color-mix(in srgb, currentColor 45%, transparent) 75%,
-      color-mix(in srgb, currentColor 20%, transparent) 100%
-    );
-    mask: linear-gradient(
-      to bottom,
-      currentColor 40%,
-      color-mix(in srgb, currentColor 45%, transparent) 75%,
-      color-mix(in srgb, currentColor 20%, transparent) 100%
-    );
-  }
-
-  /* With nothing behind the back to blur, a frost on the gutters only reached
-     into the card beside them and smeared the picture's colour into the gap,
-     a brown strip that set the sidebar apart as its own column. The back is
-     one flat tint here; the sidebar's top highlight goes too, since it drew a
-     line the gutters did not share. */
-  .shell--app-backdrop.shell--material-translucent.shell-frame:not(.shell--app-backdrop-sidebar)
-    > .workspace-layer::before {
-    backdrop-filter: none;
-  }
-
-  .shell--app-backdrop.shell-frame:not(.shell--app-backdrop-sidebar).shell--material-translucent
-    > .sidebar {
-    box-shadow: none;
-  }
-
-  /* In the desktop app the window is see-through behind the sidebar so the
-     system can frost the desktop there; the gutters sat on an opaque page
-     instead, so the two never matched. With the ground carrying its own page
-     colour inside the card, the whole window can stay see-through and the
-     sidebar and gutters frost alike. */
-  html[data-octant-native-host="true"]
-    .shell.shell-frame.shell--app-backdrop.shell--material-translucent:not(
-      .shell--app-backdrop-sidebar
-    ) {
-    background: transparent;
-  }
-
-  /* Glass cards over the ground: the card is the glass, not the back. The
-     workspace layer kept its own frost from the old glass column (0047), so
-     it blurred the picture under the card into the gutter beside the sidebar
-     and around the card's rounded corner, a brown smear where the back should
-     be flat. The layer stays clear and the primary card frosts what is
-     under it, inside its own rounded rectangle. */
-  @media (prefers-reduced-transparency: no-preference) {
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--workspace-material-translucent.shell-frame
-      > .workspace-layer,
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--workspace-material-translucent[data-octant-sidebar-vibrancy].shell-frame
-      > .workspace-layer {
-      backdrop-filter: none;
-    }
-
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--workspace-material-translucent.shell-frame
-      > .workspace-layer
-      > .primary-workspace-layer {
-      background: var(--octant-workspace-translucent);
-      backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
-    }
-
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--workspace-material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
-      > .workspace-layer
-      > .primary-workspace-layer {
-      --octant-glass-blur: 16px;
-      --octant-glass-saturate: 120%;
-      background: var(--octant-workspace-translucent-subtle);
-    }
-
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--workspace-material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
-      > .workspace-layer
-      > .primary-workspace-layer {
-      --octant-glass-blur: 34px;
-      --octant-glass-saturate: 165%;
-      background: var(--octant-workspace-translucent-strong);
-    }
-  }
-
-  /* With Cover sidebar on, the sidebar and the gutters frosted the picture
-     separately: two blurs side by side, each fading at its own edge, left a
-     seam where they met and a lighter strip at the card's corner. One frost
-     lies over the whole window instead, on the frame just above the ground,
-     with the card's rectangle cut out; the sidebar and gutters above it stay
-     clear. (A frost inside the ground's own layer blurred nothing: the
-     picture there came through black.) */
-  @media (prefers-reduced-transparency: no-preference) {
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-translucent.shell-frame
-      > .app-backdrop[data-placement="shell"] {
-      z-index: -2;
-    }
-
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-translucent.shell-frame::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      z-index: -1;
-      pointer-events: none;
-      background: var(--octant-sidebar-translucent);
-      backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
-      -webkit-mask:
-        var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-frame-x, 100%)
-          var(--octant-primary-card-frame-y, 100%) / var(--octant-primary-card-w, 0)
-          var(--octant-primary-card-h, 0),
-        linear-gradient(currentColor 0 0);
-      -webkit-mask-composite: xor;
-      mask:
-        var(--octant-primary-card-hole) no-repeat var(--octant-primary-card-frame-x, 100%)
-          var(--octant-primary-card-frame-y, 100%) / var(--octant-primary-card-w, 0)
-          var(--octant-primary-card-h, 0),
-        linear-gradient(currentColor 0 0);
-      mask-composite: exclude;
-    }
-
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame::before {
-      --octant-glass-blur: 16px;
-      --octant-glass-saturate: 120%;
-      background: var(--octant-sidebar-translucent-subtle);
-    }
-
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame::before {
-      --octant-glass-blur: 34px;
-      --octant-glass-saturate: 165%;
-      background: var(--octant-sidebar-translucent-strong);
-    }
-
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-translucent.shell-frame
-      > .sidebar,
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-translucent.shell-frame
-      > .workspace-layer::before,
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-translucent[data-octant-sidebar-vibrancy].shell-frame
-      > .sidebar,
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-translucent[data-octant-sidebar-vibrancy].shell-frame
-      > .workspace-layer::before {
-      background: transparent;
-      backdrop-filter: none;
-    }
-  }
-
-  /* When the ground runs under an opaque sidebar too, the gutters take the
-     same wash the sidebar does (surface.css), so the back stays one piece. */
-  .shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame
-    > .workspace-layer::before {
-    background: color-mix(in srgb, var(--octant-sidebar) 88%, transparent);
-  }
-
-  .shell--app-backdrop.shell--material-translucent.shell-frame > .workspace-layer::before {
-    background: var(--octant-sidebar-translucent);
-    backdrop-filter: blur(var(--octant-glass-blur)) saturate(var(--octant-glass-saturate));
-  }
-
-  .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
-    > .workspace-layer::before {
-    --octant-glass-blur: 16px;
-    --octant-glass-saturate: 120%;
-    background: var(--octant-sidebar-translucent-subtle);
-  }
-
-  .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
-    > .workspace-layer::before {
-    --octant-glass-blur: 34px;
-    --octant-glass-saturate: 165%;
-    background: var(--octant-sidebar-translucent-strong);
-  }
-
-  /* Reader pages painted the darker page ground so they stood apart from the
-     flat workspace. On a card that reads as a second card colour; the card
-     is the separation now. */
-  .shell-frame:not(.shell--app-backdrop) .surface {
-    background: var(--oct-bg);
-  }
-
-  /* The window controls float over the card's first rail. A reader page's
-     title and its Back to workspace action started inside that rail and
-     crowded the controls, so the page starts below it. */
+  /* The window controls float over the workspace's first rail. A reader
+     page's title and its Back to workspace action started inside that rail
+     and crowded the controls, so the page starts below it. */
   .shell-frame .primary-workspace-layer .surface__inner {
     padding-top: calc(var(--oct-title-rail-h) + var(--oct-space-6));
   }
 
-  /* The gutter is the separation now; a resize hairline beside it would draw
-     a second edge. The handle keeps its accent ink while grabbed. */
-  .shell-frame .right-utility-dock__resize:not(:hover, :focus-visible)::before,
-  .shell-frame .bottom-utility-panel__resize:not(:hover, :focus-visible)::before {
-    background: transparent;
-  }
-
-  /* The window chrome floats over the workspace's title row, so it moves in
-     with the card, past the card's edge; otherwise its controls sit a gutter
-     above and outside the pane header they belong to. */
-  .shell-frame > .window-chrome {
-    margin-top: calc(var(--octant-card-gutter) + 1px);
-    margin-right: calc(var(--octant-card-gutter) + 1px);
-  }
-
-  .shell--sidebar-collapsed.shell-frame > .window-chrome {
-    margin-left: calc(var(--octant-card-gutter) + 1px);
-  }
-
-  /* Inside a card the pane header no longer shares the traffic lights'
-     compact centreline, so it takes the title rail the dock head already
-     uses and the two heads close on one line. The line is drawn by the card,
-     not the header: the header stops short of the window controls by a
-     margin, and a border on it would stop there too. */
+  /* The pane header does not share the traffic lights' compact centreline,
+     so it takes the title rail the dock head already uses and the two heads
+     close on one line. The line is drawn by the pane, not the header: the
+     header stops short of the window controls by a margin, and a border on
+     it would stop there too. */
   .shell-frame .workspace-pane__header {
     min-height: var(--oct-title-rail-h);
   }
@@ -2288,99 +1891,11 @@ html[data-octant-native-host="true"]
   }
 }
 
+/* Reduced transparency makes the window surface opaque at the shell root;
+   the sidebar's own picture keeps no frost either. */
 @media (prefers-reduced-transparency: reduce) {
-  .shell--material-translucent.shell-frame > .sidebar,
-  .shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame > .sidebar,
-  .shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame > .sidebar,
-  html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) > .sidebar {
-    background: var(--octant-sidebar-opaque);
-    backdrop-filter: none;
-  }
-
   .shell--material-translucent.shell-frame > .sidebar [data-octant-sidebar-background]::after {
     content: none;
-  }
-
-  .shell--material-translucent.shell-frame > .workspace-layer,
-  .shell--material-translucent[data-octant-sidebar-vibrancy].shell-frame > .workspace-layer {
-    background: var(--octant-sidebar-opaque);
-  }
-
-  .shell--workspace-material-translucent.shell-frame > .workspace-layer,
-  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
-    > .workspace-layer,
-  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
-    > .workspace-layer,
-  html[data-octant-native-host="true"]
-    .shell-frame.shell--workspace-material-translucent
-    > .workspace-layer {
-    background: var(--oct-bg);
-    backdrop-filter: none;
-  }
-
-  .shell--workspace-material-translucent.shell-frame > .sidebar > .sidebar__projects-pane,
-  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
-    > .sidebar
-    > .sidebar__projects-pane,
-  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
-    > .sidebar
-    > .sidebar__projects-pane {
-    background: var(--oct-bg);
-    backdrop-filter: none;
-  }
-}
-
-/* On the card layout the workspace layer is the back, not the workspace.
-   The translucent-workspace fallback above paints it the card colour, which
-   erased the gutters between the cards; there the back keeps the opaque
-   sidebar colour and the cards take the workspace fill. */
-@media (prefers-reduced-transparency: reduce) and (min-width: 681px) {
-  .shell--workspace-material-translucent.shell-frame > .workspace-layer,
-  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame
-    > .workspace-layer,
-  .shell--workspace-material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame
-    > .workspace-layer,
-  html[data-octant-native-host="true"]
-    .shell-frame.shell--workspace-material-translucent
-    > .workspace-layer {
-    background: var(--octant-sidebar-opaque);
-  }
-
-  .shell--workspace-material-translucent.shell-frame
-    > .workspace-layer
-    > :is(.primary-workspace-layer, .right-utility-dock, .bottom-utility-panel) {
-    background: var(--oct-bg);
-    backdrop-filter: none;
-  }
-
-  /* The sidebar is the same back as the gutters, so it goes opaque with them;
-     left as glass it frosted the picture while the gutters beside it were
-     solid. */
-  .shell--app-backdrop.shell--material-translucent.shell-frame > .workspace-layer::before,
-  .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy].shell-frame
-    > .workspace-layer::before,
-  .shell--app-backdrop.shell--material-translucent.shell-frame > .sidebar,
-  .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy].shell-frame
-    > .sidebar {
-    background: var(--octant-sidebar-opaque);
-    backdrop-filter: none;
-  }
-}
-
-/* The same fallback when Reduce transparency is the app's own setting rather
-   than the system's: the theme provider marks the root, not the media query. */
-@media (min-width: 681px) {
-  html[data-octant-reduced-transparency="true"]
-    .shell--app-backdrop.shell--material-translucent.shell-frame
-    > .workspace-layer::before,
-  html[data-octant-reduced-transparency="true"]
-    .shell--app-backdrop.shell--material-translucent.shell-frame
-    > .sidebar,
-  html[data-octant-reduced-transparency="true"]
-    .shell--app-backdrop.shell--material-translucent[data-octant-sidebar-vibrancy].shell-frame
-    > .sidebar {
-    background: var(--octant-sidebar-opaque);
-    backdrop-filter: none;
   }
 }
 

@@ -63,7 +63,7 @@ describe("ThemeSettingsProvider", () => {
     expect(root.style.getPropertyValue("--octant-workspace")).toBe("");
   });
 
-  it("lays a chosen glass tint over the sidebar at every level, and keeps it readable under increased contrast", () => {
+  it("lays a chosen glass tint over the whole window at every level, and keeps it readable under increased contrast", () => {
     const result = render(
       <ThemeSettingsProvider settings={{ ...DEFAULT_THEME_SETTINGS, mode: "light", glassTint: 20 }}>
         <div>Theme content</div>
@@ -75,10 +75,12 @@ describe("ThemeSettingsProvider", () => {
         "color-mix(in srgb, #fafaf9 20%, transparent)",
       );
     }
-    // Glass cards keep their own tint.
-    expect(root.style.getPropertyValue("--octant-workspace-translucent-subtle")).toBe(
-      "color-mix(in srgb, #ffffff 78%, transparent)",
-    );
+    // The window surface is the workspace colour, so the tint lies over it too.
+    for (const level of ["", "-subtle", "-strong"]) {
+      expect(root.style.getPropertyValue(`--octant-workspace-translucent${level}`)).toBe(
+        "color-mix(in srgb, #ffffff 20%, transparent)",
+      );
+    }
     result.rerender(
       <ThemeSettingsProvider
         settings={{

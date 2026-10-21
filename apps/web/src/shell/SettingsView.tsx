@@ -1786,7 +1786,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
       <div className="setgroup">
         {isAvailable("sidebar-material") ? (
           <SettingRow
-            description="The frosted material behind the sidebar and around the cards. Off paints it solid."
+            description="The frosted material behind the whole window. Off paints it solid."
             focused={focusedSetting === settingId("sidebar-material")}
             label="Glass"
             scope="app"
@@ -1827,7 +1827,7 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
         ) : null}
         {isAvailable("glass-tint") && glass !== "off" && props.themeController !== undefined ? (
           <SettingRow
-            description="How much colour lies over the glass behind the sidebar and around the cards. Lower is more see-through."
+            description="How much colour lies over the glass behind the window. Lower is more see-through."
             focused={focusedSetting === settingId("glass-tint")}
             label="Tint"
             scope="app"
@@ -1847,30 +1847,6 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               step={1}
               value={glassTint}
             />
-          </SettingRow>
-        ) : null}
-        {isAvailable("workspace-material") ? (
-          <SettingRow
-            description="Let the glass show through the cards as well."
-            focused={focusedSetting === settingId("workspace-material")}
-            label="Glass cards"
-            scope="app"
-            settingId="workspace-material"
-          >
-            <OctantSwitch
-              checked={props.settings.workspaceMaterial === "system" && glass !== "off"}
-              describedBy="workspace-material-description"
-              disabled={glass === "off"}
-              label="Glass cards"
-              onCheckedChange={(checked) => {
-                props.onSettingsChange({ workspaceMaterial: checked ? "system" : "opaque" });
-              }}
-            />
-            {glass === "off" ? (
-              <p className="settings-view__effective-note" id="workspace-material-effective-note">
-                Turn on Glass first.
-              </p>
-            ) : null}
           </SettingRow>
         ) : null}
       </div>

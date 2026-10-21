@@ -56,7 +56,7 @@ chrome stays flat. A feature that is not available must explain why and offer th
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground (0091): a first-party picture or a
 person's photo, shown plain or through one still print effect, or the field of
-Pulsing characters, behind the start screens or inside the primary card.
+Pulsing characters, behind the start screens or behind every page.
 
 ## Language
 
@@ -206,20 +206,19 @@ focus; an invalid field keeps its danger border in every state. A feature's
 stylesheet lays a field out (width, height, type size) and never repaints it,
 so the three react alike in light and dark.
 
-The window frame is the one place cards carry the layout. The sidebar and the
-gutters around the workspace are a single back surface painted in the sidebar's
-material (glass, or the opaque sidebar colour when glass is off or unavailable),
-and the primary workspace, the right dock, the bottom panel, and the Settings
-page sit on it as cards: the card radius, one hairline, no shadow, 8px apart
-and 8px from every edge, the sidebar's included,
-all in the workspace colour. Reader pages inside a card use that colour too,
-so every card reads the same. Behind every page the application ground lives
-inside the primary card, cut to the card's rounded rectangle; the sidebar and
-gutters keep the back's own material, so the picture never reads as a second
-copy beside the cards. With Cover the sidebar on, the ground runs under the
-whole window and one frost lies over it with the card's rectangle cut out, so
-the sidebar and gutters frost as one piece with no seam where they meet; the
-dither stays inside the card either way. A pane header and the dock head share the
+The window is one surface. The rail, the sidebar, the primary workspace, the
+right dock, the bottom panel, and the Settings page share one colour, the
+workspace colour, painted once at the shell root, and sit edge to edge with
+no gutters, told apart only by the hairlines their resize handles draw. No
+column paints a fill of its own, so whatever the root shows reaches every one:
+the opaque workspace colour, or with Glass on the tint over the window's
+native material, which frosts the desktop behind the whole window rather than
+a sidebar strip. (The frame used to set rounded cards 8px apart on a back of
+the sidebar's material; the glass then showed only in the sidebar and an
+opaque card covered everything a person worked in, so the cards went.) Reader
+pages inside the workspace are clear too. Behind every page the application
+ground lies between the window surface and the content, from the workspace's
+leading edge, or under the whole window with Cover the sidebar on. A pane header and the dock head share the
 title rail (`--oct-title-rail-h`), and the card draws the one hairline under both. At 680px and below the
 workspace sidebar is an overlay drawer and the frame stays flat, with a scrim
 (`--octant-scrim`) dimming the page behind it. The drawer
@@ -556,8 +555,8 @@ start screen the ground is masked away behind the composer and fades out below
 it, so the prompt and the recent-thread list read on the plain page; in the
 light theme it fades out sooner, because dark text over a pale picture has
 less contrast headroom than light text over a dark one. A person
-may instead put the ground behind every page, inside the primary card, and
-under the sidebar too when they ask for it (see Shapes and depth). Conversations
+may instead put the ground behind every page, from the workspace's leading
+edge, and under the sidebar too when they ask for it (see Shapes and depth). Conversations
 soften it beneath one continuous reading background so agent replies remain
 bare prose (0155). Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›
@@ -1061,9 +1060,8 @@ hairline-ringed cards, not floating objects. Frosted material (a
 `backdrop-filter` blur) is used only where a surface has a ground behind it to
 read through:
 
-- the sidebar's optional translucency, the opt-in translucent workspace that
-  extends it, and the one frost over the application ground when it covers the
-  sidebar;
+- the window's optional glass, which is the tint over the native window
+  material behind the whole window;
 - a thread's user bubbles and composer over the application ground (agent
   replies stay bare prose; see [Transcript](#transcript));
 - Zen's windows, dock, pills, and sheets (glass cards);
@@ -1075,16 +1073,16 @@ read through:
 Its tint, stroke, and highlight are theme roles. Reduced transparency and
 unsupported `backdrop-filter` resolve every one of them to an opaque surface.
 
-The translucent workspace is the `workspaceMaterial` shell setting
-(`"system" | "opaque"`, default and absent value `"opaque"`), shown as
-the Window section's Glass cards switch, disabled until Glass is on. It takes effect only
-when the sidebar's own material already resolved translucent
-(`resolveWorkspaceMaterial`), so every accessibility, performance, and
-host-support gate on the sidebar applies to it too; it requests no second
-native material and frosts at the sidebar's vibrancy tier (subtle or strong).
-It repaints only the workspace layer and the Projects pane background; menus,
-dialogs, popovers, and other controls drawn on them stay opaque semantic
-surfaces.
+Window glass is the `sidebarMaterial` shell setting with the theme's vibrancy
+level, shown as the Window section's Glass control (Off, Subtle, Strong) and
+its Tint slider. It takes effect only when the host resolved the material
+translucent, so every accessibility, performance, and host-support gate
+applies; then the window surface is the workspace colour at the Tint's
+opacity over the native material, and reduced transparency or an unsupported
+host leaves it opaque. Menus, dialogs, popovers, and other controls drawn
+over it stay opaque semantic surfaces. The older `workspaceMaterial` setting
+is still read and stored but no longer changes anything: the whole window is
+glass or none of it is.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
@@ -1989,9 +1987,10 @@ never the theme's focus role.
 
 ### Shell edge cases
 
-- Native sidebar glass keeps a transparent backing beneath the sidebar. The
-  opaque application ground starts at the reading area's edge and covers the
-  whole window when the sidebar is collapsed.
+- The native window is transparent; the shell root paints the one window
+  surface, so no column may leave its own opaque backing. Without Cover the
+  sidebar, the application ground starts at the workspace's leading edge, and
+  covers the whole window when the sidebar is collapsed.
 - Dock tab fitting subtracts window-control padding and measures actual tab
   widths. Overflow and Add tool controls must never sit under window controls.
 - A selected Project pull request may keep Review open beside its list. Other

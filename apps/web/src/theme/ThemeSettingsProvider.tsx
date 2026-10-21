@@ -129,10 +129,11 @@ export function ThemeSettingsProvider(props: {
         }
         if (role === "sidebar" || role === "workspace") {
           const defaults = GLASS_TINT_DEFAULTS[resolved.mode];
-          // A tint the person set replaces every level's for the sidebar and
-          // the gutters it shares a back with; glass cards keep their own.
-          // Increased contrast keeps enough of the colour under sidebar text.
-          const chosen = role === "sidebar" ? accessible.glassTint : undefined;
+          // A tint the person set replaces every level's, for the sidebar's
+          // own picture wash and for the window surface, which is the
+          // workspace colour over the whole window. Increased contrast keeps
+          // enough of the colour under the text.
+          const chosen = accessible.glassTint;
           const tint =
             chosen === undefined
               ? undefined

@@ -702,18 +702,24 @@
   image-rendering: pixelated;
 }
 
-/* The shell as a stage for the ground: the layers over it that painted the
-   opaque page go translucent, the same way workspace translucency (0047)
-   lets the native glass through, so the ground shows without a second set
-   of surface rules. The sidebar keeps its own paint unless asked. */
+/* The shell as a stage for the ground. The window surface under it is opaque
+   or the glass tint, so the ground lies between the frosted desktop and the
+   content; the layers over it that painted the opaque page go clear. Unless
+   a person asked for it behind the sidebar too, it starts where the
+   workspace does. */
 .shell--app-backdrop.shell-frame {
   position: relative;
   isolation: isolate;
-  background: var(--octant-app-background);
 }
 
-.shell--app-backdrop.shell-frame > .workspace-layer {
-  background: transparent;
+.shell--app-backdrop.shell-frame:not(.shell--app-backdrop-sidebar)
+  > .app-backdrop[data-placement="shell"] {
+  left: calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width));
+}
+
+.shell--app-backdrop.shell--sidebar-collapsed.shell-frame:not(.shell--app-backdrop-sidebar)
+  > .app-backdrop[data-placement="shell"] {
+  left: 0;
 }
 
 .shell--app-backdrop.shell-frame .inbox-layer,
@@ -748,13 +754,6 @@
     color-mix(in srgb, var(--octant-app-background) 50%, transparent) 60%,
     transparent 100%
   );
-}
-
-/* Reader pages place text directly on the page instead of on conversation
-   cards. Keep the selected ground visible without painting it through text. */
-.shell--app-backdrop.shell-frame .surface,
-.shell--app-backdrop.shell-frame .projects-workspace--detail-only {
-  background: color-mix(in srgb, var(--octant-app-background) 92%, transparent);
 }
 
 /* A conversation needs one quiet reading surface: separate reply cards over
@@ -829,11 +828,4 @@
    every session in a different colour than the one its text sat on. */
 .shell--app-backdrop.shell-frame .code-terminal-pane {
   background: var(--octant-workspace);
-}
-
-/* Opaque sidebars need a wash to reveal the application ground. Translucent
-   sidebars already have one: overriding it here replaced Strong vibrancy with
-   Subtle in the main window while Settings retained the selected material. */
-.shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame > .sidebar {
-  background: color-mix(in srgb, var(--octant-sidebar) 88%, transparent);
 }
