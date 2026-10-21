@@ -1,5 +1,6 @@
 import type { ResolvedAppBackground } from "@octant/domain";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { runCharacterField } from "./appBackdropCharacters";
 import {
   decodePhoto,
   drawPrinted,
@@ -26,6 +27,7 @@ export interface AppBackdropProps {
 
 export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) {
   const photoCanvas = useRef<HTMLCanvasElement>(null);
+  const charactersCanvas = useRef<HTMLCanvasElement>(null);
   const [photo, setPhoto] = useState<DecodedPhoto | null>(null);
   const active = resolved.kind !== "none";
   const photoId = resolved.kind === "photo" ? resolved.backgroundId : null;
@@ -90,6 +92,13 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
     };
   }, [photo, resolved.effect.kind, resolved.effect.cell, resolved.effect.levels]);
 
+  const characters = resolved.kind === "characters";
+  useEffect(() => {
+    const canvas = charactersCanvas.current;
+    if (!characters || canvas === null) return;
+    return runCharacterField(canvas, resolved.backgroundAnimated);
+  }, [characters, resolved.backgroundAnimated]);
+
   if (!active) return null;
 
   const builtinUrl =
@@ -122,6 +131,13 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
           style={builtinStyle}
         />
       )}
+      {characters ? (
+        <canvas
+          className="app-backdrop__characters"
+          data-animated={resolved.backgroundAnimated ? "true" : "false"}
+          ref={charactersCanvas}
+        />
+      ) : null}
       {pictureSource === null ? null : (
         <canvas
           className="app-backdrop__photo"

@@ -47,7 +47,7 @@ import type { PreviewClient } from "@octant/client-runtime/preview-client";
 import type { CanvasClient } from "@octant/client-runtime/canvas-client";
 import type { ImageGenerationClient } from "@octant/client-runtime/image-generation-client";
 import type { CanvasInventoryEntry, ImageGenerationProfileView } from "@octant/contracts";
-import type { CanvasId } from "@octant/contracts/canvas";
+import type { CanvasDesignBrand, CanvasId } from "@octant/contracts/canvas";
 import type { CanvasThreadReferenceCard } from "@octant/contracts/canvas-cards";
 import type { ThreadHandOffOutcome } from "@octant/contracts/thread-hand-off";
 import type {
@@ -113,6 +113,7 @@ import { SideChatWorkspaceTab } from "../chat/SideChatWorkspaceTab";
 import { ThreadSubagentsTray } from "../agents/ComposerSubagentsTray";
 import { ThreadHarnessApproval } from "../harness/ThreadHarnessApproval";
 import { ThreadHarnessSteering } from "../harness/ThreadHarnessSteering";
+import { createThreadMessageQueueClient } from "../messageQueue/threadMessageQueueClient";
 import type { NativeHarnessClient } from "@octant/client-runtime/native-harness-client";
 import { useWorkResearchController } from "../work/useWorkResearchController";
 import type { WorkMutationClient } from "@octant/client-runtime/work-mutation-client";
@@ -412,6 +413,10 @@ export interface WorkspaceViewProps {
   readonly onProviderPolicyChange?: (
     projectId: ProjectId,
     policy: ProjectProviderPolicy,
+  ) => Promise<boolean>;
+  readonly onBrandKitChange?: (
+    projectId: ProjectId,
+    brandKit: CanvasDesignBrand,
   ) => Promise<boolean>;
   readonly onWorkStatusFileChange?: (projectId: ProjectId, enabled: boolean) => Promise<boolean>;
   /** The theme's ground behind the welcome and draft-thread surfaces, when one is set. */
@@ -1887,6 +1892,14 @@ function renderNonCodeTab(
           client={props.canvasClient}
           tab={tab}
           onAttachContext={canvasContext.onAttachCanvasContext}
+          {...(props.projectServerUrl === undefined || props.projectWindowCapability === undefined
+            ? {}
+            : {
+                queueClient: createThreadMessageQueueClient({
+                  serverUrl: props.projectServerUrl,
+                  windowCapability: props.projectWindowCapability,
+                }),
+              })}
           {...(props.onPinCanvasInFocusZone === undefined
             ? {}
             : { onPinCanvasInFocusZone: props.onPinCanvasInFocusZone })}
@@ -2195,6 +2208,9 @@ function renderNonCodeTab(
         {...(props.onProviderPolicyChange === undefined
           ? {}
           : { onProviderPolicyChange: props.onProviderPolicyChange })}
+        {...(props.onBrandKitChange === undefined
+          ? {}
+          : { onBrandKitChange: props.onBrandKitChange })}
         {...(props.onWorkStatusFileChange === undefined
           ? {}
           : { onWorkStatusFileChange: props.onWorkStatusFileChange })}

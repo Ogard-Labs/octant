@@ -1122,6 +1122,33 @@ describe("ProjectService", () => {
     );
   });
 
+  it("saves a Chat Project's brand kit through one journaled event and refuses an unsafe value", async () => {
+    const fixture = fixtureService({ projects: [chatProject()] });
+    const result = await fixture.service.executeProject(windowId, {
+      kind: "change-project-brand-kit",
+      projectId: chatId,
+      expectedVersion: 1,
+      brandKit: { "color-primary": "#0a7d5a" },
+    });
+    expect(result).toMatchObject({
+      kind: "project-brand-kit-changed",
+      project: { brandKit: { "color-primary": "#0a7d5a" }, version: 2 },
+    });
+    expect(fixture.append).toHaveBeenCalledTimes(1);
+    expect(fixture.append.mock.calls[0]?.[0]?.events?.[0]?.eventName).toBe(
+      "project.brand-kit-changed@1",
+    );
+    await expect(
+      fixture.service.executeProject(windowId, {
+        kind: "change-project-brand-kit",
+        projectId: chatId,
+        expectedVersion: 2,
+        brandKit: { "color-primary": "red; } body { display: none" },
+      }),
+    ).rejects.toMatchObject({ failure: { category: "invalid" } });
+    expect(fixture.append).toHaveBeenCalledTimes(1);
+  });
+
   it("journals one event per Project colour change and refuses it on an archived Project", async () => {
     const fixture = fixtureService({ projects: [chatProject()] });
     const result = await fixture.service.executeProject(windowId, {

@@ -920,6 +920,55 @@ describe("Code app-managed tools", () => {
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(64 * 1024);
   });
 
+  it.each([
+    ["kept", { status: "kept", captureId: "6f1c2f0e-8a58-4c53-9a1b-3a4f0f6f7a10" }],
+    ["not kept", { status: "not-kept", reason: "unavailable" }],
+  ] as const)("reports a %s capture of the screenshot to the agent", async (_name, capture) => {
+    const authority = browserAuthority();
+    const active = browserSnapshot(authority);
+    const tools = createCodeAppManagedTools({
+      windowId,
+      thread: thread(),
+      readThread: () => thread(),
+      uuid: uuidFactory(),
+      executeOperation: vi.fn(),
+      terminal: { read: vi.fn() },
+      browser: {
+        resolveAuthority: () => authority,
+        inspectThread: () => active,
+        create: vi.fn(),
+        act: vi.fn(async () => ({
+          ...active,
+          observation: {
+            contextId: active.context!.contextId,
+            actionId: active.context!.actionId,
+            correlationId: active.context!.correlationId,
+            authority,
+            screenshotDataUrl: "data:image/png;base64,aGVsbG8=",
+            capture,
+            observedAt: "2026-08-06T08:00:00.000Z",
+            stale: false,
+          },
+        })) as never,
+        releaseThread: vi.fn(),
+      },
+    });
+
+    const result = await tools.execute({
+      name: CODE_BROWSER_TOOL_NAME,
+      inputJson: JSON.stringify({ operation: "screenshot" }),
+    });
+
+    const page = (result.result as { page: Record<string, unknown> }).page;
+    if (capture.status === "kept") {
+      expect(page.captureId).toBe(capture.captureId);
+      expect(page.captureNotKept).toBeUndefined();
+    } else {
+      expect(page.captureId).toBeUndefined();
+      expect(page.captureNotKept).toBe("unavailable");
+    }
+  });
+
   it("fails explicitly when a requested screenshot could not fit the runtime envelope", async () => {
     const authority = browserAuthority();
     const active = browserSnapshot(authority);

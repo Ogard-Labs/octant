@@ -44,6 +44,46 @@ messages remain protocol failures. Recognition grants no tool authority: the
 launch tool list, permission hooks, OS confinement, and Keychain policy remain
 as specified in [Security and authority](../architecture.md#security-and-authority).
 
+A model writing one very large tool call streams its input for minutes with
+nothing a person can see (observed with a Canvas document on Opus). The stream
+still moves: `input_json_delta` chunks arrive, and the API interleaves `ping`
+keep-alives. The adapter turns both into the normalized `liveness` event, at
+most one every five seconds per turn. The Chat, Work, and Code runners count it
+as activity, so their idle timeout measures a session that stopped producing
+anything rather than one that is still writing. Every other consumer ignores
+it: it carries no content and reaches no transcript, journal, usage figure, or
+turn event budget. A session that goes fully silent still times out.
+
+Codex sends nothing while the model streams a tool call's arguments: the
+installed 0.163.0 app-server schema has no argument-delta notification, and
+`item/started` arrives only after the arguments are complete. Once a tool runs,
+the app-server reports progress, and the adapter turns `item/commandExecution/outputDelta`,
+`item/mcpToolCall/progress`, and `item/fileChange/patchUpdated` into the same
+throttled `liveness` event. It decodes only their thread, turn, and item
+correlation, never the output, message, or patch. The legacy
+`item/fileChange/outputDelta` is never emitted, and the `process/*`,
+`command/exec/*`, and `model/safetyBuffering/updated` notifications are not tied
+to a turn item, so they stay ignored. A single Codex tool call whose arguments
+take longer than the idle timeout to write can therefore still end as timed out.
+
+The launch environment sets no `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
+umbrella and names each channel it keeps off, as
+[Architecture: security and authority](../architecture.md#security-and-authority)
+lists them (maintainer decision, 2026-10-20: the blanket block was stricter
+than Octant needs); a person's own `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`
+in the host environment still passes through. The decision changes no
+session's tool list. Measured with the Agent SDK (`query({ tools: ["Read",
+"Artifact"] })`, reading the `system/init` message's `tools`) on Claude Code
+2.1.211 (bundled) and 2.1.304 (on `PATH`), 2026-10-20, the runtime offers its
+`Artifact` tool only when launched by Anthropic's own desktop app (it keys on
+the launching entrypoint), so a query from Octant lists `["Read"]` with the
+umbrella and without it alike. The same probe showed that
+`strictMcpConfig: true`, which every Octant query sets, keeps the account's
+claude.ai connectors (listed by 2.1.304 with `settingSources: []` when the
+option is absent) out of the session. The decoder tolerates the narrower list
+(the runtime may drop a requested tool, never add one), so a launch that lacks
+a requested tool still runs.
+
 ## OpenCode
 
 The installed OpenCode binary's

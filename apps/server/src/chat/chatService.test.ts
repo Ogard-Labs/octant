@@ -1211,6 +1211,39 @@ describe("ChatService", () => {
     expect(service.read(created.thread.id).turns).toHaveLength(0);
   });
 
+  it("tells the model to deliver kept work as a Canvas only when Chat offers the Canvas tool", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000013");
+    const { service, fakeDriver } = openFixture({
+      resolveAppManagedTools: (input) =>
+        input.thread.title === "Canvas offered"
+          ? {
+              definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+              execute: async () => ({ result: {} }),
+            }
+          : undefined,
+    });
+    for (const title of ["Canvas offered", "No Canvas"]) {
+      const created = await service.execute({ kind: "create-chat-thread", hostId: "local", title });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Write the memo",
+        },
+        { windowId: window },
+      );
+    }
+    expect(fakeDriver.sentTurns[0]?.tools.map(({ name }) => name)).toContain("octant_canvas");
+    expect(fakeDriver.sentTurns[0]?.context).toContainEqual({
+      kind: "instructions",
+      text: expect.stringContaining("as a Canvas with the octant_canvas"),
+    });
+    expect(fakeDriver.sentTurns[1]?.tools.map(({ name }) => name)).not.toContain("octant_canvas");
+    expect(JSON.stringify(fakeDriver.sentTurns[1]?.context)).not.toContain("octant_canvas");
+  });
+
   it("registers a refusal-only Computer tool when the send carries no @Computer selection", async () => {
     const window = decodeWindowId("84000000-0000-4000-8000-000000000012");
     const unattachedCalls: string[] = [];

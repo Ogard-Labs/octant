@@ -27,6 +27,9 @@ import {
   type ProviderServiceLimits,
   type TurnStopReason,
   type TurnUsage,
+  type ThreadTaskProgress,
+  MAX_THREAD_TASKS_PER_TURN,
+  restateThreadTaskList,
   upsertThreadTaskProgress,
 } from "@octant/contracts";
 import {
@@ -346,6 +349,9 @@ export class ChatTurnRunner {
         }).pipe(Effect.catchAllCause(() => Effect.logWarning("App-managed tool cleanup failed."))),
       );
       let currentAttempt = input.attempt;
+      // New tasks a full plan turned away, kept until the restatement that
+      // follows them can drop the tasks they replace.
+      const turnedAwayTasks = new Map<string, ThreadTaskProgress>();
       let actualInputTokens = 0;
       let actualOutputTokens = 0;
       let contextTokens: number | undefined;
@@ -917,6 +923,8 @@ export class ChatTurnRunner {
             Stream.runForEach((event) =>
               Effect.gen(function* () {
                 yield* idle.touch;
+                // Liveness only restarts the idle clock; nothing else sees it.
+                if (event.kind === "liveness") return;
                 timing = observeTurnMetrics(timing, event);
                 input.liveTurn?.observe(event);
                 const sighting = compactions.observe(event);
@@ -1372,11 +1380,28 @@ export class ChatTurnRunner {
                   // the full state, not a delta another event may never heal.
                   // The runtime vocabulary says "in-progress"; the persisted
                   // one says "running" — the transcript's own word.
-                  const nextTasks = upsertThreadTaskProgress(currentAttempt.tasks, {
+                  const task: ThreadTaskProgress = {
                     taskId: event.taskId,
                     state: event.status === "in-progress" ? "running" : event.status,
                     summary: event.summary,
-                  });
+                  };
+                  const nextTasks = upsertThreadTaskProgress(currentAttempt.tasks, task);
+                  if (nextTasks === currentAttempt.tasks) {
+                    if (turnedAwayTasks.size < MAX_THREAD_TASKS_PER_TURN)
+                      turnedAwayTasks.set(task.taskId, task);
+                    return;
+                  }
+                  currentAttempt = { ...currentAttempt, tasks: nextTasks, updatedAt: updatedAt() };
+                  yield* input.persistAttempt(currentAttempt);
+                  return;
+                }
+                if (event.kind === "task-list") {
+                  const nextTasks = restateThreadTaskList(
+                    currentAttempt.tasks,
+                    event.taskIds,
+                    turnedAwayTasks,
+                  );
+                  turnedAwayTasks.clear();
                   if (nextTasks === currentAttempt.tasks) return;
                   currentAttempt = { ...currentAttempt, tasks: nextTasks, updatedAt: updatedAt() };
                   yield* input.persistAttempt(currentAttempt);

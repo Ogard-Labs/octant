@@ -52,6 +52,7 @@ import {
   type ClaudeToolDecision,
 } from "./claudeAgentSdkPort";
 import {
+  CLAUDE_CHECKLIST_TOOL,
   mapClaudeMessage,
   mapClaudeToolRequest,
   type ClaudeEventContext,
@@ -73,9 +74,24 @@ import {
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
-const CLAUDE_TOOLS = ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "AskUserQuestion"];
+const CLAUDE_TOOLS = [
+  "Read",
+  "Grep",
+  "Glob",
+  "Edit",
+  "Write",
+  "Bash",
+  "AskUserQuestion",
+  CLAUDE_CHECKLIST_TOOL,
+];
 const CLAUDE_PLAN_TOOLS = ["Read", "Glob", "Grep"] as const;
 const CLAUDE_READ_TOOLS = new Set<string>(CLAUDE_PLAN_TOOLS);
+/**
+ * Tools that change only Claude's own session state: no file, shell, network,
+ * or person is involved, so every posture, Plan included, runs them unasked.
+ * The checklist is the thread's task panel.
+ */
+const CLAUDE_SESSION_TOOLS = new Set<string>([CLAUDE_CHECKLIST_TOOL]);
 const CLAUDE_INCOMPATIBLE_FALLBACK = "Claude runtime policy is incompatible with Octant.";
 const CLAUDE_INCOMPATIBLE_REASONS = new Set([
   "Claude probe did not initialize its runtime.",
@@ -168,7 +184,7 @@ function claudePolicyOptions(
       return {
         permissionMode: "plan",
         allowDangerouslySkipPermissions: false,
-        tools: [...CLAUDE_PLAN_TOOLS],
+        tools: [...CLAUDE_PLAN_TOOLS, CLAUDE_CHECKLIST_TOOL],
       };
   }
 }
@@ -1204,6 +1220,7 @@ function makeConnection(
       callUsage: new Map(),
       requestIds: new Map(),
       taskIds: new Map(),
+      todoTaskIds: new Map(),
       toolStates: new Map(),
       makeRequestId: factories.makeRequestId,
       makeTaskId: factories.makeTaskId,
@@ -1517,6 +1534,7 @@ function makeConnection(
             (input.executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
             CLAUDE_READ_TOOLS.has(request.toolName) ||
+            CLAUDE_SESSION_TOOLS.has(request.toolName) ||
             isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
           ) {
             activeState.settledToolUseIds.add(request.toolUseId);
@@ -1723,6 +1741,7 @@ function makeConnection(
             (input.executionPolicy === "auto-accept-edits" &&
               CLAUDE_EDIT_TOOLS.has(request.toolName)) ||
             (request.toolName !== "AskUserQuestion" && CLAUDE_READ_TOOLS.has(request.toolName)) ||
+            CLAUDE_SESSION_TOOLS.has(request.toolName) ||
             isPlanShellCommand(input.executionPolicy, request.toolName, executionOptions.tools)
               ? settledUnasked()
               : askThroughGrant();
@@ -1735,7 +1754,7 @@ function makeConnection(
           // shell call before it could be asked about (observed 2026-09-06:
           // "git status" refused four times, then the turn failed).
           const candidate =
-            request.toolName === "AskUserQuestion"
+            request.toolName === "AskUserQuestion" || CLAUDE_SESSION_TOOLS.has(request.toolName)
               ? projectRoot
               : request.toolName === "Bash"
                 ? (requestInput?.cwd ?? projectRoot)

@@ -261,6 +261,9 @@ const CANVAS_FAMILY_AGGREGATE_TYPES = new Set<string>([
   "canvas-action",
   "artifact-mirror",
   "canvas-outside-content",
+  // A link's record goes with its Canvas; the owed revoke of that link is a
+  // separate aggregate that names no Canvas, so it outlives the erase.
+  "canvas-public-share",
 ]);
 
 /**
