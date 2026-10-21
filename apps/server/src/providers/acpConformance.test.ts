@@ -59,6 +59,7 @@ describe.each(Object.values(acpProviderProfiles))(
           "tool-start",
           "tool-success",
           "task-progress",
+          "task-list",
           "approval-request",
           ...(profile.userQuestions === "supported" ? (["user-input-request"] as const) : []),
           "interrupted",

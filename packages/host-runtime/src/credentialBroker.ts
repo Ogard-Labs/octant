@@ -35,6 +35,10 @@ const ROUTES = new Set([
   "/v1/replica-store-credentials/resolve",
   "/v1/replica-store-credentials/set",
   "/v1/replica-store-credentials/delete",
+  "/v1/canvas-public-share-secrets/has",
+  "/v1/canvas-public-share-secrets/resolve",
+  "/v1/canvas-public-share-secrets/set",
+  "/v1/canvas-public-share-secrets/delete",
   "/v1/mcp-server-credentials/has",
   "/v1/mcp-server-credentials/resolve",
   "/v1/mcp-server-credentials/set",
@@ -47,6 +51,7 @@ const ROUTES = new Set([
 ]);
 const REPLICA_DEVICE_KEY_PREFIX = "/v1/replica-device-keys/";
 const REPLICA_STORE_CREDENTIAL_PREFIX = "/v1/replica-store-credentials/";
+const CANVAS_PUBLIC_SHARE_SECRET_PREFIX = "/v1/canvas-public-share-secrets/";
 const MCP_SERVER_CREDENTIAL_PREFIX = "/v1/mcp-server-credentials/";
 type NamespacedIdField = "instanceId" | "credentialRef" | "secretId";
 const MAX_CREDENTIAL_BYTES = 12 * 1_024;
@@ -89,6 +94,12 @@ export async function startCredentialBroker(
    */
   replicaStoreCredentials?: CredentialStore,
   /**
+   * Public links' owner secrets, served only on
+   * `/v1/canvas-public-share-secrets/*` and keyed by the link's credential
+   * reference, so no provider, device key, or sync key can reach one.
+   */
+  canvasPublicShareSecrets?: CredentialStore,
+  /**
    * The secret values a person gives an MCP server they added by hand (a
    * header, an environment variable), in a credential namespace of their own.
    * They are served only on `/v1/mcp-server-credentials/*`, keyed by the secret id
@@ -116,6 +127,7 @@ export async function startCredentialBroker(
       runtime,
       replicaDeviceKeys,
       replicaStoreCredentials,
+      canvasPublicShareSecrets,
       mcpServerCredentials,
     ).then(
       ({ destroyIncoming, response }) => {
@@ -186,6 +198,7 @@ export async function startCredentialBroker(
         runtime,
         replicaDeviceKeys,
         replicaStoreCredentials,
+        canvasPublicShareSecrets,
         mcpServerCredentials,
       ),
   });
@@ -200,6 +213,7 @@ async function handleIncoming(
   runtime: HostOAuthRuntime,
   replicaDeviceKeys: CredentialStore | undefined,
   replicaStoreCredentials: CredentialStore | undefined,
+  canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
 ): Promise<{ destroyIncoming: boolean; response: ResponseData }> {
   if (brokerUrl === undefined) throw new Error("unavailable");
@@ -232,6 +246,7 @@ async function handleIncoming(
         runtime,
         replicaDeviceKeys,
         replicaStoreCredentials,
+        canvasPublicShareSecrets,
         mcpServerCredentials,
       ),
     ),
@@ -247,6 +262,7 @@ async function handleBrokerRequest(
   runtime: HostOAuthRuntime,
   replicaDeviceKeys: CredentialStore | undefined,
   replicaStoreCredentials: CredentialStore | undefined,
+  canvasPublicShareSecrets: CredentialStore | undefined,
   mcpServerCredentials: CredentialStore | undefined,
 ): Promise<Response> {
   const url = new URL(request.url);
@@ -284,6 +300,16 @@ async function handleBrokerRequest(
       "credentialRef",
       request,
       replicaStoreCredentials,
+    );
+  }
+
+  if (url.pathname.startsWith(CANVAS_PUBLIC_SHARE_SECRET_PREFIX)) {
+    if (canvasPublicShareSecrets === undefined) return failure("not-found", 404);
+    return handleNamespacedRoute(
+      url.pathname.slice(CANVAS_PUBLIC_SHARE_SECRET_PREFIX.length),
+      "credentialRef",
+      request,
+      canvasPublicShareSecrets,
     );
   }
 

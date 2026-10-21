@@ -9,6 +9,9 @@ import { WorkThreadService } from "./work/workThreadService";
 import { WorkTurnService } from "./work/workTurnService";
 import { MAX_CHAT_ATTACHMENT_BYTES } from "./chat/chatAttachmentStore";
 import { MAX_CODE_FILE_BODY_SIZE } from "./codeRoutes";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { CANVAS_PREVIEW_ASSET_FOLDER, CANVAS_PREVIEW_PAGE } from "./canvas/canvasPreviewRenderer";
 import { healthResponse } from "./health";
 import {
   Persistence,
@@ -86,7 +89,8 @@ export {
   deriveExistingWorktreeCheckoutId,
   plainFolderCheckoutIdentity,
 } from "./wiring/code";
-export { resolveWebAssetsPath } from "./wiring/computerUse";
+import { resolveWebAssetsPath } from "./wiring/computerUse";
+export { resolveWebAssetsPath };
 export { stableAppleRootId } from "./wiring/devices";
 export { makeConfiguredProviderDriver, pathIsProjectConfined } from "./wiring/providers";
 export {
@@ -431,6 +435,7 @@ export function startOctantServer(
       sideTaskRoutes,
       threadWork,
     } = wireHarness({
+      projectService,
       agentRunInteractions,
       nativeHarnessApprovals,
       nativeHarnessQuestions,
@@ -515,6 +520,7 @@ export function startOctantServer(
       artifactMirrorRoutes,
       canvasAgentToolPort,
       canvasCommentService,
+      canvasPublicShareService,
       canvasRoutes,
       canvasService,
       replicaArtifactSync,
@@ -522,6 +528,7 @@ export function startOctantServer(
       snapshotCanvas,
     } = wireCanvas({
       agentRunPersistence,
+      browserCaptures,
       chatDataDirectory,
       contributeChildTools,
       extensionApiService,
@@ -1078,6 +1085,7 @@ export function startOctantServer(
       providerCredentialRoutes,
       remoteHost,
     } = wireRemote({
+      canvasPublicShareService,
       threadExportService,
       agentMessageService,
       authenticatedProductDispatch,
@@ -1114,6 +1122,7 @@ export function startOctantServer(
     // runtime alive on its idle lease with nothing left to close it.
     let warmingProviders: Promise<void> = Promise.resolve();
     let stopArtifactSync: () => void = () => undefined;
+    let stopPublicShareSweep: () => void = () => undefined;
     return yield* Effect.acquireRelease(
       Effect.tryPromise({
         try: async () => {
@@ -1124,10 +1133,21 @@ export function startOctantServer(
             fetch: async (request) => {
               const url = new URL(request.url);
               if (url.pathname === "/health") {
-                return healthResponse(version, options.instanceId, {
-                  activeAgentCount: providerRuntimeRegistry.activeSessionTotal(),
-                  attentionRequired: providerRuntimeRegistry.attentionRequired(),
-                });
+                return healthResponse(
+                  version,
+                  options.instanceId,
+                  {
+                    activeAgentCount: providerRuntimeRegistry.activeSessionTotal(),
+                    attentionRequired: providerRuntimeRegistry.attentionRequired(),
+                  },
+                  existsSync(
+                    join(
+                      options.webAssetsPath ?? resolveWebAssetsPath(),
+                      CANVAS_PREVIEW_ASSET_FOLDER,
+                      CANVAS_PREVIEW_PAGE,
+                    ),
+                  ),
+                );
               }
               // Every route below trusts a loopback Origin as the renderer, so a
               // page on another loopback port (a dev server a Code thread
@@ -1207,6 +1227,9 @@ export function startOctantServer(
           // only once the host is serving; with sync off each pass returns
           // before any store call.
           stopArtifactSync = artifactSyncService.start();
+          // Public links past their expiry give up their owner secrets, and
+          // revokes still owed are retried, now and hourly.
+          stopPublicShareSweep = canvasPublicShareService.start();
           // A leave the host stopped in the middle of finishes its cleanup:
           // sync off and the device key deleted.
           void replicaMembershipService.finishLeaving().catch(() => undefined);
@@ -1281,6 +1304,7 @@ export function startOctantServer(
           }
           completedThreadArchiveSweep.stop();
           stopArtifactSync();
+          stopPublicShareSweep();
           providerUsageLimitsService.stop();
           try {
             managedCloneService.close();

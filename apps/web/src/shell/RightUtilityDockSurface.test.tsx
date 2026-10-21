@@ -65,12 +65,12 @@ describe("the right sidebar surface", () => {
     expect(dockStylesheet).not.toContain("--oct-radius-xs");
     expect(ruleBody(dockStylesheet, ".dock-tool-strip__tab")).not.toMatch(/overflow:\s*hidden/);
   });
-  it("shows the active thread work map with no tool open", async () => {
+  it("offers Environment by name and the common tools as icons in the title band before any opens", async () => {
     const user = userEvent.setup();
     const onOpenTab = vi.fn();
     render(
       <RightUtilityDockSurface
-        launchableSurfaces={[browser, terminal, files]}
+        launchableSurfaces={[browser, terminal, files, surface("environment"), surface("plan")]}
         onCloseTab={vi.fn()}
         onOpenTab={onOpenTab}
         onSelectSurface={vi.fn()}
@@ -79,25 +79,49 @@ describe("the right sidebar surface", () => {
       />,
     );
 
-    expect(screen.getByRole("heading", { name: "Tools" })).toBeVisible();
-    // One line per tool; what it opens is the row's hover description.
-    expect(screen.getByRole("button", { name: "Browser" })).toHaveAttribute(
-      "title",
-      "Inspect live web activity",
-    );
-    expect(screen.getByRole("button", { name: "Files" })).toHaveAttribute(
-      "title",
-      "Browse the active checkout",
-    );
-    // The body already lists every tool; a second entry point beside an
-    // empty strip would be a control with nothing to add.
-    expect(screen.queryByRole("button", { name: "Add tool" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Terminal" }));
+    const band = screen.getByRole("group", { name: "Quick tools" });
+    const tools = within(band).getAllByRole("button");
+    expect(tools.map((tool) => tool.getAttribute("aria-label"))).toEqual([
+      "Open Environment",
+      "Open Terminal",
+      "Open Browser",
+      "Open Files",
+    ]);
+    expect(tools[0]).toHaveTextContent("Environment");
+    expect(tools[1]).not.toHaveTextContent("Terminal");
+    const terminalTool = tools[1];
+    if (terminalTool === undefined) throw new Error("Expected the Terminal tool.");
+    await user.click(terminalTool);
     expect(onOpenTab).toHaveBeenCalledWith("terminal");
-    expect(screen.queryByRole("tab", { name: "Thread tools" })).not.toBeInTheDocument();
   });
 
-  it("moves focus into the tool a tile opened, because the tile is gone", async () => {
+  it("lists every launchable tool in Add tool with no tool open, and shows no tool grid", async () => {
+    const user = userEvent.setup();
+    const onOpenTab = vi.fn();
+    render(
+      <RightUtilityDockSurface
+        launchableSurfaces={[browser, terminal, files, surface("plan")]}
+        onCloseTab={vi.fn()}
+        onOpenTab={onOpenTab}
+        onSelectSurface={vi.fn()}
+        resolution={{ kind: "closed", reason: "no-surface" }}
+        tabs={[]}
+      />,
+    );
+
+    expect(screen.queryByRole("heading", { name: "Tools" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Browser" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Add tool" }));
+    await screen.findByRole("menuitem", { name: "Browser" });
+    const menu = within(document.body);
+    for (const name of ["Browser", "Terminal", "Files", "Plan"]) {
+      expect(menu.getByRole("menuitem", { name })).toBeVisible();
+    }
+    await user.click(menu.getByRole("menuitem", { name: "Plan" }));
+    expect(onOpenTab).toHaveBeenCalledWith("plan");
+  });
+
+  it("moves focus into the tool a quick tool opened, because the quick tools are replaced by the tab strip", async () => {
     const user = userEvent.setup();
     function Dock() {
       const [open, setOpen] = useState(false);
@@ -117,14 +141,17 @@ describe("the right sidebar surface", () => {
     }
     render(<Dock />);
 
-    screen.getByRole("button", { name: "Browser" }).focus();
+    within(screen.getByRole("group", { name: "Quick tools" }))
+      .getByRole("button", { name: "Open Browser" })
+      .focus();
     await user.keyboard("{Enter}");
 
     expect(screen.getByRole("region", { name: "Browser" })).toHaveFocus();
     expect(screen.getByText("Live Browser")).toBeVisible();
   });
 
-  it("groups a long tool list under what each tool looks at", () => {
+  it("groups a long Add tool list under what each tool looks at", async () => {
+    const user = userEvent.setup();
     render(
       <RightUtilityDockSurface
         launchableSurfaces={[
@@ -141,14 +168,14 @@ describe("the right sidebar surface", () => {
       />,
     );
 
-    const thread = screen.getByRole("group", { name: "Thread tools" });
+    await user.click(screen.getByRole("button", { name: "Add tool" }));
+    const thread = await screen.findByRole("group", { name: "Thread tools" });
     const workspace = screen.getByRole("group", { name: "Workspace" });
     const devices = screen.getByRole("group", { name: "Devices" });
-    expect(within(thread).getByRole("button", { name: "Environment" })).toBeVisible();
-    expect(within(workspace).getByRole("button", { name: "Browser" })).toBeVisible();
-    expect(within(workspace).getByRole("button", { name: "Terminal" })).toBeVisible();
-    expect(within(devices).getByRole("button", { name: "Android emulator" })).toBeVisible();
-    expect(screen.getAllByText(/^(Thread tools|Workspace|Devices)$/)).toHaveLength(3);
+    expect(within(thread).getByRole("menuitem", { name: "Environment" })).toBeVisible();
+    expect(within(workspace).getByRole("menuitem", { name: "Browser" })).toBeVisible();
+    expect(within(workspace).getByRole("menuitem", { name: "Terminal" })).toBeVisible();
+    expect(within(devices).getByRole("menuitem", { name: "Android emulator" })).toBeVisible();
   });
 
   it("selects and hides open tools without stopping their strip", async () => {
@@ -220,43 +247,6 @@ describe("the right sidebar surface", () => {
 
     expect(screen.queryByText("Previous thread Browser")).toBeNull();
     expect(screen.getByRole("heading", { name: "Browser is unavailable" })).toBeVisible();
-  });
-
-  it("says what Tests does, like every other tool row", () => {
-    render(
-      <RightUtilityDockSurface
-        launchableSurfaces={[{ ...browser, id: "tests" as never, label: "Tests" }]}
-        onCloseTab={vi.fn()}
-        onOpenTab={vi.fn()}
-        onSelectSurface={vi.fn()}
-        resolution={{ kind: "closed", reason: "no-surface" }}
-        tabs={[]}
-      />,
-    );
-
-    // "Tests: Open this tool" beside twelve rows that each name what they do
-    // reads as a row nobody finished.
-    const row = screen.getByRole("button", { name: "Tests" });
-    expect(row).toHaveAttribute("title", "Run this checkout's tests");
-  });
-
-  it("uses a generic detail for an unknown launchable tool", () => {
-    render(
-      <RightUtilityDockSurface
-        launchableSurfaces={[{ ...browser, id: "unknown-tool" as never, label: "Custom tool" }]}
-        onCloseTab={vi.fn()}
-        onOpenTab={vi.fn()}
-        onSelectSurface={vi.fn()}
-        resolution={{ kind: "closed", reason: "no-surface" }}
-        tabs={[]}
-      />,
-    );
-
-    expect(screen.getByRole("button", { name: "Custom tool" })).toHaveAttribute(
-      "title",
-      "Open this tool",
-    );
-    expect(screen.queryByText("Run discovered repository tests")).not.toBeInTheDocument();
   });
 });
 

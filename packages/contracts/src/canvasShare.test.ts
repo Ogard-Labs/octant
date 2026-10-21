@@ -2,6 +2,7 @@ import type { SchemaAST } from "effect";
 import { describe, expect, it } from "vitest";
 import { CanvasBlock } from "./canvas";
 import {
+  CANVAS_SHARE_DESIGN_FIELDS_SCHEMA_VERSION,
   CANVAS_SHARE_FRAMES_SCHEMA_VERSION,
   CanvasStaticExportBlock,
   decodeCanvasStaticExportDocument,
@@ -796,8 +797,44 @@ describe("Canvas share contracts", () => {
     ).toThrow();
     // And a version this runtime has not learned is still a future version.
     expect(() =>
-      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 11, blocks: [] }),
+      decodeCanvasStaticExportDocument({ ...document, schemaVersion: 12, blocks: [] }),
     ).toThrow();
+  });
+
+  it("carries frame notes, a brand, and richer diagram fields from share version 11 and refuses them under an earlier one", () => {
+    const design = {
+      blockId: "deck",
+      schemaVersion: 21,
+      kind: "design",
+      title: "Launch deck",
+      size: "slide",
+      theme: "brand",
+      brand: { "color-primary": "#1a73e8", "radius-card": "8px" },
+      frames: [{ frameId: "intro", title: "Intro", html: "<h1>Hi</h1>", notes: "Open with it." }],
+    };
+    const diagram = {
+      blockId: "arch",
+      schemaVersion: 21,
+      kind: "diagram",
+      nodes: [{ nodeId: "db", label: "Orders", icon: "database", detail: "Postgres" }],
+      edges: [],
+      groups: [
+        { groupId: "region", label: "Region", nodeIds: [] },
+        { groupId: "data", label: "Data", nodeIds: ["db"], parentGroupId: "region" },
+      ],
+    };
+    expect(CANVAS_SHARE_DESIGN_FIELDS_SCHEMA_VERSION).toBe(11);
+    const shared = decodeCanvasStaticExportDocument({
+      ...document,
+      schemaVersion: 11,
+      blocks: [design, diagram],
+    });
+    expect(shared.blocks).toEqual([design, diagram]);
+    for (const block of [design, diagram]) {
+      expect(() =>
+        decodeCanvasStaticExportDocument({ ...document, schemaVersion: 10, blocks: [block] }),
+      ).toThrow();
+    }
   });
 
   it("rejects secret-bearing export text and credential query URLs at decode time", () => {

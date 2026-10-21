@@ -16,6 +16,7 @@ export type OctantKeybindingActionId =
   | "code-file-search"
   | "code-content-search"
   | "zen-mode"
+  | "toggle-sidebar"
   | "zen-next-space"
   | "zen-previous-space"
   | "review-next"
@@ -68,6 +69,12 @@ export const OCTANT_KEYBINDING_ACTIONS: ReadonlyArray<OctantKeybindingAction> = 
     defaultChord: "Mod+Shift+U",
   },
   { id: "zen-mode", label: "Toggle Zen mode", area: "Shell", defaultChord: "Mod+Shift+Z" },
+  {
+    id: "toggle-sidebar",
+    label: "Show or hide the sidebar",
+    area: "Shell",
+    defaultChord: "Mod+\\",
+  },
   {
     id: "zen-next-space",
     label: "Show the next focus space",

@@ -215,6 +215,7 @@ tracker ids in shipped code against `scripts/code-style-baseline.json`.
 | `apps/web`                | Shared React renderer for desktop and authenticated remote clients                       |
 | `apps/mobile`             | Expo remote-control client                                                               |
 | `apps/docs`               | VitePress user guide, independently deployable                                           |
+| `apps/share`              | Public Canvas share service: link API, viewer pages, user-content frames, storage        |
 | `packages/contracts`      | Schemas, commands, events, RPC, and versioned wire contracts; no runtime logic           |
 | `packages/domain`         | Pure policies and transitions; no Electron, React, database, filesystem, network, or I/O |
 | `packages/provider-sdk`   | Driver interfaces, normalized runtime events, discovery, and conformance harness         |
@@ -416,5 +417,6 @@ through the published seams and the credential broker, never a hosted service. T
 a local window and host-local routines (Automation Center) are in scope under the
 [architecture's rules](docs/architecture.md#modes-chat-work-and-code); other
 pull-request mutation, agent-initiated merge, cloud scheduling, and a hosted
-wake service are not.
+wake service are not. The public Canvas share service (`apps/share`) is in
+scope under [Canvas public links](docs/design/canvas-public-links.md).
 Existing scoped exceptions remain documented in the architecture.

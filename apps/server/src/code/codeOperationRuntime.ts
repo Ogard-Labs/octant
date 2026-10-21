@@ -55,6 +55,7 @@ import {
   type ProviderProbeResult,
   type WindowId,
   decodeCodeFailure,
+  MAX_THREAD_TASKS_PER_TURN,
 } from "@octant/contracts";
 import { Effect } from "effect";
 import type {
@@ -187,6 +188,10 @@ import {
   type CodeDeviceApprovalEffect,
 } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import {
+  CANVAS_DELIVERY_INSTRUCTIONS,
+  offersCanvasTool,
+} from "../canvas/canvasDeliveryInstructions";
 import { CodeEvidenceCapacityExceeded } from "./codeEvidenceStore";
 import {
   BROWSER_SELECTION_GUIDANCE,
@@ -3503,25 +3508,22 @@ class RuntimeTurnController implements CodeOperationTurnPort {
     this.#options.nativeHarness?.turnStarted(harnessScope);
     let endedTurn: TurnEndSummary | undefined;
     const browserSelected = active.extensionSelections?.some(isBrowserUseSelection) === true;
-    const fullContext = [
-      ...harnessContext,
+    const appManagedTools = this.#appManagedTools(active);
+    const hostGuidance = [
       ...(browserSelected
         ? [{ kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE }]
         : []),
-      ...(context ?? []),
+      ...(offersCanvasTool(appManagedTools?.definitions)
+        ? [{ kind: "instructions" as const, text: CANVAS_DELIVERY_INSTRUCTIONS }]
+        : []),
     ];
+    const fullContext = [...harnessContext, ...hostGuidance, ...(context ?? [])];
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
-    const appManagedTools = this.#appManagedTools(active);
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
       turn: estimateSentContextParts({
         sent: {
-          instructions: [
-            ...(browserSelected
-              ? [{ kind: "instructions" as const, text: BROWSER_SELECTION_GUIDANCE }]
-              : []),
-            ...(active.sentContext?.instructions ?? []),
-          ],
+          instructions: [...hostGuidance, ...(active.sentContext?.instructions ?? [])],
           skills: active.sentContext?.skills ?? [],
         },
         attachments,
@@ -4113,6 +4115,12 @@ function normalizedOperationEvent(
       state: event.status === "in-progress" ? "running" : ((event.status ?? "waiting") as never),
       summary:
         boundProviderSummary(event.text ?? "Provider task progress.") ?? "Provider task progress.",
+    };
+  if (event.category === "task-list")
+    return {
+      kind: "task-list",
+      // The panel keeps at most this many tasks, and the journal bounds the list to match.
+      taskIds: (event.taskIds ?? []).slice(0, MAX_THREAD_TASKS_PER_TURN),
     };
   if (event.category === "child-activity")
     return {

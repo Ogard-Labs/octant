@@ -24,9 +24,9 @@
   --oct-bg: light-dark(#ffffff, #1a1a1a);
   --oct-surface: light-dark(#fdfdfc, #232323);
   --oct-surface-warm: light-dark(#f0f0ef, #2b2b2b);
-  --oct-fg: light-dark(#1b1b1b, #f0f0f0);
+  --oct-fg: light-dark(#141414, #f5f5f7);
   --oct-fg-2: color-mix(in oklab, var(--oct-fg) 90%, transparent);
-  --oct-muted: light-dark(#4f4f4f, #a9a9a9);
+  --oct-muted: light-dark(#45454a, #bcbcc2);
   --oct-meta: light-dark(#666666, #949494);
   --oct-border: light-dark(#e0e0de, #303030);
   --oct-border-soft: color-mix(in oklab, var(--oct-fg) 7%, transparent);
@@ -36,8 +36,8 @@
   --oct-selection: light-dark(#ebebea, #2c2c2c);
 
   /* Monochrome actions. The runtime theme owns optional tinted accents. */
-  --oct-accent: light-dark(#1b1b1b, #f0f0f0);
-  --oct-accent-fg: light-dark(#1b1b1b, #f0f0f0);
+  --oct-accent: light-dark(#141414, #f5f5f7);
+  --oct-accent-fg: light-dark(#141414, #f5f5f7);
   --oct-accent-on: light-dark(#ffffff, #171717);
   --oct-accent-hover: light-dark(
     color-mix(in oklab, var(--oct-accent), black 10%),
@@ -99,13 +99,13 @@
   --oct-focus-ring: 0 0 0 1px var(--oct-bg), 0 0 0 3px var(--oct-muted);
 
   /* ── type ── */
-  /* One family. Geist sets the interface, headings, and transcript, and Geist
-     Mono sets code; the theme bridge points every role at the interface
-     setting, so these are only the first paint before settings load. The
+  /* One family. The platform face sets the interface, headings, and
+     transcript, and Geist Mono sets code; the theme bridge points every role
+     at the interface setting, so these are only the first paint before
+     settings load. The
      earlier display face and body serif were never shown once the bridge
      mapped every role to the interface face, and have been removed. */
-  --oct-font-display:
-    "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --oct-font-display: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --oct-font-body: var(--oct-font-display);
   --oct-font-transcript: var(--oct-font-display);
   --oct-font-mono:
@@ -399,7 +399,8 @@ body {
   font-size: var(--oct-text-base);
   line-height: var(--oct-leading-body);
   text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
+  /* No antialiased smoothing: on macOS it thins light text on a dark ground,
+     which read as washed out next to native apps. */
   font-synthesis: none;
   font-optical-sizing: auto;
   overflow-x: hidden;
@@ -3870,6 +3871,7 @@ input.switch:checked::after {
   color: var(--oct-muted);
   font-family: var(--oct-font-display);
   font-size: var(--octant-ui-font-size);
+  font-weight: var(--oct-weight-medium);
   text-align: left;
   text-decoration: none;
   white-space: nowrap;
@@ -4447,9 +4449,6 @@ input.switch:checked::after {
   padding: 0 var(--oct-composer-gutter) 12px calc(var(--oct-composer-gutter) - 8px);
   border-top: 0;
 }
-.composer-row .composer-gap {
-  flex: 1;
-}
 .composer-actions {
   display: inline-flex;
   flex: 0 0 auto;
@@ -4577,10 +4576,14 @@ input.switch:checked::after {
   margin: 24px auto 12px;
 }
 
-/* Existing conversations keep the message surface distinct from its binding.
-   Feedback appears only when there is something to act on. */
+/* Existing conversations keep the message surface distinct from its binding:
+   the strip above it (context and stats) sits on the page, and only the
+   surface where the person types is raised. Feedback appears only when there
+   is something to act on. */
 .composer.composer--follow-up {
-  background: var(--octant-tray);
+  display: grid;
+  gap: var(--oct-space-1);
+  background: transparent;
   border-radius: var(--oct-radius-md);
   box-shadow: none;
 }
@@ -4638,6 +4641,28 @@ input.switch:checked::after {
 }
 .thread-composer__context:empty {
   display: none;
+}
+/* The strip above a thread's composer: where it runs on the left, the plan's
+   windows and the thread's figures on the right. It reads as part of the
+   page, not the box, so it has no fill or edge of its own. */
+.thread-composer__strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 var(--oct-space-3);
+  min-width: 0;
+}
+.thread-composer__strip:empty {
+  display: none;
+}
+.thread-composer__strip > .thread-composer__context {
+  flex: 0 1 auto;
+}
+.thread-composer__strip > .thread-stats {
+  flex: 0 1 auto;
+  margin-left: auto;
+  padding: 0 var(--oct-space-2);
 }
 /* The quiet line under the composer's toolbar: the keyboard hint or a
    receipt on the left, spend and limits on the right. One recipe replaces
@@ -6095,7 +6120,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   @media (prefers-reduced-transparency: no-preference) {
     html:not([data-octant-reduced-transparency="true"])
       .shell--app-backdrop
-      :is(.turn-user .bubble, .composer) {
+      :is(.turn-user .bubble, .composer:not(.composer--follow-up)) {
       border-color: var(--oct-glass-stroke);
       background-color: var(--oct-glass-floor);
       background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
@@ -6105,27 +6130,27 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
     /* The composer draws no border, so a stroke colour alone never showed and
        the glass had no edge. Its stroke is an inset ring, which also keeps the
        ring inside the rounded corners and out of layout. */
-    html:not([data-octant-reduced-transparency="true"]) .shell--app-backdrop .composer {
+    html:not([data-octant-reduced-transparency="true"])
+      .shell--app-backdrop
+      .composer:not(.composer--follow-up) {
       box-shadow:
         inset 0 0 0 1px var(--oct-glass-stroke),
         var(--octant-shadow-md);
     }
-    /* A follow-up composer is a tray holding a message surface and the
-       checkout under it. The tray is the pane of glass, at the chrome step;
-       the surface where the person types is one more thick tint on it, not a
-       second pane, so the words being written sit on the most solid part. */
-    html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop
-      .composer.composer--follow-up {
-      box-shadow: inset 0 0 0 1px var(--oct-glass-stroke);
-      background-image: linear-gradient(var(--oct-glass-chrome), var(--oct-glass-chrome));
-      backdrop-filter: blur(var(--oct-glass-blur-chrome)) saturate(150%);
-      -webkit-backdrop-filter: blur(var(--oct-glass-blur-chrome)) saturate(150%);
-    }
+    /* A follow-up composer's strip sits on the page, so its wrapper takes no
+       glass; the surface where the person types takes the whole material the
+       composer has elsewhere: floor, thick tint, blur, ring, and shadow. */
     html:not([data-octant-reduced-transparency="true"])
       .shell--app-backdrop
       .thread-composer__surface {
-      background: var(--oct-glass-thick);
+      border-color: var(--oct-glass-stroke);
+      background-color: var(--oct-glass-floor);
+      background-image: linear-gradient(var(--oct-glass-thick), var(--oct-glass-thick));
+      backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+      -webkit-backdrop-filter: blur(var(--oct-glass-blur-thick)) saturate(150%);
+      box-shadow:
+        inset 0 0 0 1px var(--oct-glass-stroke),
+        var(--octant-shadow-md);
     }
   }
 }

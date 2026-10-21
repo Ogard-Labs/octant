@@ -23,6 +23,7 @@ import {
   FolderGit,
   FolderTree,
   History,
+  ListChecks,
   Layers,
   ListFilter,
   ListTree,
@@ -114,8 +115,10 @@ import {
   EARLIER_ACTIVITY_GROUP_ID,
   buildSidebarActivityView,
   matchesSidebarSearch,
-  readActivityViewEnabled,
-  writeActivityViewEnabled,
+  buildSidebarStatusView,
+  readThreadArrangement,
+  writeThreadArrangement,
+  type SidebarThreadArrangement,
   type SidebarActivityMode,
   type SidebarActivityThread,
 } from "../shell/activityViewModel";
@@ -128,7 +131,8 @@ import {
   SIDEBAR_THREAD_STATUS_ORDER,
 } from "@octant/domain/sidebar-thread-status-policy";
 import { type SidebarThreadStatus } from "@octant/contracts/sidebar-thread-status";
-import { groupThreadsByProject } from "./projectThreadGrouping";
+import { groupThreadsByProject, nestFollowUpThreads } from "./projectThreadGrouping";
+import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { lineageParentTitle } from "./threadLineage";
 import {
   ProjectThreadList,
@@ -143,7 +147,7 @@ import {
 } from "./ProjectThreadList";
 import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
 
@@ -352,9 +356,12 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     { readonly mode: "create" } | { readonly mode: "edit"; readonly viewId: string } | undefined
   >();
   const activityMode = props.activityMode ?? "chat";
-  const [activityView, setActivityView] = useState(() =>
-    readActivityViewEnabled(undefined, globalThis, activityMode),
+  const [arrangement, setArrangement] = useState(() =>
+    readThreadArrangement(undefined, globalThis, activityMode),
   );
+  // The feed and Status are both flat lists of the same rows; only the
+  // Project tree nests.
+  const activityView = arrangement !== "projects";
   const rowProperties = props.rowProperties ?? DEFAULT_SIDEBAR_ROW_PROPERTIES;
   const searchQuery = props.searchQuery ?? "";
   const searching = searchQuery.trim() !== "";
@@ -464,17 +471,26 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   const onNewThread = props.onNewThreadInProject ?? props.onNewChatInProject;
   const newThreadVerb = props.newThreadVerb ?? "chat";
   const nestThreads = threads !== undefined && props.onSelectThread !== undefined;
-  // With neither Projects nor threads, the Projects/Activity switch has
-  // nothing to arrange and floated alone at the row's far edge (seen in Work
-  // before its first Project). It stays while the feed is the saved
-  // arrangement, so the way back out is never what went missing.
+  // With neither Projects nor threads, the arrangement switch has nothing to
+  // arrange and floated alone at the row's far edge (seen in Work before its
+  // first Project). It stays while the feed is the saved arrangement, so the
+  // way back out is never what went missing; Status is the default and needs
+  // no way back.
   const showListSwitch =
-    nestThreads && (props.projects.length > 0 || (threads?.length ?? 0) > 0 || activityView);
+    nestThreads &&
+    (props.projects.length > 0 || (threads?.length ?? 0) > 0 || arrangement === "activity");
   const threadsByProject =
     threads !== undefined && props.onSelectThread !== undefined
       ? groupThreadsByProject(threads, props.projects)
       : undefined;
   const unfiled = threadsByProject?.unfiled ?? [];
+  // Unfiled Chat threads skip ProjectThreadList, so they take the same
+  // follow-up nesting here: a thread started from a suggestion sits under it.
+  const followUpParents = useContext(FollowUpLineageContext);
+  const unfiledRows = useMemo(() => {
+    const nesting = nestFollowUpThreads(unfiled, followUpParents);
+    return nesting.expand(nesting.topLevel);
+  }, [followUpParents, unfiled]);
   const projectHasVisibleThreads = (project: ProjectSummary): boolean =>
     (threadsByProject?.byProjectId.get(String(project.id))?.length ?? 0) > 0;
   const hideEmptyProjects = searching || currentFilters?.showEmptyProjects === false;
@@ -493,17 +509,19 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
       ? []
       : groupProjectsForView(projectRows, viewGrouping, props.projectViewEnvironments);
   const activity = useMemo(() => {
-    const view = buildSidebarActivityView({
-      ...(props.now === undefined ? {} : { now: props.now }),
-      projects: visibleProjects.map((project) => ({
-        id: String(project.id),
-        name: project.name,
-      })),
-      unfiledLabel,
-      threads: threads ?? [],
-    });
-    return view;
-  }, [threads, props.now, visibleProjects, unfiledLabel]);
+    const projects = visibleProjects.map((project) => ({
+      id: String(project.id),
+      name: project.name,
+    }));
+    return arrangement === "status"
+      ? buildSidebarStatusView({ projects, unfiledLabel, threads: threads ?? [] })
+      : buildSidebarActivityView({
+          ...(props.now === undefined ? {} : { now: props.now }),
+          projects,
+          unfiledLabel,
+          threads: threads ?? [],
+        });
+  }, [arrangement, threads, props.now, visibleProjects, unfiledLabel]);
   const hasVisibleThreads =
     (threadsByProject !== undefined &&
       (unfiled.length > 0 ||
@@ -514,12 +532,12 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     filteringThreads && threadsReady && !hasVisibleThreads && !viewingArchivedProjects;
 
   useEffect(() => {
-    setActivityView(readActivityViewEnabled(undefined, globalThis, activityMode));
+    setArrangement(readThreadArrangement(undefined, globalThis, activityMode));
   }, [activityMode]);
 
-  function showActivityView(next: boolean) {
-    setActivityView(next);
-    writeActivityViewEnabled(next, undefined, globalThis, activityMode);
+  function showArrangement(next: SidebarThreadArrangement) {
+    setArrangement(next);
+    writeThreadArrangement(next, undefined, globalThis, activityMode);
   }
 
   const [completedShelfOpen, setCompletedShelfOpen] = useState(false);
@@ -528,7 +546,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     const request = props.listRequest;
     if (request === undefined) return;
     if (request.view === "activity") {
-      showActivityView(true);
+      showArrangement("activity");
       return;
     }
     setCompletedShelfOpen(true);
@@ -708,7 +726,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               />
             ) : null}
             {showListSwitch ? (
-              <ThreadListViewSwitch activity={activityView} onChange={showActivityView} />
+              <ThreadListViewSwitch arrangement={arrangement} onChange={showArrangement} />
             ) : null}
           </div>
         ) : null}
@@ -754,6 +772,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                 ? { emptyLabel: FILTERED_THREADS_EMPTY_MESSAGE }
                 : {})}
               actions={props.threadActions ?? {}}
+              counted={arrangement === "status"}
               groups={activity.groups}
               lineageThreads={everyListedThread ?? []}
               onSelectThread={props.onSelectThread!}
@@ -812,7 +831,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
                       {...(props.openThreadIds === undefined
                         ? {}
                         : { openThreadIds: props.openThreadIds })}
-                      threads={unfiled}
+                      threads={unfiledRows}
                     />
                   </div>
                 ) : null}
@@ -1295,24 +1314,27 @@ function sortProjects(
 }
 
 /**
- * The list's two arrangements as one visible switch. It used to be a bell in
+ * The list's three arrangements as one visible switch. It used to be a bell in
  * the sidebar header that toggled the feed, which people read as
- * notifications and rarely found; two named choices say what each one does.
+ * notifications and rarely found; named choices say what each one does.
  */
 function ThreadListViewSwitch(props: {
-  readonly activity: boolean;
-  readonly onChange: (activity: boolean) => void;
+  readonly arrangement: SidebarThreadArrangement;
+  readonly onChange: (arrangement: SidebarThreadArrangement) => void;
 }) {
   return (
-    <OctantToggleGroup<"projects" | "activity">
+    <OctantToggleGroup<SidebarThreadArrangement>
       aria-label="Thread list"
       className="project-nav__list-switch"
       onValueChange={(value) => {
         const selected = value[0];
-        if (selected !== undefined) props.onChange(selected === "activity");
+        if (selected !== undefined) props.onChange(selected);
       }}
-      value={[props.activity ? "activity" : "projects"]}
+      value={[props.arrangement]}
     >
+      <OctantToggleGroupItem aria-label="Status" title="Status" value="status">
+        <ListChecks aria-hidden="true" size={14} strokeWidth={1.8} />
+      </OctantToggleGroupItem>
       <OctantToggleGroupItem aria-label="Project tree" title="Project tree" value="projects">
         <FolderTree aria-hidden="true" size={14} strokeWidth={1.8} />
       </OctantToggleGroupItem>
@@ -1333,6 +1355,8 @@ function ActivityThreadList(props: {
   readonly onSelectThread: (threadId: string) => void;
   /** A search is narrowing the feed, so every row left is a result. */
   readonly searching?: boolean;
+  /** Status groups say how many threads each holds; the feed's days do not. */
+  readonly counted?: boolean;
 }) {
   // Every other group is bounded by its day. "Earlier" is everything older than
   // a week, so it is the one group that only grows, and left open it pushed the
@@ -1378,6 +1402,11 @@ function ActivityThreadList(props: {
                   <span className="activity-nav__fold-count">{group.threads.length}</span>
                   <ChevronRight aria-hidden="true" size={12} strokeWidth={1.8} />
                 </OctantButton>
+              </h2>
+            ) : props.counted === true ? (
+              <h2 className="sidebar-section">
+                {group.label}
+                <span className="activity-nav__fold-count">{group.threads.length}</span>
               </h2>
             ) : (
               <h2 className="sidebar-section">{group.label}</h2>

@@ -39,7 +39,12 @@ import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { pullRequestKey, threadRowPullRequestDestinations } from "./threadRowPullRequests";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
 import { useSidebarRowProperties } from "../shell/sidebarRowProperties";
-import { groupThreadsByCheckout, type CheckoutThreadGroup } from "./projectThreadGrouping";
+import {
+  groupThreadsByCheckout,
+  nestFollowUpThreads,
+  type CheckoutThreadGroup,
+} from "./projectThreadGrouping";
+import { FollowUpLineageContext } from "../followUps/followUpLineage";
 import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { ThreadRenameField } from "./ThreadRenameField";
 import { type ThreadRowActions, ThreadRowMenu, threadRowMenuIsEmpty } from "./ThreadRowMenu";
@@ -755,6 +760,10 @@ interface ProjectThreadRowProps {
 
 const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowProps) {
   const drag = useContext(SidebarThreadDragContext);
+  const followUpParent = useContext(FollowUpLineageContext).get(props.thread.threadId);
+  const nestedUnderParent =
+    followUpParent !== undefined &&
+    props.lineageThreads.some((thread) => thread.threadId === followUpParent);
   const shows = useSidebarRowProperties();
   const rowId = props.thread.navigationId ?? props.thread.threadId;
   const projectName = props.projectNameForThread?.(props.thread);
@@ -826,6 +835,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
       data-follow-up={
         props.thread.followUp === undefined ? undefined : props.thread.followUp ? "true" : "false"
       }
+      data-nested-task={nestedUnderParent ? "true" : undefined}
       data-pinned={props.thread.pinned === true ? "true" : undefined}
       data-shelf={props.thread.shelf}
       data-thread-id={props.thread.threadId}
@@ -1157,7 +1167,16 @@ export interface ProjectThreadListProps {
  */
 export function ProjectThreadList(props: ProjectThreadListProps) {
   const status = props.status ?? "ready";
-  const groups = props.groupByCheckout === true ? groupThreadsByCheckout(props.threads) : undefined;
+  // A thread started from a suggested task sits under the thread that
+  // suggested it; grouping by checkout happens on the rest, so a worktree
+  // child stays under its primary-checkout parent.
+  const followUpParents = useContext(FollowUpLineageContext);
+  const nesting = useMemo(
+    () => nestFollowUpThreads(props.threads, followUpParents),
+    [followUpParents, props.threads],
+  );
+  const groups =
+    props.groupByCheckout === true ? groupThreadsByCheckout(nesting.topLevel) : undefined;
   const rows = (threads: ReadonlyArray<ChatThreadNavigationItem>, grouped: boolean) => (
     <ProjectThreadRows
       {...(props.actions === undefined ? {} : { actions: props.actions })}
@@ -1190,11 +1209,11 @@ export function ProjectThreadList(props: ProjectThreadListProps) {
       )}
       {props.threads.length > 0 ? (
         groups === undefined ? (
-          rows(props.threads, false)
+          rows(nesting.expand(nesting.topLevel), false)
         ) : (
           groups.map((group) => (
             <ProjectCheckoutGroup group={group} key={group.key}>
-              {rows(group.threads, true)}
+              {rows(nesting.expand(group.threads), true)}
             </ProjectCheckoutGroup>
           ))
         )

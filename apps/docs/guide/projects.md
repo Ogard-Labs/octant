@@ -46,6 +46,16 @@ Projects support the following operations:
 - **Relink**: when a bound root becomes unavailable (moved or removed), the Project shows `Relink required`. Use audited relink to point to the new location. Root availability is observed at bootstrap and is not journaled, so relinking does not rewrite durable history.
 - **Remember Full access** (Code Projects): `octant project access <name> full-access` on the host lets new Code threads that choose Remember for this Project start with Full access without a per-thread confirmation, or raise an existing thread to it — a Code thread `octant agent` starts in that Project follows the same choice; `octant project access <name> approval-gated` returns to the default.
 
+## Brand kit
+
+Every Project, Chat, Work or Code, can hold a **brand kit**: your colours, fonts, corner radius, and page gutter, set once. Open the Project overview, choose **Manage** next to **Brand kit**, fill in the values you care about, and select **Save brand kit**. **Clear** removes the kit.
+
+- Colours are hex values (`#0a7d5a`) or `rgb()`, `hsl()`, `oklch()`, or `oklab()` functions.
+- Fonts are system faces or generic families, such as `georgia, serif`. Octant never downloads a font.
+- Radius and gutter are lengths in `px`, `rem`, `em`, or `%`.
+
+When an agent makes a design in a Project that has a kit, it is told the kit exists and draws the design with it, so every screen, slide, and page looks like your product. The design then looks the same in the Canvas, Present, Play, a share, and an HTML export, in light and dark workspaces alike. A kit grants no access to files or the shell. A Chat thread outside a Chat Project has no kit.
+
 ## Project quick start
 
 Chat and Work Project overviews can start a thread directly. Their model pickers offer the selected model's declared reasoning or effort levels. The chosen level is applied before the first message and remains part of that thread's model settings. Choosing **Default** leaves the provider default in effect; changing the provider or model restores its last supported quick-start reasoning choice, or the provider default when none was remembered.
@@ -80,11 +90,16 @@ them again. The page never merges, approves, or comments on a pull request, and 
 deletes work. You can also open it from the command palette with **Review
 finished threads**.
 
-**Hide sidebar** shrinks the sidebar to a narrow rail of icons: the modes, the
-count tiles with their numbers, your Projects as letter tiles, the Activity
-feed, and Settings. Click **Show sidebar** at the top of the rail to bring it
-back. Choose **Hidden** in **Settings › Sidebar › When collapsed** to hide it
-completely instead.
+A narrow rail of icons stands to the left of the sidebar: Inbox, Running, To
+review and Done with their counts, your other places (Board, Pull requests and
+so on), the Activity feed, and Settings. Above Settings, a ring for each
+provider that reports plan limits shows how much of its week (outer) and five
+hours (inner) is left; hover it for every window and when it resets. **Hide sidebar** (or
+**⌘\**) shrinks the sidebar down to that rail, which then also shows the
+modes, New thread, Search, and your Projects as letter tiles. Click **Show
+sidebar** at the top of the rail, or press *_⌘\*_ again, to bring it back. In
+**Settings › Sidebar › Icon rail**, choose **When hidden** to show the rail
+only while the sidebar is hidden, or **Never** to hide everything.
 
 The switch beside the Project view picker chooses how threads are listed:
 **Projects** groups them under their Project, **Activity** lists them by
@@ -93,6 +108,8 @@ recency.
 ## What a thread row shows
 
 Sidebar thread rows can carry the Project a thread belongs to, its branch, its linked pull request, when it was last updated, and its status mark. **Settings › Sidebar › Thread rows** turns each of those on or off for the view you choose, and the Project view filter menu's **Property visibility** submenu edits the view you are looking at, with **Hide all** clearing it in one action. A row that does not carry a property omits it rather than leaving a gap.
+
+The sidebar opens on **Status**: your threads grouped as Pinned, Needs input, Ready for review, Working, and Idle, with a count on each heading. The switch beside the Project view picker changes to the Projects tree or the Activity feed, and each mode remembers your choice. A ✓ after a pull request number means its checks pass.
 
 The choice belongs to the view you are looking at. The Projects tree and the Activity feed each keep their own switches: by default the tree shows the branch, pull request, age, and status mark, while the feed shows the Project name and status mark alone. Hiding pull requests in the tree leaves the feed as it was, and the reverse.
 
