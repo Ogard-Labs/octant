@@ -1805,10 +1805,12 @@ request from the person.
   through the providers. Renderer state is presentation only.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
-  confirmation when a turn is active or the desktop cannot confirm what the host
-  is running, then stop only the
+  confirmation when provider sessions remain open or the desktop cannot confirm
+  what the host is running, then stop only the
   desktop-owned host and its child resources. Cancellation leaves both app and
-  host running. Once the person confirms, quitting never waits on a person: a
+  host running. The session count can include idle sessions kept for another turn;
+  the warning names open sessions without claiming they are executing turns.
+  Once the person confirms, quitting never waits on a person: a
   failed or stalled window-state save or host stop is logged rather than shown
   in an alert, and a fixed deadline ends the app (after force-stopping the
   managed server) if shutdown has not finished.
