@@ -179,8 +179,13 @@ describe("createCanvasAgentTools", () => {
     expect(recipeGuide).toContain('"write a memo or a one-page report" uses memo');
     expect(recipeGuide).toContain('"make slides" uses slide-deck');
     expect(recipeGuide).toContain('"show the key numbers" uses dashboard');
-    expect(recipeGuide).toContain('"design a website or landing page" uses design-prototype');
+    expect(recipeGuide).toContain(
+      '"design or redesign a website or landing page" uses design-prototype at desktop size',
+    );
     expect(recipeGuide).toContain('"a prototype I can try" uses clickable-prototype');
+    expect(recipeGuide).toContain('"a UI kit or component sheet" uses ui-kit');
+    expect(recipeGuide).toContain("uses architecture-diagram");
+    expect(recipeGuide).toContain('"redesign the whole app window" uses app-redesign-prototype');
     expect(set.definitions[0]?.description).toContain("document recipe");
     const recipes = (
       outcome.result as {
@@ -266,6 +271,9 @@ describe("createCanvasAgentTools", () => {
     ["columns", "2 to 4 tracks"],
     ["plan", "view to gantt"],
     ["diagram", "terminator (a pill)"],
+    ["diagram", "left to right"],
+    ["design", "32px"],
+    ["design", "header, hero, features"],
     ["code-excerpt", "language mermaid"],
   ])(
     "answers the %s guidance from describe instead of every turn's description",
@@ -307,8 +315,19 @@ describe("createCanvasAgentTools", () => {
     expect(result.tierGuide).toContain("running design frame");
     for (const kind of ["tabs", "columns", "design"]) expect(result.blockKinds).toContain(kind);
     const ids = result.recipes.map((recipe) => recipe.id);
-    for (const id of ["article", "design-brief", "design-system", "clickable-prototype"]) {
+    for (const id of [
+      "article",
+      "design-brief",
+      "design-system",
+      "clickable-prototype",
+      "architecture-diagram",
+      "ui-kit",
+    ]) {
       expect(ids).toContain(id);
+    }
+    // Every recipe slot names a kind the catalogue lists, so an agent can fill it.
+    for (const recipe of result.recipes) {
+      for (const block of recipe.skeleton) expect(result.blockKinds).toContain(block.kind);
     }
     // An agent reads which size a design slot is drawn at.
     expect(result.recipes.find((recipe) => recipe.id === "article")?.skeleton[0]).toMatchObject({
@@ -783,6 +802,11 @@ describe("createCanvasAgentTools", () => {
       "phone",
       "desktop",
     ]);
+    // A slide is drawn in a fixed 1920x1080 viewport and scaled as a picture, so
+    // the deck an agent copies lays its slides out in pixels, never in vh or vw.
+    const deck = examples.find((example) => example.size === "slide");
+    expect(String(deck?.styles)).toContain("1920px");
+    expect(String(deck?.styles)).not.toMatch(/\d(vh|vw)\b/);
     // The schema an agent reads names the document size and the theme field.
     expect(JSON.stringify(result.blockSchema)).toContain('"document"');
     expect(JSON.stringify(result.blockSchema)).toContain('"workspace"');

@@ -44,7 +44,17 @@ guidance names the frame kit classes, the images the thread's mode can show
 (generated images in every mode, and Project files in Work and Code), when a
 design should declare that it runs script, and the limits its bridge keeps;
 its examples are a phone flow, a deck, a themed spec, and a prototype that
-runs, one finished example of each frame tier. Unscoped
+runs, one finished example of each frame tier. The same guidance lays a
+slide out in fixed pixels at its 1920x1080 size, never in `vh` or `vw`
+(a slide is drawn in that viewport and scaled as a picture, so a viewport
+unit tracks whatever draws it; the deck example once used `100vh`), with body
+text at or above 32px, titles of 64 to 96px, one idea per slide, and the same
+header and footer on every slide; it gives a website or landing page a
+desktop size and the page's real sections in order; and it draws a UI kit's
+component sheet as a document in the kit's own palette with each control in
+every state. The `diagram` guidance lays a system diagram out by tier (one
+group per tier, flow left to right, short node labels, the protocol on each
+edge). Unscoped
 describe also lists document recipes: an id, a title, when to use one, and a
 skeleton of block kinds that already exist, where a `design` slot may name
 the `size` it is drawn at. The
@@ -53,12 +63,15 @@ blocks alone: summary, facts, detail, and the ask), a design spec, an
 architecture review (its options in a comparison matrix), a code review, an
 audit or test report, a postmortem, a research brief, a dashboard, a
 repository map, a design prototype (screens, a website, or a landing page at a
-device size), a slide deck, a data model, an article (one themed document), a
+device size), a slide deck, a data model, an architecture diagram (the parts
+grouped by tier as a diagram, the main flow as a sequence, and a key-decisions
+table), an article (one themed document), a
 product or game design brief (a themed pitch, then typed blocks in tabs), a
-design system (a themed document and a token table), and a clickable
-prototype (a design that runs). Together they cover the deliverables people
-ask an assistant for most: a web page, a one-page document, a deck, a
-dashboard, and a prototype or small app. A trusted, enabled, unscoped skill
+design system (a themed document and a token table), a UI kit (a token table
+and a component sheet in the kit's own palette with every state), and a
+clickable prototype (a design that runs). Together they cover the deliverables
+people ask an assistant for most: a web page, a one-page document, a deck, a
+dashboard, a system diagram, and a prototype or small app. A trusted, enabled, unscoped skill
 may add recipes through its Canvas contribution; a skill that is not enabled
 contributes none, and a contributed recipe cannot replace an in-tree id. A
 recipe is a starting shape, not a document and not authority. Describe reads no
