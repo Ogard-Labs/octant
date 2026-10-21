@@ -122,6 +122,19 @@ export const CanvasCommentOrigin = Schema.Union(
 );
 export type CanvasCommentOrigin = typeof CanvasCommentOrigin.Type;
 
+/**
+ * That a person sent this comment to the agent of the Canvas's owning thread
+ * as a focused revision request. `canvasSequence` is the Canvas version that
+ * was current when it was sent, stamped by the host: the request stands until
+ * a later version lands, and a renderer reads "addressed" off the history
+ * rather than off a second comment state.
+ */
+export const CanvasCommentAgentRequest = Schema.Struct({
+  canvasSequence: Schema.Int.pipe(Schema.positive()),
+  sentAt: UtcTimestamp,
+}).annotations(strict);
+export type CanvasCommentAgentRequest = typeof CanvasCommentAgentRequest.Type;
+
 export const CanvasComment = Schema.Struct({
   commentId: CanvasCommentId,
   anchor: CanvasCommentAnchor,
@@ -131,6 +144,7 @@ export const CanvasComment = Schema.Struct({
   createdAt: UtcTimestamp,
   resolvedAt: Schema.optional(UtcTimestamp),
   resolvedBy: Schema.optional(CanvasActor),
+  sentToAgent: Schema.optional(CanvasCommentAgentRequest),
 }).annotations(strict);
 export type CanvasComment = typeof CanvasComment.Type;
 
@@ -190,11 +204,29 @@ export const CanvasCommentDeleteCommand = Schema.Struct({
 }).annotations(strict);
 export type CanvasCommentDeleteCommand = typeof CanvasCommentDeleteCommand.Type;
 
+/**
+ * Marks a comment as sent to the agent. The host stamps `sentBy` with its own
+ * person and `canvasSequence` with the Canvas head it holds, whatever the
+ * request names; the turn itself goes through the thread's own follow-up
+ * path, never through this command.
+ */
+export const CanvasCommentSendToAgentCommand = Schema.Struct({
+  kind: Schema.Literal("canvas-comment-send-to-agent"),
+  canvasId: CanvasId,
+  commentId: CanvasCommentId,
+  sentBy: CanvasActor,
+  canvasSequence: Schema.Int.pipe(Schema.positive()),
+  expectedSequence: Schema.Int.pipe(Schema.nonNegative()),
+  issuedAt: UtcTimestamp,
+}).annotations(strict);
+export type CanvasCommentSendToAgentCommand = typeof CanvasCommentSendToAgentCommand.Type;
+
 export const CanvasCommentCommand = Schema.Union(
   CanvasCommentAddCommand,
   CanvasCommentReplyCommand,
   CanvasCommentResolveCommand,
   CanvasCommentDeleteCommand,
+  CanvasCommentSendToAgentCommand,
 );
 export type CanvasCommentCommand = typeof CanvasCommentCommand.Type;
 
@@ -232,10 +264,21 @@ export const CanvasCommentDeleted = Schema.Struct({
 }).annotations(strict);
 export type CanvasCommentDeleted = typeof CanvasCommentDeleted.Type;
 
+export const CanvasCommentSentToAgent = Schema.Struct({
+  canvasId: CanvasId,
+  commentId: CanvasCommentId,
+  sentBy: CanvasActor,
+  canvasSequence: Schema.Int.pipe(Schema.positive()),
+  sentAt: UtcTimestamp,
+  sequence: Schema.Int.pipe(Schema.positive()),
+}).annotations(strict);
+export type CanvasCommentSentToAgent = typeof CanvasCommentSentToAgent.Type;
+
 export const CANVAS_COMMENT_ADDED = "canvas.comment-added@1";
 export const CANVAS_COMMENT_REPLIED = "canvas.comment-replied@1";
 export const CANVAS_COMMENT_RESOLVED = "canvas.comment-resolved@1";
 export const CANVAS_COMMENT_DELETED = "canvas.comment-deleted@1";
+export const CANVAS_COMMENT_SENT_TO_AGENT = "canvas.comment-sent-to-agent@1";
 
 export const CanvasCommentEvent = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("added"), event: CanvasCommentAdded }).annotations(strict),
@@ -248,6 +291,10 @@ export const CanvasCommentEvent = Schema.Union(
   Schema.Struct({ kind: Schema.Literal("deleted"), event: CanvasCommentDeleted }).annotations(
     strict,
   ),
+  Schema.Struct({
+    kind: Schema.Literal("sent-to-agent"),
+    event: CanvasCommentSentToAgent,
+  }).annotations(strict),
 );
 export type CanvasCommentEvent = typeof CanvasCommentEvent.Type;
 
@@ -424,6 +471,10 @@ export const decodeCanvasCommentResolveCommand = Schema.decodeUnknownSync(
 export const decodeCanvasCommentDeleteCommand = Schema.decodeUnknownSync(
   CanvasCommentDeleteCommand,
 );
+export const decodeCanvasCommentSendToAgentCommand = Schema.decodeUnknownSync(
+  CanvasCommentSendToAgentCommand,
+);
+export const decodeCanvasCommentSentToAgent = Schema.decodeUnknownSync(CanvasCommentSentToAgent);
 export const decodeCanvasCommentCommand = Schema.decodeUnknownEither(CanvasCommentCommand);
 export const decodeCanvasCommentAdded = Schema.decodeUnknownSync(CanvasCommentAdded);
 export const decodeCanvasCommentReplied = Schema.decodeUnknownSync(CanvasCommentReplied);

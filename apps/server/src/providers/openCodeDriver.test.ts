@@ -1213,6 +1213,11 @@ describe("OpenCode driver", () => {
         event.kind === "task-progress",
     );
     expect(tasks.map((event) => event.taskId)).toEqual(["task-1", "task-2", "task-2", "task-1"]);
+    // Each restated list names the same stable ids, in OpenCode's order.
+    expect(values.flatMap((event) => (event.kind === "task-list" ? [event.taskIds] : []))).toEqual([
+      ["task-1", "task-2"],
+      ["task-2", "task-1"],
+    ]);
   });
 
   it("counts active sessions exactly once and releases them on terminal/finalization", async () => {
