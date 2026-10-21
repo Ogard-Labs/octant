@@ -124,7 +124,18 @@ minute, and an image no wider than 1,600 px and no taller than 4,096 px. When no
 Chromium is present, the build carries no preview page, the page fails to
 settle, or the model driving the turn does not accept images in a tool result,
 the warnings still return and the result names which (`no-browser`,
-`no-renderer`, `render-failed`, `provider-cannot-take-images`). A `design` is markup, so how its frames read
+`no-renderer`, `render-failed`, `provider-cannot-take-images`) beside one plain
+sentence (`imageOmittedNote`) saying that no picture was taken, why, and that
+the listed warnings are the whole reading. The code alone was not enough: shown
+a bare `no-renderer`, a live model reported "no picture" in one turn and
+described the picture it never saw in the next. A development host has the
+page too: `bun run dev` and `octant web --dev` build it before the host starts,
+again whenever the renderer's sources or the contracts, domain or theme
+packages it bundles are newer, and point the host at
+`apps/web/dist` through `OCTANT_WEB_DIST_PATH`, since a host run from source
+does not find the web build on its own. `/health` reports `canvasPreviewPage`,
+whether the host finds the page, so `octant web --dev` attaching to a host left
+running without the web build warns that it must be restarted. A `design` is markup, so how its frames read
 is measured in the drawn page rather than computed from the document: after
 the page settles the host reads each drawn frame and adds a
 `design-frame-overflow` warning for a frame whose content is wider than its

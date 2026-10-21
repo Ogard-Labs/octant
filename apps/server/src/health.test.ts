@@ -40,6 +40,14 @@ describe("healthResponse", () => {
     });
   });
 
+  it("says whether the host finds the Canvas preview page, and omits it when unknown", async () => {
+    const activity = { activeAgentCount: 0, attentionRequired: false };
+    expect(await healthResponse("0.0.0-dev", "i", activity, false).json()).toMatchObject({
+      canvasPreviewPage: false,
+    });
+    expect(await healthResponse("0.0.0-dev").json()).not.toHaveProperty("canvasPreviewPage");
+  });
+
   it("does not expose renderer mode because every renderer attaches to the same host", async () => {
     const response = healthResponse("0.0.0-dev");
 

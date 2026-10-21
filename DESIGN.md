@@ -263,6 +263,10 @@ draw the same hairline.
 
 Every Settings page is built from one kit, in `settings/primitives.tsx`:
 
+Selecting a page replaces its controls as well as its heading. Plugin pages
+resolve the currently selected entry point; a missing entry point shows an
+error instead of retaining another integration's account controls.
+
 - **Page header.** A 42px icon tile (`--oct-radius-inset`, a faint 8% ink fill, a
   hairline) holding the page's own navigation icon at 20px, the page title
   (`.oct-title`, 28px), a one-line subtitle with the page scope, and an
@@ -447,7 +451,9 @@ behavior is in [Workspace](docs/design/workspace.md#start-screen-cards).
 First-run setup asks only what a first task needs — a usable provider, a
 Project folder, and a model — and ends in one primary action, Start a task,
 that opens the new-task composer in that Project. Every step is optional from
-the first one. Skipping preserves settled answers, waits for pending writes,
+the first one. Opening setup focuses the current step's heading so a long
+provider list does not scroll past its introduction; Tab then reaches the
+step's controls. Skipping preserves settled answers, waits for pending writes,
 grants no authority, and creates no thread: provider, Project, model, and
 permission readiness are checked again when work is requested. After Skip, or
 in a later session with no ready instance, the New task composer in Work and
@@ -1805,10 +1811,12 @@ request from the person.
   through the providers. Renderer state is presentation only.
 - The macOS status menu always offers **Fully quit Octant**. Ordinary Quit and
   Fully quit share one guarded shutdown: refresh current host activity, ask for
-  confirmation when a turn is active or the desktop cannot confirm what the host
-  is running, then stop only the
+  confirmation when provider sessions remain open or the desktop cannot confirm
+  what the host is running, then stop only the
   desktop-owned host and its child resources. Cancellation leaves both app and
-  host running. Once the person confirms, quitting never waits on a person: a
+  host running. The session count can include idle sessions kept for another turn;
+  the warning names open sessions without claiming they are executing turns.
+  Once the person confirms, quitting never waits on a person: a
   failed or stalled window-state save or host stop is logged rather than shown
   in an alert, and a fixed deadline ends the app (after force-stopping the
   managed server) if shutdown has not finished.

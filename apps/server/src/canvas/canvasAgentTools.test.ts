@@ -1975,6 +1975,52 @@ describe("Canvas preview through the tool", () => {
     });
   });
 
+  it.each([
+    [
+      "no-browser",
+      "No picture was taken because this host has no browser to draw the Canvas, so rely on the listed warnings only.",
+    ],
+    [
+      "no-renderer",
+      "No picture was taken because this build carries no Canvas preview page, so rely on the listed warnings only.",
+    ],
+    [
+      "render-failed",
+      "No picture was taken because the preview page did not settle or the screenshot failed, so rely on the listed warnings only.",
+    ],
+    [
+      "provider-cannot-take-images",
+      "No picture was taken because the model driving this turn cannot be shown images in a tool result, so rely on the listed warnings only.",
+    ],
+  ] as const)(
+    "says in one plain sentence that no picture was taken and why when the reason is %s",
+    async (imageOmitted, sentence) => {
+      const set = previewPort(
+        () => imageOmitted !== "provider-cannot-take-images",
+        () => ({
+          kind: "preview",
+          canvasId: previewCanvasId,
+          sequence: 1,
+          width: 720,
+          warnings: [{ kind: "empty-series", blockId: "revenue" }],
+          imageOmitted,
+        }),
+      );
+      const outcome = await set.execute({
+        name: CANVAS_TOOL_NAME,
+        inputJson: JSON.stringify({ operation: "preview", canvasId: previewCanvasId }),
+      });
+      expect(outcome.isError).not.toBe(true);
+      expect(outcome.images).toBeUndefined();
+      expect(outcome.result).toMatchObject({
+        imageIncluded: false,
+        imageOmitted,
+        imageOmittedNote: sentence,
+        warnings: [{ kind: "empty-series", blockId: "revenue" }],
+      });
+    },
+  );
+
   it("attaches the picture to a model that takes images in a tool result", async () => {
     const set = previewPort(
       () => true,
