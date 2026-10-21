@@ -109,6 +109,21 @@ describe("resolveCanvasDesignAssets", () => {
     expect(ports.projectFile).not.toHaveBeenCalled();
   });
 
+  it("answers a captured-page asset as refused without reading anything until captures resolve", async () => {
+    const ports = filePorts();
+    const capture = {
+      assetId: "shot",
+      source: { kind: "browser-capture", captureId: "44444444-4444-4444-8444-444444444444" },
+    } as NonNullable<CanvasDesignBlock["assets"]>[number];
+    const resolved = await resolveCanvasDesignAssets(
+      design([capture]),
+      { mode: "work", projectId: projectId as never, threadId: threadId as never },
+      ports,
+    );
+    expect(resolved).toEqual([{ assetId: "shot", status: "unavailable", reason: "refused" }]);
+    expect(ports.projectFile).not.toHaveBeenCalled();
+  });
+
   it("draws a generated image in a Chat Canvas only when its Project says so", async () => {
     const generated = vi.fn(async (input: { readonly projectId: string | null }) =>
       input.projectId === projectId

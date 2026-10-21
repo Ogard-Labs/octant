@@ -3382,3 +3382,153 @@ describe("diagram styles and the plan's Gantt view", () => {
     );
   });
 });
+
+describe("design fields and nested diagram groups", () => {
+  const nested = (
+    groups: ReadonlyArray<unknown>,
+    schemaVersion: number = CANVAS_SCHEMA_VERSION,
+  ) => ({
+    blockId: "arch",
+    schemaVersion,
+    kind: "diagram",
+    nodes: [
+      { nodeId: "web", label: "Web app", icon: "browser", detail: "React" },
+      { nodeId: "db", label: "Orders", icon: "database" },
+    ],
+    edges: [{ edgeId: "e1", source: "web", target: "db" }],
+    groups,
+  });
+  const group = (groupId: string, parentGroupId?: string, nodeIds: ReadonlyArray<string> = []) => ({
+    groupId,
+    label: groupId,
+    nodeIds,
+    ...(parentGroupId === undefined ? {} : { parentGroupId }),
+  });
+  const branded = (overrides: Record<string, unknown> = {}) => ({
+    ...onboardingFlowExample,
+    theme: "brand",
+    brand: { "color-primary": "#1a73e8", "font-heading": "Georgia, serif", "radius-card": "8px" },
+    ...overrides,
+  });
+  const codeOrChat = (block: unknown, mode: "chat" | "work" | "code") =>
+    ({
+      ...baseDefinition,
+      provenance: { ...baseDefinition.provenance, mode },
+      blocks: [block],
+    }) as unknown;
+
+  it("admits icons, details, and groups nested up to three levels", () => {
+    expect(() =>
+      validateCanvasDefinition(
+        withBlocks([nested([group("a"), group("b", "a"), group("c", "b", ["db"])])]),
+      ),
+    ).not.toThrow();
+  });
+
+  it("refuses a parent group the diagram does not hold, a cycle, and nesting past three levels", () => {
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([nested([group("a", "ghost")])])),
+      "unknown-diagram-parent-group",
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([nested([group("a", "a")])])),
+      "diagram-group-nesting-cycle",
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([nested([group("a", "b"), group("b", "a")])])),
+      "diagram-group-nesting-cycle",
+    );
+    expectPolicyCode(
+      () =>
+        validateCanvasDefinition(
+          withBlocks([nested([group("a"), group("b", "a"), group("c", "b"), group("d", "c")])]),
+        ),
+      "diagram-group-depth-exceeded",
+    );
+  });
+
+  it("refuses the new diagram and design fields in a document that declares version 20", () => {
+    const older = { ...baseDefinition, schemaVersion: 20 };
+    for (const block of [
+      { ...nested([group("a")], 20) },
+      {
+        ...onboardingFlowExample,
+        schemaVersion: 20,
+        frames: [{ ...onboardingFlowExample.frames[0], notes: "Say hello." }],
+      },
+      { ...branded(), schemaVersion: 20 },
+    ]) {
+      expectPolicyCode(
+        () => validateCanvasDefinition({ ...older, blocks: [block] }),
+        "unsupported-schema-version",
+      );
+    }
+  });
+
+  it("keeps a version 20 document without the new fields valid", () => {
+    expect(() =>
+      validateCanvasDefinition({
+        ...baseDefinition,
+        schemaVersion: 20,
+        blocks: [{ ...onboardingFlowExample, schemaVersion: 20 }],
+      }),
+    ).not.toThrow();
+  });
+
+  it("admits a brand of safe colours, fonts, and lengths and notes on a frame", () => {
+    const frames = [{ ...onboardingFlowExample.frames[0], notes: "Open with the demo." }];
+    expect(() => validateCanvasDefinition(withBlocks([branded({ frames })]))).not.toThrow();
+  });
+
+  it("refuses a brand value that could end a declaration, load something, or name an unlisted font", () => {
+    for (const brand of [
+      { "color-primary": "red; } body { display: none" },
+      { "color-primary": "url(https://example.test/a.png)" },
+      { "color-primary": "javascript" },
+      { "font-heading": "Georgia, 'Comic Sans MS'" },
+      { "font-heading": "Courier New}" },
+      { "radius-card": "calc(1px + 2px)" },
+      { "space-gutter": "-4px" },
+    ]) {
+      expectPolicyCode(
+        () => validateCanvasDefinition(withBlocks([branded({ brand })])),
+        "design-brand-refused",
+      );
+    }
+  });
+
+  it("refuses a brand without the brand theme, the brand theme without a brand, and a running brand", () => {
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([branded({ theme: "none" })])),
+      "design-brand-refused",
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([{ ...onboardingFlowExample, theme: "brand" }])),
+      "design-brand-refused",
+    );
+    expectPolicyCode(
+      () => validateCanvasDefinition(withBlocks([branded({ runsScript: true })])),
+      "design-run-refused",
+    );
+  });
+
+  it("refuses a captured page as a design asset in Chat and admits it in Work and Code", () => {
+    const capture = {
+      ...onboardingFlowExample,
+      frames: [{ frameId: "home", title: "Home", html: '<img src="octant-asset:shot" alt="">' }],
+      assets: [
+        {
+          assetId: "shot",
+          source: { kind: "browser-capture", captureId: "66666666-6666-4666-8666-666666666666" },
+        },
+      ],
+    };
+    expectPolicyCode(
+      () => validateCanvasDefinition(codeOrChat(capture, "chat")),
+      "design-asset-refused",
+    );
+    for (const mode of ["work", "code"] as const) {
+      expect(() => validateCanvasDefinition(codeOrChat(capture, mode))).not.toThrow();
+    }
+  });
+});

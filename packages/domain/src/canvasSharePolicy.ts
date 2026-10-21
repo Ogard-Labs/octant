@@ -1,4 +1,5 @@
 import { trimTrailingUrlPunctuation } from "./trimTrailing";
+import { designBrandTokenRefusal } from "./canvasDesignFrameKit";
 import {
   CANVAS_SHARE_MAX_BLOCK_SCHEMA_VERSION,
   CANVAS_SHARE_SCHEMA_VERSION,
@@ -209,14 +210,29 @@ function sharedDesign(
       `Canvas design ${block.blockId} holds what reads as a credential in its markup.`,
     );
   }
+  // A brand leaves as validated values: the same rule that admitted it to the
+  // Canvas is applied again, so a share never carries a token that could end a
+  // declaration or load something in the viewer.
+  for (const [name, value] of Object.entries(design.brand ?? {})) {
+    const refusal = designBrandTokenRefusal(name, value);
+    if (refusal !== undefined) {
+      reject("unsafe-payload", `Canvas design ${block.blockId} brand ${refusal}.`);
+    }
+  }
   // Everything about the design that is not markup is a value like any other
   // block's, ids included, and the acknowledgement does not cover it.
   const { styles: _styles, frames, ...values } = design;
   assertNoSecretShape(
-    { ...values, frames: frames.map(({ html: _html, ...frame }) => frame) },
+    { ...values, frames: frames.map(({ html: _html, notes: _notes, ...frame }) => frame) },
     `block.${block.blockId}`,
   );
-  return design as CanvasStaticExportBlock;
+  // Presenter notes are the author's, like speaker notes in a deck: a share or
+  // public link carries the slides, never what the presenter meant to say.
+  const withoutNotes = {
+    ...design,
+    frames: design.frames.map(({ notes: _notes, ...frame }) => frame),
+  };
+  return withoutNotes as CanvasStaticExportBlock;
 }
 
 function sanitizeBlock(block: CanvasBlock, markupAcknowledged: boolean): CanvasStaticExportBlock {
