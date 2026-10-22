@@ -900,3 +900,42 @@ html[data-octant-increased-contrast="true"] .navigator-panel__notice,
 html[data-octant-increased-contrast="true"] .navigator-panel__capability {
   border-color: var(--octant-border-strong);
 }
+
+/* A Browser with several pages: the pages' row, then the page itself. */
+.right-utility-dock__tool--pages {
+  display: flex;
+  flex-direction: column;
+}
+
+.dock-browser-pages {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--oct-space-1) var(--oct-space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.dock-browser-pages::-webkit-scrollbar {
+  display: none;
+}
+
+.dock-browser-pages > .dock-browser-pages__page {
+  flex: 0 1 auto;
+}
+
+.dock-browser-pages__page > .content-tab__select {
+  max-width: 10rem;
+}
+
+.dock-browser-pages__page > .content-tab__select > svg {
+  width: var(--oct-icon-sm);
+  height: var(--oct-icon-sm);
+}
+
+.dock-browser-pages__page-body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
