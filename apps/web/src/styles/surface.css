@@ -738,6 +738,29 @@
     left: var(--octant-rail-offset, 0px);
     border-radius: var(--oct-radius-md);
   }
+
+  /* Under Glass the sidebar's nearly clear sheet cannot quiet a ground that
+     runs beneath it, and its letters read as text behind the Project and
+     thread names; there the ground keeps a quarter of its strength. */
+  .shell--app-backdrop.shell--material-translucent.shell-frame.shell--app-backdrop-sidebar
+    > .app-backdrop[data-placement="shell"] {
+    mask-image:
+      linear-gradient(
+        to bottom,
+        currentColor 40%,
+        color-mix(in srgb, currentColor 45%, transparent) 75%,
+        color-mix(in srgb, currentColor 20%, transparent) 100%
+      ),
+      linear-gradient(
+        to right,
+        color-mix(in srgb, currentColor 25%, transparent) var(--octant-rendered-sidebar-width),
+        currentColor var(--octant-rendered-sidebar-width)
+      );
+    mask-size: 100% 100%;
+    mask-repeat: no-repeat;
+    mask-composite: intersect;
+    -webkit-mask-composite: source-in;
+  }
 }
 
 .shell--app-backdrop.shell-frame .inbox-layer,
@@ -785,14 +808,18 @@
    the pane is showing at the moment. Painted on the conversation view alone,
    the "Loading Code thread" state that stands in for it while the thread
    loads had no surface at all, and the picture showed straight through. It
-   starts below the title band, which belongs to the window frame. */
+   starts below the title band, which belongs to the window frame.
+
+   The veil is the sheet's colour, not the stage's. On a black (OLED) ground
+   the stage colour turned every thread into a black hole inside the grey
+   sheet, while the pages around it (Board, Inbox) read grey over the ground. */
 .shell--app-backdrop.shell-frame
   .workspace-pane:is(
     [data-surface-kind="chat-thread"],
     [data-surface-kind="work-thread"],
     [data-surface-kind="code-overview"]
   ) {
-  --octant-thread-veil: var(--octant-stage-surface);
+  --octant-thread-veil: var(--octant-sheet-surface);
   background: linear-gradient(
     to bottom,
     transparent var(--oct-title-rail-h),
@@ -808,8 +835,39 @@
       [data-surface-kind="work-thread"],
       [data-surface-kind="code-overview"]
     ) {
-    --octant-thread-veil: color-mix(in srgb, var(--octant-stage-surface) 80%, transparent);
+    --octant-thread-veil: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);
   }
+}
+
+/* A thread's own container painted the theme's opaque workspace colour over
+   the pane, so under Glass every thread was a solid slab (near-black in the
+   OLED presets) inside a frame of glass, and the veil above never showed. In
+   the main window it is clear wherever the pane carries a surface of its own:
+   the veil over a ground, or the glass sheet. */
+.shell--app-backdrop.shell-frame
+  .workspace-pane
+  :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace),
+.shell--material-translucent.shell-frame
+  .workspace-pane
+  :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) {
+  background: transparent;
+}
+
+/* Under Glass the sheet is nearly clear, so an 80% veil of it could not quiet
+   the ground: its letters ran crisp behind the transcript. While a thread is
+   on screen the ground itself steps down to about the strength the veil
+   leaves it on an opaque sheet. A backdrop blur behind the thread was tried
+   first: a browser frosted the letters, but the packaged window, whose glass
+   is the system's, drew them sharp. */
+.shell--app-backdrop.shell--material-translucent.shell-frame:has(
+    .workspace-pane:is(
+      [data-surface-kind="chat-thread"],
+      [data-surface-kind="work-thread"],
+      [data-surface-kind="code-overview"]
+    )
+  )
+  > .app-backdrop[data-placement="shell"] {
+  opacity: 0.2;
 }
 
 /* Where the pane meets the sheet's rounded corner, its veil rounds with it. */

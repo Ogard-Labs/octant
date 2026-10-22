@@ -135,6 +135,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__nat
   left: var(--octant-window-chrome-leading-width, 148px);
 }
 
+/* Beside a rail the chrome, and so its leading cluster, starts after it. */
+html[data-octant-native-host="true"] .shell--sidebar-rail .shell-frame__native-drag-strip {
+  left: calc(
+    var(--octant-rendered-sidebar-width) + var(--octant-window-chrome-leading-width, 148px)
+  );
+}
+
 /* The right dock's tab strip lives in the same band. The strip used to run
    over it, so the tabs and their close controls dragged the window instead
    of responding; it now ends where the dock begins. */
@@ -202,15 +209,21 @@ html[data-octant-native-host="true"]
 
 /* A collapsed sidebar can stay as an icon rail. It keeps the sidebar's
    column and material, and the chrome and workspace return to the second
-   column. The rail is one icon wide; in the desktop app it widens just
-   enough to clear the native traffic lights that sit at its top. */
+   column. The rail is one icon wide and exactly as wide as the title band is
+   tall, so the frame reads as one even L. */
 .shell.shell-frame.shell--sidebar-rail {
-  --octant-rendered-sidebar-width: 48px;
+  --octant-rendered-sidebar-width: var(--oct-title-rail-h);
   grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
 }
 
-.shell.shell-frame.shell--sidebar-rail:has(> .sidebar-rail[data-native-host]) {
-  --octant-rendered-sidebar-width: 76px;
+/* In the desktop app the traffic lights sit in the title band across the
+   rail and the chrome's start, not in the rail: a rail widened to 76px to hold
+   them was wider than the rail beside the open sidebar. The chrome keeps the
+   rest of their width clear, before Show sidebar, Back, and Forward. */
+.shell--sidebar-rail.shell-frame > .window-chrome .window-chrome__traffic-light-space {
+  flex-basis: calc(
+    var(--octant-native-traffic-light-leading-width, 74px) - var(--octant-rendered-sidebar-width)
+  );
 }
 
 .shell--sidebar-rail.shell-frame > .window-chrome,
@@ -222,9 +235,11 @@ html[data-octant-native-host="true"]
    `--octant-rail-offset` moves everything placed at the sidebar's trailing
    edge (the resize handle, the native drag strip, the glass/ground split)
    right by the rail's width; the sidebar column keeps its own width rules,
-   including the Projects pane and the wide-context clamp. */
+   including the Projects pane and the wide-context clamp. The rail is as wide
+   as the title band is tall: at 48px beside a 38px band the frame's two arms
+   visibly differed. */
 .shell.shell-frame.shell--rail-beside {
-  --octant-rail-offset: 48px;
+  --octant-rail-offset: var(--oct-title-rail-h);
   grid-template-columns:
     var(--octant-rail-offset) var(--octant-rendered-sidebar-width)
     minmax(0, 1fr);
@@ -281,6 +296,14 @@ html[data-octant-native-host="true"]
   padding: var(--oct-space-2) 0 var(--oct-space-3);
   overflow-x: hidden;
   overflow-y: auto;
+  /* The rail is 38px around 32px faces. A classic scrollbar took 10px of that
+     once the rail overflowed and clipped every face, so the rail scrolls
+     without drawing one. */
+  scrollbar-width: none;
+}
+
+.sidebar-rail__column::-webkit-scrollbar {
+  display: none;
 }
 
 .sidebar-rail__group {
@@ -348,17 +371,29 @@ html[data-octant-native-host="true"]
   text-align: center;
 }
 
+/* A Project letter is drawn at icon size, as an outline in the icons' muted
+   ink. Filled 28px tiles in full ink were the loudest thing in the rail, five
+   bright blocks that outweighed the places above them. */
 .sidebar-rail__project {
   display: flex;
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
   align-items: center;
   justify-content: center;
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 22%, transparent);
   border-radius: var(--oct-radius-sm);
-  background: color-mix(in oklab, var(--oct-fg) 14%, transparent);
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
+  background: transparent;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
+}
+
+.sidebar-rail__button:hover .sidebar-rail__project,
+.sidebar-rail__button:focus-visible .sidebar-rail__project,
+.sidebar-rail__button[aria-current="page"] .sidebar-rail__project {
+  border-color: color-mix(in oklab, var(--oct-fg) 40%, transparent);
+  color: var(--oct-fg);
 }
 
 .sidebar-rail__divider {
@@ -944,6 +979,13 @@ html[data-octant-native-host="true"]
 .project-nav__list-switch {
   flex: 0 0 auto;
   margin-inline-start: auto;
+}
+
+/* Square glyph buttons. The recipe's text padding made each 32px wide, and
+   at a narrow sidebar width the row no longer fit beside the views. */
+.project-nav__list-switch > button {
+  aspect-ratio: 1;
+  padding-inline: 0;
 }
 
 .sidebar-navigation__threads {
@@ -1787,9 +1829,11 @@ html[data-octant-native-host="true"]
   }
 
   /* Under a ground that covers the sidebar too, the sidebar's piece of the
-     sheet lets a little of it through. */
+     sheet lets a trace of it through. At 84% the ground's letters read as
+     text behind the Project and thread names; the list needs a quieter
+     surface than the stage. */
   .shell--app-backdrop-sidebar.shell-frame > .sidebar::before {
-    background-color: color-mix(in srgb, var(--octant-sheet-surface) 84%, transparent);
+    background-color: color-mix(in srgb, var(--octant-sheet-surface) 94%, transparent);
   }
 
   /* Positioned for its sheet piece, but with no stacking context of its own:
@@ -1840,6 +1884,16 @@ html[data-octant-native-host="true"]
   /* The dock's surface inside its frame painted the opaque workspace colour
      over the sheet piece, so the dock stayed solid under Glass. */
   .shell-frame .right-utility-dock__surface {
+    background: transparent;
+  }
+
+  /* The sidebar's sheet piece already draws the edge between it and the
+     stage. The resize hairline ran the window's full height beside it, so it
+     cut through the title band and doubled the edge; it now shows only while
+     grabbed, and only along the sheet. */
+  .shell-frame__sidebar-resize::before {
+    top: var(--oct-title-rail-h);
+    bottom: var(--octant-sheet-inset);
     background: transparent;
   }
 

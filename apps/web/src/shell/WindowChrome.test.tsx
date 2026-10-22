@@ -738,9 +738,16 @@ describe("WindowChrome", () => {
       "transparent var(--oct-title-rail-h), var(--octant-thread-veil) var(--oct-title-rail-h)",
     );
     // Opaque unless transparency is allowed; then the ground shows faintly.
-    expect(flattened).toContain("--octant-thread-veil: var(--octant-stage-surface);");
+    // It takes the sheet's colour, so a thread on a black ground is not a
+    // black hole inside the grey sheet.
+    expect(flattened).toContain("--octant-thread-veil: var(--octant-sheet-surface);");
     expect(flattened).toContain(
-      "--octant-thread-veil: color-mix(in srgb, var(--octant-stage-surface) 80%, transparent);",
+      "--octant-thread-veil: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);",
+    );
+    // The thread's own container stays clear under the veil and under Glass,
+    // or it paints a solid slab over both.
+    expect(flattened).toContain(
+      ".shell--material-translucent.shell-frame .workspace-pane :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) { background: transparent; }",
     );
   });
 

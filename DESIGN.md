@@ -596,7 +596,7 @@ light theme it fades out sooner, because dark text over a pale picture has
 less contrast headroom than light text over a dark one. A person
 may instead put the ground behind every page, from the workspace's leading
 edge, and under the sidebar too when they ask for it (see Shapes and depth). Conversations
-soften it beneath one continuous reading veil, the stage colour at 80%, so it
+soften it beneath one continuous reading veil, the sheet colour at 80%, so it
 shows at about a fifth of its strength behind a thread and agent replies
 remain bare prose (0155). Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›
@@ -710,10 +710,10 @@ it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, with no card of its own: only the work a turn
 produced is boxed. Over the application ground, the conversation supplies one quiet,
-continuous reading veil below the title band: the stage colour at 80%, so the
+continuous reading veil below the title band: the sheet colour at 80%, so the
 ground stays faintly visible behind the transcript (0155). Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
-ground (0150). Reduced transparency keeps the reading background opaque.
+ground (0150). Under Glass the thread's container stays clear, the ground steps down to a fifth of its strength while a thread is on screen, and keeps a quarter of it under the sidebar, so it never reads as letters behind text. Reduced transparency keeps the reading background opaque.
 The follow-up composer has 24px of space above it outside the transcript
 scroll frame, so a reply never touches the input. Running text keeps a 72ch
 measure; tables and code blocks run the column's width, ending on the same edge
@@ -990,10 +990,12 @@ width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing.
 
-**Icon rail.** By default (Settings › Sidebar › Icon rail: Always) a 48px
-icon rail stands in its own column in front of the open sidebar; in the
-desktop app the traffic lights sit in the title band above it, and the
-sidebar's head keeps the rest of their width clear. Beside the sidebar it
+**Icon rail.** By default (Settings › Sidebar › Icon rail: Always) an icon
+rail stands in its own column in front of the open sidebar. It is exactly as
+wide as the title band is tall (38px), open or collapsed, so the frame's two
+arms match. In the desktop app the traffic lights sit in the title band above
+it, and the sidebar's head, or with the sidebar hidden the window chrome,
+keeps the rest of their width clear. Beside the sidebar it
 carries the places: the count tiles as icons with badges, the destination
 rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
 which and in what order, for the rail as for the sidebar), the Activity feed,
@@ -1023,8 +1025,8 @@ host keeps that observation across restarts, so the rings are there on launch;
 when the reading is more than a few hours old the card says "Last read 5h ago".
 
 **Back and forward.** Back and Forward sit in the title band beside the
-sidebar control (beside Show sidebar while the sidebar is hidden, under it on
-the collapsed icon rail, and in the sidebar's header in a browser). They step
+sidebar control (beside Show sidebar while the sidebar is hidden, with or
+without the icon rail, and in the sidebar's header in a browser). They step
 through the pages (Inbox, Board, Pull requests, Projects, the other sidebar
 places, Review, and the archive) and the tabs (threads, drafts, canvases) this
 window opened. A step in another mode switches to that exact mode (Chat and
@@ -1037,9 +1039,10 @@ disabled, at its end of the history.
 
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),
-collapses the sidebar to the rail alone, which then also shows Show sidebar,
-New thread, and Search at the top, the modes, and up to six Project letter
-tiles with a Projects button for the rest. Icon rail: When hidden shows the
+collapses the sidebar to the rail alone, which then also shows New thread and
+Search at the top, the modes, and up to six Project letters (outlined at icon
+size in the icons' muted ink) with a Projects button for the rest; Show sidebar, Back, and Forward move into the
+title band, so the rail stays one icon wide. Icon rail: When hidden shows the
 rail only in that state; Never removes the sidebar completely when hidden and
 leaves Show sidebar and New thread in the native title rail. Neither rail
 appears below the narrow-window breakpoint (960px): there the width belongs to

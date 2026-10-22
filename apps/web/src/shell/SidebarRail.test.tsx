@@ -12,7 +12,6 @@ describe("SidebarRail", () => {
         destinations={[]}
         modes={["chat", "work", "code"]}
         nativeHost={false}
-        onExpand={vi.fn()}
         onOpenSettings={vi.fn()}
         onSelectMode={vi.fn()}
         projects={[{ id: "p1", name: "octant", active: false, onOpen: vi.fn() }]}
