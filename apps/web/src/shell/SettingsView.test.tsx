@@ -1748,6 +1748,16 @@ describe("SettingsView", () => {
     expect(onSearchChange).toHaveBeenLastCalledWith("");
   });
 
+  it("opens what was just typed when Enter follows the last keystroke at once", () => {
+    const { onSearchChange } = renderSettingsWithSearch("");
+    const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+    // No wait between typing and Enter: the listed results have not caught up.
+    fireEvent.change(searchbox, { target: { value: "dark mode" } });
+    fireEvent.keyDown(searchbox, { key: "Enter" });
+    expect(onSearchChange).toHaveBeenLastCalledWith("");
+    expect(screen.getByRole("heading", { level: 1, name: "Appearance" })).toBeVisible();
+  });
+
   it("assigns the settings surface an explicit visual class contract", () => {
     const onSettingsChange = vi.fn();
     render(
