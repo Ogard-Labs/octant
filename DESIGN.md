@@ -458,7 +458,14 @@ drawn in the primary ink. The hero asks "What are we building today?" (the
 hero role) and one quiet line under it, at the detail step in muted ink, says
 "Pick a project, or just start typing". The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
-sidebar. Each mode's own prompt stays in the composer's placeholder ("Ask
+sidebar. Once a Code start screen has a Project chosen, a quick-tools column
+stands beside it on the stage (320px, one hairline, hidden below 1100px): the
+Project's own Terminal and Browser as plain rows in the middle of the column.
+Each opens in that column without starting a thread, the same window-local
+Project terminal and browser Zen uses, which no agent can see or reach;
+"Quick tools" returns to the list, and closing the terminal (or leaving the
+start screen) stops its shell, since nothing else could reopen it. The
+composer never remounts when the Project is chosen, so the draft stays. Each mode's own prompt stays in the composer's placeholder ("Ask
 anything…", "Describe the work…", "Describe the change…"), and the message
 field keeps its accessible name. The composer is prompt first, four lines tall before it
 grows; its toolbar row holds how the thread runs (attach, image and access

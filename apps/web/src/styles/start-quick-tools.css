@@ -1,0 +1,85 @@
+/* Quick tools beside a Code start screen: a column on the stage, divided from
+   the start screen by one hairline, that lists the chosen Project's terminal
+   and browser and then holds the one that was opened. */
+.draft-thread__with-tools {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  flex: 1 1 auto;
+}
+
+.draft-thread__with-tools > :first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.start-quick-tools {
+  display: flex;
+  width: 320px;
+  min-height: 0;
+  flex: 0 0 320px;
+  flex-direction: column;
+  border-left: 1px solid var(--octant-border-soft);
+}
+
+/* Listed, the tools sit in the middle of the column as plain rows. */
+.start-quick-tools:not(.start-quick-tools--open) {
+  justify-content: center;
+  padding: var(--oct-space-4);
+}
+
+.start-quick-tools__list {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--oct-space-1);
+}
+
+.start-quick-tools__row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: var(--oct-space-2);
+  color: var(--oct-fg);
+}
+
+.start-quick-tools__message {
+  margin-top: var(--oct-space-2);
+}
+
+.start-quick-tools__head {
+  display: flex;
+  align-items: center;
+  min-height: var(--oct-title-rail-h);
+  padding: 0 var(--oct-space-2);
+}
+
+.start-quick-tools__back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.start-quick-tools__body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+/* The Project browser is a floating dock in Zen; here it sits in the column. */
+.start-quick-tools__body .zen-research {
+  position: static;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* A narrow stage keeps the start screen whole. */
+@media (max-width: 1100px) {
+  .start-quick-tools {
+    display: none;
+  }
+}

@@ -181,6 +181,7 @@ import {
   type WorkKind,
 } from "./shell/workKind";
 import { useWindowHistory, type WindowPlace } from "./shell/windowHistory";
+import { StartQuickToolsContext, type StartQuickToolsServices } from "./shell/StartQuickTools";
 import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "./shell/contributionRegistry";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
@@ -1458,6 +1459,7 @@ function LaunchedShell(
     hostResourceClient,
     pendingRequestClient,
     projectTerminalClient,
+    projectBrowserClient,
     imageGenerationClient,
     speechClient,
     linearTransport,
@@ -4675,6 +4677,17 @@ function LaunchedShell(
     [activeMode, activeSidebarDestination, historyPaneId, historyTabId],
   );
   const windowHistory = useWindowHistory(currentWindowPlace, restoreWindowPlace);
+  // The start screen's quick tools open this window's Project terminal and
+  // browser; they are local to this window, never a thread's.
+  const startQuickToolsServices = useMemo<StartQuickToolsServices>(
+    () => ({
+      hostId: LOCAL_HOST_ID,
+      projectTerminalClient,
+      projectBrowserClient,
+      ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
+    }),
+    [projectBrowserClient, projectTerminalClient, props.hostBridge],
+  );
 
   async function restoreWindowPlace(place: WindowPlace): Promise<boolean> {
     if (visibleModeOf(place.mode) !== visibleModeOf(activeMode)) {
@@ -6534,7 +6547,7 @@ function LaunchedShell(
         sidebarWidth={sidebarWidth}
         wideContextOpen={!isNarrow && dockPresentedOpen}
         workspace={
-          <>
+          <StartQuickToolsContext.Provider value={startQuickToolsServices}>
             <div className="primary-workspace-layer">
               <ReaderPagesContainer
                 actions={actions}
@@ -6752,7 +6765,7 @@ function LaunchedShell(
                 writtenDocumentsByThread={writtenDocumentsByThread}
               />
             </TabActivationProvider>
-          </>
+          </StartQuickToolsContext.Provider>
         }
       >
         <ShellDialogHost

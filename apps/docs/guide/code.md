@@ -19,6 +19,14 @@ The server validates that the folder exists and the renderer receives an opaque 
 
 A Code Project can remember how new threads should start: in **this Project's current checkout**, or in **a managed worktree Octant creates**. The default is the current checkout, which creates no worktree the owner did not ask for. Set the habit from the Project overview; the composer still lets one thread override it without rewriting the Project. Desktop and phone both inherit that default, and the new thread shows which root it bound. A missing or unauthorized root fails closed instead of inventing a worktree.
 
+## Quick tools on the start screen
+
+Once you choose a Project on a Code start screen, **Terminal** and **Browser**
+appear in a column beside it (on a window at least 1100px wide). They open the
+Project's own terminal and browser right there, before any thread exists. No
+agent can see or use either. **Quick tools** takes you back to the list;
+closing the terminal stops its shell.
+
 ## Sending while a response is running
 
 The composer stays open while a response is streaming. Press Enter and the
