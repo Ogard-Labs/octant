@@ -51,8 +51,10 @@ and service workers in. There are three kinds:
   open. It never changes the profile of a page the agent opens.
 - An agent's own new page is Private. The agent may ask to open a page in the
   Project or Personal profile (a `profile` argument on the Browser tool's open
-  operation); that request always raises a site approval naming the profile (see
-  below), and the host decides, not the tool argument.
+  operation). The host decides, not the tool argument: the request raises a site
+  approval naming the profile unless the person already remembered that
+  (origin, profile) pair, and rebinding a page to a different model or authority
+  still asks (see below).
 - The thread-less Project Browser (the person's own browser for a Project) uses
   the same control. It has no agent, so no approval applies there.
 
@@ -61,12 +63,16 @@ and service workers in. There are three kinds:
 - The desktop app keeps a profile in a persistent Electron partition:
   `persist:octant-profile-personal` and `persist:octant-profile-project-<project id>`.
   A Private page keeps its in-memory `octant-browser-<context id>` partition.
-- A host without the desktop app drives a headless page. Its runtime keeps a
-  profile as a persistent context in a user-data directory under the host data
-  directory, `browser-profiles/personal/` and
-  `browser-profiles/project-<project id>/`, created with mode `0700`. The
-  runtime holds at most one persistent context per profile and opens every page
-  of that profile in it.
+- That partition is the only store a profile has. A profile page opens only in
+  the desktop app's native Browser. When the native Browser is not available
+  (a host with no desktop app, or the app not running), a profile page is
+  refused with `profile-unavailable` rather than opened in a headless page;
+  Private pages still fall back to a headless page as they do today.
+- Rationale: the host routes each new browsing context to the native or the
+  headless runtime and falls back to headless when the native owner is gone. A
+  second, headless copy of a profile would hold different cookies from the
+  native one, so pages of one "shared" profile would disagree about who is
+  signed in. One store, refused elsewhere, keeps the promise exact.
 - Profiles are never written inside a Project folder.
 - On macOS, Chromium encrypts a persistent profile's cookies with a key it keeps
   in the login keychain. Octant adds no second encryption layer.
@@ -163,8 +169,13 @@ page they are allowed on, including what the agent reads.
   folder into the host data directory under `browser-extensions/<extension id>/`,
   and journals `browser.extension-installed@1` with the name, version, content
   hash, and the permissions and host patterns it asks for. Later edits to the
-  source folder change nothing; installing the folder again updates it.
+  source folder change nothing; installing the folder again updates it and
+  journals `browser.extension-updated@1` with the same fields.
 - Installing never enables. A newly installed extension is off everywhere.
+- An update that asks for any permission or host pattern the installed version
+  did not is disabled in every profile, and each profile needs the person's
+  confirmation again, showing what is new. An update that asks for the same or
+  less stays enabled where it was, and Settings shows the new version.
 - Removing an extension disables it in every profile and deletes its copy.
 
 ### Enabling
@@ -197,13 +208,13 @@ page they are allowed on, including what the agent reads.
 
 ## Refusals
 
-| Reason                   | When                                                                                                   |
-| ------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `profile-not-local`      | A paired device tries to open, switch to, or answer for a profile page                                 |
-| `profile-needs-a-person` | A routine, a subagent, or a terminal Browser grant tries to use a profile page                         |
-| `profile-unavailable`    | The Project is archived, its mode is off, or the profile cannot be opened (for example a locked store) |
-| `extension-not-local`    | A paired device or any non-person caller tries to install, enable, or disable an extension             |
-| `extension-unsupported`  | The manifest is not Manifest V3, or the host has no desktop app                                        |
+| Reason                   | When                                                                                                  |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `profile-not-local`      | A paired device tries to open, switch to, or answer for a profile page                                |
+| `profile-needs-a-person` | A routine, a subagent, or a terminal Browser grant tries to use a profile page                        |
+| `profile-unavailable`    | The Project is archived, its mode is off, the native Browser is not available, or the store is locked |
+| `extension-not-local`    | A paired device or any non-person caller tries to install, enable, or disable an extension            |
+| `extension-unsupported`  | The manifest is not Manifest V3, or the host has no desktop app                                       |
 
 Each refusal is a value the pane shows in words; none is a silent no-op.
 

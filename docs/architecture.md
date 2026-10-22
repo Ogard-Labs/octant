@@ -6673,7 +6673,8 @@ mechanisms are:
   host drives a headless page and shows its picture.
 - **Browser profiles and extensions.** A Browser page is Private (in-memory,
   per browsing context) unless the person at a local window puts it in their
-  Project's persistent profile or the host's Personal profile. Octant never
+  Project's persistent profile or the host's Personal profile; a profile page
+  opens only in the desktop app's native Browser, never headless. Octant never
   opens or imports another browser's profile. An agent reads or acts on an
   origin in a profile page only after a site approval naming the profile;
   paired devices, routines, subagents, and terminal Browser grants are refused
