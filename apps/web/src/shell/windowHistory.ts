@@ -9,11 +9,14 @@ import type { SidebarNavigationDescriptorId } from "./navigationModel";
  * window, not the host, and are never persisted: a window's back and forward
  * step through what that window opened since it started.
  */
+/** A sidebar destination, or one of the reader pages opened from elsewhere. */
+export type WindowPage = SidebarNavigationDescriptorId | "review" | "archive";
+
 export type WindowPlace =
   | {
       readonly kind: "page";
       readonly mode: OctantMode;
-      readonly destination: SidebarNavigationDescriptorId;
+      readonly destination: WindowPage;
     }
   | {
       readonly kind: "tab";

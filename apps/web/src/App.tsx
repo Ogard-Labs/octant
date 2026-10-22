@@ -180,7 +180,7 @@ import {
   type VisibleMode,
   type WorkKind,
 } from "./shell/workKind";
-import { useWindowHistory, type WindowPlace } from "./shell/windowHistory";
+import { useWindowHistory, type WindowPage, type WindowPlace } from "./shell/windowHistory";
 import { StartQuickToolsContext, type StartQuickToolsServices } from "./shell/StartQuickTools";
 import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "./shell/contributionRegistry";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
@@ -4667,16 +4667,41 @@ function LaunchedShell(
         );
   const historyPaneId = historyPane?.paneId;
   const historyTabId = historyPane?.surface.id;
+  // Review and the archive are reader pages too, opened from elsewhere than the
+  // sidebar; without their own place, Back skipped straight past them.
+  const historyPage: WindowPage | undefined = reviewOpen
+    ? "review"
+    : archiveOpen
+      ? "archive"
+      : activeSidebarDestination;
   const currentWindowPlace = useMemo<WindowPlace | undefined>(
     () =>
-      activeSidebarDestination !== undefined
-        ? { kind: "page", mode: activeMode, destination: activeSidebarDestination }
+      historyPage !== undefined
+        ? { kind: "page", mode: activeMode, destination: historyPage }
         : historyPaneId === undefined || historyTabId === undefined
           ? undefined
           : { kind: "tab", mode: activeMode, paneId: historyPaneId, tabId: historyTabId },
-    [activeMode, activeSidebarDestination, historyPaneId, historyTabId],
+    [activeMode, historyPage, historyPaneId, historyTabId],
   );
   const windowHistory = useWindowHistory(currentWindowPlace, restoreWindowPlace);
+  // A step in another mode switches the exact mode first (Chat and Work share
+  // one visible mode but keep separate layouts), then opens the place once
+  // that mode is on screen, with the openers of that render: an opener such as
+  // the Board reads the active mode, and run straight away it opened the old
+  // mode's page.
+  const pendingHistoryRestore = useRef<
+    { readonly place: WindowPlace; readonly resolve: (restored: boolean) => void } | undefined
+  >(undefined);
+  const restoreInActiveModeRef = useRef(restoreInActiveMode);
+  restoreInActiveModeRef.current = restoreInActiveMode;
+  useEffect(() => {
+    const pending = pendingHistoryRestore.current;
+    if (pending === undefined || pending.place.mode !== activeMode) return;
+    pendingHistoryRestore.current = undefined;
+    void restoreInActiveModeRef
+      .current(pending.place)
+      .then(pending.resolve, () => pending.resolve(false));
+  }, [activeMode]);
   // The start screen's quick tools open this window's Project terminal and
   // browser; they are local to this window, never a thread's.
   const startQuickToolsServices = useMemo<StartQuickToolsServices>(
@@ -4689,10 +4714,27 @@ function LaunchedShell(
     [projectBrowserClient, projectTerminalClient, props.hostBridge],
   );
 
-  async function restoreWindowPlace(place: WindowPlace): Promise<boolean> {
-    if (visibleModeOf(place.mode) !== visibleModeOf(activeMode)) {
-      handleSelectVisibleMode(visibleModeOf(place.mode));
-    }
+  function restoreWindowPlace(place: WindowPlace): Promise<boolean> {
+    if (place.mode === activeMode) return restoreInActiveMode(place);
+    return new Promise<boolean>((resolve) => {
+      pendingHistoryRestore.current?.resolve(false);
+      pendingHistoryRestore.current = { place, resolve };
+      // The bare mode switch: a person's mode switch also lands Code on its
+      // home and opens a Work draft, which ran after the restored page opened
+      // and closed it again. The step opens its own page or tab instead.
+      controller.setMode(place.mode);
+      // A mode the window refused to switch to (turned off since) never
+      // arrives; the step then counts as gone rather than hanging.
+      setTimeout(() => {
+        if (pendingHistoryRestore.current?.place === place) {
+          pendingHistoryRestore.current = undefined;
+          resolve(false);
+        }
+      }, 2_000);
+    });
+  }
+
+  async function restoreInActiveMode(place: WindowPlace): Promise<boolean> {
     if (place.kind === "page") {
       const open = windowPageOpeners()[place.destination];
       if (open === undefined) return false;
@@ -5152,8 +5194,10 @@ function LaunchedShell(
   const bottomPanelPresentedOpen = bottomPanelOpen && !readerOpen;
 
   /** The pages back and forward can return to, by the destination that opens them. */
-  function windowPageOpeners(): Partial<Record<SidebarNavigationDescriptorId, () => void>> {
+  function windowPageOpeners(): Partial<Record<WindowPage, () => void>> {
     return {
+      review: openReview,
+      archive: openArchive,
       inbox: openInbox,
       "thread-board": openThreadBoard,
       "pull-requests": openPullRequests,

@@ -378,6 +378,7 @@ export function ShellSidebar(props: ShellSidebarProps) {
           ? {}
           : { newThread: { label: newThreadLabel, onSelect: () => newThread() } })}
         onExpand={props.rail.onExpand}
+        {...(props.history === undefined ? {} : { history: props.history })}
         {...(props.rail.onOpenActivity === undefined
           ? {}
           : { onOpenActivity: props.rail.onOpenActivity })}

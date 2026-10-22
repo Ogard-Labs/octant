@@ -1,6 +1,8 @@
 import type { OctantMode } from "@octant/contracts/modes";
 import {
   Activity,
+  ChevronLeft,
+  ChevronRight,
   CheckCheck,
   ClipboardCheck,
   Folders,
@@ -20,6 +22,7 @@ import { visibleModeOf, visibleModes, type VisibleMode } from "./workKind";
 import type { SidebarTile, SidebarTileId } from "./SidebarCountTiles";
 import { navigationIcon } from "./SidebarNavigation";
 import type { SidebarNavigationDescriptorId } from "./navigationModel";
+import type { WindowHistory } from "./windowHistory";
 
 export interface SidebarRailProject {
   readonly id: string;
@@ -61,6 +64,11 @@ export interface SidebarRailProps {
   readonly usage?: ReactNode;
   /** The More menu: destinations the rail does not list, and Customize sidebar. */
   readonly more?: ReactNode;
+  /**
+   * Back and forward, under Show sidebar on the collapsed rail: with the
+   * sidebar hidden the rail is the only place the title band leaves them.
+   */
+  readonly history?: WindowHistory;
 }
 
 const TILE_RAIL: Readonly<
@@ -102,6 +110,20 @@ export function SidebarRail(props: SidebarRailProps) {
       >
         {beside || props.onExpand === undefined ? null : (
           <RailButton icon={PanelLeftOpen} label="Show sidebar" onSelect={props.onExpand} />
+        )}
+        {beside || props.history === undefined ? null : (
+          <>
+            <RailButton
+              icon={ChevronLeft}
+              label="Back"
+              {...(props.history.canGoBack ? { onSelect: props.history.goBack } : {})}
+            />
+            <RailButton
+              icon={ChevronRight}
+              label="Forward"
+              {...(props.history.canGoForward ? { onSelect: props.history.goForward } : {})}
+            />
+          </>
         )}
         {beside || props.newThread === undefined ? null : (
           <RailButton
