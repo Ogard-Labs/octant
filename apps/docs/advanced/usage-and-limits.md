@@ -138,6 +138,9 @@ never calls a vendor usage endpoint. Each Claude account shows its own limits, l
 name, with reset time in local time and when the reading was last updated. An
 API-key Claude account says plan limits do not apply instead of drawing empty
 bars. A failed or missing refresh keeps the last reading and shows its age.
+Octant also remembers the last reading of every provider across restarts, so
+the limits show on launch with the time they were read. Launching Octant never
+starts a provider to refresh them.
 
 Devin and OpenCode Go show their plan windows too: Devin's daily and weekly
 allowance, and OpenCode Go's 5-hour, weekly, and monthly windows. Their

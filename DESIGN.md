@@ -969,7 +969,9 @@ a window near or at its limit takes the danger ink. Hovering or focusing a
 ring opens a card with every window, its share left, and when it resets;
 clicking opens Settings › Usage. A provider with no figure gets no ring,
 because an empty ring would claim a limit nobody reported. The rings read the
-host's last observation every few minutes, never a fresh provider call.
+host's last observation every few minutes, never a fresh provider call. The
+host keeps that observation across restarts, so the rings are there on launch;
+when the reading is more than a few hours old the card says "Last read 5h ago".
 
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),

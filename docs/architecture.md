@@ -2411,8 +2411,17 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   drawing empty bars, also when it kept the directory it had as a
   subscription account. Overage reads as in use once something was
   spent, not when it is merely switched on. A failed or missing
-  refresh keeps the last snapshot and shows its age. Claude is the
-  first adopter.
+  refresh keeps the last snapshot and shows its age. Every provider
+  instance's last plan-limit reading, whatever its source, is also saved
+  in `providers/usage-readings.json` (owner-only, listed in the host data
+  map), so the usage rings show it after a host restart as a past
+  observation with its original `observedAt`. A restored reading is
+  never refreshed by starting a provider: the launch pass and the
+  schedule leave it as it is, and the first fresh evidence (a turn's
+  report or a refresh a person asked for) replaces it. Windows and
+  buckets whose reset has passed are dropped on restore, and a reading
+  of an instance that was removed or disabled is not shown and is
+  forgotten. Claude is the first adopter.
   Claude is the first adopter (`CLAUDE_CONFIG_DIR` and
   `CLAUDE_SECURESTORAGE_CONFIG_DIR`, default `~/.claude`, extras
   `~/.claude-accounts/<instanceId>`, `claude auth login` /

@@ -47,6 +47,10 @@ describe("composeHostDataMap", () => {
       location: { kind: "known", path: `${dataDirectory}/providers/plan-usage.json` },
     });
     expect(decoded.host.caches).toContainEqual({
+      name: "Provider usage readings",
+      location: { kind: "known", path: `${dataDirectory}/providers/usage-readings.json` },
+    });
+    expect(decoded.host.caches).toContainEqual({
       name: "Codex account homes",
       location: { kind: "known", path: "/Users/ada/.codex-accounts" },
     });
