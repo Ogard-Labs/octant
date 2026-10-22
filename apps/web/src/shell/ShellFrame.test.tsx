@@ -138,49 +138,6 @@ describe("ShellFrame", () => {
     expect(screen.getAllByRole("main")).toHaveLength(1);
   });
 
-  it("extends translucency to the workspace layer only when workspaceMaterial resolves translucent", () => {
-    const { container, rerender } = render(
-      <ShellFrame
-        chrome={<header>Chrome</header>}
-        contextSidebarWidth={360}
-        material="translucent"
-        onCommitSidebarWidth={vi.fn()}
-        onPreviewSidebarWidth={vi.fn()}
-        sidebar={<aside>Sidebar</aside>}
-        sidebarResizable={false}
-        sidebarWidth={232}
-        wideContextOpen={false}
-        workspace={<main>Workspace</main>}
-        workspaceMaterial="opaque"
-      />,
-    );
-
-    const shell = container.firstElementChild;
-    expect(shell).not.toHaveClass("shell--workspace-material-translucent");
-
-    rerender(
-      <ShellFrame
-        chrome={<header>Chrome</header>}
-        contextSidebarWidth={360}
-        material="translucent"
-        onCommitSidebarWidth={vi.fn()}
-        onPreviewSidebarWidth={vi.fn()}
-        sidebar={<aside>Sidebar</aside>}
-        sidebarResizable={false}
-        sidebarWidth={232}
-        wideContextOpen={false}
-        workspace={<main>Workspace</main>}
-        workspaceMaterial="translucent"
-      />,
-    );
-    expect(container.firstElementChild).toHaveClass(
-      "shell",
-      "shell-frame",
-      "shell--material-translucent",
-      "shell--workspace-material-translucent",
-    );
-  });
-
   it("preserves the resolved material around a standalone surface without workspace geometry", () => {
     const { container } = render(
       <ShellFrame
@@ -376,17 +333,13 @@ describe("ShellFrame", () => {
     );
   });
 
-  it("gives the Projects collection the workspace material with only a dividing hairline", () => {
+  it("sets the Projects collection on the window surface with only a dividing hairline", () => {
     const primarySidebar = cssRule(".sidebar--projects > .sidebar__primary");
     const projectsPane = cssRule(".sidebar__projects-pane");
-    const translucentProjectsPane = cssRule(
-      ".shell--workspace-material-translucent.shell-frame > .sidebar > .sidebar__projects-pane",
-    );
 
     expect(primarySidebar).toContain("border-right: 1px solid var(--oct-border);");
-    expect(projectsPane).toContain("background: var(--oct-bg);");
+    expect(projectsPane).toContain("background: transparent;");
     expect(projectsPane).not.toContain("box-shadow:");
-    expect(translucentProjectsPane).toContain("background: var(--octant-workspace-translucent);");
   });
 
   it("shares the wide Electron titlebar row with workspace tabs without a separator", () => {

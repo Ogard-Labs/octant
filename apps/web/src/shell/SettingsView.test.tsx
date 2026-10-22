@@ -912,38 +912,6 @@ describe("SettingsView", () => {
       screen.queryByText("Translucency is unavailable, so Octant is using an opaque sidebar."),
     ).not.toBeInTheDocument();
   });
-  it("only enables Glass cards once the glass itself is on", async () => {
-    const user = userEvent.setup();
-    const onSettingsChange = vi.fn();
-    renderSettings({
-      onSettingsChange,
-      settings: { ...defaultShellSettings(), workspaceMaterial: "opaque" },
-    });
-    navigateTo("Appearance");
-
-    const control = screen.getByRole("switch", { name: "Glass cards" });
-    expect(control).toHaveAttribute("aria-checked", "false");
-    expect(control).not.toHaveAttribute("aria-disabled", "true");
-    await user.click(control);
-    expect(onSettingsChange).toHaveBeenLastCalledWith({ workspaceMaterial: "system" });
-  });
-
-  it("disables Glass cards and explains why when the glass is off", () => {
-    renderSettings({
-      settings: {
-        ...defaultShellSettings(),
-        sidebarMaterial: "opaque",
-        workspaceMaterial: "system",
-      },
-    });
-    navigateTo("Appearance");
-
-    const control = screen.getByRole("switch", { name: "Glass cards" });
-    expect(control).toHaveAttribute("aria-disabled", "true");
-    expect(control).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByText("Turn on Glass first.")).toBeInTheDocument();
-  });
-
   it("shows the effective fallback note for reduced transparency and unsupported backdrop", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
@@ -1812,8 +1780,6 @@ describe("SettingsView", () => {
       "settings-view__text-input",
     );
     expect(screen.getByRole("switch", { name: "Enable Chat" })).toHaveClass("octant-switch");
-    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
-    expect(screen.getByRole("switch", { name: "Glass cards" })).toHaveClass("octant-switch");
     fireEvent.click(screen.getByRole("button", { name: "Sidebar" }));
     expect(screen.getByRole("slider", { name: "Sidebar width" })).toHaveClass(
       "settings-view__range",

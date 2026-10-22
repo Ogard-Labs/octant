@@ -135,13 +135,6 @@ describe("octantSettingsRegistry", () => {
     expect(material?.nativeRequired).toBeUndefined();
   });
 
-  it("registers Glass cards beside Glass, ungated", () => {
-    const appearance = octantSettingsRegistry.sections.find((s) => s.id === "appearance");
-    const material = appearance?.settings.find((s) => s.id === "workspace-material");
-    expect(material?.label).toBe("Glass cards");
-    expect(material?.nativeRequired).toBeUndefined();
-  });
-
   it("keeps opaque sections without individual settings and registers the Code setup destinations", () => {
     const usage = octantSettingsRegistry.sections.find((s) => s.id === "usage");
     expect(usage?.settings).toEqual([]);
