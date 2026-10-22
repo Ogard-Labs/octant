@@ -358,18 +358,19 @@
    Chat, Work, and Code start from the same geometry: one question in the
    middle of the page and the raised `.composer` docked at its foot, where it
    sits once the thread starts, so the first message is typed where every
-   later one is. The per-mode adapters only decide which controls sit in the
-   composer's tray. */
+   later one is: 12px above the pane's foot, the thread composer's margin, so
+   a start screen beside a thread puts its composer on the same line. The
+   per-mode adapters only decide which controls sit in the composer's tray. */
 
 .welcome {
   display: flex;
-  width: min(100% - 40px, 768px);
+  width: min(100% - 40px, var(--oct-composer-width));
   min-width: 0;
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
   min-height: 100%;
-  padding-block: min(8vh, 64px) var(--oct-space-5);
+  padding-block: min(8vh, 64px) 12px;
   margin: 0 auto;
   gap: var(--oct-space-4);
 }
@@ -400,12 +401,16 @@
   margin: 0;
 }
 
+/* A start screen's composer is the same width as a thread's (octant.css),
+   centred in its canvas, and keeps the shared prompt height. */
 .composer-stack {
   position: relative;
   isolation: isolate;
   display: flex;
+  width: min(100%, var(--oct-composer-width));
   min-width: 0;
   flex-direction: column;
+  align-self: center;
 }
 
 .composer-stack > .composer {
@@ -413,12 +418,6 @@
   z-index: 1;
   width: 100%;
   margin: 0;
-}
-
-.composer-stack > .composer > .composer-input {
-  /* Four lines before the box has to grow: a prompt is a paragraph, not a
-     search query, and 64px read as one. */
-  min-height: 96px;
 }
 
 /* Where the thread runs is the first row inside the card, as small chips

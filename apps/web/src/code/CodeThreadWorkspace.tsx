@@ -128,6 +128,7 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
+import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 import {
   unattachedCapabilityMentionCopy,
   unattachedCapabilityMentions,
@@ -279,6 +280,11 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     threadId: props.threadId,
   });
   const [draft, setDraft] = useState(props.controller.pendingDraft);
+  const suggestionInput = useComposerSuggestionInput(draft, (text) => {
+    draftRevisionRef.current += 1;
+    setDraft(text);
+    props.controller.setPendingDraft?.(text, text.length);
+  });
   const compacting = useComposerCompacting();
   // User edits are counted separately from the internal clear performed when
   // an acknowledged message leaves the composer, so an async mention lookup cannot
@@ -924,6 +930,7 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (suggestionInput.takeOnTab(event)) return;
     if (appMentions.handleKeyDown(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (browser.handleKeyDown(event)) return;
@@ -1958,9 +1965,10 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
             onPaste={(event) => {
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
-            placeholder={busy ? "Send the next message…" : "Reply…"}
+            data-suggested={suggestionInput.suggested ? "true" : undefined}
+            placeholder={suggestionInput.placeholder}
             ref={textareaRef}
-            rows={2}
+            rows={3}
             value={draft}
           />
         }

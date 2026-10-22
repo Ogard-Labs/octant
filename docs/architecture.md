@@ -2292,11 +2292,11 @@ flowchart LR
 - **Composer placeholder.** An empty follow-up composer in a Chat, Work, or
   Code thread says "Reply…" and nothing else: a rotating feature tip in the
   place of a prompt read as noise to someone who already knew the feature and
-  said nothing to someone who did not. A start screen's composer asks in plain
-  words instead ("Ask anything…", "Describe the work…", "Describe the change…"),
-  because a first-time person has not started a conversation to reply to.
-  Active responses retain their send-next-message placeholder. Accessible input
-  labels remain stable.
+  said nothing to someone who did not. When the latest reply suggested a next
+  message for this thread, the empty composer shows it instead and Tab takes
+  it. A start screen's composer asks "Ask anything…" in every mode, because a
+  first-time person has not started a conversation to reply to. Neither
+  changes while a response runs, and accessible input labels remain stable.
 
 ## Providers
 

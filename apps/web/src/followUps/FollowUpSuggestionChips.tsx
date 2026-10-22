@@ -90,6 +90,64 @@ export function ComposerFollowUpSuggestions() {
   );
 }
 
+/** The next message the thread's latest reply suggested for this composer. */
+export interface ComposerSuggestion {
+  readonly prompt: string;
+  /** Marks the suggestion used, so its card leaves the foot of the thread. */
+  readonly markUsed: () => void;
+}
+
+const noFollowUps = () => () => undefined;
+
+/**
+ * The first open "next step here" suggestion of the thread around this
+ * composer, which an empty composer shows as its placeholder and takes on Tab,
+ * the way a terminal agent offers its next prompt. It reads the same feed the
+ * cards do, so it adds no request. Using it records the activation the card's
+ * Use prompt would; the composer puts the words in itself, so nothing waits
+ * on the host.
+ */
+export function useComposerSuggestion(): ComposerSuggestion | undefined {
+  const context = useContext(FollowUpSuggestionContext);
+  const client = context?.client;
+  const threadId = context?.threadId;
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      client === undefined || threadId === undefined
+        ? noFollowUps()
+        : subscribeFollowUps(client, threadId, 4_000, listener),
+    [client, threadId],
+  );
+  const suggestions = useSyncExternalStore(subscribe, () =>
+    threadId === undefined ? null : (followUpFeeds.get(threadId)?.value ?? null),
+  );
+  const dismissedTurnId = useDismissedTurn(threadId ?? "");
+  if (client === undefined || threadId === undefined || suggestions === null) return undefined;
+  const turnId = suggestions.followUps.turnId;
+  if (String(turnId) === dismissedTurnId) return undefined;
+  const next = suggestions.followUps.suggestions.find(
+    (suggestion) =>
+      suggestion.target === "same-thread" &&
+      !suggestions.activatedFollowUpIds.some((id) => String(id) === String(suggestion.id)),
+  );
+  if (next === undefined) return undefined;
+  return {
+    prompt: next.prompt,
+    markUsed: () => {
+      void client
+        .activate(threadId, { turnId, suggestionId: next.id, confirmed: true })
+        .then(() => refreshThreadFollowUps(threadId))
+        .catch(() => undefined);
+    },
+  };
+}
+
+/** The placeholder that shows a suggestion: its first line, kept to one row's worth. */
+export function suggestionPlaceholder(prompt: string): string {
+  const firstLine = prompt.split("\n", 1)[0]?.trim() ?? "";
+  return firstLine.length > 120 ? `${firstLine.slice(0, 119).trimEnd()}…` : firstLine;
+}
+
 interface FollowUpFeed {
   readonly client: Pick<FollowUpSuggestionClient, "suggestions">;
   value: ThreadFollowUpSuggestions | null;

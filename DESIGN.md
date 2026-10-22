@@ -167,15 +167,15 @@ always publishes `default`. Vivid reads best in the light theme.
 Radius has one number per role. This table is its one statement; elsewhere
 this document names the token, not the number.
 
-| Token                 | Value  | Role                                                                                                         |
-| --------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
-| `--oct-radius-sm`     | 8px    | A control or a row; a composer context chip                                                                  |
-| `--oct-radius-inset`  | 8px    | An object resting inside a card or well: a Settings page's icon tile, a board card in its column             |
-| `--oct-radius-md`     | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble; a follow-up composer |
-| `--oct-radius-lg`     | 14px   | A welcome composer and a dialog                                                                              |
-| `--oct-radius-pill`   | 9999px | Compact chips, meters, and circular icon controls only                                                       |
-| `--radius` (`md`)     | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                                      |
-| `--radius-lg` / `-xl` | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover                       |
+| Token                 | Value  | Role                                                                                             |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------ |
+| `--oct-radius-sm`     | 8px    | A control or a row; a composer context chip                                                      |
+| `--oct-radius-inset`  | 8px    | An object resting inside a card or well: a Settings page's icon tile, a board card in its column |
+| `--oct-radius-md`     | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble           |
+| `--oct-radius-lg`     | 14px   | Every composer and a dialog                                                                      |
+| `--oct-radius-pill`   | 9999px | Compact chips, meters, and circular icon controls only                                           |
+| `--radius` (`md`)     | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                          |
+| `--radius-lg` / `-xl` | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover           |
 
 The `--oct-radius-*` tokens live in `octant.css`. The shadcn recipes derive
 their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
@@ -491,10 +491,20 @@ Each opens in that column without starting a thread, the same window-local
 Project terminal and browser Zen uses, which no agent can see or reach;
 "Quick tools" returns to the list, and closing the terminal (or leaving the
 start screen) stops its shell, since nothing else could reopen it. The
-composer never remounts when the Project is chosen, so the draft stays. Each mode's own prompt stays in the composer's placeholder ("Ask
-anything…", "Describe the work…", "Describe the change…"), and the message
-field keeps its accessible name. The composer is prompt first, four lines tall before it
-grows; its toolbar row holds how the thread runs (attach, image and access
+composer never remounts when the Project is chosen, so the draft stays. Every
+start screen's composer asks "Ask anything…", and the message field keeps its
+accessible name.
+
+Every composer has one shape, on a start screen or under a thread, in Chat,
+Work, and Code: the same width, corner (`--oct-radius-lg`), hairline ring and
+mid shadow, a prompt two lines tall before it grows with the same insets, and
+the transcript's own type size, so a message looks the same in the box as in
+the bubble it becomes. Its width is the reading measure; in a split every
+composer takes the narrowest pane's room, so composers side by side match
+instead of each filling its own pane. A start screen's composer docks 12px
+above the pane's foot, where a thread's sits, so the two line up across a
+split; a start screen's card adds only its row of where-it-runs chips. Nothing
+about the box changes while a turn runs. The composer is prompt first; its toolbar row holds how the thread runs (attach, image and access
 on the left; the context ring, model and microphone on the right, next to send).
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
@@ -547,7 +557,11 @@ means, and offers Choose a folder… as the primary action with starting
 without one beside it; once a Project exists the new task leads instead.
 Start-screen composers ask in plain words ("Ask anything…"); a thread's
 follow-up composer says "Reply…" in Chat, Work, and Code, and shows no rotating
-tip.
+tip. When the latest reply suggested a next message for this thread ("Next
+step here"), the empty follow-up composer shows it in place of "Reply…", with a
+quiet Tab key cap at its top-right, and a bare Tab puts it in the draft and
+marks the suggestion used; once anything is typed, or with a modifier held,
+Tab keeps its ordinary meaning.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
 grouping, search, Favorites, and Recent. Source tabs are marks alone and name
@@ -1165,7 +1179,7 @@ Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 that establishes a genuine layer: navigation panes and open form layouts stay
 unshadowed; the card recipe uses a hairline ring instead of a shadow (0090);
 compact state and grouped surfaces use `--octant-shadow-sm`; welcome composers
-use `--octant-shadow-md`, while follow-up composers use a hairline boundary; focused or promoted raised
+and follow-up composers use `--octant-shadow-md` over a hairline ring; focused or promoted raised
 objects may use `--octant-shadow-lg`; overlays use only their overlay or pop
 token. A shadow must explain depth, not decorate a flat row.
 
