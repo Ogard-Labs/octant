@@ -356,6 +356,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     { readonly mode: "create" } | { readonly mode: "edit"; readonly viewId: string } | undefined
   >();
   const activityMode = props.activityMode ?? "chat";
+  const [filterRangeOpen, setFilterRangeOpen] = useState(false);
   const [arrangement, setArrangement] = useState(() =>
     readThreadArrangement(undefined, globalThis, activityMode),
   );
@@ -719,6 +720,8 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
               ).length
             }
             state={projectViewState}
+            rangeOpen={filterRangeOpen}
+            onRangeOpenChange={setFilterRangeOpen}
           />
         ) : null}
         {showListSwitch ? (
@@ -1566,6 +1569,9 @@ function CodeProjectViewSwitcher(props: {
   readonly onPresentationChange?: (presentation: ProjectViewSwitcherPresentation) => void;
   readonly projectCountFor: (viewId: string) => number;
   readonly state: CodeProjectViewState;
+  /** Whether the custom activity range dialog is open; held by the sidebar. */
+  readonly rangeOpen: boolean;
+  readonly onRangeOpenChange: (open: boolean) => void;
 }) {
   const allProjectsView = {
     id: ALL_CODE_PROJECTS_VIEW_ID,
@@ -1670,6 +1676,8 @@ function CodeProjectViewSwitcher(props: {
           ? {}
           : { onPresentationChange: props.onPresentationChange })}
         onRowPropertiesChange={props.onRowPropertiesChange}
+        rangeOpen={props.rangeOpen}
+        onRangeOpenChange={props.onRangeOpenChange}
         rowProperties={props.rowProperties}
         rowPropertyView={props.rowPropertyView}
       />
@@ -1772,10 +1780,16 @@ function ProjectViewFilterMenu(props: {
   readonly onRowPropertiesChange: (properties: SidebarRowPropertyVisibility) => void;
   readonly rowProperties: SidebarRowPropertyVisibility;
   readonly rowPropertyView: SidebarRowPropertyView;
+  readonly rangeOpen: boolean;
+  readonly onRangeOpenChange: (open: boolean) => void;
 }) {
   const activityRangeErrorId = useId();
   const rangeTitleId = useId();
-  const [rangeOpen, setRangeOpen] = useState(false);
+  // Held by the sidebar, not here: choosing a custom range can empty the list,
+  // which moves these controls out of the Projects heading and remounts them,
+  // and a dialog open in local state closed under the person.
+  const rangeOpen = props.rangeOpen;
+  const setRangeOpen = props.onRangeOpenChange;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const options = useMemo(() => {
     const local = { id: "local", name: "Local" };
