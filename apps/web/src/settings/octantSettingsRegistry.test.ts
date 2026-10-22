@@ -146,7 +146,18 @@ describe("octantSettingsRegistry", () => {
     const usage = octantSettingsRegistry.sections.find((s) => s.id === "usage");
     expect(usage?.settings).toEqual([]);
     const providers = octantSettingsRegistry.sections.find((s) => s.id === "providers");
-    expect(providers?.settings.map((setting) => setting.id)).toEqual(["opencode-managed-update"]);
+    expect(providers?.settings.map((setting) => setting.id)).toEqual([
+      "opencode-managed-update",
+      "provider-display-name",
+      "provider-binary-path",
+      "provider-authentication",
+      "provider-api-key",
+      "provider-base-url",
+      "provider-protocol",
+      "provider-manual-model-ids",
+      "provider-deployment-ids",
+      "provider-claude-account",
+    ]);
     const code = octantSettingsRegistry.sections.find((section) => section.id === "code");
     expect(code?.settings.map((setting) => setting.id)).toEqual([
       "code-require-git",
@@ -156,6 +167,7 @@ describe("octantSettingsRegistry", () => {
       "code-approval-persistence",
       "code-editor-executable",
       "code-editor-arguments",
+      "open-in-applications",
     ]);
     const chat = octantSettingsRegistry.sections.find((section) => section.id === "chat");
     expect(chat?.settings.map((setting) => setting.id)).toEqual([
@@ -248,6 +260,7 @@ describe("octantSettingsRegistry", () => {
     expect(first("connector")).toBe("skills");
     expect(first("sign out github")).toBe("github/github-logout");
     expect(first("notif")).toBeDefined();
+    expect(first("display name")).toBe("providers/provider-display-name");
   });
 });
 
@@ -271,26 +284,95 @@ const UNLISTED_SETTING_ROWS = new Set([
   "sync-restore",
 ]);
 
+/**
+ * Rows whose id names one item (a provider, an endpoint, a synced computer),
+ * written as a template in the view. Each kind is indexed once by the row
+ * named here, which opens the page that lists the items.
+ */
+const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
+  "provider-*-display-name": "provider-display-name",
+  "provider-*-binary-path": "provider-binary-path",
+  "provider-*-authentication": "provider-authentication",
+  "provider-*-oauth-offer": "provider-authentication",
+  "provider-*-api-key": "provider-api-key",
+  "provider-*-base-url": "provider-base-url",
+  "provider-*-protocol": "provider-protocol",
+  "provider-*-protocol-version": "provider-protocol",
+  "provider-*-manual-model-ids": "provider-manual-model-ids",
+  "provider-*-deployment-ids": "provider-deployment-ids",
+  "*-config-directory": "provider-claude-account",
+  "*-accent": "provider-claude-account",
+  "*-auth-login": "provider-claude-account",
+  "*-auth-status": "provider-claude-account",
+  "opencode-managed-consent-*": "opencode-managed-update",
+  "endpoint-*-key": "model-endpoints",
+  "endpoint-*-name": "model-endpoints",
+  "endpoint-*-remove": "model-endpoints",
+  "harness-slot-*": "model-roles",
+  "open-in-*": "open-in-applications",
+  "managed-tool-*": "managed-tools-automatic-updates",
+  "paired-computer-*": "paired-computers-code",
+  "sync-approver-*": "sync-members",
+  "sync-join-request-*": "sync-members",
+  "sync-member-*": "sync-members",
+};
+
+/** The typography rows `ThemeAppearanceEditor` builds from a surface and a field. */
+const TYPOGRAPHY_ROWS = [
+  "appearance.typography.ui.family",
+  "appearance.typography.ui.size",
+  "appearance.typography.editor.family",
+  "appearance.typography.editor.size",
+  "appearance.typography.editor.line-height",
+  "appearance.typography.editor.ligatures",
+  "appearance.typography.terminal.family",
+  "appearance.typography.terminal.size",
+  "appearance.typography.terminal.line-height",
+  "appearance.typography.terminal.ligatures",
+];
+
 describe("Settings search coverage", () => {
+  const sourceRoot = join(import.meta.dirname, "..");
+  const sources = readdirSync(sourceRoot, { recursive: true })
+    .map(String)
+    .filter((name) => name.endsWith(".tsx") && !name.includes(".test."))
+    .map((name) => readFileSync(join(sourceRoot, name), "utf8"));
+  const registered = new Set(
+    octantSettingsRegistry.sections.flatMap((section) =>
+      section.settings.map((setting) => String(setting.id)),
+    ),
+  );
+
   it("indexes every Settings row a person can see, so search never misses one", () => {
-    const sourceRoot = join(import.meta.dirname, "..");
     const rendered = new Set<string>();
-    for (const entry of readdirSync(sourceRoot, { recursive: true })) {
-      const name = String(entry);
-      if (!name.endsWith(".tsx") || name.includes(".test.")) continue;
-      const source = readFileSync(join(sourceRoot, name), "utf8");
-      for (const match of source.matchAll(/settingId="([a-z0-9.-]+)"/g)) {
-        if (match[1] !== undefined) rendered.add(match[1]);
+    for (const source of sources) {
+      for (const match of source.matchAll(
+        /settingId=(?:"([a-z0-9.-]+)"|\{settingId\("([a-z0-9.-]+)"\)\})/g,
+      )) {
+        const id = match[1] ?? match[2];
+        if (id !== undefined) rendered.add(id);
       }
     }
-    const registered = new Set(
-      octantSettingsRegistry.sections.flatMap((section) =>
-        section.settings.map((setting) => String(setting.id)),
-      ),
-    );
     const missing = [...rendered].filter(
       (id) => !registered.has(id) && !UNLISTED_SETTING_ROWS.has(id),
     );
     expect(missing).toEqual([]);
+  });
+
+  it("indexes every kind of per-item Settings row by a row of its own", () => {
+    const patterns = new Set<string>();
+    for (const source of sources) {
+      // A computed id is a template inside the attribute, which may wrap onto
+      // the next line behind a condition.
+      for (const match of source.matchAll(/settingId=\{[^`]{0,120}?`([^`]+)`/g)) {
+        if (match[1] !== undefined) patterns.add(match[1].replace(/\$\{[^}]+\}/g, "*"));
+      }
+    }
+    expect(patterns.size).toBeGreaterThan(0);
+    const unclassified = [...patterns].filter((pattern) => !(pattern in COMPUTED_SETTING_ROWS));
+    expect(unclassified).toEqual([]);
+    const unindexed = Object.values(COMPUTED_SETTING_ROWS).filter((id) => !registered.has(id));
+    expect(unindexed).toEqual([]);
+    expect(TYPOGRAPHY_ROWS.filter((id) => !registered.has(id))).toEqual([]);
   });
 });

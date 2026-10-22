@@ -470,6 +470,14 @@ export function SettingsView(props: SettingsViewProps) {
     route.applyDeepLink(link);
     props.onSearchChange("");
   };
+  // Enter usually follows the last keystroke by less than the debounce, so
+  // the listed results can still be the previous query's: read the query as
+  // typed instead, or a fresh search opens nothing and an edited one opens
+  // the old top result.
+  const openFirstResult = () => {
+    const first = searchSettings(availableSections, capabilities, props.search)[0];
+    if (first !== undefined) handleSearchSelect(searchResultLink(first));
+  };
   // A page says once which scope it applies to; its rows then only name a
   // scope that differs (see SettingsPageScope).
   const activeSectionScope = availableSections.find(
@@ -521,10 +529,7 @@ export function SettingsView(props: SettingsViewProps) {
             <SettingsSearchField
               inputRef={searchInput}
               onChange={props.onSearchChange}
-              onOpenFirst={() => {
-                const first = searchResults[0];
-                if (first !== undefined) handleSearchSelect(searchResultLink(first));
-              }}
+              onOpenFirst={openFirstResult}
               value={props.search}
             />
             <div className="settings-view__navigation-scroll" ref={navigationScroll}>
@@ -579,10 +584,7 @@ export function SettingsView(props: SettingsViewProps) {
             <SettingsSearchField
               className="settings-view__mobile-search"
               onChange={props.onSearchChange}
-              onOpenFirst={() => {
-                const first = searchResults[0];
-                if (first !== undefined) handleSearchSelect(searchResultLink(first));
-              }}
+              onOpenFirst={openFirstResult}
               value={props.search}
             />
           </header>
