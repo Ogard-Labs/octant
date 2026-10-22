@@ -13,6 +13,7 @@ import {
 } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 import { useAppearance } from "./AppearanceContext";
+import { persistWallpaperFile } from "./wallpaperFile";
 
 /** Soft cap for web data-URI wallpapers in localStorage. */
 const MAX_DATA_URI_CHARS = 900_000;
@@ -160,8 +161,10 @@ export function AppearanceBackgroundPanel() {
       });
       if (result.canceled || result.assets[0] === undefined) return;
       const asset = result.assets[0];
-      // Native: persist file URI (SecureStore-sized). Web: data URI for reload survival.
-      const stored = Platform.OS === "web" ? await readAsDataUri(asset.uri) : asset.uri;
+      // Native: keep a copy in the documents folder, because the picker's cache
+      // file can be purged. Web: data URI for reload survival.
+      const stored =
+        Platform.OS === "web" ? await readAsDataUri(asset.uri) : persistWallpaperFile(asset.uri);
       if (Platform.OS === "web" && stored.length > MAX_DATA_URI_CHARS) {
         setMessage(MOBILE_COPY.backgroundImageTooLarge);
         return;

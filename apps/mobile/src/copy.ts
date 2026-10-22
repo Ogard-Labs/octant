@@ -2,7 +2,7 @@ import type { MobileHostHealthKind } from "./session/MobileHostSessionHub";
 
 /** User-facing mobile copy. Keep Octant-owned; no third-party product names. */
 export const MOBILE_PRODUCT_NAME = "Octant";
-export const MOBILE_PRODUCT_TAGLINE = "Remote control for your hosts";
+export const MOBILE_PRODUCT_TAGLINE = "Your computers, from your phone";
 
 export const MOBILE_ROUTE_IDS = ["home", "agents", "thread", "hosts"] as const;
 export type MobileRouteId = (typeof MOBILE_ROUTE_IDS)[number];
@@ -11,7 +11,7 @@ export const MOBILE_TAB_LABELS = {
   home: "Inbox",
   agents: "Agents",
   thread: "Thread",
-  hosts: "Hosts",
+  hosts: "Computers",
 } as const satisfies Record<MobileRouteId, string>;
 
 export const MOBILE_HOST_HEALTH_LABELS = {
@@ -37,8 +37,8 @@ export function mobileModelLabel(
 }
 
 export const MOBILE_COPY = {
-  inboxEmpty: "Pair a host to see Chat, Work, and Code threads.",
-  inboxWelcome: "Direct your hosts from anywhere.",
+  inboxEmpty: "Pair a computer to see your Chat, Work and Code threads.",
+  inboxWelcome: "Pick up your threads from anywhere.",
   inboxTitle: "Inbox",
   inboxNoThreads: "No threads yet. Start one from the composer below.",
   threadEmpty: "Select a thread from Inbox.",
@@ -50,15 +50,15 @@ export const MOBILE_COPY = {
   toolStatusFailed: "Failed",
   hostsEmpty: "No hosts paired yet.",
   removeHostAction: "Remove from this phone",
-  removeHostHint:
-    "Removing works without a connection. It deletes this phone's key for the host and does not tell the host.",
+  removeHostHint: "Works offline. The computer keeps listing this phone until you revoke it there.",
   removeHostConfirm:
-    "Remove this host from this phone? The host is not told, so it still lists this device until you revoke it from the desktop.",
+    "Remove this computer from your phone? The computer is not told, so it keeps listing this phone until you revoke it there.",
   removeHostConfirmAction: "Remove",
   removeHostCancel: "Cancel",
   hostKeyNotDeleted:
     "A host was removed, but its device key could not be deleted from this phone's secure storage.",
-  hostsHint: "Enter the host HTTPS origin and pairing ticket from the desktop host.",
+  hostsHint:
+    "Scan the QR code from Settings → Remote access on your computer, or paste its pairing code.",
   pairCodeHint:
     "On your computer, open Settings → Remote access and scan the QR code shown there, or paste the code.",
   pairScanTitle: "Scan pairing code",
@@ -69,13 +69,13 @@ export const MOBILE_COPY = {
     "Octant needs the camera to scan the pairing QR code. You can paste the code instead.",
   pairScanCameraDenied:
     "Camera access is off for Octant. Turn it on in the system settings, or paste the pairing code instead.",
-  pairHostTitle: "Pair a host",
+  pairHostTitle: "Pair a computer",
   pairHostBody: "Connect your laptop to create and follow Chat, Work, and Code threads.",
   pairHostCta: "Pair host",
   pairHostScreenTitle: "Pair host",
   pairHostHeadline: "Connect this phone to your laptop.",
   pairHostSubhead: "Use the short-lived ticket from desktop Remote Access.",
-  pairBeforeCreate: "Pair a host before starting a thread.",
+  pairBeforeCreate: "Pair a computer before starting a thread.",
   pairEnterCode: "Enter a code instead",
   pairTypeDetails: "Type the details instead",
   pairCompareHint: "Check that this code matches the one on your computer, then approve there.",
@@ -90,22 +90,19 @@ export const MOBILE_COPY = {
   pairRevokeNote: "Other paired devices stay connected if you revoke later.",
   allHosts: "All hosts",
   allAgents: "Agents",
-  workspaces: "Hosts",
-  addWorkspace: "Add host",
+  workspaces: "Computers",
+  addWorkspace: "Add computer",
   composerHome: "Plan, ask, build…",
   composerChat: "Ask your host…",
   composerWork: "Plan work in this project…",
   composerCode: "Describe a Code task…",
-  composerFollowUp: "Message your host…",
-  composerDisclaimer: "Threads live on your paired host — not on this phone.",
-  composerDisclaimerShort: "Threads live on your host.",
+  composerFollowUp: "Reply…",
+  composerDisclaimerShort: "Threads live on your computer.",
   newThreadsUse: "New threads use",
-  hostOwnedThread: "Host-owned thread",
-  voiceLater: "Voice input comes later.",
   modelHostOnly: "Host models",
   modelUnavailable: "No host models",
   working: "Working",
-  handoffWarning: "Some attachments were omitted when handing off providers on the host.",
+  handoffWarning: "Some attachments were left out when the computer switched providers.",
   attachmentLabel: "Attachment",
   citationLabel: "Source",
   workListLabel: "Work",
@@ -121,27 +118,26 @@ export const MOBILE_COPY = {
   needsAttention: "Needs you",
   inReview: "In review",
   read: "Read",
-  placementHint: "New threads go to the host marked “New threads go here”.",
+  placementHint: "New threads go to the computer marked “New threads go here”.",
   createModeChat: "Chat",
   createModeWork: "Work",
   createModeCode: "Code",
   createModeCodeHelp: "Start approval-gated Code tasks on a bound repository.",
-  codeNoProject: "No available Code project on this host. Bind a repository on the host first.",
+  codeNoProject: "No Code project is open on this computer. Open a repository there first.",
   workNoProject: "No active Work project on this host. Create one on the desktop first.",
   workFollowUpHint:
-    "Runs on the host in this thread's bound folder. Files and shell stay on the desktop.",
+    "Runs on your computer in this thread's folder. Files and the shell stay there.",
   workFollowUpPlaceholder: "Follow up on this Work thread…",
   codeFollowUpHint:
-    "Runs approval-gated on the host. Approve tool use and edit files on the desktop.",
+    "Runs on your computer and asks before tools run. Approve and edit files there.",
   codeReviewTitle: "Review Code on mobile",
   codeReviewEntryBody:
-    "Inspect host-owned changes and checks here. Start and follow up on Code from here; approvals and edits stay on the desktop.",
+    "Read changes and checks, start tasks, and follow up here. Approvals and edits happen on your computer.",
   codeBrowseThreads: "Browse Code threads",
   codeFollowUpPlaceholder: "Follow up on this Code thread…",
   transcriptEmpty: "No turns yet.",
   codeEarlierTurns: "Showing the newest turns. Open the thread on the desktop for earlier ones.",
-  turnRunning: "Working on the host…",
-  hostsUnavailable: "hosts unavailable",
+  turnRunning: "Working on your computer…",
   approvalDesktopOnly:
     "Approve or reject on the desktop host. High-risk approval challenges stay local-host-only.",
   approvalAllow: "Allow",

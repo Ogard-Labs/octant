@@ -334,7 +334,6 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 : MOBILE_COPY.working
             }
             editable={staleGate.allowProductMutations && chat.activeAttempt === undefined}
-            footerHint={MOBILE_COPY.hostOwnedThread}
             modelLabel={modelLabel}
             onChangeText={setPrompt}
             onPressModel={() => setModelOpen(true)}
@@ -360,7 +359,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
             !codeTurnLive &&
             (selected.mode === "code" || work.thread !== undefined)
           }
-          footerHint={followUpComposerCopy?.footerHint ?? MOBILE_COPY.hostOwnedThread}
+          footerHint={followUpComposerCopy?.footerHint}
           modelLabel={
             selected.mode === "work" && work.thread !== undefined
               ? mobileModelLabel(models.options, String(work.thread.modelId))

@@ -235,7 +235,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           return;
         }
         if (selectedModel === undefined) {
-          setComposerError("Select a host-advertised model before starting Code.");
+          setComposerError("Choose a model from your computer before starting Code.");
           return;
         }
         const row = await createMobileCodeFromPrompt({
@@ -260,7 +260,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           return;
         }
         if (selectedModel === undefined) {
-          setComposerError("Select a host-advertised model before creating Work.");
+          setComposerError("Choose a model from your computer before starting Work.");
           return;
         }
         const row = await createMobileWorkFromPrompt({
@@ -564,7 +564,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
         />
         <View style={styles.topActions}>
           <IconButton
-            accessibilityLabel="Search all work"
+            accessibilityLabel="Search threads"
             iconSize={20}
             name="search-outline"
             onPress={() => props.onOpenAgents("all")}
@@ -573,7 +573,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
           />
           {props.homeMode === "inbox" ? (
             <IconButton
-              accessibilityLabel="Add workspace"
+              accessibilityLabel="Add computer"
               iconSize={20}
               name="folder-open-outline"
               onPress={props.onAddWorkspace}

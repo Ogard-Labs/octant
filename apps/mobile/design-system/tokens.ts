@@ -237,8 +237,6 @@ export const space = {
   xxl: 48,
 } as const;
 
-export const spacing = space;
-
 export const radii = {
   sm: 10,
   md: 22,
@@ -292,12 +290,6 @@ export const typography = {
     letterSpacing: 0.2,
     fontFamily: fonts.mono,
   },
-} as const;
-
-export const motion = {
-  pressScale: 0.98,
-  fadeFastMs: 160,
-  fadeMs: 240,
 } as const;
 
 export type GlassMaterial = "ultraThin" | "thin" | "regular" | "thick" | "chrome";

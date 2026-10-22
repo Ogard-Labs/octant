@@ -76,11 +76,38 @@ export interface AppearanceStore {
   ) => Promise<AppearancePreferences>;
 }
 
+export interface AppearanceStoreOptions {
+  /** Whether a stored file wallpaper still exists on this device. */
+  readonly fileExists?: (uri: string) => Promise<boolean>;
+  /** Deletes a wallpaper file the app copied; must ignore files it does not own. */
+  readonly removeFile?: (uri: string) => Promise<void>;
+}
+
+/**
+ * A wallpaper stored as a file path can vanish when the system clears caches
+ * or the app is restored onto a new phone. Data URIs live in the store itself
+ * and always survive, so only file URIs are checked.
+ */
+export async function keepsWallpaper(
+  uri: string,
+  options: AppearanceStoreOptions,
+): Promise<boolean> {
+  if (!uri.startsWith("file:") || options.fileExists === undefined) return true;
+  try {
+    return await options.fileExists(uri);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Local appearance preferences. Image payload lives in a separate storage key
  * so preference JSON stays small (SecureStore-friendly).
  */
-export function createAppearanceStore(storage: ExpoSecureStringStorage): AppearanceStore {
+export function createAppearanceStore(
+  storage: ExpoSecureStringStorage,
+  options: AppearanceStoreOptions = {},
+): AppearanceStore {
   // Overlapping load-then-save writes can persist the earlier tap. Queue them
   // so the last requested mode is the one that remains.
   let writeTail: Promise<void> = Promise.resolve();
@@ -111,7 +138,7 @@ export function createAppearanceStore(storage: ExpoSecureStringStorage): Appeara
       return prefs;
     }
     const image = await storage.getItem(IMAGE_KEY);
-    if (image === null || image.length === 0) {
+    if (image === null || image.length === 0 || !(await keepsWallpaper(image, options))) {
       return {
         backgroundMode: "code-gradient",
         colorSchemePreference: prefs.colorSchemePreference,
@@ -126,10 +153,24 @@ export function createAppearanceStore(storage: ExpoSecureStringStorage): Appeara
     };
   };
 
+  // The replaced copy is deleted only after the new state is stored, so a
+  // failed save never strands the preferences without their wallpaper. A
+  // failed delete leaves an orphan file, which is better than a failed save.
+  const removeReplacedFile = async (previous: string | null, kept: string | undefined) => {
+    if (previous === null || previous === kept || options.removeFile === undefined) return;
+    try {
+      await options.removeFile(previous);
+    } catch {
+      // Best effort.
+    }
+  };
+
   const save = async (prefs: AppearancePreferences): Promise<void> => {
+    const previous = await storage.getItem(IMAGE_KEY);
     if (prefs.backgroundMode === "custom" && prefs.customImageUri !== undefined) {
       await storage.setItem(IMAGE_KEY, prefs.customImageUri);
       await writeMeta(prefs);
+      await removeReplacedFile(previous, prefs.customImageUri);
       return;
     }
     await storage.deleteItem(IMAGE_KEY);
@@ -138,6 +179,7 @@ export function createAppearanceStore(storage: ExpoSecureStringStorage): Appeara
       colorSchemePreference: prefs.colorSchemePreference,
       surfaceStyle: prefs.surfaceStyle,
     });
+    await removeReplacedFile(previous, undefined);
   };
 
   return {

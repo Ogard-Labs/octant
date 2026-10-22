@@ -75,7 +75,7 @@ export function ModelPickerSheet(props: ModelPickerSheetProps) {
       <Text style={styles.section}>Active</Text>
       {props.options.length === 0 ? (
         <Text style={styles.empty} testID="mobile-model-empty">
-          Connect a host to see advertised models. The phone never stores provider secrets.
+          Connect a computer to see its models. The phone never stores provider secrets.
         </Text>
       ) : (
         props.options.map((option, index) => {

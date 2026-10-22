@@ -12,15 +12,15 @@ const VIEW_ITEMS: ReadonlyArray<{
   readonly detail: string;
   readonly icon: MobileIconName;
 }> = [
-  { id: "inbox", label: "Inbox", detail: "Work and Code status", icon: "file-tray-outline" },
+  { id: "inbox", label: "Inbox", detail: "What needs you", icon: "file-tray-outline" },
   {
     id: "chat",
     label: "Chat",
     detail: "Conversations with your hosts",
     icon: "chatbubble-outline",
   },
-  { id: "work", label: "Work", detail: "Project work", icon: "folder-outline" },
-  { id: "code", label: "Code", detail: "Repository tasks and review", icon: "code-slash" },
+  { id: "work", label: "Work", detail: "Tasks in your folders", icon: "folder-outline" },
+  { id: "code", label: "Code", detail: "Coding tasks and changes", icon: "code-slash" },
 ];
 
 export function HomeNavigationSheet(props: {

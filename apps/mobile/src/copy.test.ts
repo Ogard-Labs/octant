@@ -17,13 +17,13 @@ describe("mobile package identity", () => {
     expect(collectMobileUserFacingCopy()).not.toContain(retiredProductName);
   });
 
-  it("exposes Inbox home, Agents, Thread, and Hosts routes", () => {
+  it("exposes Inbox home, Agents, Thread, and Computers routes", () => {
     expect([...MOBILE_ROUTE_IDS]).toEqual(["home", "agents", "thread", "hosts"]);
     expect(MOBILE_TAB_LABELS).toEqual({
       home: "Inbox",
       agents: "Agents",
       thread: "Thread",
-      hosts: "Hosts",
+      hosts: "Computers",
     });
   });
 
@@ -35,7 +35,7 @@ describe("mobile package identity", () => {
       placeholder: expect.stringContaining("Code"),
     });
     expect(mobileThreadComposerCopy("code").footerHint).toMatch(/approve/i);
-    expect(mobileThreadComposerCopy("work").footerHint).toMatch(/desktop/i);
+    expect(mobileThreadComposerCopy("work").footerHint).toMatch(/stay there/i);
     expect(mobileThreadComposerCopy("code")).not.toEqual(mobileThreadComposerCopy("work"));
   });
 

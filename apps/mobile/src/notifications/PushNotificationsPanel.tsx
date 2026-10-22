@@ -23,7 +23,7 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
   const enable = async () => {
     if (!props.permission.available) return;
     if (props.transport === undefined) {
-      setMessage("Connect to a host before enabling notifications.");
+      setMessage("Connect to a computer before turning on notifications.");
       return;
     }
     setBusy(true);
@@ -62,7 +62,7 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
 
   const disable = async () => {
     if (props.transport === undefined) {
-      setMessage("Connect to a host before clearing notifications.");
+      setMessage("Connect to a computer before clearing notifications.");
       return;
     }
     setBusy(true);

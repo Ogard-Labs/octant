@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createAppearanceStore,
   DEFAULT_APPEARANCE,
+  keepsWallpaper,
   parseAppearancePreferences,
 } from "./AppearanceStore";
 
@@ -134,5 +135,77 @@ describe("AppearanceStore", () => {
       surfaceStyle: "flat",
     });
     expect(await store.load()).toEqual(cleared);
+  });
+});
+
+describe("wallpaper survival", () => {
+  it("falls back to the Octant canvas when the stored photo file is gone", async () => {
+    const storage = memoryStorage();
+    const present = createAppearanceStore(storage, { fileExists: async () => true });
+    await present.saveCustomImage("file:///docs/background.jpg");
+    expect((await present.load()).customImageUri).toBe("file:///docs/background.jpg");
+
+    const missing = createAppearanceStore(storage, { fileExists: async () => false });
+    expect(await missing.load()).toEqual({
+      backgroundMode: "code-gradient",
+      colorSchemePreference: "system",
+      surfaceStyle: "flat",
+    });
+  });
+
+  it("keeps inline photos without asking the file system", async () => {
+    const fileExists = async () => false;
+    expect(await keepsWallpaper("data:image/png;base64,AAAA", { fileExists })).toBe(true);
+    expect(
+      await keepsWallpaper("file:///x.jpg", {
+        fileExists: async () => Promise.reject(new Error("io")),
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("wallpaper copies on disk", () => {
+  function storeWithRemovals() {
+    const removed: string[] = [];
+    const store = createAppearanceStore(memoryStorage(), {
+      removeFile: async (uri) => {
+        removed.push(uri);
+      },
+    });
+    return { store, removed };
+  }
+
+  it("deletes the previous copy when a new photo replaces it", async () => {
+    const { store, removed } = storeWithRemovals();
+    await store.saveCustomImage("file:///docs/background-1.jpg");
+    expect(removed).toEqual([]);
+    await store.saveCustomImage("file:///docs/background-2.jpg");
+    expect(removed).toEqual(["file:///docs/background-1.jpg"]);
+  });
+
+  it("deletes the copy when the photo is removed or the background mode changes", async () => {
+    const { store, removed } = storeWithRemovals();
+    await store.saveCustomImage("file:///docs/background-1.jpg");
+    await store.clearCustomImage();
+    await store.saveCustomImage("file:///docs/background-2.jpg");
+    await store.setBackgroundMode("atmosphere");
+    expect(removed).toEqual(["file:///docs/background-1.jpg", "file:///docs/background-2.jpg"]);
+  });
+
+  it("keeps the copy that is still the wallpaper", async () => {
+    const { store, removed } = storeWithRemovals();
+    await store.saveCustomImage("file:///docs/background-1.jpg");
+    await store.setColorSchemePreference("dark");
+    expect(removed).toEqual([]);
+  });
+
+  it("still saves when deleting the old copy fails", async () => {
+    const store = createAppearanceStore(memoryStorage(), {
+      removeFile: async () => Promise.reject(new Error("io")),
+    });
+    await store.saveCustomImage("file:///docs/background-1.jpg");
+    const next = await store.saveCustomImage("file:///docs/background-2.jpg");
+    expect(next.customImageUri).toBe("file:///docs/background-2.jpg");
+    expect((await store.load()).customImageUri).toBe("file:///docs/background-2.jpg");
   });
 });
