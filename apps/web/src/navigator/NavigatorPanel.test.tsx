@@ -38,7 +38,7 @@ const TIMESTAMP = "2026-08-15T09:00:00.000Z" as UtcTimestamp;
 function snapshot(overrides: Partial<NavigatorAssistantSnapshot> = {}): NavigatorAssistantSnapshot {
   return {
     status: "ready",
-    settingsTarget: { section: "navigator-assistant", setting: "default-model" },
+    settingsTarget: { section: "harness", setting: "default-model" },
     threadId: null,
     transcript: [],
     defaultProvider: {
@@ -129,7 +129,7 @@ describe("NavigatorPanel", () => {
 
     await user.click(screen.getByRole("button", { name: "Open Navigator settings" }));
     expect(onOpenSettings).toHaveBeenCalledWith({
-      section: "navigator-assistant",
+      section: "harness",
       setting: "default-model",
     });
   });
@@ -142,7 +142,7 @@ describe("NavigatorPanel", () => {
             "Navigator has no default model.",
             409,
             "unconfigured",
-            { section: "navigator-assistant", setting: "default-model" },
+            { section: "harness", setting: "default-model" },
           ),
         })}
       />,

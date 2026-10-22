@@ -14,7 +14,7 @@ first request is your first publish.
 
 ## Turn Public links on
 
-1. Open **Settings › Data & privacy**.
+1. Open **Settings › Permissions**.
 2. Turn on **Public links**.
 
 The row names the service it will use. The default is
@@ -178,7 +178,7 @@ today. These steps apply once it is published.
 :::
 
 You do not have to use `canvas.octant.sh`. The share service is a small Bun app.
-Run it on your own server, put TLS in front of it, and enter its URL in **Settings › Data & privacy › Public links**. Your links
+Run it on your own server, put TLS in front of it, and enter its URL in **Settings › Permissions › Public links**. Your links
 then live wherever you run it.
 
 The service uses two web addresses: one for pages and one for design frames. It

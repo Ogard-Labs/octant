@@ -555,7 +555,7 @@ document as a future version. Frames follow the
   inside, the approval card names the markup it writes, and a themed design
   is drawn in the theme the person's window hands over; this has shipped.
   Markdown export writes the title. A public link is an export too: off until
-  the person turns on Settings › Data & privacy › Public links, published only from
+  the person turns on Settings › Permissions › Public links, published only from
   the approval card in a local window and never by an agent, it carries the
   share filter's blocks without host, Project, thread, or source identity to
   the public Canvas share service, which can read it, draws design frames only
@@ -1778,7 +1778,7 @@ flowchart LR
   A single narrow SQLite port has two adapters — `bun:sqlite` in production
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
-  the port. Settings → Data & privacy exposes a read-only, server-authoritative data
+  the port. Settings → Data & storage exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
@@ -2493,7 +2493,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   is created disabled. Discovery never installs or updates runtimes, never
   toggles an existing instance, and never treats enablement as readiness
   ([decisions/0112-first-run-claude-codex-enablement.md](decisions/0112-first-run-claude-codex-enablement.md)).
-- **Provider catalog.** Settings › Provider catalog lists the bundled
+- **Provider catalog.** Settings › Providers & Models › Provider catalog lists the bundled
   provider-driver packages (`bundledProviderDriverCatalog` in
   `@octant/plugin-host`). Each entry is validated against the public
   `ProviderDriverCatalogEntry` schema, which `@octant/plugin-api` re-exports
@@ -2607,7 +2607,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   image…** icon beside attach and dictate. It opens the same generation sheet,
   scoped to that thread, so the result lands there as a thread artifact; it is
   a person-driven action only, because the agent's image tool stays in Chat.
-  With no image profile ready the icon opens Settings › Image generation
+  With no image profile ready the icon opens Settings › Voice & images
   instead, and it is absent where the host serves no image generation. Work and
   Code keep their existing saves of a result: a Save click is the consent in
   Work, and Code confirms. The start-screen and draft composers have no

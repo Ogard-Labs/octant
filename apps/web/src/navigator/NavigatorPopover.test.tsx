@@ -10,7 +10,7 @@ import { useNavigatorAssistant } from "./useNavigatorAssistant";
 function snapshot(): NavigatorAssistantSnapshot {
   return {
     status: "ready",
-    settingsTarget: { section: "navigator-assistant", setting: "default-model" },
+    settingsTarget: { section: "harness", setting: "default-model" },
     threadId: null,
     transcript: [],
     defaultProvider: {
@@ -98,7 +98,7 @@ describe("NavigatorPopover", () => {
     expect(await screen.findByText("Navigator has no default model")).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Open Navigator settings" }));
     expect(onOpenSettings).toHaveBeenCalledWith({
-      section: "navigator-assistant",
+      section: "harness",
       setting: "default-model",
     });
   });

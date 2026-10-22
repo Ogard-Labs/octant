@@ -309,7 +309,7 @@ thread's Project open shows the same card and may answer it instead. Whoever
 answers first settles the call; if nobody answers within five minutes, the
 call is denied.
 
-To see or take back what you allowed, open **Settings → Data & privacy →
+To see or take back what you allowed, open **Settings → Permissions →
 Remembered tool approvals**. It lists each tool under its Project with a
 **Revoke** button; after revoking, the next call of that tool asks again. The
 list is available at a window on the host, not from a paired device.

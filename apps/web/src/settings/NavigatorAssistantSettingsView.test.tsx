@@ -13,7 +13,7 @@ describe("NavigatorAssistantSettingsView", () => {
     render(<NavigatorAssistantSettingsView onSettingsChange={vi.fn()} settings={{}} />);
 
     expect(
-      screen.getByRole("heading", { name: "Models" }).closest(".settings-card-section"),
+      screen.getByRole("heading", { name: "Navigator" }).closest(".settings-card-section"),
     ).toHaveClass("settings-card-section--open");
   });
 

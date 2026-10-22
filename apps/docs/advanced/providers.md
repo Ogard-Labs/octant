@@ -170,11 +170,12 @@ it instead of imitating it.
 
 ### Provider catalog
 
-**Settings → Provider catalog** lists every provider driver that ships with
+**Settings → Providers & Models → Provider catalog** lists every provider driver that ships with
 Octant: the agent runtimes, then the model endpoints. Each one is bundled, so
 it is already installed and trusted; the catalog says so and offers no install
-or trust action. Opening the catalog, or one driver's setup, only reads what
-Octant already knows. It does not scan the host or start a runtime.
+or trust action. The Providers & Models page looks on this host for installed
+runtimes when it opens; browsing the catalog or opening one driver's setup
+reads only what Octant already knows and starts no runtime.
 
 A driver's setup page shows four separate states: **Available** (Octant offers
 the driver on this host), **Enabled** (a provider for it is switched on),

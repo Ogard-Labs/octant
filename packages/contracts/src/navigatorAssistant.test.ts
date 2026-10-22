@@ -36,7 +36,7 @@ describe("NavigatorAssistantSnapshot", () => {
   it("decodes an honest unconfigured snapshot with its settings target", () => {
     const snapshot = decodeNavigatorAssistantSnapshot({
       status: "unconfigured",
-      settingsTarget: { section: "navigator-assistant", setting: "default-model" },
+      settingsTarget: { section: "harness", setting: "default-model" },
       threadId: null,
       transcript: [],
       defaultProvider: null,
@@ -44,7 +44,7 @@ describe("NavigatorAssistantSnapshot", () => {
       visionReviewer: null,
     });
     expect(snapshot.status).toBe("unconfigured");
-    expect(snapshot.settingsTarget.section).toBe("navigator-assistant");
+    expect(snapshot.settingsTarget.section).toBe("harness");
     // An unconfigured Navigator has no conversation, which is a different
     // fact from a configured one whose conversation is still empty.
     expect(snapshot.transcript).toEqual([]);
@@ -53,7 +53,7 @@ describe("NavigatorAssistantSnapshot", () => {
   it("decodes the bound conversation every Navigator surface reads", () => {
     const snapshot = decodeNavigatorAssistantSnapshot({
       status: "ready",
-      settingsTarget: { section: "navigator-assistant", setting: "default-model" },
+      settingsTarget: { section: "harness", setting: "default-model" },
       threadId: "00000000-0000-4000-8000-00000000b002",
       transcript: [
         { role: "user", text: "Where do I set the default model?", createdAt: TIMESTAMP },
@@ -70,7 +70,7 @@ describe("NavigatorAssistantSnapshot", () => {
     expect(() =>
       decodeNavigatorAssistantSnapshot({
         status: "maybe",
-        settingsTarget: { section: "navigator-assistant" },
+        settingsTarget: { section: "harness" },
         threadId: null,
         transcript: [],
         defaultProvider: null,
@@ -81,7 +81,7 @@ describe("NavigatorAssistantSnapshot", () => {
     expect(() =>
       decodeNavigatorAssistantSnapshot({
         status: "ready",
-        settingsTarget: { section: "navigator-assistant" },
+        settingsTarget: { section: "harness" },
         threadId: null,
         transcript: [],
         defaultProvider: modelRef,
@@ -117,7 +117,7 @@ describe("NavigatorAssistantCommandResult and failures", () => {
       kind: "message-sent",
       snapshot: {
         status: "ready",
-        settingsTarget: { section: "navigator-assistant" },
+        settingsTarget: { section: "harness" },
         threadId: "00000000-0000-4000-8000-00000000b002",
         transcript: [],
         defaultProvider: modelRef,
@@ -132,7 +132,7 @@ describe("NavigatorAssistantCommandResult and failures", () => {
     const failure = decodeNavigatorAssistantFailure({
       category: "unconfigured",
       message: "Navigator has no default model. Choose one in Settings.",
-      settingsTarget: { section: "navigator-assistant", setting: "default-model" },
+      settingsTarget: { section: "harness", setting: "default-model" },
     });
     expect(failure.category).toBe("unconfigured");
     expect(failure.settingsTarget?.setting).toBe("default-model");

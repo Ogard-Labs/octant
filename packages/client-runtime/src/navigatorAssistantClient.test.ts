@@ -8,7 +8,7 @@ const windowCapability = "C".repeat(43);
 
 const snapshot = {
   status: "ready",
-  settingsTarget: { section: "navigator-assistant", setting: "default-model" },
+  settingsTarget: { section: "harness", setting: "default-model" },
   threadId: "9e000000-0000-4000-8000-0000000000cc",
   transcript: [
     { role: "user", text: "Which model do I run on?", createdAt: "2026-08-15T09:00:00.000Z" },
@@ -74,7 +74,7 @@ describe("navigatorAssistantClient", () => {
         {
           error: "Navigator has no default model.",
           category: "unconfigured",
-          settingsTarget: { section: "navigator-assistant", setting: "default-model" },
+          settingsTarget: { section: "harness", setting: "default-model" },
         },
         409,
       ),
@@ -91,7 +91,7 @@ describe("navigatorAssistantClient", () => {
     // Without the deep link the renderer could only say "unavailable"; with it
     // the surface can offer the exact fix.
     expect(typed.settingsTarget).toEqual({
-      section: "navigator-assistant",
+      section: "harness",
       setting: "default-model",
     });
   });

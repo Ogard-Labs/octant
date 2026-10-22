@@ -11,6 +11,7 @@ describe("octantSettingsRegistry", () => {
     expect(octantSettingsRegistry.sections.map((s) => s.id)).toEqual([
       "general",
       "profile",
+      "notifications",
       "appearance",
       "sidebar",
       "keybindings",
@@ -18,20 +19,18 @@ describe("octantSettingsRegistry", () => {
       "work",
       "code",
       "providers",
-      "provider-catalog",
       "harness",
-      "navigator-assistant",
       "voice",
-      "image-generation",
+      "skills",
       "computer-use",
       "device-tools",
-      "skills",
       "github",
       "linear",
-      "host",
+      "permissions",
       "data",
       "sync",
       "remote-access",
+      "host",
       "usage",
     ]);
   });
@@ -49,12 +48,11 @@ describe("octantSettingsRegistry", () => {
     expect(github?.keywords).toMatch(/repositories/);
   });
 
-  it("keeps the running host and its maintenance on Host, and its data on Data & privacy", () => {
-    const host = octantSettingsRegistry.sections.find((s) => s.id === "host");
-    const data = octantSettingsRegistry.sections.find((s) => s.id === "data");
-    expect(host?.scope).toBe("host");
-    expect(host?.settings.map((setting) => setting.id)).toEqual([
-      "host-automation-notifications",
+  it("keeps the running host on Host, what was allowed on Permissions, and stored data on Data & storage", () => {
+    const section = (id: string) => octantSettingsRegistry.sections.find((s) => s.id === id);
+    const ids = (id: string) => section(id)?.settings.map((setting) => setting.id);
+    expect(section("host")?.scope).toBe("host");
+    expect(ids("host")).toEqual([
       "reset-layout",
       "reset-window-bounds",
       "export-diagnostics",
@@ -63,20 +61,21 @@ describe("octantSettingsRegistry", () => {
       "host-backup",
       "host-lifecycle",
     ]);
-    expect(host?.keywords).toMatch(/lifecycle/);
-    expect(host?.keywords).toMatch(/diagnostics/);
-    expect(data?.label).toBe("Data & privacy");
-    expect(data?.scope).toBe("host");
-    expect(data?.settings.map((setting) => setting.id)).toEqual([
-      "data-map",
-      "thread-retention",
+    expect(section("host")?.keywords).toMatch(/lifecycle/);
+    expect(section("host")?.keywords).toMatch(/diagnostics/);
+    expect(ids("notifications")).toEqual(["host-automation-notifications"]);
+    expect(section("permissions")?.label).toBe("Permissions");
+    expect(ids("permissions")).toEqual([
       "public-links",
       "public-link-service",
       "browser-site-approvals",
       "tool-approvals",
     ]);
-    expect(data?.keywords).toMatch(/backup/);
-    expect(data?.keywords).toMatch(/retention/);
+    expect(section("data")?.label).toBe("Data & storage");
+    expect(section("data")?.scope).toBe("host");
+    expect(ids("data")).toEqual(["data-map", "thread-retention"]);
+    expect(section("data")?.keywords).toMatch(/backup/);
+    expect(section("data")?.keywords).toMatch(/retention/);
   });
 
   it("registers Work with the two defaults a new Work thread starts with", () => {
@@ -180,6 +179,8 @@ describe("octantSettingsRegistry", () => {
       "subagent-creation-posture",
       "subagent-concurrency-on-host",
       "subagent-concurrency-per-thread",
+      "default-model",
+      "vision-reviewer",
     ]);
     expect(harness?.keywords).toMatch(/posture/);
   });
@@ -211,13 +212,13 @@ describe("octantSettingsRegistry", () => {
     }
   });
 
-  it("finds the OpenAI image profile under Image generation first", () => {
+  it("finds the OpenAI image profile on Voice & images first", () => {
     const results = searchSettings(
       listAvailableSections(octantSettingsRegistry, capabilities),
       capabilities,
       "openai image",
     );
-    expect(results[0]?.sectionId).toBe("image-generation");
+    expect(results[0]?.sectionId).toBe("voice");
   });
 
   it("lands a link to the model endpoints on the add-endpoint row of Octant Harness", () => {

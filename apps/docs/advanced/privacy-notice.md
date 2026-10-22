@@ -201,7 +201,7 @@ makes no network call. See
 
 A Canvas published as a public link goes to the public Canvas share service.
 Octant operates that service, at `https://canvas.octant.sh` unless you enter
-another URL in **Settings › Data & privacy › Public links**, which is off by default.
+another URL in **Settings › Permissions › Public links**, which is off by default.
 Turning it on sends nothing; the first request is your first publish, after you
 approve a card that shows the exact content, the audience (anyone with the
 link), the expiry, and an optional password. The service receives the Canvas's

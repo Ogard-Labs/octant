@@ -174,7 +174,7 @@ function navigatorAssistantClient(
   const snapshot = (): NavigatorAssistantSnapshot =>
     ({
       status: "ready",
-      settingsTarget: { section: "navigator-assistant", setting: "default-model" },
+      settingsTarget: { section: "harness", setting: "default-model" },
       threadId: null,
       transcript: current,
       defaultProvider: {

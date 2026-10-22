@@ -12,6 +12,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 export const SETTINGS_SECTION_IDS = [
   "general",
   "profile",
+  "notifications",
   "appearance",
   "sidebar",
   "keybindings",
@@ -19,20 +20,18 @@ export const SETTINGS_SECTION_IDS = [
   "work",
   "code",
   "providers",
-  "provider-catalog",
   "harness",
-  "navigator-assistant",
   "voice",
-  "image-generation",
+  "skills",
   "computer-use",
   "device-tools",
-  "skills",
   "github",
   "linear",
-  "host",
+  "permissions",
   "data",
   "sync",
   "remote-access",
+  "host",
   "usage",
 ] as const;
 
@@ -67,6 +66,9 @@ const RetiredSettingsSectionId = Schema.transformLiterals(
   ["advanced", "host"],
   ["agents", "harness"],
   ["profiles", "providers"],
+  ["provider-catalog", "providers"],
+  ["navigator-assistant", "harness"],
+  ["image-generation", "voice"],
 );
 
 export const SettingsDeepLink = Schema.Struct({

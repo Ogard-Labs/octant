@@ -127,7 +127,7 @@ The gist destination reports one of three states:
 
 A public link is a read-only page hosted by a share service, so anyone you give
 the URL can open the Canvas in a browser. It is off until you turn on
-**Settings › Data & privacy › Public links**. The approval card shows the content that
+**Settings › Permissions › Public links**. The approval card shows the content that
 will be sent, who can open it, the expiry, and an optional password, and the
 service can read what you publish. See
 [Share a Canvas with a public link](/guide/public-links).

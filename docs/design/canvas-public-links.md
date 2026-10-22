@@ -21,7 +21,7 @@ and TLS are not part of this change.
 
 ## Off until the person turns it on
 
-- Settings › Data & privacy › **Public links** is off by default. Its row names the
+- Settings › Permissions › **Public links** is off by default. Its row names the
   service URL, `https://canvas.octant.sh` unless the person enters their own.
   A service URL is `https:`; `http:` is accepted only for a loopback address
   (`127.0.0.1`, `::1`, `localhost`) so a self-hosted service can be tried on

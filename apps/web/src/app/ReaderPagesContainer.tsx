@@ -552,7 +552,9 @@ export const ReaderPagesContainer = memo(function ReaderPagesContainer(
         onCloseImageLibrary={() => actions.setImageLibraryOpen(false)}
         imageGenerationClient={imageGenerationClient}
         imageProfiles={imageProfiles}
-        onOpenImageSettings={() => void actions.openSettings({ section: "image-generation" })}
+        onOpenImageSettings={() =>
+          void actions.openSettings({ section: "voice", setting: "custom-image-sources" })
+        }
         onCreateArtifact={() => {
           // An artifact carries the thread it was made in, so there
           // is nowhere to put one that has no origin. Starting a

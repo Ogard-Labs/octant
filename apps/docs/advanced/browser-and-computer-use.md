@@ -151,7 +151,7 @@ waiting or the page half-open.
   turn can use the Browser again, and asks again for any site you did not
   choose **Always allow** for.
 - **You chose Always allow for a site.** It opens without asking, in Work and
-  Code, until you forget it under **Settings → Data & privacy → Remembered
+  Code, until you forget it under **Settings → Permissions → Remembered
   websites**. Switching the thread's model still asks, because the remembered
   site covers the page, not who drives it.
 - **The provider cannot carry the tool.** The composer does not offer
