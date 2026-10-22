@@ -6,7 +6,7 @@ import { useId, type ReactNode } from "react";
 import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
-import { ThreadStats } from "../threadStats/ThreadStats";
+import { ThreadPlanWindows, ThreadStats } from "../threadStats/ThreadStats";
 import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
 import "./composer-plan-usage.css";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -110,7 +110,7 @@ export interface ThreadComposerProps {
   /**
    * The provider a new thread will send to. Its remaining plan usage stands
    * at the right of the start context's row. A thread's own composer never
-   * takes it: its windows come with the thread's stats strip.
+   * takes it: its windows stand in the thread's strip above the box.
    */
   readonly planUsage?: { readonly providerInstanceId: string | undefined };
   readonly queue?: ReactNode;
@@ -200,6 +200,8 @@ export function ThreadComposer(props: ThreadComposerProps) {
   // thread; inside the surface they made the box read as one tall composer.
   // Where the thread runs and how much of the plan is left share one strip
   // above the box, so the box itself holds only the message and its controls.
+  // The stats line stands under the box, where a person reads the last turn's
+  // figures after sending.
   const body = followUp ? (
     <>
       <ComposerFollowUpSuggestions />
@@ -207,7 +209,7 @@ export function ThreadComposer(props: ThreadComposerProps) {
         {props.context === undefined ? null : (
           <div className="thread-composer__context">{props.context}</div>
         )}
-        <ThreadStats />
+        <ThreadPlanWindows />
       </div>
       <div className="thread-composer__surface">
         <ComposerOutsideContentNotice busy={props.threadBusy === true} />
@@ -218,6 +220,7 @@ export function ThreadComposer(props: ThreadComposerProps) {
         </div>
         {controls}
       </div>
+      <ThreadStats windows={false} />
     </>
   ) : (
     <>

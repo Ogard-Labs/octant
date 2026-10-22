@@ -6,13 +6,14 @@ import {
 import type { CodeProviderLimit } from "@octant/contracts/code-operations";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import {
   ComposerContextMeterGate,
   ComposerContextMeterProvider,
 } from "../context/composerContextMeterScope";
+import { ThreadComposer } from "../composer/ThreadComposer";
 import { ThreadStats } from "./ThreadStats";
 import { ThreadStatsDetailDialog } from "./ThreadStatsDetail";
 import { ThreadStatsProvider } from "./threadStatsScope";
@@ -77,6 +78,8 @@ function Harness(props: {
   readonly paneActive?: boolean;
   readonly initiallyVisible?: boolean;
   readonly onVisibleChange?: (visible: boolean) => void;
+  /** What stands in the composer's place; the bare stats line when absent. */
+  readonly children?: ReactNode;
 }) {
   const [visible, setVisible] = useState(props.initiallyVisible ?? true);
   return (
@@ -96,7 +99,7 @@ function Harness(props: {
       >
         <ComposerContextMeterGate enabled={props.paneActive ?? true}>
           <ComposerContextMeter />
-          <ThreadStats />
+          {props.children ?? <ThreadStats />}
           <ThreadStatsDetailDialog />
         </ComposerContextMeterGate>
       </ComposerContextMeterProvider>
@@ -111,7 +114,7 @@ describe("the thread stats line", () => {
 
     const line = screen.getByTestId("thread-stats-line");
     expect(line).toHaveTextContent(
-      "↑ 48k in · ↓ 3.1k out · cache 92% · 41 tok/s · 0.9 s first token · $0.01 est.",
+      "1 turn · ↑ 48k in · ↓ 3.1k out · cache 92% · 41 tok/s · 0.9 s first token · $0.01 est.",
     );
   });
 
@@ -272,6 +275,53 @@ describe("the thread stats line", () => {
     render(<Harness summary={undefined} />);
 
     expect(screen.queryByTestId("thread-stats-line")).not.toBeInTheDocument();
+  });
+});
+
+describe("the stats line in a thread's composer", () => {
+  function FollowUpComposer() {
+    return (
+      <ThreadComposer
+        context={<span>Project · branch</span>}
+        input={<textarea aria-label="Message" className="composer-input" />}
+        presentation="follow-up"
+        row={{ actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } } }}
+      />
+    );
+  }
+  const limits: ReadonlyArray<CodeProviderLimit> = [
+    { window: "five_hour", status: "allowed", utilization: 0.12 },
+    { window: "seven_day", status: "allowed", utilization: 0.62 },
+  ];
+
+  it("states the figures under the box and the plan windows in the strip above it", () => {
+    const { container } = render(
+      <Harness limits={limits} summary={summaryOf([turn()])}>
+        <FollowUpComposer />
+      </Harness>,
+    );
+
+    const surface = container.querySelector(".thread-composer__surface");
+    const line = screen.getByTestId("thread-stats-line");
+    expect(surface?.nextElementSibling).toBe(line);
+    expect(line).toHaveTextContent("↑ 48k in · ↓ 3.1k out · cache 92%");
+    expect(within(line).queryByText("5h")).not.toBeInTheDocument();
+    const strip = container.querySelector(".thread-composer__strip");
+    expect(strip).toHaveTextContent("Project · branch");
+    expect(
+      within(strip as HTMLElement).getByRole("group", { name: "Plan usage left" }),
+    ).toHaveTextContent("5h88%wk38%");
+  });
+
+  it("keeps the plan windows above the box when the stats line is hidden", () => {
+    const { container } = render(
+      <Harness initiallyVisible={false} limits={limits} summary={summaryOf([turn()])}>
+        <FollowUpComposer />
+      </Harness>,
+    );
+
+    expect(screen.queryByTestId("thread-stats-line")).not.toBeInTheDocument();
+    expect(container.querySelector(".thread-composer__strip")).toHaveTextContent("5h88%wk38%");
   });
 });
 

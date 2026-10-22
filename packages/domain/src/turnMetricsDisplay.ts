@@ -31,7 +31,15 @@ import {
  *   price is known for the model.
  */
 
-export type ThreadStatKey = "input" | "output" | "cache" | "speed" | "first-token" | "cost";
+export type ThreadStatKey =
+  | "turns"
+  | "input"
+  | "output"
+  | "reasoning"
+  | "cache"
+  | "speed"
+  | "first-token"
+  | "cost";
 
 export interface ThreadStat {
   readonly key: ThreadStatKey;
@@ -63,6 +71,11 @@ export interface ThreadCost {
 }
 
 export interface ThreadStatsInput {
+  /**
+   * How many turns the thread has run. Only a thread's own reading sets it: a
+   * harness session's footer and card already state their turns beside the line.
+   */
+  readonly turns?: number | undefined;
   readonly usage?: TurnUsage | undefined;
   readonly speed?: SpeedFigures | undefined;
   readonly cost?: ThreadCost | undefined;
@@ -252,6 +265,7 @@ export function threadStatsInputOf(summary: TurnMetricsSummary | undefined): Thr
     summary.turnCount <= summary.turns.length,
   );
   return {
+    turns: summary.turnCount,
     usage: summary.usage,
     speed: speedFiguresOfSession(summary.metrics),
     cost,
@@ -298,7 +312,7 @@ export function sessionStatsInputOf(
  */
 export function threadStats(input: ThreadStatsInput): ReadonlyArray<ThreadStat> {
   const stats: ThreadStat[] = [];
-  const { usage, speed, cost } = input;
+  const { turns, usage, speed, cost } = input;
   if (usage !== undefined && usage.inputTokens > 0) {
     stats.push({
       key: "input",
@@ -311,6 +325,14 @@ export function threadStats(input: ThreadStatsInput): ReadonlyArray<ThreadStat> 
       key: "output",
       text: `↓ ${formatTokenCount(usage.outputTokens)} out`,
       label: `${formatExactCount(usage.outputTokens)} output tokens`,
+    });
+  }
+  if (usage?.reasoningTokens !== undefined && usage.reasoningTokens > 0) {
+    stats.push({
+      key: "reasoning",
+      text: `${formatTokenCount(usage.reasoningTokens)} thinking`,
+      label: `${formatExactCount(usage.reasoningTokens)} reasoning tokens`,
+      hint: "Part of the output tokens.",
     });
   }
   const hit = cacheHitRate(usage);
@@ -360,6 +382,12 @@ export function threadStats(input: ThreadStatsInput): ReadonlyArray<ThreadStat> 
           ? basis
           : `${basis} Covers the latest ${String(cost.latestTurns)} turns only.`,
     });
+  }
+  // The turn count leads only a line that already has a figure: on its own it
+  // would make a line appear for a provider that reported nothing.
+  if (stats.length > 0 && turns !== undefined && turns > 0) {
+    const text = `${formatExactCount(turns)} ${turns === 1 ? "turn" : "turns"}`;
+    stats.unshift({ key: "turns", text, label: text });
   }
   return stats;
 }

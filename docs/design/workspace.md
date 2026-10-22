@@ -614,10 +614,12 @@ the composer and Environment explain an admission refusal and its recovery.
 [Context and usage accounting](../architecture.md#context-and-usage-accounting)
 owns budget enforcement, provenance, native-session identity, and journal rules.
 
-Above the composer of every thread, in Chat, Work, and Code and for every provider, a
-quiet stats line, right of the thread's context in one strip, states what the thread used: input and output tokens, the cache
-hit, output speed, time to first token, and cost. When the provider reported account
-limit windows, the line leads with one bar per window, showing the share left
+Under the composer of every thread, in Chat, Work, and Code and for every provider, a
+quiet stats line states what the thread used: its turns, input and output tokens,
+thinking tokens when reported, the cache hit, output speed, time to first token, and
+cost. The provider's account limit windows stand in the strip above the box, right of
+the thread's context, one bar per window showing the share left; the stats line's
+switch hides the figures, not those bars
 (`composerLimitWindows` in `apps/web/src/context`, read from the context snapshot and
 falling back to the Code thread's own report). A provider that reported neither windows
 nor usage shows no line. In a split workspace the line shows in the active pane only: the
