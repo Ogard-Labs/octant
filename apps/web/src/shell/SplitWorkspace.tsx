@@ -551,7 +551,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     {navigation.map((entry) => (
                       <div className="workspace-content-tabs__entry content-tab" key={entry.id}>
                         <OctantTabsTab
-                          className="content-tab__select border-0 bg-transparent text-inherit"
+                          className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
                           value={entry.id}
                           title={workspaceSurfaceTitle(entry, props.liveThreadTitles)}
                         >
@@ -576,7 +576,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     {localViews.map((view) => (
                       <div className="workspace-content-tabs__entry content-tab" key={view.key}>
                         <OctantTabsTab
-                          className="content-tab__select border-0 bg-transparent text-inherit"
+                          className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
                           value={view.key}
                         >
                           <span>{view.title}</span>
