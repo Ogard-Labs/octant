@@ -167,7 +167,6 @@ describe("rail usage rings", () => {
     expect(windowHours("monthly")).toBeGreaterThan(windowHours("seven_day"));
   });
 
-
   it("gives no ring to a provider that reported no window figure", () => {
     expect(
       railUsageReadings(
