@@ -35,6 +35,31 @@ install or trust action, because a bundled driver needs neither. Opening the
 page or a setup runs nothing; at phone width a fact's value moves under its
 name.
 
+### A runtime whose saved binary is gone
+
+A runtime card whose saved binary is missing or reported incompatible, while the
+latest scan found the same driver at another path, offers one outlined action in
+the card's details: "Use the one found at ~/.local/bin/claude (2.1.306)". The
+card is missing when the scan searched where the saved binary should be and did
+not find it, or when its last check could not start it. A saved binary that
+starts and answers is never second-guessed, and a failed or cancelled scan
+offers nothing. The offer names the launcher path the scan examined, not the
+versioned file it resolves to, so it survives the runtime's own updates; of
+several candidates it takes a compatible one with the highest version, and a
+candidate the scan itself found incompatible or unavailable is never offered.
+The details open when an offer first appears. Nothing switches by itself and
+the offer never turns the runtime on.
+
+Clicking the offer goes through the same host path as Locate binary, without
+the file picker: the `locate-binary` command names a scanned path instead of a
+picker receipt. The host accepts the path only when it is a candidate of the
+same driver kind from its own latest scan, then checks it as it checks a picked
+file (executable regular file, version probe under the same confinement) and
+only then changes the card's binary path, leaving its other settings alone. An
+enabled runtime is checked again right away. The answer is the same quiet line
+(the version the host read) or a warning box with the host's reason. Because it
+needs no picker, the action is also available in a browser.
+
 ### Claude API-key profiles on a headless host
 
 A browser can create a named Claude API-key profile without a credential.
@@ -77,6 +102,16 @@ and model pickers. The mark inherits the theme's text color; the surrounding
 control supplies its accessible name.
 
 ### Additional CLI accounts
+
+Every Claude and Codex provider card offers Add account in its details, beside
+Check connection. It opens the same manual form that Add provider manually
+opens, expanded, with that driver chosen, the card's binary path filled in, and
+a suggested name ("<card name> (2)", the next free number) focused for editing.
+It adds no route and no authority: the host still assigns the account directory
+and the form shows the sign-in guidance for an additional account. A created
+account closes the form again, so the suggested name is not offered twice.
+Cards for other drivers, and the single runtime card on a provider's own
+page, have no Add account.
 
 The manual Claude and Codex account forms give the account directory, accent
 and sign-in guidance full-width setting rows. The compact provider/name/binary

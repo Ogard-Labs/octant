@@ -86,12 +86,12 @@ active pane shows the line, so a pane never shows another thread's figures:
   word, averaged over the turns that were measured.
 - **cost** says **est.** because Octant prices tokens at the standard API rates
   for the model. A cost the provider reported itself drops the **est.**.
-- **5h** and **Week** (or any other window the provider reports) lead the line
-  as small bars. Each shows how much of that account window is left. A bar
-  turns amber when less than a fifth is left, and red when none is left. Hover
-  for the full name and the percentage. Only windows the provider has reported
-  appear, and a window whose reset has passed drops out until the provider
-  reports it again.
+- **5h** and **wk** lead the line as small bars. Each shows how much of that
+  account window is left: the shortest window the provider reports and the
+  longest. A bar turns amber when less than a fifth is left, and red when none
+  is left. Hover for the full name and the percentage. Only windows the
+  provider has reported appear, and a window whose reset has passed drops out
+  until the provider reports it again.
 
 A figure the provider did not report, and one that cannot be measured, is left
 out: Octant never shows a zero it did not see. A provider that reports neither
@@ -109,6 +109,24 @@ composer** in the context meter's popover, or in **Settings › Appearance ›
 Reading**. It is on by default, and the choice is saved for this installation.
 The same figures appear on the Octant Harness session card, in the terminal
 footer, and on the phone's session panel.
+
+## Plan usage above the composer
+
+The same two meters, `5h ▬▬▬ 85%  wk ▬▬ 43%`, stand at the right of the row
+above the composer, on the same row as where the work runs (Project, folder, or
+branch). On a start screen they follow the provider you have picked in the
+model menu, so changing the model changes the account they describe. In a
+thread they show that thread's provider. Each is a short name, a thin bar, and
+the share of the window that is **left**.
+
+They read the same last observation as the rings at the foot of the sidebar,
+so a provider that reports no plan window (an API key, or a runtime that does
+not report) shows no meters rather than an empty bar.
+
+**Settings › Appearance › Reading › Usage bars** chooses how the bar is drawn:
+**Smooth** (the default) is a thin line, and **Pixelated** is a row of small
+square cells whose fill thins out into a stipple at its leading edge. Both use
+the theme's accent colour.
 
 ## Threads on the usage page
 
@@ -138,6 +156,9 @@ never calls a vendor usage endpoint. Each Claude account shows its own limits, l
 name, with reset time in local time and when the reading was last updated. An
 API-key Claude account says plan limits do not apply instead of drawing empty
 bars. A failed or missing refresh keeps the last reading and shows its age.
+Octant also remembers the last reading of every provider across restarts, so
+the limits show on launch with the time they were read. Launching Octant never
+starts a provider to refresh them.
 
 Devin and OpenCode Go show their plan windows too: Devin's daily and weekly
 allowance, and OpenCode Go's 5-hour, weekly, and monthly windows. Their

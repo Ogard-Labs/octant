@@ -249,6 +249,16 @@ accepted, the card's binary path changes to the file you picked and its other
 settings (sign-in method, display name) stay as they were; an enabled runtime
 is checked again right away.
 
+If a runtime's saved binary has been removed or is reported incompatible, but
+the latest scan found the same runtime somewhere else, its card details offer
+**Use the one found at ...** with the path and version, for example
+`~/.local/bin/claude (2.1.306)`. Nothing switches until you click it. Octant
+offers the stable launcher path rather than the versioned file behind it, and
+when the scan found several it offers a compatible one with the highest version.
+The host checks the binary the way it checks a picked file and only then changes
+the card's binary path; it does not turn the runtime on. This action needs no
+file picker, so it also appears in a browser.
+
 Discovery also recognizes a narrowly parsed alias declaration for a supported
 executable in `~/.bash_aliases`, `~/.bash_profile`, `~/.bashrc`, `~/.zprofile`,
 or `~/.zshrc`. Octant reads those files without sourcing them, accepts only a
@@ -282,8 +292,11 @@ Mistral API key entered in **Settings → Providers & Models** because its confi
 does not read the macOS Keychain.
 
 You can add more than one Claude account. Each account is its own provider
-in **Settings → Providers & Models**: give it a name and an accent color so the model
-picker can tell them apart. Octant assigns the first subscription account
+in **Settings → Providers & Models**. To add one, open the details of your
+Claude card and choose **Add account**; the form opens with Claude chosen, your
+binary path filled in, and a suggested name such as "Claude Agent SDK (2)". (**Add
+provider manually** opens the same form.) Give the account a name and an accent
+color so the model picker can tell them apart. Octant assigns the first subscription account
 Claude's default directory (`~/.claude`). Each additional account, and every
 API-key account, gets its own directory under `~/.claude-accounts/`. A
 directory you chose earlier keeps working until you re-assign it. Re-assigning
@@ -301,7 +314,8 @@ assigned directory. Removing an account does not delete its directory. Octant
 tells you where it is; delete it yourself to remove that account's sign-in
 and history.
 
-You can add more than one Codex account the same way. Octant assigns the
+You can add more than one Codex account the same way, with **Add account** on
+the Codex card. Octant assigns the
 first account Codex's default directory (`~/.codex`). Each additional
 account gets its own directory under `~/.codex-accounts/`. Sign in only
 with the unmodified `codex login` command in a terminal for that account;

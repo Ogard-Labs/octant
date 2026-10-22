@@ -143,6 +143,12 @@ export function ChatWelcome(props: ChatWelcomeProps) {
         </div>
         <div className="composer-stack">
           <ThreadComposer
+            planUsage={{
+              providerInstanceId:
+                props.selectedProviderInstanceId === undefined
+                  ? undefined
+                  : String(props.selectedProviderInstanceId),
+            }}
             startContext={
               <div className="composer-tray composer-tray--inside" aria-label="Thread context">
                 <div className="composer-tray__leading">

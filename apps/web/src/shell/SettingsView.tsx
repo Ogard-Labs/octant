@@ -1332,6 +1332,10 @@ function ProvidersSection(props: {
     discoveryController,
     props.hostBridge,
   );
+  const onUseScannedBinary = adoptScannedRuntimeBinary(
+    props.providerController,
+    discoveryController,
+  );
 
   return (
     <div id="settings-providers">
@@ -1341,6 +1345,7 @@ function ProvidersSection(props: {
           ? {}
           : { usageLimitsClient: props.usageLimitsClient })}
         {...(onLocateBinary === undefined ? {} : { onLocateBinary })}
+        {...(onUseScannedBinary === undefined ? {} : { onUseScannedBinary })}
         discovery={
           discoveryController === undefined ? null : (
             <ProviderDiscoverySection
@@ -1389,15 +1394,42 @@ function locateRuntimeBinary(
     }
     if (picked.kind === "cancelled") return { kind: "cancelled" };
     const outcome = await discoveryController.locateBinary(instanceId, picked.receiptId);
-    if (outcome.kind === "located") {
-      await providerController.retry();
-      const instance = providerController
-        .readInstances()
-        .find((candidate) => String(candidate.id) === String(instanceId));
-      if (instance?.enabled === true) await providerController.probe(instanceId);
-    }
+    await refreshAfterLocated(providerController, instanceId, outcome);
     return outcome;
   };
+}
+
+/**
+ * The card's offer to use a binary the latest scan found. It needs no picker:
+ * the host takes only a path its own scan found for that runtime, and checks it
+ * the way it checks a picked file.
+ */
+function adoptScannedRuntimeBinary(
+  providerController: ProviderController,
+  discoveryController: DiscoveryController | undefined,
+):
+  | ((instanceId: ProviderInstanceId, binaryPath: string) => Promise<LocateBinaryOutcome>)
+  | undefined {
+  if (discoveryController === undefined) return undefined;
+  return async (instanceId, binaryPath) => {
+    const outcome = await discoveryController.adoptScannedBinary(instanceId, binaryPath);
+    await refreshAfterLocated(providerController, instanceId, outcome);
+    return outcome;
+  };
+}
+
+/** A relocated binary changes the instance; an enabled one is checked again. */
+async function refreshAfterLocated(
+  providerController: ProviderController,
+  instanceId: ProviderInstanceId,
+  outcome: LocateBinaryOutcome,
+): Promise<void> {
+  if (outcome.kind !== "located") return;
+  await providerController.retry();
+  const instance = providerController
+    .readInstances()
+    .find((candidate) => String(candidate.id) === String(instanceId));
+  if (instance?.enabled === true) await providerController.probe(instanceId);
 }
 
 /**
@@ -1418,6 +1450,7 @@ function ProviderCatalogSection(props: {
   const controller = props.providerController;
   const discoveryController = props.discoveryController;
   const onLocateBinary = locateRuntimeBinary(controller, discoveryController, props.hostBridge);
+  const onUseScannedBinary = adoptScannedRuntimeBinary(controller, discoveryController);
   const cardProps = providerSettingsViewProps(controller, props.hostBridge);
   return (
     <div id="settings-provider-catalog">
@@ -1450,6 +1483,7 @@ function ProviderCatalogSection(props: {
           <ProviderSettingsList
             {...cardProps}
             {...(onLocateBinary === undefined ? {} : { onLocateBinary })}
+            {...(onUseScannedBinary === undefined ? {} : { onUseScannedBinary })}
             discoverySnapshot={discoveryController?.snapshot}
             heading="Its provider card"
             instances={[instance]}
@@ -1913,6 +1947,27 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
               label="Stats line under the composer"
               onCheckedChange={(showThreadStats) => props.onSettingsChange({ showThreadStats })}
             />
+          </SettingRow>
+        ) : null}
+        {isAvailable("usage-bars") ? (
+          <SettingRow
+            description="How the plan-usage meters above the composer draw their bar."
+            focused={focusedSetting === settingId("usage-bars")}
+            label="Usage bars"
+            scope="app"
+            settingId="usage-bars"
+          >
+            <OctantToggleGroup<ShellSettings["usageBars"]>
+              aria-label="Usage bars"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) props.onSettingsChange({ usageBars: selected });
+              }}
+              value={[props.settings.usageBars]}
+            >
+              <OctantToggleGroupItem value="smooth">Smooth</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="pixelated">Pixelated</OctantToggleGroupItem>
+            </OctantToggleGroup>
           </SettingRow>
         ) : null}
       </div>
