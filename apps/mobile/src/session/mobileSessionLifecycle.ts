@@ -4,7 +4,11 @@ import {
   type RemoteSessionBridge,
   type RemotePairingApproval,
 } from "@octant/client-runtime";
-import type { MobileHostRegistration, MobileHostRegistry } from "../hosts/HostRegistry";
+import type {
+  MobileHostRegistration,
+  MobileHostRegistry,
+  MobileHostRegistryRead,
+} from "../hosts/HostRegistry";
 import type { MobileHostSessionHub } from "./MobileHostSessionHub";
 
 export function disconnectLiveMobileSession(input: {
@@ -19,12 +23,14 @@ export async function refreshLiveMobileSession(input: {
   readonly registry: Pick<MobileHostRegistry, "list">;
   readonly hub: Pick<MobileHostSessionHub, "syncRegistrations">;
   readonly signal: AbortSignal;
-}): Promise<ReadonlyArray<MobileHostRegistration> | undefined> {
+}): Promise<MobileHostRegistryRead | undefined> {
   if (input.signal.aborted) return undefined;
-  const hosts = await input.registry.list();
+  const read = await input.registry.list();
   if (input.signal.aborted) return undefined;
-  input.hub.syncRegistrations(hosts);
-  return hosts;
+  // An unreadable list says nothing about which hosts are paired, so the live
+  // sessions stay as they are instead of being torn down.
+  if (read.kind === "ok") input.hub.syncRegistrations(read.hosts);
+  return read;
 }
 
 export async function finishLiveMobilePairing(input: {
@@ -61,7 +67,8 @@ export async function removeMobileHost(input: {
 }): Promise<RemoveMobileHostResult> {
   const registration = await input.registry.get(input.hostId);
   await input.registry.remove(input.hostId);
-  input.hub.syncRegistrations(await input.registry.list());
+  const remaining = await input.registry.list();
+  if (remaining.kind === "ok") input.hub.syncRegistrations(remaining.hosts);
   try {
     await forgetHostCredential(input.deviceKeyStore, registration);
   } catch {

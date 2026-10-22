@@ -14,23 +14,48 @@ export function resolveDeepLinkToInboxRow(
   return inboxRowFromDeepLinkTarget(target, knownRows);
 }
 
+/**
+ * A link without a mode is refused rather than opened as Chat: guessing the
+ * mode opened Work and Code threads in the wrong screen.
+ */
 export function inboxRowFromDeepLinkTarget(
   target: MobileDeepLinkTarget,
   knownRows: ReadonlyArray<MobileInboxRow> = [],
-): MobileInboxRow {
+): MobileInboxRow | undefined {
+  const { mode } = target;
+  if (mode === undefined) return undefined;
   const known = knownRows.find(
-    (row) =>
-      row.hostId === target.hostId &&
-      row.threadId === target.threadId &&
-      (target.mode === undefined || row.mode === target.mode),
+    (row) => row.hostId === target.hostId && row.threadId === target.threadId && row.mode === mode,
   );
   if (known !== undefined) return known;
   return {
     hostId: target.hostId,
     threadId: target.threadId,
-    mode: target.mode ?? "chat",
+    mode,
     title: "Thread",
     status: "active",
     freshness: new Date(0).toISOString(),
   };
+}
+
+// Defined here because the shared copy file is owned elsewhere in this change.
+export const DEEP_LINK_HOST_NOT_PAIRED = "That computer isn't paired on this phone.";
+
+export const DEEP_LINK_HOSTS_UNREADABLE =
+  "Couldn't read the computers paired on this phone, so that link wasn't opened.";
+
+/**
+ * A link to a computer this phone never paired would open a thread screen that
+ * can only fail. The navigator shows this reason instead of opening it.
+ */
+export function deepLinkRefusal(
+  row: Pick<MobileInboxRow, "hostId">,
+  pairedHostIds: ReadonlyArray<string>,
+  registryUnreadable = false,
+): string | undefined {
+  // An unreadable registry looks like an empty one; saying "not paired" then is false.
+  if (registryUnreadable) return DEEP_LINK_HOSTS_UNREADABLE;
+  return pairedHostIds.some((hostId) => hostId === row.hostId)
+    ? undefined
+    : DEEP_LINK_HOST_NOT_PAIRED;
 }

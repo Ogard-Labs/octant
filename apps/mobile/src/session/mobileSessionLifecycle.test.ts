@@ -32,8 +32,8 @@ describe("live mobile session lifecycle", () => {
     let finishRead = () => {};
     const registry = {
       list: () =>
-        new Promise<typeof hosts>((resolve) => {
-          finishRead = () => resolve(hosts);
+        new Promise<{ readonly kind: "ok"; readonly hosts: typeof hosts }>((resolve) => {
+          finishRead = () => resolve({ kind: "ok", hosts });
         }),
     };
     const hub = { syncRegistrations: vi.fn() };
@@ -44,12 +44,24 @@ describe("live mobile session lifecycle", () => {
     expect(await refreshing).toBeUndefined();
     expect(hub.syncRegistrations).not.toHaveBeenCalled();
     const reopened = await refreshLiveMobileSession({
-      registry: { list: async () => hosts },
+      registry: { list: async () => ({ kind: "ok" as const, hosts }) },
       hub,
       signal: new AbortController().signal,
     });
-    expect(reopened).toEqual(hosts);
+    expect(reopened).toEqual({ kind: "ok", hosts });
     expect(hub.syncRegistrations).toHaveBeenCalledExactlyOnceWith(hosts);
+  });
+
+  it("keeps live sessions when the stored host list cannot be read", async () => {
+    const hub = { syncRegistrations: vi.fn() };
+    const read = await refreshLiveMobileSession({
+      registry: { list: async () => ({ kind: "unreadable" as const, reason: "corrupt" }) },
+      hub,
+      signal: new AbortController().signal,
+    });
+
+    expect(read).toEqual({ kind: "unreadable", reason: "corrupt" });
+    expect(hub.syncRegistrations).not.toHaveBeenCalled();
   });
 
   it("saves an approved pairing without connecting if the vault closes during the save", async () => {
@@ -159,7 +171,8 @@ describe("live mobile session lifecycle", () => {
 
     it("leaves no device key for the removed host and keeps the other host's key", async () => {
       const { storage, deviceKeyStore, registry, hub } = await pairTwoHosts();
-      const [first, second] = await registry.list();
+      const listed = await registry.list();
+      const [first, second] = listed.kind === "ok" ? listed.hosts : [];
 
       const result = await removeMobileHost({ hostId: firstHostId, registry, hub, deviceKeyStore });
 
@@ -192,7 +205,10 @@ describe("live mobile session lifecycle", () => {
         expect(unreachable).not.toHaveBeenCalled();
         expect(await registry.get(firstHostId)).toBeUndefined();
         expect(await storage.getItem("octant.remote.device-keys.v1")).not.toContain(first!.keyId);
-        expect((await registry.list()).map((host) => host.hostId)).toEqual([secondHostId]);
+        const remaining = await registry.list();
+        expect(remaining.kind === "ok" ? remaining.hosts.map((host) => host.hostId) : []).toEqual([
+          secondHostId,
+        ]);
       } finally {
         vi.unstubAllGlobals();
       }
@@ -204,7 +220,7 @@ describe("live mobile session lifecycle", () => {
 
       await Promise.all([remove(firstHostId), remove(secondHostId)]);
 
-      expect(await registry.list()).toEqual([]);
+      expect(await registry.list()).toEqual({ kind: "ok", hosts: [] });
       expect(await storage.getItem("octant.remote.device-keys.v1")).toBeNull();
     });
 

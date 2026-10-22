@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { buildMobileThreadDeepLink } from "../notifications/deepLinks";
-import { inboxRowFromDeepLinkTarget, resolveDeepLinkToInboxRow } from "./deepLinkNavigation";
+import {
+  DEEP_LINK_HOST_NOT_PAIRED,
+  DEEP_LINK_HOSTS_UNREADABLE,
+  deepLinkRefusal,
+  inboxRowFromDeepLinkTarget,
+  resolveDeepLinkToInboxRow,
+} from "./deepLinkNavigation";
 
 const hostId = "11111111-1111-4111-8111-111111111111";
 const threadId = "00000000-0000-4000-8000-000000000001";
@@ -32,5 +38,36 @@ describe("deep link navigation", () => {
 
   it("ignores malformed urls", () => {
     expect(resolveDeepLinkToInboxRow("https://example.com")).toBeUndefined();
+  });
+
+  it("refuses a link that names no mode instead of opening it as Chat", () => {
+    expect(inboxRowFromDeepLinkTarget({ hostId, threadId })).toBeUndefined();
+    expect(
+      resolveDeepLinkToInboxRow(`octant://hosts/${hostId}/threads/${threadId}`),
+    ).toBeUndefined();
+  });
+
+  it("does not take a known row of another mode for the linked thread", () => {
+    const known = {
+      hostId,
+      threadId,
+      mode: "work" as const,
+      title: "Known",
+      status: "active",
+      freshness: "2026-08-05T20:00:00.000Z",
+    };
+    expect(inboxRowFromDeepLinkTarget({ hostId, threadId, mode: "code" }, [known])?.mode).toBe(
+      "code",
+    );
+  });
+
+  it("explains a link to a computer that is not paired on this phone", () => {
+    expect(deepLinkRefusal({ hostId }, ["someone-else"])).toBe(DEEP_LINK_HOST_NOT_PAIRED);
+    expect(deepLinkRefusal({ hostId }, [hostId])).toBeUndefined();
+  });
+
+  it("does not call a computer unpaired when the paired list could not be read", () => {
+    expect(deepLinkRefusal({ hostId }, [], true)).toBe(DEEP_LINK_HOSTS_UNREADABLE);
+    expect(deepLinkRefusal({ hostId }, [], false)).toBe(DEEP_LINK_HOST_NOT_PAIRED);
   });
 });
