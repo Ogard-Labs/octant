@@ -1,16 +1,16 @@
 import {
+  Blocks,
+  Bot,
+  CalendarClock,
   CircleDot,
-  Columns3,
-  FileStack,
-  Folder,
-  GitFork,
-  GitPullRequest,
+  Folders,
+  GitPullRequestArrow,
+  Images,
   Inbox,
-  ImagePlus,
-  ListTodo,
-  Puzzle,
+  Layers,
+  ListChecks,
+  SquareKanban,
   SquarePen,
-  Workflow,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import {
@@ -35,6 +35,11 @@ export interface SidebarNavigationProps {
   readonly projectAction?: ReactNode;
   readonly projectSection?: ReactNode;
   /**
+   * The rail beside the sidebar holds the Projects place, so the row is left
+   * out and only the Project list it heads stays here.
+   */
+  readonly projectsRowInRail?: boolean;
+  /**
    * Resolved row order from the person's destination customization. Absent
    * falls back to the mode's default ordering.
    */
@@ -55,21 +60,22 @@ export function SidebarNavigation(props: SidebarNavigationProps) {
     if (descriptor.id === "projects") {
       const action = props.actions.projects;
       if (action !== undefined) {
-        rows.push(
-          <OctantButton
-            aria-current={props.activeDestination === "projects" ? "page" : undefined}
-            aria-label={descriptor.label}
-            className="sidebar-item window-no-drag justify-start"
-            data-navigation-id={descriptor.id}
-            key={descriptor.id}
-            onClick={() => action()}
-            type="button"
-            variant="bare"
-          >
-            <Folder aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
-            <span className="sidebar-label">{descriptor.label}</span>
-          </OctantButton>,
-        );
+        if (props.projectsRowInRail !== true)
+          rows.push(
+            <OctantButton
+              aria-current={props.activeDestination === "projects" ? "page" : undefined}
+              aria-label={descriptor.label}
+              className="sidebar-item window-no-drag justify-start"
+              data-navigation-id={descriptor.id}
+              key={descriptor.id}
+              onClick={() => action()}
+              type="button"
+              variant="bare"
+            >
+              <Folders aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
+              <span className="sidebar-label">{descriptor.label}</span>
+            </OctantButton>,
+          );
         if (props.projectSection !== undefined && props.projectSection !== null) {
           projectContent = (
             <div className="sidebar-navigation__project-threads">{props.projectSection}</div>
@@ -133,27 +139,27 @@ export function navigationIcon(id: SidebarNavigationDescriptorId) {
     case "new-work-thread":
       return SquarePen;
     case "automations":
-      return Workflow;
+      return CalendarClock;
     case "agents":
-      return GitFork;
+      return Bot;
     case "plugins":
-      return Puzzle;
+      return Blocks;
     case "inbox":
       return Inbox;
     case "artifact-library":
-      return FileStack;
+      return Layers;
     case "image-library":
-      return ImagePlus;
+      return Images;
     case "thread-board":
-      return Columns3;
+      return SquareKanban;
     case "pull-requests":
-      return GitPullRequest;
+      return GitPullRequestArrow;
     case "github-issues":
       return CircleDot;
     case "linear-issues":
-      return ListTodo;
+      return ListChecks;
     case "projects":
-      return Folder;
+      return Folders;
     default:
       return undefined;
   }

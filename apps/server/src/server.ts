@@ -395,6 +395,7 @@ export function startOctantServer(
       providerUsageLimitsService,
       refreshStandaloneSkills,
       resolveSelectedExtensions,
+      pinnedExtensionIds,
       reviewedModelManifest,
       skillDiscoveryService,
     } = yield* wireProviders({
@@ -653,6 +654,7 @@ export function startOctantServer(
       browserAutomationService,
       browserToolApprovalService,
       resolveSelectedExtensions,
+      pinnedExtensionIds,
       roots,
       runtimeOutsideContentMarks,
       selectCodeConversation,
@@ -810,6 +812,7 @@ export function startOctantServer(
       browserToolApprovalService,
       resolveCanvasWorkspace,
       resolveSelectedExtensions,
+      pinnedExtensionIds,
       roots,
       routeCodeService,
       runtimeOutsideContentMarks,

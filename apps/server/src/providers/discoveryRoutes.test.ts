@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   decodeProviderInstanceId,
   type AggregateVersion,
+  type DiscoveryCandidate,
   type ProviderInstance,
   type ProviderRegistryCommand,
   type UtcTimestamp,
@@ -339,13 +340,31 @@ describe("locate binary", () => {
     } as ProviderInstance;
   }
 
-  function setup(instance: ProviderInstance = codexInstance("/opt/homebrew/bin/codex")) {
+  function scannedCandidate(binaryPath: string, patch: Partial<DiscoveryCandidate> = {}) {
+    return {
+      driverKind: "codex",
+      displayName: "Codex CLI",
+      binaryPath,
+      readiness: "ready",
+      pathSummary: binaryPath,
+      detectedAt: "2026-10-01T00:00:00.000Z",
+      ...patch,
+    } as DiscoveryCandidate;
+  }
+
+  function setup(
+    instance: ProviderInstance = codexInstance("/opt/homebrew/bin/codex"),
+    scanned: ReadonlyArray<DiscoveryCandidate> = [],
+  ) {
     const applied: Array<{ windowId: string; command: ProviderRegistryCommand }> = [];
     const handler = createDiscoveryRouteHandler({
-      discoveryService: makeDiscoveryService({
-        versionProbeConfinement: passthroughConfinement,
-        environment: { PATH: "/usr/bin:/bin", HOME: directory },
-      }),
+      discoveryService: {
+        ...makeDiscoveryService({
+          versionProbeConfinement: passthroughConfinement,
+          environment: { PATH: "/usr/bin:/bin", HOME: directory },
+        }),
+        getLastScanCandidates: () => scanned,
+      },
       // Each capability authenticates as its own window.
       windowAuthorityStore: {
         authenticate: (capability: string) =>
@@ -520,6 +539,74 @@ describe("locate binary", () => {
     );
     expect(minted?.status).toBe(401);
     expect(applied).toHaveLength(1);
+  });
+
+  it("points the runtime at a binary the latest scan found, after the host checks it", async () => {
+    const binary = stub("codex", '#!/bin/sh\necho "codex-cli 0.49.1"\n');
+    const { locate, applied } = setup(codexInstance("/gone/bin/codex"), [
+      scannedCandidate(join(directory, "versions", "0.49.1", "codex"), { discoveredPath: binary }),
+    ]);
+
+    const result = await locate({
+      kind: "locate-binary",
+      instanceId,
+      scannedBinaryPath: binary,
+    });
+
+    expect(result).toEqual({
+      status: 200,
+      body: { kind: "binary-located", instanceId, version: "codex-cli 0.49.1" },
+    });
+    expect(applied).toEqual([
+      {
+        windowId,
+        command: {
+          kind: "change-provider-binary",
+          instanceId,
+          expectedVersion: 3,
+          binaryPath: binary,
+        },
+      },
+    ]);
+  });
+
+  it("refuses a scanned binary the host cannot run or that answers the wrong program", async () => {
+    const notes = stub("codex", '#!/bin/sh\necho "codex-cli 0.49.1"\n', 0o644);
+    const wrong = stub("other", "#!/bin/sh\necho 'unknown option' >&2\nexit 2\n");
+    const { locate, applied } = setup(codexInstance("/gone/bin/codex"), [
+      scannedCandidate(notes),
+      scannedCandidate(wrong),
+    ]);
+
+    expect(
+      await locate({ kind: "locate-binary", instanceId, scannedBinaryPath: notes }),
+    ).toMatchObject({ status: 400, body: { category: "invalid-configuration" } });
+    expect(
+      await locate({ kind: "locate-binary", instanceId, scannedBinaryPath: wrong }),
+    ).toMatchObject({ status: 400, body: { category: "invalid-configuration" } });
+    expect(applied).toEqual([]);
+  });
+
+  it("refuses a path the latest scan did not find for this runtime", async () => {
+    const binary = stub("codex", '#!/bin/sh\necho "codex-cli 0.49.1"\n');
+    const other = stub("opencode", '#!/bin/sh\necho "opencode 2.1.2"\n');
+    const { locate, applied } = setup(codexInstance("/gone/bin/codex"), [
+      scannedCandidate(other, { driverKind: "opencode", displayName: "OpenCode" }),
+    ]);
+
+    // A real, runnable file the scan never listed.
+    const unlisted = await locate({ kind: "locate-binary", instanceId, scannedBinaryPath: binary });
+    expect(unlisted).toMatchObject({ status: 400, body: { category: "unknown-candidate" } });
+    // A path the scan found, but for another runtime.
+    const otherKind = await locate({ kind: "locate-binary", instanceId, scannedBinaryPath: other });
+    expect(otherKind).toMatchObject({ status: 400, body: { category: "unknown-candidate" } });
+    // Nothing scanned yet.
+    const empty = setup(codexInstance("/gone/bin/codex"), []);
+    expect(
+      await empty.locate({ kind: "locate-binary", instanceId, scannedBinaryPath: binary }),
+    ).toMatchObject({ status: 400, body: { category: "unknown-candidate" } });
+    expect(applied).toEqual([]);
+    expect(empty.applied).toEqual([]);
   });
 
   it("offers Locate binary only for runtimes whose version probe the host can run", () => {

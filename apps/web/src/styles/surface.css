@@ -702,18 +702,42 @@
   image-rendering: pixelated;
 }
 
-/* The shell as a stage for the ground: the layers over it that painted the
-   opaque page go translucent, the same way workspace translucency (0047)
-   lets the native glass through, so the ground shows without a second set
-   of surface rules. The sidebar keeps its own paint unless asked. */
+/* The shell as a stage for the ground. The window surface under it is opaque
+   or the glass tint, so the ground lies between the frosted desktop and the
+   content; the layers over it that painted the opaque page go clear. Unless
+   a person asked for it behind the sidebar too, it starts where the
+   workspace does. */
 .shell--app-backdrop.shell-frame {
   position: relative;
   isolation: isolate;
-  background: var(--octant-app-background);
 }
 
-.shell--app-backdrop.shell-frame > .workspace-layer {
-  background: transparent;
+.shell--app-backdrop.shell-frame:not(.shell--app-backdrop-sidebar)
+  > .app-backdrop[data-placement="shell"] {
+  left: calc(var(--octant-rail-offset, 0px) + var(--octant-rendered-sidebar-width));
+}
+
+.shell--app-backdrop.shell--sidebar-collapsed.shell-frame:not(.shell--app-backdrop-sidebar)
+  > .app-backdrop[data-placement="shell"] {
+  left: var(--octant-rail-offset, 0px);
+}
+
+/* In the window frame the ground belongs to the sheet: it stops at the title
+   band and at the sheet's inset, and takes the sheet's rounded corners, so the
+   rail and the band stay a plain frame around it. */
+@media (min-width: 681px) {
+  .shell--app-backdrop.shell-frame > .app-backdrop[data-placement="shell"] {
+    top: var(--oct-title-rail-h);
+    right: var(--octant-sheet-inset);
+    bottom: var(--octant-sheet-inset);
+    border-radius: 0 var(--oct-radius-md) var(--oct-radius-md) 0;
+  }
+
+  .shell--app-backdrop.shell-frame.shell--app-backdrop-sidebar
+    > .app-backdrop[data-placement="shell"] {
+    left: var(--octant-rail-offset, 0px);
+    border-radius: var(--oct-radius-md);
+  }
 }
 
 .shell--app-backdrop.shell-frame .inbox-layer,
@@ -750,77 +774,54 @@
   );
 }
 
-/* Reader pages place text directly on the page instead of on conversation
-   cards. Keep the selected ground visible without painting it through text. */
-.shell--app-backdrop.shell-frame .surface,
-.shell--app-backdrop.shell-frame .projects-workspace--detail-only {
-  background: color-mix(in srgb, var(--octant-app-background) 92%, transparent);
-}
-
 /* A conversation needs one quiet reading surface: separate reply cards over
-   the dither made even short answers compete with the composer (0155).
-   Opaque is the fallback, including when transparency is reduced.
+   the dither made even short answers compete with the composer (0155). It is
+   a veil rather than a wall: the ground stays faintly visible behind a thread
+   so the window keeps its character, but at a fifth of its strength it does
+   not pull at the transcript. Opaque is the fallback, including when
+   transparency is reduced.
 
-   The surface belongs to the pane that holds a thread, title rail included,
-   not to whichever view the pane is showing at the moment. Painted on the
-   conversation view alone, the "Loading Code thread" state that stands in
-   for it while the thread loads had no surface at all, and the picture
-   showed straight through the card; the title rail had the same gap. */
-.shell--app-backdrop.shell-frame .chat-workspace,
-.shell--app-backdrop.shell-frame .work-thread-workspace,
-.shell--app-backdrop.shell-frame .code-thread-workspace,
+   The surface belongs to the pane that holds a thread, not to whichever view
+   the pane is showing at the moment. Painted on the conversation view alone,
+   the "Loading Code thread" state that stands in for it while the thread
+   loads had no surface at all, and the picture showed straight through. It
+   starts below the title band, which belongs to the window frame. */
 .shell--app-backdrop.shell-frame
   .workspace-pane:is(
     [data-surface-kind="chat-thread"],
     [data-surface-kind="work-thread"],
     [data-surface-kind="code-overview"]
   ) {
-  background: var(--octant-workspace);
-}
-
-/* Inside a thread pane the pane is the surface; a second one on the view
-   would double the tint. */
-.shell--app-backdrop.shell-frame
-  .workspace-pane:is(
-    [data-surface-kind="chat-thread"],
-    [data-surface-kind="work-thread"],
-    [data-surface-kind="code-overview"]
-  )
-  :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) {
-  background: transparent;
+  --octant-thread-veil: var(--octant-stage-surface);
+  background: linear-gradient(
+    to bottom,
+    transparent var(--oct-title-rail-h),
+    var(--octant-thread-veil) var(--oct-title-rail-h)
+  );
 }
 
 @media (prefers-reduced-transparency: no-preference) {
-  html:not([data-octant-reduced-transparency="true"])
-    .shell--app-backdrop.shell-frame
-    :is(
-      .chat-workspace,
-      .work-thread-workspace,
-      .code-thread-workspace,
-      .workspace-pane:is(
-        [data-surface-kind="chat-thread"],
-        [data-surface-kind="work-thread"],
-        [data-surface-kind="code-overview"]
-      )
-    ) {
-    background: linear-gradient(
-      to right,
-      color-mix(in srgb, var(--octant-workspace) 90%, transparent),
-      color-mix(in srgb, var(--octant-workspace) 97%, transparent) 20%,
-      color-mix(in srgb, var(--octant-workspace) 97%, transparent) 80%,
-      color-mix(in srgb, var(--octant-workspace) 90%, transparent)
-    );
-  }
-
   html:not([data-octant-reduced-transparency="true"])
     .shell--app-backdrop.shell-frame
     .workspace-pane:is(
       [data-surface-kind="chat-thread"],
       [data-surface-kind="work-thread"],
       [data-surface-kind="code-overview"]
-    )
-    :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) {
-    background: transparent;
+    ) {
+    --octant-thread-veil: color-mix(in srgb, var(--octant-stage-surface) 80%, transparent);
+  }
+}
+
+/* Where the pane meets the sheet's rounded corner, its veil rounds with it. */
+@media (min-width: 681px) {
+  .shell--app-backdrop.shell-frame
+    > .workspace-layer:not(.workspace-layer--wide-context-open, .workspace-layer--bottom-panel-open)
+    .workspace-pane:is(
+      [data-surface-kind="chat-thread"],
+      [data-surface-kind="work-thread"],
+      [data-surface-kind="code-overview"]
+    ) {
+    border-bottom-right-radius: var(--oct-radius-md);
   }
 }
 
@@ -829,11 +830,4 @@
    every session in a different colour than the one its text sat on. */
 .shell--app-backdrop.shell-frame .code-terminal-pane {
   background: var(--octant-workspace);
-}
-
-/* Opaque sidebars need a wash to reveal the application ground. Translucent
-   sidebars already have one: overriding it here replaced Strong vibrancy with
-   Subtle in the main window while Settings retained the selected material. */
-.shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame > .sidebar {
-  background: color-mix(in srgb, var(--octant-sidebar) 88%, transparent);
 }

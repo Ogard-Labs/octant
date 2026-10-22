@@ -8,14 +8,24 @@ published seams, and an explicit maintainer request.
 
 ## Connector / OAuth marketplace
 
-**Hold.** Catalogued third-party connectors with OAuth, revocation, publisher
-trust, and outbound data boundaries stay Later. That is larger than distributing
+**Lifted on 2026-10-20.** The maintainer authorized connectors, and the
+architecture's [Connectors and user-added MCP servers](architecture.md#extensions-and-skills)
+rules now document the design: every connector is a user-added MCP server
+package under the activation ladder, secrets live only in the credential
+broker's own namespace, sign-in follows the MCP authorization flow with
+revocation on sign-out, the catalog is bundled first-party data naming only a
+vendor's own address, and nothing is imported, trusted or enabled without the
+person's click. The gates below were the conditions; they are kept as the
+record of what had to be true.
+
+**Historical hold.** Catalogued third-party connectors with OAuth, revocation, publisher
+trust, and outbound data boundaries stayed Later. That is larger than distributing
 plugins and skills. A first-party Integration plugin (Linear through the
 Integration kind) is not a connector marketplace; [0001](decisions/0001-plugin-architecture.md)
 already draws that line, and [0026](decisions/0026-shipping-to-a-user-owned-target.md)
 keeps ship integrations on the same plugin seams without opening a marketplace.
 
-**Start gates.** Work may leave Backlog only when all of the following are true:
+**Start gates.** Work could leave Backlog only when all of the following were true:
 
 1. Current specifications document the approved design for OAuth and token revocation,
    publisher trust, what data may leave the host, and how a connector catalog

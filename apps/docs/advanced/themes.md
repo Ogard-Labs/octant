@@ -16,7 +16,8 @@ The **Appearance** page covers the color scheme and presets, UI/editor/terminal
 typography, theme accessibility, and theme import and export, then **Window**
 (Glass), **Background**, **Sidebar** (width, destinations, the More row, the
 mode switcher, provider icons), **Sidebar thread rows**, and **Reading**
-(transcript text size and width). **Reset to default**, at the right of the page
+(transcript text size and width, the stats line, and how the composer's usage
+bars are drawn). **Reset to default**, at the right of the page
 title, returns every appearance setting to its default.
 
 Every Settings page is laid out the same way: an icon tile, the page title and
@@ -74,7 +75,8 @@ placement, or **Don't show**, and use the chevrons to move it up or down.
 **Reset sidebar destinations** restores the untouched placement and order.
 
 **More row in the sidebar** (on by default) ends the sidebar's navigation with
-a More row above the Project and thread lists. Its popup holds the **Menu only** destinations and **Customize
+a More row above the Project and thread lists, or, with the icon rail beside
+the sidebar, adds a More button to the rail. Its popup holds the **Menu only** destinations and **Customize
 sidebar**, so a destination set to Menu only opens from the rail it was hidden
 from. Turning it off returns those destinations to the account menu. A
 **Don't show** destination appears nowhere either way.
@@ -121,17 +123,16 @@ from the font picker as System interface.
 
 ### Glass
 
-**Glass** is the frosted material behind the sidebar and around the workspace
-cards: **Off** paints it solid, **Subtle** or **Strong** uses the system
-material at that strength. **Tint** (0–90%) sets how much colour lies over
-the glass behind the sidebar and around the cards; lower is more see-through,
-and until you move it the slider shows the level's own tint. In the desktop app
-the glass frosts your desktop; with a background shown everywhere it frosts
-that instead. Increased contrast keeps the tint at 80% or more, and Reduced
-transparency makes it solid. **Glass cards** lets the glass show through the
-cards as well. When the material resolves to opaque — for accessibility or
-performance reasons — the interface says so honestly. **Reduced
-Transparency** and **Increased Contrast** resolve the sidebar to opaque.
+**Glass** is the frosted material behind the whole window: the rail, the
+sidebar, and everything you work in. **Off** paints the window solid,
+**Subtle** or **Strong** uses the system material at that strength. **Tint**
+(0–90%) sets how much colour lies over the glass; lower is more see-through,
+and until you move it the slider shows the level's own tint. In the desktop
+app the glass frosts your desktop, and a background shown everywhere sits
+between that frost and your work. Increased contrast keeps the tint at 80% or
+more, and Reduced transparency makes the window solid. When the material
+resolves to opaque — for accessibility or performance reasons — the interface
+says so honestly.
 
 ### Sidebar background
 
@@ -244,9 +245,10 @@ replay across restarts.
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries
 
 The everywhere background also shows behind page surfaces such as Board, Inbox,
-Archive, and Pull requests. Reader pages and Project overviews soften it behind
-a translucent reading surface. Cards, menus, and controls keep their own
-surfaces.
+Archive, and Pull requests, and faintly behind threads, where a veil keeps it
+at about a fifth of its strength so it does not pull at the transcript.
+Clicking sends a ring through Pulsing characters only on a start screen.
+Cards, menus, and controls keep their own surfaces.
 
 When an everywhere background covers the sidebar, separate sidebar decoration
 controls are suspended. Turn off **Cover the sidebar** to restore your saved

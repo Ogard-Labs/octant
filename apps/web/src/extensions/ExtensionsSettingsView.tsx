@@ -17,9 +17,17 @@ import type {
   ExtensionSource,
   StandaloneSkillRecord,
 } from "@octant/contracts/extensions";
-import type { ExtensionPackagePreview } from "@octant/contracts/extension-rpc";
+import type {
+  ExtensionPackagePreview,
+  ExtensionProjectPinListing,
+} from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
 import { SettingsDisclosure, SettingsSection } from "../settings/primitives";
+import { AddMcpServerDialog } from "./AddMcpServerDialog";
+import { DiscoveredToolingSection } from "./DiscoveredToolingSection";
+import { McpServerSignInControl } from "./McpServerSignInControl";
+import { ConnectorsView } from "./ConnectorsView";
+import { providerFit } from "./providerFit";
 import { OctantInput } from "../ui/base/OctantInput";
 import { OctantButton, OctantIconButton } from "../ui/base/OctantButton";
 import { OctantSwitch } from "../ui/base/OctantSwitch";
@@ -84,6 +92,8 @@ function sourceLabel(source: ExtensionSnapshot["packages"][number]["source"]): s
       return "Plugin package";
     case "provider-native":
       return "Provider native";
+    case "user-added":
+      return "Added by you";
   }
 }
 
@@ -251,9 +261,9 @@ const INSTALLED_SKILL_PREVIEW_LIMIT = 12;
 export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const scope = props.scope ?? DEFAULT_EXTENSION_SETTINGS_SCOPE;
   const marketplaceFetchesEnabled = props.marketplaceFetchesEnabled ?? true;
-  const [view, setView] = useState<"installed" | "marketplace">("installed");
+  const [view, setView] = useState<"installed" | "marketplace" | "connectors">("installed");
   const viewSwitch = (
-    <OctantToggleGroup<"installed" | "marketplace">
+    <OctantToggleGroup<"installed" | "marketplace" | "connectors">
       aria-label="View"
       onValueChange={(value) => {
         const selected = value[0];
@@ -263,6 +273,7 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     >
       <OctantToggleGroupItem value="installed">Installed</OctantToggleGroupItem>
       <OctantToggleGroupItem value="marketplace">Marketplace</OctantToggleGroupItem>
+      <OctantToggleGroupItem value="connectors">Connectors</OctantToggleGroupItem>
     </OctantToggleGroup>
   );
   const [status, setStatus] = useState<LoadStatus>("loading");
@@ -289,6 +300,9 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
   const [inspectingSkillId, setInspectingSkillId] = useState<string | undefined>();
   const [installingSkill, setInstallingSkill] = useState(false);
   const [importingLocal, setImportingLocal] = useState(false);
+  const [addingServer, setAddingServer] = useState(false);
+  const [discoveredRevision, setDiscoveredRevision] = useState(0);
+  const [projectPins, setProjectPins] = useState<ExtensionProjectPinListing>();
   const [installedSkillQuery, setInstalledSkillQuery] = useState("");
   const [showAllInstalledSkills, setShowAllInstalledSkills] = useState(false);
   const installedSkillSearch = useRef<HTMLInputElement>(null);
@@ -318,6 +332,22 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
     },
     [props.client],
   );
+
+  useEffect(() => {
+    if (!props.client.toolGrantsAvailable) return;
+    let cancelled = false;
+    props.client
+      .projectPins({ kind: "list" })
+      .then((listing) => {
+        if (!cancelled) setProjectPins(listing);
+      })
+      .catch(() => {
+        if (!cancelled) setProjectPins(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.client, discoveredRevision]);
 
   const reload = useCallback(async () => {
     setStatus("loading");
@@ -725,6 +755,29 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                       key={`${pkg.extensionId}:${pkg.packageId}`}
                       packageState={pkg}
                       busy={busyPackageId === `${pkg.extensionId}:${pkg.packageId}`}
+                      {...(props.client.toolGrantsAvailable ? { signIn: props.client } : {})}
+                      {...(projectPins === undefined
+                        ? {}
+                        : {
+                            projectPins,
+                            onPin: async (projectId: string, pinned: boolean) => {
+                              try {
+                                setProjectPins(
+                                  await props.client.projectPins({
+                                    kind: "set",
+                                    projectId: projectId as never,
+                                    extensionId: pkg.extensionId,
+                                    pinned,
+                                  }),
+                                );
+                              } catch {
+                                setFailure({
+                                  category: "unavailable",
+                                  message: "The pin could not be changed.",
+                                });
+                              }
+                            },
+                          })}
                       onTrust={(trusted) =>
                         runLifecycle(
                           {
@@ -776,8 +829,46 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
                   ))}
                 </ul>
               )}
+              <div className="extensions-settings__local-import">
+                <OctantButton
+                  disabled={installing}
+                  onClick={() => setAddingServer(true)}
+                  type="button"
+                  variant="outline"
+                >
+                  Add MCP server…
+                </OctantButton>
+              </div>
+              <AddMcpServerDialog
+                client={props.client}
+                onAdded={() => {
+                  setAddingServer(false);
+                  setDiscoveredRevision((revision) => revision + 1);
+                  void reload();
+                }}
+                onClose={() => setAddingServer(false)}
+                open={addingServer}
+                secretsAvailable={props.client.toolGrantsAvailable}
+              />
             </div>
           </SettingsSection>
+
+          {props.client.toolGrantsAvailable ? (
+            <DiscoveredToolingSection
+              client={props.client}
+              disabled={installing || importingLocal}
+              onPluginInspected={(found) => {
+                setLocalPreview(found);
+                setPreview(undefined);
+                setView("marketplace");
+              }}
+              onServerAdded={() => {
+                setDiscoveredRevision((revision) => revision + 1);
+                void reload();
+              }}
+              revision={discoveredRevision}
+            />
+          ) : null}
 
           <SettingsSection className="extensions-settings__section" title="Standalone skills">
             <div className="extensions-settings__body">
@@ -936,6 +1027,18 @@ export function ExtensionsSettingsView(props: ExtensionsSettingsViewProps) {
             </SettingsDisclosure>
           ) : null}
         </>
+      ) : view === "connectors" ? (
+        <ConnectorsView
+          actions={viewSwitch}
+          client={props.client}
+          disabled={installing || importingLocal}
+          localHost={props.client.toolGrantsAvailable}
+          onConnected={() => {
+            setDiscoveredRevision((revision) => revision + 1);
+            void reload();
+          }}
+          snapshot={snapshot}
+        />
       ) : (
         <>
           <SettingsSection
@@ -1592,6 +1695,11 @@ function StandaloneSkillCard(props: StandaloneSkillCardProps) {
 interface InstalledPackageCardProps {
   readonly packageState: ExtensionSnapshot["packages"][number];
   readonly busy: boolean;
+  /** Present in the Octant window on this host, where a hosted server can be signed in to. */
+  readonly signIn?: Pick<ExtensionClient, "mcpServerSignIn">;
+  /** The Projects a plugin can be pinned to, and the pins that exist; absent off the host. */
+  readonly projectPins?: ExtensionProjectPinListing;
+  readonly onPin?: (projectId: string, pinned: boolean) => Promise<void>;
   readonly onTrust: (trusted: boolean) => Promise<boolean>;
   readonly onPluginDesired: (desired: boolean) => Promise<boolean>;
   readonly onComponentDesired: (
@@ -1599,6 +1707,21 @@ interface InstalledPackageCardProps {
     desired: boolean,
   ) => Promise<boolean>;
   readonly onUninstall: () => Promise<boolean>;
+}
+
+/** Where the package works, in words: the modes and providers the host would allow. */
+function ProviderFitLine(props: { readonly packageState: ExtensionSnapshot["packages"][number] }) {
+  const fit = providerFit(props.packageState);
+  return (
+    <p className="extcard-fit">
+      <span>{fit.sentence}</span>
+      {fit.limits.map((limit) => (
+        <span className="extcard-fit__limit" key={limit}>
+          {limit}
+        </span>
+      ))}
+    </p>
+  );
 }
 
 function InstalledPackageCard(props: InstalledPackageCardProps) {
@@ -1657,6 +1780,7 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
       <span className="extcard-src">
         {sourceLabel(pkg.source)} · v<span>{pkg.version}</span>
       </span>
+      <ProviderFitLine packageState={pkg} />
       <div className="extcard-scopes">
         {pkg.compatibility.platforms.map((platform) => (
           <span className="tag" key={`platform:${platform}`}>
@@ -1719,10 +1843,58 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
                     ? "Disable component"
                     : "Enable component"}
                 </OctantButton>
+                {props.signIn !== undefined &&
+                pkg.source.kind === "user-added" &&
+                componentState.component.kind === "mcp-server" ? (
+                  <McpServerSignInControl
+                    client={props.signIn}
+                    componentId={String(componentState.component.id)}
+                    disabled={props.busy}
+                    extensionId={String(pkg.extensionId)}
+                  />
+                ) : null}
               </div>
             );
           })}
         </div>
+      ) : null}
+      {props.projectPins !== undefined &&
+      props.onPin !== undefined &&
+      props.projectPins.projects.length > 0 &&
+      pkg.activation.installed ? (
+        <SettingsDisclosure title="Use in a Project" variant="inline">
+          <p className="extensions-settings__effective">
+            A pinned plugin is offered on every Work and Code turn in that Project without typing @.
+            Each tool call still asks for approval.
+          </p>
+          <ul aria-label="Projects" className="extensions-settings__pins">
+            {props.projectPins.projects.map((project) => {
+              const pinned = props.projectPins?.pins.some(
+                (pin) =>
+                  String(pin.projectId) === String(project.projectId) &&
+                  String(pin.extensionId) === String(pkg.extensionId),
+              );
+              return (
+                <li className="extensions-settings__pin" key={String(project.projectId)}>
+                  <OctantSwitch
+                    checked={pinned === true}
+                    disabled={
+                      props.busy || !pkg.activation.trusted || !pkg.activation.pluginDesired
+                    }
+                    label={`Use in ${project.name}`}
+                    onCheckedChange={(next) => void props.onPin?.(String(project.projectId), next)}
+                  />
+                  <span className="extensions-settings__pin-name">
+                    {project.name}
+                    <span className="extensions-settings__pin-type">
+                      {project.type === "work" ? " · Work" : " · Code"}
+                    </span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </SettingsDisclosure>
       ) : null}
       {pkg.diagnostics.length > 0 ? (
         <ul className="extensions-settings__diagnostics">

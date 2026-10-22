@@ -30,7 +30,10 @@ import {
   AgentPluginMcpSessionManager,
   extensionToolDefinitionDigest,
 } from "./agentPluginMcpSessionManager";
+import { decodeExtensionPackageManifest } from "@octant/contracts/extensions";
+import { normalizeAgentPluginPackage } from "./agentPluginIngestion";
 import { LocalPluginFolderRegistry } from "./localPluginFolderRegistry";
+import { UserAddedMcpServerStore } from "./userAddedMcpServers";
 import { CodexPluginPackageResolver } from "./codexPluginResolver";
 import { inspectExtensionPackage } from "./packageInspector";
 import { ExtensionSupervisor } from "./extensionSupervisor";
@@ -2216,6 +2219,89 @@ function effectiveMcpSnapshot(
     collisions: [],
   } as never;
 }
+
+describe("MCP servers added by hand, launched through the session manager", () => {
+  it("launches with the broker's secret value after the package was installed under its normalized manifest", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-user-added-launch-"));
+    try {
+      const values = new Map<string, string>();
+      const registry = new LocalPluginFolderRegistry({ sourceKind: "user-added" });
+      const servers = new UserAddedMcpServerStore({
+        directory: join(directory, "user-added"),
+        registry,
+        secrets: {
+          has: async (id) => values.has(id),
+          resolve: async (id) => values.get(id) ?? "",
+          set: async (id, value) => {
+            values.set(id, value);
+          },
+          delete: async (id) => {
+            values.delete(id);
+          },
+        },
+      });
+      const { source } = await servers.add({
+        name: "Remote",
+        server: {
+          type: "streamable-http",
+          url: "https://mcp.example/mcp",
+          headers: [{ name: "Authorization", value: "Bearer private-value", secret: true }],
+        },
+      });
+      const registered = registry.get(source.sourceRef);
+      if (registered === undefined) throw new Error("Expected the registered folder.");
+      // Installing keeps only this normalized manifest, whose source kind is
+      // generic: the launch must not depend on it still saying "user-added".
+      const manifest = decodeExtensionPackageManifest(
+        normalizeAgentPluginPackage(registered.packageInput).manifest,
+      );
+      expect(manifest.source.kind).toBe("plugin-package");
+      const component = manifest.components[0];
+      if (component === undefined) throw new Error("Expected an MCP component.");
+      const seenAuthorization: string[] = [];
+      const fetchImpl = (async (_input, init) => {
+        const headers = new Headers(init?.headers);
+        seenAuthorization.push(headers.get("authorization") ?? "");
+        const body = JSON.parse(String(init?.body ?? "{}")) as { method?: string; id?: number };
+        if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+        if (body.method === "tools/list") {
+          return Response.json({ jsonrpc: "2.0", id: body.id, result: { tools: [] } });
+        }
+        return Response.json({ jsonrpc: "2.0", id: body.id, result: { ok: true } });
+      }) as typeof fetch;
+      const manager = new AgentPluginMcpSessionManager({
+        store: {
+          contentRoot: () => registered.absolutePath,
+          pluginDataRoot: () => join(directory, "data"),
+          readVerifiedConfiguration: async () =>
+            readFile(join(registered.absolutePath, "mcp.json"), "utf8"),
+        },
+        fetch: fetchImpl,
+        isUserAddedSource: (sourceRef) => servers.owns(sourceRef),
+        resolveUserAddedSecrets: (launch) => servers.resolveLaunchSecrets(launch),
+      });
+      const effective = effectiveMcpSnapshot(component.id, component.displayName);
+      const [packageState] = effective.packages;
+      if (packageState === undefined) throw new Error("Expected a package.");
+      await manager.reconcile({
+        ...effective,
+        packages: [
+          {
+            ...packageState,
+            extensionId: manifest.extensionId,
+            packageId: manifest.packageId,
+            source: manifest.source,
+          },
+        ],
+      } as never);
+      expect(seenAuthorization.length).toBeGreaterThan(0);
+      expect(new Set(seenAuthorization)).toEqual(new Set(["Bearer private-value"]));
+      await manager.drainAll();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("Agent Plugins MCP protocol headers", () => {
   it("sends the negotiated MCP protocol version on subsequent Streamable HTTP requests", async () => {

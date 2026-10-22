@@ -93,6 +93,7 @@ export const ExtensionSourceKind = Schema.Literal(
   "agents-skills-directory",
   "plugin-package",
   "provider-native",
+  "user-added",
 );
 export type ExtensionSourceKind = typeof ExtensionSourceKind.Type;
 
@@ -120,6 +121,15 @@ export const ExtensionSource = Schema.Union(
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("provider-native"),
+    sourceRef: ExtensionSourceReference,
+  }).annotations(strict),
+  /**
+   * A package the host wrote for an MCP server the person added by hand in
+   * Settings. The reference names the host's own folder for it; uninstalling
+   * removes that folder and the secrets the server was given.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("user-added"),
     sourceRef: ExtensionSourceReference,
   }).annotations(strict),
 );

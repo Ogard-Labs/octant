@@ -2,19 +2,19 @@ import type { SettingsDeepLink } from "@octant/contracts";
 import type { UserProfile } from "@octant/contracts/user-profile";
 import {
   Archive,
+  Blocks,
+  Bot,
+  CalendarClock,
   ChartNoAxesColumn,
   ChevronUp,
   Compass,
-  FileStack,
-  GitFork,
+  Images,
+  Layers,
   PanelLeft,
   Plug,
-  Puzzle,
   Settings,
   Sparkles,
-  Workflow,
   type LucideIcon,
-  ImagePlus,
 } from "lucide-react";
 import type { ComponentType } from "react";
 import { UserAvatar } from "../profile/UserAvatar";
@@ -49,11 +49,11 @@ export interface SidebarProfileProps {
 }
 
 export const secondaryIcons: Record<SidebarAppMenuDescriptorId, LucideIcon> = {
-  agents: GitFork,
-  automations: Workflow,
-  "artifact-library": FileStack,
-  "image-library": ImagePlus,
-  plugins: Puzzle,
+  agents: Bot,
+  automations: CalendarClock,
+  "artifact-library": Layers,
+  "image-library": Images,
+  plugins: Blocks,
 };
 
 /**

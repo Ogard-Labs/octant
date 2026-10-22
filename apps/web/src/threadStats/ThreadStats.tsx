@@ -5,6 +5,7 @@ import { useComposerContextMeterScope } from "../context/composerContextMeterSco
 import { composerLimitWindows, type ComposerLimitWindow } from "../context/composerLimitWindows";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantTooltip } from "../ui/base/OctantTooltip";
+import { PlanUsageMeters } from "../usage/PlanUsageMeters";
 import { useThreadStatsScope } from "./threadStatsScope";
 import "./threadStats.css";
 
@@ -54,24 +55,7 @@ function ThreadStatsLine(props: {
   ];
   const content = (
     <>
-      {props.limits.map((limit, index) => (
-        <Fragment key={limit.window}>
-          {index === 0 ? null : (
-            <span aria-hidden="true" className="thread-stats__separator">
-              {" · "}
-            </span>
-          )}
-          <OctantTooltip label={`${limit.name}, ${String(limit.percent)}% left`} side="top">
-            <span className="thread-stats__limit" data-level={limit.level}>
-              <span className="thread-stats__limit-name">{limit.short}</span>
-              <span aria-hidden="true" className="thread-stats__limit-meter">
-                <span style={{ width: `${String(limit.percent)}%` }} />
-              </span>
-              <span className="thread-stats__item">{`${String(limit.percent)}%`}</span>
-            </span>
-          </OctantTooltip>
-        </Fragment>
-      ))}
+      <PlanUsageMeters windows={props.limits} />
       {props.limits.length > 0 && props.stats.length > 0 ? (
         <span aria-hidden="true" className="thread-stats__separator">
           {" · "}

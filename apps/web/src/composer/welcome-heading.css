@@ -1,0 +1,25 @@
+/* The start screen's question: the mark close above it, then one sentence in
+   the primary ink at regular weight. It is a prompt to answer, not a headline,
+   so it wears neither the page title's weight nor any accent in any style. The
+   selector is longer than the hero role's own so it wins whichever stylesheet
+   loads last. The approved size is 24px on a 30px line; the type scale has no
+   24px step, so the nearest token (26px) carries it on the same 30px line. */
+.oct-title.oct-title--hero.welcome__question {
+  color: var(--oct-fg);
+  font-size: var(--oct-text-2xl);
+  font-weight: var(--oct-weight-regular);
+  letter-spacing: -0.012em;
+  line-height: calc(30 * var(--oct-text-step));
+}
+
+/* The mark sits two pixels nearer the question than the heading's usual gap. */
+svg.welcome__mark {
+  margin-bottom: calc(var(--oct-space-2) - 2px);
+}
+
+@media (max-width: 760px) {
+  .oct-title.oct-title--hero.welcome__question {
+    font-size: var(--oct-text-xl);
+    line-height: 1.25;
+  }
+}

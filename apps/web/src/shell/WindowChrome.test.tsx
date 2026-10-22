@@ -124,6 +124,21 @@ function atRuleBlock(atRule: string, source = styles): string {
 }
 
 describe("WindowChrome", () => {
+  it("offers Back and Forward beside Show sidebar while the sidebar is hidden, off at either end", async () => {
+    const user = userEvent.setup();
+    const history = {
+      canGoBack: true,
+      canGoForward: false,
+      goBack: vi.fn(),
+      goForward: vi.fn(),
+    };
+    renderChrome({ history, onExpandSidebar: vi.fn() });
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(history.goBack).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled();
+  });
+
   it("keeps creating a thread reachable beside the sidebar recovery control", async () => {
     const user = userEvent.setup();
     const onNewThread = vi.fn();
@@ -494,14 +509,12 @@ describe("WindowChrome", () => {
     const increasedContrast = increasedContrastRules();
 
     expect(styles).not.toContain("prefers-contrast");
-    expect(reducedTransparency).toContain(".shell--material-translucent.shell-frame > .sidebar");
-    expect(reducedTransparency).toContain(
-      '.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"].shell-frame > .sidebar',
-    );
-    expect(reducedTransparency).toContain(
-      '.shell--material-translucent[data-octant-sidebar-vibrancy="strong"].shell-frame > .sidebar',
-    );
-    expect(reducedTransparency).toContain("backdrop-filter: none;");
+    // The frame and the sheet are painted from three surfaces on the shell
+    // root, so reduced transparency makes those opaque rather than
+    // repainting each column.
+    expect(reducedTransparency).toContain(".shell.shell-frame");
+    expect(reducedTransparency).toContain("--octant-window-surface: var(--octant-sidebar-opaque);");
+    expect(reducedTransparency).toContain("--octant-sheet-surface: var(--octant-workspace);");
     expect(reducedTransparency).not.toContain("--octant-border-strong");
     expect(reducedTransparency).not.toContain("--octant-text-");
     expect(reducedTransparency).not.toContain("box-shadow:");
@@ -689,10 +702,14 @@ describe("WindowChrome", () => {
     expect(coarse).toMatch(/\.sidebar-navigation__thread-lineage \{\s*right: 50px;/);
   });
 
-  it("exposes the native sidebar canvas and integrated titlebar while keeping workspace surfaces opaque", () => {
+  it("lets the native window glass through one window surface under an integrated titlebar", () => {
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("background: transparent;");
-    expect(cssRule('html[data-octant-native-host="true"] .shell.shell-frame')).toContain(
-      "background: transparent;",
+    expect(cssRule(".shell.shell-frame")).toContain("background: var(--octant-window-surface);");
+    expect(cssRule(".shell.shell-frame.shell--material-translucent")).toContain(
+      "--octant-window-surface: var(--octant-sidebar-translucent);",
+    );
+    expect(cssRule(".shell.shell-frame.shell--material-translucent")).toContain(
+      "--octant-sheet-surface: var(--octant-workspace-translucent);",
     );
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("overflow: clip;");
     expect(cssRule(".shell.shell-frame--standalone")).toContain("position: fixed;");
@@ -700,28 +717,31 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell-frame > .window-chrome")).toContain("background: transparent;");
   });
 
-  it("keeps dense sidebar content legible when the background covers it", () => {
-    expect(
-      cssRule(
-        ".shell--app-backdrop.shell--app-backdrop-sidebar.shell--material-opaque.shell-frame > .sidebar",
-      ),
-    ).toContain("background: color-mix(in srgb, var(--octant-sidebar) 88%, transparent);");
-    expect(styles).not.toContain(
-      ".shell--app-backdrop.shell--app-backdrop-sidebar.shell-frame > .sidebar",
-    );
-  });
-
-  it("gives conversations one legible reading surface over the application ground", () => {
-    expect(cssRule(".shell--app-backdrop.shell-frame > .workspace-layer")).toContain(
+  it("paints no column of its own over the window surface", () => {
+    // A column with its own fill hides the glass and the ground behind it,
+    // which is how the glass came to show in a sidebar strip alone.
+    expect(cssRule(".shell-frame > .sidebar")).toContain("background: transparent;");
+    expect(cssRule(".shell-frame > .sidebar-rail")).toContain("background: transparent;");
+    expect(styles).not.toContain("--octant-card-gutter");
+    // The dock's own surface would cover its sheet piece.
+    expect(cssRule(".shell-frame .right-utility-dock__surface")).toContain(
       "background: transparent;",
     );
-    for (const workspace of [
-      ".shell--app-backdrop.shell-frame .chat-workspace",
-      ".shell--app-backdrop.shell-frame .work-thread-workspace",
-      ".shell--app-backdrop.shell-frame .code-thread-workspace",
-    ]) {
-      expect(cssRule(workspace)).toContain("background: var(--octant-workspace);");
-    }
+    // The stage piece sits below the ground, so the shell holds its own level.
+    expect(cssRule(".shell.shell-frame", 2)).toContain("isolation: isolate;");
+  });
+
+  it("lays a veil over the application ground behind a thread, below the title band", () => {
+    const flattened = styles.replace(/\s+/g, " ");
+    // The veil starts under the band, so the frame stays the frame in a thread.
+    expect(flattened).toContain(
+      "transparent var(--oct-title-rail-h), var(--octant-thread-veil) var(--oct-title-rail-h)",
+    );
+    // Opaque unless transparency is allowed; then the ground shows faintly.
+    expect(flattened).toContain("--octant-thread-veil: var(--octant-stage-surface);");
+    expect(flattened).toContain(
+      "--octant-thread-veil: color-mix(in srgb, var(--octant-stage-surface) 80%, transparent);",
+    );
   });
 
   it("keeps glass on input surfaces without enclosing agent replies", () => {
@@ -747,13 +767,14 @@ describe("WindowChrome", () => {
     expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
   });
 
-  it("clears the workspace and pane fills under a translucent workspace so the glass shows", () => {
+  it("clears the workspace, pane, and reader page fills inside the window so the glass shows", () => {
     // Each surface paints the opaque workspace colour on its own, so any one
     // of them left filled hides the glass behind the whole workspace.
-    for (const surface of [".workspace", ".workspace-pane"]) {
-      expect(cssRule(`.shell--workspace-material-translucent.shell-frame ${surface}`)).toContain(
-        "background: transparent;",
-      );
+    for (const surface of [".workspace-layer", " .workspace", " .workspace-pane", " .surface"]) {
+      const selector = surface.startsWith(" ")
+        ? `.shell-frame${surface}`
+        : `.shell-frame > ${surface}`;
+      expect(cssRule(selector)).toContain("background: transparent;");
     }
   });
 
@@ -767,7 +788,7 @@ describe("WindowChrome", () => {
       "color-mix(in srgb, var(--octant-sidebar-opaque) 97%, transparent)",
     );
     expect(atRuleBlock("@media (prefers-reduced-transparency: reduce)")).toContain(
-      'html[data-octant-native-host="true"] .shell-frame:not(.shell--material-opaque) > .sidebar',
+      "--octant-window-surface: var(--octant-sidebar-opaque);",
     );
   });
 

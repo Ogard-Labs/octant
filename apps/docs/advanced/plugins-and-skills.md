@@ -195,6 +195,88 @@ and set `"command": "${PLUGIN_ROOT}/.venv/bin/python"` with the package's script
 or `["-m", "<module>"]` as `args`. A virtual environment built from Homebrew
 Python runs under the sandbox.
 
+### Add an MCP server by hand
+
+**Settings → Skills & Extensions → Add MCP server…** connects a server
+without a package. Give it a name and choose how Octant reaches it:
+
+- **Command**: a program on this computer, by name or full path, its
+  arguments one per line, and environment variables. Octant starts it
+  confined, the way it starts a plugin's own server.
+- **Address**: an `https` address (or `http` on this computer) and headers.
+
+Mark a value **Secret** to keep it in this Mac's credential store instead of
+the package; Octant cannot show it again. The server appears under Extension
+packages as **Added by you**, installed, trusted and switched on, and its tools
+ask for approval on every call like any plugin's. Removing it deletes the
+package and its secrets. Adding a server works only from the Octant window on
+this host, not from a paired device, and a browser-hosted Settings cannot keep
+secrets.
+
+### Connectors
+
+**Settings → Skills & Extensions → Connectors** lists hosted services an
+agent can use once you connect them: issue trackers, docs, databases,
+deployment platforms, payments, and more, by category, with a search box.
+The list ships with the app; nothing is fetched to show it. **Connect** adds
+the service's server to this host the way Add MCP server does, then opens
+its sign-in page, or asks for a key the service issues (kept in this Mac's
+credential store), or simply connects when the service asks for nothing. A
+connected entry reads **Connected**, and its server appears under Extension
+packages like any other. **Hide** keeps an entry out of sight on this
+computer; **Show hidden** brings them back. Connecting works only from the
+Octant window on this host.
+
+### Sign in to a hosted server
+
+A server you added by its address can ask you to sign in instead of taking a
+key. Its component in **Extension packages** then shows **Sign in**. Octant
+reads where the server sends people to sign in, registers itself there,
+opens that page in your browser, and keeps the grant in this Mac's
+credential store; the row says **Signed in through** the issuer, with
+**Sign out**. If the grant stops working you see **Sign in again**. A server
+whose sign-in needs a client id Octant cannot register for itself says so;
+you can still add that server with a key in a header. Signing in and out work
+only from the Octant window on this host.
+
+### Found on this Mac
+
+Below the extension packages, **Found on this Mac** lists the MCP servers
+and plugins Claude Code and Codex already use on this computer: the servers
+in Claude Code's configuration (yours, and the ones kept for a Project folder
+Octant knows), a Project's `.mcp.json`, Codex's configured servers, and the
+plugins each tool has installed. Looking changes nothing. **Add to Octant**
+copies one server in, the same way Add MCP server does: a value whose name
+reads like a credential goes to the credential store. A variable the other
+tool reads from its environment is filled in, into a variable or header
+value only, when this Mac has it. A server that uses a variable in its
+command, arguments or address, or needs one this Mac lacks, cannot be added
+from here: its row says which, and you add it by hand with the value
+entered. **Review and import** reads one plugin for
+the usual review and Install; a Claude Code plugin keeps its skills and MCP
+servers, and its commands, agents and hooks are left out, which the review
+says. Octant never writes to the other tools' files. The section appears
+only in the Octant window on this host.
+
+### Where a plugin works
+
+Each package card says, in words, where it works: the modes it may run in
+and the providers it is limited to, or every provider when it names none.
+When only part of a package may run in a mode, the card says which part (for
+example, "In Chat, its skills only"), and a package with MCP servers notes
+that a provider which cannot carry Octant's tools refuses a turn that selects
+them. The words follow the same rules the host applies when it decides what
+a turn may use.
+
+### Use a plugin in a Project without typing @
+
+Open a plugin's card under **Extension packages** and expand **Use in a
+Project**: one switch per Work or Code Project. A pinned plugin is offered on
+every turn in that Project without naming it with `@`. It changes nothing
+about approval: each tool call still asks, or uses an answer you remembered in
+that Project. A plugin that is turned off or untrusted is skipped rather than
+stopping a turn. Pins can be set only from the Octant window on this host.
+
 ### Structured references
 
 In a composer, typing `@` opens a searchable plugin palette. Selections

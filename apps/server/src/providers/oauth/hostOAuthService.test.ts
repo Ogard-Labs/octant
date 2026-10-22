@@ -141,6 +141,44 @@ describe("host OAuth service", () => {
     expect(called).toBe(false);
   });
 
+  it("sends an MCP sign-in's resource and callback port to the broker", async () => {
+    const seen: unknown[] = [];
+    const service = createHostOAuthService({
+      journal: { append: () => undefined },
+      broker: {
+        begin: async (input) => {
+          seen.push(input.descriptor);
+          return { kind: "refused", reason: "unavailable" };
+        },
+        status: async () => ({}),
+        refresh: async () => ({}),
+        access: async () => ({}),
+        forget: async () => undefined,
+        revoke: async () => ({ kind: "revoked" }),
+      },
+    });
+    const mcp = decodeHostOAuthDescriptor({
+      descriptorId: "mcp-sample",
+      clientId: "octant-issued-client",
+      dialect: "mcp-authorization",
+      flow: "authorization-code-pkce",
+      authorizationEndpoint: "https://auth.example/authorize",
+      tokenEndpoint: "https://auth.example/token",
+      scopes: [],
+      termsId: "mcp-sign-in-terms-1",
+      resource: "https://mcp.example/mcp",
+      redirectPort: 43125,
+    });
+    const actorId = randomUUID();
+    service.acknowledgeTerms({ principalKind: "local-window", actorId, descriptor: mcp });
+    await service.begin({ principalKind: "local-window", actorId, descriptor: mcp });
+    expect(seen[0]).toMatchObject({
+      dialect: "mcp-authorization",
+      resource: "https://mcp.example/mcp",
+      redirectPort: 43125,
+    });
+  });
+
   it("keeps the API-key path available beside sign-in", () => {
     const service = createHostOAuthService({
       journal: { append: () => undefined },
