@@ -5,20 +5,39 @@
  * composer's inset.
  */
 .outside-content-notice {
-  margin: var(--oct-space-3) var(--oct-space-4) 0;
+  margin: var(--oct-space-2) var(--oct-space-4) 0;
 }
 
-/* Both are compact: the mark, its sentence, and the action share one line
-   while they fit, and the action drops under the sentence on a narrow screen
-   instead of leaving the mark alone on a line of its own. */
-.outside-content-notice,
+/* In the composer the notice is one quiet line, not a box: as a bordered card
+   it stood taller than the reply field under it and read as an error on every
+   thread that had opened a web page. Its sentence, mark, and Review still say
+   the same thing. */
+.outside-content-notice {
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--oct-space-2);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-detail);
+}
+
+.outside-content-notice > svg {
+  width: 14px;
+  height: 14px;
+  margin-top: 0;
+}
+
+/* The review dialog's message stays compact: its mark, sentence, and action
+   share one line while they fit, and the action drops under the sentence on
+   a narrow screen instead of leaving the mark alone on a line of its own. */
 .outside-content-review__message {
   align-items: center;
   gap: var(--oct-space-2) var(--oct-space-3);
   padding: var(--oct-space-3) var(--oct-space-4);
 }
 
-.outside-content-notice > .callout__body,
 .outside-content-review__message > .callout__body {
   flex-basis: 200px;
 }

@@ -1216,11 +1216,25 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 
 .code-project-views__inline {
   display: flex;
-  flex-wrap: wrap;
+  min-width: 0;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: flex-start;
   gap: 2px;
   padding: 0 4px;
+  /* The views share one row with the filter and the list switch. Wrapping
+     them stacked a narrow sidebar's toolbar into three ragged rows, so the
+     views scroll sideways instead, without a scrollbar over the glyphs. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.code-project-views__inline::-webkit-scrollbar {
+  display: none;
+}
+
+.code-project-views__inline > * {
+  flex: 0 0 auto;
 }
 
 .code-project-views__inline-button {
@@ -1267,8 +1281,8 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
 }
 
 .code-project-views__new {
-  width: 27px;
-  min-height: 27px;
+  width: 28px;
+  min-height: 28px;
   border-radius: var(--oct-radius-sm);
   color: var(--octant-text-muted);
 }

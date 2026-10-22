@@ -785,14 +785,18 @@
    the pane is showing at the moment. Painted on the conversation view alone,
    the "Loading Code thread" state that stands in for it while the thread
    loads had no surface at all, and the picture showed straight through. It
-   starts below the title band, which belongs to the window frame. */
+   starts below the title band, which belongs to the window frame.
+
+   The veil is the sheet's colour, not the stage's. On a black (OLED) ground
+   the stage colour turned every thread into a black hole inside the grey
+   sheet, while the pages around it (Board, Inbox) read grey over the ground. */
 .shell--app-backdrop.shell-frame
   .workspace-pane:is(
     [data-surface-kind="chat-thread"],
     [data-surface-kind="work-thread"],
     [data-surface-kind="code-overview"]
   ) {
-  --octant-thread-veil: var(--octant-stage-surface);
+  --octant-thread-veil: var(--octant-sheet-surface);
   background: linear-gradient(
     to bottom,
     transparent var(--oct-title-rail-h),
@@ -808,7 +812,7 @@
       [data-surface-kind="work-thread"],
       [data-surface-kind="code-overview"]
     ) {
-    --octant-thread-veil: color-mix(in srgb, var(--octant-stage-surface) 80%, transparent);
+    --octant-thread-veil: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);
   }
 }
 

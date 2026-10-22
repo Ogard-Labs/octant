@@ -85,7 +85,7 @@ export function OutsideContentNotice(props: OutsideContentThread & { readonly bu
               ref={reviewButton}
               size="sm"
               type="button"
-              variant="outline"
+              variant="ghost"
             >
               Review
             </OctantButton>

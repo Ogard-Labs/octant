@@ -371,17 +371,29 @@ html[data-octant-native-host="true"]
   text-align: center;
 }
 
+/* A Project letter is drawn at icon size, as an outline in the icons' muted
+   ink. Filled 28px tiles in full ink were the loudest thing in the rail, five
+   bright blocks that outweighed the places above them. */
 .sidebar-rail__project {
   display: flex;
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
+  box-sizing: border-box;
   align-items: center;
   justify-content: center;
+  border: 1px solid color-mix(in oklab, var(--oct-fg) 22%, transparent);
   border-radius: var(--oct-radius-sm);
-  background: color-mix(in oklab, var(--oct-fg) 14%, transparent);
-  color: var(--oct-fg);
-  font-size: var(--oct-text-sm);
+  background: transparent;
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
+}
+
+.sidebar-rail__button:hover .sidebar-rail__project,
+.sidebar-rail__button:focus-visible .sidebar-rail__project,
+.sidebar-rail__button[aria-current="page"] .sidebar-rail__project {
+  border-color: color-mix(in oklab, var(--oct-fg) 40%, transparent);
+  color: var(--oct-fg);
 }
 
 .sidebar-rail__divider {
@@ -967,6 +979,13 @@ html[data-octant-native-host="true"]
 .project-nav__list-switch {
   flex: 0 0 auto;
   margin-inline-start: auto;
+}
+
+/* Square glyph buttons. The recipe's text padding made each 32px wide, and
+   at a narrow sidebar width the row no longer fit beside the views. */
+.project-nav__list-switch > button {
+  aspect-ratio: 1;
+  padding-inline: 0;
 }
 
 .sidebar-navigation__threads {
@@ -1810,9 +1829,11 @@ html[data-octant-native-host="true"]
   }
 
   /* Under a ground that covers the sidebar too, the sidebar's piece of the
-     sheet lets a little of it through. */
+     sheet lets a trace of it through. At 84% the ground's letters read as
+     text behind the Project and thread names; the list needs a quieter
+     surface than the stage. */
   .shell--app-backdrop-sidebar.shell-frame > .sidebar::before {
-    background-color: color-mix(in srgb, var(--octant-sheet-surface) 84%, transparent);
+    background-color: color-mix(in srgb, var(--octant-sheet-surface) 94%, transparent);
   }
 
   /* Positioned for its sheet piece, but with no stacking context of its own:

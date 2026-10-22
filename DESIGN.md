@@ -596,7 +596,7 @@ light theme it fades out sooner, because dark text over a pale picture has
 less contrast headroom than light text over a dark one. A person
 may instead put the ground behind every page, from the workspace's leading
 edge, and under the sidebar too when they ask for it (see Shapes and depth). Conversations
-soften it beneath one continuous reading veil, the stage colour at 80%, so it
+soften it beneath one continuous reading veil, the sheet colour at 80%, so it
 shows at about a fifth of its strength behind a thread and agent replies
 remain bare prose (0155). Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›
@@ -709,7 +709,7 @@ it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, with no card of its own: only the work a turn
 produced is boxed. Over the application ground, the conversation supplies one quiet,
-continuous reading veil below the title band: the stage colour at 80%, so the
+continuous reading veil below the title band: the sheet colour at 80%, so the
 ground stays faintly visible behind the transcript (0155). Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
 ground (0150). Reduced transparency keeps the reading background opaque.
@@ -1039,8 +1039,8 @@ disabled, at its end of the history.
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),
 collapses the sidebar to the rail alone, which then also shows New thread and
-Search at the top, the modes, and up to six Project letter tiles with a
-Projects button for the rest; Show sidebar, Back, and Forward move into the
+Search at the top, the modes, and up to six Project letters (outlined at icon
+size in the icons' muted ink) with a Projects button for the rest; Show sidebar, Back, and Forward move into the
 title band, so the rail stays one icon wide. Icon rail: When hidden shows the
 rail only in that state; Never removes the sidebar completely when hidden and
 leaves Show sidebar and New thread in the native title rail. Neither rail
