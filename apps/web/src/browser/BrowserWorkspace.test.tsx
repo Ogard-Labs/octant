@@ -2,10 +2,10 @@ import {
   BrowserAutomationClientFailure,
   type BrowserAutomationClient,
 } from "@octant/client-runtime/browser-automation-client";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserWorkspace } from "./BrowserWorkspace";
 import { boundsInsideViewport } from "./useNativeBrowserSurface";
 
@@ -110,6 +110,9 @@ function stubNativeSurfaceDom(): () => void {
 }
 
 describe("BrowserWorkspace", () => {
+  // Opening a page records it as recent; a later test must not start from it.
+  afterEach(() => globalThis.localStorage.clear());
+
   it("keeps compact browser chrome ahead of the live or remote page surface", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/shell.css"), "utf8");
 
@@ -368,11 +371,45 @@ describe("BrowserWorkspace", () => {
     await waitFor(() => expect(browser.create).toHaveBeenCalledOnce());
     await waitFor(() => expect(browser.act).toHaveBeenCalledOnce());
     expect(screen.getByText("Browser running")).toBeInTheDocument();
+    // The committed page is what a later Browser offers under Recent.
+    await waitFor(() =>
+      expect(
+        JSON.parse(globalThis.localStorage.getItem("octant.browser.recent-pages.v1") ?? "[]"),
+      ).toEqual([expect.objectContaining({ url: expect.stringMatching(/^https?:/) })]),
+    );
     expect(screen.getByText("Example")).toBeInTheDocument();
     fireEvent.submit(screen.getByRole("textbox", { name: "Browser URL" }).closest("form")!);
     await waitFor(() => expect(browser.act).toHaveBeenCalledTimes(2));
     expect(screen.queryByText("Selector")).not.toBeInTheDocument();
     expect(screen.queryByText("Value")).not.toBeInTheDocument();
+  });
+
+  it("offers the pages opened before on its start page and opens the one the person picks", async () => {
+    globalThis.localStorage.setItem(
+      "octant.browser.recent-pages.v1",
+      JSON.stringify([{ url: "https://example.com/docs", openedAt: "2026-10-22T08:00:00.000Z" }]),
+    );
+    const browser = client();
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000001" as any,
+          mode: "work",
+          title: "Browser",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+    const recent = screen.getByRole("region", { name: "Recent pages" });
+    fireEvent.click(within(recent).getByRole("button", { name: "Open example.com/docs" }));
+    await waitFor(() => expect(browser.create).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(browser.act).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: "navigate", target: "https://example.com/docs" }),
+      ),
+    );
   });
 
   it("shows security for the committed page instead of the editable address", async () => {

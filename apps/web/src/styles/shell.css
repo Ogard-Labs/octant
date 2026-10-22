@@ -3277,6 +3277,34 @@ form > .work-composer-adapter__attachments {
   font-size: var(--oct-text-xs);
 }
 
+/* A Browser that has not opened a page is a start page: the running servers,
+   then the pages opened before, then the note. It used to offer only a button
+   and an empty address bar unless a server for this checkout was running. */
+.browser-workspace__start {
+  display: grid;
+  align-content: start;
+  gap: var(--oct-space-6);
+  min-height: 0;
+  overflow: auto;
+  padding: var(--oct-space-6);
+}
+
+.browser-workspace__start > .browser-workspace__local {
+  overflow: visible;
+  padding: 0;
+}
+
+/* With nothing to suggest, the invitation fills the page as before. */
+.browser-workspace__start:has(> .browser-workspace__empty) {
+  align-content: stretch;
+  padding: 0;
+}
+
+.browser-workspace__recent-icon {
+  flex: none;
+  color: var(--oct-muted);
+}
+
 .browser-workspace__native {
   position: relative;
   min-width: 0;

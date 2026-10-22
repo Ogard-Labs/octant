@@ -44,6 +44,7 @@ import type { OctantHostBridge } from "../shell/hostBridge";
 import { useNativeBrowserSurface } from "./useNativeBrowserSurface";
 import { OctantAlert } from "../ui/base/OctantAlert";
 import { useLocalServersController } from "../environment/useLocalServersController";
+import { readRecentBrowserPages, recordRecentBrowserPage } from "./recentBrowserPages";
 
 /**
  * Renderer chrome a native page must never be painted over. A native view is a
@@ -167,6 +168,14 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         : [],
     [codeThreadId, localServers.snapshot],
   );
+  const [recentPages, setRecentPages] = useState(() => readRecentBrowserPages());
+  // A running server is already offered under Local; its address is not
+  // offered twice.
+  const recentSuggestions = useMemo(
+    () =>
+      recentPages.filter((page) => !serverSuggestions.some((server) => server.url === page.url)),
+    [recentPages, serverSuggestions],
+  );
   const firstSuggestion = serverSuggestions[0]?.url;
   useEffect(() => {
     if (!addressTyped && !activeContext && firstSuggestion !== undefined) setUrl(firstSuggestion);
@@ -175,6 +184,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const committedAddress = activeContext
     ? ((nativeContext ? nativeState?.url : undefined) ?? snapshot?.observation?.url)
     : undefined;
+  // Every page the Browser commits counts as recent, however it was reached:
+  // the address bar, a server row, a conversation link that opened its own
+  // context, or a navigation within the open page.
+  useEffect(() => {
+    if (committedAddress === undefined || !/^https?:/i.test(committedAddress)) return;
+    setRecentPages(recordRecentBrowserPage(committedAddress));
+  }, [committedAddress]);
   const secureAddress = committedAddress?.toLocaleLowerCase().startsWith("https:") === true;
   const addressSecurityLabel =
     committedAddress === undefined ? "Address" : secureAddress ? "Secure HTTPS" : "Not secure HTTP";
@@ -741,68 +757,117 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
           {notice}
         </OctantAlert>
       )}
-      {!activeContext && serverSuggestions.length > 0 ? (
-        <section aria-label="Local servers" className="browser-workspace__local">
-          <header className="browser-workspace__local-header">
-            <h2>Local</h2>
-            <OctantButton
-              aria-label="Refresh local servers"
-              onClick={() => void localServers.refresh()}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <RotateCw aria-hidden="true" size={14} />
-            </OctantButton>
-          </header>
-          <ul aria-label="Running servers" className="browser-workspace__servers">
-            {serverSuggestions.map((server) => {
-              const kind = server.framework ?? server.processName;
-              const name = server.workspaceLabel ?? kind;
-              const address = serverAddressLabel(server.url);
-              return (
-                <li className="browser-workspace__server-row" key={server.listenerId}>
-                  <OctantButton
-                    aria-label={`Open ${name} at ${address}`}
-                    disabled={starting}
-                    onClick={() => void openServer(server)}
-                    type="button"
-                    variant="ghost"
-                  >
-                    <span className="browser-workspace__server">
-                      <span className="browser-workspace__server-text">
-                        <span className="browser-workspace__server-name">{name}</span>
-                        <span className="browser-workspace__server-meta">
-                          <span className="browser-workspace__server-address">{address}</span>
-                          {name === kind ? null : <span>{` · ${kind}`}</span>}
+      {!activeContext ? (
+        <div className="browser-workspace__start">
+          {serverSuggestions.length > 0 ? (
+            <section aria-label="Local servers" className="browser-workspace__local">
+              <header className="browser-workspace__local-header">
+                <h2>Local</h2>
+                <OctantButton
+                  aria-label="Refresh local servers"
+                  onClick={() => void localServers.refresh()}
+                  size="icon"
+                  type="button"
+                  variant="ghost"
+                >
+                  <RotateCw aria-hidden="true" size={14} />
+                </OctantButton>
+              </header>
+              <ul aria-label="Running servers" className="browser-workspace__servers">
+                {serverSuggestions.map((server) => {
+                  const kind = server.framework ?? server.processName;
+                  const name = server.workspaceLabel ?? kind;
+                  const address = serverAddressLabel(server.url);
+                  return (
+                    <li className="browser-workspace__server-row" key={server.listenerId}>
+                      <OctantButton
+                        aria-label={`Open ${name} at ${address}`}
+                        disabled={starting}
+                        onClick={() => void openServer(server)}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <span className="browser-workspace__server">
+                          <span className="browser-workspace__server-text">
+                            <span className="browser-workspace__server-name">{name}</span>
+                            <span className="browser-workspace__server-meta">
+                              <span className="browser-workspace__server-address">{address}</span>
+                              {name === kind ? null : <span>{` · ${kind}`}</span>}
+                            </span>
+                          </span>
+                          {/* Every listed server answered the host's probe, so the
+                              dot marks it running rather than telling rows apart. */}
+                          <span aria-hidden="true" className="browser-workspace__server-dot" />
                         </span>
-                      </span>
-                      {/* Every listed server answered the host's probe, so the
-                          dot marks it running rather than telling rows apart. */}
-                      <span aria-hidden="true" className="browser-workspace__server-dot" />
-                    </span>
-                  </OctantButton>
-                </li>
-              );
-            })}
-          </ul>
-          <p className="browser-workspace__local-note">
-            A page opens isolated to this thread and shared with its agent.
-          </p>
-        </section>
-      ) : !activeContext ? (
-        <div className="browser-workspace__empty">
-          <ShieldCheck aria-hidden="true" size={20} />
-          <h2>Open a private Browser session</h2>
-          <p>The page is isolated to this thread and shared with its agent.</p>
-          <OctantButton
-            aria-label="Start browser"
-            disabled={starting || url.trim() === ""}
-            onClick={() => void startFromAddress()}
-            type="button"
-          >
-            {starting ? "Starting…" : "Open page"}
-          </OctantButton>
+                      </OctantButton>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ) : null}
+          {recentSuggestions.length > 0 ? (
+            <section aria-label="Recent pages" className="browser-workspace__local">
+              <header className="browser-workspace__local-header">
+                <h2>Recent</h2>
+              </header>
+              <ul aria-label="Recently opened pages" className="browser-workspace__servers">
+                {recentSuggestions.map((page) => {
+                  const address = serverAddressLabel(page.url);
+                  const host = new URL(page.url).host;
+                  return (
+                    <li className="browser-workspace__server-row" key={page.url}>
+                      <OctantButton
+                        aria-label={`Open ${address}`}
+                        disabled={starting}
+                        onClick={() => {
+                          setAddressTyped(true);
+                          void start(page.url);
+                        }}
+                        type="button"
+                        variant="ghost"
+                      >
+                        <span className="browser-workspace__server">
+                          <Globe2
+                            aria-hidden="true"
+                            className="browser-workspace__recent-icon"
+                            size={14}
+                          />
+                          <span className="browser-workspace__server-text">
+                            <span className="browser-workspace__server-name">{host}</span>
+                            {address === host ? null : (
+                              <span className="browser-workspace__server-meta">
+                                <span className="browser-workspace__server-address">{address}</span>
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                      </OctantButton>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ) : null}
+          {serverSuggestions.length > 0 || recentSuggestions.length > 0 ? (
+            <p className="browser-workspace__local-note">
+              A page opens isolated to this thread and shared with its agent.
+            </p>
+          ) : (
+            <div className="browser-workspace__empty">
+              <ShieldCheck aria-hidden="true" size={20} />
+              <h2>Open a private Browser session</h2>
+              <p>The page is isolated to this thread and shared with its agent.</p>
+              <OctantButton
+                aria-label="Start browser"
+                disabled={starting || url.trim() === ""}
+                onClick={() => void startFromAddress()}
+                type="button"
+              >
+                {starting ? "Starting…" : "Open page"}
+              </OctantButton>
+            </div>
+          )}
         </div>
       ) : nativeContext ? (
         <div

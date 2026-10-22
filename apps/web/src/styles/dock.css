@@ -133,10 +133,12 @@
   text-overflow: ellipsis;
 }
 
-/* Only the open tool names itself; the others are their icons, with the name
-   in the tooltip, so several open tools fit the band without ellipsizing. */
-.dock-tool-strip__select[aria-selected="false"] > span {
-  display: none;
+/* Every open tool names itself, as a browser's tabs do. Icon-only tabs beside
+   the one open tool left two tools of the same kind (two terminals) and a
+   Browser beside a Terminal to be told apart by hovering; a long name gives
+   way to an ellipsis instead, and the dock now opens wide enough for names. */
+.dock-tool-strip > .dock-tool-strip__tab > .dock-tool-strip__select {
+  max-width: 10rem;
 }
 
 .dock-tool-strip__select > svg {
@@ -691,6 +693,19 @@
 
 .right-utility-dock__tool[data-dock-inset="true"] > .shell-state {
   padding: 0;
+}
+
+/* A terminal is a screen set into the dock, not the dock itself. Run edge to
+   edge, its cells' ground met the glass sheet as a hard black slab with no
+   frame, flush under the tab band; inset and rounded it reads as a plate. */
+.right-utility-dock__tool:has(.code-terminal-pane) {
+  padding: 0 var(--oct-space-2) var(--oct-space-2);
+}
+
+.right-utility-dock__tool .code-terminal-pane {
+  overflow: hidden;
+  border: 1px solid var(--octant-border-soft);
+  border-radius: var(--oct-radius-md);
 }
 
 /* A dialog shares the layer menus, popovers and pickers float on (`z-50`),

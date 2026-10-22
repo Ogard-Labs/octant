@@ -1049,7 +1049,10 @@ appears below the narrow-window breakpoint (960px): there the width belongs to
 the page, and below the drawer breakpoint a collapsed sidebar is a closed
 drawer.
 
-The right dock defaults to 420px when open. A fresh window
+The right dock defaults to 640px when open, and opening a Browser or a
+Terminal widens a narrower dock to 640px once (the person can drag it back;
+the next such opening widens it again). A terminal in the dock is an inset,
+rounded plate rather than an edge-to-edge slab. A fresh window
 starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is `--oct-title-rail-h` in the native host and the status
@@ -1174,9 +1177,9 @@ their own pane headers and lifecycle controls. Capability-gated toggles for
 Open in, bottom panel, and right dock remain window chrome. Above the right
 dock, in the same title band, sit its tools: while none is open, Environment by
 name and Terminal, Browser, Files, and the device tools as icons (each only
-where the thread can open it); once tools are open, the tab strip, where only
-the open tool names itself and the others are their icons with the name in
-the tooltip. Environment is opened from that band or Add tool. Zen
+where the thread can open it); once tools are open, the tab strip, where every
+open tool shows its icon and name, a long name ellipsizing at 10rem, and the
+tools that do not fit gather behind a count. Environment is opened from that band or Add tool. Zen
 remains in the bottom-left identity menu.
 
 Zen is a desk. Every card is a window: its title bar moves it, every edge and

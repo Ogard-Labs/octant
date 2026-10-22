@@ -5,6 +5,8 @@ import {
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveDockPresentationWidth,
   resolveRightUtilityDockSurface,
+  WORKBENCH_DOCK_WIDTH,
+  workbenchDockWidth,
   type RightUtilityDockResolutionInput,
   type RightUtilityDockSurfaceAvailability,
   MULTI_INSTANCE_DOCK_SURFACES,
@@ -303,5 +305,14 @@ describe("multi-instance dock surfaces", () => {
     for (const surface of ["environment", "plan", "review", "files", "tests"]) {
       expect(MULTI_INSTANCE_DOCK_SURFACES.has(surface)).toBe(false);
     }
+  });
+});
+
+describe("workbenchDockWidth", () => {
+  it("widens a narrow dock when a Browser or Terminal opens, and leaves other tools and wide docks alone", () => {
+    expect(workbenchDockWidth("browser", 395)).toBe(WORKBENCH_DOCK_WIDTH);
+    expect(workbenchDockWidth("terminal", 420)).toBe(WORKBENCH_DOCK_WIDTH);
+    expect(workbenchDockWidth("browser", 800)).toBeUndefined();
+    expect(workbenchDockWidth("environment", 300)).toBeUndefined();
   });
 });
