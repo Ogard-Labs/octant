@@ -31,6 +31,10 @@ browser diagnostic enters committed evidence. A kept screenshot is a separate
 thread capture, described under Browser captures below; the journal holds only a
 reference to it, never its bytes.
 
+A new Browser starts with an empty address bar. In a Code thread it lists the
+web servers running for that checkout, with any other running ones after them,
+and fills in the first. Choose one to open it, or type another address.
+
 The Browser pane provides an address bar, history controls, and the isolated
 page. Lifecycle and stop controls remain visible when a session needs them.
 The renderer requests lifecycle through authenticated routes; a denial creates
