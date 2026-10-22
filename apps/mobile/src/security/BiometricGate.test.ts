@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   assertBiometricConfirmed,
+  decideWithConfirmation,
   requireBiometricConfirmation,
   type BiometricAuthenticator,
 } from "./BiometricGate";
@@ -46,6 +47,18 @@ describe("BiometricGate", () => {
     expect(() => assertBiometricConfirmed(result, "Revoke")).toThrow(/blocked/);
   });
 
+  it("reports unavailable when the device credential probe fails", async () => {
+    const result = await requireBiometricConfirmation({
+      authenticator: authenticator({
+        hasDeviceCredential: vi.fn(async () => {
+          throw new Error("native auth unavailable");
+        }),
+      }),
+      reason: "approve",
+    });
+    expect(result.status).toBe("unavailable");
+  });
+
   it("marks app-owned high-risk authentication as active until the prompt settles", async () => {
     let resolveAuthentication:
       | ((outcome: "confirmed" | "denied" | "unavailable") => void)
@@ -62,5 +75,40 @@ describe("BiometricGate", () => {
     resolveAuthentication?.("confirmed");
     await expect(pending).resolves.toEqual({ status: "confirmed" });
     expect(isMobileHighRiskPromptActive()).toBe(false);
+  });
+});
+
+describe("decideWithConfirmation", () => {
+  it("sends the decision after the person confirms", async () => {
+    const send = vi.fn(async () => "accepted");
+    await expect(
+      decideWithConfirmation({ authenticator: authenticator(), reason: "approve", send }),
+    ).resolves.toEqual({ status: "sent", value: "accepted" });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends no decision when the person cancels the prompt", async () => {
+    const send = vi.fn(async () => "accepted");
+    const result = await decideWithConfirmation({
+      authenticator: authenticator({ authenticate: vi.fn(async () => "denied" as const) }),
+      reason: "approve",
+      send,
+    });
+    expect(result.status).toBe("blocked");
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("sends no decision and says what to set up when nothing is enrolled", async () => {
+    const send = vi.fn(async () => "accepted");
+    const result = await decideWithConfirmation({
+      authenticator: authenticator({ hasDeviceCredential: vi.fn(async () => false) }),
+      reason: "approve",
+      send,
+    });
+    expect(result).toEqual({
+      status: "blocked",
+      message: "Set up Face ID, Touch ID or a passcode to allow from this phone.",
+    });
+    expect(send).not.toHaveBeenCalled();
   });
 });

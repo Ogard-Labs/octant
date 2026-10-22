@@ -13,12 +13,17 @@ export interface GlassChipProps {
   readonly trailing?: ReactNode;
 }
 
+// The pill is about 32pt tall; the slop reaches the 44pt minimum without
+// changing how the chip looks or the room around it.
+const CHIP_HIT_SLOP = { top: 6, bottom: 6, left: 6, right: 6 } as const;
+
 export function GlassChip(props: GlassChipProps) {
   const { colors } = useTheme();
   const active = props.active === true;
   return (
     <Pressable
       accessibilityRole="button"
+      hitSlop={CHIP_HIT_SLOP}
       onPress={props.onPress}
       style={props.style}
       testID={props.testID}

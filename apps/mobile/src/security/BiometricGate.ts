@@ -1,12 +1,15 @@
 import type { DeviceAuthenticator } from "./AppVault";
+import { MOBILE_COPY } from "../copy";
 import { beginMobileHighRiskPrompt } from "./mobileAuthPromptState";
 
 /**
- * High-risk mobile actions (approve, reject, revoke) require a biometric
- * (or device-credential) confirmation. Follow-ups after vault unlock do not.
+ * Granting authority (approve) and revoking this device require a biometric
+ * (or device-credential) confirmation. Denying never does: refusing is the
+ * safe direction, so a locked or unenrolled phone can still say no. Follow-ups
+ * after vault unlock do not need it either.
  */
 
-export type BiometricPromptReason = "approve" | "reject" | "revoke";
+export type BiometricPromptReason = "approve" | "revoke";
 
 export type BiometricGateResult =
   | { readonly status: "confirmed" }
@@ -17,7 +20,6 @@ export type BiometricAuthenticator = DeviceAuthenticator;
 
 const PROMPTS: Record<BiometricPromptReason, string> = {
   approve: "Confirm approval with biometrics",
-  reject: "Confirm rejection with biometrics",
   revoke: "Confirm device revocation with biometrics",
 };
 
@@ -28,7 +30,16 @@ export async function requireBiometricConfirmation(input: {
 }): Promise<BiometricGateResult> {
   const releasePrompt = beginMobileHighRiskPrompt();
   try {
-    const hasDeviceCredential = await input.authenticator.hasDeviceCredential();
+    // A native auth API that throws is "cannot confirm", not a send failure.
+    const hasDeviceCredential = await input.authenticator
+      .hasDeviceCredential()
+      .catch(() => undefined);
+    if (hasDeviceCredential === undefined) {
+      return {
+        status: "unavailable",
+        reason: "Biometric confirmation is unavailable right now.",
+      };
+    }
     if (!hasDeviceCredential) {
       return {
         status: "unavailable",
@@ -56,4 +67,30 @@ export function assertBiometricConfirmed(result: BiometricGateResult, actionLabe
     throw new Error(`${actionLabel} cancelled — biometric confirmation required.`);
   }
   throw new Error(`${actionLabel} blocked — ${result.reason}`);
+}
+
+export type ConfirmedSendResult<T> =
+  | { readonly status: "sent"; readonly value: T }
+  | { readonly status: "blocked"; readonly message: string };
+
+/**
+ * Runs `send` only after the person confirmed on this phone. Unavailable and
+ * denied both fail closed: nothing is sent and the caller gets words to show.
+ */
+export async function decideWithConfirmation<T>(input: {
+  readonly authenticator: BiometricAuthenticator;
+  readonly reason: BiometricPromptReason;
+  readonly send: () => Promise<T>;
+}): Promise<ConfirmedSendResult<T>> {
+  const gate = await requireBiometricConfirmation({
+    authenticator: input.authenticator,
+    reason: input.reason,
+  });
+  if (gate.status === "unavailable") {
+    return { status: "blocked", message: MOBILE_COPY.approvalBiometricUnavailable };
+  }
+  if (gate.status === "denied") {
+    return { status: "blocked", message: MOBILE_COPY.approvalBiometricDenied };
+  }
+  return { status: "sent", value: await input.send() };
 }
