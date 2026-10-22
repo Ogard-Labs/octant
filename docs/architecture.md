@@ -7732,7 +7732,8 @@ macOS-only.
   candidate ship as a second app, Octant Nightly, with its own bundle id, link
   scheme, command-line name, and icon. Nightly shares Octant's data through
   Octant's running host and never runs a host of its own on that folder, so the
-  journal keeps one writer and no nightly migrates data Octant must still open
+  journal keeps one writer and no nightly migrates data Octant must still open.
+  The first technical preview therefore ships as Octant on `stable`
   ([Octant Nightly](design/nightly-app.md)).
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a

@@ -8,8 +8,8 @@ one host per data folder, how updates are verified, and which rings exist
 [current release boundary](../architecture.md#current-release-boundary)).
 DESIGN.md owns Settings presentation.
 
-Status: proposed for review, not yet built. Until it is built, there is one
-app, and Settings › Updates switches its ring.
+Status: approved design, not yet built. Until it is built, there is one app,
+and Settings › Updates switches its ring.
 
 ## Two apps, one set of data
 
@@ -83,13 +83,21 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
 ## Getting Octant Nightly
 
 - **From Octant.** Settings › Updates replaces the ring switch with an Octant
-  Nightly row: "Install Octant Nightly" downloads the newest preview build,
-  verifies it exactly as an update is verified (feed signature, artifact
-  hash, then the platform's code-signature check), and places it beside Octant.
-  Once installed, the row offers "Open Octant Nightly" and "Remove Octant
-  Nightly", which moves the app to the Trash and leaves the shared data alone.
-  Installing is a download the person starts; Octant never installs Nightly by
-  itself.
+  Nightly row: "Install Octant Nightly" downloads the newest preview build and
+  places it beside Octant after three checks:
+  - The feed signature, against the preview ring's trust set (the preview key
+    and the stable key). This installer is the only part of Octant that reads
+    a preview feed; Octant's own updater still trusts and checks only `stable`.
+  - The artifact hash inside that signed feed.
+  - On macOS, a code-signature requirement written for Nightly: bundle id
+    `app.octant.desktop.nightly`, signed by Octant's own Developer ID team. It
+    is not the self-updater's check, which requires the running app's bundle
+    id and would refuse Nightly; and it is never just "validly signed", which
+    would admit another publisher's app.
+    Once installed, the row offers "Open Octant Nightly" and "Remove Octant
+    Nightly", which moves the app to the Trash and leaves the shared data alone.
+    Installing is a download the person starts; Octant never installs Nightly by
+    itself.
 - **From the website.** octant.sh offers both downloads. The Nightly download
   says it works with Octant and needs it installed.
 - Nightly then updates itself on its own rings. Octant's updater only ever
@@ -110,6 +118,10 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
   must equal a ring the app follows, and on macOS the platform updater's
   code-signature check also requires the running app's bundle id.
 - Nothing has shipped on any ring, so no install needs moving between apps.
+- **Release order.** The first technical preview ships as Octant on the
+  `stable` ring, so a person's first install has a host. Octant Nightly is
+  published only once a stable Octant exists for it to attach to; "technical
+  preview" names the product's stage, not the ring.
 
 ## Presentation
 
@@ -137,13 +149,13 @@ The apps differ only in what macOS and Linux need to keep two apps apart:
 - Octant offers only stable updates. Nightly offers preview and candidate, and
   refuses a feed signed for `stable`.
 
-## Decisions for review
+## Rationale: whose host owns the data
 
-- **Whose host owns the data.** This design gives the host to Octant, so a
-  nightly can never upgrade the data out from under it. The cost: Nightly
-  tests new screens, but host changes (agents, providers, tools) run only once
-  they ship in Octant. The alternative is that the newest installed host owns
-  the data and serves both apps. Nightly would then test everything. But once
-  it migrates the data, Octant alone cannot open it until Octant updates (the
-  host keeps a backup before every migration), and a broken nightly host would
-  hold the data until a fix or a restore.
+Octant's host owns the data, so a nightly can never upgrade it out from under
+the app a person works in. The cost is that Nightly tests new screens, while
+host changes (agents, providers, tools) run only once they ship in Octant.
+Rejected: the newest installed host owns the data and serves both apps.
+Nightly would then test everything, but once it migrated the data Octant
+alone could not open it until Octant updated (the host keeps a backup before
+every migration), and a broken nightly host would hold the data until a fix or
+a restore.
