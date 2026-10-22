@@ -41,8 +41,12 @@ A runtime card whose saved binary is missing or reported incompatible, while the
 latest scan found the same driver at another path, offers one outlined action in
 the card's details: "Use the one found at ~/.local/bin/claude (2.1.306)". The
 card is missing when the scan searched where the saved binary should be and did
-not find it, or when its last check could not start it. A saved binary that
-starts and answers is never second-guessed, and a failed or cancelled scan
+not find it, or when its last check could not start it. A runtime that is off
+and that the scan did not find counts too, wherever its binary was saved: nothing
+checks a runtime that is off, and the host refuses to turn it on while its
+binary is gone, so without the offer such a card had no way out (a Claude Code
+saved under an npm prefix that a native install had replaced). A saved binary
+that starts and answers is never second-guessed, and a failed or cancelled scan
 offers nothing. The offer names the launcher path the scan examined, not the
 versioned file it resolves to, so it survives the runtime's own updates; of
 several candidates it takes a compatible one with the highest version, and a

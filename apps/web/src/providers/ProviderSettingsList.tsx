@@ -1944,11 +1944,16 @@ function scannedBinaryOffer(
   }
   // The scan's silence counts only for the directory it actually searched: a
   // binary saved elsewhere (a custom prefix) may work, and the scan says
-  // nothing about it.
+  // nothing about it. A provider that is off is the exception: nothing probes
+  // it, so its readiness never says the binary is gone, and the host refuses
+  // to turn it on while it is. A Claude Code saved under an npm prefix that a
+  // native install had since replaced could not be turned on and offered no
+  // way out, so an off provider the scan did not find is offered what it did.
   const unusable =
     readiness === "unavailable" ||
     readiness === "incompatible" ||
-    (!detectedLocally && isAbsenceProven(savedPath, instance.driverKind, snapshot));
+    (!detectedLocally &&
+      (!instance.enabled || isAbsenceProven(savedPath, instance.driverKind, snapshot)));
   if (!unusable) return undefined;
   let best: DiscoverySnapshot["candidates"][number] | undefined;
   for (const candidate of snapshot.candidates) {
