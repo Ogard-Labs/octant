@@ -371,6 +371,12 @@ describe("BrowserWorkspace", () => {
     await waitFor(() => expect(browser.create).toHaveBeenCalledOnce());
     await waitFor(() => expect(browser.act).toHaveBeenCalledOnce());
     expect(screen.getByText("Browser running")).toBeInTheDocument();
+    // The committed page is what a later Browser offers under Recent.
+    await waitFor(() =>
+      expect(
+        JSON.parse(globalThis.localStorage.getItem("octant.browser.recent-pages.v1") ?? "[]"),
+      ).toEqual([expect.objectContaining({ url: expect.stringMatching(/^https?:/) })]),
+    );
     expect(screen.getByText("Example")).toBeInTheDocument();
     fireEvent.submit(screen.getByRole("textbox", { name: "Browser URL" }).closest("form")!);
     await waitFor(() => expect(browser.act).toHaveBeenCalledTimes(2));

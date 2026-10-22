@@ -184,6 +184,13 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
   const committedAddress = activeContext
     ? ((nativeContext ? nativeState?.url : undefined) ?? snapshot?.observation?.url)
     : undefined;
+  // Every page the Browser commits counts as recent, however it was reached:
+  // the address bar, a server row, a conversation link that opened its own
+  // context, or a navigation within the open page.
+  useEffect(() => {
+    if (committedAddress === undefined || !/^https?:/i.test(committedAddress)) return;
+    setRecentPages(recordRecentBrowserPage(committedAddress));
+  }, [committedAddress]);
   const secureAddress = committedAddress?.toLocaleLowerCase().startsWith("https:") === true;
   const addressSecurityLabel =
     committedAddress === undefined ? "Address" : secureAddress ? "Secure HTTPS" : "Not secure HTTP";
@@ -339,7 +346,6 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
       });
       setScope(resolved);
       update(next);
-      if (next.context !== undefined) setRecentPages(recordRecentBrowserPage(targetUrl));
       if (next.context !== undefined) {
         if (next.context.state === "active") {
           const navigated = await props.client.act({

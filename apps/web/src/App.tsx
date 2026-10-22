@@ -3702,6 +3702,7 @@ function LaunchedShell(
         if (bottomPanelPresentation.open) {
           persistBottomPanelPresentation({ ...bottomPanelPresentation, open: false });
         }
+        widenDockFor("browser");
         setDockVisible(true);
         setDockStatesByThread((current) =>
           addThreadUtilityTab(current, dockThreadKey, "browser", crypto.randomUUID(), contextId),

@@ -8,13 +8,28 @@ export interface RecentBrowserPage {
 }
 
 /**
- * The addresses a person opened in the Browser tool, newest first, kept in
- * this window's local storage so a new Browser can offer them. Best-effort by
- * design: losing the list only empties the start page's Recent section, so no
- * failure here may block opening a page.
+ * The renderer's local storage, or undefined where it is refused. Merely
+ * reading `localStorage` throws when a client blocks site data, and a default
+ * argument is evaluated before the function body's guard could catch it.
+ */
+function rendererStorage(): Storage | undefined {
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The pages the Browser tool showed, newest first, kept in the renderer's
+ * local storage so a new Browser can offer them. The renderer's windows share
+ * that storage, so the list is the person's on this computer, like a
+ * browser's history, rather than one window's. Best-effort by design: losing
+ * the list only empties the start page's Recent section, so no failure here
+ * may block opening a page.
  */
 export function readRecentBrowserPages(
-  storage: Pick<Storage, "getItem"> | undefined = globalThis.localStorage,
+  storage: Pick<Storage, "getItem"> | undefined = rendererStorage(),
 ): ReadonlyArray<RecentBrowserPage> {
   if (storage === undefined) return [];
   try {
@@ -34,10 +49,10 @@ export function readRecentBrowserPages(
   }
 }
 
-/** Puts an opened address first; the same address opened again moves up rather than repeating. */
+/** Puts a shown address first; the same address shown again moves up rather than repeating. */
 export function recordRecentBrowserPage(
   url: string,
-  storage: Storage | undefined = globalThis.localStorage,
+  storage: Storage | undefined = rendererStorage(),
   now: Date = new Date(),
 ): ReadonlyArray<RecentBrowserPage> {
   const existing = readRecentBrowserPages(storage).filter((entry) => entry.url !== url);
