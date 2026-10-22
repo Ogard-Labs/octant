@@ -284,6 +284,17 @@ export function BrowserWorkspace(props: BrowserWorkspaceProps) {
         // resets the counter and returns to the base interval.
         unchangedPolls.current += 1;
         nextDelay = browserRefreshDelay(unchangedPolls.current);
+        // A page this tab held that the host no longer has (Octant restarted,
+        // or it was closed elsewhere) is not an error to read: the tab simply
+        // has no page, so it shows its start page. The host's wording,
+        // "Browser context is stale or no longer owned", meant nothing to the
+        // person who had done nothing.
+        if (error instanceof BrowserAutomationClientFailure && error.category === "stale") {
+          setSnapshot(undefined);
+          setStatus("ready");
+          setMessage(undefined);
+          return;
+        }
         applyFailure(error, setStatus, setMessage);
       } finally {
         if (active && !controller.signal.aborted) {
@@ -1123,7 +1134,11 @@ function applyFailure(
             ? "stale"
             : "failed",
     );
-    setMessage(error.message);
+    setMessage(
+      error.category === "stale"
+        ? "That page has closed, for example when Octant restarted. Open it again from Recent or the address bar."
+        : error.message,
+    );
     return;
   }
   setStatus("failed");
