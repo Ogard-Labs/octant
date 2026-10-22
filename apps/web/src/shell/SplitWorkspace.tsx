@@ -508,7 +508,12 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                         /
                       </span>
                     )}
-                    <span className="workspace-pane__title">{title}</span>
+                    <span
+                      className="workspace-pane__title"
+                      title={projectName === undefined ? title : `${projectName} / ${title}`}
+                    >
+                      {title}
+                    </span>
                   </>
                 )}
                 {running ? (

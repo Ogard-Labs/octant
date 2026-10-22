@@ -845,6 +845,25 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   );
 }
 
+/* Under Glass the page colour is not what surrounds the column: on an OLED
+   preset it is black, and the wash sat on the grey glass as a dark stain
+   behind the question. There the column takes no wash and the ground steps
+   down instead while a start screen is up, so the letters stay quiet behind
+   the question without a shape of their own. */
+.shell--app-backdrop.shell--material-translucent.shell-frame
+  :is(.draft-thread, .work-composer-adapter, .code-composer-adapter):not(
+    :is(.draft-thread, .work-composer-adapter, .code-composer-adapter) *
+  ) {
+  background: transparent;
+}
+
+.shell--app-backdrop.shell--material-translucent.shell-frame:has(
+    :is(.draft-thread, .work-composer-adapter, .code-composer-adapter)
+  )
+  > .app-backdrop[data-placement="shell"] {
+  opacity: 0.5;
+}
+
 /* A conversation needs one quiet reading surface: separate reply cards over
    the dither made even short answers compete with the composer (0155). It is
    a veil rather than a wall: the ground stays faintly visible behind a thread

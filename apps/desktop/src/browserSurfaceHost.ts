@@ -98,11 +98,19 @@ interface BrowserSurfaceSessionPort {
   };
 }
 
+/** The part of a captured frame the host uses: emptiness, encoding, and scaling. */
+export interface BrowserSurfaceImage {
+  isEmpty(): boolean;
+  toJPEG(quality: number): Uint8Array;
+  getSize?(): { readonly width: number; readonly height: number };
+  resize?(options: { readonly width: number }): BrowserSurfaceImage;
+}
+
 export interface BrowserSurfaceViewPort {
   setBounds(bounds: BrowserSurfaceBounds): void;
   setVisible(visible: boolean): void;
   readonly webContents: {
-    capturePage(): Promise<{ isEmpty(): boolean; toJPEG(quality: number): Uint8Array }>;
+    capturePage(): Promise<BrowserSurfaceImage>;
     close(): void;
     readonly debugger: {
       attach(protocolVersion?: string): void;
@@ -1239,16 +1247,47 @@ async function waitForSelector(
   throw new Error("Timed out waiting for Browser target.");
 }
 
+/** What the observation contract carries for a picture, data URL included. */
+const MAX_SCREENSHOT_DATA_URL = 54 * 1_024;
+/**
+ * The steps a picture is shrunk through to fit. A full Retina frame of a busy
+ * page (a news front page) was several times the limit at quality 70, and the
+ * picture was then dropped whole: the Browser preview showed only the page
+ * title over an empty frame. A preview needs a recognisable page, not every
+ * pixel, so the frame steps down in width and quality until it fits.
+ */
+const SCREENSHOT_WIDTHS = [undefined, 1_280, 960, 720, 480] as const;
+const SCREENSHOT_QUALITIES = [70, 55] as const;
+
+function jpegDataUrl(bytes: Uint8Array | string): string {
+  const base64 = typeof bytes === "string" ? bytes : Buffer.from(bytes).toString("base64");
+  return `data:image/jpeg;base64,${base64}`;
+}
+
+function fitImage(image: BrowserSurfaceImage): string | undefined {
+  const width = image.getSize?.().width;
+  for (const target of SCREENSHOT_WIDTHS) {
+    if (
+      target !== undefined &&
+      (image.resize === undefined || width === undefined || width <= target)
+    ) {
+      continue;
+    }
+    const sized =
+      target === undefined || image.resize === undefined ? image : image.resize({ width: target });
+    for (const quality of SCREENSHOT_QUALITIES) {
+      const dataUrl = jpegDataUrl(sized.toJPEG(quality));
+      if (dataUrl.length <= MAX_SCREENSHOT_DATA_URL) return dataUrl;
+    }
+  }
+  return undefined;
+}
+
 async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string | undefined> {
   const image = await view.webContents.capturePage();
   // A detached surface paints nothing, and Chromium reports that as an empty
   // image rather than an error; an empty JPEG is not a page snapshot.
-  if (!image.isEmpty()) {
-    const bytes = image.toJPEG(70);
-    const dataUrl = `data:image/jpeg;base64,${Buffer.from(bytes).toString("base64")}`;
-    if (dataUrl.length <= 54 * 1_024) return dataUrl;
-    return undefined;
-  }
+  if (!image.isEmpty()) return fitImage(image);
   // A surface that is not in a window still has a live renderer: the debugger
   // captures its view directly instead of a compositor surface it does not
   // have.
@@ -1256,14 +1295,38 @@ async function captureScreenshot(view: BrowserSurfaceViewPort): Promise<string |
   if (client.isAttached()) return undefined;
   try {
     client.attach("1.3");
-    const result = (await client.sendCommand("Page.captureScreenshot", {
-      format: "jpeg",
-      quality: 70,
-      fromSurface: false,
-    })) as { readonly data?: string };
-    const data = typeof result.data === "string" ? result.data : "";
-    const dataUrl = `data:image/jpeg;base64,${data}`;
-    return data !== "" && dataUrl.length <= 54 * 1_024 ? dataUrl : undefined;
+    const metrics = (await client.sendCommand("Page.getLayoutMetrics")) as
+      | {
+          readonly cssLayoutViewport?: {
+            readonly clientWidth?: number;
+            readonly clientHeight?: number;
+          };
+        }
+      | undefined;
+    const viewportWidth = metrics?.cssLayoutViewport?.clientWidth;
+    const viewportHeight = metrics?.cssLayoutViewport?.clientHeight;
+    for (const target of SCREENSHOT_WIDTHS) {
+      const scale =
+        target === undefined || viewportWidth === undefined || viewportWidth <= target
+          ? undefined
+          : target / viewportWidth;
+      if (target !== undefined && scale === undefined) continue;
+      for (const quality of SCREENSHOT_QUALITIES) {
+        const result = (await client.sendCommand("Page.captureScreenshot", {
+          format: "jpeg",
+          quality,
+          fromSurface: false,
+          ...(scale === undefined || viewportWidth === undefined || viewportHeight === undefined
+            ? {}
+            : { clip: { x: 0, y: 0, width: viewportWidth, height: viewportHeight, scale } }),
+        })) as { readonly data?: string };
+        const data = typeof result.data === "string" ? result.data : "";
+        if (data === "") return undefined;
+        const dataUrl = jpegDataUrl(data);
+        if (dataUrl.length <= MAX_SCREENSHOT_DATA_URL) return dataUrl;
+      }
+    }
+    return undefined;
   } catch {
     return undefined;
   } finally {

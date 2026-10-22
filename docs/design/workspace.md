@@ -186,8 +186,10 @@ it runs on another host), then a breadcrumb: the Project in meta text, a slash,
 and the title. The Project keeps its width (capped at a fixed character count,
 not a share of the header) and the title truncates first (it shrinks much
 faster, with no fixed floor so a narrow pane keeps its status pill); without a
-Project the breadcrumb is the title alone. The branch is not repeated here: it
-is in the composer's strip, beside the thread it runs. While the host projects the thread as executing, a "Running" pill with
+Project the breadcrumb is the title alone. A header narrower than 520px (a
+pane in a split) drops the Project step too and names it in the title's
+tooltip, so the title is read whole instead of both steps being cut. The branch is not repeated here: it
+is in the composer's strip, beside the thread it runs. While the host projects the thread as executing, a "Running" pill (a neutral wash, not the theme's tint) with
 a spinner follows them; it carries no elapsed time because the host does not
 report when the turn began. A thread whose turn is parked on the agent's own
 approval is not running: the pill reads "Needs you", with no spinner, until

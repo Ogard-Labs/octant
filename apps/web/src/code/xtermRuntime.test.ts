@@ -50,7 +50,7 @@ vi.mock("@xterm/xterm", () => ({
   }),
 }));
 
-import { mount } from "./xtermRuntime";
+import { mount, withPromptIconFonts } from "./xtermRuntime";
 
 const THEME_ROLES: Readonly<Record<string, string>> = {
   "text-primary": "#f2f1ed",
@@ -163,6 +163,19 @@ describe("Xterm runtime", () => {
     session.dispose();
   });
 
+  it("lets a prompt's icons fall back to an installed Nerd Font after the chosen faces", () => {
+    const family = withPromptIconFonts(
+      "'JetBrains Mono', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', monospace",
+    );
+    // The chosen faces lead, the Nerd Fonts follow, and the generic family stays last.
+    expect(
+      family.startsWith("'JetBrains Mono', 'SF Mono', Menlo, 'Symbols Nerd Font Mono', "),
+    ).toBe(true);
+    expect(family).toContain("'Hack Nerd Font Mono'");
+    expect(family.endsWith(", monospace")).toBe(true);
+    expect(family.match(/Symbols Nerd Font Mono/g)).toHaveLength(1);
+  });
+
   it("projects terminal typography at mount and on live updates", () => {
     const element = document.createElement("div");
     const session = mount(element, {
@@ -181,7 +194,7 @@ describe("Xterm runtime", () => {
 
     expect(mocks.terminal).toHaveBeenCalledWith(
       expect.objectContaining({
-        fontFamily: "JetBrains Mono",
+        fontFamily: expect.stringMatching(/^JetBrains Mono, /),
         fontSize: 12,
         fontWeight: 300,
         lineHeight: 1.3,
@@ -195,7 +208,7 @@ describe("Xterm runtime", () => {
       fontLigatures: false,
     });
     expect(mocks.terminalOptions).toMatchObject({
-      fontFamily: "SF Mono",
+      fontFamily: expect.stringMatching(/^SF Mono, /),
       fontSize: 13,
       fontWeight: 500,
       lineHeight: 1.5,
