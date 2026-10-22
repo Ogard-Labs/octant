@@ -93,6 +93,7 @@ import { ProviderUsageLimitsService } from "../providers/providerUsageLimitsServ
 import { unavailableLimitsReason } from "../providers/providerLimitsReporting";
 import { createProviderUsageLimitsRouteHandler } from "../providers/providerUsageLimitsRoutes";
 import { ProviderAccountPlanUsageStore } from "../providers/providerAccountPlanUsageStore";
+import { ProviderUsageReadingStore } from "../providers/providerUsageReadingStore";
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -403,8 +404,14 @@ export function wireProviders(deps: ProvidersDependencies) {
       join(providerDataDirectory, "providers", "plan-usage.json"),
     );
     void providerAccountPlanUsageStore.load().catch(() => undefined);
+    let providerUsageLimitsServiceRef: ProviderUsageLimitsService | undefined;
     const recordProviderRuntimeUsage = (event: ProviderRuntimeEvent): void => {
       providerRuntimeUsageLimitsStore.record(event);
+      if (event.kind === "rate-limit-window" || event.kind === "rate-limit-bucket") {
+        // Saved as it arrives, so a host that closes before the next poll
+        // keeps the reading.
+        providerUsageLimitsServiceRef?.noteRuntimeEvidence();
+      }
       if (event.kind !== "rate-limit-window") return;
       const instance = persistence
         .readProviderInstances()
@@ -1284,7 +1291,16 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       clock: () => new Date().toISOString(),
     });
+    // The last reading of each instance, so the usage rings have something
+    // to show before the first turn of a new run reports. Loading it asks no
+    // provider anything.
+    const providerUsageReadingStore = new ProviderUsageReadingStore(
+      join(providerDataDirectory, "providers", "usage-readings.json"),
+    );
+    const restoredUsageReadings = yield* Effect.promise(() => providerUsageReadingStore.load());
     const providerUsageLimitsService = new ProviderUsageLimitsService({
+      restoredEntries: restoredUsageReadings,
+      persistEntries: (entries) => providerUsageReadingStore.save(entries),
       // Image profiles are jobs against a generation endpoint, not runtimes
       // with an account to meter; listing them would promise a report that
       // has no channel to arrive on.
@@ -1362,6 +1378,7 @@ export function wireProviders(deps: ProvidersDependencies) {
           : providerAccountPlanUsageStore.serviceLimits(instanceId, directory, observedAt);
       },
     });
+    providerUsageLimitsServiceRef = providerUsageLimitsService;
     providerUsageLimitsService.start();
     void providerUsageLimitsService.refresh().catch(() => undefined);
     const providerUsageLimitsRoutes = createProviderUsageLimitsRouteHandler({

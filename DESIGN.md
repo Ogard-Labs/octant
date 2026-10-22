@@ -106,17 +106,17 @@ nothing essential sits under 12px at the default. The roles live in
 `styles/surface.css`; the size tokens are listed under
 [Typography](#typography).
 
-| Role          | Size | Weight | Leading | Colour      | Where                                                                               |
-| ------------- | ---- | ------ | ------- | ----------- | ----------------------------------------------------------------------------------- |
-| Hero          | 36   | 700    | 1.1     | primary     | Welcome question only (`oct-title--hero`, `--oct-text-3xl`)                         |
-| Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens)                 |
-| Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label |
-| Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option                                                      |
-| Body          | 13   | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                      |
-| Subtitle      | 14   | 400    | 1.45    | secondary   | The one line under a page title (`oct-subtitle`)                                    |
-| Detail        | 13   | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                     |
-| Meta          | 12   | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                                              |
-| Identifier    | 12   | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                             |
+| Role          | Size | Weight | Leading | Colour      | Where                                                                                                   |
+| ------------- | ---- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------- |
+| Hero          | 26   | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width) |
+| Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens)                                     |
+| Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label                     |
+| Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option                                                                          |
+| Body          | 13   | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                          |
+| Subtitle      | 14   | 400    | 1.45    | secondary   | The one line under a page title (`oct-subtitle`)                                                        |
+| Detail        | 13   | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                         |
+| Meta          | 12   | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                                                                  |
+| Identifier    | 12   | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                 |
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
@@ -124,12 +124,11 @@ labels, controls, and every name in navigation (thread titles, sidebar rows,
 Settings sections), so a name stands apart from the facts under it by weight
 rather than size, 600 (`--oct-weight-strong`) for emphasis (section labels,
 card titles, counts, `strong`, the app's name), and 700 (`--oct-weight-title`)
-only for the page title and the welcome question. `bun run ui:check` counts a
+only for the page title. The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
 weight above 600 outside the title roles in `styles/surface.css` as a
 `heavy-weight` finding and ratchets it against the baseline.
 
-Titles use `--oct-tracking-tight` (-0.025em) and the hero
-`--oct-tracking-stat` (-0.04em); section labels use `--oct-tracking-snug`;
+Titles and the welcome question use `--oct-tracking-tight` (-0.025em); section labels use `--oct-tracking-snug`;
 body and detail use none.
 
 ### Colour
@@ -434,14 +433,36 @@ context: where the thread runs (Project and branch) on the left, the stats on th
 right, on the page rather than in the box, so the box holds only the message and
 its controls. The stats are one row of figures at the 12px meta step in the meta ink,
 separated by middle dots, with no hue on any number and no fill on the row. When the
-provider reported account limit windows, they lead the row as short bars (a name such
-as 5h or Week, a three-pixel bar, and the share left), filled in the same
-inks as the context meter's popover. It wraps at narrow widths rather than scrolling,
+provider reported account limit windows, they lead the row as the plan meters
+described below. It wraps at narrow widths rather than scrolling,
 and a trailing quiet icon button hides it. A figure
 that is approximate carries a leading tilde and a dotted underline that explains it on
 hover; a figure the provider did not report is absent, never zero. The whole line is one
 button that opens the per-turn detail dialog, a plain definition list of tokens, timing,
 and cost with Previous and Next turn controls.
+
+**Plan meters.** Remaining plan usage stands above the composer, right-aligned on
+the same row as where the work runs: the strip above a thread's box, and on a
+start screen the end of the context-chip row inside the card (it drops to its
+own right-aligned line when the chips leave no room). Two compact meters read
+`5h ▬▬▬ 85%  wk ▬▬ 43%`: the shortest window the provider reported and the
+longest, each a short name (`wk` for a week, `mo` for a month) in the primary
+ink, a bar about 52px wide, and the share **left** in tabular numerals, all at
+the 12px meta step in meta ink with no fill behind the row. They describe the
+provider the composer will send to (a start screen follows the model menu's
+choice) and read the same host observation as the rail's rings, picked by window
+length (`windowSpan`). A provider that reports no window gets no meters, never
+an empty bar. The fill is the theme's accent role (`--oct-accent`, the ink in the
+monochrome default); a window with a fifth or less left takes the warning ink and
+a spent one the danger ink. The Appearance setting **Usage bars** (`usageBars`,
+Settings › Appearance › Reading) chooses the bar: **Smooth** (default) is a
+three-pixel rounded line; **Pixelated** is a 17 × 3 grid of 2px square cells with
+1px gaps, lit in the same accent, whose last four columns thin out in steps (two
+thirds, a checker, a third, a stipple) so the fill dissolves at its leading edge.
+Neither animates, so reduced motion needs no variant. The composer row keeps its
+controls: the access chip carries its shield icon beside the label, the model
+button names the model with a chosen effort in muted ink, the microphone sits
+just before send, and send is the round accent-filled button with an up arrow.
 
 Work follow-up composers use the same attached context strip as Code, showing
 the project and working folder instead of Git controls. Full paths require a
@@ -453,9 +474,14 @@ Pane headers show thread titles without repeated project labels.
 Chat, Work, and Code open on the same screen: one question in the middle of
 the page and one raised composer docked at its foot, where it stays once the
 thread starts, so the first message is typed where every later one is. Above
-the question sits the octant mark, a 24px circle with one eighth filled,
-drawn in the primary ink. The hero asks "What are we building today?" (the
-hero role) and one quiet line under it, at the detail step in muted ink, says
+the question sits the Octant aperture mark (`icons.svg#aperture`) at 22px,
+drawn in the primary ink and set 2px closer to the question than the
+heading's usual gap. The hero asks "What are we building today?" (the hero
+role: regular weight, -0.012em tracking, the primary ink in every style and
+never the accent). The approved size is 24px on a 30px line; the type scale
+has no 24px step and `ui:check` refuses a raw size, so the nearest token,
+`--oct-text-2xl` (26px), carries it on the 30px line, and phone width uses 20px.
+One quiet line under it, at the detail step in muted ink, says
 "Pick a project, or just start typing". The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
 sidebar. Each mode's own prompt stays in the composer's placeholder ("Ask
@@ -975,7 +1001,9 @@ a window near or at its limit takes the danger ink. Hovering or focusing a
 ring opens a card with every window, its share left, and when it resets;
 clicking opens Settings › Usage. A provider with no figure gets no ring,
 because an empty ring would claim a limit nobody reported. The rings read the
-host's last observation every few minutes, never a fresh provider call.
+host's last observation every few minutes, never a fresh provider call. The
+host keeps that observation across restarts, so the rings are there on launch;
+when the reading is more than a few hours old the card says "Last read 5h ago".
 
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),
@@ -1324,7 +1352,11 @@ than a manual form: the card's details carry an outlined "Locate binary…"
 action beside Check connection, shown only where the desktop's file picker
 exists and only for a runtime whose version probe the host can run. Its
 answer is one quiet line under the actions (the version the host read), or a
-warning box saying why the host refused the file.
+warning box saying why the host refused the file. A card whose saved binary is
+missing or incompatible, while the latest scan found that runtime elsewhere,
+adds a second outlined action, "Use the one found at ~/.local/bin/claude
+(2.1.306)", that gives the same answer without the picker; see
+[Providers and model endpoints](docs/design/model-endpoints.md).
 
 Provider catalog and the Octant Harness model endpoints (rows, detail
 sub-pages, and Add endpoint) follow

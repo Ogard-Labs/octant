@@ -1,5 +1,5 @@
 import type { PermissionPersistence, ProviderExecutionPolicy } from "@octant/contracts/providers";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ShieldCheck } from "lucide-react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import {
   OctantMenuCheckboxItem,
@@ -71,6 +71,7 @@ export function CodeComposerAccessMenu(props: CodeComposerAccessMenuProps) {
         disabled={props.disabled === true}
         render={<OctantButton size="sm" variant="ghost" />}
       >
+        <ShieldCheck aria-hidden="true" />
         <span>{selected?.label}</span>
         <ChevronDown aria-hidden="true" />
       </OctantMenuTrigger>

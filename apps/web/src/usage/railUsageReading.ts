@@ -6,12 +6,14 @@ export interface RailUsageReading {
   readonly providerInstanceId: string;
   /** Every reported window with a figure, in the provider's order (shortest first). */
   readonly windows: ReadonlyArray<ComposerLimitWindow>;
-  /** The longest window, drawn as the outer arc: what is left of the week. */
+  /** The longest window, drawn as the outer arc: what is left of the week (or of the month, where one is reported). */
   readonly outer: ComposerLimitWindow;
   /** The shortest window, drawn as the inner arc, when there are two or more. */
   readonly inner?: ComposerLimitWindow;
   /** When each window resets, by window id, where the provider said. */
   readonly resetsAt: ReadonlyMap<string, string>;
+  /** When the host last read these figures, which can be before it started. */
+  readonly observedAt: string;
 }
 
 /**
@@ -33,29 +35,48 @@ export function railUsageReadings(
           : undefined;
     if (limits === undefined) return [];
     const windows = composerLimitWindows({ now, snapshot: { serviceLimits: limits } });
-    // Arcs are chosen by how long each window is, not by its name: Codex
-    // scopes its ids ("codex:secondary_7d"), Claude adds per-model weeks
-    // ("seven_day_opus"). The first window of a length wins a tie, which keeps
-    // the plain week ahead of a per-model one.
-    const byLength = [...windows].sort((a, b) => windowHours(a.window) - windowHours(b.window));
-    const shortest = byLength[0];
-    const longestHours = windowHours(byLength[byLength.length - 1]?.window ?? "");
-    const longest = windows.find((window) => windowHours(window.window) === longestHours);
-    if (shortest === undefined || longest === undefined) return [];
+    const span = windowSpan(windows);
+    if (span === undefined) return [];
     return [
       {
         providerInstanceId: String(entry.providerInstanceId),
         windows,
-        outer: longest,
-        ...(windowHours(shortest.window) < longestHours ? { inner: shortest } : {}),
+        outer: span.outer,
+        ...(span.inner === undefined ? {} : { inner: span.inner }),
         resetsAt: new Map(
           (limits.rateLimitWindows ?? []).flatMap((window) =>
             window.resetsAt === undefined ? [] : [[window.window, window.resetsAt] as const],
           ),
         ),
+        observedAt:
+          entry.status === "failed"
+            ? (entry.lastSuccessfulAt ?? entry.observedAt)
+            : entry.observedAt,
       },
     ];
   });
+}
+
+/**
+ * The longest window and, when the provider reported a shorter one, the
+ * shortest. Chosen by how long each window is, not by its name: Codex scopes
+ * its ids ("codex:secondary_7d"), Claude adds per-model weeks
+ * ("seven_day_opus"). The first window of a length wins a tie, which keeps the
+ * plain week ahead of a per-model one. The rail's two arcs and the composer's
+ * two meters both read this.
+ */
+export function windowSpan(
+  windows: ReadonlyArray<ComposerLimitWindow>,
+): { readonly outer: ComposerLimitWindow; readonly inner?: ComposerLimitWindow } | undefined {
+  const byLength = [...windows].sort((a, b) => windowHours(a.window) - windowHours(b.window));
+  const shortest = byLength[0];
+  const longestHours = windowHours(byLength[byLength.length - 1]?.window ?? "");
+  const longest = windows.find((window) => windowHours(window.window) === longestHours);
+  if (shortest === undefined || longest === undefined) return undefined;
+  return {
+    outer: longest,
+    ...(windowHours(shortest.window) < longestHours ? { inner: shortest } : {}),
+  };
 }
 
 const NAMED_WINDOW_HOURS: Readonly<Record<string, number>> = {
@@ -63,6 +84,8 @@ const NAMED_WINDOW_HOURS: Readonly<Record<string, number>> = {
   five_hour: 5,
   one_day: 24,
   seven_day: 168,
+  // A month is taken as 30 days: only its order against the week matters here.
+  monthly: 720,
 };
 
 const UNIT_HOURS: Readonly<Record<string, number>> = { m: 1 / 60, h: 1, d: 24, w: 168 };
@@ -82,7 +105,21 @@ export function windowHours(window: string): number {
   return match?.[1] === undefined || unit === undefined ? 0 : Number(match[1]) * unit;
 }
 
-/** "Resets in 2h 52m", "Resets in 1d 4h", or nothing when the reset is unknown or past. */
+/**
+ * A reading this old was most likely made before the app was last opened, so
+ * the card says when. Younger ones are the live state and say nothing.
+ */
+const STALE_READING_MS = 3 * 60 * 60_000;
+
+/** "Last read 5h ago" for a reading several hours old, or nothing for a recent one. */
+export function readingAgePhrase(observedAt: string, now: number): string | undefined {
+  const age = now - Date.parse(observedAt);
+  if (!Number.isFinite(age) || age < STALE_READING_MS) return undefined;
+  const hours = Math.floor(age / (60 * 60_000));
+  return hours >= 48 ? `Last read ${Math.floor(hours / 24)}d ago` : `Last read ${hours}h ago`;
+}
+
+/** "Resets in 2h 52m","Resets in 1d 4h", or nothing when the reset is unknown or past. */
 export function resetPhrase(resetsAt: string | undefined, now: number): string | undefined {
   if (resetsAt === undefined) return undefined;
   const minutes = Math.round((Date.parse(resetsAt) - now) / 60_000);

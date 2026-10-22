@@ -113,6 +113,13 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
             "thread stats line tokens cache hit speed tok/s first token latency cost usage composer show hide",
         },
         {
+          id: settingId("usage-bars"),
+          label: "Usage bars",
+          scope: "app",
+          keywords:
+            "usage bars plan limits meters remaining left 5h week composer smooth pixelated pixel cells dither",
+        },
+        {
           id: settingId("app-background"),
           label: "Background",
           scope: "app",
