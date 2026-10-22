@@ -380,7 +380,13 @@ chrome. It holds a skeleton at the page's aspect ratio until the
 first frame and never prints status prose. It reads the same host snapshot the
 Browser pane reads, asks for a fresh picture only while it is on screen, pauses
 with the window, and backs off while the page does not change. Computer Use keeps
-its separate card. **Browser captures.** The Browser pane toolbar has a
+its separate card. **Browser start.** A Browser with no page opens on an empty
+address bar, never a placeholder site. In a Code thread it lists the servers the
+host reports as openable for the thread's Project, this checkout's first and
+then leftovers from elsewhere, leaving out any the host could not reach, the
+same reading Local servers shows. It fills the address with the first until the
+person types, and choosing one opens it. It reads the servers only while no page
+is open. **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
 page's picture with the thread, and a thread that kept screenshots shows a
 _Browser captures_ strip in its transcript beside the generated images. The

@@ -449,8 +449,8 @@ Pane headers show thread titles without repeated project labels.
 Chat, Work, and Code open on the same screen: one question in the middle of
 the page and one raised composer docked at its foot, where it stays once the
 thread starts, so the first message is typed where every later one is. Above
-the question sits the octant mark, a 24px circle with one eighth filled,
-drawn in the primary ink. The hero asks "What are we building today?" (the
+the question sits the Octant logo, the eight-blade aperture from the shared
+icon sprite (`icons.svg#aperture`) at 24px, drawn in the primary ink. The hero asks "What are we building today?" (the
 hero role) and one quiet line under it, at the detail step in muted ink, says
 "Pick a project, or just start typing". The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
@@ -969,7 +969,9 @@ a window near or at its limit takes the danger ink. Hovering or focusing a
 ring opens a card with every window, its share left, and when it resets;
 clicking opens Settings › Usage. A provider with no figure gets no ring,
 because an empty ring would claim a limit nobody reported. The rings read the
-host's last observation every few minutes, never a fresh provider call.
+host's last observation every few minutes, never a fresh provider call. The
+host keeps that observation across restarts, so the rings are there on launch;
+when the reading is more than a few hours old the card says "Last read 5h ago".
 
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),
@@ -1319,7 +1321,11 @@ than a manual form: the card's details carry an outlined "Locate binary…"
 action beside Check connection, shown only where the desktop's file picker
 exists and only for a runtime whose version probe the host can run. Its
 answer is one quiet line under the actions (the version the host read), or a
-warning box saying why the host refused the file.
+warning box saying why the host refused the file. A card whose saved binary is
+missing or incompatible, while the latest scan found that runtime elsewhere,
+adds a second outlined action, "Use the one found at ~/.local/bin/claude
+(2.1.306)", that gives the same answer without the picker; see
+[Providers and model endpoints](docs/design/model-endpoints.md).
 
 Provider catalog and the Octant Harness model endpoints (rows, detail
 sub-pages, and Add endpoint) follow

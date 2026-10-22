@@ -249,6 +249,16 @@ accepted, the card's binary path changes to the file you picked and its other
 settings (sign-in method, display name) stay as they were; an enabled runtime
 is checked again right away.
 
+If a runtime's saved binary has been removed or is reported incompatible, but
+the latest scan found the same runtime somewhere else, its card details offer
+**Use the one found at ...** with the path and version, for example
+`~/.local/bin/claude (2.1.306)`. Nothing switches until you click it. Octant
+offers the stable launcher path rather than the versioned file behind it, and
+when the scan found several it offers a compatible one with the highest version.
+The host checks the binary the way it checks a picked file and only then changes
+the card's binary path; it does not turn the runtime on. This action needs no
+file picker, so it also appears in a browser.
+
 Discovery also recognizes a narrowly parsed alias declaration for a supported
 executable in `~/.bash_aliases`, `~/.bash_profile`, `~/.bashrc`, `~/.zprofile`,
 or `~/.zshrc`. Octant reads those files without sourcing them, accepts only a
