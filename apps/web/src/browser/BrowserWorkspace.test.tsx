@@ -860,6 +860,31 @@ describe("BrowserWorkspace", () => {
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
   });
 
+  it("shows its start page without a warning when the page it held has closed", async () => {
+    // After a restart the tab still names a context the host no longer has.
+    const browser = client();
+    vi.mocked(browser.inspectThread).mockRejectedValue(
+      new BrowserAutomationClientFailure("stale", "Browser context is stale or no longer owned."),
+    );
+    render(
+      <BrowserWorkspace
+        client={browser}
+        tab={{
+          kind: "browser",
+          id: "90000000-0000-4000-8000-000000000001" as any,
+          mode: "work",
+          title: "Browser",
+          threadId: threadId as any,
+        }}
+      />,
+    );
+
+    await waitFor(() => expect(browser.inspectThread).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: "Start browser" })).toBeVisible();
+    expect(screen.queryByText(/stale or no longer owned/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("backs off instead of re-asking every half second while the context refuses", async () => {
     const browser = client();
     vi.mocked(browser.inspectThread).mockRejectedValue(new Error("Browser context is stale."));
