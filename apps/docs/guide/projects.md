@@ -92,7 +92,9 @@ finished threads**.
 
 A narrow rail of icons stands to the left of the sidebar: Inbox, Running, To
 review and Done with their counts, your other places (Board, Pull requests and
-so on), the Activity feed, and Settings. Above Settings, a ring for each
+so on), the Activity feed, Projects, **More** (the places you set to Menu only,
+and Customize sidebar), and Settings. **Settings › Sidebar › Sidebar
+destinations** decides which places the rail shows and in what order. Above Settings, a ring for each
 provider that reports plan limits shows how much of its week (outer) and five
 hours (inner) is left; hover it for every window and when it resets. The rings
 are still there after you restart Octant, and the card says when the reading was

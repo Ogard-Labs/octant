@@ -115,7 +115,7 @@ function RailUsageRing(props: {
         variant="link"
       >
         <span aria-hidden="true" className="rail-usage__face">
-          <svg viewBox="0 0 26 26">
+          <svg className="rail-usage__rings" viewBox="0 0 26 26">
             <circle className="rail-usage__track" cx="13" cy="13" r={OUTER_RADIUS} />
             <circle
               className="rail-usage__arc"

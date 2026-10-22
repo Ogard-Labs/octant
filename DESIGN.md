@@ -982,19 +982,28 @@ width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing.
 
-**Icon rail.** By default (Settings › Sidebar › Icon rail: Always) a 56px
-icon rail (76px in the desktop app, where the native traffic lights sit at its
-top) stands in its own column in front of the open sidebar. Beside the sidebar
-it carries only places and counts: the count tiles as icons with badges, the
-destination rows, the Activity feed, and Settings. The sidebar keeps its
-header (modes, search, new thread, hide), the Projects row with its list,
-More with Customize sidebar, and the profile, so nothing is offered twice.
-Rail icons are 20px on a 40px face; every rail control names itself in its
-accessible name and in a label that opens beside the rail on hover or keyboard
-focus.
+**Icon rail.** By default (Settings › Sidebar › Icon rail: Always) a 48px
+icon rail stands in its own column in front of the open sidebar; in the
+desktop app the traffic lights sit in the title band above it, and the
+sidebar's head keeps the rest of their width clear. Beside the sidebar it
+carries the places: the count tiles as icons with badges, the destination
+rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
+which and in what order, for the rail as for the sidebar), the Activity feed,
+Projects, More (the menu-only destinations and Customize sidebar), the usage
+rings, and Settings. The sidebar keeps its header (modes, search, new thread,
+hide), the Project list with its view, filter, and Activity controls, the
+threads, and the profile, so nothing is offered twice. Rail icons are 16px on
+a 32px face; every rail control names itself in its accessible name and in a
+label that opens beside the rail on hover or keyboard focus. Destinations
+have their own marks: Inbox a tray, Running a spinner, To review a checked
+clipboard, Done today a double check, Board a kanban, Issues the issue dot,
+Pull requests the pull-request arrow, Linear a checklist, Projects stacked
+folders, Agents a bot, Automations a calendar clock, Artifacts layers, Image
+generator images, Plugins blocks, and the Activity feed a pulse line.
 
 **Usage rings.** Above Settings, at the foot of either rail, each provider
-that reports a plan window with a figure gets a ring in its identity colour:
+that reports a plan window with a figure gets a ring in its identity colour
+around its 12px logo:
 the outer arc is what is left of the longest window (the week), the inner arc
 what is left of the shortest (five hours), chosen by each window's length, and
 a window near or at its limit takes the danger ink. Hovering or focusing a
@@ -1278,8 +1287,9 @@ and as a tint with a coloured count in the dark one.
 
 Primary sidebar destinations are Board and Pull requests when valid for the
 active mode. The destinations a person placed under Menu
-only wait in a More row that closes the destination list — an ellipsis opening
-a popup beside the rail with those destinations and Customize sidebar; the
+only wait in a More row that closes the destination list (the rail's More
+button when the rail stands beside the sidebar) — an ellipsis opening a popup
+beside the rail with those destinations and Customize sidebar; the
 setting that turns the More row off returns them to the bottom-left identity
 menu. The identity menu owns Settings, Navigator, Agents, Providers, Usage,
 Plugins, Automations, Artifacts, and Zen entry points. The account menu opens
