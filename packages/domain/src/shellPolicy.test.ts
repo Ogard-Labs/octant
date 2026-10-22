@@ -162,6 +162,7 @@ describe("shell settings policy", () => {
       projectViewSwitcherPresentation: "dropdown",
       transcriptTextSize: "small",
       transcriptWidth: "narrow",
+      usageBars: "smooth",
       showThreadProviderIcons: true,
       showThreadStats: true,
       homeCards: { order: [], visibility: [] },

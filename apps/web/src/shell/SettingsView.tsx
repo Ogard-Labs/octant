@@ -1973,6 +1973,27 @@ function AppearanceSection({ focusedSetting, props, capabilities }: AppearanceSe
             />
           </SettingRow>
         ) : null}
+        {isAvailable("usage-bars") ? (
+          <SettingRow
+            description="How the plan-usage meters above the composer draw their bar."
+            focused={focusedSetting === settingId("usage-bars")}
+            label="Usage bars"
+            scope="app"
+            settingId="usage-bars"
+          >
+            <OctantToggleGroup<ShellSettings["usageBars"]>
+              aria-label="Usage bars"
+              onValueChange={(value) => {
+                const selected = value[0];
+                if (selected !== undefined) props.onSettingsChange({ usageBars: selected });
+              }}
+              value={[props.settings.usageBars]}
+            >
+              <OctantToggleGroupItem value="smooth">Smooth</OctantToggleGroupItem>
+              <OctantToggleGroupItem value="pixelated">Pixelated</OctantToggleGroupItem>
+            </OctantToggleGroup>
+          </SettingRow>
+        ) : null}
       </div>
     </SettingsSection>
   );

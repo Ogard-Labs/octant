@@ -1,0 +1,70 @@
+/* Plan usage above a composer: a short name, a thin bar and the share left,
+   for the shortest and the longest window the provider reported. Meta ink on
+   the page, tabular figures, no fill behind the row. The fill is the theme's
+   accent (the ink, in the monochrome default); a window near its limit or
+   spent takes the warning or danger ink, as the context meter's popover does. */
+.plan-usage {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--oct-space-3);
+  color: var(--oct-meta);
+  font-size: var(--oct-text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.plan-usage__meter {
+  --plan-usage-fill: var(--oct-accent);
+
+  display: inline-flex;
+  align-items: center;
+  gap: var(--oct-space-1);
+}
+
+.plan-usage__meter[data-level="near"] {
+  --plan-usage-fill: var(--oct-warn-fg);
+}
+
+.plan-usage__meter[data-level="spent"] {
+  --plan-usage-fill: var(--oct-danger-fg);
+}
+
+.plan-usage__name {
+  color: var(--oct-fg);
+}
+
+.plan-usage__bar {
+  flex: 0 0 auto;
+}
+
+.plan-usage__bar--smooth {
+  display: inline-block;
+  width: 52px;
+  height: 3px;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+  border-radius: var(--oct-radius-pill);
+}
+
+.plan-usage__bar--smooth > span {
+  display: block;
+  height: 100%;
+  background: var(--plan-usage-fill);
+  border-radius: inherit;
+}
+
+/* Square cells; the unlit ones are the track, the lit ones the accent. */
+.plan-usage__cell {
+  fill: color-mix(in oklab, var(--oct-fg) 12%, transparent);
+  shape-rendering: crispEdges;
+}
+
+.plan-usage__cell[data-lit="true"] {
+  fill: var(--plan-usage-fill);
+}
+
+.plan-usage__percent {
+  min-width: 3ch;
+  text-align: right;
+}

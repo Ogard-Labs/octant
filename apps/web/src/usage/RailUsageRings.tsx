@@ -1,6 +1,6 @@
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
-import type { ProviderInstance, ProviderUsageLimitsSnapshot } from "@octant/contracts";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import type { ProviderInstance } from "@octant/contracts";
+import { useMemo, type CSSProperties } from "react";
 import { ProviderGlyph, providerGlyphColor } from "../providers/ProviderGlyph";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPreviewCard } from "../ui/base/OctantPreviewCard";
@@ -10,14 +10,8 @@ import {
   resetPhrase,
   type RailUsageReading,
 } from "./railUsageReading";
+import { useProviderUsageSnapshot } from "./useProviderUsageSnapshot";
 import "../styles/usage.css";
-
-/**
- * How often the rail asks again. The list is the host's last observation, not
- * a fresh provider call, so a few minutes keeps it current without spending
- * anything; a new reading arrives whenever a turn reports one.
- */
-const REREAD_MS = 3 * 60_000;
 
 const OUTER_RADIUS = 11;
 const INNER_RADIUS = 7;
@@ -33,28 +27,7 @@ export function RailUsageRings(props: {
   readonly instances: ReadonlyArray<ProviderInstance>;
   readonly onOpenUsage?: () => void;
 }) {
-  const [snapshot, setSnapshot] = useState<ProviderUsageLimitsSnapshot>();
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    let cancelled = false;
-    const read = () =>
-      props.client.list().then(
-        (next) => {
-          if (cancelled) return;
-          setSnapshot(next);
-          setNow(Date.now());
-        },
-        // An unreachable host leaves the rings as they were; the Usage page
-        // is where a failure is explained.
-        () => undefined,
-      );
-    void read();
-    const timer = setInterval(() => void read(), REREAD_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [props.client]);
+  const { snapshot, now } = useProviderUsageSnapshot(props.client);
   const instances = useMemo(
     () => new Map(props.instances.map((instance) => [String(instance.id), instance])),
     [props.instances],

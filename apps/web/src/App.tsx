@@ -267,6 +267,7 @@ import {
   writeSidebarCollapsed,
 } from "./shell/useShellPresentation";
 import { useSidebarToggleShortcut } from "./shell/useSidebarToggleShortcut";
+import { PlanUsageProvider } from "./usage/PlanUsageContext";
 import { RailUsageRings } from "./usage/RailUsageRings";
 import { FollowUpLineageProvider } from "./followUps/followUpLineage";
 import { AppBackdrop } from "./theme/AppBackdrop";
@@ -6907,7 +6908,12 @@ function LaunchedShell(
                               value={providerController.verifyModelTools}
                             >
                               <HostFederationStackContext.Provider value={federation}>
-                                {shell}
+                                <PlanUsageProvider
+                                  barStyle={controller.settings?.usageBars ?? "smooth"}
+                                  client={launchedClients.providerUsageLimitsClient}
+                                >
+                                  {shell}
+                                </PlanUsageProvider>
                               </HostFederationStackContext.Provider>
                             </ModelToolVerificationContext.Provider>
                           </WorkKindChoiceContext.Provider>

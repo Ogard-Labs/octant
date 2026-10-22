@@ -1,17 +1,23 @@
 import { Fragment } from "react";
+import "./welcome-heading.css";
 
 /** The start screen's question, shared by every mode's welcome. */
 export const WELCOME_QUESTION = "What are we building today?";
 
 /**
- * The mark above the question: Octant's own aperture, the same eight-blade
- * symbol the harness wears as its provider mark, from the shared icon sprite.
- * It is drawn in the text ink, so it follows the theme without a colour of its
- * own.
+ * The mark above the question: the Octant aperture from the icon sprite. It is
+ * drawn in the text ink, so it follows the theme without a colour of its own.
  */
 function OctantMark() {
   return (
-    <svg aria-hidden="true" className="welcome__mark" height={24} viewBox="0 0 100 100" width={24}>
+    <svg
+      aria-hidden="true"
+      className="welcome__mark"
+      focusable="false"
+      height={22}
+      viewBox="0 0 100 100"
+      width={22}
+    >
       <use href="./icons.svg#aperture" />
     </svg>
   );
@@ -28,7 +34,7 @@ export function WelcomeHeading() {
   return (
     <Fragment>
       <OctantMark />
-      <h1 className="oct-title oct-title--hero">{WELCOME_QUESTION}</h1>
+      <h1 className="oct-title oct-title--hero welcome__question">{WELCOME_QUESTION}</h1>
       <p className="oct-row-detail welcome__status">Pick a project, or just start typing</p>
     </Fragment>
   );
