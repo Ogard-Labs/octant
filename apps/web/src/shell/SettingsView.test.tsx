@@ -941,6 +941,11 @@ describe("SettingsView", () => {
     expect(styles).toMatch(
       /\.settings-view:not\(\.settings-view--narrow\) > \.settings-view__workspace \{[^}]*background: var\(--octant-sheet-surface\);/,
     );
+    // The narrow page and its header lie on the stage rather than painting the
+    // page colour.
+    expect(styles).toContain(
+      ".shell--material-translucent :is(.settings-view__workspace, .settings-view__mobile-header) { background: transparent; }",
+    );
     // A section card is the card step under Glass, not a mix into the page.
     expect(styles).toMatch(
       /\.shell--material-translucent \.settings-view \{ --oct-settings-card-fill: var\(--octant-card\); \}/,

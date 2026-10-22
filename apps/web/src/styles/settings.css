@@ -62,6 +62,13 @@
   background: var(--octant-stage-surface);
 }
 
+/* The narrow page and its header lie straight on that stage. Their own page
+   colour kept the whole narrow Settings window opaque under Glass; the wide
+   layout paints the sheet over the page instead. */
+.shell--material-translucent :is(.settings-view__workspace, .settings-view__mobile-header) {
+  background: transparent;
+}
+
 /* The narrow navigation is a drawer over the page, so it keeps a blur over
    the text it covers. */
 .shell--material-translucent .settings-view__sidebar {
