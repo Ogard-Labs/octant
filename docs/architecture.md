@@ -7728,7 +7728,12 @@ macOS-only.
   `candidate` (on-demand builds of a chosen ref, so a test install exercises
   the real update path) at `<base>/<ring>/<platform>-<arch>.json`. A build's default ring is read from
   its version; the signed ring field is what separates the streams. The base
-  is overridable but must be HTTPS.
+  is overridable but must be HTTPS. Stable ships as Octant; preview and
+  candidate ship as a second app, Octant Nightly, with its own bundle id, link
+  scheme, command-line name, and icon. Nightly shares Octant's data through
+  Octant's running host and never runs a host of its own on that folder, so the
+  journal keeps one writer and no nightly migrates data Octant must still open
+  ([Octant Nightly](design/nightly-app.md)).
 - Release notes for an offered update ride inside the signed release (at
   most 4,096 characters) and fail with it; notes for the running build are a
   bundled file read from disk, so What's New never adds a request.
