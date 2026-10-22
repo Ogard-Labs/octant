@@ -233,13 +233,18 @@ describe("the right sidebar surface", () => {
       />,
     );
 
-    // The title band names the Browser once, beside the Terminal.
+    // The title band names the Browser once, in its first page's place,
+    // whichever page shows.
     const strip = screen.getByRole("tablist", { name: "Open tools" });
     expect(
       within(strip)
         .getAllByRole("tab")
         .map((tab) => tab.textContent),
-    ).toEqual(["Terminal", "Browser"]);
+    ).toEqual(["Browser", "Terminal"]);
+    expect(within(strip).getByRole("tab", { name: "Browser" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     const pages = screen.getByRole("tablist", { name: "Browser pages" });
     expect(within(pages).getByRole("tab", { name: "Browser 2" })).toHaveAttribute(
       "aria-selected",

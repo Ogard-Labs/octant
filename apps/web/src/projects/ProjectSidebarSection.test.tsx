@@ -1041,11 +1041,11 @@ describe("ProjectSidebarSection code project views", () => {
   it("names the folder of each Project that shares its name with another", () => {
     window.localStorage.clear();
     chooseProjectTree();
-    const brev = (id: string, canonicalRoot: string) =>
+    const brev = (id: string, canonicalRoot: string, pinned = false) =>
       ({
         id: id as ProjectId,
         name: "brev",
-        pinned: false,
+        pinned,
         type: "code",
         binding: { canonicalRoot },
       }) as ProjectSummary;
@@ -1059,7 +1059,8 @@ describe("ProjectSidebarSection code project views", () => {
         onReorder={vi.fn()}
         onRestore={vi.fn()}
         projects={[
-          brev("77777777-7777-4777-8777-777777777777", "/Users/example/Dev/Repos/brev"),
+          // Pinned, so the two sit in different sections.
+          brev("77777777-7777-4777-8777-777777777777", "/Users/example/Dev/Repos/brev", true),
           brev("88888888-8888-4888-8888-888888888888", "/Users/example/Projects/brev"),
           codeProjectB,
         ]}

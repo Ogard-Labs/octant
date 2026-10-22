@@ -69,14 +69,19 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   // and "Browser 2"; the band now names the Browser once and the pages sit in
   // their own row inside it.
   const browserTabs = props.tabs.filter((tab) => dockTabSurface(tab).id === "browser");
-  const browserRepresentative = browserTabs.find((tab) => tab.id === activeTabId) ?? browserTabs[0];
+  // The Browser keeps the first page's place in the strip, whichever page is
+  // showing: standing in for the selected page, it moved past the Terminal and
+  // back as pages were chosen.
+  const browserRepresentative = browserTabs[0];
+  const browserActive = activeTab !== undefined && dockTabSurface(activeTab).id === "browser";
   const stripTabs = props.tabs.flatMap((tab) => {
     if (dockTabSurface(tab).id !== "browser") return [tab];
     if (tab !== browserRepresentative) return [];
     return [browserTabs.length > 1 && "surface" in tab ? { ...tab, label: "Browser" } : tab];
   });
-  const showPages =
-    activeTab !== undefined && dockTabSurface(activeTab).id === "browser" && browserTabs.length > 1;
+  const stripActive =
+    browserActive && browserRepresentative !== undefined ? browserRepresentative.id : activeTabId;
+  const showPages = browserActive && browserTabs.length > 1;
   useEffect(() => {
     if (!focusOpenedTool.current || openedTabId === undefined) return;
     focusOpenedTool.current = false;
@@ -113,7 +118,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
             />
           ) : (
             <DockToolStrip
-              {...(activeTabId === undefined ? {} : { active: activeTabId })}
+              {...(stripActive === undefined ? {} : { active: stripActive })}
               onClose={(tabId) => {
                 // Closing the Browser closes all its pages, as closing a
                 // browser window does.
@@ -125,6 +130,8 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
               }}
               onSelect={(tabId) => {
                 focusOpenedTool.current = false;
+                // The Browser entry keeps the page already showing.
+                if (tabId === browserRepresentative?.id && browserActive) return;
                 props.onSelectSurface(tabId);
               }}
               tabs={stripTabs}

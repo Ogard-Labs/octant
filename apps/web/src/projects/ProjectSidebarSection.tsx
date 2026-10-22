@@ -631,6 +631,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     return (
       <ProjectGroup
         key={label}
+        allProjects={props.projects}
         {...(props.activeProjectId === undefined ? {} : { activeProjectId: props.activeProjectId })}
         {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
         {...(props.openThreadIds === undefined ? {} : { openThreadIds: props.openThreadIds })}
@@ -925,6 +926,8 @@ function projectThreadListId(projectId: ProjectId): string {
 }
 
 function ProjectGroup(props: {
+  /** Every visible Project, across sections, for telling same-named ones apart. */
+  readonly allProjects: ReadonlyArray<ProjectSummary>;
   readonly activeProjectId?: ProjectId;
   readonly activeThreadId?: string;
   readonly openThreadIds?: ReadonlyArray<string>;
@@ -1042,10 +1045,14 @@ function ProjectGroup(props: {
       ) : null}
       {props.projects.map((project, index) => {
         // Two Projects with one name ("brev" twice) could only be told apart
-        // by opening them; each names the folder it lives in instead.
+        // by opening them; each names the folder it lives in instead. The
+        // whole list counts, not this section: one pinned and one not sit in
+        // two sections and would otherwise each look unique.
         const where =
           project.type !== "chat" &&
-          props.projects.some((other) => other !== project && other.name === project.name)
+          props.allProjects.some(
+            (other) => String(other.id) !== String(project.id) && other.name === project.name,
+          )
             ? parentFolderName(project.binding.canonicalRoot)
             : undefined;
         const availability = props.availabilityByProject.get(project.id);
