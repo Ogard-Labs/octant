@@ -1,9 +1,12 @@
 import type { ContextClient } from "@octant/client-runtime/context-client";
+import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
+import { decodeProviderUsageLimitsSnapshot } from "@octant/contracts";
 import { decodeThreadExternalContentState } from "@octant/contracts/content-provenance";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { OutsideContentContext } from "./OutsideContentNotice";
+import { PlanUsageProvider } from "../usage/PlanUsageContext";
 import { ThreadComposer } from "./ThreadComposer";
 
 describe("ThreadComposer", () => {
@@ -22,6 +25,62 @@ describe("ThreadComposer", () => {
     expect(trailing).toContainElement(screen.getByText("Ask"));
     expect(trailing).toContainElement(screen.getByRole("button", { name: "Send" }));
     expect(trailing).not.toContainElement(screen.getByText("Model"));
+  });
+
+  it("puts the plan meters at the right of the start screen's context row", async () => {
+    const providerInstanceId = "10000000-0000-4000-8000-000000000001";
+    const observedAt = "2026-10-20T12:00:00.000Z";
+    const window = (id: string, utilization: number) => ({
+      window: id,
+      status: "allowed",
+      utilization,
+      observedAt,
+    });
+    const snapshot = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: observedAt,
+      entries: [
+        {
+          providerInstanceId,
+          status: "available",
+          source: "provider-runtime",
+          observedAt,
+          limits: {
+            providerInstanceId,
+            scope: "account",
+            requests: { status: "unavailable" },
+            tokens: { status: "unavailable" },
+            concurrency: { status: "unavailable" },
+            retry: { status: "inactive" },
+            quota: "available",
+            source: "observed-evidence",
+            confidence: "high",
+            updatedAt: observedAt,
+            rateLimitWindows: [window("five_hour", 0.15), window("seven_day", 0.57)],
+          },
+        },
+      ],
+    });
+    const client = { list: vi.fn(async () => snapshot) } as unknown as ProviderUsageLimitsClient;
+    const { container } = render(
+      <PlanUsageProvider barStyle="smooth" client={client}>
+        <ThreadComposer
+          input={<textarea aria-label="Message" className="composer-input" />}
+          planUsage={{ providerInstanceId }}
+          row={{
+            actions: { kind: "send", send: { ariaLabel: "Send", onSend: vi.fn() } },
+          }}
+          startContext={<div className="composer-tray composer-tray--inside">Project</div>}
+        />
+      </PlanUsageProvider>,
+    );
+
+    const meters = await screen.findByRole("group", { name: "Plan usage left" });
+    const row = container.querySelector(".composer-start");
+    expect(row).toContainElement(meters);
+    expect(row?.firstElementChild).toHaveClass("composer-tray");
+    expect(row?.lastElementChild).toBe(meters);
+    expect(meters).toHaveTextContent("5h85%wk43%");
   });
 
   it("keeps follow-up feedback and checkout context separate from the message toolbar", () => {

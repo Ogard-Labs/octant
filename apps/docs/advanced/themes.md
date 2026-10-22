@@ -16,7 +16,8 @@ The **Appearance** page covers the color scheme and presets, UI/editor/terminal
 typography, theme accessibility, and theme import and export, then **Window**
 (Glass), **Background**, **Sidebar** (width, destinations, the More row, the
 mode switcher, provider icons), **Sidebar thread rows**, and **Reading**
-(transcript text size and width). **Reset to default**, at the right of the page
+(transcript text size and width, the stats line, and how the composer's usage
+bars are drawn). **Reset to default**, at the right of the page
 title, returns every appearance setting to its default.
 
 Every Settings page is laid out the same way: an icon tile, the page title and

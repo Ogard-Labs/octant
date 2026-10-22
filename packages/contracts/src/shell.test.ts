@@ -58,6 +58,7 @@ const settings = {
   projectViewSwitcherPresentation: "dropdown",
   transcriptTextSize: "medium",
   transcriptWidth: "narrow",
+  usageBars: "smooth",
   showThreadProviderIcons: true,
   showThreadStats: true,
   homeCards: { order: [], visibility: [] },
@@ -161,6 +162,15 @@ describe("shell bootstrap contracts", () => {
   it("defaults transcript text to the compact reading size", () => {
     const { transcriptTextSize: _omitted, ...withoutTranscriptTextSize } = settings;
     expect(decodeShellSettings(withoutTranscriptTextSize).transcriptTextSize).toBe("small");
+  });
+
+  it("draws the usage bars smooth unless someone chose the pixelated cells", () => {
+    const { usageBars: _omitted, ...withoutUsageBars } = settings;
+    expect(decodeShellSettings(withoutUsageBars).usageBars).toBe("smooth");
+    expect(decodeShellSettings({ ...settings, usageBars: "pixelated" }).usageBars).toBe(
+      "pixelated",
+    );
+    expect(() => decodeShellSettings({ ...settings, usageBars: "dotted" })).toThrow();
   });
 
   it("shows the thread stats line unless someone turned it off", () => {

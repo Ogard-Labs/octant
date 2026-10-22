@@ -4,6 +4,7 @@ import {
   decodeProviderServiceLimits,
   type ProviderInstance,
   type ProviderInstanceId,
+  type ProviderUsageLimitsEntry,
   type ProviderServiceLimits,
   type UtcTimestamp,
 } from "@octant/contracts";
@@ -706,5 +707,273 @@ describe("ProviderUsageLimitsService", () => {
       reason: "plan-limits-do-not-apply",
     });
     expect(snapshot.entries[0]).not.toHaveProperty("limits");
+  });
+});
+
+describe("ProviderUsageLimitsService across a restart", () => {
+  const readAt = "2026-08-23T12:00:00.000Z" as UtcTimestamp;
+  const laterToday = "2026-08-23T15:00:00.000Z" as UtcTimestamp;
+
+  function windowLimits(id: ProviderInstanceId, resetsAt: string): ProviderServiceLimits {
+    return decodeProviderServiceLimits({
+      providerInstanceId: id,
+      scope: "account",
+      requests: { status: "unavailable" },
+      tokens: { status: "unavailable" },
+      concurrency: { status: "unavailable" },
+      retry: { status: "inactive" },
+      quota: "available",
+      source: "runtime-reported",
+      confidence: "high",
+      updatedAt: readAt,
+      rateLimitWindows: [
+        { window: "five_hour", status: "allowed", utilization: 0.3, resetsAt, observedAt: readAt },
+        {
+          window: "seven_day",
+          status: "allowed",
+          utilization: 0.5,
+          resetsAt: "2026-08-28T12:00:00.000Z",
+          observedAt: readAt,
+        },
+      ],
+    });
+  }
+
+  /** A host that read the limits once and wrote them down, as the wiring does. */
+  async function readBeforeRestart(
+    ids: ReadonlyArray<ProviderInstanceId>,
+  ): Promise<ReadonlyArray<ProviderUsageLimitsEntry>> {
+    let saved: ReadonlyArray<ProviderUsageLimitsEntry> = [];
+    const before = new ProviderUsageLimitsService({
+      listInstances: () => ids.map((id) => instance(id)),
+      observe: vi.fn(async (provider: ProviderInstance) => ({
+        source: "provider-runtime" as const,
+        limits: windowLimits(provider.id, "2026-08-23T17:00:00.000Z"),
+      })),
+      persistEntries: (entries) => {
+        saved = entries;
+      },
+      now: () => readAt,
+    });
+    await before.refresh({ onDemand: true });
+    return saved;
+  }
+
+  function restarted(options: {
+    readonly restored: ReadonlyArray<ProviderUsageLimitsEntry>;
+    readonly instances: () => ReadonlyArray<ProviderInstance>;
+    readonly now?: () => UtcTimestamp;
+    readonly persistEntries?: (entries: ReadonlyArray<ProviderUsageLimitsEntry>) => void;
+  }) {
+    const observe = vi.fn(async () => undefined);
+    const service = new ProviderUsageLimitsService({
+      listInstances: options.instances,
+      observe,
+      restoredEntries: options.restored,
+      ...(options.persistEntries === undefined ? {} : { persistEntries: options.persistEntries }),
+      now: options.now ?? (() => laterToday),
+    });
+    return { service, observe };
+  }
+
+  it("lists the last reading of a provider after the host restarts, as read hours ago", async () => {
+    const saved = await readBeforeRestart([firstId]);
+    const { service, observe } = restarted({
+      restored: saved,
+      instances: () => [instance(firstId)],
+    });
+
+    expect(service.snapshot().entries).toEqual([
+      expect.objectContaining({
+        providerInstanceId: firstId,
+        status: "available",
+        observedAt: readAt,
+      }),
+    ]);
+
+    // The launch-time and scheduled passes find nothing new and may not start
+    // the provider to look, so the reading must survive them.
+    const refreshed = await service.refresh();
+    expect(observe).toHaveBeenCalledWith(expect.anything(), expect.anything(), {
+      onDemand: false,
+    });
+    expect(refreshed.entries[0]).toMatchObject({ status: "available", observedAt: readAt });
+  });
+
+  it("does not list a stored reading of a provider that was removed or disabled", async () => {
+    const saved = await readBeforeRestart([firstId, secondId]);
+    const rewritten: Array<ReadonlyArray<ProviderUsageLimitsEntry>> = [];
+    const { service } = restarted({
+      restored: saved,
+      instances: () => [instance(firstId, false)],
+      persistEntries: (entries) => rewritten.push(entries),
+    });
+
+    expect(service.snapshot().entries).toEqual([]);
+    const refreshed = await service.refresh();
+    expect(refreshed.entries).toEqual([
+      expect.objectContaining({
+        providerInstanceId: firstId,
+        status: "unavailable",
+        reason: "not-configured",
+      }),
+    ]);
+    // The saved readings of both are forgotten rather than waiting to return.
+    expect(rewritten.at(-1)).toEqual([]);
+  });
+
+  it("drops the windows of a stored reading whose reset has passed", async () => {
+    const saved = await readBeforeRestart([firstId]);
+    const { service } = restarted({
+      restored: saved,
+      instances: () => [instance(firstId)],
+      now: () => "2026-08-23T18:00:00.000Z" as UtcTimestamp,
+    });
+
+    const [entry] = service.snapshot().entries;
+    expect(entry?.status).toBe("available");
+    const windows = entry?.status === "available" ? entry.limits.rateLimitWindows : undefined;
+    expect(windows?.map((window) => window.window)).toEqual(["seven_day"]);
+
+    const weekGone = restarted({
+      restored: saved,
+      instances: () => [instance(firstId)],
+      now: () => "2026-08-29T00:00:00.000Z" as UtcTimestamp,
+    });
+    expect(weekGone.service.snapshot().entries).toEqual([
+      expect.objectContaining({ status: "unavailable" }),
+    ]);
+  });
+
+  it("replaces a stored reading with the first fresh one and saves that", async () => {
+    const saved = await readBeforeRestart([firstId]);
+    const rewritten: Array<ReadonlyArray<ProviderUsageLimitsEntry>> = [];
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => ({
+        source: "provider-runtime" as const,
+        limits: limits(firstId, 40),
+      })),
+      restoredEntries: saved,
+      persistEntries: (entries) => rewritten.push(entries),
+      now: () => laterToday,
+    });
+
+    const refreshed = await service.refresh({ onDemand: true });
+
+    expect(refreshed.entries[0]).toMatchObject({ status: "available", observedAt: laterToday });
+    expect(rewritten.at(-1)).toEqual([
+      expect.objectContaining({ providerInstanceId: firstId, observedAt: laterToday }),
+    ]);
+  });
+
+  it("saves a runtime report as it arrives instead of at the next poll", async () => {
+    const rewritten: Array<ReadonlyArray<ProviderUsageLimitsEntry>> = [];
+    let reported: ProviderServiceLimits | undefined;
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => undefined),
+      runtimeLimits: () => reported,
+      persistEntries: (entries) => rewritten.push(entries),
+      now: () => laterToday,
+    });
+    expect(rewritten).toEqual([]);
+
+    reported = windowLimits(firstId, "2026-08-23T17:00:00.000Z");
+    service.noteRuntimeEvidence();
+
+    expect(rewritten.at(-1)).toEqual([
+      expect.objectContaining({ providerInstanceId: firstId, status: "available" }),
+    ]);
+  });
+
+  it("replaces every figure of a restored reading when a mixed runtime report arrives", async () => {
+    const stale: ProviderUsageLimitsEntry = {
+      providerInstanceId: firstId,
+      status: "available",
+      source: "provider-runtime",
+      observedAt: readAt,
+      limits: decodeProviderServiceLimits({
+        ...windowLimits(firstId, "2026-08-23T17:00:00.000Z"),
+        requests: { status: "available", limit: 100, remaining: 90 },
+        quota: "exhausted",
+      }),
+    };
+    const live = decodeProviderServiceLimits({
+      ...windowLimits(firstId, "2026-08-23T18:00:00.000Z"),
+      requests: { status: "available", limit: 100, remaining: 10 },
+      quota: "unknown",
+      updatedAt: laterToday,
+    });
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => undefined),
+      restoredEntries: [stale],
+      runtimeLimits: () => live,
+      now: () => laterToday,
+    });
+
+    for (const snapshot of [service.snapshot(), await service.refresh()]) {
+      const [entry] = snapshot.entries;
+      expect(entry?.status === "available" ? entry.limits : undefined).toMatchObject({
+        requests: { remaining: 10 },
+        quota: "unknown",
+      });
+    }
+  });
+
+  it("keeps a stored reading whose only evidence is the quota state", async () => {
+    const quotaOnly: ProviderUsageLimitsEntry = {
+      providerInstanceId: firstId,
+      status: "available",
+      source: "provider-runtime",
+      observedAt: readAt,
+      limits: decodeProviderServiceLimits({
+        providerInstanceId: firstId,
+        scope: "account",
+        requests: { status: "unavailable" },
+        tokens: { status: "unavailable" },
+        concurrency: { status: "unavailable" },
+        retry: { status: "inactive" },
+        quota: "exhausted",
+        source: "runtime-reported",
+        confidence: "high",
+        updatedAt: readAt,
+      }),
+    };
+    const rewritten: Array<ReadonlyArray<ProviderUsageLimitsEntry>> = [];
+    const { service } = restarted({
+      restored: [quotaOnly],
+      instances: () => [instance(firstId)],
+      persistEntries: (entries) => rewritten.push(entries),
+    });
+
+    expect(service.snapshot().entries).toEqual([
+      expect.objectContaining({ status: "available", observedAt: readAt }),
+    ]);
+    // Whatever is rewritten still holds the reading.
+    expect(rewritten.every((entries) => entries.length === 1)).toBe(true);
+  });
+
+  it("keeps the last good reading on disk while a refresh fails", async () => {
+    const rewritten: Array<ReadonlyArray<ProviderUsageLimitsEntry>> = [];
+    let fail = false;
+    const service = new ProviderUsageLimitsService({
+      listInstances: () => [instance(firstId)],
+      observe: vi.fn(async () => {
+        if (fail) throw new Error("offline");
+        return { source: "provider-runtime" as const, limits: limits(firstId, 60) };
+      }),
+      persistEntries: (entries) => rewritten.push(entries),
+      now: () => laterToday,
+    });
+    await service.refresh({ onDemand: true });
+    fail = true;
+    await service.refresh({ onDemand: true });
+
+    expect(service.snapshot().entries[0]?.status).toBe("failed");
+    expect(rewritten.at(-1)).toEqual([
+      expect.objectContaining({ status: "available", observedAt: laterToday }),
+    ]);
   });
 });
