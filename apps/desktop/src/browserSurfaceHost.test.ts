@@ -376,6 +376,44 @@ describe("BrowserSurfaceHost", () => {
     expect(observation.screenshotDataUrl).toBeUndefined();
   });
 
+  it("shrinks a picture too large for the observation instead of dropping it", async () => {
+    // A busy page at full Retina size is several times the observation's
+    // limit; the preview then showed only the title over an empty frame.
+    const created = view();
+    const small = {
+      isEmpty: () => false,
+      toJPEG: () => Uint8Array.from([1, 2, 3]),
+      getSize: () => ({ width: 1_280, height: 800 }),
+    };
+    const resize = vi.fn(() => small);
+    vi.mocked(created.webContents.capturePage).mockResolvedValue({
+      isEmpty: () => false,
+      toJPEG: () => new Uint8Array(80 * 1_024),
+      getSize: () => ({ width: 2_560, height: 1_600 }),
+      resize,
+    });
+    const host = createBrowserSurfaceHost({ createView: () => created });
+    await host.createContext({
+      contextId,
+      owner: { windowId: "window-a", threadId },
+      policy: {
+        profileMode: "isolated",
+        allowedOrigins: ["https://example.com"],
+        credentialFieldProtection: true,
+        maxConcurrentTabs: 1,
+        sessionTimeoutMs: 300_000,
+      },
+    });
+
+    const observation = await host.act(contextId, {
+      kind: "navigate",
+      target: "https://example.com/docs",
+    });
+
+    expect(resize).toHaveBeenCalledWith({ width: 1_280 });
+    expect(observation.screenshotDataUrl).toBe("data:image/jpeg;base64,AQID");
+  });
+
   it("captures a detached surface's page through the renderer when compositing paints nothing", async () => {
     // A surface that is not in a window produces an empty capturePage image;
     // the renderer itself still holds the page, so the debugger takes the
