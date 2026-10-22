@@ -734,7 +734,11 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
     listTools !== undefined &&
     !(nestThreads && activityView) &&
     !showFilteredThreadsEmpty &&
-    (viewGrouping === "project" || props.projects.length === 0);
+    (viewGrouping === "project" || props.projects.length === 0) &&
+    // The Projects heading hides when it has nothing to show and empty
+    // Projects are hidden (every match pinned, say); the tools keep their own
+    // row then, or the filter that hid them could not be undone.
+    !(ordinary.length === 0 && hideEmptyProjects);
 
   return (
     <SidebarRowPropertiesContext.Provider value={rowProperties.projects}>

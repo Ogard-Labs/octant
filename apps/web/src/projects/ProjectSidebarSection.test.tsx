@@ -1710,6 +1710,52 @@ describe("ProjectSidebarSection code project views", () => {
     expect(screen.queryByRole("button", { name: "Collapse auroradocs" })).not.toBeInTheDocument();
   });
 
+  it("keeps the list's controls when hiding empty Projects leaves no Projects heading", () => {
+    window.localStorage.clear();
+    chooseProjectTree();
+    window.localStorage.setItem(
+      "octant.code.project-view-preferences.v1",
+      JSON.stringify({ filters: { activity: "today", showEmptyProjects: false } }),
+    );
+
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        now={new Date("2026-08-23T15:00:00.000Z")}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projectViewsEnabled
+        // The one Project with a matching thread is pinned, so the Projects
+        // heading has nothing to show and hides.
+        projects={[{ ...codeProjectA, pinned: true } as ProjectSummary, codeProjectB]}
+        threads={[
+          {
+            projectId: String(codeProjectA.id),
+            threadId: "thread-today",
+            title: "Today",
+            updatedAt: "2026-08-23T10:00:00.000Z",
+          },
+          {
+            projectId: String(codeProjectB.id),
+            threadId: "thread-old",
+            title: "Old",
+            updatedAt: "2026-08-01T10:00:00.000Z",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByRole("region", { name: "Projects" })).not.toBeInTheDocument();
+    // The filter that hid them is still there to undo it.
+    expect(screen.getByRole("button", { name: /^Project view filters/ })).toBeVisible();
+    expect(screen.getByRole("group", { name: "Thread list" })).toBeVisible();
+  });
+
   it("explains an activity window that matched no threads instead of a blank sidebar", () => {
     window.localStorage.clear();
     chooseProjectTree();
