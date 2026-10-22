@@ -181,6 +181,15 @@ export interface ProviderSettingsViewProps {
    * the executable and the host checks it. Absent where there is no picker.
    */
   readonly onLocateBinary?: (instanceId: ProviderInstanceId) => Promise<LocateBinaryOutcome>;
+  /**
+   * A runtime card's offer to use a binary the host's latest scan found, when
+   * the card's own binary is missing or incompatible. The host accepts only a
+   * path from that scan and checks it first.
+   */
+  readonly onUseScannedBinary?: (
+    instanceId: ProviderInstanceId,
+    binaryPath: string,
+  ) => Promise<LocateBinaryOutcome>;
   readonly onChangeOpenAiCompatibleConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: OpenAiCompatibleProviderConfiguration,
@@ -473,6 +482,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
         onChangeBinary={props.onChangeBinary}
         {...(props.onLocateBinary === undefined ? {} : { onLocateBinary: props.onLocateBinary })}
+        {...(props.onUseScannedBinary === undefined
+          ? {}
+          : { onUseScannedBinary: props.onUseScannedBinary })}
         {...(props.usageLimitsClient === undefined
           ? {}
           : { usageLimitsClient: props.usageLimitsClient })}
