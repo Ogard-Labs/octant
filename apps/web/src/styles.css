@@ -1652,8 +1652,10 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 @container pane-header (max-width: 520px) {
-  .workspace-pane__context,
-  .workspace-pane__crumb {
+  /* Only where the title is shown: a pane showing content tabs has no title
+     to carry the Project in its tooltip, so its breadcrumb keeps the step. */
+  .workspace-pane__header:has(.workspace-pane__title) .workspace-pane__context,
+  .workspace-pane__header:has(.workspace-pane__title) .workspace-pane__crumb {
     display: none;
   }
 }
