@@ -305,7 +305,11 @@ an existing context to a different model or authority still asks, because the
 remembered grant covers the page, not who drives it. The remembered set grows
 only through that approval answer: `replace-settings` may remove an origin but
 rejects additions, so a client cannot grant itself origins the prompt never
-showed. Plan refuses every Code browser operation except stopping the
+showed. A remembered origin covers Private pages only; a page in a Project or
+Personal Browser profile asks for each origin and remembers the pair (origin,
+profile), never one without the other
+([Browser profiles](design/browser-profiles.md#the-agent-on-a-signed-in-page)).
+Plan refuses every Code browser operation except stopping the
 thread's own browser (`plan-mode-read-only`). See
 [decision 0093](decisions/0093-app-owned-tools-use-managed-runtime-transports.md).
 
@@ -6651,7 +6655,7 @@ mechanisms are:
 - **Project browsing contexts.** A person may open a browser for a Work or Code
   Project with no thread, under the same separation: it is the person's
   browser, never an agent's. Its page lives in its own isolated, ephemeral
-  context, registered with the browser runtime under an owner id derived from
+  context unless the person chose a Browser profile for it, registered with the browser runtime under an owner id derived from
   the Project (never a thread id), so no thread's surface can attach to it and
   no thread's origin approval carries into it. A separate Project browser
   service owns these contexts; the agent's browser tools resolve contexts only
@@ -6667,6 +6671,15 @@ mechanisms are:
   Archiving the Project, relinking its root, turning its mode off, the window
   moving to another Project, or the window's authority ending closes it. On the desktop app the page is a live native view; elsewhere the
   host drives a headless page and shows its picture.
+- **Browser profiles and extensions.** A Browser page is Private (in-memory,
+  per browsing context) unless the person at a local window puts it in their
+  Project's persistent profile or the host's Personal profile. Octant never
+  opens or imports another browser's profile. An agent reads or acts on an
+  origin in a profile page only after a site approval naming the profile;
+  paired devices, routines, subagents, and terminal Browser grants are refused
+  on profile pages. Browser extensions install only from an unpacked folder at
+  a local window, start disabled, are enabled per profile, and never load into a
+  Private page. Detail is in [Browser profiles and extensions](design/browser-profiles.md).
 - **Side Chat reads.** A Side Chat may read its source thread's transcript,
   state, and files; it never inherits the source's Work or Code execution
   authority. The file tools (`octant_side_chat_list_files`,

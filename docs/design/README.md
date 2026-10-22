@@ -18,6 +18,7 @@ The precedence and authorization rules live in [AGENTS.md](../../AGENTS.md#missi
 | Device workbench       | [Device workbench](device-workbench.md)                     | Changing Simulator or emulator panes, capture, input delivery, keyboard layouts, or managed device tools                  |
 | Browser captures       | [Browser captures](browser-captures.md)                     | Changing which Browser screenshots a thread keeps, their retention, the capture routes, or the Browser captures strip     |
 | Tainted search queries | [Search queries on a tainted thread](search-query-taint.md) | Changing which `web-search` queries the native harness refuses on a tainted thread                                        |
+| Browser profiles       | [Browser profiles and extensions](browser-profiles.md)      | Changing where Browser pages keep sign-ins, profile approvals, or browser extension install and enablement                |
 | Terminal Browser grant | [Terminal Browser grant](terminal-browser-grant.md)         | Changing how a CLI typed into a Code thread terminal reaches that thread's Browser, or the grant's lifecycle and refusals |
 | Visual design          | [Design system](../../DESIGN.md)                            | Changing typography, colour, materials, Settings composition, controls, or accessibility                                  |
 | Start screen           | [Start screen](start-screen.md)                             | Changing start-screen tiles, tabs, cards, or Code's agent home; the rule set is in Workspace                              |
