@@ -6112,14 +6112,17 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
 }
 
 /* Input surfaces retain the glass material over the application ground
-   (0150, narrowed by 0155). Replies share the quiet conversation ground;
-   adding glass to each one would bring back the repeated card silhouettes.
-   The floor protects input text over bright photos. Reduced transparency
-   and engines without the filter keep the ordinary opaque paints. */
+   (0150, narrowed by 0155), and under window Glass with no ground too, so the
+   composer is one material whichever of the two a window shows. Under Glass
+   alone it was the opaque card colour, a black slab on an OLED preset.
+   Replies share the quiet conversation ground; adding glass to each one would
+   bring back the repeated card silhouettes. The floor protects input text
+   over bright photos. Reduced transparency and engines without the filter
+   keep the ordinary opaque paints. */
 @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
   @media (prefers-reduced-transparency: no-preference) {
     html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop
+      :is(.shell--app-backdrop, .shell--material-translucent)
       :is(.turn-user .bubble, .composer:not(.composer--follow-up)) {
       border-color: var(--oct-glass-stroke);
       background-color: var(--oct-glass-floor);
@@ -6131,7 +6134,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
        the glass had no edge. Its stroke is an inset ring, which also keeps the
        ring inside the rounded corners and out of layout. */
     html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop
+      :is(.shell--app-backdrop, .shell--material-translucent)
       .composer:not(.composer--follow-up) {
       box-shadow:
         inset 0 0 0 1px var(--oct-glass-stroke),
@@ -6141,7 +6144,7 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
        glass; the surface where the person types takes the whole material the
        composer has elsewhere: floor, thick tint, blur, ring, and shadow. */
     html:not([data-octant-reduced-transparency="true"])
-      .shell--app-backdrop
+      :is(.shell--app-backdrop, .shell--material-translucent)
       .thread-composer__surface {
       border-color: var(--oct-glass-stroke);
       background-color: var(--oct-glass-floor);
