@@ -449,8 +449,8 @@ Pane headers show thread titles without repeated project labels.
 Chat, Work, and Code open on the same screen: one question in the middle of
 the page and one raised composer docked at its foot, where it stays once the
 thread starts, so the first message is typed where every later one is. Above
-the question sits the octant mark, a 24px circle with one eighth filled,
-drawn in the primary ink. The hero asks "What are we building today?" (the
+the question sits the Octant logo, the eight-blade aperture from the shared
+icon sprite (`icons.svg#aperture`) at 24px, drawn in the primary ink. The hero asks "What are we building today?" (the
 hero role) and one quiet line under it, at the detail step in muted ink, says
 "Pick a project, or just start typing". The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
