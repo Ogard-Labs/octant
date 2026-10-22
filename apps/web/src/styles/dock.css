@@ -216,14 +216,14 @@
 }
 
 /* One fact group per card: a title row, then rows at the 28px step. The card
-   recipe is the overview's own, a hairline on the surface fill. */
+   is a wash of the ink over the dock, like the Environment's cards; the opaque
+   surface fill with a hairline drew black boxes on the glass dock. */
 .dock-card {
   display: grid;
   gap: var(--oct-space-1);
   min-width: 0;
   padding: var(--oct-space-2) var(--oct-space-3);
-  background: var(--oct-surface);
-  border: 1px solid var(--oct-hairline);
+  background: color-mix(in oklab, var(--oct-fg) 4%, transparent);
   border-radius: var(--oct-radius-md);
 }
 

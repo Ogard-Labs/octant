@@ -24,8 +24,11 @@
 .thread-environment-dock {
   /* One step above the dock's own fill: a card on the panel. The tile and the
      pill sit a step above the card. Both follow the theme's text colour so the
-     Default style stays monochrome in light and dark. */
-  --environment-card-fill: color-mix(in oklab, var(--oct-fg) 3%, var(--oct-bg));
+     Default style stays monochrome in light and dark. The card is a wash of
+     the ink over whatever the dock shows, not over the opaque page colour:
+     mixed into that, on an OLED preset under Glass, every card was a black
+     slab with a ring on the frosted dock. */
+  --environment-card-fill: color-mix(in oklab, var(--oct-fg) 4%, transparent);
   --environment-soft-fill: color-mix(in oklab, var(--oct-fg) 5%, transparent);
   --environment-tile-fill: color-mix(in oklab, var(--oct-fg) 8%, transparent);
   --environment-tile-size: 26px;
@@ -46,7 +49,6 @@
   margin: var(--oct-space-3) var(--oct-space-3) 0;
   padding: var(--oct-space-3);
   background: var(--environment-card-fill);
-  border: 1px solid var(--oct-hairline);
   border-radius: var(--oct-radius-md);
 }
 
@@ -310,7 +312,6 @@
   display: grid;
   min-width: 0;
   background: var(--environment-card-fill);
-  border: 1px solid var(--oct-hairline);
   border-radius: var(--oct-radius-md);
 }
 
@@ -581,7 +582,9 @@
 /* Increased contrast strengthens the card outlines. It lives here, after the
    cards' own border shorthands: this sheet loads after styles.css, so an
    override there was reset to the hairline by these same-specificity rules. */
+/* The cards carry no ring by default, so increased contrast draws the whole
+   border, not only its colour. */
 html[data-octant-increased-contrast="true"] .thread-environment-dock__header,
 html[data-octant-increased-contrast="true"] .environment-card__rows {
-  border-color: var(--octant-border-strong);
+  border: 1px solid var(--octant-border-strong);
 }

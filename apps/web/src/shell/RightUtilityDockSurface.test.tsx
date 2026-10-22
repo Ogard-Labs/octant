@@ -47,8 +47,11 @@ describe("the right sidebar surface", () => {
       sharedStylesheet,
       '.content-tab:has([role="tab"][aria-selected="true"])',
     );
-    expect(selected).toMatch(/background:\s*var\(--octant-control\)/);
-    expect(selected).toMatch(/box-shadow:\s*inset 0 0 0 1px var\(--octant-border\)/);
+    // A neutral ink wash, not the theme-tinted control fill with a ring.
+    expect(selected).toMatch(
+      /background:\s*color-mix\(in oklab, var\(--oct-fg\) 9%, transparent\)/,
+    );
+    expect(selected).not.toMatch(/box-shadow/);
     expect(ruleBody(sharedStylesheet, ".content-tab:hover")).toMatch(
       /background:\s*var\(--oct-fg-soft\)/,
     );

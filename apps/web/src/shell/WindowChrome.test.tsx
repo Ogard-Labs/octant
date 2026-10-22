@@ -594,10 +594,12 @@ describe("WindowChrome", () => {
     // so the dock and dialog stay workspace-opaque under every theme.
     expect(cssRule(".right-utility-dock")).toContain("background: var(--oct-bg);");
     expect(cssRule(".octant-dialog__popup")).toContain("background: var(--oct-bg);");
-    // The Environment's boundary is its header card now, not the checkout block.
+    // The Environment's boundary is its header card now, not the checkout block:
+    // a wash of the ink over the dock, with no ring (increased contrast adds one).
     expect(cssRule(".thread-environment-dock__header")).toContain(
-      "border: 1px solid var(--oct-hairline);",
+      "background: var(--environment-card-fill);",
     );
+    expect(cssRule(".thread-environment-dock__header")).not.toContain("border:");
     // The meta line mixes the branch with the folder; only the folder is an
     // identifier, so only it takes the identifier face.
     expect(cssRule(".thread-environment-dock__place", 1)).toContain(

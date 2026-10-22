@@ -1279,8 +1279,9 @@ button, so keyboard focus skips it; its threads take one more step of indent on
 their content, never on their fill, and drop the branch fact the heading already
 states. A Project with a single checkout shows no heading. The Activity feed
 and Status stay flat. A hovered row takes the soft ink wash and the row
-the workspace is showing takes the selection fill with a hairline edge, the
-same two states the thread tab strip draws, so pointing never looks like
+the workspace is showing takes a stronger neutral ink wash (never the
+theme-tinted selection or control fill, which drew a coloured slab on tinted
+presets), the same two states the thread tab strip draws, so pointing never looks like
 being there. Provider identity remains at the leading edge. A Project row leads with a 20px
 rounded letter tile: the Project's first letter, white, on the colour the person
 picked from the theme palette, or a neutral tile when none is set. The same tile
@@ -1512,7 +1513,9 @@ for another subject never makes unavailable chrome visible.
 Environment is a right-dock tool, opened from the dock's title band (its
 quick tools or tab strip) or Add tool and nowhere else; the title band carries no second Environment button. It reads
 top to bottom as cards in the Settings kit's grouped-card look: one header card,
-then two captioned cards of rows. The header card names what the thread works
+then two captioned cards of rows. A card is a faint wash of the ink over the
+dock with no ring (increased contrast adds one), so it never paints the opaque
+page colour onto the glass. The header card names what the thread works
 in: the name on its own line, then the branch glyph, the branch, a dot, and the
 home-relative folder in mono, with the full summary (working folder, running
 servers) kept as one sentence for assistive technology. Inside it, an inner
