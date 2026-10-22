@@ -149,7 +149,9 @@ export function defaultShellSettings(): ShellSettings {
     // Wide enough for a thread's title to be read rather than guessed: at 232px
     // a two-line row showed about twenty characters of it.
     sidebarWidth: 280,
-    contextSidebarWidth: 420,
+    // Wide enough for a Browser page to lay out as a desktop site and for the
+    // dock's tabs to carry their names; 420px showed a phone layout.
+    contextSidebarWidth: 640,
     lastContextSurface: null,
     sidebarMaterial: "system",
     workspaceMaterial: "opaque",

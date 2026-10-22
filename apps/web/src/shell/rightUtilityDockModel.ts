@@ -119,6 +119,25 @@ export type RightUtilityDockResolution =
  */
 export const MULTI_INSTANCE_DOCK_SURFACES: ReadonlySet<string> = new Set(["browser", "terminal"]);
 
+/**
+ * The width a page or a shell needs to be usable. At the 420px default (and
+ * at the narrower widths people had dragged it to) a Browser showed a phone
+ * layout of every site and the tab strip had room for one name; opening a
+ * Browser or a Terminal widens a narrower dock to this once. The person can
+ * still drag it narrower; the next such opening widens it again.
+ */
+export const WORKBENCH_DOCK_WIDTH = 640;
+
+/** The width to widen the dock to when this tool opens, or undefined to leave it. */
+export function workbenchDockWidth(
+  surface: RightUtilityDockSurfaceId,
+  configuredWidth: number | undefined,
+): number | undefined {
+  if (surface !== "browser" && surface !== "terminal") return undefined;
+  if (configuredWidth !== undefined && configuredWidth >= WORKBENCH_DOCK_WIDTH) return undefined;
+  return WORKBENCH_DOCK_WIDTH;
+}
+
 export function resolveDockPresentationWidth(input: {
   readonly configuredWidth: number;
   readonly resolution: RightUtilityDockResolution;

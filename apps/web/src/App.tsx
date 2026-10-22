@@ -317,6 +317,7 @@ import {
   MULTI_INSTANCE_DOCK_SURFACES,
   RIGHT_UTILITY_DOCK_SURFACES,
   resolveDockPresentationWidth,
+  workbenchDockWidth,
   resolveRightUtilityDockSurface,
   type RightUtilityDockResolution,
   type RightUtilityDockSurfaceId,
@@ -3529,6 +3530,7 @@ function LaunchedShell(
     if (surface === "terminal") {
       dockTabActivation.noteActivated(workspaceDockTabId(undefined, "terminal"));
     }
+    widenDockFor(surface);
     markInteraction("renderer", "dock-open-requested");
     markInteractionAfterPaint("dock-open");
     if (bottomPanelPresentation.open) {
@@ -3542,6 +3544,10 @@ function LaunchedShell(
       setDockStatesByThread((current) => openThreadUtilityTab(current, dockThreadKey, surface));
     }
   }
+  function widenDockFor(surface: RightUtilityDockSurfaceId) {
+    const width = workbenchDockWidth(surface, controller.settings?.contextSidebarWidth);
+    if (width !== undefined) void controller.updateSettings({ contextSidebarWidth: width });
+  }
   function addDockTab(surface: RightUtilityDockSurfaceId) {
     const descriptor = RIGHT_UTILITY_DOCK_SURFACES.find((candidate) => candidate.id === surface);
     if (descriptor === undefined || !descriptor.modes.some((mode) => mode === activeMode)) return;
@@ -3553,6 +3559,7 @@ function LaunchedShell(
     if (surface === "terminal") {
       dockTabActivation.noteActivated(workspaceDockTabId(instanceId, "terminal"));
     }
+    widenDockFor(surface);
     setDockVisible(true);
     if (dockThreadKey === undefined) {
       setFallbackDockState((current) => addUtilityTabState(current, surface, instanceId));

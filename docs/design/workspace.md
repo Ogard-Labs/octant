@@ -386,7 +386,10 @@ host reports as openable for the thread's Project, this checkout's first and
 then leftovers from elsewhere, leaving out any the host could not reach, the
 same reading Local servers shows. It fills the address with the first until the
 person types, and choosing one opens it. It reads the servers only while no page
-is open. **Browser captures.** The Browser pane toolbar has a
+is open. Under them, Recent lists the last eight pages the person opened in the
+Browser, newest first, kept in the window's local storage and never sent to the
+host; a running server's address is not repeated there, and choosing a row
+opens it. With neither, the start page invites an address. **Browser captures.** The Browser pane toolbar has a
 Screenshot button (a camera icon beside Open in default browser) that keeps the
 page's picture with the thread, and a thread that kept screenshots shows a
 _Browser captures_ strip in its transcript beside the generated images. The

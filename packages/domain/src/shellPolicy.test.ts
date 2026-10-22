@@ -154,7 +154,7 @@ describe("shell settings policy", () => {
       chatEnabled: true,
       workEnabled: true,
       sidebarWidth: 280,
-      contextSidebarWidth: 420,
+      contextSidebarWidth: 640,
       lastContextSurface: null,
       sidebarMaterial: "system",
       workspaceMaterial: "opaque",
