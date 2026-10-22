@@ -3093,14 +3093,14 @@ describe("ProviderSettingsView", () => {
     expect(onUseScannedBinary).not.toHaveBeenCalled();
   });
 
-  it("does not call an unprobed binary outside the searched directories missing just because the scan found another", () => {
+  it("does not second-guess an enabled binary outside the searched directories just because the scan found another", () => {
     renderExpanded(
       <ProviderSettingsView
         {...fixture({
           instance: provider({
             displayName: "Custom Codex",
             driverKind: "codex",
-            enabled: false,
+            enabled: true,
             configuration: { kind: "codex-cli", binaryPath: "/opt/custom/bin/codex" },
           }),
           // The scan covered Codex, but only under ~/.local/bin: its silence
@@ -3115,6 +3115,38 @@ describe("ProviderSettingsView", () => {
     );
 
     expect(screen.queryByRole("button", { name: /^Use the one found at/ })).toBeNull();
+  });
+
+  it("offers the scanned binary to a provider that is off and saved outside the searched directories", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({
+            displayName: "Old Codex",
+            driverKind: "codex",
+            enabled: false,
+            // An npm prefix the scan does not search: nothing proves the file
+            // gone, and nothing probes a provider that is off, yet the host
+            // refuses to turn it on when the file is missing.
+            configuration: {
+              kind: "codex-cli",
+              binaryPath: "/Users/example/.local/lib/node_modules/@openai/codex/bin/codex.js",
+            },
+          }),
+          discoverySnapshot: discoverySnapshot({
+            candidates: [scannedCodexCandidate()],
+            searchedDirectories: searchedDirectoriesFor("codex", "/Users/example/.local/bin"),
+          }),
+        })}
+        onUseScannedBinary={vi.fn(async () => ({ kind: "cancelled" }) as const)}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: "Use the one found at ~/.local/bin/codex (0.49.1) for Old Codex",
+      }),
+    ).toBeVisible();
   });
 
   it("makes no offer from a failed scan or without a way to use it", () => {
