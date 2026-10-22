@@ -499,8 +499,8 @@ on the left; the context ring, model and microphone on the right, next to send).
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, base branch, checkout, Environment, repository) is the first row
-inside the card, above the prompt, as small bordered chips on a faint fill
-(the `--oct-radius-sm` step), so the composer stays a single object. Code's
+inside the card, above the prompt, as small rounded chips on a faint fill with
+no outline, so the composer stays a single object. Code's
 base-branch chip is absent until a Project is chosen: with no Project it
 would name a branch of nothing. The chip
 is painted on the plain element that holds each control, never on the shared
@@ -1179,7 +1179,11 @@ dock, in the same title band, sit its tools: while none is open, Environment by
 name and Terminal, Browser, Files, and the device tools as icons (each only
 where the thread can open it); once tools are open, the tab strip, where every
 open tool shows its icon and name, a long name ellipsizing at 10rem, and the
-tools that do not fit gather behind a count. Environment is opened from that band or Add tool. Zen
+tools that do not fit gather behind a count. Several Browsers are one Browser
+tab there: their pages sit in a row of their own at the top of the Browser,
+with a + for a new page, and closing the Browser tab closes every page. The
+Browser's toolbar groups back, forward, and reload in one rounded capsule
+beside a pill-shaped address field. Environment is opened from that band or Add tool. Zen
 remains in the bottom-left identity menu.
 
 Zen is a desk. Every card is a window: its title bar moves it, every edge and

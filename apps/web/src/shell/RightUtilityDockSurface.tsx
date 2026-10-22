@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { useEffect, useRef, type ReactNode, type Ref } from "react";
 import { DockUtilityLauncher, type DockUtilityLauncherReference } from "./DockUtilityLauncher";
 import { DockToolIcon } from "./dockToolIcons";
@@ -63,6 +63,25 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   const toolPanel = useRef<HTMLDivElement>(null);
   const focusOpenedTool = useRef(false);
   const openedTabId = activeTab?.id;
+  // Every open Browser is one Browser tool with pages, the way a browser
+  // keeps its tabs inside its own window. As separate strip tabs, two Browsers
+  // beside a Terminal and Environment crowded the title band with "Browser 1"
+  // and "Browser 2"; the band now names the Browser once and the pages sit in
+  // their own row inside it.
+  const browserTabs = props.tabs.filter((tab) => dockTabSurface(tab).id === "browser");
+  // The Browser keeps the first page's place in the strip, whichever page is
+  // showing: standing in for the selected page, it moved past the Terminal and
+  // back as pages were chosen.
+  const browserRepresentative = browserTabs[0];
+  const browserActive = activeTab !== undefined && dockTabSurface(activeTab).id === "browser";
+  const stripTabs = props.tabs.flatMap((tab) => {
+    if (dockTabSurface(tab).id !== "browser") return [tab];
+    if (tab !== browserRepresentative) return [];
+    return [browserTabs.length > 1 && "surface" in tab ? { ...tab, label: "Browser" } : tab];
+  });
+  const stripActive =
+    browserActive && browserRepresentative !== undefined ? browserRepresentative.id : activeTabId;
+  const showPages = browserActive && browserTabs.length > 1;
   useEffect(() => {
     if (!focusOpenedTool.current || openedTabId === undefined) return;
     focusOpenedTool.current = false;
@@ -99,13 +118,23 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
             />
           ) : (
             <DockToolStrip
-              {...(activeTabId === undefined ? {} : { active: activeTabId })}
-              onClose={props.onCloseTab}
+              {...(stripActive === undefined ? {} : { active: stripActive })}
+              onClose={(tabId) => {
+                // Closing the Browser closes all its pages, as closing a
+                // browser window does.
+                if (tabId === browserRepresentative?.id) {
+                  for (const tab of browserTabs) props.onCloseTab(tab.id);
+                  return;
+                }
+                props.onCloseTab(tabId);
+              }}
               onSelect={(tabId) => {
                 focusOpenedTool.current = false;
+                // The Browser entry keeps the page already showing.
+                if (tabId === browserRepresentative?.id && browserActive) return;
                 props.onSelectSurface(tabId);
               }}
-              tabs={props.tabs}
+              tabs={stripTabs}
             />
           )}
           {/* The title band offers a few tools by face; Add tool lists every
@@ -140,9 +169,9 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
           />
         ) : activeTab === undefined ? null : (
           <div
-            aria-label={activeTab.label}
-            key={activeTab.id}
-            className="right-utility-dock__tool"
+            aria-label={showPages ? "Browser" : activeTab.label}
+            key={showPages ? "browser" : activeTab.id}
+            className={`right-utility-dock__tool${showPages ? " right-utility-dock__tool--pages" : ""}`}
             ref={toolPanel}
             role="region"
             tabIndex={-1}
@@ -154,8 +183,46 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
                 : undefined
             }
           >
-            {props.renderTab?.(dockTabDescriptor(activeTab)) ??
-              contents[dockTabSurface(activeTab).id]}
+            {showPages ? (
+              <>
+                <div aria-label="Browser pages" className="dock-browser-pages" role="tablist">
+                  {browserTabs.map((tab) => (
+                    <span className="dock-browser-pages__page content-tab" key={tab.id}>
+                      <OctantButton
+                        aria-selected={tab.id === activeTabId}
+                        className="content-tab__select border-0 bg-transparent text-inherit"
+                        onClick={() => props.onSelectSurface(tab.id)}
+                        role="tab"
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <DockToolIcon surface="browser" />
+                        <span>{tab.label}</span>
+                      </OctantButton>
+                      <IconButton
+                        className="content-tab__close text-muted-foreground"
+                        icon={X}
+                        label={`Close ${tab.label}`}
+                        onClick={() => props.onCloseTab(tab.id)}
+                      />
+                    </span>
+                  ))}
+                  <IconButton
+                    icon={Plus}
+                    label="New Browser page"
+                    onClick={() => props.onOpenTab("browser")}
+                  />
+                </div>
+                <div className="dock-browser-pages__page-body" key={activeTab.id}>
+                  {props.renderTab?.(dockTabDescriptor(activeTab)) ??
+                    contents[dockTabSurface(activeTab).id]}
+                </div>
+              </>
+            ) : (
+              (props.renderTab?.(dockTabDescriptor(activeTab)) ??
+              contents[dockTabSurface(activeTab).id])
+            )}
           </div>
         )}
       </div>

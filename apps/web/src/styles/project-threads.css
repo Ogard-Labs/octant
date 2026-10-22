@@ -458,6 +458,11 @@
   }
 }
 
+/* The folder that tells two same-named Projects apart, quieter than the name. */
+.project-row__where {
+  color: var(--oct-meta);
+}
+
 .project-row__action {
   min-height: var(--oct-nav-row-h);
   padding: 0 var(--oct-space-2);

@@ -214,6 +214,52 @@ describe("the right sidebar surface", () => {
     expect(screen.getByRole("button", { name: "Add tool" })).toBeVisible();
   });
 
+  it("shows several Browsers as one Browser tool with a row of pages", async () => {
+    const user = userEvent.setup();
+    const onCloseTab = vi.fn();
+    const onOpenTab = vi.fn();
+    const onSelectSurface = vi.fn();
+    const page = (id: string, label: string) => ({ id, label, surface: browser });
+    render(
+      <RightUtilityDockSurface
+        activeTabId="browser-2"
+        launchableSurfaces={[browser, terminal]}
+        onCloseTab={onCloseTab}
+        onOpenTab={onOpenTab}
+        onSelectSurface={onSelectSurface}
+        renderTab={(tab) => <p>{`Live ${tab.label}`}</p>}
+        resolution={{ kind: "surface", surface: browser }}
+        tabs={[page("browser-1", "Browser 1"), terminal, page("browser-2", "Browser 2")]}
+      />,
+    );
+
+    // The title band names the Browser once, in its first page's place,
+    // whichever page shows.
+    const strip = screen.getByRole("tablist", { name: "Open tools" });
+    expect(
+      within(strip)
+        .getAllByRole("tab")
+        .map((tab) => tab.textContent),
+    ).toEqual(["Browser", "Terminal"]);
+    expect(within(strip).getByRole("tab", { name: "Browser" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const pages = screen.getByRole("tablist", { name: "Browser pages" });
+    expect(within(pages).getByRole("tab", { name: "Browser 2" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByText("Live Browser 2")).toBeVisible();
+    await user.click(within(pages).getByRole("tab", { name: "Browser 1" }));
+    expect(onSelectSurface).toHaveBeenCalledWith("browser-1");
+    await user.click(within(pages).getByRole("button", { name: "New Browser page" }));
+    expect(onOpenTab).toHaveBeenCalledWith("browser");
+    // Closing the Browser in the band closes every page.
+    await user.click(within(strip).getByRole("button", { name: "Hide Browser" }));
+    expect(onCloseTab.mock.calls.map(([id]) => id)).toEqual(["browser-1", "browser-2"]);
+  });
+
   it("moves between tools from the keyboard without leaving the strip", async () => {
     const user = userEvent.setup();
     const onSelectSurface = vi.fn();
