@@ -1836,6 +1836,20 @@ html[data-octant-native-host="true"]
     background-color: color-mix(in srgb, var(--octant-sheet-surface) 94%, transparent);
   }
 
+  /* Under Glass the sheet is nearly clear, so no mix of it can quiet the
+     ground; frosting what lies behind the sidebar and the dock turns the
+     letters into a haze, as behind a thread. */
+  @media (prefers-reduced-transparency: no-preference) {
+    html:not([data-octant-reduced-transparency="true"])
+      .shell--app-backdrop-sidebar.shell--material-translucent.shell-frame
+      > .sidebar::before,
+    html:not([data-octant-reduced-transparency="true"])
+      .shell--app-backdrop.shell--material-translucent.shell-frame
+      .right-utility-dock::before {
+      backdrop-filter: blur(var(--octant-glass-blur));
+    }
+  }
+
   /* Positioned for its sheet piece, but with no stacking context of its own:
      the piece sits under the ground, which sits under the panes. */
   .shell-frame > .workspace-layer {

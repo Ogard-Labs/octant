@@ -744,6 +744,11 @@ describe("WindowChrome", () => {
     expect(flattened).toContain(
       "--octant-thread-veil: color-mix(in srgb, var(--octant-sheet-surface) 80%, transparent);",
     );
+    // The thread's own container stays clear under the veil and under Glass,
+    // or it paints a solid slab over both.
+    expect(flattened).toContain(
+      ".shell--material-translucent.shell-frame .workspace-pane :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) { background: transparent; }",
+    );
   });
 
   it("keeps glass on input surfaces without enclosing agent replies", () => {

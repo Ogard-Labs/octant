@@ -712,7 +712,7 @@ produced is boxed. Over the application ground, the conversation supplies one qu
 continuous reading veil below the title band: the sheet colour at 80%, so the
 ground stays faintly visible behind the transcript (0155). Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
-ground (0150). Reduced transparency keeps the reading background opaque.
+ground (0150). Under Glass the thread's container stays clear and the ground behind the thread, the sidebar, and the dock is frosted, so it reads as a haze rather than letters. Reduced transparency keeps the reading background opaque.
 The follow-up composer has 24px of space above it outside the transcript
 scroll frame, so a reply never touches the input. Running text keeps a 72ch
 measure; tables and code blocks run the column's width, ending on the same edge

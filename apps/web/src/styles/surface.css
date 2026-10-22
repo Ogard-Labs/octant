@@ -816,6 +816,53 @@
   }
 }
 
+/* A thread's own container painted the theme's opaque workspace colour over
+   the pane, so under Glass every thread was a solid slab (near-black in the
+   OLED presets) inside a frame of glass, and the veil above never showed. In
+   the main window it is clear wherever the pane carries a surface of its own:
+   the veil over a ground, or the glass sheet. */
+.shell--app-backdrop.shell-frame
+  .workspace-pane
+  :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace),
+.shell--material-translucent.shell-frame
+  .workspace-pane
+  :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) {
+  background: transparent;
+}
+
+/* Under Glass the sheet is nearly clear, so an 80% veil of it could not quiet
+   the ground: its letters ran crisp behind the transcript. Frosting what lies
+   behind the thread turns them into a haze while the glass still shows. It
+   sits on a layer of its own, because a backdrop filter on the pane itself
+   would make the pane the containing block of everything fixed inside it. */
+@media (prefers-reduced-transparency: no-preference) {
+  html:not([data-octant-reduced-transparency="true"])
+    .shell--app-backdrop.shell--material-translucent.shell-frame
+    .workspace-pane:is(
+      [data-surface-kind="chat-thread"],
+      [data-surface-kind="work-thread"],
+      [data-surface-kind="code-overview"]
+    ) {
+    isolation: isolate;
+  }
+
+  html:not([data-octant-reduced-transparency="true"])
+    .shell--app-backdrop.shell--material-translucent.shell-frame
+    .workspace-pane:is(
+      [data-surface-kind="chat-thread"],
+      [data-surface-kind="work-thread"],
+      [data-surface-kind="code-overview"]
+    )::before {
+    position: absolute;
+    z-index: -1;
+    inset: var(--oct-title-rail-h) 0 0 0;
+    border-radius: inherit;
+    backdrop-filter: blur(var(--octant-glass-blur));
+    content: "";
+    pointer-events: none;
+  }
+}
+
 /* Where the pane meets the sheet's rounded corner, its veil rounds with it. */
 @media (min-width: 681px) {
   .shell--app-backdrop.shell-frame
