@@ -986,6 +986,16 @@ clicking opens Settings › Usage. A provider with no figure gets no ring,
 because an empty ring would claim a limit nobody reported. The rings read the
 host's last observation every few minutes, never a fresh provider call.
 
+**Back and forward.** Back and Forward sit in the title band beside the
+sidebar control (beside Show sidebar while the sidebar is hidden, and in the
+sidebar's header in a browser). They step through the pages (Inbox, Board,
+Pull requests, Projects, and the other sidebar places) and the tabs (threads,
+drafts, canvases) this window opened, switching mode when a step belongs to
+another one. The history belongs to the window and is never stored; it holds
+the last 50 steps, a new place drops the steps ahead of the current one, and
+a step whose tab was closed since is skipped. Each button stays in place,
+disabled, at its end of the history.
+
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),
 collapses the sidebar to the rail alone, which then also shows Show sidebar,

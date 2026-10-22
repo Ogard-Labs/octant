@@ -19,6 +19,8 @@ import {
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
 import { IconButton } from "./IconButton";
+import type { WindowHistory } from "./windowHistory";
+import { WindowHistoryButtons } from "./WindowHistoryButtons";
 import { ModeSwitcher } from "./ModeSwitcher";
 import { SidebarBackgroundLayer, type BackgroundFetcher } from "./SidebarBackgroundLayer";
 import { SidebarCountTiles, type SidebarTile } from "./SidebarCountTiles";
@@ -83,6 +85,8 @@ export interface ShellSidebarProps {
   readonly onOpenZen?: () => void;
   /** Hides the sidebar; the window chrome then offers the matching Show control. */
   readonly onCollapseSidebar?: () => void;
+  /** Back and forward through this window's pages and tabs, in the title band. */
+  readonly history?: WindowHistory;
   readonly onRetryChat?: () => void;
   /** Chat and Work show as one Work mode; App resolves which kind it opens. */
   readonly onSelectMode: (mode: VisibleMode) => void;
@@ -422,6 +426,12 @@ export function ShellSidebar(props: ShellSidebarProps) {
                   onClick={props.onCollapseSidebar}
                 />
               )}
+              {props.history === undefined ? null : (
+                <WindowHistoryButtons
+                  className="sidebar__native-collapse"
+                  history={props.history}
+                />
+              )}
               <span aria-hidden="true" className="sidebar__drag-surface window-drag-region" />
             </div>
           ) : null}
@@ -475,6 +485,9 @@ export function ShellSidebar(props: ShellSidebarProps) {
                         label="Hide sidebar"
                         onClick={props.onCollapseSidebar}
                       />
+                    )}
+                    {props.nativeHost === true || props.history === undefined ? null : (
+                      <WindowHistoryButtons history={props.history} />
                     )}
                   </span>
                 </>

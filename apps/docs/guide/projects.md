@@ -99,7 +99,8 @@ provider that reports plan limits shows how much of its week (outer) and five
 hours (inner) is left; hover it for every window and when it resets. **Hide sidebar** (or
 **⌘\**) shrinks the sidebar down to that rail, which then also shows the
 modes, New thread, Search, and your Projects as letter tiles. Click **Show
-sidebar** at the top of the rail, or press *_⌘\*_ again, to bring it back. In
+sidebar** at the top of the rail, or press *_⌘\*_ again, to bring it back. **Back** and **Forward** in the title band step through the pages and
+threads you opened in this window. In
 **Settings › Sidebar › Icon rail**, choose **When hidden** to show the rail
 only while the sidebar is hidden, or **Never** to hide everything.
 

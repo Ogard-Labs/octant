@@ -124,6 +124,21 @@ function atRuleBlock(atRule: string, source = styles): string {
 }
 
 describe("WindowChrome", () => {
+  it("offers Back and Forward beside Show sidebar while the sidebar is hidden, off at either end", async () => {
+    const user = userEvent.setup();
+    const history = {
+      canGoBack: true,
+      canGoForward: false,
+      goBack: vi.fn(),
+      goForward: vi.fn(),
+    };
+    renderChrome({ history, onExpandSidebar: vi.fn() });
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(history.goBack).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Forward" })).toBeDisabled();
+  });
+
   it("keeps creating a thread reachable beside the sidebar recovery control", async () => {
     const user = userEvent.setup();
     const onNewThread = vi.fn();

@@ -3,6 +3,8 @@ import { MoreHorizontal, PanelBottom, PanelLeftOpen, PanelRight, SquarePen } fro
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "./hostBridge";
 import { OctantButton } from "../ui/base/OctantButton";
 import { IconButton } from "./IconButton";
+import type { WindowHistory } from "./windowHistory";
+import { WindowHistoryButtons } from "./WindowHistoryButtons";
 
 export interface WindowChromeProps {
   readonly activeSurface: string;
@@ -24,6 +26,8 @@ export interface WindowChromeProps {
   readonly onNewThread?: () => void;
   readonly newThreadLabel?: string;
   readonly zenRecoveryNeeded?: boolean;
+  /** Back and forward, shown beside Show sidebar while the sidebar is hidden. */
+  readonly history?: WindowHistory;
 }
 
 /**
@@ -89,6 +93,9 @@ export function WindowChrome(props: WindowChromeProps) {
             label="Show sidebar"
             onClick={props.onExpandSidebar}
           />
+          {props.history === undefined ? null : (
+            <WindowHistoryButtons className="window-chrome__button" history={props.history} />
+          )}
           {props.onNewThread === undefined ? null : (
             <IconButton
               className="window-chrome__button window-chrome__new-thread"

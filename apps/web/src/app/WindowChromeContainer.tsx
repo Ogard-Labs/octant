@@ -2,6 +2,7 @@ import type { OctantMode } from "@octant/contracts/modes";
 import { memo } from "react";
 import type { OctantHostBridge, ResolvedSidebarMaterial } from "../shell/hostBridge";
 import { WindowChrome } from "../shell/WindowChrome";
+import type { WindowHistory } from "../shell/windowHistory";
 import type { ShellActions } from "./shellActions";
 
 export interface WindowChromeContainerProps {
@@ -23,6 +24,8 @@ export interface WindowChromeContainerProps {
   readonly setSidebarCollapsed: (collapsed: boolean) => void;
   readonly sidebarRail: boolean;
   readonly zenRecoveryNeeded: boolean;
+  /** Stable between moves; see useWindowHistory. */
+  readonly windowHistory: WindowHistory;
 }
 
 /**
@@ -62,7 +65,7 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
       material={material}
       nativeTitlebarInset={hostReservesTitlebarInset}
       {...(presentedSidebarCollapsed && !sidebarRail
-        ? { onExpandSidebar: () => setSidebarCollapsed(false) }
+        ? { onExpandSidebar: () => setSidebarCollapsed(false), history: props.windowHistory }
         : {})}
       {...(presentedSidebarCollapsed && !sidebarRail
         ? {

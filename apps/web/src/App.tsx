@@ -180,6 +180,7 @@ import {
   type VisibleMode,
   type WorkKind,
 } from "./shell/workKind";
+import { useWindowHistory, type WindowPlace } from "./shell/windowHistory";
 import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "./shell/contributionRegistry";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
@@ -4608,6 +4609,94 @@ function LaunchedShell(
     workspace: controller.workspace,
   });
 
+  // Derived before the loading and recovery returns below: the window history
+  // is a hook, and it must run on every render.
+  // A reader (Board, Inbox, pull requests, issues, archive) is a page about
+  // many threads, and the dock is about the one active thread; while a reader
+  // is up the dock steps aside so the page gets the pane. With the dock kept
+  // open the Board's four columns squeezed to about 90px each.
+  const readerOpen =
+    projectsListOpen ||
+    railPlaceholder !== undefined ||
+    inboxOpen ||
+    reviewOpen ||
+    codeBoardOpen ||
+    workBoardOpen ||
+    codePullRequestsOpen ||
+    githubIssuesOpen ||
+    linearIssuesOpen ||
+    archiveOpen ||
+    automationCenterOpen ||
+    agentsCenterOpen ||
+    artifactLibraryOpen ||
+    imageLibraryOpen;
+  const projectsDestinationActive =
+    projectsListOpen || (selectedProjectTabId !== undefined && !readerOpen);
+  const activeSidebarDestination: SidebarNavigationDescriptorId | undefined =
+    projectsDestinationActive
+      ? "projects"
+      : inboxOpen
+        ? "inbox"
+        : workBoardOpen || codeBoardOpen
+          ? "thread-board"
+          : codePullRequestsOpen
+            ? "pull-requests"
+            : githubIssuesOpen
+              ? "github-issues"
+              : linearIssuesOpen
+                ? "linear-issues"
+                : automationCenterOpen
+                  ? "automations"
+                  : agentsCenterOpen
+                    ? "agents"
+                    : artifactLibraryOpen
+                      ? "artifact-library"
+                      : imageLibraryOpen
+                        ? "image-library"
+                        : undefined;
+  // Back and forward step through the pages and tabs this window opened.
+  // A window still loading or recovering has no workspace yet, so no place.
+  const historyPane =
+    controller.workspace === undefined
+      ? undefined
+      : findWorkspacePane(
+          controller.workspace.layouts[activeMode],
+          controller.workspace.activePaneIds[activeMode],
+        );
+  const historyPaneId = historyPane?.paneId;
+  const historyTabId = historyPane?.surface.id;
+  const currentWindowPlace = useMemo<WindowPlace | undefined>(
+    () =>
+      activeSidebarDestination !== undefined
+        ? { kind: "page", mode: activeMode, destination: activeSidebarDestination }
+        : historyPaneId === undefined || historyTabId === undefined
+          ? undefined
+          : { kind: "tab", mode: activeMode, paneId: historyPaneId, tabId: historyTabId },
+    [activeMode, activeSidebarDestination, historyPaneId, historyTabId],
+  );
+  const windowHistory = useWindowHistory(currentWindowPlace, restoreWindowPlace);
+
+  async function restoreWindowPlace(place: WindowPlace): Promise<boolean> {
+    if (visibleModeOf(place.mode) !== visibleModeOf(activeMode)) {
+      handleSelectVisibleMode(visibleModeOf(place.mode));
+    }
+    if (place.kind === "page") {
+      const open = windowPageOpeners()[place.destination];
+      if (open === undefined) return false;
+      open();
+      return true;
+    }
+    closeWorkspaceReaders();
+    // Going back from a page to the tab under it only has to close the page:
+    // the pane still shows that tab, which is not among its other open tabs.
+    const shown =
+      controller.workspace === undefined
+        ? undefined
+        : findWorkspacePane(controller.workspace.layouts[place.mode], place.paneId)?.surface;
+    if (shown !== undefined && String(shown.id) === String(place.tabId)) return true;
+    return controller.activateContentTab(place.paneId, place.tabId);
+  }
+
   if (controller.status === "loading") {
     return (
       <main className="shell-boundary">
@@ -5031,49 +5120,6 @@ function LaunchedShell(
    * thread dismisses the reader first instead of opening the destination
    * invisibly behind it.
    */
-  // A reader (Board, Inbox, pull requests, issues, archive) is a page about
-  // many threads, and the dock is about the one active thread; while a reader
-  // is up the dock steps aside so the page gets the pane. With the dock kept
-  // open the Board's four columns squeezed to about 90px each.
-  const readerOpen =
-    projectsListOpen ||
-    railPlaceholder !== undefined ||
-    inboxOpen ||
-    reviewOpen ||
-    codeBoardOpen ||
-    workBoardOpen ||
-    codePullRequestsOpen ||
-    githubIssuesOpen ||
-    linearIssuesOpen ||
-    archiveOpen ||
-    automationCenterOpen ||
-    agentsCenterOpen ||
-    artifactLibraryOpen ||
-    imageLibraryOpen;
-  const projectsDestinationActive =
-    projectsListOpen || (selectedProjectTabId !== undefined && !readerOpen);
-  const activeSidebarDestination: SidebarNavigationDescriptorId | undefined =
-    projectsDestinationActive
-      ? "projects"
-      : inboxOpen
-        ? "inbox"
-        : workBoardOpen || codeBoardOpen
-          ? "thread-board"
-          : codePullRequestsOpen
-            ? "pull-requests"
-            : githubIssuesOpen
-              ? "github-issues"
-              : linearIssuesOpen
-                ? "linear-issues"
-                : automationCenterOpen
-                  ? "automations"
-                  : agentsCenterOpen
-                    ? "agents"
-                    : artifactLibraryOpen
-                      ? "artifact-library"
-                      : imageLibraryOpen
-                        ? "image-library"
-                        : undefined;
   // Readers hide unrelated thread tools. Selecting a pull request explicitly
   // opens its Review beside that list, so the detail must remain visible.
   const dockPresentedOpen =
@@ -5091,6 +5137,22 @@ function LaunchedShell(
   // `bottomPanelOpen`, so which tools the dock may still launch does not
   // change while a reader is up.
   const bottomPanelPresentedOpen = bottomPanelOpen && !readerOpen;
+
+  /** The pages back and forward can return to, by the destination that opens them. */
+  function windowPageOpeners(): Partial<Record<SidebarNavigationDescriptorId, () => void>> {
+    return {
+      inbox: openInbox,
+      "thread-board": openThreadBoard,
+      "pull-requests": openPullRequests,
+      "github-issues": openGithubIssues,
+      "linear-issues": openLinearIssues,
+      agents: openAgentsCenter,
+      automations: openAutomationCenter,
+      "artifact-library": openArtifactLibrary,
+      "image-library": openImageLibrary,
+      projects: openProjects,
+    };
+  }
 
   function closeWorkspaceReaders() {
     setProjectsListOpen(false);
@@ -6368,6 +6430,7 @@ function LaunchedShell(
         {...(themeController.draft === undefined ? {} : { theme: themeController.draft })}
         chrome={
           <WindowChromeContainer
+            windowHistory={windowHistory}
             actions={actions}
             activeMode={activeMode}
             activeSurface={activeSurface}
@@ -6404,6 +6467,7 @@ function LaunchedShell(
         sidebar={
           <FollowUpLineageProvider client={launchedClients.followUpSuggestionClient}>
             <SidebarContainer
+              windowHistory={windowHistory}
               actions={actions}
               {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
               {...(activeCodeThreadId === undefined ? {} : { activeCodeThreadId })}
