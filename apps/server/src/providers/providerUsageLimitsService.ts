@@ -8,6 +8,7 @@ import {
   type ProviderUsageLimitsUnavailableReason,
   type ProviderInstanceId,
   type ProviderServiceLimits,
+  type ServiceLimitBucket,
   UtcTimestamp as UtcTimestampSchema,
   type UtcTimestamp,
 } from "@octant/contracts";
@@ -49,6 +50,17 @@ export interface ProviderUsageLimitsServiceOptions {
    * knows the runtime never will names that instead.
    */
   readonly unavailableReason?: (instance: ProviderInstance) => ProviderUsageLimitsUnavailableReason;
+  /**
+   * Readings the host saved before it last stopped. They come back as past
+   * observations, with the time they were read, and give way to the first
+   * fresh evidence. Nothing here asks a provider for anything.
+   */
+  readonly restoredEntries?: ReadonlyArray<ProviderUsageLimitsEntry>;
+  /**
+   * Called with the readings worth keeping whenever they change: the entries
+   * that hold limits, a failed refresh's last good reading included.
+   */
+  readonly persistEntries?: (entries: ReadonlyArray<ProviderUsageLimitsEntry>) => void;
   readonly now: () => UtcTimestamp;
   readonly refreshIntervalMs?: number;
   readonly refreshTimeoutMs?: number;
@@ -92,6 +104,9 @@ export class ProviderUsageLimitsService {
   readonly #options: ProviderUsageLimitsServiceOptions;
   readonly #entries = new Map<string, ProviderUsageLimitsEntry>();
   readonly #runtimeOrigins = new Map<string, RuntimeEvidenceOrigin>();
+  /** Instances whose entry is still a reading restored from before a restart. */
+  readonly #restored = new Set<string>();
+  #persisted: string | undefined;
   #inFlight: Promise<ProviderUsageLimitsSnapshot> | undefined;
   #inFlightOnDemand = false;
   #refreshAbortController: AbortController | undefined;
@@ -99,6 +114,17 @@ export class ProviderUsageLimitsService {
 
   constructor(options: ProviderUsageLimitsServiceOptions) {
     this.#options = options;
+    const restored = (options.restoredEntries ?? []).filter(
+      (entry) => entry.status === "available",
+    );
+    // The saved file is the baseline: the first read rewrites it only when
+    // an entry was dropped (an instance removed or disabled since).
+    this.#persisted = JSON.stringify(restored);
+    for (const entry of restored) {
+      this.#entries.set(String(entry.providerInstanceId), entry);
+      this.#restored.add(String(entry.providerInstanceId));
+    }
+    this.#settleRestored(options.now());
   }
 
   snapshot(): ProviderUsageLimitsSnapshot {
@@ -154,12 +180,17 @@ export class ProviderUsageLimitsService {
     const observedAt = this.#options.now();
     const instances = this.#options.listInstances();
     this.#pruneRuntimeOrigins(instances);
+    this.#settleRestored(observedAt);
     const next = await Promise.all(
       instances.map((instance) => this.#observe(instance, observedAt, signal, onDemand)),
     );
     if (signal.aborted) return this.#snapshot(this.#options.now());
+    const before = new Map(this.#entries);
     this.#entries.clear();
     for (const entry of next) this.#entries.set(String(entry.providerInstanceId), entry);
+    for (const key of this.#restored) {
+      if (this.#entries.get(key) !== before.get(key)) this.#restored.delete(key);
+    }
     return this.#snapshot(this.#options.now());
   }
 
@@ -210,6 +241,16 @@ export class ProviderUsageLimitsService {
         return this.#unavailable(instance, observedAt, observation.unavailableReason);
       }
       if (observation === undefined || observation.limits === undefined) {
+        // A restored reading is the only evidence there is until a turn or a
+        // refresh a person asked for reports again, so a pass that found
+        // nothing leaves it as it was. Any live runtime report replaces it.
+        if (
+          previous?.status === "available" &&
+          this.#restored.has(key) &&
+          runtimeLimits === undefined
+        ) {
+          return previous;
+        }
         if (runtimeLimits === undefined) {
           return this.#unavailable(instance, observedAt, this.#noEvidenceReason(instance));
         }
@@ -342,7 +383,17 @@ export class ProviderUsageLimitsService {
     }
   }
 
+  /**
+   * Called when a live session reports new limit evidence, so the reading is
+   * saved when it arrives rather than when something next asks for the list.
+   */
+  noteRuntimeEvidence(): void {
+    this.#snapshot(this.#options.now());
+  }
+
   #snapshot(refreshedAt: UtcTimestamp): ProviderUsageLimitsSnapshot {
+    this.#settleRestored(refreshedAt);
+    this.#supersedeRestored(refreshedAt);
     const entries = new Map(this.#entries);
     const runtimeLimits = this.#options.runtimeLimits;
     if (runtimeLimits !== undefined) {
@@ -418,13 +469,95 @@ export class ProviderUsageLimitsService {
         });
       }
     }
-    return decodeProviderUsageLimitsSnapshot({
+    const snapshot = decodeProviderUsageLimitsSnapshot({
       version: 1,
       refreshedAt,
       entries: [...entries.values()].sort((left, right) =>
         String(left.providerInstanceId).localeCompare(String(right.providerInstanceId)),
       ),
     });
+    this.#persist(snapshot.entries);
+    return snapshot;
+  }
+
+  /**
+   * Keeps a restored reading honest: it is dropped once its instance is gone
+   * or disabled, loses windows and buckets whose reset has passed, and turns
+   * into an unavailable entry when nothing is left. The reading's own
+   * `observedAt` is never touched, so it always reads as a past observation.
+   */
+  #settleRestored(now: UtcTimestamp): void {
+    if (this.#restored.size === 0) return;
+    const instances = new Map(
+      this.#options.listInstances().map((instance) => [String(instance.id), instance]),
+    );
+    for (const key of this.#restored) {
+      const entry = this.#entries.get(key);
+      const instance = instances.get(key);
+      if (entry?.status !== "available" || instance === undefined || !instance.enabled) {
+        this.#entries.delete(key);
+        this.#restored.delete(key);
+        continue;
+      }
+      const limits = withoutExpiredEvidence(entry.limits, now);
+      if (limits === undefined) {
+        this.#entries.set(key, this.#unavailable(instance, now, this.#noEvidenceReason(instance)));
+        this.#restored.delete(key);
+      } else if (limits !== entry.limits) {
+        this.#entries.set(key, { ...entry, limits });
+      }
+    }
+  }
+
+  /**
+   * Fresh runtime evidence replaces a restored reading whole, so no bucket,
+   * quota, or retry hold from before the restart outlives the report that
+   * supersedes it.
+   */
+  #supersedeRestored(now: UtcTimestamp): void {
+    const runtimeLimits = this.#options.runtimeLimits;
+    if (runtimeLimits === undefined) return;
+    for (const key of this.#restored) {
+      const entry = this.#entries.get(key);
+      if (entry?.status !== "available") continue;
+      const limits = runtimeLimits(entry.providerInstanceId, now);
+      if (limits === undefined) continue;
+      this.#entries.set(key, {
+        providerInstanceId: entry.providerInstanceId,
+        status: "available",
+        source: "provider-runtime",
+        observedAt: limits.updatedAt,
+        limits,
+      });
+      this.#runtimeOrigins.set(key, "runtime-only");
+      this.#restored.delete(key);
+    }
+  }
+
+  #persist(entries: ReadonlyArray<ProviderUsageLimitsEntry>): void {
+    const persist = this.#options.persistEntries;
+    if (persist === undefined) return;
+    const readings = entries.flatMap((entry): ProviderUsageLimitsEntry[] => {
+      if (entry.status === "available") return [entry];
+      if (entry.status !== "failed" || entry.staleLimits === undefined) return [];
+      return [
+        {
+          providerInstanceId: entry.providerInstanceId,
+          status: "available",
+          source: entry.source,
+          observedAt: entry.lastSuccessfulAt ?? entry.observedAt,
+          limits: entry.staleLimits,
+        },
+      ];
+    });
+    const serialized = JSON.stringify(readings);
+    if (serialized === this.#persisted) return;
+    this.#persisted = serialized;
+    try {
+      persist(readings);
+    } catch {
+      // Reading the limits never fails because the file could not be saved.
+    }
   }
 
   /**
@@ -470,6 +603,59 @@ export class ProviderUsageLimitsService {
       if (!currentIds.has(ownerId)) this.#runtimeOrigins.delete(ownerId);
     }
   }
+}
+
+/**
+ * The limits with every window, bucket, and retry hold whose time has passed
+ * removed, or nothing when no figure is left to show.
+ */
+function withoutExpiredEvidence(
+  limits: ProviderServiceLimits,
+  now: UtcTimestamp,
+): ProviderServiceLimits | undefined {
+  const nowMs = Date.parse(now);
+  const bucket = (value: ServiceLimitBucket): ServiceLimitBucket =>
+    value.status === "available" &&
+    value.resetsAt !== undefined &&
+    Date.parse(value.resetsAt) <= nowMs
+      ? { status: "unavailable" }
+      : value;
+  const windows = limits.rateLimitWindows?.filter(
+    (window) => window.resetsAt === undefined || Date.parse(window.resetsAt) > nowMs,
+  );
+  const { rateLimitWindows: _stored, ...rest } = limits;
+  const next: ProviderServiceLimits = {
+    ...rest,
+    requests: bucket(limits.requests),
+    tokens: bucket(limits.tokens),
+    concurrency: bucket(limits.concurrency),
+    retry:
+      limits.retry.status === "active" && Date.parse(limits.retry.until) <= nowMs
+        ? { status: "inactive" }
+        : limits.retry,
+    ...(windows === undefined || windows.length === 0 ? {} : { rateLimitWindows: windows }),
+  };
+  // A reading that never held more than a quota state is still a reading;
+  // one that lost its windows or buckets to expiry has nothing left to show.
+  const survives = hasFigure(next) || (!hasFigure(limits) && hasServiceLimitEvidence(next));
+  if (!survives) return undefined;
+  const unchanged =
+    next.requests === limits.requests &&
+    next.tokens === limits.tokens &&
+    next.concurrency === limits.concurrency &&
+    next.retry === limits.retry &&
+    (next.rateLimitWindows?.length ?? 0) === (limits.rateLimitWindows?.length ?? 0);
+  return unchanged ? limits : next;
+}
+
+function hasFigure(limits: ProviderServiceLimits): boolean {
+  return (
+    (limits.rateLimitWindows?.length ?? 0) > 0 ||
+    limits.requests.status === "available" ||
+    limits.tokens.status === "available" ||
+    limits.concurrency.status === "available" ||
+    limits.retry.status === "active"
+  );
 }
 
 function withoutWindows(limits: ProviderServiceLimits): ProviderServiceLimits {

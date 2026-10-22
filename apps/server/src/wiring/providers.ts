@@ -20,6 +20,7 @@ import {
   type ProviderProbeResult,
   type ProviderRuntimeEvent,
   type UtcTimestamp,
+  decodeProjectId,
 } from "@octant/contracts";
 import { ExtensionProviderFamily } from "@octant/contracts/extensions";
 import type { ProviderDriver, ProviderLocalUsageHistorySource } from "@octant/provider-sdk";
@@ -44,6 +45,7 @@ import { makeAnthropicCompatibleDriver } from "../providers/anthropicCompatibleD
 import { makeAzureFoundryDriver } from "../providers/azureFoundryDriver";
 import {
   makeCredentialBrokerClient,
+  makeMcpServerCredentialBrokerClient,
   type ProviderCredentialResolver,
 } from "../providers/credentialBrokerClient";
 import { makeProviderApiKeyPool } from "../providers/providerApiKeyPool";
@@ -91,6 +93,7 @@ import { ProviderUsageLimitsService } from "../providers/providerUsageLimitsServ
 import { unavailableLimitsReason } from "../providers/providerLimitsReporting";
 import { createProviderUsageLimitsRouteHandler } from "../providers/providerUsageLimitsRoutes";
 import { ProviderAccountPlanUsageStore } from "../providers/providerAccountPlanUsageStore";
+import { ProviderUsageReadingStore } from "../providers/providerUsageReadingStore";
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -131,6 +134,15 @@ import { NpmAgentPluginMarketplace } from "../extensions/npmAgentPluginMarketpla
 import { createDefaultCodexPluginPackageSources } from "../extensions/curatedBuildIosAppsCatalog";
 import { AgentPluginMcpSessionManager } from "../extensions/agentPluginMcpSessionManager";
 import { LocalPluginFolderRegistry } from "../extensions/localPluginFolderRegistry";
+import { UserAddedMcpServerStore } from "../extensions/userAddedMcpServers";
+import { AgentToolingDiscovery } from "../extensions/agentToolingDiscovery";
+import { McpServerSignIn } from "../extensions/mcpServerSignIn";
+import { ExtensionProjectPinStore } from "../extensions/extensionProjectPinStore";
+import type {
+  ExtensionProjectPinListing,
+  McpServerSignInView,
+} from "@octant/contracts/extension-rpc";
+import { validateAgentPluginsMcpDocument } from "@octant/plugin-host/agent-plugins";
 import { LocalPluginImportReceiptStore } from "../extensions/localPluginImportReceiptStore";
 import { createExtensionToolCallAuthorizer } from "../extensions/extensionToolCallAuthorizer";
 import { ExtensionToolGrantStore } from "../extensions/extensionToolGrantStore";
@@ -392,8 +404,14 @@ export function wireProviders(deps: ProvidersDependencies) {
       join(providerDataDirectory, "providers", "plan-usage.json"),
     );
     void providerAccountPlanUsageStore.load().catch(() => undefined);
+    let providerUsageLimitsServiceRef: ProviderUsageLimitsService | undefined;
     const recordProviderRuntimeUsage = (event: ProviderRuntimeEvent): void => {
       providerRuntimeUsageLimitsStore.record(event);
+      if (event.kind === "rate-limit-window" || event.kind === "rate-limit-bucket") {
+        // Saved as it arrives, so a host that closes before the next poll
+        // keeps the reading.
+        providerUsageLimitsServiceRef?.noteRuntimeEvidence();
+      }
       if (event.kind !== "rate-limit-window") return;
       const instance = persistence
         .readProviderInstances()
@@ -518,11 +536,67 @@ export function wireProviders(deps: ProvidersDependencies) {
         statePath: join(providerDataDirectory, "extensions", "local-plugin-folders.json"),
       });
     yield* Effect.promise(() => localPluginFolderRegistry.initialize());
+    // The packages the host writes for MCP servers a person adds by hand live
+    // in the host's own folder, registered under their own source kind, with
+    // their secret values in the broker's namespace for them.
+    const userAddedPluginRegistry = new LocalPluginFolderRegistry({
+      appVersion: version,
+      platform: process.platform,
+      statePath: join(providerDataDirectory, "extensions", "user-added-servers.json"),
+      sourceKind: "user-added",
+    });
+    yield* Effect.promise(() => userAddedPluginRegistry.initialize());
+    // Sign-in to a hosted server needs the host OAuth service, which is made
+    // further down once the broker is known; the holder lets the session
+    // manager and the routes reach it from here.
+    const mcpServerSignInHolder: { current: McpServerSignIn | undefined } = { current: undefined };
+    const signInOrUnavailable = async (
+      run: (signIn: McpServerSignIn) => Promise<McpServerSignInView>,
+    ): Promise<McpServerSignInView> =>
+      mcpServerSignInHolder.current === undefined
+        ? {
+            kind: "refused",
+            reason: "unavailable",
+            message: "Signing in needs the credential broker.",
+          }
+        : run(mcpServerSignInHolder.current);
+    const userAddedMcpServers = new UserAddedMcpServerStore({
+      directory: join(providerDataDirectory, "extensions", "user-added"),
+      registry: userAddedPluginRegistry,
+      ...(options.credentialBrokerUrl === undefined || options.credentialBrokerToken === undefined
+        ? {}
+        : {
+            secrets: makeMcpServerCredentialBrokerClient({
+              url: options.credentialBrokerUrl,
+              token: options.credentialBrokerToken,
+            }),
+          }),
+    });
+    // What Claude Code and Codex keep on this computer, read for a local
+    // window to pick from; Octant never writes to their files.
+    const agentToolingDiscovery = new AgentToolingDiscovery({
+      home: homedir(),
+      projectRoots: () =>
+        persistence
+          .readProjects({ lifecycle: "active" })
+          .flatMap((project) =>
+            "binding" in project &&
+            typeof project.binding === "object" &&
+            project.binding !== null &&
+            "canonicalRoot" in project.binding &&
+            typeof project.binding.canonicalRoot === "string"
+              ? [project.binding.canonicalRoot]
+              : [],
+          ),
+      env: process.env,
+      parseToml: (text) => Bun.TOML.parse(text),
+    });
     const extensionPackageResolver =
       options.extensionPackageResolver ??
       new CodexPluginPackageResolver({
         ...(options.codexPluginPackageSources ?? createDefaultCodexPluginPackageSources()),
         localFolderRegistry: localPluginFolderRegistry,
+        userAddedRegistry: userAddedPluginRegistry,
         isMarketplaceFetchAllowed,
         agentPluginCatalog: new NpmAgentPluginMarketplace({
           appVersion: version,
@@ -530,6 +604,19 @@ export function wireProviders(deps: ProvidersDependencies) {
           isMarketplaceFetchAllowed,
         }),
       });
+    // A pin offers a plugin on every Work or Code turn in one Project. The
+    // turn's extension resolver turns each pinned id into a selection against
+    // the Project's current catalog, so a pin to a package that is not
+    // installed, trusted and switched on is skipped rather than failing the turn.
+    const extensionProjectPinStore = new ExtensionProjectPinStore({
+      journal: persistence.journal,
+      connection: persistence.connection,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+      actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+    });
+    const pinnedExtensionIds = (projectId: string): ReadonlyArray<string> =>
+      extensionProjectPinStore.list(projectId);
     const extensionToolGrantStore = new ExtensionToolGrantStore({
       journal: persistence.journal,
       connection: persistence.connection,
@@ -553,6 +640,14 @@ export function wireProviders(deps: ProvidersDependencies) {
             readApprovalOutsideContent(persistence.connection, threadId),
         }),
         recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
+        isUserAddedSource: (sourceRef) => userAddedMcpServers.owns(sourceRef),
+        resolveUserAddedSecrets: async (launch, target) => {
+          const withSecrets = await userAddedMcpServers.resolveLaunchSecrets(launch);
+          const signIn = mcpServerSignInHolder.current;
+          return signIn === undefined
+            ? withSecrets
+            : signIn.attachBearer(target.extensionId, target.componentId, withSecrets);
+        },
         ...(extensionSupervisor instanceof ExtensionSupervisor
           ? { stdioSupervisor: extensionSupervisor }
           : {}),
@@ -585,9 +680,22 @@ export function wireProviders(deps: ProvidersDependencies) {
         // Uninstall, rollback, and withdrawn trust end the package's remembered
         // tool approvals, so bringing it back restores none of them.
         extensionToolGrantStore.revokeForLifecycleChange(command);
+        if (
+          command.kind === "uninstall-package" &&
+          !snapshot.packages.some((candidate) => candidate.extensionId === command.extensionId)
+        ) {
+          extensionProjectPinStore.forgetExtension(String(command.extensionId));
+        }
         // Settings has no thread authority. Drain only package/components whose
         // lifecycle state changed; unrelated in-flight MCP calls remain intact.
         await agentPluginMcpSessionManager.reconcileLifecycleSnapshot(snapshot);
+      },
+      userAddedMcpServers: {
+        owns: (sourceRef) => userAddedMcpServers.owns(sourceRef),
+        remove: async (sourceRef, extensionId) => {
+          await mcpServerSignInHolder.current?.forgetPackage(extensionId);
+          await userAddedMcpServers.remove(sourceRef);
+        },
       },
     });
     const resolveSelectedExtensions = createSelectedExtensionResolver({
@@ -633,6 +741,43 @@ export function wireProviders(deps: ProvidersDependencies) {
         : { desktopBridgeSecret: options.desktopBridgeSecret }),
       localPluginFolderRegistry,
       localPluginImportReceipts: new LocalPluginImportReceiptStore(),
+      userAddedMcpServers,
+      agentToolingDiscovery,
+      extensionProjectPins: {
+        list: () => ({
+          projects: persistence
+            .readProjects({ lifecycle: "active" })
+            .flatMap((project) =>
+              project.type === "work" || project.type === "code"
+                ? [{ projectId: project.id, name: project.name, type: project.type }]
+                : [],
+            ),
+          pins: extensionProjectPinStore.listAll().map((pin) => ({
+            projectId: pin.projectId as ExtensionProjectPinListing["pins"][number]["projectId"],
+            extensionId:
+              pin.extensionId as ExtensionProjectPinListing["pins"][number]["extensionId"],
+          })),
+        }),
+        set: (projectId, extensionId, pinned) => {
+          const project = persistence.readProject(decodeProjectId(projectId));
+          if (project === undefined || project.lifecycle !== "active" || project.type === "chat") {
+            return "refused";
+          }
+          return extensionProjectPinStore.set(projectId, extensionId, pinned);
+        },
+      },
+      mcpServerSignIn: {
+        status: (extensionId, componentId, principalKind) =>
+          signInOrUnavailable((signIn) => signIn.status(extensionId, componentId, principalKind)),
+        begin: (extensionId, componentId, principalKind) =>
+          signInOrUnavailable((signIn) => signIn.begin(extensionId, componentId, principalKind)),
+        poll: (extensionId, componentId, attemptId, principalKind) =>
+          signInOrUnavailable((signIn) =>
+            signIn.poll(extensionId, componentId, attemptId, principalKind),
+          ),
+        signOut: (extensionId, componentId, principalKind) =>
+          signInOrUnavailable((signIn) => signIn.signOut(extensionId, componentId, principalKind)),
+      },
       toolApprovals: extensionToolApprovalService,
       toolGrants: extensionToolGrantStore,
     });
@@ -843,6 +988,52 @@ export function wireProviders(deps: ProvidersDependencies) {
       for (const acknowledgment of oauthJournal.acknowledgments()) {
         hostOAuth.restoreAcknowledgment(acknowledgment);
       }
+    }
+    if (hostOAuth !== undefined && oauthBroker !== undefined) {
+      mcpServerSignInHolder.current = new McpServerSignIn({
+        statePath: join(providerDataDirectory, "extensions", "mcp-server-sign-ins.json"),
+        oauth: hostOAuth,
+        access: (credentialRef) => oauthBroker.access(credentialRef),
+        actorId: OCTANT_LOCAL_ACTOR_ID,
+        // The address a user-added server's package names, read from the
+        // installed package itself so a sign-in can only ever target the
+        // server the person added.
+        serverUrl: async (extensionId, componentId) => {
+          const packageState = extensionLifecycleService
+            .snapshot()
+            .packages.find((candidate) => candidate.extensionId === extensionId);
+          if (packageState === undefined || packageState.source.kind !== "user-added") {
+            return undefined;
+          }
+          const componentState = packageState.components.find(
+            (candidate) => candidate.component.id === componentId,
+          );
+          if (componentState?.component.kind !== "mcp-server") return undefined;
+          let raw: unknown;
+          try {
+            raw = JSON.parse(
+              await extensionPackageStore.readVerifiedConfiguration(
+                {
+                  extensionId,
+                  packageId: packageState.packageId,
+                  version: packageState.version,
+                  digest: packageState.digest,
+                },
+                componentId,
+              ),
+            );
+          } catch {
+            return undefined;
+          }
+          const document = validateAgentPluginsMcpDocument(raw, {
+            pluginSchema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+          });
+          const server = document.servers.find(
+            (candidate) => candidate.name === componentState.component.displayName,
+          );
+          return server !== undefined && server.type !== "stdio" ? server.url : undefined;
+        },
+      });
     }
     const subscriptionOAuth =
       oauthBroker === undefined ? undefined : subscriptionOAuthHostFromBroker(oauthBroker);
@@ -1100,7 +1291,16 @@ export function wireProviders(deps: ProvidersDependencies) {
       },
       clock: () => new Date().toISOString(),
     });
+    // The last reading of each instance, so the usage rings have something
+    // to show before the first turn of a new run reports. Loading it asks no
+    // provider anything.
+    const providerUsageReadingStore = new ProviderUsageReadingStore(
+      join(providerDataDirectory, "providers", "usage-readings.json"),
+    );
+    const restoredUsageReadings = yield* Effect.promise(() => providerUsageReadingStore.load());
     const providerUsageLimitsService = new ProviderUsageLimitsService({
+      restoredEntries: restoredUsageReadings,
+      persistEntries: (entries) => providerUsageReadingStore.save(entries),
       // Image profiles are jobs against a generation endpoint, not runtimes
       // with an account to meter; listing them would promise a report that
       // has no channel to arrive on.
@@ -1178,6 +1378,7 @@ export function wireProviders(deps: ProvidersDependencies) {
           : providerAccountPlanUsageStore.serviceLimits(instanceId, directory, observedAt);
       },
     });
+    providerUsageLimitsServiceRef = providerUsageLimitsService;
     providerUsageLimitsService.start();
     void providerUsageLimitsService.refresh().catch(() => undefined);
     const providerUsageLimitsRoutes = createProviderUsageLimitsRouteHandler({
@@ -1245,6 +1446,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       providerUsageLimitsService,
       refreshStandaloneSkills,
       resolveSelectedExtensions,
+      pinnedExtensionIds,
       reviewedModelManifest,
       skillDiscoveryService,
     };

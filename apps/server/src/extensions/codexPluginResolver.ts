@@ -55,6 +55,10 @@ export interface CodexPluginPackageResolverOptions {
   readonly localFolderRegistry?: {
     get(sourceRef: string): { readonly packageInput: PluginPackageInput } | undefined;
   };
+  /** Resolves the packages the host wrote for MCP servers a person added by hand. */
+  readonly userAddedRegistry?: {
+    get(sourceRef: string): { readonly packageInput: PluginPackageInput } | undefined;
+  };
   readonly fetch?: PinnedUpstreamFetchInput["fetch"];
   readonly appVersion?: string;
   readonly platform?: NodeJS.Platform;
@@ -70,6 +74,7 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
   readonly #localFolderRegistry:
     | { get(sourceRef: string): { readonly packageInput: PluginPackageInput } | undefined }
     | undefined;
+  readonly #userAddedRegistry: CodexPluginPackageResolverOptions["userAddedRegistry"];
   readonly #fetch: PinnedUpstreamFetchInput["fetch"];
   readonly #appVersion: string;
   readonly #platform: NodeJS.Platform;
@@ -79,6 +84,7 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
     this.#catalog = options.catalog ?? [];
     this.#localFolders = options.localFolders ?? new Map();
     this.#localFolderRegistry = options.localFolderRegistry;
+    this.#userAddedRegistry = options.userAddedRegistry;
     this.#fetch =
       options.isMarketplaceFetchAllowed === undefined && options.fetch === undefined
         ? undefined
@@ -217,6 +223,13 @@ export class CodexPluginPackageResolver implements ExtensionPackageResolverPort 
         this.#localFolderRegistry?.get(source.sourceRef)?.packageInput;
       if (input === undefined || !sameSource(input.source, source)) {
         throw new Error("Local plugin folder is unavailable.");
+      }
+      return input;
+    }
+    if (source.kind === "user-added") {
+      const input = this.#userAddedRegistry?.get(source.sourceRef)?.packageInput;
+      if (input === undefined || !sameSource(input.source, source)) {
+        throw new Error("The added server's package is unavailable.");
       }
       return input;
     }

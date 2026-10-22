@@ -1,14 +1,22 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { ExtensionSource } from "@octant/contracts/extensions";
-import { loadAgentPluginDirectory, localPluginSourceRefForPath } from "./agentPluginFilesystem";
-import type { AgentPluginPackageInput } from "./agentPluginIngestion";
+import { localPluginSourceRefForPath } from "./agentPluginFilesystem";
+import type { PluginPackageInput } from "./codexPluginResolver";
 import type { ExtensionArchiveEntry } from "./packageInspector";
+import { loadPluginDirectory, type PluginDirectoryFormat } from "./pluginDirectoryLoader";
+
+/** The source kinds a folder registry may hand out: a folder the person picked, or one the host wrote for a server they added. */
+export type LocalPluginFolderSourceKind = "local-folder" | "user-added";
 
 export interface RegisteredLocalPluginFolder {
-  readonly source: Extract<ExtensionSource, { readonly kind: "local-folder" }>;
+  readonly source: Extract<ExtensionSource, { readonly kind: LocalPluginFolderSourceKind }>;
   readonly absolutePath: string;
-  readonly packageInput: AgentPluginPackageInput;
+  readonly packageInput: PluginPackageInput;
+  /** The layout the folder was read as. */
+  readonly format: PluginDirectoryFormat;
+  /** What the loader left out of another tool's plugin, in plain words. */
+  readonly notes: ReadonlyArray<string>;
 }
 
 interface PersistedLocalPluginFolders {
@@ -27,24 +35,28 @@ export class LocalPluginFolderRegistry {
   readonly #appVersion: string;
   readonly #platform: NodeJS.Platform;
   readonly #statePath: string | undefined;
+  readonly #sourceKind: LocalPluginFolderSourceKind;
 
   constructor(
     options: {
       readonly appVersion?: string;
       readonly platform?: NodeJS.Platform;
       readonly statePath?: string;
+      /** The source kind every folder here is registered under; local-folder unless told otherwise. */
+      readonly sourceKind?: LocalPluginFolderSourceKind;
     } = {},
   ) {
     this.#appVersion = options.appVersion ?? "1.0.0";
     this.#platform = options.platform ?? process.platform;
     this.#statePath = options.statePath;
+    this.#sourceKind = options.sourceKind ?? "local-folder";
   }
 
   get(sourceRef: string): RegisteredLocalPluginFolder | undefined {
     return this.#folders.get(sourceRef);
   }
 
-  snapshot(): ReadonlyMap<string, AgentPluginPackageInput> {
+  snapshot(): ReadonlyMap<string, PluginPackageInput> {
     return new Map(
       [...this.#folders.entries()].map(([sourceRef, folder]) => [sourceRef, folder.packageInput]),
     );
@@ -86,35 +98,54 @@ export class LocalPluginFolderRegistry {
     absolutePath: string,
     options: { readonly persist?: boolean } = {},
   ): Promise<RegisteredLocalPluginFolder> {
-    const loaded = await loadAgentPluginDirectory(absolutePath);
+    const loaded = await loadPluginDirectory(absolutePath);
     const sourceRef = localPluginSourceRefForPath(loaded.pluginRoot);
     const source = {
-      kind: "local-folder",
+      kind: this.#sourceKind,
       sourceRef,
-    } as Extract<ExtensionSource, { readonly kind: "local-folder" }>;
+    } as Extract<ExtensionSource, { readonly kind: LocalPluginFolderSourceKind }>;
     const entries: ExtensionArchiveEntry[] = loaded.entries.map((entry) => ({
       path: entry.path,
       kind: entry.kind === "directory" ? "directory" : "file",
       ...(entry.content === undefined ? {} : { content: entry.content }),
     }));
-    const packageInput: AgentPluginPackageInput = {
-      source,
-      format: "directory",
-      archiveBytes: loaded.archiveBytes,
-      entries,
-      appVersion: this.#appVersion,
-      platform: this.#platform,
-    };
+    const packageInput: PluginPackageInput =
+      loaded.format === "codex-plugin"
+        ? {
+            source,
+            format: "directory",
+            archiveBytes: loaded.archiveBytes,
+            manifest: loaded.codexManifest,
+            entries,
+            appVersion: this.#appVersion,
+            platform: this.#platform,
+          }
+        : {
+            source,
+            format: "directory",
+            archiveBytes: loaded.archiveBytes,
+            entries,
+            appVersion: this.#appVersion,
+            platform: this.#platform,
+          };
     const registered: RegisteredLocalPluginFolder = {
       source,
       absolutePath: loaded.pluginRoot,
       packageInput,
+      format: loaded.format,
+      notes: loaded.notes,
     };
     this.#folders.set(sourceRef, registered);
     if (options.persist !== false) {
       await this.#persist();
     }
     return registered;
+  }
+
+  /** Forgets a folder; the caller removes what is on disk. */
+  async unregister(sourceRef: string): Promise<void> {
+    if (!this.#folders.delete(sourceRef)) return;
+    await this.#persist();
   }
 
   async #persist(): Promise<void> {

@@ -340,24 +340,44 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
         origin,
       );
     }
-    // The receipt is the only way a path reaches this route: one the picker
-    // issued to this window, not yet used, and not expired.
-    const binaryPath = dependencies.binaryReceipts.consume({
-      receiptId: command.receiptId,
-      windowId,
-      now: now(),
-    });
-    if (binaryPath === undefined) {
-      return response(
-        {
-          category: "unauthorized",
-          message: "Choose the binary again; that selection is no longer valid.",
-        },
-        401,
-        origin,
-      );
+    // A path reaches this route in one of two ways, and neither lets the
+    // renderer name an arbitrary one: a receipt the picker issued to this
+    // window (not yet used, not expired), or a path the latest scan found for
+    // this runtime's driver kind. Both then take the same check and update.
+    let binaryPath: string;
+    let instance: ProviderInstance | undefined;
+    if ("receiptId" in command) {
+      const consumed = dependencies.binaryReceipts.consume({
+        receiptId: command.receiptId,
+        windowId,
+        now: now(),
+      });
+      if (consumed === undefined) {
+        return response(
+          {
+            category: "unauthorized",
+            message: "Choose the binary again; that selection is no longer valid.",
+          },
+          401,
+          origin,
+        );
+      }
+      binaryPath = consumed;
+      instance = dependencies.readInstance(command.instanceId);
+    } else {
+      binaryPath = command.scannedBinaryPath;
+      instance = dependencies.readInstance(command.instanceId);
+      if (instance !== undefined && !wasFoundByLatestScan(instance, binaryPath)) {
+        return response(
+          {
+            category: "unknown-candidate",
+            message: "Use a binary from the latest discovery scan on this host.",
+          },
+          400,
+          origin,
+        );
+      }
     }
-    const instance = dependencies.readInstance(command.instanceId);
     if (instance === undefined || !canLocateRuntimeBinary(instance.driverKind)) {
       return response(
         { category: "unsupported", message: "This provider does not run a local binary." },
@@ -396,6 +416,19 @@ export function createDiscoveryRouteHandler(dependencies: DiscoveryRouteDependen
       { kind: "binary-located", instanceId: instance.id, version: checked.version },
       200,
       origin,
+    );
+  }
+
+  /**
+   * Whether the latest scan found this path for this runtime's driver kind,
+   * under either spelling it records: the launcher path it examined or the
+   * canonical target.
+   */
+  function wasFoundByLatestScan(instance: ProviderInstance, path: string): boolean {
+    return (dependencies.discoveryService.getLastScanCandidates?.() ?? []).some(
+      (candidate) =>
+        candidate.driverKind === instance.driverKind &&
+        (candidate.binaryPath === path || candidate.discoveredPath === path),
     );
   }
 }

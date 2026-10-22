@@ -8,6 +8,7 @@ import {
   type NativeHarnessSlotId,
   type ProviderModel,
 } from "@octant/contracts";
+import type { VoiceModelHint } from "./voiceModels";
 
 /** The kinds of endpoint Add endpoint connects by address, in the order it offers them. */
 export type EndpointKind =
@@ -73,6 +74,93 @@ export const ENDPOINT_KINDS: ReadonlyArray<EndpointKindPresentation> = [
 export function endpointKindPresentation(kind: EndpointKind): EndpointKindPresentation {
   const found = ENDPOINT_KINDS.find((entry) => entry.kind === kind);
   if (found === undefined) throw new Error(`Unknown endpoint kind ${kind}`);
+  return found;
+}
+
+/**
+ * A service Add endpoint offers by name beside the sign-ins: the person pastes
+ * a key and the address, protocol and name are already right. A preset makes
+ * an ordinary endpoint of its kind; nothing about it reaches the host.
+ */
+export interface EndpointPreset {
+  readonly id: string;
+  readonly kind: "openai-compatible";
+  readonly displayName: string;
+  /** One line under the name: what the service is and what the key costs. */
+  readonly detail: string;
+  /** The logo mark's key in the provider logo set. */
+  readonly glyph: string;
+  readonly baseUrl: string;
+  readonly protocol: "auto" | "responses" | "chat-completions";
+  /** Where the person creates the key, named as a page they can open. */
+  readonly keyPage: { readonly label: string; readonly url: string };
+  /** Voice models the service serves, so the endpoint can offer them to Voice settings. */
+  readonly voice?: VoiceModelHint;
+}
+
+/**
+ * Addresses were probed on 2026-10-20: each one answers `/models` with the
+ * OpenAI list shape (or 401 without a key, for Mistral) and serves
+ * `/chat/completions`. OpenCode's `/inference/openai/v1` base, the one its SDK
+ * examples use, does not list models, so the presets use the `/inference/v1`
+ * bases, which serve the models route and both OpenAI protocols.
+ */
+export const ENDPOINT_PRESETS: ReadonlyArray<EndpointPreset> = [
+  {
+    id: "opencode-go",
+    kind: "openai-compatible",
+    displayName: "OpenCode Go",
+    detail: "Open models on the OpenCode Go subscription. Needs the Go plan and its key.",
+    glyph: "opencode",
+    baseUrl: "https://opencode.ai/inference/go/v1",
+    protocol: "auto",
+    keyPage: { label: "the OpenCode console", url: "https://opencode.ai/console/go" },
+  },
+  {
+    id: "opencode-zen",
+    kind: "openai-compatible",
+    displayName: "OpenCode Zen",
+    detail: "OpenCode's model gateway, paid per request from your console credits.",
+    glyph: "opencode",
+    baseUrl: "https://opencode.ai/inference/v1",
+    protocol: "auto",
+    keyPage: { label: "the OpenCode console", url: "https://opencode.ai/console" },
+  },
+  {
+    id: "mistral",
+    kind: "openai-compatible",
+    displayName: "Mistral",
+    detail: "Mistral's models with a Mistral API key, the same key Vibe uses.",
+    glyph: "mistral-vibe",
+    baseUrl: "https://api.mistral.ai/v1",
+    protocol: "chat-completions",
+    keyPage: { label: "Mistral Studio", url: "https://console.mistral.ai/api-keys" },
+    // Voxtral: transcription over the OpenAI-shaped audio route; speech over
+    // Mistral's own dialect (voice_id, base64 reply), which the host speaks.
+    voice: { transcription: "voxtral-mini-latest", speech: "voxtral-mini-tts-2603" },
+  },
+  {
+    id: "requesty",
+    kind: "openai-compatible",
+    displayName: "Requesty",
+    detail: "One key for many models, billed by Requesty.",
+    glyph: "model-endpoint",
+    baseUrl: "https://router.requesty.ai/v1",
+    protocol: "chat-completions",
+    keyPage: { label: "the Requesty app", url: "https://app.requesty.ai" },
+  },
+];
+
+/** The preset whose address an endpoint uses, so its page can offer what the preset knows. */
+export function endpointPresetForUrl(baseUrl: string): EndpointPreset | undefined {
+  const normalize = (url: string) => url.trim().replace(/\/+$/, "").toLowerCase();
+  const wanted = normalize(baseUrl);
+  return ENDPOINT_PRESETS.find((entry) => normalize(entry.baseUrl) === wanted);
+}
+
+export function endpointPreset(id: string): EndpointPreset {
+  const found = ENDPOINT_PRESETS.find((entry) => entry.id === id);
+  if (found === undefined) throw new Error(`Unknown endpoint preset ${id}`);
   return found;
 }
 

@@ -21,10 +21,6 @@
   --oct-provider-setup: var(--octant-palette-orange, currentColor);
 }
 
-:root[data-octant-style="vivid"] .welcome__heading > .oct-title--hero {
-  color: var(--oct-vivid-accent);
-}
-
 /* Canvases in a thread take the hue of what they hold: a plan purple, a
    chart or a row of figures the first chart series' amber, a diagram teal,
    a mockup pink, a table or document blue. The hue tints the card's ring

@@ -228,6 +228,17 @@ describe("SettingsView", () => {
     expect(props.onSettingsChange).toHaveBeenCalledWith({ showThreadStats: false });
   });
 
+  it("draws the usage bars smooth until Pixelated is chosen in Appearance", async () => {
+    const user = userEvent.setup();
+    const { props } = renderSettings();
+    navigateTo("Appearance");
+
+    expect(screen.getByRole("button", { name: "Smooth" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Pixelated" }));
+
+    expect(props.onSettingsChange).toHaveBeenCalledWith({ usageBars: "pixelated" });
+  });
+
   it("shows the stats line switch off when the saved preference is off", () => {
     renderSettings({ settings: { ...defaultShellSettings(), showThreadStats: false } });
     navigateTo("Appearance");
@@ -901,38 +912,6 @@ describe("SettingsView", () => {
       screen.queryByText("Translucency is unavailable, so Octant is using an opaque sidebar."),
     ).not.toBeInTheDocument();
   });
-  it("only enables Glass cards once the glass itself is on", async () => {
-    const user = userEvent.setup();
-    const onSettingsChange = vi.fn();
-    renderSettings({
-      onSettingsChange,
-      settings: { ...defaultShellSettings(), workspaceMaterial: "opaque" },
-    });
-    navigateTo("Appearance");
-
-    const control = screen.getByRole("switch", { name: "Glass cards" });
-    expect(control).toHaveAttribute("aria-checked", "false");
-    expect(control).not.toHaveAttribute("aria-disabled", "true");
-    await user.click(control);
-    expect(onSettingsChange).toHaveBeenLastCalledWith({ workspaceMaterial: "system" });
-  });
-
-  it("disables Glass cards and explains why when the glass is off", () => {
-    renderSettings({
-      settings: {
-        ...defaultShellSettings(),
-        sidebarMaterial: "opaque",
-        workspaceMaterial: "system",
-      },
-    });
-    navigateTo("Appearance");
-
-    const control = screen.getByRole("switch", { name: "Glass cards" });
-    expect(control).toHaveAttribute("aria-disabled", "true");
-    expect(control).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByText("Turn on Glass first.")).toBeInTheDocument();
-  });
-
   it("shows the effective fallback note for reduced transparency and unsupported backdrop", () => {
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8");
 
@@ -1494,6 +1473,11 @@ describe("SettingsView", () => {
       })),
       execute: vi.fn(),
       importLocalPluginReceipt: vi.fn(),
+      addUserMcpServer: vi.fn() as never,
+      listDiscoveredTooling: vi.fn() as never,
+      mcpServerSignIn: vi.fn() as never,
+      projectPins: vi.fn() as never,
+      applyDiscoveredTooling: vi.fn() as never,
     };
     renderSettings({ extensionClient: extensionClient as never });
     navigateTo("Skills & Extensions");
@@ -1796,8 +1780,6 @@ describe("SettingsView", () => {
       "settings-view__text-input",
     );
     expect(screen.getByRole("switch", { name: "Enable Chat" })).toHaveClass("octant-switch");
-    fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
-    expect(screen.getByRole("switch", { name: "Glass cards" })).toHaveClass("octant-switch");
     fireEvent.click(screen.getByRole("button", { name: "Sidebar" }));
     expect(screen.getByRole("slider", { name: "Sidebar width" })).toHaveClass(
       "settings-view__range",

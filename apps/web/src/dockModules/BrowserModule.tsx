@@ -39,6 +39,7 @@ export default function BrowserModule(props: Props) {
       client={props.browserAutomationClient}
       {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
       {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+      {...(props.subject.projectId === undefined ? {} : { projectId: props.subject.projectId })}
       {...(props.onBrowserContextCreated === undefined
         ? {}
         : { onContextCreated: props.onBrowserContextCreated })}

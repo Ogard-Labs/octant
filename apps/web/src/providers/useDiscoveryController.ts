@@ -1,4 +1,9 @@
-import type { DiscoveryCandidate, DiscoverySnapshot, ProviderInstanceId } from "@octant/contracts";
+import type {
+  DiscoveryCandidate,
+  DiscoveryCommand,
+  DiscoverySnapshot,
+  ProviderInstanceId,
+} from "@octant/contracts";
 import {
   createDiscoveryClient,
   type DiscoveryClient,
@@ -131,13 +136,15 @@ export function useDiscoveryController(options: DiscoveryControllerOptions) {
    * Redeems a native file-picker receipt for a runtime's binary. The host
    * checks the file and answers the version it printed, or why it refused.
    */
-  const locateBinary = useCallback(
-    async (instanceId: ProviderInstanceId, receiptId: string): Promise<LocateBinaryOutcome> => {
+  const pointRuntimeAtBinary = useCallback(
+    async (
+      command: Extract<DiscoveryCommand, { kind: "locate-binary" }>,
+    ): Promise<LocateBinaryOutcome> => {
       if (client === undefined) {
         return { kind: "refused", message: "Discovery is unavailable for this window." };
       }
       try {
-        const result = await client.locateBinary({ kind: "locate-binary", instanceId, receiptId });
+        const result = await client.locateBinary(command);
         return { kind: "located", version: result.version };
       } catch (error) {
         return {
@@ -152,6 +159,23 @@ export function useDiscoveryController(options: DiscoveryControllerOptions) {
     [client],
   );
 
+  const locateBinary = useCallback(
+    (instanceId: ProviderInstanceId, receiptId: string) =>
+      pointRuntimeAtBinary({ kind: "locate-binary", instanceId, receiptId }),
+    [pointRuntimeAtBinary],
+  );
+
+  /**
+   * Points a runtime at a binary the latest scan found. The host takes the path
+   * only if it names a candidate of that runtime from its own scan, and checks
+   * it exactly as it checks a picked file.
+   */
+  const adoptScannedBinary = useCallback(
+    (instanceId: ProviderInstanceId, scannedBinaryPath: string) =>
+      pointRuntimeAtBinary({ kind: "locate-binary", instanceId, scannedBinaryPath }),
+    [pointRuntimeAtBinary],
+  );
+
   // One identity while nothing in it moved; see useRetainedRecord.
   return useRetainedRecord({
     snapshot,
@@ -161,6 +185,7 @@ export function useDiscoveryController(options: DiscoveryControllerOptions) {
     scan,
     connect,
     locateBinary,
+    adoptScannedBinary,
   });
 }
 

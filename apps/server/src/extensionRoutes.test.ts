@@ -12,6 +12,7 @@ import type { ResolvedExtensionPackage } from "./extensions/packageInspector";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
 import { LocalPluginImportReceiptStore } from "./extensions/localPluginImportReceiptStore";
 import { ExtensionToolApprovalService } from "./extensions/extensionToolApprovalService";
+import { UserAddedMcpServerError } from "./extensions/userAddedMcpServers";
 
 const now = Date.parse("2026-07-28T12:00:00.000Z");
 const capability = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop0";
@@ -396,6 +397,7 @@ describe("bounded authenticated extension routes", () => {
     });
     const register = vi.fn(async () => ({
       source: { kind: "local-folder", sourceRef: "local-receipt" },
+      notes: [],
     }));
     const execute = vi.fn(async () => ({
       kind: "extension-command-failed",
@@ -792,6 +794,476 @@ describe("extension route request abort propagation", () => {
     }
   });
 });
+
+describe("MCP servers added by hand", () => {
+  const body = {
+    name: "Docs search",
+    server: { type: "stdio", command: "npx", args: ["-y", "docs-search-mcp"], env: [] },
+  };
+
+  it("refuses a paired device and a host that cannot add one", async () => {
+    const add = vi.fn();
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      userAddedMcpServers: { add } as never,
+      now: () => now,
+    });
+    const denied = await handler(pairedDeviceRequest("/api/extensions/user-servers", body));
+    expect(denied?.status).toBe(401);
+    expect(add).not.toHaveBeenCalled();
+
+    const without = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      now: () => now,
+    });
+    expect((await without(request("/api/extensions/user-servers", body)))?.status).toBe(503);
+  });
+
+  it("writes the package, then installs, trusts and switches it on as one act", async () => {
+    const source = { kind: "user-added", sourceRef: "user-docs-search" } as const;
+    const add = vi.fn(async () => ({ source }));
+    const observed: Array<ExtensionCommand> = [];
+    let stateVersion = 1;
+    const packageState = (components: ReadonlyArray<string>) => ({
+      extensionId,
+      packageId,
+      stateVersion: stateVersion++,
+      version: "1.0.0",
+      digest,
+      source,
+      components: components.map((id) => ({
+        component: { id, kind: "mcp-server", displayName: "Docs search" },
+      })),
+    });
+    const execute = vi.fn(async (command: ExtensionCommand) => {
+      observed.push(command);
+      if (command.kind === "inspect-package") {
+        return {
+          kind: "package-inspected",
+          preview: { entry: { extensionId, packageId, version: "1.0.0", digest, source } },
+        } as never;
+      }
+      return {
+        kind: "extension-state-updated",
+        snapshot: { ...setupSnapshot(), packages: [packageState(["mcp-docs-search"])] },
+      } as never;
+    });
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      userAddedMcpServers: { add } as never,
+      now: () => now,
+    });
+    const answered = await handler(request("/api/extensions/user-servers", body));
+    expect(answered?.status).toBe(200);
+    expect(add).toHaveBeenCalledWith(body);
+    expect(observed.map((command) => command.kind)).toEqual([
+      "inspect-package",
+      "install-package",
+      "set-source-trust",
+      "set-plugin-desired",
+      "set-component-desired",
+    ]);
+    expect(observed[2]).toMatchObject({ trusted: true, expectedStateVersion: 1 });
+    expect(observed[3]).toMatchObject({ desired: true, expectedStateVersion: 2 });
+    expect(observed[4]).toMatchObject({
+      componentId: "mcp-docs-search",
+      desired: true,
+      expectedStateVersion: 3,
+    });
+    expect(await answered?.json()).toMatchObject({
+      kind: "extension-state-updated",
+      addedPackage: { extensionId, componentId: "mcp-docs-search" },
+    });
+  });
+
+  it("answers a refusal from the store with its own sentence", async () => {
+    const add = vi.fn(async () => {
+      throw new UserAddedMcpServerError("conflict", "A server with this name is already added.");
+    });
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      userAddedMcpServers: { add } as never,
+      now: () => now,
+    });
+    const answered = await handler(request("/api/extensions/user-servers", body));
+    expect(answered?.status).toBe(200);
+    expect(await answered?.json()).toMatchObject({
+      failure: { category: "invalid", message: "A server with this name is already added." },
+    });
+  });
+
+  it("removes the written package again when it cannot be installed, so the name stays free", async () => {
+    const source = { kind: "user-added", sourceRef: "user-docs-search" } as const;
+    const add = vi.fn(async () => ({ source }));
+    const remove = vi.fn(async () => undefined);
+    const execute = vi.fn(async (command: ExtensionCommand) =>
+      command.kind === "inspect-package"
+        ? ({
+            kind: "package-inspected",
+            preview: { entry: { extensionId, packageId, version: "1.0.0", digest, source } },
+          } as never)
+        : ({
+            kind: "extension-command-failed",
+            failure: { category: "blocked", message: "Install refused." },
+          } as never),
+    );
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      userAddedMcpServers: { add, remove } as never,
+      now: () => now,
+    });
+    const answered = await handler(request("/api/extensions/user-servers", body));
+    expect(answered?.status).toBe(200);
+    expect(await answered?.json()).toMatchObject({
+      failure: { category: "blocked", message: "Install refused." },
+    });
+    expect(remove).toHaveBeenCalledWith("user-docs-search");
+
+    execute.mockRejectedValueOnce(new Error("interrupted"));
+    await handler(request("/api/extensions/user-servers", body));
+    expect(remove).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("servers and plugins found on this computer", () => {
+  const listing = {
+    servers: [
+      {
+        id: "claude-00000000000000000000000000000001",
+        origin: "claude-code",
+        scope: "user",
+        name: "docs",
+        transport: "stdio",
+        summary: "npx -y docs-mcp",
+        needsValues: [],
+        unsupportedPlaceholders: [],
+        secretNames: ["DOCS_TOKEN"],
+      },
+    ],
+    plugins: [
+      {
+        id: "codex-00000000000000000000000000000002",
+        origin: "codex",
+        name: "github@openai-curated",
+        version: "1.1.0",
+        format: "codex-plugin",
+        enabledThere: true,
+      },
+    ],
+    notes: [],
+  };
+  const found = {
+    list: vi.fn(async () => listing),
+    server: vi.fn((id: string) =>
+      id === listing.servers[0]?.id
+        ? {
+            name: "docs",
+            server: { type: "stdio", command: "npx", args: ["-y", "docs-mcp"], env: [] },
+          }
+        : undefined,
+    ),
+    refusal: vi.fn((): unknown => undefined),
+    pluginPath: vi.fn((id: string) =>
+      id === listing.plugins[0]?.id
+        ? "/Users/ada/.codex/plugins/cache/openai-curated/github/1.1.0"
+        : undefined,
+    ),
+  };
+
+  it("lists for a local window only, and never names a path", async () => {
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      agentToolingDiscovery: found as never,
+      now: () => now,
+    });
+    const denied = await handler(
+      pairedDeviceRequest("/api/extensions/discovered", { kind: "list" }),
+    );
+    expect(denied?.status).toBe(401);
+    const answered = await handler(request("/api/extensions/discovered", { kind: "list" }));
+    expect(answered?.status).toBe(200);
+    const body = await answered?.text();
+    expect(JSON.parse(body ?? "")).toEqual(listing);
+    expect(body).not.toContain("/Users/ada");
+  });
+
+  it("adds a found server through the same act as adding one by hand", async () => {
+    const add = vi.fn(async () => ({ source: { kind: "user-added", sourceRef: "user-docs" } }));
+    const execute = vi.fn(async (command: ExtensionCommand) =>
+      command.kind === "inspect-package"
+        ? ({
+            kind: "package-inspected",
+            preview: {
+              entry: {
+                extensionId,
+                packageId,
+                version: "1.0.0",
+                digest,
+                source: { kind: "user-added", sourceRef: "user-docs" },
+              },
+            },
+          } as never)
+        : ({ kind: "extension-state-updated", snapshot: setupSnapshot() } as never),
+    );
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      agentToolingDiscovery: found as never,
+      userAddedMcpServers: { add } as never,
+      now: () => now,
+    });
+    const answered = await handler(
+      request("/api/extensions/discovered", { kind: "add-server", id: listing.servers[0]?.id }),
+    );
+    expect(answered?.status).toBe(200);
+    expect(add).toHaveBeenCalledWith({
+      name: "docs",
+      server: { type: "stdio", command: "npx", args: ["-y", "docs-mcp"], env: [] },
+    });
+    expect(execute.mock.calls.map(([command]) => command.kind)).toEqual([
+      "inspect-package",
+      "install-package",
+    ]);
+    const stale = await handler(
+      request("/api/extensions/discovered", {
+        kind: "add-server",
+        id: "claude-00000000000000000000000000000099",
+      }),
+    );
+    expect(stale?.status).toBe(404);
+  });
+
+  it("refuses to add a found server that still holds a placeholder, before anything is written", async () => {
+    const add = vi.fn();
+    const execute = vi.fn();
+    found.refusal.mockReturnValueOnce({ kind: "unsupported-placeholders", names: ["API_TOKEN"] });
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      agentToolingDiscovery: found as never,
+      userAddedMcpServers: { add } as never,
+      now: () => now,
+    });
+    const answered = await handler(
+      request("/api/extensions/discovered", { kind: "add-server", id: listing.servers[0]?.id }),
+    );
+    expect(answered?.status).toBe(400);
+    expect(await answered?.json()).toMatchObject({
+      failure: { category: "invalid", message: expect.stringContaining("API_TOKEN") },
+    });
+    expect(add).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("shows what the loader left out of a found plugin in the review's diagnostics", async () => {
+    const register = vi.fn(async () => ({
+      source: { kind: "local-folder", sourceRef: "local-github" },
+      notes: ["api: needs values Claude Code asks for (user_config); left out."],
+    }));
+    const execute = vi.fn(async () => ({
+      kind: "package-inspected",
+      preview: { diagnostics: [{ code: "existing", message: "Already there." }] },
+    }));
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      agentToolingDiscovery: found as never,
+      localPluginFolderRegistry: { register } as never,
+      now: () => now,
+    });
+    const answered = await handler(
+      request("/api/extensions/discovered", { kind: "import-plugin", id: listing.plugins[0]?.id }),
+    );
+    expect(await answered?.json()).toMatchObject({
+      kind: "package-inspected",
+      preview: {
+        diagnostics: [
+          { code: "existing" },
+          { message: "api: needs values Claude Code asks for (user_config); left out." },
+        ],
+      },
+    });
+  });
+
+  it("imports a found plugin for review through the folder registry", async () => {
+    const register = vi.fn(async () => ({
+      source: { kind: "local-folder", sourceRef: "local-github" },
+      notes: [],
+    }));
+    const execute = vi.fn(async () => ({
+      kind: "extension-command-failed",
+      failure: { category: "blocked", message: "Fixture inspection." },
+    }));
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      agentToolingDiscovery: found as never,
+      localPluginFolderRegistry: { register } as never,
+      now: () => now,
+    });
+    const answered = await handler(
+      request("/api/extensions/discovered", { kind: "import-plugin", id: listing.plugins[0]?.id }),
+    );
+    expect(answered?.status).toBe(200);
+    expect(register).toHaveBeenCalledWith(
+      "/Users/ada/.codex/plugins/cache/openai-curated/github/1.1.0",
+    );
+    expect(execute).toHaveBeenCalledWith(
+      { kind: "inspect-package", source: { kind: "local-folder", sourceRef: "local-github" } },
+      expect.anything(),
+    );
+  });
+});
+
+describe("signing in to a hosted server from Settings", () => {
+  const target = { extensionId, componentId: "mcp-docs" };
+  const signIn = {
+    status: vi.fn(async () => ({ kind: "signed-out" })),
+    begin: vi.fn(async (_e: string, _c: string, principal: string) =>
+      principal === "local-window"
+        ? {
+            kind: "awaiting-consent",
+            attemptId: "55000000-0000-4000-8000-000000000001",
+            authorizationUrl: "https://auth.example/authorize?x=1",
+            expiresAt: "2026-10-20T12:10:00.000Z",
+          }
+        : {
+            kind: "refused",
+            reason: "local-host-required",
+            message: "Sign in from the Octant window on this host.",
+          },
+    ),
+    poll: vi.fn(async () => ({ kind: "signed-in", issuer: "auth.example" })),
+    signOut: vi.fn(async () => ({ kind: "signed-out" })),
+  };
+
+  it("lets a local window begin, poll and sign out, and tells a paired device to use the host", async () => {
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerSignIn: signIn as never,
+      now: () => now,
+    });
+    const status = await handler(request("/api/extensions/sign-in", { kind: "status", ...target }));
+    expect(await status?.json()).toEqual({ kind: "signed-out" });
+    expect(signIn.status).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
+    const begun = await handler(request("/api/extensions/sign-in", { kind: "begin", ...target }));
+    expect(await begun?.json()).toMatchObject({ kind: "awaiting-consent" });
+    expect(signIn.begin).toHaveBeenCalledWith(extensionId, "mcp-docs", "local-window");
+    const polled = await handler(
+      request("/api/extensions/sign-in", {
+        kind: "poll",
+        ...target,
+        attemptId: "55000000-0000-4000-8000-000000000001",
+      }),
+    );
+    expect(await polled?.json()).toEqual({ kind: "signed-in", issuer: "auth.example" });
+    const out = await handler(request("/api/extensions/sign-in", { kind: "sign-out", ...target }));
+    expect(await out?.json()).toEqual({ kind: "signed-out" });
+
+    await handler(pairedDeviceRequest("/api/extensions/sign-in", { kind: "status", ...target }));
+    expect(signIn.status).toHaveBeenLastCalledWith(extensionId, "mcp-docs", "remote-device");
+    const remote = await handler(
+      pairedDeviceRequest("/api/extensions/sign-in", { kind: "begin", ...target }),
+    );
+    expect(remote?.status).toBe(200);
+    expect(await remote?.json()).toMatchObject({ kind: "refused", reason: "local-host-required" });
+    expect(signIn.begin).toHaveBeenLastCalledWith(extensionId, "mcp-docs", "remote-device");
+  });
+
+  it("answers 503 on a host without the sign-in service and 400 for a malformed request", async () => {
+    const without = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      now: () => now,
+    });
+    expect(
+      (await without(request("/api/extensions/sign-in", { kind: "status", ...target })))?.status,
+    ).toBe(503);
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      mcpServerSignIn: signIn as never,
+      now: () => now,
+    });
+    expect(
+      (await handler(request("/api/extensions/sign-in", { kind: "poll", ...target })))?.status,
+    ).toBe(400);
+  });
+});
+
+describe("plugins pinned to a Project", () => {
+  const projectId = "72000000-0000-4000-8000-00000000000a";
+  const listing = {
+    projects: [{ projectId, name: "Studio", type: "code" }],
+    pins: [{ projectId, extensionId }],
+  };
+  const pins = { list: vi.fn(() => listing), set: vi.fn(() => "recorded" as const) };
+
+  it("lets a local window pin and unpin, lists for a paired device, and refuses its pin", async () => {
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      extensionProjectPins: pins as never,
+      now: () => now,
+    });
+    const set = await handler(
+      request("/api/extensions/project-pins", {
+        kind: "set",
+        projectId,
+        extensionId,
+        pinned: true,
+      }),
+    );
+    expect(set?.status).toBe(200);
+    expect(pins.set).toHaveBeenCalledWith(projectId, extensionId, true);
+    expect(await set?.json()).toEqual(listing);
+    const listed = await handler(
+      pairedDeviceRequest("/api/extensions/project-pins", { kind: "list" }),
+    );
+    expect(listed?.status).toBe(200);
+    const denied = await handler(
+      pairedDeviceRequest("/api/extensions/project-pins", {
+        kind: "set",
+        projectId,
+        extensionId,
+        pinned: false,
+      }),
+    );
+    expect(denied?.status).toBe(401);
+    expect(pins.set).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers 400 when the store refuses the pin", async () => {
+    const handler = createExtensionRouteHandler({
+      service: { snapshot: setupSnapshot, execute: vi.fn() } as never,
+      windowAuthorityStore: registeredWindowStore(),
+      extensionProjectPins: { ...pins, set: vi.fn(() => "refused" as const) } as never,
+      now: () => now,
+    });
+    const refused = await handler(
+      request("/api/extensions/project-pins", {
+        kind: "set",
+        projectId,
+        extensionId,
+        pinned: true,
+      }),
+    );
+    expect(refused?.status).toBe(400);
+  });
+});
+
+function registeredWindowStore(): WindowAuthorityStore {
+  const windowAuthorityStore = new WindowAuthorityStore();
+  windowAuthorityStore.register({ windowId: windowId as never, capability, now });
+  return windowAuthorityStore;
+}
 
 function setupSnapshot(): ExtensionSnapshot {
   return {

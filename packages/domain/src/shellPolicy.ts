@@ -170,6 +170,7 @@ export function defaultShellSettings(): ShellSettings {
     openInApplications: [...DEFAULT_OPEN_IN_APPLICATIONS],
     transcriptTextSize: "small",
     transcriptWidth: "narrow",
+    usageBars: "smooth",
     showThreadProviderIcons: true,
     showThreadStats: true,
     homeCards: { order: [], visibility: [] },

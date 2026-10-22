@@ -2411,8 +2411,17 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   drawing empty bars, also when it kept the directory it had as a
   subscription account. Overage reads as in use once something was
   spent, not when it is merely switched on. A failed or missing
-  refresh keeps the last snapshot and shows its age. Claude is the
-  first adopter.
+  refresh keeps the last snapshot and shows its age. Every provider
+  instance's last plan-limit reading, whatever its source, is also saved
+  in `providers/usage-readings.json` (owner-only, listed in the host data
+  map), so the usage rings show it after a host restart as a past
+  observation with its original `observedAt`. A restored reading is
+  never refreshed by starting a provider: the launch pass and the
+  schedule leave it as it is, and the first fresh evidence (a turn's
+  report or a refresh a person asked for) replaces it. Windows and
+  buckets whose reset has passed are dropped on restore, and a reading
+  of an instance that was removed or disabled is not shown and is
+  forgotten. Claude is the first adopter.
   Claude is the first adopter (`CLAUDE_CONFIG_DIR` and
   `CLAUDE_SECURESTORAGE_CONFIG_DIR`, default `~/.claude`, extras
   `~/.claude-accounts/<instanceId>`, `claude auth login` /
@@ -2499,6 +2508,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   configured instance when one exists. Opening the catalog starts nothing. A
   scan, connect, enable, or connection check runs only from its step's button,
   and sign-in, Locate binary, and credentials stay on the runtime's own card.
+  The card may also point its runtime at a binary the latest scan found, when
+  its saved one is missing or incompatible: the `locate-binary` command then
+  names a scanned path instead of a picker receipt, and the host takes it only
+  if it is a candidate of that driver kind from its own scan, checking it
+  exactly as it checks a picked file.
   Discovery keeps one provider per driver family, as auto-registration does:
   a discovery connect for a driver that already has a provider returns that
   provider instead of creating a second one, and leaves its switch unchanged.
@@ -2603,7 +2617,16 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   **Voice** is an app-managed capability rather than a provider kind: speech
   to text and text to speech each resolve against one enabled OpenAI-compatible
   instance named in Settings › Voice and reuse its base URL, authentication,
-  and credential. The host serves `/api/speech/status`, `/api/speech/transcriptions`,
+  and credential. Mistral's speech route is the one dialect the adapter
+  speaks besides OpenAI's: on `api.mistral.ai` the voice goes as `voice_id`
+  and the reply is JSON with base64 `audio_data`, as Mistral's OpenAPI
+  description lays out; transcription there is OpenAI-shaped and needs no
+  dialect. An endpoint page, and Add endpoint's last step, offer the
+  endpoint's voice models to Voice settings when it lists any (a preset's
+  known models, or ids that read as transcription or speech models): one
+  click makes a transcription model the one Voice uses, and speech is named
+  with what it still needs, a voice from the provider, since Octant cannot
+  choose one. The host serves `/api/speech/status`, `/api/speech/transcriptions`,
   and `/api/speech/synthesis` behind window authority, sniffs and bounds the
   audio, persists nothing, and reports each direction `ready`, `unconfigured`,
   or `unavailable` with the Settings link that fixes it; see
@@ -5491,6 +5514,151 @@ document does, and one that fails it is refused rather than published. The
 receipt is the gist URL and its id, journaled in `canvas.export@1` like any
 other destination's.
 
+**Connectors and user-added MCP servers.** A person connects an MCP server
+from Settings › Skills & Extensions without writing a package: Add MCP server
+takes a command Octant starts (with arguments and environment) or an address
+it connects to over Streamable HTTP (with headers). The host writes an
+ordinary Agent Plugins package for it (`plugin.json` and an `mcp.json` with
+the one server) into its own folder under the data directory and registers it
+under the `user-added` source kind, so the activation ladder, per-call
+approvals, remembered grants, taint rules, and the confined launch apply
+unchanged; the package is installed, trusted and switched on as one act,
+because the person just typed it in. Only a local window may add one
+(`/api/extensions/user-servers`); a paired device cannot. A value the person
+marks secret never enters the package: the host stores it in the credential
+broker's own namespace for these secrets (`/v1/mcp-server-credentials/*`, the
+`mcp-server-credential` Keychain service or Secret Service attribute) and the
+package carries `${OCTANT_SECRET:<id>}` in its place. The session manager
+fills references in at launch, only for a package the host's own store of
+generated folders vouches for by source reference (the installed manifest's
+source kind is rewritten to `plugin-package`, so it cannot be the authority),
+so a third-party package can never name a secret; a reference the broker
+cannot answer fails the launch rather than starting the server with a blank.
+Uninstalling the package removes its folder and every secret it referenced,
+and an add that fails before the package is installed removes them too, so a
+retry with the same name is not blocked. Refusals travel as typed results
+(HTTP 200) like every other extension command, so the dialog shows the host's
+own sentence.
+On a host without a broker the add is refused when it carries a secret, with
+the Octant app named as the way to do it. **Found on this Mac.** The same Settings section lists what Claude Code and
+Codex already know on this computer, read-only: the MCP servers in Claude
+Code's `~/.claude.json` (the person's own and the ones kept for a Project
+folder Octant knows), a Project's `.mcp.json`, and Codex's `[mcp_servers.*]`
+in `~/.codex/config.toml`; and the plugins each has installed (Claude Code's
+cache and claude.ai-synced folders under `~/.claude/plugins`, Codex's
+`~/.codex/plugins/cache`). Listing changes nothing: no server or plugin is
+imported, trusted or enabled until the person clicks that one item, and
+Octant never writes to the other tools' files. The listing names each item
+by an opaque id and shows a command line or address, never a path or a
+value. Adding a found server is the same act as Add MCP server: `${VAR}`
+and the tools' token variables are filled from the host environment only in
+a value the broker can hold (an environment value or a header), and that
+value is marked secret so it goes to the broker. A variable in the command,
+an argument or the address is never expanded, so no host value reaches the
+listing or the saved package; the row names it (`unsupportedPlaceholders`).
+A variable the environment lacks is named on the row rather than invented
+(`needsValues`). The server refuses to add either kind before writing
+anything, and the row's button is off with the reason; the person adds such
+a server by hand. The folder import returns what the loader left out of a
+plugin as diagnostics on its inspection, so the review shows them. A found plugin goes through the ordinary folder
+import for review and install; the folder loader reads all three layouts
+(Agent Plugins, Codex, Claude Code) and turns a Claude Code plugin into an
+Agent Plugins package in memory, keeping its skills and MCP servers and
+leaving its commands, agents and hooks behind, with a note saying so. This
+is the one place the home folder's `.claude` is read, and only for this
+explicit listing; it is still never a skill root. **Project pins.** A plugin can be pinned to a Work or Code Project from its
+card in Settings (Use in a Project, one switch per active Project). A pin is
+the person's standing choice to offer that plugin on every turn in that
+Project without naming it with `@` each time; it is journaled as its own
+aggregate per Project (`extension.project-pin-changed@1`) and projected like
+tool grants. At turn start the Work and Code services hand the Project's
+pinned ids to the turn's extension resolver, which places each pin against
+the same catalog the person's own selections are checked against: a pinned
+plugin becomes one selection per component, carrying the package identity
+and catalog epoch a selection needs, and a plugin the person also named this
+turn keeps exactly the components they chose. Only a package that is in that
+catalog with every component effective rides along: a pin to anything else
+is skipped rather than failing the turn, so a disabled or removed plugin
+never blocks work. A pin grants nothing: every tool call still
+asks, or uses a remembered approval in that Project, and the resolver's
+catalog, mode and provider checks apply as for an explicit selection. Chat
+has no Project and no pins. Only a local window sets a pin; a paired device
+may read the list. Uninstalling a package forgets its pins everywhere.
+
+**Where a package works, on its card.** Each installed package's card says in
+words where it works, derived from the same data and rules the host applies
+at activation: the manifest's modes, narrowed per mode to the components that
+`isExtensionComponentModeSafe` allows there, and the provider families it
+names, or every provider when it names none; a package with MCP servers adds
+that a provider which cannot carry Octant's tools refuses a turn that selects
+them. The card never claims more than the activation ladder would grant.
+
+**Connectors catalog.** Settings › Skills & Extensions has a Connectors view:
+a bundled, first-party list of hosted MCP servers (`connectorCatalog` in
+`@octant/domain`), each with a name, one line, a category, the vendor's own
+address and how it is reached: sign-in through the MCP authorization flow,
+a key the vendor issues sent in one header, or nothing. Nothing is fetched
+to show the list, so it adds no request and no marketplace disclosure; the
+catalog relates to the plugin marketplace only in that both end in an
+installed package under the one activation ladder. Connect makes an
+ordinary user-added server for the entry's address and then starts the
+sign-in, or takes the key (kept in the broker like any user-added secret),
+or just connects. The add request carries the entry's id; the host accepts it
+only for an id in the bundled catalog at that entry's own address, and names
+the package `connector-<id>`, a name it refuses to a hand-added server. The
+view recognizes a connected entry by that package name, never by a display
+name, so a server a person happened to call "Linear" neither shows as
+Connected nor receives its sign-in. The add's answer names the package it
+created (`addedPackage`), and the sign-in starts on that package rather than
+on whichever one a snapshot diff shows. An entry is listed only after a probe showed the address
+behaving as its kind claims (a sign-in server: 401 with resource metadata,
+an authorization server with PKCE S256 and dynamic client registration); a
+vendor whose issuer offers no registration is listed as a key entry or not
+at all, never as a sign-in that would fail. Hide keeps an entry out of
+sight on this computer and Show hidden brings every entry back; that
+preference lives in the renderer's storage, since it changes nothing on the
+host. Connecting works only from the Octant window on the host, like Add
+MCP server.
+
+**Sign-in to a hosted server.** A user-added server reached over Streamable
+HTTP shows Sign in under its component in Settings. The host runs the MCP
+authorization flow as the protocol lays it out: a bare request to the server
+answers 401 and names its protected resource metadata (RFC 9728, or the
+well-known path when the header names none), whose `resource` must be the
+server's own canonical address, or a server could obtain a bearer meant for
+another API and receive it on connect; that names the authorization server;
+its metadata (RFC 8414, or the OpenID discovery document) must name that
+same issuer, names the endpoints and must allow PKCE with S256; Octant
+registers itself there as a
+public client (RFC 7591, `token_endpoint_auth_method: none`) naming a
+loopback callback whose port it chose first; then the host OAuth runner runs
+its ordinary PKCE flow under the `mcp-authorization` dialect, which sends the
+server's canonical address as `resource` (RFC 8707) on authorize, exchange and
+refresh, binds the chosen port, and accepts an empty scope list. Scopes
+follow the RFC 6749 scope-token grammar, so a URL-shaped scope survives. An
+issuer may grant an access token without a refresh token; such a grant lasts
+as long as the access token and then asks for a new sign-in. Every issuer
+endpoint must be https. The grant lives in the credential broker like a
+provider sign-in; the host keeps only its reference, the descriptor that made
+it and the issuer's host name, in its own state file, and attaches the bearer
+to the launch each time the server connects, refreshed through the broker. A
+grant the broker reports gone (revoked, expired, reused) leaves the launch
+bare, the server answers 401, and Settings shows Sign in again from the
+next status read; a broker that is merely unavailable changes nothing. Sign
+out revokes the grant
+where the issuer allows and forgets it either way; uninstalling the package
+does the same for every sign-in it had. An issuer that offers no client
+registration is refused in plain words, since Octant cannot invent a client
+id; a server that never asks for a sign-in is reported as such. The
+person's click on Sign in is the acknowledgment: there is no vendor terms
+text for a server they added themselves. A paired device can read the state
+and nothing more: a status read from a device returns the last known state
+of a pending attempt without polling the broker, since polling can finish
+the sign-in and store the grant, which is a host action. The release-boundary hold on a connector
+marketplace was lifted by the maintainer on 2026-10-20; the start gates in
+[release-boundary holds](release-boundary-holds.md) are met by this section
+and the rules above.
+
 **Computer use plugin.** The bundled Computer component is selected through
 `@Computer` in Chat, Work, and Code. The server validates the structured
 selection and supplies `octant_computer` through the provider's existing
@@ -5590,7 +5758,9 @@ credentials requires its own explicit confirmation.
 The rationale and original migration account remain in
 [0001](decisions/0001-plugin-architecture.md). This section owns the current
 boundary and approved direction; the archived proposal's status is not a delivery
-gate. The connector marketplace hold remains in force.
+gate. The connector marketplace hold was lifted on 2026-10-20; connectors are
+built as user-added MCP server packages on these seams, as the
+[Connectors and user-added MCP servers](#extensions-and-skills) rules describe.
 
 ## Security and authority
 
@@ -7488,7 +7658,6 @@ in this document describe the build as it ships. The steps, the open questions, 
 | `apps/desktop`            | Electron shell: windows, menus, native credential-store integration, pickers, signed updates, server process lifecycle, packaging                       | contracts, domain, host-runtime                                   |
 | `apps/web`                | React renderer for desktop and paired browsers                                                                                                          | client-runtime, contracts, domain, plugin-host, theme             |
 | `apps/mobile`             | Expo iOS/Android remote-control client                                                                                                                  | client-runtime, contracts, domain                                 |
-| `apps/share`              | Public Canvas share service: link API, viewer pages, user-content frames, storage, expiry, limits                                                       | contracts, domain                                                 |
 
 Dependencies point inward: no package imports an app, and `contracts` imports
 nothing first-party.
@@ -7586,8 +7755,8 @@ storage and no relay for them. The storage provider can read the files. That
 does not open a hosted relay or an Octant cloud account. See
 [0163](decisions/0163-artifact-replicas-in-storage-the-user-owns.md).
 
-The public Canvas share service (`apps/share`, `https://canvas.octant.sh`) is
-in scope: an Octant-operated service that stores, and can read, the Canvases
+The public Canvas share service (`https://canvas.octant.sh`, in the
+`octant-webapp` repository) is in scope: an Octant-operated service that stores, and can read, the Canvases
 people publish as public links, under the rules in
 [Canvas public links](design/canvas-public-links.md). It is not an Octant
 account, a relay, or a sync store; nothing reaches it until the person turns
@@ -7595,10 +7764,14 @@ Public links on and approves a publish, and a self-hosted service URL is a
 Settings choice. Deploying it, its DNS and TLS, and its operator contact are
 release steps of their own.
 
-The start gates for the connector / OAuth marketplace and full LSP /
-extension host / debugger holds are in
-[release-boundary holds](release-boundary-holds.md). Neither hold is opened by
+The start gates for the full LSP / extension host / debugger hold are in
+[release-boundary holds](release-boundary-holds.md); that hold is not opened by
 plugin work, a first-party Integration, or Monaco and external-editor handoff.
+The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
+[Connectors and user-added MCP servers](#extensions-and-skills) rules: a
+bundled first-party catalog, sign-in through the MCP authorization flow, and
+servers imported from other tools' configuration on this Mac, all as
+user-added packages through the published seams and the credential broker.
 
 ## Development loop
 

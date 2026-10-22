@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import {
   MAX_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
@@ -30,7 +30,6 @@ export interface ShellFrameProps {
   readonly sidebarVibrancyMode?: SidebarVibrancyMode;
   readonly sidebarWidth: number;
   readonly standaloneSurface?: ReactNode;
-  readonly workspaceMaterial?: ResolvedSidebarMaterial;
   /**
    * The application ground drawn under the whole shell when its scope is
    * everywhere. The workspace and its panes go transparent over it; the
@@ -70,63 +69,7 @@ export function ShellThemeRoot(props: ShellThemeRootProps) {
   );
 }
 
-/**
- * Over an application ground the frosted back must not lie under the primary
- * card, which shows the ground clear. The card's rectangle depends on the
- * dock and bottom panel tracks (clamped, resizable), so it is measured rather
- * than re-derived in CSS, and handed to the mask as custom properties on the
- * layer. The same rectangle, measured from the window frame, lets the ground's
- * dither be drawn inside the card only: under the whole shell its dots ran on
- * through the gutters and the strip above the card, so the card had no edge.
- * Only the rectangle is written: no React state, no re-render.
- */
-function usePrimaryCardHole(layer: HTMLDivElement | null, active: boolean): void {
-  // Before paint, so the first frame already clips the ground to the card.
-  useLayoutEffect(() => {
-    if (!active || layer === null || typeof ResizeObserver === "undefined") return;
-    const card = layer.querySelector<HTMLElement>(":scope > .primary-workspace-layer");
-    const frame = layer.parentElement;
-    if (card === null || frame === null) return;
-    const write = () => {
-      const outer = layer.getBoundingClientRect();
-      const origin = frame.getBoundingClientRect();
-      const inner = card.getBoundingClientRect();
-      layer.style.setProperty("--octant-primary-card-x", `${String(inner.left - outer.left)}px`);
-      layer.style.setProperty("--octant-primary-card-y", `${String(inner.top - outer.top)}px`);
-      layer.style.setProperty("--octant-primary-card-w", `${String(inner.width)}px`);
-      layer.style.setProperty("--octant-primary-card-h", `${String(inner.height)}px`);
-      frame.style.setProperty(
-        "--octant-primary-card-frame-x",
-        `${String(inner.left - origin.left)}px`,
-      );
-      frame.style.setProperty(
-        "--octant-primary-card-frame-y",
-        `${String(inner.top - origin.top)}px`,
-      );
-      frame.style.setProperty("--octant-primary-card-w", `${String(inner.width)}px`);
-      frame.style.setProperty("--octant-primary-card-h", `${String(inner.height)}px`);
-    };
-    write();
-    const observer = new ResizeObserver(write);
-    observer.observe(layer);
-    observer.observe(card);
-    return () => {
-      observer.disconnect();
-      for (const name of [
-        "--octant-primary-card-frame-x",
-        "--octant-primary-card-frame-y",
-        "--octant-primary-card-w",
-        "--octant-primary-card-h",
-      ]) {
-        frame.style.removeProperty(name);
-      }
-    };
-  }, [active, layer]);
-}
-
 export function ShellFrame(props: ShellFrameProps) {
-  const [workspaceLayer, setWorkspaceLayer] = useState<HTMLDivElement | null>(null);
-  usePrimaryCardHole(workspaceLayer, props.backdrop !== undefined);
   return (
     <ShellThemeRoot
       {...(props.theme === undefined ? {} : { theme: props.theme })}
@@ -137,11 +80,7 @@ export function ShellFrame(props: ShellFrameProps) {
         className={
           props.standaloneSurface !== undefined
             ? `shell shell-frame--standalone shell--material-${props.material}`
-            : `shell shell-frame shell--material-${props.material}${
-                props.workspaceMaterial === "translucent"
-                  ? " shell--workspace-material-translucent"
-                  : ""
-              }${props.wideContextOpen ? " shell--wide-context-open" : ""}${
+            : `shell shell-frame shell--material-${props.material}${props.wideContextOpen ? " shell--wide-context-open" : ""}${
                 props.sidebarCollapsed ? " shell--sidebar-collapsed" : ""
               }${
                 props.sidebarCollapsed && props.sidebarRail === true ? " shell--sidebar-rail" : ""
@@ -199,7 +138,6 @@ export function ShellFrame(props: ShellFrameProps) {
             */}
             {props.chrome}
             <div
-              ref={setWorkspaceLayer}
               className={`workspace-layer${
                 props.wideContextOpen ? " workspace-layer--wide-context-open" : ""
               }${props.bottomPanelOpen ? " workspace-layer--bottom-panel-open" : ""}`}
