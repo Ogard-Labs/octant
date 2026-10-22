@@ -10,6 +10,9 @@ import {
 
 export type BackgroundImageFetcher = (backgroundId: string) => Promise<Blob>;
 
+/** The new-thread start screens, the only place the shell's ground answers a click. */
+const START_SCREEN_SELECTOR = ".draft-thread, .work-composer-adapter, .code-composer-adapter";
+
 /**
  * Where the ground is drawn: under one welcome surface, masked away behind
  * its composer; under the whole shell, where there is no composer to clear
@@ -96,8 +99,12 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   useEffect(() => {
     const canvas = charactersCanvas.current;
     if (!characters || canvas === null) return;
-    return runCharacterField(canvas, resolved.backgroundAnimated);
-  }, [characters, resolved.backgroundAnimated]);
+    return runCharacterField(
+      canvas,
+      resolved.backgroundAnimated,
+      placement === "shell" ? START_SCREEN_SELECTOR : undefined,
+    );
+  }, [characters, placement, resolved.backgroundAnimated]);
 
   if (!active) return null;
 

@@ -10,7 +10,9 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ModelToolCheck } from "../../providers/useProviderController";
+import { endpointPreset } from "./addEndpointSteps";
 import { AddEndpointFlow, type AddEndpointFlowProps, type AddedEndpoint } from "./AddEndpointFlow";
+import { EndpointChoices } from "./AddModelEndpoint";
 import type { EndpointStatus, ModelEndpointInstance } from "./endpointStatus";
 
 const id = decodeProviderInstanceId("80000000-0000-4000-8000-0000000004a7");
@@ -769,5 +771,126 @@ describe("Add endpoint, step by step", () => {
       expect.objectContaining({ kind: "azure-foundry-openai-http" }),
       expect.objectContaining({ value: "" }),
     );
+  });
+});
+
+describe("Add endpoint presets", () => {
+  it("fills in OpenCode Go's name, address and protocol from its row, and links to where the key is made", async () => {
+    const user = userEvent.setup();
+    const props = renderFlow({
+      signIns: (flow) => (
+        <EndpointChoices
+          credentialManagementAvailable
+          disabled={false}
+          onAddWithKey={flow.choosePreset}
+          onSignIn={vi.fn()}
+        />
+      ),
+    });
+    await user.click(screen.getByRole("button", { name: "Add with key, OpenCode Go" }));
+
+    const form = screen.getByRole("form", { name: "Connect OpenCode Go" });
+    expect(within(form).getByLabelText("Name")).toHaveValue("OpenCode Go");
+    expect(within(form).getByRole("textbox", { name: /address/i })).toHaveValue(
+      "https://opencode.ai/inference/go/v1",
+    );
+    expect(within(form).getByRole("link", { name: "the OpenCode console" })).toHaveAttribute(
+      "href",
+      "https://opencode.ai/console/go",
+    );
+    await user.type(within(form).getByLabelText("API key"), "private-value");
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+
+    expect(props.onCreateOpenAiCompatible).toHaveBeenCalledWith(
+      "OpenCode Go",
+      {
+        kind: "openai-compatible-http",
+        baseUrl: "https://opencode.ai/inference/go/v1",
+        authentication: "bearer",
+        protocol: "auto",
+        manualModelIds: [],
+      },
+      expect.objectContaining({ value: "private-value" }),
+    );
+  });
+
+  it("opens on Connect, filled in, for a preset chosen on the page", () => {
+    renderFlow({ initialPreset: endpointPreset("mistral") });
+    const form = screen.getByRole("form", { name: "Connect Mistral" });
+    expect(within(form).getByRole("textbox", { name: /address/i })).toHaveValue(
+      "https://api.mistral.ai/v1",
+    );
+    expect(screen.queryByRole("list", { name: "Kinds of endpoint" })).not.toBeInTheDocument();
+  });
+
+  it("links to where a preset's key is made even where the browser cannot store keys", () => {
+    renderFlow({ credentialManagementAvailable: false, initialPreset: endpointPreset("mistral") });
+    const form = screen.getByRole("form", { name: "Connect Mistral" });
+    expect(within(form).getByTestId("endpoint-key-later")).toBeVisible();
+    expect(
+      within(form).getByRole("link", { name: endpointPreset("mistral").keyPage.label }),
+    ).toHaveAttribute("href", endpointPreset("mistral").keyPage.url);
+  });
+});
+
+describe("voice models on a new endpoint", () => {
+  it("offers a listed transcription model to Voice on the last step, in one click", async () => {
+    const user = userEvent.setup();
+    const onUseForTranscription = vi.fn(async () => true);
+    renderFlow({
+      creates: endpoint("openai-compatible"),
+      observedAfterCreate: observed([model("gpt-4.1"), model("whisper-1")]),
+      voice: { settings: undefined, onUseForTranscription, onOpenVoice: vi.fn() },
+    });
+    const form = await connect(user, "OpenAI-compatible", {
+      name: "Team gateway",
+      url: "https://gateway.example/v1",
+      key: "k",
+    });
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    const tip = await screen.findByTestId("voice-tip");
+    expect(tip).toHaveTextContent("This endpoint has voice models.");
+    expect(tip).toHaveTextContent("whisper-1 can turn your speech into text.");
+    await user.click(within(tip).getByRole("button", { name: "Use for Transcription" }));
+    expect(onUseForTranscription).toHaveBeenCalledWith(id, "whisper-1");
+  });
+
+  it("offers no voice tip for an endpoint Voice could not use, even when it lists a voice model", async () => {
+    const user = userEvent.setup();
+    renderFlow({
+      creates: { ...endpoint("openai-compatible"), enabled: false } as ModelEndpointInstance,
+      observedAfterCreate: observed([model("gpt-4.1"), model("whisper-1")]),
+      voice: { settings: undefined, onUseForTranscription: vi.fn(), onOpenVoice: vi.fn() },
+    });
+    const form = await connect(user, "OpenAI-compatible", {
+      name: "Team gateway",
+      url: "https://gateway.example/v1",
+      key: "k",
+    });
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(screen.queryByTestId("voice-tip")).not.toBeInTheDocument();
+  });
+
+  it("says nothing about voice when the endpoint lists no voice model", async () => {
+    const user = userEvent.setup();
+    renderFlow({
+      creates: endpoint("openai-compatible"),
+      observedAfterCreate: observed([model("gpt-4.1")]),
+      voice: { settings: undefined, onUseForTranscription: vi.fn(), onOpenVoice: vi.fn() },
+    });
+    const form = await connect(user, "OpenAI-compatible", {
+      name: "Team gateway",
+      url: "https://gateway.example/v1",
+      key: "k",
+    });
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(screen.queryByTestId("voice-tip")).not.toBeInTheDocument();
   });
 });

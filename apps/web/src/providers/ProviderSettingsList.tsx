@@ -87,6 +87,7 @@ export type ProviderSettingsListProps = Pick<
   | "onRename"
   | "onChangeBinary"
   | "onLocateBinary"
+  | "onUseScannedBinary"
   | "usageLimitsClient"
   | "onChangeClaudeConfiguration"
   | "onChangeCodexConfiguration"
@@ -132,6 +133,11 @@ export type ProviderSettingsListProps = Pick<
   readonly discoverySnapshot: DiscoverySnapshot | undefined;
   readonly presentationObservedByInstance?: ReadonlyMap<ProviderInstanceId, ProviderObservedState>;
   readonly createForm?: ReactNode;
+  /**
+   * Claude and Codex cards offer "Add account" when this is given: it opens
+   * the create form for another account of the same driver.
+   */
+  readonly onAddAccount?: (instance: ProviderInstance) => void;
   readonly heading?: string;
   readonly note?: string;
   /** What the list says when it holds no instance yet. */
@@ -254,6 +260,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           : { usageLimitsClient: props.usageLimitsClient })}
         instance={instance}
         key={instance.id}
+        {...(props.onAddAccount === undefined ? {} : { onAddAccount: props.onAddAccount })}
         {...(props.discoverySnapshot === undefined
           ? {}
           : { discoverySnapshot: props.discoverySnapshot })}
@@ -262,6 +269,9 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           : { observed: presentationObserved.get(instance.id)! })}
         onChangeBinary={props.onChangeBinary}
         {...(props.onLocateBinary === undefined ? {} : { onLocateBinary: props.onLocateBinary })}
+        {...(props.onUseScannedBinary === undefined
+          ? {}
+          : { onUseScannedBinary: props.onUseScannedBinary })}
         onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
         onChangeCodexConfiguration={props.onChangeCodexConfiguration}
         onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
@@ -585,9 +595,11 @@ interface ProviderRowProps {
   readonly index: number;
   readonly count: number;
   readonly onMove: (index: number, direction: -1 | 1) => void;
+  readonly onAddAccount?: (instance: ProviderInstance) => void;
   readonly onRename: ProviderSettingsViewProps["onRename"];
   readonly onChangeBinary: ProviderSettingsViewProps["onChangeBinary"];
   readonly onLocateBinary?: ProviderSettingsViewProps["onLocateBinary"];
+  readonly onUseScannedBinary?: ProviderSettingsViewProps["onUseScannedBinary"];
   readonly onChangeClaudeConfiguration: ProviderSettingsViewProps["onChangeClaudeConfiguration"];
   readonly onChangeCodexConfiguration: ProviderSettingsViewProps["onChangeCodexConfiguration"];
   readonly onChangeDevinConfiguration: ProviderSettingsViewProps["onChangeDevinConfiguration"];
@@ -688,6 +700,16 @@ function ProviderRow(props: ProviderRowProps) {
         ? "Not found by the latest scan in the locations it searched — you can still enable it; the host checks the binary first."
         : "The latest scan did not check this provider — you can still enable it; the host checks the binary first."
       : undefined;
+  const scannedOffer =
+    props.onUseScannedBinary === undefined
+      ? undefined
+      : scannedBinaryOffer(props.instance, props.discoverySnapshot, readiness, detectedLocally);
+  const scannedOfferPath = scannedOffer?.path;
+  // The offer is the way out of a broken card, so the details that hold it open
+  // when it first appears; collapsing them afterwards sticks.
+  useEffect(() => {
+    if (scannedOfferPath !== undefined) setDetailsOpen(true);
+  }, [scannedOfferPath]);
   const isCli =
     props.instance.driverKind === "opencode" || props.instance.driverKind === "kimi-code";
   const isCodex = props.instance.driverKind === "codex";
@@ -766,16 +788,25 @@ function ProviderRow(props: ProviderRowProps) {
       await props.onProbe(props.instance.id, { quiet: true });
     }
   };
-  const locateBinary = async () => {
-    if (props.onLocateBinary === undefined) return;
+  const pointAtBinary = async (choose: () => Promise<LocateBinaryOutcome>) => {
     setLocating(true);
     try {
-      const outcome = await props.onLocateBinary(props.instance.id);
+      const outcome = await choose();
       // Dismissing the picker changes nothing, so it says nothing either.
       if (outcome.kind !== "cancelled") setLocated(outcome);
     } finally {
       setLocating(false);
     }
+  };
+  const locateBinary = async () => {
+    const onLocateBinary = props.onLocateBinary;
+    if (onLocateBinary === undefined) return;
+    await pointAtBinary(() => onLocateBinary(props.instance.id));
+  };
+  const useScannedBinary = async () => {
+    const onUseScannedBinary = props.onUseScannedBinary;
+    if (onUseScannedBinary === undefined || scannedOffer === undefined) return;
+    await pointAtBinary(() => onUseScannedBinary(props.instance.id, scannedOffer.path));
   };
   const name = props.instance.displayName;
   const meta = `${label} ${runtimeLabel}`.trim();
@@ -985,6 +1016,30 @@ function ProviderRow(props: ProviderRowProps) {
                 variant="outline"
               >
                 {locating ? "Checking binary…" : "Locate binary…"}
+              </OctantButton>
+            ) : null}
+            {scannedOffer === undefined ? null : (
+              <OctantButton
+                aria-label={`${scannedOffer.label} for ${name}`}
+                disabled={disabled || locating}
+                onClick={() => void useScannedBinary()}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                {locating ? "Checking binary…" : scannedOffer.label}
+              </OctantButton>
+            )}
+            {props.onAddAccount !== undefined && (isClaude || isCodex) ? (
+              <OctantButton
+                aria-label={`Add account for ${name}`}
+                disabled={props.busy}
+                onClick={() => props.onAddAccount?.(props.instance)}
+                size="sm"
+                type="button"
+                variant="outline"
+              >
+                Add account
               </OctantButton>
             ) : null}
             <OctantButton
@@ -1847,6 +1902,112 @@ function isDetectedLocally(
         (candidate.binaryPath === binaryPath || candidate.discoveredPath === binaryPath),
     )
   );
+}
+
+interface ScannedBinaryOffer {
+  /** The path the host is asked to use: the stable launcher, not a versioned target. */
+  readonly path: string;
+  readonly label: string;
+}
+
+/**
+ * The binary the latest scan found for this runtime, offered when the card's
+ * saved one cannot be used: it is missing (the scan searched where it should be
+ * and did not find it, or its last check could not start it) or its last check
+ * called it incompatible. A saved binary that starts and answers is never
+ * second-guessed, and a scan that failed or was cancelled proves nothing.
+ *
+ * The offer is the stable launcher the scan examined (`discoveredPath`) rather
+ * than the versioned file it resolves to, so it survives the runtime's own
+ * updates. Of several candidates it takes a compatible one with the highest
+ * version. The host still checks the path before the card changes.
+ */
+function scannedBinaryOffer(
+  instance: ProviderInstance,
+  snapshot: DiscoverySnapshot | undefined,
+  readiness: ProviderObservedState["readiness"] | "checking" | undefined,
+  detectedLocally: boolean,
+): ScannedBinaryOffer | undefined {
+  const savedPath = providerBinaryPath(instance);
+  if (
+    savedPath === undefined ||
+    !canLocateRuntimeBinary(instance.driverKind) ||
+    snapshot === undefined ||
+    snapshot.status === "failed" ||
+    snapshot.status === "cancelled" ||
+    readiness === "checking" ||
+    readiness === "ready" ||
+    readiness === "degraded" ||
+    readiness === "unauthenticated"
+  ) {
+    return undefined;
+  }
+  // The scan's silence counts only for the directory it actually searched: a
+  // binary saved elsewhere (a custom prefix) may work, and the scan says
+  // nothing about it.
+  const unusable =
+    readiness === "unavailable" ||
+    readiness === "incompatible" ||
+    (!detectedLocally && isAbsenceProven(savedPath, instance.driverKind, snapshot));
+  if (!unusable) return undefined;
+  let best: DiscoverySnapshot["candidates"][number] | undefined;
+  for (const candidate of snapshot.candidates) {
+    if (
+      candidate.driverKind !== instance.driverKind ||
+      candidate.readiness === "incompatible" ||
+      candidate.readiness === "unavailable" ||
+      candidate.binaryPath === savedPath ||
+      candidate.discoveredPath === savedPath
+    ) {
+      continue;
+    }
+    if (best === undefined || compareVersions(candidate.version, best.version) > 0)
+      best = candidate;
+  }
+  if (best === undefined) return undefined;
+  const path = best.discoveredPath ?? best.binaryPath;
+  const version = best.version === undefined ? undefined : versionNumber(best.version);
+  return {
+    path,
+    label: `Use the one found at ${homeRelativePath(best, path)}${version === undefined ? "" : ` (${version})`}`,
+  };
+}
+
+/** The dotted version number in a probe's output, such as `2.1.306` in `2.1.306 (Claude Code)`. */
+function versionNumber(output: string): string | undefined {
+  return /\d+(?:\.\d+)+/.exec(output)?.[0];
+}
+
+/** Candidates without a readable version rank below any that has one. */
+function compareVersions(left: string | undefined, right: string | undefined): number {
+  const leftParts = (left === undefined ? undefined : versionNumber(left))?.split(".").map(Number);
+  const rightParts = (right === undefined ? undefined : versionNumber(right))
+    ?.split(".")
+    .map(Number);
+  if (leftParts === undefined || rightParts === undefined) {
+    return (leftParts === undefined ? 0 : 1) - (rightParts === undefined ? 0 : 1);
+  }
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const difference = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+/**
+ * Spells a path under the person's home folder as `~/…`. The renderer does not
+ * know the home folder, but the candidate's `pathSummary` abbreviates its
+ * canonical path with it, which fixes where home ends.
+ */
+function homeRelativePath(
+  candidate: DiscoverySnapshot["candidates"][number],
+  path: string,
+): string {
+  if (!candidate.pathSummary.startsWith("~/")) return path;
+  const tail = candidate.pathSummary.slice(1);
+  if (!candidate.binaryPath.endsWith(tail)) return path;
+  const home = candidate.binaryPath.slice(0, candidate.binaryPath.length - tail.length);
+  return home.length > 0 && path.startsWith(`${home}/`) ? `~${path.slice(home.length)}` : path;
 }
 
 /**

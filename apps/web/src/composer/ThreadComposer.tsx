@@ -7,6 +7,8 @@ import { ArrowUp, Square } from "lucide-react";
 import { ComposerContextMeter } from "../context/ComposerContextMeter";
 import { useComposerCompacting } from "../context/composerContextMeterScope";
 import { ThreadStats } from "../threadStats/ThreadStats";
+import { ComposerPlanUsage } from "../usage/ComposerPlanUsage";
+import "./composer-plan-usage.css";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
   focusComposerThreadDrop,
@@ -105,6 +107,12 @@ export interface ThreadComposerProps {
    * thread's own composer never takes it: its context is already fixed.
    */
   readonly startContext?: ReactNode;
+  /**
+   * The provider a new thread will send to. Its remaining plan usage stands
+   * at the right of the start context's row. A thread's own composer never
+   * takes it: its windows come with the thread's stats strip.
+   */
+  readonly planUsage?: { readonly providerInstanceId: string | undefined };
   readonly queue?: ReactNode;
   /**
    * A turn is running or messages are queued on the thread around this
@@ -148,7 +156,14 @@ export function ThreadComposer(props: ThreadComposerProps) {
   const frameClassName = `${followUp ? `${baseClassName} composer--follow-up` : baseClassName}${notice == null ? "" : " composer--has-notice"}`;
   const message = (
     <>
-      {props.startContext}
+      {props.startContext === undefined || props.planUsage === undefined ? (
+        props.startContext
+      ) : (
+        <div className="composer-start">
+          {props.startContext}
+          <ComposerPlanUsage providerInstanceId={props.planUsage.providerInstanceId} />
+        </div>
+      )}
       {props.queue}
       {props.chips}
       {props.label === undefined ? (

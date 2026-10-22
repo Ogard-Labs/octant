@@ -11,6 +11,13 @@ import {
 } from "./packageInspector";
 import { ExtensionApiService } from "./extensionApiService";
 import type { ExtensionLifecycleService } from "./extensionLifecycleService";
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { decodeExtensionPackageManifest } from "@octant/contracts/extensions";
+import { normalizeAgentPluginPackage } from "./agentPluginIngestion";
+import { LocalPluginFolderRegistry } from "./localPluginFolderRegistry";
+import { UserAddedMcpServerStore } from "./userAddedMcpServers";
 import { StandaloneSkillService } from "./standaloneSkillService";
 
 const extensionId = "45000000-0000-4000-8000-000000000001";
@@ -344,5 +351,64 @@ describe("extension inspection and lifecycle API service", () => {
       { kind: "search-skills", query: "review" },
       controller.signal,
     );
+  });
+
+  it("removes the generated folder and its secrets when an added MCP server is uninstalled", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "octant-user-added-uninstall-"));
+    try {
+      const values = new Map<string, string>();
+      const registry = new LocalPluginFolderRegistry({ sourceKind: "user-added" });
+      const servers = new UserAddedMcpServerStore({
+        directory: join(directory, "user-added"),
+        registry,
+        secrets: {
+          has: async (id) => values.has(id),
+          resolve: async (id) => values.get(id) ?? "",
+          set: async (id, value) => {
+            values.set(id, value);
+          },
+          delete: async (id) => {
+            values.delete(id);
+          },
+        },
+      });
+      const { source } = await servers.add({
+        name: "Remote",
+        server: {
+          type: "streamable-http",
+          url: "https://mcp.example/mcp",
+          headers: [{ name: "Authorization", value: "Bearer private-value", secret: true }],
+        },
+      });
+      const registered = registry.get(source.sourceRef);
+      if (registered === undefined) throw new Error("Expected the registered folder.");
+      // The installed package carries the normalized manifest's source, not "user-added".
+      const manifest = decodeExtensionPackageManifest(
+        normalizeAgentPluginPackage(registered.packageInput).manifest,
+      );
+      const installed = {
+        ...emptySnapshot,
+        packages: [{ extensionId: manifest.extensionId, source: manifest.source }],
+      } as unknown as ExtensionSnapshot;
+      const state = lifecycle([]);
+      state.snapshot = () => installed;
+      state.uninstall = vi.fn(async () => emptySnapshot);
+      const service = new ExtensionApiService({
+        lifecycle: state,
+        resolver: { resolve: async () => resolvedPackage() },
+        userAddedMcpServers: servers,
+      });
+
+      expect(values.size).toBe(1);
+      await service.execute({
+        kind: "uninstall-package",
+        extensionId: manifest.extensionId,
+      } as never);
+
+      expect(values.size).toBe(0);
+      await expect(stat(registered.absolutePath)).rejects.toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

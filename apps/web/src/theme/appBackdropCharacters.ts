@@ -146,11 +146,26 @@ export function rippleBrightness(ripple: Ripple, x: number, y: number, t: number
 }
 
 /**
+ * Whether a click may send a ring. With `within`, only a click inside a
+ * matching element counts: under the whole shell the field also lies behind
+ * threads, where a ring answering every click in a transcript was a
+ * distraction, so there it answers the start screen alone.
+ */
+export function acceptsRipple(target: EventTarget | null, within: string | undefined): boolean {
+  if (within === undefined) return true;
+  return target instanceof Element && target.closest(within) !== null;
+}
+
+/**
  * Draws the field into `canvas` and, when `animated`, keeps it moving until
  * the returned stop is called. A still field draws one frame and stops, which
  * is what reduced motion asks for. A hidden window draws nothing.
  */
-export function runCharacterField(canvas: HTMLCanvasElement, animated: boolean): () => void {
+export function runCharacterField(
+  canvas: HTMLCanvasElement,
+  animated: boolean,
+  ripplesWithin?: string,
+): () => void {
   const context = canvas.getContext("2d");
   if (context === null) return () => undefined;
   let field = createCharacterField(0, 0);
@@ -240,6 +255,7 @@ export function runCharacterField(canvas: HTMLCanvasElement, animated: boolean):
   // The canvas takes no pointer events, so clicks are read on the window and
   // kept only when they land over the field. A still field takes no ripples.
   const ripple = (event: PointerEvent) => {
+    if (!acceptsRipple(event.target, ripplesWithin)) return;
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;

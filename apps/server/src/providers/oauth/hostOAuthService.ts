@@ -435,6 +435,8 @@ function wireDescriptor(
       ? {}
       : { extAgentHostId: descriptor.extAgentHostId }),
     ...(descriptor.agentNameHint === undefined ? {} : { agentNameHint: descriptor.agentNameHint }),
+    ...(descriptor.resource === undefined ? {} : { resource: descriptor.resource }),
+    ...(descriptor.redirectPort === undefined ? {} : { redirectPort: descriptor.redirectPort }),
   };
 }
 

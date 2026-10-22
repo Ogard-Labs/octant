@@ -23,7 +23,7 @@ const BoundedPath = Schema.NonEmptyTrimmedString.pipe(
 );
 
 export const MAX_HOST_DATA_MAP_PROJECTS = 4_096;
-export const MAX_HOST_DATA_MAP_NAMED_LOCATIONS = 16;
+export const MAX_HOST_DATA_MAP_NAMED_LOCATIONS = 24;
 
 /** A filesystem location the host verified, or an honest unknown. */
 export const HostDataMapLocation = Schema.Union(

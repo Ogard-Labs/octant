@@ -992,7 +992,13 @@ describe("ShellSidebar", () => {
     const onExpand = vi.fn();
     const onSelectMode = vi.fn();
     const openProject = vi.fn();
-    const actions = { "new-code-thread": vi.fn(), inbox: vi.fn(), "thread-board": vi.fn() };
+    const actions = {
+      "new-code-thread": vi.fn(),
+      inbox: vi.fn(),
+      "thread-board": vi.fn(),
+      agents: vi.fn(),
+    };
+    const history = { canGoBack: true, canGoForward: false, goBack: vi.fn(), goForward: vi.fn() };
     render(
       <ShellSidebar
         codeNavigation={{ actions }}
@@ -1007,6 +1013,7 @@ describe("ShellSidebar", () => {
           onExpand,
           projects: [{ id: "p1", name: "octant", active: true, onOpen: openProject }],
         }}
+        history={history}
         settings={defaultShellSettings()}
         workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
       />,
@@ -1027,9 +1034,18 @@ describe("ShellSidebar", () => {
     expect(openProject).toHaveBeenCalledOnce();
     await user.click(within(rail).getByRole("button", { name: "Show sidebar" }));
     expect(onExpand).toHaveBeenCalledOnce();
+    // The menu-only destinations have left the account menu, so the collapsed
+    // rail still reaches them through More, named on keyboard focus too.
+    // Back and Forward stay reachable with the sidebar hidden.
+    await user.click(within(rail).getByRole("button", { name: "Back" }));
+    expect(history.goBack).toHaveBeenCalledOnce();
+    expect(within(rail).getByRole("button", { name: "Forward" })).toBeDisabled();
+    const more = within(rail).getByRole("button", { name: "More destinations" });
+    more.focus();
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("More");
   });
 
-  it("stands the rail beside the open sidebar, which keeps only its header, Projects, and threads", async () => {
+  it("stands the rail beside the open sidebar, with Projects and More, and leaves the sidebar its header, Project list, and threads", async () => {
     const user = userEvent.setup();
     const actions = {
       "new-code-thread": vi.fn(),
@@ -1037,6 +1053,7 @@ describe("ShellSidebar", () => {
       "thread-board": vi.fn(),
       "pull-requests": vi.fn(),
       projects: vi.fn(),
+      agents: vi.fn(),
     };
     render(
       <ShellSidebar
@@ -1066,6 +1083,12 @@ describe("ShellSidebar", () => {
     expect(within(sidebar).queryByRole("button", { name: "Pull requests" })).toBeNull();
     expect(within(sidebar).queryByRole("button", { name: /^Inbox/ })).toBeNull();
     expect(within(sidebar).getByRole("navigation", { name: "Projects" })).toBeInTheDocument();
+    // Projects and More are rail places now; the sidebar keeps the Project list.
+    await user.click(within(rail).getByRole("button", { name: "Projects" }));
+    expect(actions.projects).toHaveBeenCalledOnce();
+    expect(within(sidebar).queryByRole("button", { name: "Projects" })).toBeNull();
+    expect(within(rail).getByRole("button", { name: "More destinations" })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("button", { name: "More destinations" })).toBeNull();
   });
 
   it("renders the rows in the customized order", () => {

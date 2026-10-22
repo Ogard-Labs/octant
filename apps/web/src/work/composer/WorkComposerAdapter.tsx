@@ -410,6 +410,12 @@ export function WorkComposerAdapter(props: WorkComposerAdapterProps) {
         <div className="composer-stack">
           <ThreadComposer
             {...(threadDropKey === undefined ? {} : { threadDropKey })}
+            planUsage={{
+              providerInstanceId:
+                props.selectedProviderInstanceId === undefined
+                  ? undefined
+                  : String(props.selectedProviderInstanceId),
+            }}
             startContext={
               <div className="composer-tray composer-tray--inside" aria-label="Thread context">
                 <div className="composer-tray__leading">

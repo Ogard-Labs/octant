@@ -12,6 +12,13 @@ import {
   ExtensionToolApprovalList,
   ExtensionToolGrantList,
   type ExtensionToolGrantRequest,
+  type UserAddedMcpServerRequest,
+  DiscoveredAgentToolingListing,
+  type DiscoveredAgentToolingRequest,
+  McpServerSignInView,
+  type McpServerSignInRequest,
+  ExtensionProjectPinListing,
+  type ExtensionProjectPinRequest,
 } from "@octant/contracts/extension-rpc";
 import { decodeHostAnswer } from "@octant/contracts";
 import { bindFetchPort } from "./bindFetchPort";
@@ -40,6 +47,18 @@ export interface ExtensionClient {
   revokeToolGrant(grantId: string): Promise<boolean>;
   /** Consume one native-picker receipt to register and inspect an Agent Plugins directory. */
   importLocalPluginReceipt(receiptId: string): Promise<ExtensionCommandResult>;
+  /** Adds an MCP server by hand; the host installs, trusts and enables its package. */
+  addUserMcpServer(request: UserAddedMcpServerRequest): Promise<ExtensionCommandResult>;
+  /** What other agent tools on this computer know: servers and plugins the person may add. */
+  listDiscoveredTooling(): Promise<DiscoveredAgentToolingListing>;
+  /** Adds a found server, or imports a found plugin for preview, by its listed id. */
+  applyDiscoveredTooling(
+    request: Exclude<DiscoveredAgentToolingRequest, { readonly kind: "list" }>,
+  ): Promise<ExtensionCommandResult>;
+  /** Sign-in state and actions for a hosted server a person added. */
+  mcpServerSignIn(request: McpServerSignInRequest): Promise<McpServerSignInView>;
+  /** The plugins pinned to Projects; `set` changes one pin and answers with the whole list. */
+  projectPins(request: ExtensionProjectPinRequest): Promise<ExtensionProjectPinListing>;
 }
 
 export class ExtensionClientFailure extends Error {
@@ -197,6 +216,66 @@ export function createExtensionClient(options: ExtensionClientOptions): Extensio
           }
           return value.revoked;
         },
+      );
+    },
+    projectPins(pin) {
+      return request(
+        fetch,
+        new URL("/api/extensions/project-pins", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(pin),
+        },
+        decodeHostAnswer(ExtensionProjectPinListing),
+      );
+    },
+    mcpServerSignIn(signIn) {
+      return request(
+        fetch,
+        new URL("/api/extensions/sign-in", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(signIn),
+        },
+        decodeHostAnswer(McpServerSignInView),
+      );
+    },
+    listDiscoveredTooling() {
+      return request(
+        fetch,
+        new URL("/api/extensions/discovered", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify({ kind: "list" }),
+        },
+        decodeHostAnswer(DiscoveredAgentToolingListing),
+      );
+    },
+    applyDiscoveredTooling(discovered) {
+      return request(
+        fetch,
+        new URL("/api/extensions/discovered", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(discovered),
+        },
+        decodeHostAnswer(ExtensionCommandResult),
+      );
+    },
+    addUserMcpServer(server) {
+      return request(
+        fetch,
+        new URL("/api/extensions/user-servers", options.baseUrl).toString(),
+        {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json" },
+          body: JSON.stringify(server),
+        },
+        decodeHostAnswer(ExtensionCommandResult),
       );
     },
     importLocalPluginReceipt(receiptId) {

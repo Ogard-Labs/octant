@@ -519,8 +519,8 @@ p.provider-limits__warning {
 .rail-usage__face {
   position: relative;
   display: flex;
-  width: 40px;
-  height: 40px;
+  width: 32px;
+  height: 32px;
   align-items: center;
   justify-content: center;
   border-radius: var(--oct-radius-sm);
@@ -531,9 +531,12 @@ p.provider-limits__warning {
   background: color-mix(in oklab, var(--oct-fg) 7%, transparent);
 }
 
-.rail-usage__face > svg {
-  width: 28px;
-  height: 28px;
+/* Only the ring turns: the provider's logo inside is an svg too, and a rule
+   on every svg child drew each logo at the ring's full size, rotated a quarter
+   turn, over its own ring. */
+.rail-usage__face > .rail-usage__rings {
+  width: 26px;
+  height: 26px;
   transform: rotate(-90deg);
 }
 
@@ -562,6 +565,8 @@ p.provider-limits__warning {
 
 .rail-usage__face > .rail-usage__glyph {
   position: absolute;
+  width: 12px;
+  height: 12px;
 }
 
 .rail-usage__card {

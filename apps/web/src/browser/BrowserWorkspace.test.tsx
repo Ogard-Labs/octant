@@ -9,6 +9,18 @@ import { describe, expect, it, vi } from "vitest";
 import { BrowserWorkspace } from "./BrowserWorkspace";
 import { boundsInsideViewport } from "./useNativeBrowserSurface";
 
+const localServers = vi.hoisted(() => ({
+  snapshot: undefined as unknown,
+  open: async (_listenerId: string): Promise<unknown> => undefined,
+}));
+vi.mock("../environment/useLocalServersController", () => ({
+  useLocalServersController: () => ({
+    status: "ready",
+    snapshot: localServers.snapshot,
+    open: (listenerId: string) => localServers.open(listenerId),
+  }),
+}));
+
 const threadId = "10000000-0000-4000-8000-000000000001";
 const authority = {
   hostId: "20000000-0000-4000-8000-000000000001",
@@ -187,6 +199,7 @@ describe("BrowserWorkspace", () => {
 
     await act(async () => undefined);
     expect(browser.inspectThread).not.toHaveBeenCalled();
+    enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     await waitFor(() => expect(onContextCreated).toHaveBeenCalledWith(context.contextId));
   });
@@ -230,6 +243,82 @@ describe("BrowserWorkspace", () => {
       expect(screen.getByLabelText("Browser URL")).toHaveValue("https://example.com/agent-updated"),
     );
     expect(browser.inspectThread).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers the checkout's running servers and opens the one the person picks as the host prepared it", async () => {
+    const listener = (port: number, extra: object) => ({
+      listenerId: `lsn_${String(port).padStart(32, "0")}`,
+      port,
+      url: `http://localhost:${port}/`,
+      processName: "node",
+      attribution: "current-checkout",
+      startSource: "terminal",
+      bindScope: "loopback",
+      health: "listening",
+      openAvailable: true,
+      stop: { kind: "unavailable" },
+      ...extra,
+    });
+    localServers.snapshot = {
+      threadId,
+      projectId: authority.projectId,
+      currentCheckout: [
+        listener(5173, { framework: "vite" }),
+        listener(9229, { health: "unresponsive", openAvailable: false }),
+      ],
+      // An HTTPS dev server on a self-signed localhost certificate.
+      other: [listener(3000, { framework: "next", url: "https://localhost:3000/" })],
+      observedAt: "2026-07-27T20:00:00.000Z",
+    };
+    const opened: string[] = [];
+    localServers.open = async (listenerId) => {
+      opened.push(listenerId);
+      return {
+        url: "https://localhost:3000/",
+        allowedOrigin: "https://localhost:3000",
+        acceptsLocalCertificate: true,
+      };
+    };
+    const browser = client();
+    try {
+      render(
+        <BrowserWorkspace
+          client={browser}
+          projectId={authority.projectId as any}
+          tab={{
+            kind: "browser",
+            id: "90000000-0000-4000-8000-000000000040" as any,
+            mode: "code",
+            title: "Browser",
+            threadId: threadId as any,
+          }}
+        />,
+      );
+
+      expect(screen.getByRole("textbox", { name: "Browser URL" })).toHaveValue(
+        "http://localhost:5173/",
+      );
+      const servers = screen.getByRole("list", { name: "Running servers" });
+      expect(
+        Array.from(servers.querySelectorAll("button"), (row) => row.getAttribute("aria-label")),
+      ).toEqual(["Open vite at localhost:5173", "Open next at localhost:3000"]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Open next at localhost:3000" }));
+      await waitFor(() =>
+        expect(browser.create).toHaveBeenCalledWith(
+          expect.objectContaining({
+            policy: expect.objectContaining({
+              allowedOrigins: ["https://localhost:3000"],
+              acceptsLocalCertificate: true,
+            }),
+          }),
+        ),
+      );
+      expect(opened).toEqual([`lsn_${"3000".padStart(32, "0")}`]);
+    } finally {
+      localServers.snapshot = undefined;
+      localServers.open = async () => undefined;
+    }
   });
 
   it("renders unavailable truthfully when the tab has no owning thread", () => {
@@ -510,6 +599,7 @@ describe("BrowserWorkspace", () => {
     );
 
     expect(await screen.findByRole("button", { name: "Stop" })).toBeVisible();
+    enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Reload" }));
     await waitFor(() =>
       expect(browser.act).toHaveBeenCalledWith(
@@ -672,6 +762,7 @@ describe("BrowserWorkspace", () => {
       />,
     );
 
+    enterAddress("https://example.com");
     const start = screen.getByRole("button", { name: "Start browser" });
     fireEvent.click(start);
     fireEvent.click(start);
@@ -726,6 +817,7 @@ describe("BrowserWorkspace", () => {
         }}
       />,
     );
+    enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     await screen.findByText("Browser failed");
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
@@ -773,6 +865,7 @@ describe("BrowserWorkspace", () => {
       />,
     );
 
+    enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The host browser could not start.");
     await waitFor(() => expect(browser.inspectThread).toHaveBeenCalledTimes(2), { timeout: 2_000 });
@@ -821,6 +914,7 @@ describe("BrowserWorkspace", () => {
         }}
       />,
     );
+    enterAddress("https://example.com");
     fireEvent.click(screen.getByRole("button", { name: "Start browser" }));
     await screen.findByText("Browser running");
     fireEvent.submit(screen.getByRole("textbox", { name: "Browser URL" }).closest("form")!);
@@ -1019,3 +1113,7 @@ describe("BrowserWorkspace", () => {
     expect(over.y + over.height).toBe(600);
   });
 });
+
+function enterAddress(value: string): void {
+  fireEvent.change(screen.getByRole("textbox", { name: "Browser URL" }), { target: { value } });
+}

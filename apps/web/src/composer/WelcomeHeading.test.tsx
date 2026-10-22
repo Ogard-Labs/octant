@@ -11,4 +11,13 @@ describe("WelcomeHeading", () => {
     expect(screen.getByText("Pick a project, or just start typing")).toBeVisible();
     expect(screen.queryByText(/running|waiting for your review|Good (morning|evening)/)).toBeNull();
   });
+
+  it("draws the aperture mark at 22px above the question", () => {
+    const { container } = render(<WelcomeHeading />);
+    const mark = container.querySelector("svg.welcome__mark");
+    expect(mark).toHaveAttribute("width", "22");
+    expect(mark).toHaveAttribute("height", "22");
+    expect(mark?.querySelector("use")).toHaveAttribute("href", "./icons.svg#aperture");
+    expect(mark?.nextElementSibling).toBe(screen.getByRole("heading"));
+  });
 });

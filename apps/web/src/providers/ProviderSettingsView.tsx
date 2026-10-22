@@ -40,7 +40,7 @@ import {
   implicitCodexAccountOwnerId,
   isImageProfileDriverKind,
 } from "@octant/domain";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { ProviderUsageLimitsClient } from "@octant/client-runtime/provider-usage-limits-client";
 import { SettingsSection } from "../settings/primitives";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -181,6 +181,15 @@ export interface ProviderSettingsViewProps {
    * the executable and the host checks it. Absent where there is no picker.
    */
   readonly onLocateBinary?: (instanceId: ProviderInstanceId) => Promise<LocateBinaryOutcome>;
+  /**
+   * A runtime card's offer to use a binary the host's latest scan found, when
+   * the card's own binary is missing or incompatible. The host accepts only a
+   * path from that scan and checks it first.
+   */
+  readonly onUseScannedBinary?: (
+    instanceId: ProviderInstanceId,
+    binaryPath: string,
+  ) => Promise<LocateBinaryOutcome>;
   readonly onChangeOpenAiCompatibleConfiguration: (
     instanceId: ProviderInstanceId,
     configuration: OpenAiCompatibleProviderConfiguration,
@@ -377,7 +386,49 @@ const GENERAL_PROVIDER_TYPES: ReadonlyArray<ProviderCreateProviderType> = [
   "fx",
 ];
 
+interface AddAccountRequest {
+  readonly sequence: number;
+  readonly providerType: "claude" | "codex";
+  readonly displayName: string;
+  readonly binaryPath: string;
+}
+
+/**
+ * The next free "<name> (n)" for another account of a card's driver, so the
+ * model picker can tell the accounts apart before the person renames it.
+ */
+function suggestedAccountName(
+  instances: ReadonlyArray<ProviderInstance>,
+  source: ProviderInstance,
+): string {
+  // A trailing "(n)" is an account sequence only when an account of the same
+  // driver carries the name without it; otherwise the number is the person's
+  // own, as in "Claude Research (2024)", and stays part of the name.
+  const unnumbered = source.displayName.replace(/\s*\(\d+\)$/, "").trim();
+  const base =
+    unnumbered !== source.displayName &&
+    instances.some(
+      (instance) =>
+        instance.driverKind === source.driverKind &&
+        instance.displayName.toLowerCase() === unnumbered.toLowerCase(),
+    )
+      ? unnumbered
+      : source.displayName;
+  const taken = new Set(instances.map((instance) => instance.displayName.toLowerCase()));
+  let number = 2;
+  while (taken.has(`${base} (${number})`.toLowerCase())) number += 1;
+  return `${base} (${number})`;
+}
+
 export function ProviderSettingsView(props: ProviderSettingsViewProps) {
+  const [addAccount, setAddAccount] = useState<AddAccountRequest | undefined>(undefined);
+  // A card's "Add account" opens the same manual form for its driver. A created
+  // account closes it again, so the suggested name is not offered twice.
+  const created = async (operation: Promise<boolean>) => {
+    const ok = await operation;
+    if (ok) setAddAccount(undefined);
+    return ok;
+  };
   // The settings shell already renders the pane's `.oct-title` and
   // `.oct-subtitle`; repeating an identity heading here read as three titles
   // in a row, so the pane goes straight to content and keeps global knobs in
@@ -416,19 +467,37 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
       {props.discovery}
       <ProviderSettingsList
         busy={props.busy}
+        onAddAccount={(source) => {
+          if (source.driverKind !== "claude" && source.driverKind !== "codex") return;
+          setAddAccount((current) => ({
+            sequence: (current?.sequence ?? 0) + 1,
+            providerType: source.driverKind,
+            displayName: suggestedAccountName(props.instances, source),
+            binaryPath: source.configuration.binaryPath,
+          }));
+        }}
         createForm={
           <ProviderCreateForm
+            key={addAccount?.sequence ?? "manual"}
             allowedProviderTypes={GENERAL_PROVIDER_TYPES}
+            {...(addAccount === undefined
+              ? {}
+              : {
+                  initialProviderType: addAccount.providerType,
+                  initialDisplayName: addAccount.displayName,
+                  initialBinaryPath: addAccount.binaryPath,
+                  openWithNameFocused: true,
+                })}
             busy={props.busy}
             claudeHostProfileTaken={implicitClaudeAccountOwnerId(props.instances) !== undefined}
             codexHostProfileTaken={implicitCodexAccountOwnerId(props.instances) !== undefined}
             heading="Agent runtime"
             hint="Installed runtimes are detected automatically. Use this for an unusual executable location or a runtime the scan missed. Model endpoints such as OpenAI-compatible APIs are added under Octant Harness › Model endpoints."
             credentialManagementAvailable={props.credentialManagementAvailable}
-            onCreate={props.onCreate}
+            onCreate={(...args) => created(props.onCreate(...args))}
             onCreateAnthropicCompatible={props.onCreateAnthropicCompatible}
             onCreateAzureFoundry={props.onCreateAzureFoundry}
-            onCreateClaude={props.onCreateClaude}
+            onCreateClaude={(...args) => created(props.onCreateClaude(...args))}
             onCreateGrok={props.onCreateGrok}
             onCreateGlm={props.onCreateGlm}
             onCreateGemini={props.onCreateGemini}
@@ -473,6 +542,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
         onChangeAzureFoundryConfiguration={props.onChangeAzureFoundryConfiguration}
         onChangeBinary={props.onChangeBinary}
         {...(props.onLocateBinary === undefined ? {} : { onLocateBinary: props.onLocateBinary })}
+        {...(props.onUseScannedBinary === undefined
+          ? {}
+          : { onUseScannedBinary: props.onUseScannedBinary })}
         {...(props.usageLimitsClient === undefined
           ? {}
           : { usageLimitsClient: props.usageLimitsClient })}
