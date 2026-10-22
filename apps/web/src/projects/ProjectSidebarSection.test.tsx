@@ -892,6 +892,13 @@ describe("ProjectSidebarSection activity view", () => {
       );
 
       const listSwitch = screen.getByRole("group", { name: "Thread list" });
+      // In the tree the switch shares the Projects heading's row, so the
+      // sidebar has one header row before the first Project.
+      expect(
+        within(screen.getByRole("region", { name: "Projects" })).getByRole("group", {
+          name: "Thread list",
+        }),
+      ).toBe(listSwitch);
       expect(within(listSwitch).getByRole("button", { name: "Project tree" })).toHaveAttribute(
         "aria-pressed",
         "true",

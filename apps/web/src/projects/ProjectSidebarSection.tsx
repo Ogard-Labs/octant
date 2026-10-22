@@ -626,11 +626,12 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
   function renderProjectGroup(
     label: string,
     projects: ReadonlyArray<ProjectSummary>,
-    options: { readonly allowAdd?: boolean } = {},
+    options: { readonly allowAdd?: boolean; readonly tools?: React.ReactNode } = {},
   ): React.ReactNode {
     return (
       <ProjectGroup
         key={label}
+        {...(options.tools === undefined ? {} : { tools: options.tools })}
         allProjects={props.projects}
         {...(props.activeProjectId === undefined ? {} : { activeProjectId: props.activeProjectId })}
         {...(props.activeThreadId === undefined ? {} : { activeThreadId: props.activeThreadId })}
@@ -679,6 +680,62 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
 
   const rowPropertyView: SidebarRowPropertyView = activityView ? "activity" : "projects";
 
+  const listTools =
+    (props.projectViewsEnabled === true &&
+      projectViewState !== undefined &&
+      props.projects.length > 0) ||
+    showListSwitch ? (
+      <div className="project-nav__toolbar">
+        {props.projectViewsEnabled === true &&
+        projectViewState !== undefined &&
+        props.projects.length > 0 ? (
+          <CodeProjectViewSwitcher
+            onCreate={() => setProjectViewEditor({ mode: "create" })}
+            onDelete={(viewId) =>
+              persistProjectViewState(deleteCodeProjectView(projectViewState, viewId))
+            }
+            onEdit={(viewId) => setProjectViewEditor({ mode: "edit", viewId })}
+            onSelect={(viewId) =>
+              persistProjectViewState(selectCodeProjectView(projectViewState, viewId))
+            }
+            filters={currentFilters ?? normalizeProjectViewFilters(undefined)}
+            onFiltersChange={persistProjectViewFilters}
+            onRowPropertiesChange={(next) =>
+              props.onRowPropertiesChange?.({ ...rowProperties, [rowPropertyView]: next })
+            }
+            rowProperties={rowProperties[rowPropertyView]}
+            rowPropertyView={rowPropertyView}
+            environmentOptions={
+              props.projectViewEnvironmentOptions ?? [{ id: "local", name: "Local" }]
+            }
+            presentation={props.projectViewSwitcherPresentation ?? "dropdown"}
+            {...(props.onProjectViewSwitcherPresentationChange === undefined
+              ? {}
+              : { onPresentationChange: props.onProjectViewSwitcherPresentationChange })}
+            projectCountFor={(viewId) =>
+              visibleCodeProjects(
+                props.projects.map((project) => ({ ...project, id: String(project.id) })),
+                { ...projectViewState, activeViewId: viewId },
+              ).length
+            }
+            state={projectViewState}
+          />
+        ) : null}
+        {showListSwitch ? (
+          <ThreadListViewSwitch arrangement={arrangement} onChange={showArrangement} />
+        ) : null}
+      </div>
+    ) : undefined;
+  // In the Project tree the list's tools stand in the Projects heading, as one
+  // header row; on their own row above it they made two rows of controls
+  // before the first Project. The status and activity lists have no such
+  // heading, so they keep the row.
+  const toolsInHeading =
+    listTools !== undefined &&
+    !(nestThreads && activityView) &&
+    !showFilteredThreadsEmpty &&
+    (viewGrouping === "project" || props.projects.length === 0);
+
   return (
     <SidebarRowPropertiesContext.Provider value={rowProperties.projects}>
       <nav aria-label="Projects" className="project-nav window-no-drag">
@@ -686,51 +743,7 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             "All Projects" over a heading that said "Projects" again. The
             Projects/Activity switch shares the row so the list's two
             questions, which Projects and which arrangement, sit together. */}
-        {(props.projectViewsEnabled === true &&
-          projectViewState !== undefined &&
-          props.projects.length > 0) ||
-        showListSwitch ? (
-          <div className="project-nav__toolbar">
-            {props.projectViewsEnabled === true &&
-            projectViewState !== undefined &&
-            props.projects.length > 0 ? (
-              <CodeProjectViewSwitcher
-                onCreate={() => setProjectViewEditor({ mode: "create" })}
-                onDelete={(viewId) =>
-                  persistProjectViewState(deleteCodeProjectView(projectViewState, viewId))
-                }
-                onEdit={(viewId) => setProjectViewEditor({ mode: "edit", viewId })}
-                onSelect={(viewId) =>
-                  persistProjectViewState(selectCodeProjectView(projectViewState, viewId))
-                }
-                filters={currentFilters ?? normalizeProjectViewFilters(undefined)}
-                onFiltersChange={persistProjectViewFilters}
-                onRowPropertiesChange={(next) =>
-                  props.onRowPropertiesChange?.({ ...rowProperties, [rowPropertyView]: next })
-                }
-                rowProperties={rowProperties[rowPropertyView]}
-                rowPropertyView={rowPropertyView}
-                environmentOptions={
-                  props.projectViewEnvironmentOptions ?? [{ id: "local", name: "Local" }]
-                }
-                presentation={props.projectViewSwitcherPresentation ?? "dropdown"}
-                {...(props.onProjectViewSwitcherPresentationChange === undefined
-                  ? {}
-                  : { onPresentationChange: props.onProjectViewSwitcherPresentationChange })}
-                projectCountFor={(viewId) =>
-                  visibleCodeProjects(
-                    props.projects.map((project) => ({ ...project, id: String(project.id) })),
-                    { ...projectViewState, activeViewId: viewId },
-                  ).length
-                }
-                state={projectViewState}
-              />
-            ) : null}
-            {showListSwitch ? (
-              <ThreadListViewSwitch arrangement={arrangement} onChange={showArrangement} />
-            ) : null}
-          </div>
-        ) : null}
+        {listTools === undefined || toolsInHeading ? null : listTools}
         {projectViewEditor === undefined || projectViewState === undefined ? null : (
           <CodeProjectViewEditorDialog
             mode={projectViewEditor.mode}
@@ -789,7 +802,10 @@ export function ProjectSidebarSection(props: ProjectSidebarSectionProps) {
             {viewGrouping === "project" || props.projects.length === 0
               ? [
                   renderProjectGroup("Pinned", pinned),
-                  renderProjectGroup("Projects", ordinary, { allowAdd: true }),
+                  renderProjectGroup("Projects", ordinary, {
+                    allowAdd: true,
+                    ...(toolsInHeading ? { tools: listTools } : {}),
+                  }),
                 ]
               : groupedViewProjects.map((group) => renderProjectGroup(group.label, group.projects))}
             {unfiled.length > 0 && props.onSelectThread !== undefined ? (
@@ -926,6 +942,8 @@ function projectThreadListId(projectId: ProjectId): string {
 }
 
 function ProjectGroup(props: {
+  /** The list's view, filter, and arrangement controls, shown in this heading. */
+  readonly tools?: React.ReactNode;
   /** Every visible Project, across sections, for telling same-named ones apart. */
   readonly allProjects: ReadonlyArray<ProjectSummary>;
   readonly activeProjectId?: ProjectId;
@@ -981,6 +999,7 @@ function ProjectGroup(props: {
     >
       <div className="project-section__header sidebar-section">
         <h2>{props.label}</h2>
+        {props.tools}
         {props.onAddProject === undefined &&
         (props.onSortChange === undefined || props.sort === undefined) ? null : (
           <div className="project-section__header-actions">

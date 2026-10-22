@@ -500,7 +500,9 @@ The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, base branch, checkout, Environment, repository) is the first row
 inside the card, above the prompt, as small rounded chips on a faint fill with
-no outline, so the composer stays a single object. Code's
+no outline, so the composer stays a single object. On a start screen the
+Project chooser stands just above the card's top-left edge as plain text,
+lifted out of the row so it never pushes the prompt down. Code's
 base-branch chip is absent until a Project is chosen: with no Project it
 would name a branch of nothing. The chip
 is painted on the plain element that holds each control, never on the shared
@@ -1052,7 +1054,9 @@ drawer.
 The right dock defaults to 640px when open, and opening a Browser or a
 Terminal widens a narrower dock to 640px once (the person can drag it back;
 the next such opening widens it again). A terminal in the dock is an inset,
-rounded plate rather than an edge-to-edge slab. A fresh window
+rounded plate rather than an edge-to-edge slab; under Glass the plate and
+its cells are the page colour with 12% of the ink, a grey that sits with the
+frosted panels instead of a black slab. A fresh window
 starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is `--oct-title-rail-h` in the native host and the status

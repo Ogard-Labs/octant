@@ -501,6 +501,23 @@
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
 }
 
+/* The Project a new thread will run in is the start screen's first choice, so
+   it stands above the composer as plain text, the way a start screen asks
+   "where" before "what". It is lifted out of the row rather than given a row
+   of its own, so it never pushes the prompt down the page (a tray above the
+   card once did), and its menu opens on whichever side has room. */
+.composer-stack
+  > .composer
+  .composer-tray--inside
+  .composer-tray__leading
+  > .composer-folder-selector {
+  position: absolute;
+  bottom: calc(100% + var(--oct-space-2));
+  left: var(--oct-space-1);
+  background: transparent;
+  border-radius: 0;
+}
+
 /* The Environment is a plain span rather than a trigger, so the chip draws
    its own inset and height to match the triggers beside it. */
 .composer-tray--inside .host-selector {
