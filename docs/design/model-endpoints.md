@@ -103,6 +103,16 @@ control supplies its accessible name.
 
 ### Additional CLI accounts
 
+Every Claude and Codex provider card offers Add account in its details, beside
+Check connection. It opens the same manual form that Add provider manually
+opens, expanded, with that driver chosen, the card's binary path filled in, and
+a suggested name ("<card name> (2)", the next free number) focused for editing.
+It adds no route and no authority: the host still assigns the account directory
+and the form shows the sign-in guidance for an additional account. A created
+account closes the form again, so the suggested name is not offered twice.
+Cards for other drivers, and the single runtime card on a provider's own
+page, have no Add account.
+
 The manual Claude and Codex account forms give the account directory, accent
 and sign-in guidance full-width setting rows. The compact provider/name/binary
 fields may share columns; account rows must not become cells in that row.

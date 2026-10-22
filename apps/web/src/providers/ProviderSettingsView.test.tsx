@@ -634,6 +634,127 @@ describe("ProviderSettingsView", () => {
     expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
   });
 
+  it("adds another Claude account from the Claude card with the form ready to name it", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    renderProviderSettings(<ProviderSettingsView {...props} />);
+
+    expect(screen.queryByLabelText("Provider type")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Details for Claude local" }));
+    await user.click(screen.getByRole("button", { name: "Add account for Claude local" }));
+
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    expect(within(create).getByRole("combobox", { name: "Provider type" })).toHaveTextContent(
+      "Claude Agent SDK",
+    );
+    const name = within(create).getByLabelText("Provider name");
+    expect(name).toHaveValue("Claude local (2)");
+    expect(name).toHaveFocus();
+    expect(within(create).getByLabelText("Claude binary")).toHaveValue("/opt/homebrew/bin/claude");
+    expect(within(create).getByLabelText("Account directory")).toHaveValue(
+      "~/.claude-accounts/<assigned on create>",
+    );
+
+    await user.click(within(create).getByRole("button", { name: "Add Claude" }));
+    expect(props.onCreateClaude).toHaveBeenLastCalledWith(
+      "Claude local (2)",
+      {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+      expect.objectContaining({ value: "" }),
+    );
+    // The new account exists, so the suggested name is not offered a second time.
+    await waitFor(() => {
+      expect(screen.queryByRole("form", { name: "Add Claude provider" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("adds another Codex account from the Codex card through the same form", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: codexProvider() });
+    renderProviderSettings(<ProviderSettingsView {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Details for Codex local" }));
+    await user.click(screen.getByRole("button", { name: "Add account for Codex local" }));
+
+    const create = screen.getByRole("form", { name: "Add provider" });
+    expect(within(create).getByRole("combobox", { name: "Provider type" })).toHaveTextContent(
+      "Codex CLI",
+    );
+    expect(within(create).getByLabelText("Provider name")).toHaveValue("Codex local (2)");
+    expect(within(create).getByLabelText("Codex binary")).toHaveValue("/opt/homebrew/bin/codex");
+
+    await user.click(within(create).getByRole("button", { name: "Add Codex" }));
+    expect(props.onCreate).toHaveBeenCalledWith(
+      "codex",
+      "Codex local (2)",
+      "/opt/homebrew/bin/codex",
+    );
+  });
+
+  it("suggests the next free number when a second account already exists", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    const second = decodeProviderInstance({
+      ...claudeProvider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000093"),
+      displayName: "Claude local (2)",
+    });
+    renderProviderSettings(
+      <ProviderSettingsView {...props} instances={[...props.instances, second]} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Details for Claude local" }));
+    await user.click(screen.getByRole("button", { name: "Add account for Claude local" }));
+
+    expect(screen.getByLabelText("Provider name")).toHaveValue("Claude local (3)");
+  });
+
+  it("keeps a number the person put in a card's name instead of reading it as an account sequence", async () => {
+    const user = userEvent.setup();
+    const research = decodeProviderInstance({
+      ...claudeProvider(),
+      displayName: "Claude Research (2024)",
+    });
+    renderProviderSettings(<ProviderSettingsView {...fixture({ instance: research })} />);
+
+    await user.click(screen.getByRole("button", { name: "Details for Claude Research (2024)" }));
+    await user.click(
+      screen.getByRole("button", { name: "Add account for Claude Research (2024)" }),
+    );
+
+    expect(screen.getByLabelText("Provider name")).toHaveValue("Claude Research (2024) (2)");
+  });
+
+  it("continues the sequence from a numbered account when its unnumbered sibling exists", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    const numbered = decodeProviderInstance({
+      ...claudeProvider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000093"),
+      displayName: "Claude local (2)",
+    });
+    renderProviderSettings(
+      <ProviderSettingsView {...props} instances={[...props.instances, numbered]} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Details for Claude local (2)" }));
+    await user.click(screen.getByRole("button", { name: "Add account for Claude local (2)" }));
+
+    expect(screen.getByLabelText("Provider name")).toHaveValue("Claude local (3)");
+  });
+
+  it("offers Add account on Claude and Codex cards only", async () => {
+    const user = userEvent.setup();
+    renderProviderSettings(<ProviderSettingsView {...fixture()} />);
+
+    await user.click(screen.getByRole("button", { name: "Details for Existing CLI" }));
+    expect(screen.getByRole("button", { name: "Check connection for Existing CLI" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Add account/ })).not.toBeInTheDocument();
+  });
+
   it("hides the Claude sign-in command until the binary path is absolute", async () => {
     const user = userEvent.setup();
     renderExpanded(<ProviderSettingsView {...fixture()} />);
