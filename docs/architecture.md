@@ -218,6 +218,10 @@ fetch sends the proof-bound session cookie explicitly and disables the shared
 cookie jar to prevent duplicate or stale cookies. Browser cookie ownership is
 unchanged, and native remote requests refuse redirects.
 
+Its background shares the desktop's three Gradient pictures and Pixelate/Dither
+print effect (Appearance › Background), drawn once through a GL shader that
+uses the same ordered threshold.
+
 Internal TestFlight distributes this same client and grants the phone no new
 authority. The bundle is `app.octant.mobile` (installed name Octant) at source
 version `0.1.0`; EAS Build signs and archives it, with build numbers from EAS

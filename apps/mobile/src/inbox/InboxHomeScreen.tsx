@@ -198,7 +198,7 @@ export function InboxHomeScreen(props: InboxHomeScreenProps) {
       setTransportError(
         cause instanceof MobileInboxFailure
           ? cause.message
-          : "Could not load threads from your hosts.",
+          : "Could not load threads from your computers.",
       );
     } finally {
       if (inboxRequestGuard.isCurrent(request)) setLoading(false);

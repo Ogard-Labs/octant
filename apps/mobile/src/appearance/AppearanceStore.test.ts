@@ -22,7 +22,43 @@ function memoryStorage() {
 }
 
 describe("AppearanceStore", () => {
-  it("defaults to the Octant canvas, system theme, and flat surfaces", () => {
+  it("starts a fresh install on Soft glow with the effect off", () => {
+    expect(DEFAULT_APPEARANCE.picture).toBe("soft-glow");
+    expect(DEFAULT_APPEARANCE.effect).toEqual({ kind: "none", cell: 4, levels: 4 });
+  });
+
+  it("replays saved backgrounds from before pictures as the ground they showed", () => {
+    const parse = (backgroundMode: string, extra: object = {}) =>
+      parseAppearancePreferences(JSON.stringify({ backgroundMode, ...extra }));
+    expect(parse("code-gradient").picture).toBe("plain");
+    expect(parse("atmosphere").picture).toBe("atmosphere");
+    const custom = parse("custom", { customImageUri: "file:///a.jpg" });
+    expect(custom.picture).toBe("custom");
+    expect(custom.customImageUri).toBe("file:///a.jpg");
+    expect(parse("custom").picture).toBe("plain");
+  });
+
+  it("clamps saved effect dials and ignores unknown effect kinds", () => {
+    const parsed = parseAppearancePreferences(
+      JSON.stringify({ picture: "soft-sunset", effect: { kind: "dither", cell: 40, levels: 1 } }),
+    );
+    expect(parsed.picture).toBe("soft-sunset");
+    expect(parsed.effect).toEqual({ kind: "dither", cell: 16, levels: 2 });
+    const odd = parseAppearancePreferences(
+      JSON.stringify({ picture: "soft-glow", effect: { kind: "sparkle" } }),
+    );
+    expect(odd.effect.kind).toBe("none");
+  });
+
+  it("keeps the picture and effect across a save and load", async () => {
+    const store = createAppearanceStore(memoryStorage());
+    await store.setPicture("soft-graphite");
+    const next = await store.setEffect({ kind: "dither", cell: 8, levels: 6 });
+    expect(next.picture).toBe("soft-graphite");
+    expect(await store.load()).toEqual(next);
+  });
+
+  it("defaults to Soft glow, system theme, and flat surfaces", () => {
     expect(parseAppearancePreferences(null)).toEqual(DEFAULT_APPEARANCE);
     expect(parseAppearancePreferences("{")).toEqual(DEFAULT_APPEARANCE);
     expect(DEFAULT_APPEARANCE.colorSchemePreference).toBe("system");
@@ -32,7 +68,8 @@ describe("AppearanceStore", () => {
   it("parses legacy prefs without theme/surface as system + flat", () => {
     expect(parseAppearancePreferences(JSON.stringify({ backgroundMode: "code-gradient" }))).toEqual(
       {
-        backgroundMode: "code-gradient",
+        picture: "plain",
+        effect: DEFAULT_APPEARANCE.effect,
         colorSchemePreference: "system",
         surfaceStyle: "flat",
       },
@@ -51,26 +88,26 @@ describe("AppearanceStore", () => {
 
     const withImage = await store.saveCustomImage("data:image/png;base64,abc");
     expect(withImage.surfaceStyle).toBe("glass");
-    expect(withImage.backgroundMode).toBe("custom");
+    expect(withImage.picture).toBe("custom");
 
     const cleared = await store.clearCustomImage();
     expect(cleared.surfaceStyle).toBe("glass");
-    expect(cleared.backgroundMode).toBe("code-gradient");
+    expect(cleared.picture).toBe("plain");
   });
 
   it("persists theme preference independently of wallpaper", async () => {
     const store = createAppearanceStore(memoryStorage());
     const dark = await store.setColorSchemePreference("dark");
     expect(dark.colorSchemePreference).toBe("dark");
-    expect(dark.backgroundMode).toBe("code-gradient");
+    expect(dark.picture).toBe("soft-glow");
 
     const withImage = await store.saveCustomImage("data:image/png;base64,abc");
     expect(withImage.colorSchemePreference).toBe("dark");
-    expect(withImage.backgroundMode).toBe("custom");
+    expect(withImage.picture).toBe("custom");
 
     const cleared = await store.clearCustomImage();
     expect(cleared.colorSchemePreference).toBe("dark");
-    expect(cleared.backgroundMode).toBe("code-gradient");
+    expect(cleared.picture).toBe("plain");
     expect(await store.load()).toEqual(cleared);
   });
 
@@ -92,15 +129,16 @@ describe("AppearanceStore", () => {
       deleteItem: inner.deleteItem,
     });
 
-    const first = store.setBackgroundMode("atmosphere");
-    const second = store.setBackgroundMode("code-gradient");
+    const first = store.setPicture("atmosphere");
+    const second = store.setPicture("plain");
     await Promise.resolve();
     expect(getCount).toBe(1);
     expect(releaseFirstGet).toBeDefined();
     releaseFirstGet?.();
     await Promise.all([first, second]);
     expect(await store.load()).toEqual({
-      backgroundMode: "code-gradient",
+      picture: "plain",
+      effect: DEFAULT_APPEARANCE.effect,
       colorSchemePreference: "system",
       surfaceStyle: "flat",
     });
@@ -108,29 +146,30 @@ describe("AppearanceStore", () => {
 
   it("persists the opt-in atmosphere background independently of theme", async () => {
     const store = createAppearanceStore(memoryStorage());
-    const atmosphere = await store.setBackgroundMode("atmosphere");
-    expect(atmosphere.backgroundMode).toBe("atmosphere");
+    const atmosphere = await store.setPicture("atmosphere");
+    expect(atmosphere.picture).toBe("atmosphere");
     expect(atmosphere.surfaceStyle).toBe("flat");
     expect(await store.load()).toEqual(atmosphere);
 
     const dark = await store.setColorSchemePreference("dark");
-    expect(dark.backgroundMode).toBe("atmosphere");
+    expect(dark.picture).toBe("atmosphere");
 
-    const canvas = await store.setBackgroundMode("code-gradient");
-    expect(canvas.backgroundMode).toBe("code-gradient");
+    const canvas = await store.setPicture("plain");
+    expect(canvas.picture).toBe("plain");
     expect(canvas.colorSchemePreference).toBe("dark");
   });
 
   it("persists and clears a custom background image", async () => {
     const store = createAppearanceStore(memoryStorage());
     const withImage = await store.saveCustomImage("data:image/png;base64,abc");
-    expect(withImage.backgroundMode).toBe("custom");
+    expect(withImage.picture).toBe("custom");
     expect(withImage.customImageUri).toBe("data:image/png;base64,abc");
     expect(await store.load()).toEqual(withImage);
 
     const cleared = await store.clearCustomImage();
     expect(cleared).toEqual({
-      backgroundMode: "code-gradient",
+      picture: "plain",
+      effect: DEFAULT_APPEARANCE.effect,
       colorSchemePreference: "system",
       surfaceStyle: "flat",
     });
@@ -139,7 +178,7 @@ describe("AppearanceStore", () => {
 });
 
 describe("wallpaper survival", () => {
-  it("falls back to the Octant canvas when the stored photo file is gone", async () => {
+  it("falls back to the plain page when the stored photo file is gone", async () => {
     const storage = memoryStorage();
     const present = createAppearanceStore(storage, { fileExists: async () => true });
     await present.saveCustomImage("file:///docs/background.jpg");
@@ -147,7 +186,8 @@ describe("wallpaper survival", () => {
 
     const missing = createAppearanceStore(storage, { fileExists: async () => false });
     expect(await missing.load()).toEqual({
-      backgroundMode: "code-gradient",
+      picture: "plain",
+      effect: DEFAULT_APPEARANCE.effect,
       colorSchemePreference: "system",
       surfaceStyle: "flat",
     });
@@ -183,12 +223,12 @@ describe("wallpaper copies on disk", () => {
     expect(removed).toEqual(["file:///docs/background-1.jpg"]);
   });
 
-  it("deletes the copy when the photo is removed or the background mode changes", async () => {
+  it("deletes the copy when the photo is removed or another picture is chosen", async () => {
     const { store, removed } = storeWithRemovals();
     await store.saveCustomImage("file:///docs/background-1.jpg");
     await store.clearCustomImage();
     await store.saveCustomImage("file:///docs/background-2.jpg");
-    await store.setBackgroundMode("atmosphere");
+    await store.setPicture("atmosphere");
     expect(removed).toEqual(["file:///docs/background-1.jpg", "file:///docs/background-2.jpg"]);
   });
 

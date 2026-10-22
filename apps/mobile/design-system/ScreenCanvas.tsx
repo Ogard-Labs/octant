@@ -1,46 +1,56 @@
 import type { ReactNode } from "react";
-import { Image, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import { StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { themeAtmosphereOpacity, themeAtmosphereSources } from "./themeAtmospheres";
+import { DEFAULT_EFFECT, type GroundEffect, type GroundPicture } from "./groundPrint";
+import { pictureSource } from "./groundPictures";
+import { PrintedGround } from "./PrintedGround";
+import { themeAtmosphereOpacity } from "./themeAtmospheres";
 import { useTheme } from "./theme";
-
-export type CanvasBackgroundMode = "code-gradient" | "atmosphere" | "custom";
 
 export interface ScreenCanvasProps {
   readonly children: ReactNode;
   readonly style?: StyleProp<ViewStyle>;
   readonly testID?: string;
-  readonly backgroundMode?: CanvasBackgroundMode;
+  readonly picture?: GroundPicture;
+  readonly effect?: GroundEffect;
   readonly customImageUri?: string | undefined;
 }
 
 /**
- * The Octant canvas mirrors the desktop ground: a flat workspace colour with a
- * whisper of neutral wash — not a loud photo. The bundled atmosphere and custom
- * wallpapers remain opt-in through Appearance → Background; custom photos stay
- * dimmed for readability.
+ * The Octant canvas mirrors the desktop ground: a flat workspace colour under
+ * one of the first-party pictures, a person's photo, or the plain page, printed
+ * as it is, pixelated or dithered. It is drawn once and never moves. A custom
+ * photo stays dimmed for readability; the plain page keeps a whisper of wash.
  */
+// A pixelated or dithered print is all edges, so it steps back under the
+// canvas colour the way the atmosphere does; a plain print keeps its full depth.
+const PRINTED_PICTURE_OPACITY = 0.72;
+
 export function ScreenCanvas(props: ScreenCanvasProps) {
   const { colors, scheme } = useTheme();
-  const mode = props.backgroundMode ?? "code-gradient";
-  const custom = mode === "custom" && props.customImageUri !== undefined;
+  const picture = props.picture ?? "plain";
+  const effect = props.effect ?? DEFAULT_EFFECT;
+  const customSource =
+    picture === "custom" && props.customImageUri !== undefined
+      ? { uri: props.customImageUri }
+      : undefined;
+  const bundledSource = pictureSource(picture, scheme);
   const atmosphereOpacity = themeAtmosphereOpacity[scheme];
-  const atmosphereSource = themeAtmosphereSources[scheme];
 
   return (
     <View
       style={[styles.root, { backgroundColor: colors.canvas }, props.style]}
       testID={props.testID ?? "mobile-screen-canvas"}
     >
-      {custom ? (
+      {customSource !== undefined ? (
         <>
-          <Image
-            accessibilityIgnoresInvertColors
-            resizeMode="cover"
-            source={{ uri: props.customImageUri }}
-            style={[StyleSheet.absoluteFill, { opacity: 0.88 }]}
-            testID="mobile-canvas-custom-image"
-          />
+          <View style={styles.customPicture}>
+            <PrintedGround
+              effect={effect}
+              source={customSource}
+              testID="mobile-canvas-custom-image"
+            />
+          </View>
           <View
             style={[styles.customDim, { backgroundColor: colors.customDim }]}
             testID="mobile-canvas-custom-dim"
@@ -52,15 +62,24 @@ export function ScreenCanvas(props: ScreenCanvasProps) {
             style={StyleSheet.absoluteFill}
           />
         </>
-      ) : mode === "atmosphere" ? (
+      ) : bundledSource !== undefined ? (
         <>
-          <Image
-            accessibilityIgnoresInvertColors
-            resizeMode="cover"
-            source={atmosphereSource}
-            style={[StyleSheet.absoluteFill, { opacity: atmosphereOpacity }]}
-            testID={`mobile-canvas-atmosphere-${scheme}`}
-          />
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              picture === "atmosphere"
+                ? { opacity: atmosphereOpacity }
+                : effect.kind === "none"
+                  ? null
+                  : { opacity: PRINTED_PICTURE_OPACITY },
+            ]}
+          >
+            <PrintedGround
+              effect={effect}
+              source={bundledSource}
+              testID={`mobile-canvas-picture-${picture}`}
+            />
+          </View>
           <LinearGradient
             colors={[colors.atmosphereScrimStart, "transparent", colors.atmosphereScrimEnd]}
             end={{ x: 0.5, y: 1 }}
@@ -90,6 +109,10 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  customPicture: {
+    ...StyleSheet.absoluteFill,
+    opacity: 0.88,
   },
   customDim: {
     ...StyleSheet.absoluteFill,

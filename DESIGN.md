@@ -600,6 +600,7 @@ soften it beneath one continuous reading veil, the stage colour at 80%, so it
 shows at about a fifth of its strength behind a thread and agent replies
 remain bare prose (0155). Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›
+Appearance › Background. The phone shares the same pictures and print effect under
 Appearance › Background.
 When the ground runs behind everything, a start screen's reading column
 carries a soft wash of the page colour that fades out before the edges, and a

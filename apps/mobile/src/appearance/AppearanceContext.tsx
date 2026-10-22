@@ -10,6 +10,8 @@ import {
 import {
   ThemeProvider,
   type ColorSchemePreference,
+  type GroundEffect,
+  type GroundPicture,
   type SurfaceStylePreference,
 } from "../../design-system";
 import { createExpoSecureStringStorage } from "../hosts/expoSecureStorage";
@@ -26,8 +28,8 @@ export interface AppearanceContextValue {
   readonly ready: boolean;
   readonly setCustomBackground: (dataUri: string) => Promise<void>;
   readonly clearCustomBackground: () => Promise<void>;
-  readonly useCodeGradient: () => Promise<void>;
-  readonly useAtmosphere: () => Promise<void>;
+  readonly setPicture: (picture: Exclude<GroundPicture, "custom">) => Promise<void>;
+  readonly setEffect: (effect: GroundEffect) => Promise<void>;
   readonly setColorSchemePreference: (preference: ColorSchemePreference) => Promise<void>;
   readonly setSurfaceStyle: (style: SurfaceStylePreference) => Promise<void>;
 }
@@ -83,14 +85,21 @@ export function AppearanceProvider(props: {
     setPreferences(next);
   }, [store]);
 
-  const useCodeGradient = useCallback(async () => {
-    await clearCustomBackground();
-  }, [clearCustomBackground]);
+  const setPicture = useCallback(
+    async (picture: Exclude<GroundPicture, "custom">) => {
+      const next = await store.setPicture(picture);
+      setPreferences(next);
+    },
+    [store],
+  );
 
-  const useAtmosphere = useCallback(async () => {
-    const next = await store.setBackgroundMode("atmosphere");
-    setPreferences(next);
-  }, [store]);
+  const setEffect = useCallback(
+    async (effect: GroundEffect) => {
+      const next = await store.setEffect(effect);
+      setPreferences(next);
+    },
+    [store],
+  );
 
   const setColorSchemePreference = useCallback(
     async (preference: ColorSchemePreference) => {
@@ -114,8 +123,8 @@ export function AppearanceProvider(props: {
       ready,
       setCustomBackground,
       clearCustomBackground,
-      useCodeGradient,
-      useAtmosphere,
+      setPicture,
+      setEffect,
       setColorSchemePreference,
       setSurfaceStyle,
     }),
@@ -124,8 +133,8 @@ export function AppearanceProvider(props: {
       ready,
       setCustomBackground,
       clearCustomBackground,
-      useCodeGradient,
-      useAtmosphere,
+      setPicture,
+      setEffect,
       setColorSchemePreference,
       setSurfaceStyle,
     ],

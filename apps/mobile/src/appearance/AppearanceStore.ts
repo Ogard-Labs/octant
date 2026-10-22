@@ -1,15 +1,18 @@
 import type { ExpoSecureStringStorage } from "@octant/client-runtime";
-import type {
-  CanvasBackgroundMode,
-  ColorSchemePreference,
-  SurfaceStylePreference,
-} from "../../design-system";
+import {
+  clampEffect,
+  DEFAULT_EFFECT,
+  type GroundEffect,
+  type GroundPicture,
+} from "../../design-system/groundPrint";
+import type { ColorSchemePreference, SurfaceStylePreference } from "../../design-system";
 
 const PREFS_KEY = "appearance.preferences.v1";
 const IMAGE_KEY = "appearance.backgroundImage.v1";
 
 export interface AppearancePreferences {
-  readonly backgroundMode: CanvasBackgroundMode;
+  readonly picture: GroundPicture;
+  readonly effect: GroundEffect;
   /** Data URI or file URI for custom wallpaper. */
   readonly customImageUri?: string;
   /** User theme: light, dark, or follow OS. */
@@ -18,11 +21,22 @@ export interface AppearancePreferences {
   readonly surfaceStyle: SurfaceStylePreference;
 }
 
+/** A fresh install starts on Soft glow with the effect off, like the desktop. */
 export const DEFAULT_APPEARANCE: AppearancePreferences = {
-  backgroundMode: "code-gradient",
+  picture: "soft-glow",
+  effect: DEFAULT_EFFECT,
   colorSchemePreference: "system",
   surfaceStyle: "flat",
 };
+
+const PICTURES: ReadonlyArray<GroundPicture> = [
+  "soft-glow",
+  "soft-graphite",
+  "soft-sunset",
+  "atmosphere",
+  "custom",
+  "plain",
+];
 
 function parseColorSchemePreference(value: unknown): ColorSchemePreference {
   if (value === "light" || value === "dark" || value === "system") return value;
@@ -34,29 +48,51 @@ function parseSurfaceStyle(value: unknown): SurfaceStylePreference {
   return "flat";
 }
 
+function isPicture(value: unknown): value is GroundPicture {
+  return PICTURES.some((picture) => picture === value);
+}
+
+/**
+ * Preferences written before pictures existed carried a `backgroundMode`; it
+ * replays as the ground it showed then, so nobody's phone changes on update.
+ */
+function parsePicture(parsed: Record<string, unknown>): GroundPicture {
+  if (isPicture(parsed.picture)) return parsed.picture;
+  if (parsed.backgroundMode === "atmosphere") return "atmosphere";
+  if (parsed.backgroundMode === "custom") return "custom";
+  return "plain";
+}
+
+function parseEffect(value: unknown): GroundEffect {
+  if (typeof value !== "object" || value === null) return DEFAULT_EFFECT;
+  const record = value as Record<string, unknown>;
+  const kind =
+    record.kind === "pixelate" || record.kind === "dither" || record.kind === "none"
+      ? record.kind
+      : "none";
+  return clampEffect({
+    kind,
+    cell: typeof record.cell === "number" ? record.cell : DEFAULT_EFFECT.cell,
+    levels: typeof record.levels === "number" ? record.levels : DEFAULT_EFFECT.levels,
+  });
+}
+
 export function parseAppearancePreferences(raw: string | null): AppearancePreferences {
   if (raw === null || raw.length === 0) return DEFAULT_APPEARANCE;
   try {
-    const parsed = JSON.parse(raw) as Partial<AppearancePreferences>;
-    const colorSchemePreference = parseColorSchemePreference(parsed.colorSchemePreference);
-    const surfaceStyle = parseSurfaceStyle(parsed.surfaceStyle);
-    const mode: CanvasBackgroundMode =
-      parsed.backgroundMode === "custom" || parsed.backgroundMode === "atmosphere"
-        ? parsed.backgroundMode
-        : "code-gradient";
-    if (mode === "custom" && typeof parsed.customImageUri === "string") {
-      return {
-        backgroundMode: "custom",
-        customImageUri: parsed.customImageUri,
-        colorSchemePreference,
-        surfaceStyle,
-      };
-    }
-    return {
-      backgroundMode: mode === "custom" ? "code-gradient" : mode,
-      colorSchemePreference,
-      surfaceStyle,
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null) return DEFAULT_APPEARANCE;
+    const record = parsed as Record<string, unknown>;
+    const base = {
+      effect: parseEffect(record.effect),
+      colorSchemePreference: parseColorSchemePreference(record.colorSchemePreference),
+      surfaceStyle: parseSurfaceStyle(record.surfaceStyle),
     };
+    const picture = parsePicture(record);
+    if (picture === "custom" && typeof record.customImageUri === "string") {
+      return { ...base, picture, customImageUri: record.customImageUri };
+    }
+    return { ...base, picture: picture === "custom" ? "plain" : picture };
   } catch {
     return DEFAULT_APPEARANCE;
   }
@@ -71,9 +107,10 @@ export interface AppearanceStore {
     preference: ColorSchemePreference,
   ) => Promise<AppearancePreferences>;
   readonly setSurfaceStyle: (style: SurfaceStylePreference) => Promise<AppearancePreferences>;
-  readonly setBackgroundMode: (
-    mode: Exclude<CanvasBackgroundMode, "custom">,
+  readonly setPicture: (
+    picture: Exclude<GroundPicture, "custom">,
   ) => Promise<AppearancePreferences>;
+  readonly setEffect: (effect: GroundEffect) => Promise<AppearancePreferences>;
 }
 
 export interface AppearanceStoreOptions {
@@ -121,12 +158,13 @@ export function createAppearanceStore(
   };
 
   const writeMeta = async (prefs: AppearancePreferences): Promise<void> => {
-    const meta: Record<string, string> = {
-      backgroundMode: prefs.backgroundMode,
+    const meta: Record<string, unknown> = {
+      picture: prefs.picture,
+      effect: prefs.effect,
       colorSchemePreference: prefs.colorSchemePreference,
       surfaceStyle: prefs.surfaceStyle,
     };
-    if (prefs.backgroundMode === "custom") {
+    if (prefs.picture === "custom") {
       meta.customImageUri = "stored";
     }
     await storage.setItem(PREFS_KEY, JSON.stringify(meta));
@@ -134,23 +172,15 @@ export function createAppearanceStore(
 
   const load = async (): Promise<AppearancePreferences> => {
     const prefs = parseAppearancePreferences(await storage.getItem(PREFS_KEY));
-    if (prefs.backgroundMode !== "custom") {
+    if (prefs.picture !== "custom") {
       return prefs;
     }
+    const { customImageUri: _stored, ...rest } = prefs;
     const image = await storage.getItem(IMAGE_KEY);
     if (image === null || image.length === 0 || !(await keepsWallpaper(image, options))) {
-      return {
-        backgroundMode: "code-gradient",
-        colorSchemePreference: prefs.colorSchemePreference,
-        surfaceStyle: prefs.surfaceStyle,
-      };
+      return { ...rest, picture: "plain" };
     }
-    return {
-      backgroundMode: "custom",
-      customImageUri: image,
-      colorSchemePreference: prefs.colorSchemePreference,
-      surfaceStyle: prefs.surfaceStyle,
-    };
+    return { ...rest, customImageUri: image };
   };
 
   // The replaced copy is deleted only after the new state is stored, so a
@@ -167,82 +197,36 @@ export function createAppearanceStore(
 
   const save = async (prefs: AppearancePreferences): Promise<void> => {
     const previous = await storage.getItem(IMAGE_KEY);
-    if (prefs.backgroundMode === "custom" && prefs.customImageUri !== undefined) {
+    if (prefs.picture === "custom" && prefs.customImageUri !== undefined) {
       await storage.setItem(IMAGE_KEY, prefs.customImageUri);
       await writeMeta(prefs);
       await removeReplacedFile(previous, prefs.customImageUri);
       return;
     }
     await storage.deleteItem(IMAGE_KEY);
-    await writeMeta({
-      backgroundMode: prefs.backgroundMode === "custom" ? "code-gradient" : prefs.backgroundMode,
-      colorSchemePreference: prefs.colorSchemePreference,
-      surfaceStyle: prefs.surfaceStyle,
-    });
+    await writeMeta({ ...prefs, picture: prefs.picture === "custom" ? "plain" : prefs.picture });
     await removeReplacedFile(previous, undefined);
   };
+
+  const update = (change: (current: AppearancePreferences) => AppearancePreferences) =>
+    runExclusive(async () => {
+      const next = change(await load());
+      await save(next);
+      return next;
+    });
 
   return {
     load,
     save,
-    async saveCustomImage(dataUri) {
-      return runExclusive(async () => {
-        const current = await load();
-        const next: AppearancePreferences = {
-          backgroundMode: "custom",
-          customImageUri: dataUri,
-          colorSchemePreference: current.colorSchemePreference,
-          surfaceStyle: current.surfaceStyle,
-        };
-        await save(next);
-        return next;
-      });
-    },
-    async clearCustomImage() {
-      return runExclusive(async () => {
-        const current = await load();
-        const next: AppearancePreferences = {
-          backgroundMode: "code-gradient",
-          colorSchemePreference: current.colorSchemePreference,
-          surfaceStyle: current.surfaceStyle,
-        };
-        await save(next);
-        return next;
-      });
-    },
-    async setColorSchemePreference(preference) {
-      return runExclusive(async () => {
-        const current = await load();
-        const next: AppearancePreferences = {
-          ...current,
-          colorSchemePreference: preference,
-        };
-        await save(next);
-        return next;
-      });
-    },
-    async setSurfaceStyle(style) {
-      return runExclusive(async () => {
-        const current = await load();
-        const next: AppearancePreferences = {
-          ...current,
-          surfaceStyle: style,
-        };
-        await save(next);
-        return next;
-      });
-    },
-    async setBackgroundMode(mode) {
-      return runExclusive(async () => {
-        const current = await load();
-        const next: AppearancePreferences = {
-          backgroundMode: mode,
-          colorSchemePreference: current.colorSchemePreference,
-          surfaceStyle: current.surfaceStyle,
-        };
-        await save(next);
-        return next;
-      });
-    },
+    saveCustomImage: (dataUri) =>
+      update((current) => ({ ...current, picture: "custom", customImageUri: dataUri })),
+    clearCustomImage: () =>
+      update(({ customImageUri: _removed, ...current }) => ({ ...current, picture: "plain" })),
+    setColorSchemePreference: (preference) =>
+      update((current) => ({ ...current, colorSchemePreference: preference })),
+    setSurfaceStyle: (style) => update((current) => ({ ...current, surfaceStyle: style })),
+    setPicture: (picture) =>
+      update(({ customImageUri: _removed, ...current }) => ({ ...current, picture })),
+    setEffect: (effect) => update((current) => ({ ...current, effect: clampEffect(effect) })),
   };
 }

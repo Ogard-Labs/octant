@@ -59,7 +59,8 @@ function AppShell(props: {
     <SafeAreaView edges={["top", "right", "bottom", "left"]} style={styles.safeArea}>
       <StatusBar barStyle={scheme === "dark" ? "light-content" : "dark-content"} />
       <ScreenCanvas
-        backgroundMode={appearance.preferences.backgroundMode}
+        effect={appearance.preferences.effect}
+        picture={appearance.preferences.picture}
         customImageUri={appearance.preferences.customImageUri}
       >
         {props.mockScenario !== undefined ? (
