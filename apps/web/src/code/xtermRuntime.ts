@@ -17,7 +17,7 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
     convertEol: true,
     cursorBlink: true,
     disableStdin: !interactive,
-    fontFamily: typography.fontFamily,
+    fontFamily: withPromptIconFonts(typography.fontFamily),
     fontSize: typography.fontSize,
     fontWeight: typography.fontWeight,
     lineHeight: typography.lineHeight,
@@ -191,9 +191,39 @@ function applyTerminalTypography(
   element: HTMLElement,
   typography: TerminalTypographyProjection,
 ): void {
-  terminal.options.fontFamily = typography.fontFamily;
+  terminal.options.fontFamily = withPromptIconFonts(typography.fontFamily);
   terminal.options.fontSize = typography.fontSize;
   terminal.options.fontWeight = typography.fontWeight;
   terminal.options.lineHeight = typography.lineHeight;
   element.style.fontVariantLigatures = typography.fontLigatures ? "common-ligatures" : "none";
+}
+
+/**
+ * Shell prompts (Powerline, Starship, oh-my-posh) draw their separators and
+ * icons from Nerd Font code points. The stack named only the symbols-only
+ * Nerd Font, which few people install, so a prompt drew empty boxes even on a
+ * Mac that had a full Nerd Font such as Hack's. The common Nerd Font families
+ * join the stack just before its generic family, after every face the person
+ * chose, so they only ever supply the glyphs those faces lack.
+ */
+const PROMPT_ICON_FONTS = [
+  "Symbols Nerd Font Mono",
+  "Symbols Nerd Font",
+  "Hack Nerd Font Mono",
+  "JetBrainsMono Nerd Font Mono",
+  "MesloLGS Nerd Font Mono",
+  "MesloLGS NF",
+  "FiraCode Nerd Font Mono",
+] as const;
+
+export function withPromptIconFonts(family: string): string {
+  const named = family.toLowerCase();
+  const missing = PROMPT_ICON_FONTS.filter((font) => !named.includes(font.toLowerCase())).map(
+    (font) => `'${font}'`,
+  );
+  if (missing.length === 0) return family;
+  const generic = /,\s*(monospace|ui-monospace)\s*$/i.exec(family);
+  return generic === null
+    ? `${family}, ${missing.join(", ")}`
+    : `${family.slice(0, generic.index)}, ${missing.join(", ")}${generic[0]}`;
 }

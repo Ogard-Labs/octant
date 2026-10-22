@@ -1643,6 +1643,21 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   }
 }
 
+/* A narrow pane, as in a split, does the same: the breadcrumb cut both parts
+   to "auroradocs-… / please open w…", and neither could be read. The title
+   keeps the whole room and names the Project in its tooltip. */
+.workspace-pane__header {
+  container-name: pane-header;
+  container-type: inline-size;
+}
+
+@container pane-header (max-width: 520px) {
+  .workspace-pane__context,
+  .workspace-pane__crumb {
+    display: none;
+  }
+}
+
 /* A turn is executing. The pill keeps its width while the chips shrink, so
    the state stays readable in a narrow pane. */
 .workspace-pane__status {
@@ -1652,7 +1667,9 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   gap: var(--oct-space-1);
   padding: 0 var(--oct-space-2);
   color: var(--oct-fg-2);
-  background: var(--octant-selection);
+  /* A neutral wash, as the open thread row and tab are: the selection role
+     carries the theme's hue and drew a green pill on Onyx. */
+  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
   border-radius: var(--oct-radius-pill);
   font-size: var(--oct-text-xs);
   font-weight: var(--oct-weight-medium);
