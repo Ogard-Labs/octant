@@ -582,7 +582,9 @@
 /* Increased contrast strengthens the card outlines. It lives here, after the
    cards' own border shorthands: this sheet loads after styles.css, so an
    override there was reset to the hairline by these same-specificity rules. */
+/* The cards carry no ring by default, so increased contrast draws the whole
+   border, not only its colour. */
 html[data-octant-increased-contrast="true"] .thread-environment-dock__header,
 html[data-octant-increased-contrast="true"] .environment-card__rows {
-  border-color: var(--octant-border-strong);
+  border: 1px solid var(--octant-border-strong);
 }

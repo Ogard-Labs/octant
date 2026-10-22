@@ -77,6 +77,36 @@ describe("ComposerProjectSelector", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it("opens its menu on the side of the trigger with more room, capped to that room", async () => {
+    render(<ComposerProjectSelector entries={entries} onSelect={vi.fn()} onAddFolder={() => {}} />);
+    const trigger = screen.getByRole("button", { name: "Project: Choose a Project" });
+    const at = (top: number) =>
+      vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+        top,
+        bottom: top + 24,
+        left: 0,
+        right: 120,
+        width: 120,
+        height: 24,
+        x: 0,
+        y: top,
+        toJSON: () => ({}),
+      });
+    const menu = () => document.querySelector(".composer-folder-selector__menu");
+
+    // Near the foot of the window, as on a start screen: above, capped to the room there.
+    at(window.innerHeight - 60);
+    await userEvent.click(trigger);
+    expect(menu()).not.toHaveClass("composer-folder-selector__menu--below");
+    expect(menu()).toHaveStyle({ maxHeight: "448px" });
+    await userEvent.click(trigger);
+
+    // Near the top, as under Code Home's question: below.
+    at(80);
+    await userEvent.click(trigger);
+    expect(menu()).toHaveClass("composer-folder-selector__menu--below");
+  });
+
   it("asks for a Project until one is chosen", () => {
     render(
       <ComposerProjectSelector entries={entries} onSelect={() => {}} onAddFolder={() => {}} />,
