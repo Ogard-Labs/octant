@@ -7380,8 +7380,11 @@ html[data-octant-reduced-transparency="true"] [data-slot="card"][data-variant="g
   background: var(--oct-fg-soft);
   color: var(--oct-fg);
 }
+/* The open page takes the same neutral wash of the ink as the open thread in
+   the workspace sidebar. The selection role carries the theme's hue, and on
+   Onyx the open page read as a green slab on the glass. */
 .setnav-item[aria-current="page"] {
-  background: var(--oct-selection);
+  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
   color: var(--oct-fg);
 }
 

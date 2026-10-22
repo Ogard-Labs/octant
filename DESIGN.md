@@ -328,7 +328,9 @@ error instead of retaining another integration's account controls.
   with the destructive button variant. The danger is carried by the
   placement and the confirm control; the label keeps its ink.
 - **Rail.** Each page keeps its icon (16px) in the navigation rail, and
-  Device tools has its own, apart from Computer use. Search is an icon beside
+  Device tools has its own, apart from Computer use. The open page takes the
+  same neutral wash of the ink as the open thread in the workspace sidebar,
+  never the theme's selection hue. Search is an icon beside
   the "Settings" heading that reveals the field; Cmd/Ctrl+F reveals and
   focuses it, the field stays mounted while folded away, and it folds back
   when it loses focus empty. Below the narrow breakpoint the field is always
@@ -1176,6 +1178,8 @@ stage), defined once on every shell in `shell.css`:
   (`--octant-outline-rest`); its hover and pressed fills stay the control
   fills.
 - **Quick tools** beside a Code start screen are a clear column on the stage.
+- **The Browser** is clear on its own start page, whose rows take the card
+  step; a loaded page keeps its opaque canvas.
 
 Controls keep their own opaque fills (a switch thumb, a filled or secondary
 button, a segmented track), and menus, popovers, and dialogs keep the opaque
