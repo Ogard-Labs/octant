@@ -2301,10 +2301,10 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   text-overflow: ellipsis;
 }
 
-/* The selector sits in the composer's top strip, and the composer docks at
-   the foot of the page, so the menu opens upward over the page. Hung below
-   the trigger it ran past the window's bottom edge and showed one Project
-   and a half. */
+/* The menu opens on the side of the trigger with more room (the selector
+   measures it) and is capped to that room. Hung always below, it ran past the
+   window's bottom edge where the composer docks at the page foot and showed
+   one Project and a half. */
 .composer-folder-selector__menu {
   position: absolute;
   z-index: 40;
@@ -2320,6 +2320,11 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   border: 1px solid var(--octant-border-strong);
   border-radius: var(--oct-radius-md);
   box-shadow: var(--octant-shadow-overlay);
+}
+
+.composer-folder-selector__menu--below {
+  inset-block-start: calc(100% + 6px);
+  inset-block-end: auto;
 }
 
 /* The GitHub flow carries a picker and a confirmation card, so the same

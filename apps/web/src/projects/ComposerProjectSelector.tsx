@@ -8,6 +8,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -93,6 +94,14 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
   const [view, setView] = useState<"projects" | "github">("projects");
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
+  // Which side of the trigger the menu opens on, and how tall it may grow
+  // there. Always above ran off the top on Code Home, where the composer sits
+  // under the question; always below ran off the bottom where it docks at the
+  // foot. The side with more room wins and the menu is capped to that room.
+  const [placement, setPlacement] = useState<{
+    readonly side: "above" | "below";
+    readonly maxHeight: number;
+  }>();
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -202,6 +211,21 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
     return () => document.removeEventListener("mousedown", handler);
   }, [close, open]);
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    const trigger = triggerRef.current;
+    if (trigger === null) return;
+    const rect = trigger.getBoundingClientRect();
+    const margin = 12;
+    const above = rect.top - margin;
+    const below = window.innerHeight - rect.bottom - margin;
+    const side = above >= below ? "above" : "below";
+    setPlacement({
+      side,
+      maxHeight: Math.max(160, Math.min(448, side === "above" ? above : below)),
+    });
+  }, [open, view]);
+
   const optionClass = (index: number, selected = false) =>
     `composer-folder-selector__option${index === activeIndex ? " composer-folder-selector__option--active" : ""}${selected ? " composer-folder-selector__option--selected" : ""}`;
 
@@ -224,9 +248,10 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
       </OctantButton>
       {open ? (
         <div
-          className={`composer-folder-selector__menu${view === "github" ? " composer-folder-selector__menu--github" : ""}`}
+          className={`composer-folder-selector__menu${view === "github" ? " composer-folder-selector__menu--github" : ""}${placement?.side === "below" ? " composer-folder-selector__menu--below" : ""}`}
           onKeyDown={handleKeyDown}
           ref={listRef}
+          {...(placement === undefined ? {} : { style: { maxHeight: placement.maxHeight } })}
         >
           {view === "github" && github !== undefined ? (
             <>
