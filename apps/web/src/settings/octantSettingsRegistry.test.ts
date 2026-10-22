@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { octantSettingsRegistry } from "./octantSettingsRegistry";
 import { listAvailableSections, resolveDeepLink, searchSettings } from "./registry";
@@ -34,11 +36,14 @@ describe("octantSettingsRegistry", () => {
     ]);
   });
 
-  it("registers the GitHub section as an opaque host-scoped connection destination", () => {
+  it("registers the GitHub section as a host-scoped connection destination", () => {
     const github = octantSettingsRegistry.sections.find((s) => s.id === "github");
     expect(github?.label).toBe("GitHub");
     expect(github?.scope).toBe("host");
-    expect(github?.settings).toEqual([]);
+    expect(github?.settings.map((setting) => setting.id)).toEqual([
+      "github-connection",
+      "github-logout",
+    ]);
     expect(github?.keywords).toMatch(/authentication/);
     expect(github?.keywords).toMatch(/revoke/);
     expect(github?.keywords).toMatch(/repositories/);
@@ -54,6 +59,9 @@ describe("octantSettingsRegistry", () => {
       "reset-window-bounds",
       "export-diagnostics",
       "journal-growth",
+      "host-automatic-startup",
+      "host-backup",
+      "host-lifecycle",
     ]);
     expect(host?.keywords).toMatch(/lifecycle/);
     expect(host?.keywords).toMatch(/diagnostics/);
@@ -135,7 +143,7 @@ describe("octantSettingsRegistry", () => {
     expect(material?.nativeRequired).toBeUndefined();
   });
 
-  it("keeps opaque sections without individual settings and registers the Code setup destinations", () => {
+  it("keeps Usage opaque and registers the Chat and Code setup destinations", () => {
     const usage = octantSettingsRegistry.sections.find((s) => s.id === "usage");
     expect(usage?.settings).toEqual([]);
     const providers = octantSettingsRegistry.sections.find((s) => s.id === "providers");
@@ -145,9 +153,21 @@ describe("octantSettingsRegistry", () => {
       "code-require-git",
       "code-default-diff-layout",
       "project-view-switcher",
+      "code-default-access",
+      "code-approval-persistence",
+      "code-editor-executable",
+      "code-editor-arguments",
     ]);
     const chat = octantSettingsRegistry.sections.find((section) => section.id === "chat");
-    expect(chat?.settings.map((setting) => setting.id)).toEqual(["stream-replies"]);
+    expect(chat?.settings.map((setting) => setting.id)).toEqual([
+      "stream-replies",
+      "chat-default-model",
+      "chat-fallback-model",
+      "chat-personality",
+      "chat-research-enabled",
+      "chat-research-backend",
+      "chat-searxng-url",
+    ]);
   });
 
   it("keeps the helper-agent posture with the Octant Harness it governs", () => {
@@ -158,6 +178,8 @@ describe("octantSettingsRegistry", () => {
       "model-endpoints",
       "model-roles",
       "subagent-creation-posture",
+      "subagent-concurrency-on-host",
+      "subagent-concurrency-per-thread",
     ]);
     expect(harness?.keywords).toMatch(/posture/);
   });
@@ -189,13 +211,13 @@ describe("octantSettingsRegistry", () => {
     }
   });
 
-  it("finds the OpenAI image profile under Image generation", () => {
+  it("finds the OpenAI image profile under Image generation first", () => {
     const results = searchSettings(
       listAvailableSections(octantSettingsRegistry, capabilities),
       capabilities,
       "openai image",
     );
-    expect(results.map((result) => result.sectionId)).toEqual(["image-generation"]);
+    expect(results[0]?.sectionId).toBe("image-generation");
   });
 
   it("lands a link to the model endpoints on the add-endpoint row of Octant Harness", () => {
@@ -205,5 +227,69 @@ describe("octantSettingsRegistry", () => {
     });
     expect(resolved?.section.id).toBe("harness");
     expect(resolved?.settingId).toBe("model-endpoints");
+  });
+
+  it("finds the everyday words people search Settings with", () => {
+    const available = listAvailableSections(octantSettingsRegistry, capabilities);
+    const first = (query: string) => {
+      const result = searchSettings(available, capabilities, query)[0];
+      return result === undefined
+        ? undefined
+        : result.kind === "setting"
+          ? `${result.sectionId}/${result.settingId}`
+          : result.sectionId;
+    };
+    expect(first("dark mode")).toBe("appearance/appearance.scheme.dark-preset");
+    expect(first("password")).not.toBe("keybindings/keybindings");
+    expect(first("password")).toBeDefined();
+    expect(first("delete my data")).toBe("data/thread-retention");
+    expect(first("telemetry")).toBe("data/data-map");
+    expect(first("connector")).toBe("skills");
+    expect(first("sign out github")).toBe("github/github-logout");
+    expect(first("notif")).toBeDefined();
+  });
+});
+
+/**
+ * Rows a person only passes through (onboarding steps, progress while a sync
+ * joins or restores, placeholders shown while nothing is installed) or that
+ * repeat a listed row (OpenCode's Update button sits on the listed OpenCode
+ * update row). They carry a setting id so a deep link can land on them, but
+ * they are not things a person looks up.
+ */
+const UNLISTED_SETTING_ROWS = new Set([
+  "first-run-task-mode",
+  "first-run-task-project",
+  "managed-tools-empty",
+  "opencode-managed-available",
+  "opencode-managed-update-action",
+  "paired-computers-claim",
+  "sync-ask-again",
+  "sync-join-read",
+  "sync-leave-replica",
+  "sync-restore",
+]);
+
+describe("Settings search coverage", () => {
+  it("indexes every Settings row a person can see, so search never misses one", () => {
+    const sourceRoot = join(import.meta.dirname, "..");
+    const rendered = new Set<string>();
+    for (const entry of readdirSync(sourceRoot, { recursive: true })) {
+      const name = String(entry);
+      if (!name.endsWith(".tsx") || name.includes(".test.")) continue;
+      const source = readFileSync(join(sourceRoot, name), "utf8");
+      for (const match of source.matchAll(/settingId="([a-z0-9.-]+)"/g)) {
+        if (match[1] !== undefined) rendered.add(match[1]);
+      }
+    }
+    const registered = new Set(
+      octantSettingsRegistry.sections.flatMap((section) =>
+        section.settings.map((setting) => String(setting.id)),
+      ),
+    );
+    const missing = [...rendered].filter(
+      (id) => !registered.has(id) && !UNLISTED_SETTING_ROWS.has(id),
+    );
+    expect(missing).toEqual([]);
   });
 });
