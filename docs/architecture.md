@@ -2601,8 +2601,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   keep thread authority and the agent tool generates only into its own thread)
   and an app-managed `octant_create_image` tool invoke that job service
   through `/api/image/` when an enabled image profile exists (a dedicated
-  image provider, or a custom image source named in Settings › Image
-  generation, which every renderer surface lists alongside them). The
+  image provider, or a custom image source named in Settings › Voice &
+  images, which every renderer surface lists alongside them). The
   composer of an open Chat, Work, or Code thread also carries a **Create
   image…** icon beside attach and dictate. It opens the same generation sheet,
   scoped to that thread, so the result lands there as a thread artifact; it is
@@ -5440,8 +5440,8 @@ same. This holds in Chat, Work, and Code.
     host stopped before appending the revocation; Settings does not list it
     and a call asks again. A person
     revokes one through the local-only `/api/extensions/tool-grants`, which
-    lists and revokes and has no request that adds a grant. Settings › Data &
-    privacy lists them by Project with Revoke, and the prompt offers "always
+    lists and revokes and has no request that adds a grant. Settings ›
+    Permissions lists them by Project with Revoke, and the prompt offers "always
     allow" only to a client on a loopback host.
   - This covers only the tools Octant itself calls. An MCP server that a
     provider runtime starts from the person's own configuration (for example

@@ -15,7 +15,7 @@ kind where it is used:
   Octant calls over an API itself: OpenAI-compatible, Anthropic-compatible,
   Ollama, and Azure AI Foundry, including the ones you sign in to with a
   subscription.
-- **Settings → Image generation** holds the image profiles and custom image
+- **Settings → Voice & images** holds the image profiles and custom image
   sources.
 
 All three are the same kind of provider instance, with the same credentials
@@ -473,8 +473,8 @@ the built-in list. A deployment with a name of its own takes image input from
 the model it reports serving after its first completed request. Any other
 model is treated as text-only.
 
-Image generation profiles are also provider instances. Open **Settings → Image
-generation → Add image provider** to choose a provider, enter its API key, and
+Image generation profiles are also provider instances. Open **Settings → Voice &
+images → Add image provider** to choose a provider, enter its API key, and
 set its model allowlist. Image generation is where these profiles are added
 and listed:
 

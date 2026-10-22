@@ -491,7 +491,7 @@ image profile and model, describe the image, and generate. The image appears in
 that thread, where you can attach it, revise it, or download it. In Work and Code
 it can also be saved to the Project (Work saves when you click Save; Code asks
 you to confirm). With no image profile ready, the button opens **Settings →
-Image generation** instead.
+Voice & images** instead.
 
 ## Next steps
 

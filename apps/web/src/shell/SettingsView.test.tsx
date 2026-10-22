@@ -285,6 +285,16 @@ describe("SettingsView", () => {
     expect(screen.getByLabelText("Name")).toBeVisible();
   });
 
+  it("keeps links to settings moved out of Host and Data on the pages that hold them now", () => {
+    const { unmount } = renderSettings({
+      initialDeepLink: { section: "host", setting: "host-automation-notifications" },
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "Notifications" })).toBeVisible();
+    unmount();
+    renderSettings({ initialDeepLink: { section: "data", setting: "browser-site-approvals" } });
+    expect(screen.getByRole("heading", { level: 1, name: "Permissions" })).toBeVisible();
+  });
+
   it("moves keyboard shortcuts out of General into a dedicated section", () => {
     renderSettings();
 

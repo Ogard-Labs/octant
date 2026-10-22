@@ -143,6 +143,12 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
           setReturnFocusTo(open.listing.entry.driverKind);
           setOpenKind(undefined);
         }}
+        // The catalog shares a page with Providers & Models, so sending a
+        // person there means closing this setup to show the providers list.
+        onOpenProviders={() => {
+          setOpenKind(undefined);
+          props.onOpenProviders();
+        }}
       />
     );
   }

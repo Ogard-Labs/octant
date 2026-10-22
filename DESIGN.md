@@ -551,8 +551,8 @@ Code shows a primary **Set up a provider** action that opens Providers &
 Models and returns to the same draft. The action leaves once any instance is
 ready; the model picker takes its place. Profile,
 appearance, the mode switches, and Navigator are not first-run steps: Profile
-and Appearance live in Settings › Personal, and Navigator in its own Settings
-section. No display name is inferred from the OS account. Continue retains
+lives in Settings › General, Appearance in Settings › Look & feel, and
+Navigator's models in a section of Settings › Octant Harness. No display name is inferred from the OS account. Continue retains
 compact recent-task rows and their status and Git cues.
 Empty Code entry offers folder setup and a direct route to Code settings; opening
 that setting never turns on projectless threads.

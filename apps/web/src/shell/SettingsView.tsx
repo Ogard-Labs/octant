@@ -289,6 +289,10 @@ const MOVED_SETTINGS: ReadonlyArray<{
   readonly to: SettingsSectionId;
 }> = [
   { from: "general", setting: "user-profile", to: "profile" },
+  { from: "host", setting: "host-automation-notifications", to: "notifications" },
+  ...["public-links", "public-link-service", "browser-site-approvals", "tool-approvals"].map(
+    (setting) => ({ from: "data" as const, setting, to: "permissions" as const }),
+  ),
   { from: "general", setting: "marketplace-fetches", to: "skills" },
   { from: "appearance", setting: "stream-replies", to: "chat" },
   { from: "appearance", setting: "project-view-switcher", to: "code" },
@@ -1016,7 +1020,11 @@ function ActiveSectionContent({
       // catalog entry's own page hides the configured list while it is open.
       return props.providerController !== undefined ? (
         <div className="settings-section-stack" id="settings-providers">
-          <div className="settings-section-stack" hidden={harnessEndpointOpen}>
+          <div
+            className="settings-section-stack"
+            hidden={harnessEndpointOpen}
+            id="settings-configured-providers"
+          >
             <ProvidersSection
               discoveryController={props.discoveryController}
               {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
@@ -1031,7 +1039,15 @@ function ActiveSectionContent({
             {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
             onDetailChange={onCatalogEntryChange}
             onOpenModelEndpoints={openModelEndpoints}
-            onOpenProviders={() => onApplyDeepLink({ section: "providers" })}
+            onOpenProviders={() =>
+              // The list is on this page; once the catalog's setup closes,
+              // bring the providers to the top of the view.
+              requestAnimationFrame(() =>
+                document
+                  .getElementById("settings-configured-providers")
+                  ?.scrollIntoView?.({ block: "start" }),
+              )
+            }
             providerController={props.providerController}
           />
         </div>
