@@ -109,6 +109,16 @@
   opacity: 1;
 }
 
+/* Under Glass the terminal is a grey plate, the page colour with 12% of the
+   ink; the runtime paints the cells the same mix, so the frame and the cells
+   stay one colour. The page colour alone made a black slab in the frosted
+   dock on an OLED preset. */
+html:not([data-octant-reduced-transparency="true"])
+  .shell--material-translucent
+  :is(.code-terminal-pane > [aria-label="Repository terminal"], .terminal-leave-hint) {
+  background: color-mix(in srgb, var(--octant-workspace), var(--octant-text-primary) 12%);
+}
+
 .code-terminal-pane__actions-menu {
   position: absolute;
   z-index: 3;

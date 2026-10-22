@@ -205,6 +205,20 @@
   font: inherit;
 }
 
+/* In the Project tree the list's view, filter, and arrangement controls share
+   the Projects heading's row, after the label, so the sidebar has one header
+   row before the first Project. */
+.project-section__header h2 {
+  flex: none;
+}
+
+.project-section__header > .project-nav__toolbar {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+  margin-inline-start: var(--oct-space-2);
+}
+
 .project-section > .sidebar-section {
   color: var(--octant-text-muted);
   font-family: var(--oct-font-display);
