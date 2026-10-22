@@ -135,6 +135,13 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .shell-frame__nat
   left: var(--octant-window-chrome-leading-width, 148px);
 }
 
+/* Beside a rail the chrome, and so its leading cluster, starts after it. */
+html[data-octant-native-host="true"] .shell--sidebar-rail .shell-frame__native-drag-strip {
+  left: calc(
+    var(--octant-rendered-sidebar-width) + var(--octant-window-chrome-leading-width, 148px)
+  );
+}
+
 /* The right dock's tab strip lives in the same band. The strip used to run
    over it, so the tabs and their close controls dragged the window instead
    of responding; it now ends where the dock begins. */
@@ -202,15 +209,21 @@ html[data-octant-native-host="true"]
 
 /* A collapsed sidebar can stay as an icon rail. It keeps the sidebar's
    column and material, and the chrome and workspace return to the second
-   column. The rail is one icon wide; in the desktop app it widens just
-   enough to clear the native traffic lights that sit at its top. */
+   column. The rail is one icon wide and exactly as wide as the title band is
+   tall, so the frame reads as one even L. */
 .shell.shell-frame.shell--sidebar-rail {
-  --octant-rendered-sidebar-width: 48px;
+  --octant-rendered-sidebar-width: var(--oct-title-rail-h);
   grid-template-columns: var(--octant-rendered-sidebar-width) minmax(0, 1fr);
 }
 
-.shell.shell-frame.shell--sidebar-rail:has(> .sidebar-rail[data-native-host]) {
-  --octant-rendered-sidebar-width: 76px;
+/* In the desktop app the traffic lights sit in the title band across the
+   rail and the chrome's start, not in the rail: a rail widened to 76px to hold
+   them was wider than the rail beside the open sidebar. The chrome keeps the
+   rest of their width clear, before Show sidebar, Back, and Forward. */
+.shell--sidebar-rail.shell-frame > .window-chrome .window-chrome__traffic-light-space {
+  flex-basis: calc(
+    var(--octant-native-traffic-light-leading-width, 74px) - var(--octant-rendered-sidebar-width)
+  );
 }
 
 .shell--sidebar-rail.shell-frame > .window-chrome,
@@ -222,9 +235,11 @@ html[data-octant-native-host="true"]
    `--octant-rail-offset` moves everything placed at the sidebar's trailing
    edge (the resize handle, the native drag strip, the glass/ground split)
    right by the rail's width; the sidebar column keeps its own width rules,
-   including the Projects pane and the wide-context clamp. */
+   including the Projects pane and the wide-context clamp. The rail is as wide
+   as the title band is tall: at 48px beside a 38px band the frame's two arms
+   visibly differed. */
 .shell.shell-frame.shell--rail-beside {
-  --octant-rail-offset: 48px;
+  --octant-rail-offset: var(--oct-title-rail-h);
   grid-template-columns:
     var(--octant-rail-offset) var(--octant-rendered-sidebar-width)
     minmax(0, 1fr);
@@ -1840,6 +1855,16 @@ html[data-octant-native-host="true"]
   /* The dock's surface inside its frame painted the opaque workspace colour
      over the sheet piece, so the dock stayed solid under Glass. */
   .shell-frame .right-utility-dock__surface {
+    background: transparent;
+  }
+
+  /* The sidebar's sheet piece already draws the edge between it and the
+     stage. The resize hairline ran the window's full height beside it, so it
+     cut through the title band and doubled the edge; it now shows only while
+     grabbed, and only along the sheet. */
+  .shell-frame__sidebar-resize::before {
+    top: var(--oct-title-rail-h);
+    bottom: var(--octant-sheet-inset);
     background: transparent;
   }
 

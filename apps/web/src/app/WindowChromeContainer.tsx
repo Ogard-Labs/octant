@@ -64,7 +64,7 @@ export const WindowChromeContainer = memo(function WindowChromeContainer(
       isNarrow={isNarrow}
       material={material}
       nativeTitlebarInset={hostReservesTitlebarInset}
-      {...(presentedSidebarCollapsed && !sidebarRail
+      {...(presentedSidebarCollapsed
         ? { onExpandSidebar: () => setSidebarCollapsed(false), history: props.windowHistory }
         : {})}
       {...(presentedSidebarCollapsed && !sidebarRail

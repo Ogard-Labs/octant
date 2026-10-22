@@ -439,7 +439,8 @@ describe("App", () => {
     const rail = screen.getByRole("complementary", { name: "Octant sidebar, collapsed" });
     expect(within(rail).getByRole("button", { name: "New task" })).toBeVisible();
     expect(within(rail).getByRole("button", { name: /^Running, \d+$/ })).toBeVisible();
-    // The rail carries Show sidebar, so the window chrome does not offer a second one.
+    // Show sidebar sits in the title band, not the rail, and only once.
+    expect(within(rail).queryByRole("button", { name: "Show sidebar" })).toBeNull();
     expect(screen.getAllByRole("button", { name: "Show sidebar" })).toHaveLength(1);
     expect(globalThis.localStorage.getItem("octant.shell.sidebar-collapsed.v1")).toBe("true");
     // The activated control is unmounted by its own state change, so focus

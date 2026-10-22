@@ -575,7 +575,6 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       {...(sidebarRail
         ? {
             rail: {
-              onExpand: () => setSidebarCollapsed(false),
               onOpenActivity: () => openSidebarList("activity"),
               projects: (workSide ? workSideProjects : projects).map((project) => ({
                 id: String(project.id),

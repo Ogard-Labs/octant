@@ -989,10 +989,12 @@ width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing.
 
-**Icon rail.** By default (Settings › Sidebar › Icon rail: Always) a 48px
-icon rail stands in its own column in front of the open sidebar; in the
-desktop app the traffic lights sit in the title band above it, and the
-sidebar's head keeps the rest of their width clear. Beside the sidebar it
+**Icon rail.** By default (Settings › Sidebar › Icon rail: Always) an icon
+rail stands in its own column in front of the open sidebar. It is exactly as
+wide as the title band is tall (38px), open or collapsed, so the frame's two
+arms match. In the desktop app the traffic lights sit in the title band above
+it, and the sidebar's head, or with the sidebar hidden the window chrome,
+keeps the rest of their width clear. Beside the sidebar it
 carries the places: the count tiles as icons with badges, the destination
 rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
 which and in what order, for the rail as for the sidebar), the Activity feed,
@@ -1022,8 +1024,8 @@ host keeps that observation across restarts, so the rings are there on launch;
 when the reading is more than a few hours old the card says "Last read 5h ago".
 
 **Back and forward.** Back and Forward sit in the title band beside the
-sidebar control (beside Show sidebar while the sidebar is hidden, under it on
-the collapsed icon rail, and in the sidebar's header in a browser). They step
+sidebar control (beside Show sidebar while the sidebar is hidden, with or
+without the icon rail, and in the sidebar's header in a browser). They step
 through the pages (Inbox, Board, Pull requests, Projects, the other sidebar
 places, Review, and the archive) and the tabs (threads, drafts, canvases) this
 window opened. A step in another mode switches to that exact mode (Chat and
@@ -1036,9 +1038,10 @@ disabled, at its end of the history.
 
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),
-collapses the sidebar to the rail alone, which then also shows Show sidebar,
-New thread, and Search at the top, the modes, and up to six Project letter
-tiles with a Projects button for the rest. Icon rail: When hidden shows the
+collapses the sidebar to the rail alone, which then also shows New thread and
+Search at the top, the modes, and up to six Project letter tiles with a
+Projects button for the rest; Show sidebar, Back, and Forward move into the
+title band, so the rail stays one icon wide. Icon rail: When hidden shows the
 rail only in that state; Never removes the sidebar completely when hidden and
 leaves Show sidebar and New thread in the native title rail. Neither rail
 appears below the narrow-window breakpoint (960px): there the width belongs to

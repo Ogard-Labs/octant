@@ -989,7 +989,6 @@ describe("ShellSidebar", () => {
 
   it("collapses to an icon rail that keeps the modes, counts, and Projects in reach", async () => {
     const user = userEvent.setup();
-    const onExpand = vi.fn();
     const onSelectMode = vi.fn();
     const openProject = vi.fn();
     const actions = {
@@ -998,7 +997,6 @@ describe("ShellSidebar", () => {
       "thread-board": vi.fn(),
       agents: vi.fn(),
     };
-    const history = { canGoBack: true, canGoForward: false, goBack: vi.fn(), goForward: vi.fn() };
     render(
       <ShellSidebar
         codeNavigation={{ actions }}
@@ -1010,10 +1008,8 @@ describe("ShellSidebar", () => {
         onSelectMode={onSelectMode}
         projectSection={<nav aria-label="Projects">Project navigation</nav>}
         rail={{
-          onExpand,
           projects: [{ id: "p1", name: "octant", active: true, onOpen: openProject }],
         }}
-        history={history}
         settings={defaultShellSettings()}
         workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
       />,
@@ -1032,14 +1028,12 @@ describe("ShellSidebar", () => {
     expect(within(rail).getByRole("button", { name: "Inbox, 3" })).toHaveTextContent("3");
     await user.click(within(rail).getByRole("button", { name: "octant" }));
     expect(openProject).toHaveBeenCalledOnce();
-    await user.click(within(rail).getByRole("button", { name: "Show sidebar" }));
-    expect(onExpand).toHaveBeenCalledOnce();
+    // Show sidebar, Back, and Forward sit in the title band, so the rail
+    // stays one icon wide.
+    expect(within(rail).queryByRole("button", { name: "Show sidebar" })).toBeNull();
+    expect(within(rail).queryByRole("button", { name: "Back" })).toBeNull();
     // The menu-only destinations have left the account menu, so the collapsed
     // rail still reaches them through More, named on keyboard focus too.
-    // Back and Forward stay reachable with the sidebar hidden.
-    await user.click(within(rail).getByRole("button", { name: "Back" }));
-    expect(history.goBack).toHaveBeenCalledOnce();
-    expect(within(rail).getByRole("button", { name: "Forward" })).toBeDisabled();
     const more = within(rail).getByRole("button", { name: "More destinations" });
     more.focus();
     expect(await screen.findByRole("tooltip")).toHaveTextContent("More");

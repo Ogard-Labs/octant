@@ -141,7 +141,6 @@ export interface ShellSidebarProps {
     readonly onOpenActivity?: () => void;
   };
   readonly rail?: {
-    readonly onExpand: () => void;
     readonly projects: ReadonlyArray<SidebarRailProject>;
     readonly onOpenActivity?: () => void;
   };
@@ -377,8 +376,6 @@ export function ShellSidebar(props: ShellSidebarProps) {
         {...(newThread === undefined || newThreadLabel === undefined
           ? {}
           : { newThread: { label: newThreadLabel, onSelect: () => newThread() } })}
-        onExpand={props.rail.onExpand}
-        {...(props.history === undefined ? {} : { history: props.history })}
         {...(props.rail.onOpenActivity === undefined
           ? {}
           : { onOpenActivity: props.rail.onOpenActivity })}
