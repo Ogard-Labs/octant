@@ -49,9 +49,12 @@ or newer. The browser mock keeps its browser-provided crypto.
 
 For a live connection, enable **Settings → Remote access** on the Octant host
 with a private HTTPS address and a certificate trusted by the device. Both
-endpoints must be on the same LAN or user-controlled mesh. Enter the origin,
-ticket ID, and ticket proof on the phone, compare the code on the host, approve,
-and check approval on the phone. The loopback desktop URL is not a phone endpoint.
+endpoints must be on the same LAN or user-controlled mesh. With no host paired,
+the Inbox opens the pairing screen with the QR scanner ready: scan the code
+shown in Settings → Remote access, compare the code on the host, and approve
+there. The phone checks for approval itself every two seconds. "Enter a code
+instead" takes the pasted code, and "Type the details instead" takes the
+address, pairing ticket and ticket secret. The loopback desktop URL is not a phone endpoint.
 See the [native connection preflight](../../docs/mobile-testflight.md#native-connection-preflight).
 
 Native remote requests use the session bridge's explicit proof-bound cookie,
