@@ -1038,6 +1038,42 @@ const codeProjectB = {
 } as ProjectSummary;
 
 describe("ProjectSidebarSection code project views", () => {
+  it("names the folder of each Project that shares its name with another", () => {
+    window.localStorage.clear();
+    chooseProjectTree();
+    const brev = (id: string, canonicalRoot: string) =>
+      ({
+        id: id as ProjectId,
+        name: "brev",
+        pinned: false,
+        type: "code",
+        binding: { canonicalRoot },
+      }) as ProjectSummary;
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        projects={[
+          brev("77777777-7777-4777-8777-777777777777", "/Users/example/Dev/Repos/brev"),
+          brev("88888888-8888-4888-8888-888888888888", "/Users/example/Projects/brev"),
+          codeProjectB,
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: /^(Expand|Collapse) brev in Repos$/ })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: /^(Expand|Collapse) brev in Projects$/ }),
+    ).toBeVisible();
+    // A name nothing else shares stays bare.
+    expect(screen.getByRole("button", { name: /^(Expand|Collapse) auroradocs$/ })).toBeVisible();
+  });
+
   it("does not expose Code project views in Chat", () => {
     window.localStorage.clear();
     chooseProjectTree();

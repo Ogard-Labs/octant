@@ -489,16 +489,16 @@
   font-size: var(--oct-text-xs);
 }
 
-/* Inside the card each control is a small bordered chip on a faint fill, so
+/* Inside the card each control is a small rounded chip on a faint fill, so
    it reads as a choice made rather than as a field. The chip is painted on
    the plain element that holds the control, never on the trigger: the
    triggers are shared button and select recipes a feature stylesheet may size
-   but not repaint. */
+   but not repaint. It carries no outline: three outlined chips over the
+   prompt read as a row of form fields, louder than the message under them. */
 .composer-tray--inside .composer-tray__leading > *,
 .composer-tray--inside .composer-tray__trailing > * {
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-sm);
-  background: color-mix(in oklab, var(--oct-fg) 4%, transparent);
+  border-radius: var(--oct-radius-pill);
+  background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
 }
 
 /* The Environment is a plain span rather than a trigger, so the chip draws

@@ -69,8 +69,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
   // and "Browser 2"; the band now names the Browser once and the pages sit in
   // their own row inside it.
   const browserTabs = props.tabs.filter((tab) => dockTabSurface(tab).id === "browser");
-  const browserRepresentative =
-    browserTabs.find((tab) => tab.id === activeTabId) ?? browserTabs[0];
+  const browserRepresentative = browserTabs.find((tab) => tab.id === activeTabId) ?? browserTabs[0];
   const stripTabs = props.tabs.flatMap((tab) => {
     if (dockTabSurface(tab).id !== "browser") return [tab];
     if (tab !== browserRepresentative) return [];

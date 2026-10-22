@@ -1041,6 +1041,13 @@ function ProjectGroup(props: {
         </p>
       ) : null}
       {props.projects.map((project, index) => {
+        // Two Projects with one name ("brev" twice) could only be told apart
+        // by opening them; each names the folder it lives in instead.
+        const where =
+          project.type !== "chat" &&
+          props.projects.some((other) => other !== project && other.name === project.name)
+            ? parentFolderName(project.binding.canonicalRoot)
+            : undefined;
         const availability = props.availabilityByProject.get(project.id);
         const unavailable = project.type !== "chat" && availability?.status === "unavailable";
         // Only a degraded reading is worth a mark. "Healthy" and "never
@@ -1075,7 +1082,7 @@ function ProjectGroup(props: {
             >
               <OctantButton
                 aria-expanded={showNested ? expanded : undefined}
-                aria-label={`${expanded ? "Collapse" : "Expand"} ${project.name}`}
+                aria-label={`${expanded ? "Collapse" : "Expand"} ${project.name}${where === undefined ? "" : ` in ${where}`}`}
                 className="project-row__select justify-start window-no-drag"
                 onClick={() => props.onToggleProject(project.id)}
                 type="button"
@@ -1084,7 +1091,11 @@ function ProjectGroup(props: {
                 <ProjectTile project={project} />
                 <span className="project-row__copy">
                   <span>{project.name}</span>
-                  {unavailable ? <small>Relink required</small> : null}
+                  {unavailable ? (
+                    <small>Relink required</small>
+                  ) : where === undefined ? null : (
+                    <small>{`in ${where}`}</small>
+                  )}
                 </span>
               </OctantButton>
               {showNested && expanded && nestedThreads.length > 0 ? null : (
@@ -2267,4 +2278,10 @@ function CodeProjectViewEditorDialog(props: {
       </form>
     </OctantDialog>
   );
+}
+
+/** The folder a Project's folder sits in: "Repos" for ~/Dev/Repos/brev. */
+function parentFolderName(root: string): string {
+  const segments = root.split("/").filter((segment) => segment.length > 0);
+  return segments.at(-2) ?? "/";
 }
