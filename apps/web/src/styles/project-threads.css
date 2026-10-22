@@ -492,11 +492,14 @@
    not only the one that opened it. The menu is anchored to its trigger, and
    moving the pointer off the row to reach the menu collapsed the sibling
    control beside it, which widened the name column and slid the trigger, and
-   the open menu slid with it, out from under the pointer. */
+   the open menu slid with it, out from under the pointer. Only an action's
+   own expanded state counts: the Project name is a disclosure too, and keying
+   on any expanded control in the row showed every open Project's menu and
+   New task button at all times. */
 .project-row:hover .project-row__action--icon,
 .project-row:focus-within .project-row__action--icon,
-.project-row:has([aria-expanded="true"]) .project-row__action--icon,
-.project-row:has([data-popup-open]) .project-row__action--icon,
+.project-row:has(.project-row__action[aria-expanded="true"]) .project-row__action--icon,
+.project-row:has(.project-row__action[data-popup-open]) .project-row__action--icon,
 .project-row__action--icon:has([aria-expanded="true"]),
 .project-row__action--icon[aria-expanded="true"],
 .project-row__action--icon[data-popup-open] {

@@ -1575,7 +1575,10 @@ export function createMainBrowserWindowOptions(options: {
     ...options.browserWindow,
     show: false,
     title: "Octant",
-    visualEffectState: "followWindow",
+    // The glass stays lit when the window is not in front. Following the
+    // window let macOS swap in its inactive material, and behind the nearly
+    // clear sheet a thread then read as solid black beside a grey sidebar.
+    visualEffectState: "active",
     webPreferences: {
       contextIsolation: true,
       additionalArguments: [

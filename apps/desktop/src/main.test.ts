@@ -229,7 +229,7 @@ describe("Project window BrowserWindow construction", () => {
       titleBarStyle: "hiddenInset",
       transparent: true,
       vibrancy: "sidebar",
-      visualEffectState: "followWindow",
+      visualEffectState: "active",
       webPreferences: {
         additionalArguments: [
           `--octant-project-capability=${"A".repeat(43)}`,

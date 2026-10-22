@@ -7636,10 +7636,12 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   color: var(--oct-fg);
   background: var(--oct-fg-soft);
 }
+/* The open tab is a neutral wash of the ink, like the open thread row: the
+   control role carries a tinted preset's hue and drew the tab as a coloured
+   button with a ring. */
 .content-tab:has([role="tab"][aria-selected="true"]) {
   color: var(--oct-fg);
-  background: var(--octant-control);
-  box-shadow: inset 0 0 0 1px var(--octant-border);
+  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
 }
 .content-tab > .content-tab__select {
   height: 26px;

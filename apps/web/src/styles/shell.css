@@ -1063,11 +1063,13 @@ html[data-octant-native-host="true"]
    hairline edge, the two states the thread tab strip draws. This row is the
    only place that answers "which thread am I in" now that the thread carries
    no identity header of its own. The weight stays at 400 so the list keeps
-   one weight; the fill and the primary ink are what say "you are here". */
+   one weight; the fill and the primary ink are what say "you are here".
+   The fill is a neutral wash of the ink, as on the rail: the selection role
+   carries the theme's hue, and on a tinted preset (Onyx) the open row read as
+   a green slab, louder than anything else in the list. */
 .sidebar-navigation__thread[aria-current="page"] {
   color: var(--oct-fg);
-  background: var(--oct-selection);
-  box-shadow: inset 0 0 0 1px var(--oct-border);
+  background: color-mix(in oklab, var(--oct-fg) 9%, transparent);
 }
 
 /* A window can show several threads at once, and exactly one marked row
@@ -2299,10 +2301,14 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   text-overflow: ellipsis;
 }
 
+/* The selector sits in the composer's top strip, and the composer docks at
+   the foot of the page, so the menu opens upward over the page. Hung below
+   the trigger it ran past the window's bottom edge and showed one Project
+   and a half. */
 .composer-folder-selector__menu {
   position: absolute;
   z-index: 40;
-  inset-block-start: calc(100% + 6px);
+  inset-block-end: calc(100% + 6px);
   inset-inline-start: 0;
   display: grid;
   width: min(24rem, calc(100vw - 2rem));
