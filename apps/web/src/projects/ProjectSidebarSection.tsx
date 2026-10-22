@@ -1090,12 +1090,15 @@ function ProjectGroup(props: {
               >
                 <ProjectTile project={project} />
                 <span className="project-row__copy">
-                  <span>{project.name}</span>
-                  {unavailable ? (
-                    <small>Relink required</small>
-                  ) : where === undefined ? null : (
-                    <small>{`in ${where}`}</small>
-                  )}
+                  <span>
+                    {project.name}
+                    {/* On the name's line: a second line made the row taller
+                        than its fixed height and it ran into the next one. */}
+                    {where === undefined ? null : (
+                      <span className="project-row__where">{` · ${where}`}</span>
+                    )}
+                  </span>
+                  {unavailable ? <small>Relink required</small> : null}
                 </span>
               </OctantButton>
               {showNested && expanded && nestedThreads.length > 0 ? null : (
