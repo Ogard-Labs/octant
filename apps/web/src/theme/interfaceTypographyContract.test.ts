@@ -16,6 +16,9 @@ const technicalMonoSelectors = new Set([
   // the added and removed line counts a diff reports: both are code values.
   ".dock-overview__chip",
   ".dock-overview__diffstat",
+  // A suggested server is named by its host and port, which the Browser opens
+  // verbatim: an address, set in mono like the paths and branches above.
+  ".browser-workspace__server-address",
 ]);
 
 describe("interface typography contract", () => {

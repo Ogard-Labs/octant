@@ -4,7 +4,12 @@ import { useMemo, type CSSProperties } from "react";
 import { ProviderGlyph, providerGlyphColor } from "../providers/ProviderGlyph";
 import { OctantButton } from "../ui/base/OctantButton";
 import { OctantPreviewCard } from "../ui/base/OctantPreviewCard";
-import { railUsageReadings, resetPhrase, type RailUsageReading } from "./railUsageReading";
+import {
+  railUsageReadings,
+  readingAgePhrase,
+  resetPhrase,
+  type RailUsageReading,
+} from "./railUsageReading";
 import { useProviderUsageSnapshot } from "./useProviderUsageSnapshot";
 import "../styles/usage.css";
 
@@ -67,12 +72,16 @@ function RailUsageRing(props: {
   const summary = reading.windows
     .map((window) => `${window.short} ${window.percent}% left`)
     .join(", ");
+  const age = readingAgePhrase(reading.observedAt, props.now);
   return (
     <OctantPreviewCard
       align="end"
       content={
         <div className="rail-usage__card">
-          <p className="rail-usage__card-title">{instance.displayName}</p>
+          <div>
+            <p className="rail-usage__card-title">{instance.displayName}</p>
+            {age === undefined ? null : <span className="oct-meta">{age}</span>}
+          </div>
           {reading.windows.map((window) => {
             const reset = resetPhrase(reading.resetsAt.get(window.window), props.now);
             return (

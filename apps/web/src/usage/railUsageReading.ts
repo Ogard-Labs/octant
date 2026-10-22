@@ -12,6 +12,8 @@ export interface RailUsageReading {
   readonly inner?: ComposerLimitWindow;
   /** When each window resets, by window id, where the provider said. */
   readonly resetsAt: ReadonlyMap<string, string>;
+  /** When the host last read these figures, which can be before it started. */
+  readonly observedAt: string;
 }
 
 /**
@@ -46,6 +48,10 @@ export function railUsageReadings(
             window.resetsAt === undefined ? [] : [[window.window, window.resetsAt] as const],
           ),
         ),
+        observedAt:
+          entry.status === "failed"
+            ? (entry.lastSuccessfulAt ?? entry.observedAt)
+            : entry.observedAt,
       },
     ];
   });
@@ -99,7 +105,21 @@ export function windowHours(window: string): number {
   return match?.[1] === undefined || unit === undefined ? 0 : Number(match[1]) * unit;
 }
 
-/** "Resets in 2h 52m", "Resets in 1d 4h", or nothing when the reset is unknown or past. */
+/**
+ * A reading this old was most likely made before the app was last opened, so
+ * the card says when. Younger ones are the live state and say nothing.
+ */
+const STALE_READING_MS = 3 * 60 * 60_000;
+
+/** "Last read 5h ago" for a reading several hours old, or nothing for a recent one. */
+export function readingAgePhrase(observedAt: string, now: number): string | undefined {
+  const age = now - Date.parse(observedAt);
+  if (!Number.isFinite(age) || age < STALE_READING_MS) return undefined;
+  const hours = Math.floor(age / (60 * 60_000));
+  return hours >= 48 ? `Last read ${Math.floor(hours / 24)}d ago` : `Last read ${hours}h ago`;
+}
+
+/** "Resets in 2h 52m","Resets in 1d 4h", or nothing when the reset is unknown or past. */
 export function resetPhrase(resetsAt: string | undefined, now: number): string | undefined {
   if (resetsAt === undefined) return undefined;
   const minutes = Math.round((Date.parse(resetsAt) - now) / 60_000);

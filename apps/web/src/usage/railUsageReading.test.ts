@@ -1,6 +1,6 @@
 import { decodeProviderUsageLimitsSnapshot } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
-import { railUsageReadings, resetPhrase, windowHours } from "./railUsageReading";
+import { railUsageReadings, readingAgePhrase, resetPhrase, windowHours } from "./railUsageReading";
 
 const now = Date.parse("2026-10-20T12:00:00.000Z");
 const providerInstanceId = "10000000-0000-4000-8000-000000000001";
@@ -89,6 +89,46 @@ describe("rail usage rings", () => {
     expect(reading?.inner).toMatchObject({ window: "codex:primary_5h", percent: 90 });
   });
 
+  it("says when a reading from before this launch was read, and stays quiet for a live one", () => {
+    expect(readingAgePhrase("2026-10-20T11:30:00.000Z", now)).toBeUndefined();
+    expect(readingAgePhrase("2026-10-20T07:10:00.000Z", now)).toBe("Last read 4h ago");
+    expect(readingAgePhrase("2026-10-17T12:00:00.000Z", now)).toBe("Last read 3d ago");
+  });
+
+  it("carries the time a failed refresh's last good reading was made", () => {
+    const window = {
+      window: "five_hour",
+      status: "allowed",
+      utilization: 0.1,
+      observedAt: "2026-10-20T08:00:00.000Z",
+    };
+    const [reading] = railUsageReadings(
+      entries({
+        providerInstanceId,
+        status: "failed",
+        source: "provider-runtime",
+        observedAt: "2026-10-20T12:00:00.000Z",
+        failure: { category: "unavailable", message: "Provider limits could not be refreshed." },
+        lastSuccessfulAt: "2026-10-20T08:00:00.000Z",
+        staleLimits: {
+          providerInstanceId,
+          scope: "account",
+          requests: { status: "unavailable" },
+          tokens: { status: "unavailable" },
+          concurrency: { status: "unavailable" },
+          retry: { status: "inactive" },
+          quota: "available",
+          source: "observed-evidence",
+          confidence: "high",
+          updatedAt: "2026-10-20T08:00:00.000Z",
+          rateLimitWindows: [window],
+        },
+      }),
+      now,
+    );
+    expect(reading?.observedAt).toBe("2026-10-20T08:00:00.000Z");
+  });
+
   it("treats a monthly window as the longest, so five hours and the month are the pair", () => {
     const window = (id: string, utilization: number) => ({
       window: id,
@@ -126,6 +166,7 @@ describe("rail usage rings", () => {
     expect(reading?.outer).toMatchObject({ window: "monthly", percent: 40 });
     expect(windowHours("monthly")).toBeGreaterThan(windowHours("seven_day"));
   });
+
 
   it("gives no ring to a provider that reported no window figure", () => {
     expect(
