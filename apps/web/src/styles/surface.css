@@ -775,69 +775,53 @@
 }
 
 /* A conversation needs one quiet reading surface: separate reply cards over
-   the dither made even short answers compete with the composer (0155).
-   Opaque is the fallback, including when transparency is reduced.
+   the dither made even short answers compete with the composer (0155). It is
+   a veil rather than a wall: the ground stays faintly visible behind a thread
+   so the window keeps its character, but at a fifth of its strength it does
+   not pull at the transcript. Opaque is the fallback, including when
+   transparency is reduced.
 
-   The surface belongs to the pane that holds a thread, title rail included,
-   not to whichever view the pane is showing at the moment. Painted on the
-   conversation view alone, the "Loading Code thread" state that stands in
-   for it while the thread loads had no surface at all, and the picture
-   showed straight through the card; the title rail had the same gap. */
-.shell--app-backdrop.shell-frame .chat-workspace,
-.shell--app-backdrop.shell-frame .work-thread-workspace,
-.shell--app-backdrop.shell-frame .code-thread-workspace,
+   The surface belongs to the pane that holds a thread, not to whichever view
+   the pane is showing at the moment. Painted on the conversation view alone,
+   the "Loading Code thread" state that stands in for it while the thread
+   loads had no surface at all, and the picture showed straight through. It
+   starts below the title band, which belongs to the window frame. */
 .shell--app-backdrop.shell-frame
   .workspace-pane:is(
     [data-surface-kind="chat-thread"],
     [data-surface-kind="work-thread"],
     [data-surface-kind="code-overview"]
   ) {
-  background: var(--octant-workspace);
-}
-
-/* Inside a thread pane the pane is the surface; a second one on the view
-   would double the tint. */
-.shell--app-backdrop.shell-frame
-  .workspace-pane:is(
-    [data-surface-kind="chat-thread"],
-    [data-surface-kind="work-thread"],
-    [data-surface-kind="code-overview"]
-  )
-  :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) {
-  background: transparent;
+  --octant-thread-veil: var(--octant-stage-surface);
+  background: linear-gradient(
+    to bottom,
+    transparent var(--oct-title-rail-h),
+    var(--octant-thread-veil) var(--oct-title-rail-h)
+  );
 }
 
 @media (prefers-reduced-transparency: no-preference) {
-  html:not([data-octant-reduced-transparency="true"])
-    .shell--app-backdrop.shell-frame
-    :is(
-      .chat-workspace,
-      .work-thread-workspace,
-      .code-thread-workspace,
-      .workspace-pane:is(
-        [data-surface-kind="chat-thread"],
-        [data-surface-kind="work-thread"],
-        [data-surface-kind="code-overview"]
-      )
-    ) {
-    background: linear-gradient(
-      to right,
-      color-mix(in srgb, var(--octant-workspace) 90%, transparent),
-      color-mix(in srgb, var(--octant-workspace) 97%, transparent) 20%,
-      color-mix(in srgb, var(--octant-workspace) 97%, transparent) 80%,
-      color-mix(in srgb, var(--octant-workspace) 90%, transparent)
-    );
-  }
-
   html:not([data-octant-reduced-transparency="true"])
     .shell--app-backdrop.shell-frame
     .workspace-pane:is(
       [data-surface-kind="chat-thread"],
       [data-surface-kind="work-thread"],
       [data-surface-kind="code-overview"]
-    )
-    :is(.chat-workspace, .work-thread-workspace, .code-thread-workspace) {
-    background: transparent;
+    ) {
+    --octant-thread-veil: color-mix(in srgb, var(--octant-stage-surface) 80%, transparent);
+  }
+}
+
+/* Where the pane meets the sheet's rounded corner, its veil rounds with it. */
+@media (min-width: 681px) {
+  .shell--app-backdrop.shell-frame
+    > .workspace-layer:not(.workspace-layer--wide-context-open, .workspace-layer--bottom-panel-open)
+    .workspace-pane:is(
+      [data-surface-kind="chat-thread"],
+      [data-surface-kind="work-thread"],
+      [data-surface-kind="code-overview"]
+    ) {
+    border-bottom-right-radius: var(--oct-radius-md);
   }
 }
 

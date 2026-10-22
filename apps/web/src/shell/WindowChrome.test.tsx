@@ -716,14 +716,17 @@ describe("WindowChrome", () => {
     expect(cssRule(".shell.shell-frame", 2)).toContain("isolation: isolate;");
   });
 
-  it("gives conversations one legible reading surface over the application ground", () => {
-    for (const workspace of [
-      ".shell--app-backdrop.shell-frame .chat-workspace",
-      ".shell--app-backdrop.shell-frame .work-thread-workspace",
-      ".shell--app-backdrop.shell-frame .code-thread-workspace",
-    ]) {
-      expect(cssRule(workspace)).toContain("background: var(--octant-workspace);");
-    }
+  it("lays a veil over the application ground behind a thread, below the title band", () => {
+    const flattened = styles.replace(/\s+/g, " ");
+    // The veil starts under the band, so the frame stays the frame in a thread.
+    expect(flattened).toContain(
+      "transparent var(--oct-title-rail-h), var(--octant-thread-veil) var(--oct-title-rail-h)",
+    );
+    // Opaque unless transparency is allowed; then the ground shows faintly.
+    expect(flattened).toContain("--octant-thread-veil: var(--octant-stage-surface);");
+    expect(flattened).toContain(
+      "--octant-thread-veil: color-mix(in srgb, var(--octant-stage-surface) 80%, transparent);",
+    );
   });
 
   it("keeps glass on input surfaces without enclosing agent replies", () => {

@@ -244,9 +244,10 @@ replay across restarts.
 - [Release compatibility](/advanced/release-compatibility) for preview boundaries
 
 The everywhere background also shows behind page surfaces such as Board, Inbox,
-Archive, and Pull requests. Reader pages and Project overviews soften it behind
-a translucent reading surface. Cards, menus, and controls keep their own
-surfaces.
+Archive, and Pull requests, and faintly behind threads, where a veil keeps it
+at about a fifth of its strength so it does not pull at the transcript.
+Clicking sends a ring through Pulsing characters only on a start screen.
+Cards, menus, and controls keep their own surfaces.
 
 When an everywhere background covers the sidebar, separate sidebar decoration
 controls are suspended. Turn off **Cover the sidebar** to restore your saved
