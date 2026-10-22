@@ -1756,6 +1756,30 @@ describe("ProjectSidebarSection code project views", () => {
     expect(screen.getByRole("group", { name: "Thread list" })).toBeVisible();
   });
 
+  it("tells a first run where its threads will appear and how to start one", () => {
+    window.localStorage.clear();
+    render(
+      <ProjectSidebarSection
+        archivedProjects={[]}
+        availabilityByProject={new Map()}
+        onArchive={vi.fn()}
+        onMove={vi.fn()}
+        onProjectOpen={vi.fn()}
+        onReorder={vi.fn()}
+        onRestore={vi.fn()}
+        onSelectThread={vi.fn()}
+        projects={[]}
+        threads={[]}
+      />,
+    );
+
+    expect(screen.getByText("No threads yet")).toBeVisible();
+    expect(
+      screen.getByText("Start one from the composer. Your threads gather here."),
+    ).toBeVisible();
+    expect(screen.queryByText("No threads in this mode.")).not.toBeInTheDocument();
+  });
+
   it("explains an activity window that matched no threads instead of a blank sidebar", () => {
     window.localStorage.clear();
     chooseProjectTree();
