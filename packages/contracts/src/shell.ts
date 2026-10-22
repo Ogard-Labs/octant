@@ -450,6 +450,9 @@ export const TranscriptTextSize = Schema.Literal("small", "medium", "large");
 export type TranscriptTextSize = typeof TranscriptTextSize.Type;
 export const TranscriptWidth = Schema.Literal("narrow", "medium", "wide");
 export type TranscriptWidth = typeof TranscriptWidth.Type;
+/** How the composer's plan-usage meters draw their bar: a smooth fill or square cells. */
+export const UsageBarStyle = Schema.Literal("smooth", "pixelated");
+export type UsageBarStyle = typeof UsageBarStyle.Type;
 
 export const MIN_COMPLETED_THREAD_ARCHIVE_DAYS = 1;
 export const MAX_COMPLETED_THREAD_ARCHIVE_DAYS = 365;
@@ -612,6 +615,11 @@ export const ShellSettings = Schema.Struct({
   transcriptWidth: Schema.optionalWith(TranscriptWidth, {
     default: () => "narrow" as const,
   }),
+  /**
+   * How the plan-usage bars above the composer are drawn. A store persisted
+   * before the setting shipped decodes to the smooth bar.
+   */
+  usageBars: Schema.optionalWith(UsageBarStyle, { default: () => "smooth" as const }),
   showThreadProviderIcons: Schema.optionalWith(Schema.Boolean, { default: () => true }),
   /**
    * Whether the quiet stats line (tokens, cache hit, speed, first-token time,

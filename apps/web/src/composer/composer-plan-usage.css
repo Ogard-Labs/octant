@@ -1,0 +1,24 @@
+/* The start screen's context row with the plan meters at its right end: where
+   the thread runs on the left, how much of the plan is left on the right. The
+   meters drop to their own right-aligned line when the chips leave no room. */
+.composer-start {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.composer-start > .composer-tray--inside {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.composer-start:has(> .plan-usage) > .composer-tray--inside {
+  padding-right: 0;
+}
+
+.composer-start > .plan-usage {
+  margin-left: auto;
+  padding: var(--oct-space-3) var(--oct-composer-gutter) 0 var(--oct-space-2);
+}

@@ -104,6 +104,18 @@ export const DiscoveryCommand = Schema.Union(
     instanceId: ProviderInstanceId,
     receiptId: PickerReceiptId,
   }).annotations(strict),
+  /**
+   * Points a runtime at an executable the host's latest scan found for that
+   * runtime, instead of one the picker returned. The host accepts the path only
+   * when it names a candidate of the same driver kind from that scan, then
+   * checks it exactly as it checks a picked file, so a renderer cannot point a
+   * runtime at a path the host never discovered.
+   */
+  Schema.Struct({
+    kind: Schema.Literal("locate-binary"),
+    instanceId: ProviderInstanceId,
+    scannedBinaryPath: CanonicalBinaryPath,
+  }).annotations(strict),
 );
 export type DiscoveryCommand = typeof DiscoveryCommand.Type;
 
