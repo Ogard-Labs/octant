@@ -296,6 +296,14 @@ html[data-octant-native-host="true"]
   padding: var(--oct-space-2) 0 var(--oct-space-3);
   overflow-x: hidden;
   overflow-y: auto;
+  /* The rail is 38px around 32px faces. A classic scrollbar took 10px of that
+     once the rail overflowed and clipped every face, so the rail scrolls
+     without drawing one. */
+  scrollbar-width: none;
+}
+
+.sidebar-rail__column::-webkit-scrollbar {
+  display: none;
 }
 
 .sidebar-rail__group {
