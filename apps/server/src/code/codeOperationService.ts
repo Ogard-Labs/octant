@@ -833,6 +833,8 @@ export interface CodeOperationExecuteOptions {
 
 export interface CodeOperationServiceOptions {
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
+  /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
+  readonly pinnedExtensionIds?: (projectId: string) => ReadonlyArray<string>;
   readonly authority: CodeOperationAuthorityPort;
   /**
    * Runs after the command has passed thread, checkout, lifecycle, and Project
@@ -3555,11 +3557,18 @@ export class CodeOperationService {
       );
     const selections =
       command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
+    const pinnedExtensionIds = this.#options.pinnedExtensionIds?.(String(thread.projectId)) ?? [];
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
     let extensionTools: AppManagedToolSet | undefined;
-    if (selections.length > 0) {
+    if (selections.length > 0 || pinnedExtensionIds.length > 0) {
       const resolved = await this.#options
-        .resolveSelectedExtensions?.({ mode: "code", thread, selections, windowId })
+        .resolveSelectedExtensions?.({
+          mode: "code",
+          thread,
+          selections,
+          pinnedExtensionIds,
+          windowId,
+        })
         .catch(() => undefined);
       if (resolved === undefined || resolved.kind === "unavailable") {
         return this.#failed(

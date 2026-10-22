@@ -7,6 +7,7 @@ const sourceOrder: Readonly<Record<SourceQualifiedSkill["sourceKind"], number>> 
   bundled: 3,
   catalog: 4,
   "local-folder": 5,
+  "user-added": 6,
 };
 
 export type SkillCollisionResolution =

@@ -249,6 +249,16 @@ accepted, the card's binary path changes to the file you picked and its other
 settings (sign-in method, display name) stay as they were; an enabled runtime
 is checked again right away.
 
+If a runtime's saved binary has been removed or is reported incompatible, but
+the latest scan found the same runtime somewhere else, its card details offer
+**Use the one found at ...** with the path and version, for example
+`~/.local/bin/claude (2.1.306)`. Nothing switches until you click it. Octant
+offers the stable launcher path rather than the versioned file behind it, and
+when the scan found several it offers a compatible one with the highest version.
+The host checks the binary the way it checks a picked file and only then changes
+the card's binary path; it does not turn the runtime on. This action needs no
+file picker, so it also appears in a browser.
+
 Discovery also recognizes a narrowly parsed alias declaration for a supported
 executable in `~/.bash_aliases`, `~/.bash_profile`, `~/.bashrc`, `~/.zprofile`,
 or `~/.zshrc`. Octant reads those files without sourcing them, accepts only a
@@ -282,8 +292,11 @@ Mistral API key entered in **Settings → Providers & Models** because its confi
 does not read the macOS Keychain.
 
 You can add more than one Claude account. Each account is its own provider
-in **Settings → Providers & Models**: give it a name and an accent color so the model
-picker can tell them apart. Octant assigns the first subscription account
+in **Settings → Providers & Models**. To add one, open the details of your
+Claude card and choose **Add account**; the form opens with Claude chosen, your
+binary path filled in, and a suggested name such as "Claude Agent SDK (2)". (**Add
+provider manually** opens the same form.) Give the account a name and an accent
+color so the model picker can tell them apart. Octant assigns the first subscription account
 Claude's default directory (`~/.claude`). Each additional account, and every
 API-key account, gets its own directory under `~/.claude-accounts/`. A
 directory you chose earlier keeps working until you re-assign it. Re-assigning
@@ -301,7 +314,8 @@ assigned directory. Removing an account does not delete its directory. Octant
 tells you where it is; delete it yourself to remove that account's sign-in
 and history.
 
-You can add more than one Codex account the same way. Octant assigns the
+You can add more than one Codex account the same way, with **Add account** on
+the Codex card. Octant assigns the
 first account Codex's default directory (`~/.codex`). Each additional
 account gets its own directory under `~/.codex-accounts/`. Sign in only
 with the unmodified `codex login` command in a terminal for that account;
@@ -391,8 +405,8 @@ session or treats the 2.x version as the legacy runtime.
 ### API endpoints
 
 Direct API endpoints are added in **Settings → Octant Harness → Model
-endpoints → Add endpoint**. After the one-click sign-ins, the dialog walks
-through five steps:
+endpoints → Add endpoint**. After the one-click sign-ins and the presets, the
+dialog walks through five steps:
 
 1. **Kind**: Azure AI Foundry, OpenAI-compatible, Anthropic-compatible, or
    Local (Ollama).
@@ -558,6 +572,32 @@ as a sign-in finishes. An endpoint you added yourself whose base URL is
 one of these offers the same sign-in beside its API key. The host refuses a
 sign-in started from a paired device; sign in from the Octant app or a browser
 on the host.
+
+### Presets added with a key
+
+Some services take an ordinary API key but are easier to add by name. The
+same list offers each as a row with **Add with key**, which opens Connect with
+the name, address and protocol filled in and a link to the page where the key
+is created; the address stays editable, and the result is an ordinary
+OpenAI-compatible endpoint.
+
+- **OpenCode Go** — `https://opencode.ai/inference/go/v1`, the OpenCode Go
+  subscription. The key comes from the OpenCode console; without the Go plan
+  the models list but every request is refused, which Verify tools shows.
+- **OpenCode Zen** — `https://opencode.ai/inference/v1`, OpenCode's gateway
+  paid per request from console credits, with the same kind of key.
+- **Mistral** — `https://api.mistral.ai/v1` with a Mistral API key from
+  Mistral Studio, the same key the Vibe CLI uses.
+- **Requesty** — `https://router.requesty.ai/v1` with a key from the Requesty
+  app.
+
+When an endpoint lists voice models, the last step of Add endpoint and the
+endpoint's **Voice** section say so. **Use for Transcription** makes that
+model the one **Settings → Voice** uses for speech to text, in one click. A
+speech model is named too, with what it still needs: a voice from the
+provider, which you give in Voice settings. The Mistral preset knows its
+Voxtral models; for other endpoints Octant reads the model ids. Mistral's
+speech output works too: Octant speaks its own request shape there.
 
 While Octant checks your saved account, the Sign-in section says **Checking
 sign-in**. After you choose Sign in, it shows the browser progress and a link to

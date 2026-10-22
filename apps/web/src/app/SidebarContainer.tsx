@@ -1,3 +1,4 @@
+import type { WindowHistory } from "../shell/windowHistory";
 import type { ContextHealth } from "@octant/contracts/context";
 import type { OctantMode } from "@octant/contracts/modes";
 import type { ProjectId } from "@octant/contracts/projects";
@@ -149,6 +150,7 @@ export interface SidebarContainerProps {
   readonly resolvedSidebarBackground: ShellSidebarProps["resolvedSidebarBackground"];
   readonly setEnvironmentSelection: (selection: EnvironmentSelection) => void;
   readonly setSidebarCollapsed: (collapsed: boolean) => void;
+  readonly windowHistory: WindowHistory;
   readonly setSidebarFilterQuery: (query: string) => void;
   readonly settings: ShellSidebarProps["settings"];
   readonly shellBackdropCoversSidebar: boolean;
@@ -550,6 +552,7 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
       navigatorAvailable={navigatorAvailable}
       onOpenSearch={openThreadSearch}
       onCollapseSidebar={() => setSidebarCollapsed(true)}
+      history={props.windowHistory}
       onOpenNavigator={openNavigator}
       onOpenSettings={(deepLink) => void openSettings(deepLink)}
       onOpenZen={() => void enterZen()}

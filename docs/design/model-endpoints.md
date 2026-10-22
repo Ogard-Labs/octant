@@ -35,6 +35,31 @@ install or trust action, because a bundled driver needs neither. Opening the
 page or a setup runs nothing; at phone width a fact's value moves under its
 name.
 
+### A runtime whose saved binary is gone
+
+A runtime card whose saved binary is missing or reported incompatible, while the
+latest scan found the same driver at another path, offers one outlined action in
+the card's details: "Use the one found at ~/.local/bin/claude (2.1.306)". The
+card is missing when the scan searched where the saved binary should be and did
+not find it, or when its last check could not start it. A saved binary that
+starts and answers is never second-guessed, and a failed or cancelled scan
+offers nothing. The offer names the launcher path the scan examined, not the
+versioned file it resolves to, so it survives the runtime's own updates; of
+several candidates it takes a compatible one with the highest version, and a
+candidate the scan itself found incompatible or unavailable is never offered.
+The details open when an offer first appears. Nothing switches by itself and
+the offer never turns the runtime on.
+
+Clicking the offer goes through the same host path as Locate binary, without
+the file picker: the `locate-binary` command names a scanned path instead of a
+picker receipt. The host accepts the path only when it is a candidate of the
+same driver kind from its own latest scan, then checks it as it checks a picked
+file (executable regular file, version probe under the same confinement) and
+only then changes the card's binary path, leaving its other settings alone. An
+enabled runtime is checked again right away. The answer is the same quiet line
+(the version the host read) or a warning box with the host's reason. Because it
+needs no picker, the action is also available in a browser.
+
 ### Claude API-key profiles on a headless host
 
 A browser can create a named Claude API-key profile without a credential.
@@ -78,6 +103,16 @@ control supplies its accessible name.
 
 ### Additional CLI accounts
 
+Every Claude and Codex provider card offers Add account in its details, beside
+Check connection. It opens the same manual form that Add provider manually
+opens, expanded, with that driver chosen, the card's binary path filled in, and
+a suggested name ("<card name> (2)", the next free number) focused for editing.
+It adds no route and no authority: the host still assigns the account directory
+and the form shows the sign-in guidance for an additional account. A created
+account closes the form again, so the suggested name is not offered twice.
+Cards for other drivers, and the single runtime card on a provider's own
+page, have no Add account.
+
 The manual Claude and Codex account forms give the account directory, accent
 and sign-in guidance full-width setting rows. The compact provider/name/binary
 fields may share columns; account rows must not become cells in that row.
@@ -86,7 +121,7 @@ keeping every input and the submit action reachable without horizontal clipping.
 
 ### Add endpoint
 
-Add endpoint opens a dialog: the sign-ins first, then a guided flow with a numbered strip of steps. Kind is four cards (Azure AI Foundry, OpenAI-compatible, Anthropic-compatible, Local (Ollama)). Connect asks for a name, the address, and the key, each with a one-line hint, and no control is greyed out without a sentence saying why; protocol, how the key is sent, and "It takes no key" sit under Advanced, and an Azure address entered as OpenAI-compatible offers Switch to Azure AI Foundry. Azure also names at least one deployment, as chips, because the host cannot add it without one. Check and add adds the endpoint and shows its row state in the dialog, with its fix; from then on the endpoint exists, and closing the dialog keeps it. Models lists a short catalogue whole and chosen; a long one is searched, lists at most eight matches with a count of the rest, starts with nothing chosen, and has an Add by ID row; models left unchosen are hidden from the model picker. Azure edits its deployment chips; Local lists the models installed in Ollama, with no Add by ID. Verify tools checks each chosen model, one request at a time, after a button that says how many requests it sends; each model reads Checking…, Verified, or "Chat only" with the reason and Retry, and a failed check never stops the endpoint being added. Ollama models are Chat only without a request, with the reason said once. Agents is optional: only verified models can be offered to helper agents or given an Octant Harness role (a Chat only model is listed with its checkbox off and a sentence saying why; role choices list verified models only, and Reading images only those that read images). A chosen role makes the model its first choice and keeps what it had as backups, saved with the roles' version; a stale version reloads the roles and asks again. In a browser, a kind that needs a key is added without one and reads Needs key, sending the person to the desktop app; Local works fully. "Chat only · Verify tools" is the one label for an unverified model on the endpoint row (when no shown model is verified), the endpoint's Models, the model pickers, and Add endpoint. Targets are 44px tall at phone width.
+Add endpoint opens a dialog: the sign-ins first, then the presets, then a guided flow with a numbered strip of steps. A preset is a named service added with a pasted key (OpenCode Go, OpenCode Zen, Mistral, Requesty): its row sits in the same list as the sign-ins with a one-line description and Add with key, which opens Connect with the name, address and protocol filled in and the key hint naming the page where the key is made, as a link; the address stays editable, and the result is an ordinary endpoint of its kind. On the first-run page the same row opens the dialog on Connect. Kind is four cards (Azure AI Foundry, OpenAI-compatible, Anthropic-compatible, Local (Ollama)). Connect asks for a name, the address, and the key, each with a one-line hint, and no control is greyed out without a sentence saying why; protocol, how the key is sent, and "It takes no key" sit under Advanced, and an Azure address entered as OpenAI-compatible offers Switch to Azure AI Foundry. Azure also names at least one deployment, as chips, because the host cannot add it without one. Check and add adds the endpoint and shows its row state in the dialog, with its fix; from then on the endpoint exists, and closing the dialog keeps it. Models lists a short catalogue whole and chosen; a long one is searched, lists at most eight matches with a count of the rest, starts with nothing chosen, and has an Add by ID row; models left unchosen are hidden from the model picker. Azure edits its deployment chips; Local lists the models installed in Ollama, with no Add by ID. Verify tools checks each chosen model, one request at a time, after a button that says how many requests it sends; each model reads Checking…, Verified, or "Chat only" with the reason and Retry, and a failed check never stops the endpoint being added. Ollama models are Chat only without a request, with the reason said once. When the endpoint lists a voice model (a preset's known transcription or speech model, or an id that reads as one), the last step and the endpoint's Voice section (after Models) say so in one line and offer Use for Transcription, which makes that model Voice's choice at once and then reads "Transcription uses <model> on <endpoint>"; a speech model is named with what it still needs, a voice from the provider, and Open Voice settings. Agents is optional: only verified models can be offered to helper agents or given an Octant Harness role (a Chat only model is listed with its checkbox off and a sentence saying why; role choices list verified models only, and Reading images only those that read images). A chosen role makes the model its first choice and keeps what it had as backups, saved with the roles' version; a stale version reloads the roles and asks again. In a browser, a kind that needs a key is added without one and reads Needs key, sending the person to the desktop app; Local works fully. "Chat only · Verify tools" is the one label for an unverified model on the endpoint row (when no shown model is verified), the endpoint's Models, the model pickers, and Add endpoint. Targets are 44px tall at phone width.
 
 ## Endpoint address and stored key
 

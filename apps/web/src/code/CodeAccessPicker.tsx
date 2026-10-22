@@ -5,7 +5,7 @@ import {
   accessPosturesAbove,
   accessPosturesAtOrBelow,
 } from "@octant/domain/code-policy";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ShieldCheck } from "lucide-react";
 import { useId } from "react";
 import { OctantButton } from "../ui/base/OctantButton";
 import {
@@ -135,6 +135,7 @@ export function CodeAccessPicker(props: CodeAccessPickerProps) {
         disabled={props.disabled === true}
         render={<OctantButton size="sm" variant="ghost" />}
       >
+        <ShieldCheck aria-hidden="true" />
         <span>
           {reviewAvailable && props.autoApprove?.checked
             ? "Approve for me"

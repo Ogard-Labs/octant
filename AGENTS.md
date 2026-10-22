@@ -215,7 +215,6 @@ tracker ids in shipped code against `scripts/code-style-baseline.json`.
 | `apps/web`                | Shared React renderer for desktop and authenticated remote clients                       |
 | `apps/mobile`             | Expo remote-control client                                                               |
 | `apps/docs`               | VitePress user guide, independently deployable                                           |
-| `apps/share`              | Public Canvas share service: link API, viewer pages, user-content frames, storage        |
 | `packages/contracts`      | Schemas, commands, events, RPC, and versioned wire contracts; no runtime logic           |
 | `packages/domain`         | Pure policies and transitions; no Electron, React, database, filesystem, network, or I/O |
 | `packages/provider-sdk`   | Driver interfaces, normalized runtime events, discovery, and conformance harness         |
@@ -407,12 +406,17 @@ code-delivery channel and macOS refuses the replacement anyway. A local package
 built without maintainer signing credentials is unsigned. Cross-platform
 desktop (macOS, Linux, Windows) remains authorized: Linux desktop shell next, Windows Work/Code only after an
 explicitly approved Windows confinement design is documented. Do not add native mobile store distribution, hosted
-relay, connector/OAuth marketplace, or full LSP/extension host unless an explicit
+relay, or full LSP/extension host unless an explicit
 request authorizes that scope and the current specification documents its
-authority and release boundaries. The person's confirmed pull-request merge from
+authority and release boundaries. Connectors (MCP servers added by hand, imported
+from other tools on this Mac, signed in to, or chosen from the bundled catalog)
+are in scope under the architecture's
+[connector rules](docs/architecture.md#extensions-and-skills): user-added packages
+through the published seams and the credential broker, never a hosted service. The person's confirmed pull-request merge from
 a local window and host-local routines (Automation Center) are in scope under the
 [architecture's rules](docs/architecture.md#modes-chat-work-and-code); other
 pull-request mutation, agent-initiated merge, cloud scheduling, and a hosted
-wake service are not. The public Canvas share service (`apps/share`) is in
-scope under [Canvas public links](docs/design/canvas-public-links.md).
+wake service are not. The public Canvas share service is in scope under
+[Canvas public links](docs/design/canvas-public-links.md); its code lives in the
+`octant-webapp` repository.
 Existing scoped exceptions remain documented in the architecture.

@@ -139,6 +139,24 @@ export type ExtensionLifecycleEvent = typeof ExtensionLifecycleEvent.Type;
 
 export const decodeExtensionLifecycleEvent = Schema.decodeUnknownSync(ExtensionLifecycleEvent);
 
+/**
+ * A plugin pinned to a Project: offered on every Work or Code turn there
+ * without a per-send selection. One aggregate per Project, like grants.
+ */
+export const EXTENSION_PROJECT_PIN_AGGREGATE = "extension-project-pin";
+export const EXTENSION_PROJECT_PIN_EVENT_NAMES = {
+  changed: "extension.project-pin-changed@1",
+} as const;
+export const ExtensionProjectPinChanged = Schema.Struct({
+  projectId: ProjectId,
+  extensionId: ToolExtensionId,
+  pinned: Schema.Boolean,
+}).annotations(strict);
+export type ExtensionProjectPinChanged = typeof ExtensionProjectPinChanged.Type;
+export const decodeExtensionProjectPinChanged = Schema.decodeUnknownSync(
+  ExtensionProjectPinChanged,
+);
+
 export const EXTENSION_TOOL_GRANT_AGGREGATE = "extension-tool-grant";
 export const EXTENSION_TOOL_GRANT_EVENT_NAMES = {
   recorded: "extension.tool-grant-recorded@1",

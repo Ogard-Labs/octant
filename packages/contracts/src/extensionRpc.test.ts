@@ -3,6 +3,7 @@ import {
   MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH,
   decodeExtensionCommand,
   decodeExtensionCommandResult,
+  decodeUserAddedMcpServerRequest,
   decodeExtensionSnapshot,
 } from "./extensionRpc";
 
@@ -72,6 +73,25 @@ describe("extension RPC contracts", () => {
   ])("strictly decodes $kind commands", (command) => {
     expect(decodeExtensionCommand(command).kind).toBe(command.kind);
     expect(() => decodeExtensionCommand({ ...command, token: "secret" })).toThrow();
+  });
+
+  it("decodes an MCP server added by hand and refuses a field it does not know", () => {
+    const server = {
+      name: "Docs search",
+      server: {
+        type: "streamable-http",
+        url: "https://mcp.example/mcp",
+        headers: [{ name: "Authorization", value: "Bearer private-value", secret: true }],
+      },
+    };
+    expect(decodeUserAddedMcpServerRequest(server).server.type).toBe("streamable-http");
+    expect(() => decodeUserAddedMcpServerRequest({ ...server, trusted: true })).toThrow();
+    expect(() =>
+      decodeUserAddedMcpServerRequest({
+        ...server,
+        server: { ...server.server, headers: [{ name: "bad header", value: "x", secret: false }] },
+      }),
+    ).toThrow();
   });
 
   it("requires versioned optimistic desired-state mutations", () => {

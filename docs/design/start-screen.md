@@ -18,7 +18,10 @@ Chat and Work add their starter chips only before the mode's first thread.
 **Code Home** is where Code lands with nothing chosen (the Code welcome tab):
 the question and the composer, then Code's prompt suggestions, the card area,
 and [Code agent home](#code-agent-home). With those the page scrolls and the
-composer sits under the question. Neither screen has tabs or action tiles:
+composer sits under the question. Switching to Code opens no draft of its own,
+and a New task draft left with no text or images counts as nothing chosen:
+switching to Code gives its pane back to Code Home, while a draft with text
+stays as New task. Neither screen has tabs or action tiles:
 adding a folder lives in the composer's Project picker, a terminal in the
 workspace tools, and what is running or waiting for review in the sidebar.
 

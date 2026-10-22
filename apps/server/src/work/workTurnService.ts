@@ -1,3 +1,4 @@
+import type { ExtensionSelection } from "@octant/contracts/extensions";
 import { recordProviderChildObservation } from "@octant/provider-sdk/child-observations";
 import {
   coveredAgentResultDeliveryMembers,
@@ -208,6 +209,8 @@ export interface WorkTurnStartOptions {
 
 export interface WorkTurnServiceDependencies {
   readonly resolveSelectedExtensions?: SelectedExtensionResolver;
+  /** The plugins pinned to a Project, offered on every turn there without a per-send selection. */
+  readonly pinnedExtensionIds?: (projectId: string) => ReadonlyArray<string>;
   readonly persistence: {
     readonly status: () => { readonly state: string; readonly integrity: string };
     readonly readProject: (projectId: ProjectId) => Project | undefined;
@@ -425,6 +428,7 @@ export class WorkTurnService {
    */
   readonly #runningAccess: RunningWorkTurnAccess;
   readonly #resolveSelectedExtensions: SelectedExtensionResolver | undefined;
+  readonly #pinnedExtensionIds: WorkTurnServiceDependencies["pinnedExtensionIds"];
   readonly #persistence: WorkTurnServiceDependencies["persistence"];
   readonly #threads: WorkTurnServiceDependencies["threads"];
   readonly #projects: WorkTurnServiceDependencies["projects"];
@@ -473,6 +477,7 @@ export class WorkTurnService {
     this.#runningAccess = dependencies.runningAccess ?? new Map();
     this.#contextHarness = dependencies.contextHarness;
     this.#resolveSelectedExtensions = dependencies.resolveSelectedExtensions;
+    this.#pinnedExtensionIds = dependencies.pinnedExtensionIds;
     this.#persistence = dependencies.persistence;
     this.#threads = dependencies.threads;
     this.#projects = dependencies.projects;
@@ -823,9 +828,11 @@ export class WorkTurnService {
 
     const selections =
       command.extensionSelections?.filter((selection) => !isBrowserUseSelection(selection)) ?? [];
+    const pinnedExtensionIds =
+      thread === undefined ? [] : (this.#pinnedExtensionIds?.(String(thread.projectId)) ?? []);
     let skillContext: ReadonlyArray<ProviderContextBlock> = [];
     let extensionTools: AppManagedToolSet | undefined;
-    if (selections.length > 0) {
+    if (selections.length > 0 || pinnedExtensionIds.length > 0) {
       const resolved =
         thread === undefined
           ? undefined
@@ -833,6 +840,7 @@ export class WorkTurnService {
               mode: "work",
               thread,
               selections,
+              pinnedExtensionIds,
               windowId: authenticatedWindowId,
             }).catch(() => undefined);
       if (resolved === undefined || resolved.kind === "unavailable") {
