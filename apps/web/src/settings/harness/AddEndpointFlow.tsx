@@ -46,8 +46,11 @@ import {
   modelsToList,
   withFirstChoice,
   type EndpointKind,
+  type EndpointPreset,
   type ToolCheck,
 } from "./addEndpointSteps";
+import { isSpeechUsable, voiceModelsOf } from "./voiceModels";
+import { VoiceTip, type VoiceLinks } from "./VoiceTip";
 import { NEEDS_KEY_LABEL, type EndpointStatus, type ModelEndpointInstance } from "./endpointStatus";
 import type { EndpointDetailFocus } from "./ModelEndpointDetail";
 import { EndpointState } from "./ModelEndpointRow";
@@ -101,8 +104,17 @@ export type AddEndpointFlowProps = Pick<
   };
   /** Told after the flow saved Octant Harness roles, so a roles view can read them again. */
   readonly onRolesSaved?: () => void;
-  /** The sign-ins offered before the kinds, on the first step only. */
-  readonly signIns?: ReactNode;
+  /**
+   * The sign-ins and presets offered before the kinds, on the first step
+   * only. Choosing a preset moves the flow to Connect with its fields filled.
+   */
+  readonly signIns?: (flow: {
+    readonly choosePreset: (preset: EndpointPreset) => void;
+  }) => ReactNode;
+  /** Opens the flow on Connect for this preset instead of on the kinds. */
+  readonly initialPreset?: EndpointPreset;
+  /** Voice settings, so an endpoint with voice models can offer them when it is added. */
+  readonly voice?: VoiceLinks;
   readonly onStepChange?: (step: AddEndpointStep) => void;
   readonly onOpenAdded: (focus?: EndpointDetailFocus) => void;
   readonly onClose: () => void;
@@ -116,8 +128,11 @@ export type AddEndpointFlowProps = Pick<
  * stops it being added.
  */
 export function AddEndpointFlow(props: AddEndpointFlowProps) {
-  const [step, setStepState] = useState<AddEndpointStep>("kind");
-  const [kind, setKind] = useState<EndpointKind>("openai-compatible");
+  const [step, setStepState] = useState<AddEndpointStep>(
+    props.initialPreset === undefined ? "kind" : "connect",
+  );
+  const [kind, setKind] = useState<EndpointKind>(props.initialPreset?.kind ?? "openai-compatible");
+  const [preset, setPreset] = useState<EndpointPreset | undefined>(props.initialPreset);
   const [chosen, setChosen] = useState<ReadonlyArray<ProviderModelId>>([]);
   const [checks, setChecks] = useState<Readonly<Record<string, ToolCheck>>>({});
   const { onStepChange } = props;
@@ -139,10 +154,17 @@ export function AddEndpointFlow(props: AddEndpointFlowProps) {
       <KindStep
         headingRef={headingRef}
         onChoose={(next) => {
+          setPreset(undefined);
           setKind(next);
           setStep("connect");
         }}
-        signIns={props.signIns}
+        signIns={props.signIns?.({
+          choosePreset: (next) => {
+            setPreset(next);
+            setKind(next.kind);
+            setStep("connect");
+          },
+        })}
       />
     );
   } else if (step === "connect") {
@@ -154,6 +176,7 @@ export function AddEndpointFlow(props: AddEndpointFlowProps) {
         onBack={() => setStep("kind")}
         onContinue={() => setStep("models")}
         onKindChange={setKind}
+        {...(preset === undefined ? {} : { preset })}
       />
     );
   } else if (added === undefined) {
@@ -204,6 +227,8 @@ export function AddEndpointFlow(props: AddEndpointFlowProps) {
         headingRef={headingRef}
         onClose={props.onClose}
         onOpenAdded={props.onOpenAdded}
+        {...(props.voice === undefined ? {} : { voice: props.voice })}
+        voiceModels={voiceModelsOf(added.observed?.models, preset?.voice)}
       />
     );
   }
@@ -320,15 +345,18 @@ type ConnectStepProps = AddEndpointFlowProps & {
   readonly onKindChange: (kind: EndpointKind) => void;
   readonly onBack: () => void;
   readonly onContinue: () => void;
+  /** The preset this step was opened from; its fields start filled in. */
+  readonly preset?: EndpointPreset;
 };
 
 function ConnectStep(props: ConnectStepProps) {
   const presentation = endpointKindPresentation(props.kind);
-  const [name, setName] = useState(presentation.defaultName ?? "");
-  const [url, setUrl] = useState(presentation.defaultUrl ?? "");
+  const preset = props.preset;
+  const [name, setName] = useState(preset?.displayName ?? presentation.defaultName ?? "");
+  const [url, setUrl] = useState(preset?.baseUrl ?? presentation.defaultUrl ?? "");
   const [noKey, setNoKey] = useState(false);
   const [keyHeader, setKeyHeader] = useState<"api-key" | "bearer">("api-key");
-  const [protocol, setProtocol] = useState("auto");
+  const [protocol, setProtocol] = useState<string>(preset?.protocol ?? "auto");
   const [protocolVersion, setProtocolVersion] = useState("2023-06-01");
   const [deployments, setDeployments] = useState<ReadonlyArray<ProviderModelId>>([]);
   const [problem, setProblem] = useState<string>();
@@ -470,14 +498,23 @@ function ConnectStep(props: ConnectStepProps) {
 
   return (
     <form
-      aria-label={`Connect ${presentation.title}`}
+      aria-label={`Connect ${preset?.displayName ?? presentation.title}`}
       className="endpoint-flow__form"
       noValidate
       onSubmit={submit}
     >
-      <StepHeading detail={presentation.detail} headingRef={props.headingRef}>
-        <KindMark kind={props.kind} /> {presentation.title}
-      </StepHeading>
+      {preset === undefined ? (
+        <StepHeading detail={presentation.detail} headingRef={props.headingRef}>
+          <KindMark kind={props.kind} /> {presentation.title}
+        </StepHeading>
+      ) : (
+        <StepHeading detail={preset.detail} headingRef={props.headingRef}>
+          <span aria-hidden="true" className="endpoint-mark">
+            <ProviderGlyph displayName={preset.displayName} driverKind={preset.glyph} size={16} />
+          </span>{" "}
+          {preset.displayName}
+        </StepHeading>
+      )}
       <div className="endpoint-flow__field">
         <label htmlFor={`${ids}-name-input`}>Name</label>
         <OctantInput
@@ -549,9 +586,19 @@ function ConnectStep(props: ConnectStepProps) {
             type="password"
           />
           <span className="endpoint-flow__hint" id={`${ids}-key`}>
-            {presentation.key === "required"
-              ? "Saved in this Mac's Keychain. Octant can't show it again."
-              : "Saved in this Mac's Keychain. For a server that takes no key, choose that under Advanced."}
+            {preset !== undefined ? (
+              <>
+                Create one in{" "}
+                <a href={preset.keyPage.url} rel="noreferrer" target="_blank">
+                  {preset.keyPage.label}
+                </a>
+                . Saved in this Mac's Keychain. Octant can't show it again.
+              </>
+            ) : presentation.key === "required" ? (
+              "Saved in this Mac's Keychain. Octant can't show it again."
+            ) : (
+              "Saved in this Mac's Keychain. For a server that takes no key, choose that under Advanced."
+            )}
           </span>
         </div>
       ) : (
@@ -560,6 +607,16 @@ function ConnectStep(props: ConnectStepProps) {
           <p className="endpoint-flow__note" data-testid="endpoint-key-later">
             This browser can't store keys. Add it now and it shows Needs key; then add the key in
             the Octant desktop app on this Mac.
+            {preset !== undefined ? (
+              <>
+                {" "}
+                Create one in{" "}
+                <a href={preset.keyPage.url} rel="noreferrer" target="_blank">
+                  {preset.keyPage.label}
+                </a>
+                .
+              </>
+            ) : null}
             {presentation.key === "optional"
               ? " A server that takes no key works from here: choose that under Advanced."
               : null}
@@ -1567,6 +1624,8 @@ function DoneStep(props: {
   readonly checks: Readonly<Record<string, ToolCheck>>;
   readonly onOpenAdded: (focus?: EndpointDetailFocus) => void;
   readonly onClose: () => void;
+  readonly voice?: VoiceLinks;
+  readonly voiceModels: ReturnType<typeof voiceModelsOf>;
 }) {
   const verified = props.chosen.filter((modelId) =>
     mayTakeAgentWork(props.checks[String(modelId)]),
@@ -1594,6 +1653,14 @@ function DoneStep(props: {
           </p>
         )}
       </div>
+      {props.voice === undefined || !isSpeechUsable(props.added.instance) ? null : (
+        <VoiceTip
+          instanceId={props.added.instance.id}
+          instanceName={props.added.instance.displayName}
+          links={props.voice}
+          voiceModels={props.voiceModels}
+        />
+      )}
       <div className="endpoint-flow__actions">
         <OctantButton onClick={() => props.onOpenAdded()} size="sm" type="button" variant="outline">
           Open details

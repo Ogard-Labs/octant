@@ -634,6 +634,127 @@ describe("ProviderSettingsView", () => {
     expect(within(create).queryByLabelText("Account sign-in command")).toBeNull();
   });
 
+  it("adds another Claude account from the Claude card with the form ready to name it", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    renderProviderSettings(<ProviderSettingsView {...props} />);
+
+    expect(screen.queryByLabelText("Provider type")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Details for Claude local" }));
+    await user.click(screen.getByRole("button", { name: "Add account for Claude local" }));
+
+    const create = screen.getByRole("form", { name: "Add Claude provider" });
+    expect(within(create).getByRole("combobox", { name: "Provider type" })).toHaveTextContent(
+      "Claude Agent SDK",
+    );
+    const name = within(create).getByLabelText("Provider name");
+    expect(name).toHaveValue("Claude local (2)");
+    expect(name).toHaveFocus();
+    expect(within(create).getByLabelText("Claude binary")).toHaveValue("/opt/homebrew/bin/claude");
+    expect(within(create).getByLabelText("Account directory")).toHaveValue(
+      "~/.claude-accounts/<assigned on create>",
+    );
+
+    await user.click(within(create).getByRole("button", { name: "Add Claude" }));
+    expect(props.onCreateClaude).toHaveBeenLastCalledWith(
+      "Claude local (2)",
+      {
+        kind: "claude-agent-sdk",
+        binaryPath: "/opt/homebrew/bin/claude",
+        authentication: "subscription",
+      },
+      expect.objectContaining({ value: "" }),
+    );
+    // The new account exists, so the suggested name is not offered a second time.
+    await waitFor(() => {
+      expect(screen.queryByRole("form", { name: "Add Claude provider" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("adds another Codex account from the Codex card through the same form", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: codexProvider() });
+    renderProviderSettings(<ProviderSettingsView {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Details for Codex local" }));
+    await user.click(screen.getByRole("button", { name: "Add account for Codex local" }));
+
+    const create = screen.getByRole("form", { name: "Add provider" });
+    expect(within(create).getByRole("combobox", { name: "Provider type" })).toHaveTextContent(
+      "Codex CLI",
+    );
+    expect(within(create).getByLabelText("Provider name")).toHaveValue("Codex local (2)");
+    expect(within(create).getByLabelText("Codex binary")).toHaveValue("/opt/homebrew/bin/codex");
+
+    await user.click(within(create).getByRole("button", { name: "Add Codex" }));
+    expect(props.onCreate).toHaveBeenCalledWith(
+      "codex",
+      "Codex local (2)",
+      "/opt/homebrew/bin/codex",
+    );
+  });
+
+  it("suggests the next free number when a second account already exists", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    const second = decodeProviderInstance({
+      ...claudeProvider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000093"),
+      displayName: "Claude local (2)",
+    });
+    renderProviderSettings(
+      <ProviderSettingsView {...props} instances={[...props.instances, second]} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Details for Claude local" }));
+    await user.click(screen.getByRole("button", { name: "Add account for Claude local" }));
+
+    expect(screen.getByLabelText("Provider name")).toHaveValue("Claude local (3)");
+  });
+
+  it("keeps a number the person put in a card's name instead of reading it as an account sequence", async () => {
+    const user = userEvent.setup();
+    const research = decodeProviderInstance({
+      ...claudeProvider(),
+      displayName: "Claude Research (2024)",
+    });
+    renderProviderSettings(<ProviderSettingsView {...fixture({ instance: research })} />);
+
+    await user.click(screen.getByRole("button", { name: "Details for Claude Research (2024)" }));
+    await user.click(
+      screen.getByRole("button", { name: "Add account for Claude Research (2024)" }),
+    );
+
+    expect(screen.getByLabelText("Provider name")).toHaveValue("Claude Research (2024) (2)");
+  });
+
+  it("continues the sequence from a numbered account when its unnumbered sibling exists", async () => {
+    const user = userEvent.setup();
+    const props = fixture({ instance: claudeProvider() });
+    const numbered = decodeProviderInstance({
+      ...claudeProvider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000093"),
+      displayName: "Claude local (2)",
+    });
+    renderProviderSettings(
+      <ProviderSettingsView {...props} instances={[...props.instances, numbered]} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Details for Claude local (2)" }));
+    await user.click(screen.getByRole("button", { name: "Add account for Claude local (2)" }));
+
+    expect(screen.getByLabelText("Provider name")).toHaveValue("Claude local (3)");
+  });
+
+  it("offers Add account on Claude and Codex cards only", async () => {
+    const user = userEvent.setup();
+    renderProviderSettings(<ProviderSettingsView {...fixture()} />);
+
+    await user.click(screen.getByRole("button", { name: "Details for Existing CLI" }));
+    expect(screen.getByRole("button", { name: "Check connection for Existing CLI" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /^Add account/ })).not.toBeInTheDocument();
+  });
+
   it("hides the Claude sign-in command until the binary path is absolute", async () => {
     const user = userEvent.setup();
     renderExpanded(<ProviderSettingsView {...fixture()} />);
@@ -2784,6 +2905,248 @@ describe("ProviderSettingsView", () => {
     expect(screen.queryByRole("button", { name: "Locate binary for GLM" })).toBeNull();
   });
 
+  it("offers the binary the scan found when the saved one is gone, and has the host check it on click", async () => {
+    const user = userEvent.setup();
+    const onUseScannedBinary = vi.fn(
+      async (_instanceId: ProviderInstance["id"], _binaryPath: string) =>
+        ({ kind: "located", version: "codex-cli 0.49.1" }) as const,
+    );
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({
+            displayName: "Missing Codex",
+            driverKind: "codex",
+            enabled: false,
+            configuration: {
+              kind: "codex-cli",
+              binaryPath: "/Users/example/.local/lib/node_modules/@openai/codex/bin/codex.js",
+            },
+          }),
+          discoverySnapshot: discoverySnapshot({
+            candidates: [scannedCodexCandidate()],
+            // The scan looked in the saved binary's own directory and found
+            // nothing there, so the saved binary is known to be gone.
+            searchedDirectories: searchedDirectoriesFor(
+              "codex",
+              "/Users/example/.local/bin",
+              "/Users/example/.local/lib/node_modules/@openai/codex/bin",
+            ),
+          }),
+        })}
+        onUseScannedBinary={onUseScannedBinary}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Missing Codex" });
+    // The stable launcher is offered, not the versioned file it resolves to.
+    const offer = within(card).getByRole("button", {
+      name: "Use the one found at ~/.local/bin/codex (0.49.1) for Missing Codex",
+    });
+    expect(onUseScannedBinary).not.toHaveBeenCalled();
+
+    await user.click(offer);
+
+    expect(onUseScannedBinary).toHaveBeenCalledTimes(1);
+    expect(onUseScannedBinary).toHaveBeenLastCalledWith(id, "/Users/example/.local/bin/codex");
+    expect(await within(card).findByRole("status")).toHaveTextContent(
+      "Octant checked the chosen binary and will use it (codex-cli 0.49.1).",
+    );
+  });
+
+  it("reports the host's refusal of an offered binary and keeps the saved one", async () => {
+    const user = userEvent.setup();
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({
+            displayName: "Missing Codex",
+            driverKind: "codex",
+            enabled: false,
+            configuration: { kind: "codex-cli", binaryPath: "/gone/bin/codex" },
+          }),
+          discoverySnapshot: discoverySnapshot({
+            candidates: [scannedCodexCandidate()],
+            searchedDirectories: searchedDirectoriesFor("codex", "/gone/bin"),
+          }),
+        })}
+        onUseScannedBinary={vi.fn(
+          async () =>
+            ({
+              kind: "refused",
+              message: "The chosen file did not answer Codex CLI's version check.",
+            }) as const,
+        )}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Missing Codex" });
+    await user.click(within(card).getByRole("button", { name: /^Use the one found at/ }));
+
+    expect(
+      await within(card).findByText("The chosen file did not answer Codex CLI's version check."),
+    ).toBeVisible();
+  });
+
+  it("offers the newest compatible scanned binary when the saved one is incompatible", async () => {
+    const user = userEvent.setup();
+    const onUseScannedBinary = vi.fn(
+      async (_instanceId: ProviderInstance["id"], _binaryPath: string) =>
+        ({ kind: "located", version: "2.1.2" }) as const,
+    );
+    const candidate = (
+      binaryPath: string,
+      version: string,
+      patch: Partial<DiscoverySnapshot["candidates"][number]> = {},
+    ) =>
+      ({
+        ...opencodeCandidate(),
+        binaryPath,
+        discoveredPath: undefined,
+        version,
+        pathSummary: binaryPath.replace("/Users/example", "~"),
+        ...patch,
+      }) as DiscoverySnapshot["candidates"][number];
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({
+            displayName: "Old OpenCode",
+            configuration: {
+              kind: "opencode-cli",
+              binaryPath: "/Users/example/.local/bin/opencode2",
+            },
+          }),
+          observed: observation({ readiness: "incompatible", detectedVersion: "2.0.11" }),
+          discoverySnapshot: discoverySnapshot({
+            candidates: [
+              candidate("/Users/example/.local/bin/opencode2", "2.0.11"),
+              candidate("/Users/example/.opencode/bin/opencode", "2.1.2"),
+              candidate("/Users/example/.cache/opencode", "2.0.30"),
+              // Newer, but the scan itself found it unusable.
+              candidate("/Users/example/.broken/opencode", "2.9.0", { readiness: "incompatible" }),
+            ],
+            searchedDirectories: searchedDirectoriesFor("opencode", "/Users/example/.local/bin"),
+          }),
+        })}
+        onUseScannedBinary={onUseScannedBinary}
+      />,
+    );
+
+    const card = screen.getByRole("article", { name: "Old OpenCode" });
+    await user.click(
+      within(card).getByRole("button", {
+        name: "Use the one found at ~/.opencode/bin/opencode (2.1.2) for Old OpenCode",
+      }),
+    );
+
+    expect(onUseScannedBinary).toHaveBeenLastCalledWith(
+      id,
+      "/Users/example/.opencode/bin/opencode",
+    );
+  });
+
+  it("offers no scanned binary when the saved one is the one the scan found or still works", () => {
+    const onUseScannedBinary = vi.fn(async () => ({ kind: "cancelled" }) as const);
+    const saved = provider({
+      displayName: "Detected Codex",
+      driverKind: "codex",
+      enabled: false,
+      configuration: { kind: "codex-cli", binaryPath: "/opt/homebrew/bin/codex" },
+    });
+    const { unmount } = renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: saved,
+          discoverySnapshot: discoverySnapshot({
+            candidates: [codexCandidate(), scannedCodexCandidate()],
+            searchedDirectories: searchedDirectoriesFor("codex", "/opt/homebrew/bin"),
+          }),
+        })}
+        onUseScannedBinary={onUseScannedBinary}
+      />,
+    );
+    // The saved spelling is the scan's launcher path: nothing to switch to.
+    expect(screen.queryByRole("button", { name: /^Use the one found at/ })).toBeNull();
+    unmount();
+
+    // A saved binary that starts and answers is never second-guessed, even
+    // when the scan did not look where it lives.
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({
+            displayName: "Custom Codex",
+            driverKind: "codex",
+            configuration: { kind: "codex-cli", binaryPath: "/opt/custom/bin/codex" },
+          }),
+          observed: observation({ readiness: "ready" }),
+          discoverySnapshot: discoverySnapshot({
+            candidates: [scannedCodexCandidate()],
+            searchedDirectories: searchedDirectoriesFor("codex", "/Users/example/.local/bin"),
+          }),
+        })}
+        onUseScannedBinary={onUseScannedBinary}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /^Use the one found at/ })).toBeNull();
+    expect(onUseScannedBinary).not.toHaveBeenCalled();
+  });
+
+  it("does not call an unprobed binary outside the searched directories missing just because the scan found another", () => {
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({
+          instance: provider({
+            displayName: "Custom Codex",
+            driverKind: "codex",
+            enabled: false,
+            configuration: { kind: "codex-cli", binaryPath: "/opt/custom/bin/codex" },
+          }),
+          // The scan covered Codex, but only under ~/.local/bin: its silence
+          // says nothing about /opt/custom/bin.
+          discoverySnapshot: discoverySnapshot({
+            candidates: [scannedCodexCandidate()],
+            searchedDirectories: searchedDirectoriesFor("codex", "/Users/example/.local/bin"),
+          }),
+        })}
+        onUseScannedBinary={vi.fn(async () => ({ kind: "cancelled" }) as const)}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /^Use the one found at/ })).toBeNull();
+  });
+
+  it("makes no offer from a failed scan or without a way to use it", () => {
+    const missing = provider({
+      displayName: "Missing Codex",
+      driverKind: "codex",
+      enabled: false,
+      configuration: { kind: "codex-cli", binaryPath: "/gone/bin/codex" },
+    });
+    const snapshot = (status: DiscoverySnapshot["status"]) =>
+      discoverySnapshot({
+        status,
+        candidates: [scannedCodexCandidate()],
+        searchedDirectories: searchedDirectoriesFor("codex", "/gone/bin"),
+      });
+    const { unmount } = renderExpanded(
+      <ProviderSettingsView
+        {...fixture({ instance: missing, discoverySnapshot: snapshot("failed") })}
+        onUseScannedBinary={vi.fn(async () => ({ kind: "cancelled" }) as const)}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /^Use the one found at/ })).toBeNull();
+    unmount();
+
+    renderExpanded(
+      <ProviderSettingsView
+        {...fixture({ instance: missing, discoverySnapshot: snapshot("completed") })}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /^Use the one found at/ })).toBeNull();
+  });
+
   it("refuses to mark or enable a provider from a failed scan's stale candidates", () => {
     renderProviderSettings(
       <ProviderSettingsView
@@ -4429,6 +4792,20 @@ function codexCandidate(): DiscoverySnapshot["candidates"][number] {
     discoveredPath: "/opt/homebrew/bin/codex",
     readiness: "ready",
     pathSummary: "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js",
+    detectedAt: "2026-07-26T20:00:00.000Z" as never,
+  } as DiscoverySnapshot["candidates"][number];
+}
+
+/** A Codex whose launcher symlink points at a versioned file under the home folder. */
+function scannedCodexCandidate(): DiscoverySnapshot["candidates"][number] {
+  return {
+    driverKind: "codex",
+    displayName: "Codex CLI",
+    binaryPath: "/Users/example/.local/share/codex/versions/0.49.1/codex",
+    discoveredPath: "/Users/example/.local/bin/codex",
+    version: "codex-cli 0.49.1",
+    readiness: "ready",
+    pathSummary: "~/.local/share/codex/versions/0.49.1/codex",
     detectedAt: "2026-07-26T20:00:00.000Z" as never,
   } as DiscoverySnapshot["candidates"][number];
 }

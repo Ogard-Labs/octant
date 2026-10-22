@@ -113,6 +113,7 @@ function upcastPersistedShellSettings(value: unknown): unknown {
         : "small",
     transcriptWidth:
       "transcriptWidth" in withSidebarBackground ? withSidebarBackground.transcriptWidth : "narrow",
+    usageBars: "usageBars" in withSidebarBackground ? withSidebarBackground.usageBars : "smooth",
     showThreadProviderIcons:
       "showThreadProviderIcons" in withSidebarBackground
         ? withSidebarBackground.showThreadProviderIcons

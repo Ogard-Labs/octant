@@ -8,6 +8,7 @@ import { signInConsent } from "../../providers/ProviderOAuthSignIn";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantDialog } from "../../ui/base/OctantDialog";
+import { ENDPOINT_PRESETS, type EndpointPreset } from "./addEndpointSteps";
 import {
   AddEndpointFlow,
   type AddEndpointFlowProps,
@@ -65,13 +66,16 @@ export interface EndpointChoicesProps {
   readonly disabled: boolean;
   readonly credentialManagementAvailable: boolean;
   readonly onSignIn: (offer: SubscriptionOAuthOffer) => void;
+  /** Opens Connect for a preset, with its name, address and protocol filled in. */
+  readonly onAddWithKey: (preset: EndpointPreset) => void;
   /** Absent inside the add dialog, where the form follows the sign-ins. */
   readonly onAddEndpoint?: () => void;
 }
 
 /**
  * The ways in: one row per sign-in, each one click with its consent line
- * under the button, and Another endpoint by its address.
+ * under the button; one row per preset, added with a pasted key; and Another
+ * endpoint by its address.
  */
 export function EndpointChoices(props: EndpointChoicesProps) {
   const offers = offeredSignIns();
@@ -116,6 +120,31 @@ export function EndpointChoices(props: EndpointChoicesProps) {
           </li>
         );
       })}
+      {ENDPOINT_PRESETS.map((preset) => (
+        <li className="endpoint-choice" key={preset.id}>
+          <span aria-hidden="true" className="endpoint-mark">
+            <ProviderGlyph
+              displayName={preset.displayName}
+              driverKind={preset.glyph}
+              size={preset.glyph === "model-endpoint" ? 24 : 16}
+            />
+          </span>
+          <span className="endpoint-choice__text">
+            <span className="endpoint-choice__name">{preset.displayName}</span>
+            <span className="endpoint-choice__detail">{preset.detail}</span>
+          </span>
+          <OctantButton
+            aria-label={`Add with key, ${preset.displayName}`}
+            disabled={props.disabled}
+            onClick={() => props.onAddWithKey(preset)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            Add with key
+          </OctantButton>
+        </li>
+      ))}
       {props.onAddEndpoint === undefined ? null : (
         <li className="endpoint-choice">
           <span aria-hidden="true" className="endpoint-mark">
@@ -142,7 +171,7 @@ export function EndpointChoices(props: EndpointChoicesProps) {
   );
 }
 
-export interface AddEndpointDialogProps extends AddEndpointFlowProps {
+export interface AddEndpointDialogProps extends Omit<AddEndpointFlowProps, "signIns"> {
   readonly open: boolean;
   readonly onSignIn: (offer: SubscriptionOAuthOffer) => void;
   /** A page-level message, repeated here because the page sits behind the dialog. */
@@ -155,11 +184,13 @@ export interface AddEndpointDialogProps extends AddEndpointFlowProps {
  */
 export function AddEndpointDialog(props: AddEndpointDialogProps) {
   const titleId = useId();
-  const [step, setStep] = useState<AddEndpointStep>("kind");
-  // Each opening starts the flow again from its first step.
+  const firstStep: AddEndpointStep = props.initialPreset === undefined ? "kind" : "connect";
+  const [step, setStep] = useState<AddEndpointStep>(firstStep);
+  // Each opening starts the flow again from its first step: the kinds, or
+  // Connect when a preset was chosen on the page.
   useEffect(() => {
-    if (props.open) setStep("kind");
-  }, [props.open]);
+    if (props.open) setStep(firstStep);
+  }, [props.open, firstStep]);
   // The page alert speaks for creating the endpoint; once it exists, each
   // step says what happened next to the model it is about.
   const showMessage = props.message !== undefined && (step === "kind" || step === "connect");
@@ -186,13 +217,14 @@ export function AddEndpointDialog(props: AddEndpointDialogProps) {
             setStep(next);
             props.onStepChange?.(next);
           }}
-          signIns={
+          signIns={(flow) => (
             <EndpointChoices
               credentialManagementAvailable={props.credentialManagementAvailable}
               disabled={props.busy}
+              onAddWithKey={flow.choosePreset}
               onSignIn={props.onSignIn}
             />
-          }
+          )}
         />
       ) : null}
     </OctantDialog>

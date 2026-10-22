@@ -7,11 +7,16 @@ import { startCredentialBroker } from "./credentialBroker";
 import {
   codeVerifierMatchesChallenge,
   createHostOAuthRuntime,
+  handleHostOAuthBrokerRoute,
   exchangeAuthorizationCode,
   type HostOAuthDescriptor,
 } from "./hostOAuth";
 
 const ACCESS = "access-token-must-not-leak";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
 const REFRESH = "refresh-token-must-not-leak";
 
 function memoryStore(): CredentialStore & { readonly values: Map<string, string> } {
@@ -876,3 +881,224 @@ async function signIn(
   if (status.kind !== "signed-in") throw new Error("missing credential ref");
   return status.credentialRef;
 }
+
+describe("the MCP authorization dialect", () => {
+  it("binds the chosen callback port, names the resource on authorize, exchange and refresh, and grants without a scope", async () => {
+    const seen: Array<{ readonly step: string; readonly resource: string | null }> = [];
+    let redirectSeen = "";
+    const server = createServer((request, response) => {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (request.method === "GET" && url.pathname === "/authorize") {
+        seen.push({ step: "authorize", resource: url.searchParams.get("resource") });
+        redirectSeen = url.searchParams.get("redirect_uri") ?? "";
+        expect(url.searchParams.has("scope")).toBe(false);
+        const callback = new URL(redirectSeen);
+        callback.searchParams.set("code", "auth-code");
+        callback.searchParams.set("state", url.searchParams.get("state") ?? "");
+        response.writeHead(302, { location: callback.toString() });
+        response.end();
+        return;
+      }
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer | string) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      request.on("end", () => {
+        const form = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+        seen.push({ step: form.get("grant_type") ?? "?", resource: form.get("resource") });
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({
+            access_token: `${ACCESS}-${seen.length}`,
+            refresh_token: `${REFRESH}-${seen.length}`,
+            token_type: "Bearer",
+            expires_in: 1,
+          }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const issuer = baseUrl(server);
+    const store = memoryStore();
+    let clock = Date.parse("2026-10-20T12:00:00.000Z");
+    const runtime = createHostOAuthRuntime({ store, timeoutMs: 2_000, now: () => clock });
+    const port = 43000 + Math.floor(Math.random() * 2000);
+    try {
+      const started = await runtime.begin({
+        descriptor: {
+          descriptorId: "mcp-sample",
+          clientId: "octant-issued-client",
+          dialect: "mcp-authorization",
+          flow: "authorization-code-pkce",
+          authorizationEndpoint: `${issuer}/authorize`,
+          tokenEndpoint: `${issuer}/token`,
+          scopes: [],
+          termsId: "mcp-sign-in-terms-1",
+          resource: "https://mcp.example/mcp",
+          redirectPort: port,
+        },
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-20T12:00:00.000Z",
+      });
+      expect(started.kind).toBe("awaiting-consent");
+      if (started.kind !== "awaiting-consent" || started.flow !== "authorization-code-pkce") {
+        throw new Error("expected a PKCE attempt");
+      }
+      expect(new URL(started.authorizationUrl).searchParams.get("resource")).toBe(
+        "https://mcp.example/mcp",
+      );
+      const followed = await fetch(started.authorizationUrl);
+      expect(followed.ok).toBe(true);
+      expect(redirectSeen).toBe(`http://127.0.0.1:${port}/oauth/callback`);
+      await waitForState(() => runtime.status(started.attemptId), "signed-in");
+      const done = runtime.status(started.attemptId);
+      if (done.kind !== "signed-in") throw new Error("expected signed-in");
+      clock += 5_000;
+      const refreshed = await runtime.refresh(done.credentialRef);
+      expect(refreshed.kind).toBe("refreshed");
+      expect(seen).toEqual([
+        { step: "authorize", resource: "https://mcp.example/mcp" },
+        { step: "authorization_code", resource: "https://mcp.example/mcp" },
+        { step: "refresh_token", resource: "https://mcp.example/mcp" },
+      ]);
+    } finally {
+      await runtime.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("accepts a grant without a refresh token over the broker route and asks for a new sign-in once it expires", async () => {
+    const server = createServer((request, response) => {
+      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      if (request.method === "GET" && url.pathname === "/authorize") {
+        const callback = new URL(url.searchParams.get("redirect_uri") ?? "");
+        callback.searchParams.set("code", "auth-code");
+        callback.searchParams.set("state", url.searchParams.get("state") ?? "");
+        response.writeHead(302, { location: callback.toString() });
+        response.end();
+        return;
+      }
+      request.on("data", () => undefined);
+      request.on("end", () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(
+          JSON.stringify({ access_token: ACCESS, token_type: "Bearer", expires_in: 60 }),
+        );
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const issuer = baseUrl(server);
+    const store = memoryStore();
+    let clock = Date.parse("2026-10-20T12:00:00.000Z");
+    const runtime = createHostOAuthRuntime({ store, timeoutMs: 2_000, now: () => clock });
+    const port = 43000 + Math.floor(Math.random() * 2000);
+    try {
+      const begun = await handleHostOAuthBrokerRoute(
+        "/v1/oauth/begin",
+        new Request("http://127.0.0.1/v1/oauth/begin", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            actorId: randomUUID(),
+            termsAcknowledgedAt: "2026-10-20T12:00:00.000Z",
+            descriptor: {
+              descriptorId: "mcp-sample",
+              clientId: "octant-issued-client",
+              dialect: "mcp-authorization",
+              flow: "authorization-code-pkce",
+              authorizationEndpoint: `${issuer}/authorize`,
+              tokenEndpoint: `${issuer}/token`,
+              scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+              termsId: "mcp-sign-in-terms-1",
+              resource: "https://mcp.example/mcp",
+              redirectPort: port,
+            },
+          }),
+        }),
+        runtime,
+      );
+      expect(begun.status).toBe(200);
+      const started: unknown = await begun.json();
+      const attemptId = isRecord(started) ? started.attemptId : undefined;
+      const authorizationUrl = isRecord(started) ? started.authorizationUrl : undefined;
+      if (typeof attemptId !== "string" || typeof authorizationUrl !== "string") {
+        throw new Error("expected a PKCE attempt over the route");
+      }
+      const authorization = new URL(authorizationUrl);
+      expect(authorization.searchParams.get("redirect_uri")).toBe(
+        `http://127.0.0.1:${port}/oauth/callback`,
+      );
+      expect(authorization.searchParams.get("resource")).toBe("https://mcp.example/mcp");
+      await fetch(authorizationUrl);
+      await waitForState(() => runtime.status(attemptId), "signed-in");
+      const done = runtime.status(attemptId);
+      if (done.kind !== "signed-in") throw new Error("expected signed-in");
+      expect(await runtime.refresh(done.credentialRef)).toEqual({ kind: "refreshed" });
+      expect(await runtime.access(done.credentialRef)).toMatchObject({
+        kind: "granted",
+        accessToken: ACCESS,
+      });
+      clock += 61_000;
+      expect(await runtime.refresh(done.credentialRef)).toEqual({
+        kind: "sign-in-again",
+        reason: "expired",
+      });
+      expect(await runtime.access(done.credentialRef)).toEqual({
+        kind: "sign-in-again",
+        reason: "expired",
+      });
+    } finally {
+      await runtime.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("refuses the dialect without a client id or a resource, and refuses a resource on a standard flow", async () => {
+    const store = memoryStore();
+    const runtime = createHostOAuthRuntime({ store, timeoutMs: 2_000 });
+    try {
+      const base = {
+        descriptorId: "mcp-sample",
+        flow: "authorization-code-pkce" as const,
+        authorizationEndpoint: "https://auth.example/authorize",
+        tokenEndpoint: "https://auth.example/token",
+        scopes: [],
+        termsId: "mcp-sign-in-terms-1",
+      };
+      const actorId = randomUUID();
+      const termsAcknowledgedAt = "2026-10-20T12:00:00.000Z";
+      expect(
+        await runtime.begin({
+          descriptor: {
+            ...base,
+            dialect: "mcp-authorization",
+            resource: "https://mcp.example/mcp",
+          },
+          actorId,
+          termsAcknowledgedAt,
+        }),
+      ).toEqual({ kind: "refused", reason: "invalid" });
+      expect(
+        await runtime.begin({
+          descriptor: { ...base, dialect: "mcp-authorization", clientId: "octant-issued-client" },
+          actorId,
+          termsAcknowledgedAt,
+        }),
+      ).toEqual({ kind: "refused", reason: "invalid" });
+      expect(
+        await runtime.begin({
+          descriptor: {
+            ...base,
+            clientId: "public-client",
+            scopes: ["read"],
+            resource: "https://mcp.example/mcp",
+          },
+          actorId,
+          termsAcknowledgedAt,
+        }),
+      ).toEqual({ kind: "refused", reason: "invalid" });
+    } finally {
+      await runtime.close();
+    }
+  });
+});

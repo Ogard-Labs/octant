@@ -197,6 +197,7 @@ describe("Journal", () => {
         projectViewSwitcherPresentation: "dropdown",
         transcriptTextSize: "medium",
         transcriptWidth: "narrow",
+        usageBars: "smooth",
         showThreadProviderIcons: true,
         showThreadStats: true,
         homeCards: { order: [], visibility: [] },

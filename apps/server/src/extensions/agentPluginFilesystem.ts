@@ -28,6 +28,12 @@ export interface LoadedAgentPluginDirectory {
   readonly archiveBytes: number;
 }
 
+export interface ReadPluginDirectory {
+  readonly pluginRoot: string;
+  readonly entries: ReadonlyArray<AgentPluginsPackageEntry>;
+  readonly archiveBytes: number;
+}
+
 /**
  * Load an Agent Plugin from a real filesystem directory.
  * Enforces filesystem-resolved containment: every package path must remain
@@ -37,6 +43,26 @@ export async function loadAgentPluginDirectory(
   directoryPath: string,
   options: LoadAgentPluginDirectoryOptions = {},
 ): Promise<LoadedAgentPluginDirectory> {
+  const read = await readPluginDirectory(directoryPath, options);
+  if (!looksLikeAgentPlugin(read.entries)) {
+    fail(
+      "manifest-schema",
+      "Directory is not an Agent Plugins package (missing root plugin.json with supported $schema).",
+    );
+  }
+  const plugin = loadAgentPluginFromEntries(read.entries);
+  return { ...read, plugin };
+}
+
+/**
+ * Reads a plugin folder's files with the same bounds and symlink rules the
+ * Agent Plugins loader applies, without deciding what format it is: a loader
+ * for another tool's layout builds its package from these entries.
+ */
+export async function readPluginDirectory(
+  directoryPath: string,
+  options: LoadAgentPluginDirectoryOptions = {},
+): Promise<ReadPluginDirectory> {
   const maximumEntries = options.maximumEntries ?? DEFAULT_MAX_ENTRIES;
   const maximumFileBytes = options.maximumFileBytes ?? DEFAULT_MAX_FILE_BYTES;
   const maximumTotalBytes = options.maximumTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
@@ -83,14 +109,7 @@ export async function loadAgentPluginDirectory(
   });
 
   entries.sort((left, right) => left.path.localeCompare(right.path));
-  if (!looksLikeAgentPlugin(entries)) {
-    fail(
-      "manifest-schema",
-      "Directory is not an Agent Plugins package (missing root plugin.json with supported $schema).",
-    );
-  }
-  const plugin = loadAgentPluginFromEntries(entries);
-  return { pluginRoot, entries, plugin, archiveBytes: totalBytes };
+  return { pluginRoot, entries, archiveBytes: totalBytes };
 }
 
 export function localPluginSourceRefForPath(canonicalPath: string): string {
@@ -202,6 +221,10 @@ async function walk(
   const children = await readdir(current, { withFileTypes: true });
   for (const child of children.sort((left, right) => left.name.localeCompare(right.name))) {
     if (child.name === "." || child.name === "..") continue;
+    // A plugin installed as a git checkout carries its history beside its
+    // files; that history is never package content, and its pack files
+    // exceed the per-file limit (observed importing a cloned Claude plugin).
+    if (child.name === ".git") continue;
     const absolutePath = join(current, child.name);
     const relativePath = relative(root, absolutePath).split(sep).join("/");
     if (relativePath === "" || relativePath.startsWith("..")) {

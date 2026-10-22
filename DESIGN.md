@@ -56,7 +56,7 @@ chrome stays flat. A feature that is not available must explain why and offer th
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground (0091): a first-party picture or a
 person's photo, shown plain or through one still print effect, or the field of
-Pulsing characters, behind the start screens or inside the primary card.
+Pulsing characters, behind the start screens or behind every page.
 
 ## Language
 
@@ -106,17 +106,17 @@ nothing essential sits under 12px at the default. The roles live in
 `styles/surface.css`; the size tokens are listed under
 [Typography](#typography).
 
-| Role          | Size | Weight | Leading | Colour      | Where                                                                               |
-| ------------- | ---- | ------ | ------- | ----------- | ----------------------------------------------------------------------------------- |
-| Hero          | 36   | 700    | 1.1     | primary     | Welcome question only (`oct-title--hero`, `--oct-text-3xl`)                         |
-| Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens)                 |
-| Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label |
-| Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option                                                      |
-| Body          | 13   | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                      |
-| Subtitle      | 14   | 400    | 1.45    | secondary   | The one line under a page title (`oct-subtitle`)                                    |
-| Detail        | 13   | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                     |
-| Meta          | 12   | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                                              |
-| Identifier    | 12   | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                             |
+| Role          | Size | Weight | Leading | Colour      | Where                                                                                                   |
+| ------------- | ---- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------- |
+| Hero          | 26   | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width) |
+| Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens)                                     |
+| Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label                     |
+| Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option                                                                          |
+| Body          | 13   | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                          |
+| Subtitle      | 14   | 400    | 1.45    | secondary   | The one line under a page title (`oct-subtitle`)                                                        |
+| Detail        | 13   | 400    | 1.45    | secondary   | Row description, menu detail (`oct-row-detail`)                                                         |
+| Meta          | 12   | 400    | 1.4     | muted       | Timestamps, counts, hints (`oct-meta`)                                                                  |
+| Identifier    | 12   | 400    | 1.4     | muted, mono | Paths, branches, ids (`oct-meta--mono`)                                                                 |
 
 Weights are one ladder, as tokens in `octant.css`: 400 (`--oct-weight-regular`)
 for reading text, 500 (`--oct-weight-medium`, `--oct-weight-display`) for
@@ -124,12 +124,11 @@ labels, controls, and every name in navigation (thread titles, sidebar rows,
 Settings sections), so a name stands apart from the facts under it by weight
 rather than size, 600 (`--oct-weight-strong`) for emphasis (section labels,
 card titles, counts, `strong`, the app's name), and 700 (`--oct-weight-title`)
-only for the page title and the welcome question. `bun run ui:check` counts a
+only for the page title. The welcome question is a prompt to answer, so it is regular weight. `bun run ui:check` counts a
 weight above 600 outside the title roles in `styles/surface.css` as a
 `heavy-weight` finding and ratchets it against the baseline.
 
-Titles use `--oct-tracking-tight` (-0.025em) and the hero
-`--oct-tracking-stat` (-0.04em); section labels use `--oct-tracking-snug`;
+Titles and the welcome question use `--oct-tracking-tight` (-0.025em); section labels use `--oct-tracking-snug`;
 body and detail use none.
 
 ### Colour
@@ -206,21 +205,25 @@ focus; an invalid field keeps its danger border in every state. A feature's
 stylesheet lays a field out (width, height, type size) and never repaints it,
 so the three react alike in light and dark.
 
-The window frame is the one place cards carry the layout. The sidebar and the
-gutters around the workspace are a single back surface painted in the sidebar's
-material (glass, or the opaque sidebar colour when glass is off or unavailable),
-and the primary workspace, the right dock, the bottom panel, and the Settings
-page sit on it as cards: the card radius, one hairline, no shadow, 8px apart
-and 8px from every edge, the sidebar's included,
-all in the workspace colour. Reader pages inside a card use that colour too,
-so every card reads the same. Behind every page the application ground lives
-inside the primary card, cut to the card's rounded rectangle; the sidebar and
-gutters keep the back's own material, so the picture never reads as a second
-copy beside the cards. With Cover the sidebar on, the ground runs under the
-whole window and one frost lies over it with the card's rectangle cut out, so
-the sidebar and gutters frost as one piece with no seam where they meet; the
-dither stays inside the card either way. A pane header and the dock head share the
-title rail (`--oct-title-rail-h`), and the card draws the one hairline under both. At 680px and below the
+The window is a frame and one sheet. The rail and the title band form one
+L-shaped frame in the window surface (the sidebar colour), with no line where
+they meet. The sidebar, the stage (the primary workspace), the right dock, and
+the bottom panel sit inside it as one sheet: it starts under the title band,
+stops 8px short of the window's right and bottom edges, rounds its outer
+corners (`--oct-radius-md`) where the frame turns and along the bottom, and
+divides its parts with hairlines. The sidebar's side is the workspace colour,
+a step lighter than the stage's application background, so the turn of the
+frame reads. Pane headers and dock tabs stay in the title band. With Glass on,
+the frame and the sheet are the Tint over the window's native material, so
+the desktop frosts behind the whole window rather than a sidebar strip. (The
+frame used to set rounded cards 8px apart on a back of the sidebar's material;
+the glass then showed only in the sidebar and an opaque card covered
+everything a person worked in, so the cards went.) Reader pages inside the
+stage are clear. Behind every page the application ground lies on the stage's
+piece of the sheet, under the content, taking the sheet's corners; with Cover
+the sidebar on it runs under the sidebar's piece too, which then lets a
+little of it through. A pane header and the dock head share the
+title rail (`--oct-title-rail-h`), and the pane draws the one hairline under both. At 680px and below the
 workspace sidebar is an overlay drawer and the frame stays flat, with a scrim
 (`--octant-scrim`) dimming the page behind it. The drawer
 starts closed on every load, closes on Escape, on a tap outside it, and on
@@ -430,14 +433,36 @@ context: where the thread runs (Project and branch) on the left, the stats on th
 right, on the page rather than in the box, so the box holds only the message and
 its controls. The stats are one row of figures at the 12px meta step in the meta ink,
 separated by middle dots, with no hue on any number and no fill on the row. When the
-provider reported account limit windows, they lead the row as short bars (a name such
-as 5h or Week, a three-pixel bar, and the share left), filled in the same
-inks as the context meter's popover. It wraps at narrow widths rather than scrolling,
+provider reported account limit windows, they lead the row as the plan meters
+described below. It wraps at narrow widths rather than scrolling,
 and a trailing quiet icon button hides it. A figure
 that is approximate carries a leading tilde and a dotted underline that explains it on
 hover; a figure the provider did not report is absent, never zero. The whole line is one
 button that opens the per-turn detail dialog, a plain definition list of tokens, timing,
 and cost with Previous and Next turn controls.
+
+**Plan meters.** Remaining plan usage stands above the composer, right-aligned on
+the same row as where the work runs: the strip above a thread's box, and on a
+start screen the end of the context-chip row inside the card (it drops to its
+own right-aligned line when the chips leave no room). Two compact meters read
+`5h ▬▬▬ 85%  wk ▬▬ 43%`: the shortest window the provider reported and the
+longest, each a short name (`wk` for a week, `mo` for a month) in the primary
+ink, a bar about 52px wide, and the share **left** in tabular numerals, all at
+the 12px meta step in meta ink with no fill behind the row. They describe the
+provider the composer will send to (a start screen follows the model menu's
+choice) and read the same host observation as the rail's rings, picked by window
+length (`windowSpan`). A provider that reports no window gets no meters, never
+an empty bar. The fill is the theme's accent role (`--oct-accent`, the ink in the
+monochrome default); a window with a fifth or less left takes the warning ink and
+a spent one the danger ink. The Appearance setting **Usage bars** (`usageBars`,
+Settings › Appearance › Reading) chooses the bar: **Smooth** (default) is a
+three-pixel rounded line; **Pixelated** is a 17 × 3 grid of 2px square cells with
+1px gaps, lit in the same accent, whose last four columns thin out in steps (two
+thirds, a checker, a third, a stipple) so the fill dissolves at its leading edge.
+Neither animates, so reduced motion needs no variant. The composer row keeps its
+controls: the access chip carries its shield icon beside the label, the model
+button names the model with a chosen effort in muted ink, the microphone sits
+just before send, and send is the round accent-filled button with an up arrow.
 
 Work follow-up composers use the same attached context strip as Code, showing
 the project and working folder instead of Git controls. Full paths require a
@@ -449,12 +474,24 @@ Pane headers show thread titles without repeated project labels.
 Chat, Work, and Code open on the same screen: one question in the middle of
 the page and one raised composer docked at its foot, where it stays once the
 thread starts, so the first message is typed where every later one is. Above
-the question sits the octant mark, a 24px circle with one eighth filled,
-drawn in the primary ink. The hero asks "What are we building today?" (the
-hero role) and one quiet line under it, at the detail step in muted ink, says
+the question sits the Octant aperture mark (`icons.svg#aperture`) at 22px,
+drawn in the primary ink and set 2px closer to the question than the
+heading's usual gap. The hero asks "What are we building today?" (the hero
+role: regular weight, -0.012em tracking, the primary ink in every style and
+never the accent). The approved size is 24px on a 30px line; the type scale
+has no 24px step and `ui:check` refuses a raw size, so the nearest token,
+`--oct-text-2xl` (26px), carries it on the 30px line, and phone width uses 20px.
+One quiet line under it, at the detail step in muted ink, says
 "Pick a project, or just start typing". The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
-sidebar. Each mode's own prompt stays in the composer's placeholder ("Ask
+sidebar. Once a Code start screen has a Project chosen, a quick-tools column
+stands beside it on the stage (320px, one hairline, hidden below 1100px): the
+Project's own Terminal and Browser as plain rows in the middle of the column.
+Each opens in that column without starting a thread, the same window-local
+Project terminal and browser Zen uses, which no agent can see or reach;
+"Quick tools" returns to the list, and closing the terminal (or leaving the
+start screen) stops its shell, since nothing else could reopen it. The
+composer never remounts when the Project is chosen, so the draft stays. Each mode's own prompt stays in the composer's placeholder ("Ask
 anything…", "Describe the work…", "Describe the change…"), and the message
 field keeps its accessible name. The composer is prompt first, four lines tall before it
 grows; its toolbar row holds how the thread runs (attach, image and access
@@ -546,7 +583,8 @@ plain page. Pulsing characters is the one drawn ground, and only when a person
 picks it: a grid of monospace letters and digits in the theme's primary ink,
 at most half opaque, whose brightness drifts in slow patches and breathes as
 a whole at twelve frames a second while a few glyphs swap. A click over it
-sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
+on a start screen (behind every page, only there; a click in a thread or a
+list sends nothing) sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
 it grows, trailed by a fainter echo, and about one click in six draws a heart
 instead, and fades within two seconds. With the default Mono accent the ring
 is the ink, only brighter; a chosen accent colours it. It carries no picture, so the effect controls do not apply, and it
@@ -556,10 +594,11 @@ start screen the ground is masked away behind the composer and fades out below
 it, so the prompt and the recent-thread list read on the plain page; in the
 light theme it fades out sooner, because dark text over a pale picture has
 less contrast headroom than light text over a dark one. A person
-may instead put the ground behind every page, inside the primary card, and
-under the sidebar too when they ask for it (see Shapes and depth). Conversations
-soften it beneath one continuous reading background so agent replies remain
-bare prose (0155). Increased contrast turns the ground off; reduced motion
+may instead put the ground behind every page, from the workspace's leading
+edge, and under the sidebar too when they ask for it (see Shapes and depth). Conversations
+soften it beneath one continuous reading veil, the stage colour at 80%, so it
+shows at about a fifth of its strength behind a thread and agent replies
+remain bare prose (0155). Increased contrast turns the ground off; reduced motion
 shows an animated picture's still frame. It is chosen in Settings ›
 Appearance › Background.
 When the ground runs behind everything, a start screen's reading column
@@ -670,8 +709,8 @@ it (`turn-time`: detail size, muted, right edge), and carries 12px more air
 above it than the reply before it. A reply (`turn-agent`) is bare prose at the
 transcript size with 1.5 leading, with no card of its own: only the work a turn
 produced is boxed. Over the application ground, the conversation supplies one quiet,
-continuous reading background that admits a little more atmosphere at its
-outer edges (0155). Replies remain bare prose, including on translucent
+continuous reading veil below the title band: the stage colour at 80%, so the
+ground stays faintly visible behind the transcript (0155). Replies remain bare prose, including on translucent
 workspaces; user bubbles and the composer retain glass over the application
 ground (0150). Reduced transparency keeps the reading background opaque.
 The follow-up composer has 24px of space above it outside the transcript
@@ -950,26 +989,50 @@ width, defaulting to 280px (wide enough to read a thread's title rather than
 guess it); narrow Settings layouts retain their responsive
 rail clamp or drawer. The workspace sidebar supports resizing.
 
-**Icon rail.** By default (Settings › Sidebar › Icon rail: Always) a 56px
-icon rail (76px in the desktop app, where the native traffic lights sit at its
-top) stands in its own column in front of the open sidebar. Beside the sidebar
-it carries only places and counts: the count tiles as icons with badges, the
-destination rows, the Activity feed, and Settings. The sidebar keeps its
-header (modes, search, new thread, hide), the Projects row with its list,
-More with Customize sidebar, and the profile, so nothing is offered twice.
-Rail icons are 20px on a 40px face; every rail control names itself in its
-accessible name and in a label that opens beside the rail on hover or keyboard
-focus.
+**Icon rail.** By default (Settings › Sidebar › Icon rail: Always) a 48px
+icon rail stands in its own column in front of the open sidebar; in the
+desktop app the traffic lights sit in the title band above it, and the
+sidebar's head keeps the rest of their width clear. Beside the sidebar it
+carries the places: the count tiles as icons with badges, the destination
+rows the person keeps shown (Settings › Sidebar › Sidebar destinations decides
+which and in what order, for the rail as for the sidebar), the Activity feed,
+Projects, More (the menu-only destinations and Customize sidebar), the usage
+rings, and Settings. The sidebar keeps its header (modes, search, new thread,
+hide), the Project list with its view, filter, and Activity controls, the
+threads, and the profile, so nothing is offered twice. Rail icons are 16px on
+a 32px face; every rail control names itself in its accessible name and in a
+label that opens beside the rail on hover or keyboard focus. Destinations
+have their own marks: Inbox a tray, Running a spinner, To review a checked
+clipboard, Done today a double check, Board a kanban, Issues the issue dot,
+Pull requests the pull-request arrow, Linear a checklist, Projects stacked
+folders, Agents a bot, Automations a calendar clock, Artifacts layers, Image
+generator images, Plugins blocks, and the Activity feed a pulse line.
 
 **Usage rings.** Above Settings, at the foot of either rail, each provider
-that reports a plan window with a figure gets a ring in its identity colour:
+that reports a plan window with a figure gets a ring in its identity colour
+around its 12px logo:
 the outer arc is what is left of the longest window (the week), the inner arc
 what is left of the shortest (five hours), chosen by each window's length, and
 a window near or at its limit takes the danger ink. Hovering or focusing a
 ring opens a card with every window, its share left, and when it resets;
 clicking opens Settings › Usage. A provider with no figure gets no ring,
 because an empty ring would claim a limit nobody reported. The rings read the
-host's last observation every few minutes, never a fresh provider call.
+host's last observation every few minutes, never a fresh provider call. The
+host keeps that observation across restarts, so the rings are there on launch;
+when the reading is more than a few hours old the card says "Last read 5h ago".
+
+**Back and forward.** Back and Forward sit in the title band beside the
+sidebar control (beside Show sidebar while the sidebar is hidden, under it on
+the collapsed icon rail, and in the sidebar's header in a browser). They step
+through the pages (Inbox, Board, Pull requests, Projects, the other sidebar
+places, Review, and the archive) and the tabs (threads, drafts, canvases) this
+window opened. A step in another mode switches to that exact mode (Chat and
+Work keep separate layouts though they share one visible mode) and opens the
+page or tab once that mode is on screen, without the home landing a person's
+own mode switch makes. The history belongs to the window and is never stored; it holds
+the last 50 steps, a new place drops the steps ahead of the current one, and
+a step whose tab was closed since is skipped. Each button stays in place,
+disabled, at its end of the history.
 
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),
@@ -1061,9 +1124,8 @@ hairline-ringed cards, not floating objects. Frosted material (a
 `backdrop-filter` blur) is used only where a surface has a ground behind it to
 read through:
 
-- the sidebar's optional translucency, the opt-in translucent workspace that
-  extends it, and the one frost over the application ground when it covers the
-  sidebar;
+- the window's optional glass, which is the tint over the native window
+  material behind the whole window;
 - a thread's user bubbles and composer over the application ground (agent
   replies stay bare prose; see [Transcript](#transcript));
 - Zen's windows, dock, pills, and sheets (glass cards);
@@ -1075,16 +1137,16 @@ read through:
 Its tint, stroke, and highlight are theme roles. Reduced transparency and
 unsupported `backdrop-filter` resolve every one of them to an opaque surface.
 
-The translucent workspace is the `workspaceMaterial` shell setting
-(`"system" | "opaque"`, default and absent value `"opaque"`), shown as
-the Window section's Glass cards switch, disabled until Glass is on. It takes effect only
-when the sidebar's own material already resolved translucent
-(`resolveWorkspaceMaterial`), so every accessibility, performance, and
-host-support gate on the sidebar applies to it too; it requests no second
-native material and frosts at the sidebar's vibrancy tier (subtle or strong).
-It repaints only the workspace layer and the Projects pane background; menus,
-dialogs, popovers, and other controls drawn on them stay opaque semantic
-surfaces.
+Window glass is the `sidebarMaterial` shell setting with the theme's vibrancy
+level, shown as the Window section's Glass control (Off, Subtle, Strong) and
+its Tint slider. It takes effect only when the host resolved the material
+translucent, so every accessibility, performance, and host-support gate
+applies; then the frame (the sidebar colour) and the sheet (the workspace
+colour) are each at the Tint's opacity over the native material, and reduced
+transparency or an unsupported host leaves them opaque. Menus, dialogs, popovers, and other controls drawn
+over it stay opaque semantic surfaces. The older `workspaceMaterial` setting
+is still read and stored but no longer changes anything: the whole window is
+glass or none of it is.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
@@ -1245,8 +1307,9 @@ and as a tint with a coloured count in the dark one.
 
 Primary sidebar destinations are Board and Pull requests when valid for the
 active mode. The destinations a person placed under Menu
-only wait in a More row that closes the destination list — an ellipsis opening
-a popup beside the rail with those destinations and Customize sidebar; the
+only wait in a More row that closes the destination list (the rail's More
+button when the rail stands beside the sidebar) — an ellipsis opening a popup
+beside the rail with those destinations and Customize sidebar; the
 setting that turns the More row off returns them to the bottom-left identity
 menu. The identity menu owns Settings, Navigator, Agents, Providers, Usage,
 Plugins, Automations, Artifacts, and Zen entry points. The account menu opens
@@ -1319,7 +1382,11 @@ than a manual form: the card's details carry an outlined "Locate binary…"
 action beside Check connection, shown only where the desktop's file picker
 exists and only for a runtime whose version probe the host can run. Its
 answer is one quiet line under the actions (the version the host read), or a
-warning box saying why the host refused the file.
+warning box saying why the host refused the file. A card whose saved binary is
+missing or incompatible, while the latest scan found that runtime elsewhere,
+adds a second outlined action, "Use the one found at ~/.local/bin/claude
+(2.1.306)", that gives the same answer without the picker; see
+[Providers and model endpoints](docs/design/model-endpoints.md).
 
 Provider catalog and the Octant Harness model endpoints (rows, detail
 sub-pages, and Add endpoint) follow
@@ -1989,9 +2056,10 @@ never the theme's focus role.
 
 ### Shell edge cases
 
-- Native sidebar glass keeps a transparent backing beneath the sidebar. The
-  opaque application ground starts at the reading area's edge and covers the
-  whole window when the sidebar is collapsed.
+- The native window is transparent; the shell root paints the one window
+  surface, so no column may leave its own opaque backing. Without Cover the
+  sidebar, the application ground starts at the workspace's leading edge, and
+  covers the whole window when the sidebar is collapsed.
 - Dock tab fitting subtracts window-control padding and measures actual tab
   widths. Overflow and Add tool controls must never sit under window controls.
 - A selected Project pull request may keep Review open beside its list. Other

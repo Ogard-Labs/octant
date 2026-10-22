@@ -128,6 +128,16 @@ export interface ProviderCreateFormPresentationProps {
   readonly claudeHostProfileTaken?: boolean;
   /** An account already holds Codex's host profile. */
   readonly codexHostProfileTaken?: boolean;
+  /**
+   * The form opens already expanded and moves focus to the provider name. A
+   * provider card's "Add account" action opens it this way so the person lands
+   * on the field to fill in.
+   */
+  readonly openWithNameFocused?: boolean;
+  /** A name suggested for the new provider; the person can change it. */
+  readonly initialDisplayName?: string;
+  /** A binary path suggested for the new provider; the person can change it. */
+  readonly initialBinaryPath?: string;
 }
 
 export function ProviderCreateForm(
@@ -135,7 +145,7 @@ export function ProviderCreateForm(
 ) {
   const [creating, setCreating] = useState(false);
   const [validationMessage, setValidationMessage] = useState<string | undefined>(undefined);
-  const [manualOpenState, setManualOpen] = useState(false);
+  const [manualOpenState, setManualOpen] = useState(props.openWithNameFocused === true);
   const manualOpen = props.embedded === true || manualOpenState;
   const initialProviderType =
     props.initialProviderType ?? props.allowedProviderTypes?.[0] ?? "opencode";
@@ -143,9 +153,9 @@ export function ProviderCreateForm(
   const [claudeAuthentication, setClaudeAuthentication] =
     useState<ClaudeAuthentication>("subscription");
   const [claudeAccent, setClaudeAccent] = useState<ClaudeAccountAccent | "">("");
-  const [claudeBinaryPath, setClaudeBinaryPath] = useState("");
+  const [claudeBinaryPath, setClaudeBinaryPath] = useState(props.initialBinaryPath ?? "");
   const [codexAccent, setCodexAccent] = useState<ClaudeAccountAccent | "">("");
-  const [codexBinaryPath, setCodexBinaryPath] = useState("");
+  const [codexBinaryPath, setCodexBinaryPath] = useState(props.initialBinaryPath ?? "");
   const vibeAuthentication: MistralVibeAuthentication = "api-key";
   const [grokAuthentication, setGrokAuthentication] = useState<GrokAuthentication>("subscription");
   const [glmAuthentication, setGlmAuthentication] = useState<GlmAuthentication>("provider-owned");
@@ -563,6 +573,10 @@ export function ProviderCreateForm(
                 className="settings-view__text-input window-no-drag"
                 name="displayName"
                 required
+                {...(props.initialDisplayName === undefined
+                  ? {}
+                  : { defaultValue: props.initialDisplayName })}
+                {...(props.openWithNameFocused === true ? { autoFocus: true } : {})}
               />
             </label>
             {providerType !== "openai-compatible" &&

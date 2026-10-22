@@ -188,6 +188,23 @@ function client(
     results,
     snapshot: vi.fn(async () => snapshot),
     effectiveState: vi.fn(async () => effective),
+    addUserMcpServer: vi.fn(async () => {
+      const result: ExtensionCommandResult = {
+        kind: "extension-command-failed",
+        failure: { category: "unavailable", message: "Not configured in this test." },
+      };
+      return result;
+    }),
+    listDiscoveredTooling: vi.fn(async () => ({ servers: [], plugins: [], notes: [] })),
+    mcpServerSignIn: vi.fn(async () => ({ kind: "not-applicable" }) as const),
+    projectPins: vi.fn(async () => ({ projects: [], pins: [] })),
+    applyDiscoveredTooling: vi.fn(async () => {
+      const result: ExtensionCommandResult = {
+        kind: "extension-command-failed",
+        failure: { category: "unavailable", message: "Not configured in this test." },
+      };
+      return result;
+    }),
     importLocalPluginReceipt: vi.fn(async () => {
       const result: ExtensionCommandResult = {
         kind: "extension-command-failed",
@@ -1954,5 +1971,46 @@ describe("local Agent Plugin import", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Inspect the complete diff before making changes.")).toBeVisible();
     expect(screen.getByText(/bundled skill instructions/i)).toBeVisible();
+  });
+});
+
+describe("Use in a Project", () => {
+  it("offers one switch per Project and records a pin through the host", async () => {
+    const projectId = "72000000-0000-4000-8000-00000000000a";
+    const c = client({
+      snapshot: installedSnapshot({
+        activation: baseActivation({ trusted: true, pluginDesired: true }),
+      }),
+    });
+    const listing = { projects: [{ projectId, name: "Studio", type: "code" }], pins: [] };
+    const projectPins = vi
+      .fn()
+      .mockResolvedValueOnce(listing)
+      .mockResolvedValueOnce({
+        ...listing,
+        pins: [{ projectId, extensionId: installedSnapshot().packages[0]?.extensionId }],
+      });
+    render(
+      <ExtensionsSettingsView
+        client={{ ...c, projectPins, toolGrantsAvailable: true }}
+        scope={scope}
+      />,
+    );
+    await screen.findByText("Build Helper");
+    fireEvent.click(await screen.findByText("Use in a Project"));
+    const pin = await screen.findByRole("switch", { name: "Use in Studio" });
+    expect(pin).not.toBeChecked();
+    fireEvent.click(pin);
+    await waitFor(() =>
+      expect(projectPins).toHaveBeenLastCalledWith({
+        kind: "set",
+        projectId,
+        extensionId: installedSnapshot().packages[0]?.extensionId,
+        pinned: true,
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("switch", { name: "Use in Studio" })).toBeChecked(),
+    );
   });
 });

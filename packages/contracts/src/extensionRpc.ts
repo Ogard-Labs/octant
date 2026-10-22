@@ -26,6 +26,7 @@ import {
 } from "./extensions";
 import { ExtensionToolGrantId, ExtensionToolGrantRecorded } from "./extensionEvents";
 import { ToolExtensionId } from "./toolActions";
+import { ProjectId } from "./projects";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const boundedText = (maximumLength: number) =>
@@ -115,6 +116,197 @@ export const ExtensionToolGrantRequest = Schema.Union(
   ),
 );
 export type ExtensionToolGrantRequest = typeof ExtensionToolGrantRequest.Type;
+
+/**
+ * An MCP server the person adds by hand: a command to start, or an address to
+ * connect to. A value marked secret is kept in the host credential broker and
+ * never written into the package; the package carries a reference instead.
+ */
+const userAddedSecretValue = Schema.Struct({
+  name: boundedText(128).pipe(Schema.pattern(/^[A-Za-z_][A-Za-z0-9_-]*$/)),
+  value: Schema.String.pipe(Schema.maxLength(8192)),
+  secret: Schema.Boolean,
+}).annotations(strict);
+export const UserAddedMcpServerRequest = Schema.Struct({
+  name: boundedText(64),
+  /**
+   * The catalog connector this server is, when it was added from Connectors.
+   * The host checks it against the bundled catalog and names the package after
+   * it, so the package stays recognizable whatever its display name is.
+   */
+  connectorId: Schema.optional(boundedText(64)),
+  server: Schema.Union(
+    Schema.Struct({
+      type: Schema.Literal("stdio"),
+      command: boundedText(1024),
+      args: Schema.Array(Schema.String.pipe(Schema.maxLength(1024))).pipe(Schema.maxItems(64)),
+      env: Schema.Array(userAddedSecretValue).pipe(Schema.maxItems(64)),
+    }).annotations(strict),
+    Schema.Struct({
+      type: Schema.Literal("streamable-http"),
+      url: boundedText(2048),
+      headers: Schema.Array(userAddedSecretValue).pipe(Schema.maxItems(32)),
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type UserAddedMcpServerRequest = typeof UserAddedMcpServerRequest.Type;
+export const decodeUserAddedMcpServerRequest = Schema.decodeUnknownSync(UserAddedMcpServerRequest);
+
+/**
+ * MCP servers and plugins another agent tool on this computer already knows,
+ * listed for the person to add. The listing carries no path and no value:
+ * an opaque id names each item, and the host keeps what it points at.
+ */
+export const DiscoveredAgentToolingOrigin = Schema.Literal("claude-code", "codex");
+export type DiscoveredAgentToolingOrigin = typeof DiscoveredAgentToolingOrigin.Type;
+const discoveredId = boundedText(128).pipe(Schema.pattern(/^[a-z]+-[a-f0-9]{32}$/));
+export const DiscoveredMcpServer = Schema.Struct({
+  id: discoveredId,
+  origin: DiscoveredAgentToolingOrigin,
+  /** Where the other tool keeps it: for the person, or for one Project's folder. */
+  scope: Schema.Literal("user", "project"),
+  name: boundedText(128),
+  transport: Schema.Literal("stdio", "streamable-http"),
+  /** The command line or the address, for the row; never a secret. */
+  summary: boundedText(512),
+  /** Variables the other tool reads from its environment that this host could not find. */
+  needsValues: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
+  /**
+   * Variables the other tool expands inside the command, its arguments or the
+   * address. Octant never copies a host value into those fields, so a server
+   * that has any cannot be added from here.
+   */
+  unsupportedPlaceholders: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
+  /** Values that will be kept in the credential store rather than the package. */
+  secretNames: Schema.Array(boundedText(128)).pipe(Schema.maxItems(32)),
+}).annotations(strict);
+export type DiscoveredMcpServer = typeof DiscoveredMcpServer.Type;
+export const DiscoveredPlugin = Schema.Struct({
+  id: discoveredId,
+  origin: DiscoveredAgentToolingOrigin,
+  name: boundedText(128),
+  version: Schema.optional(boundedText(64)),
+  format: Schema.Literal("agent-plugins", "codex-plugin", "claude-plugin"),
+  /** Whether the other tool has it switched on. */
+  enabledThere: Schema.Boolean,
+}).annotations(strict);
+export type DiscoveredPlugin = typeof DiscoveredPlugin.Type;
+export const DiscoveredAgentToolingListing = Schema.Struct({
+  servers: Schema.Array(DiscoveredMcpServer).pipe(Schema.maxItems(256)),
+  plugins: Schema.Array(DiscoveredPlugin).pipe(Schema.maxItems(256)),
+  /** What was found but cannot be offered, in plain words. */
+  notes: Schema.Array(boundedText(256)).pipe(Schema.maxItems(64)),
+}).annotations(strict);
+export type DiscoveredAgentToolingListing = typeof DiscoveredAgentToolingListing.Type;
+export const decodeDiscoveredAgentToolingListing = Schema.decodeUnknownSync(
+  DiscoveredAgentToolingListing,
+);
+/**
+ * Signing in to a hosted MCP server a person added. The view never carries a
+ * token; the host keeps the grant in the credential broker and attaches the
+ * bearer when it connects.
+ */
+const signInTarget = {
+  extensionId: ToolExtensionId,
+  componentId: ExtensionComponentId,
+};
+export const McpServerSignInRequest = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("status"), ...signInTarget }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("begin"), ...signInTarget }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("poll"),
+    ...signInTarget,
+    attemptId: Schema.UUID,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("sign-out"), ...signInTarget }).annotations(strict),
+);
+export type McpServerSignInRequest = typeof McpServerSignInRequest.Type;
+export const decodeMcpServerSignInRequest = Schema.decodeUnknownSync(McpServerSignInRequest);
+export const McpServerSignInView = Schema.Union(
+  /** A server reached by a command, or one that answered without asking for a sign-in. */
+  Schema.Struct({ kind: Schema.Literal("not-applicable") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("signed-out") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("awaiting-consent"),
+    attemptId: Schema.UUID,
+    authorizationUrl: boundedText(4096),
+    expiresAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("signed-in"),
+    /** The authorization server that issued the grant, for the row. */
+    issuer: boundedText(256),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("sign-in-again"),
+    reason: Schema.Literal("revoked", "expired", "refresh-reused"),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("refused"),
+    reason: Schema.Literal(
+      "no-sign-in-offered",
+      "client-registration-unavailable",
+      "issuer-unsupported",
+      "denied",
+      "timeout",
+      "unavailable",
+      "local-host-required",
+      "invalid",
+    ),
+    message: boundedText(512),
+  }).annotations(strict),
+);
+export type McpServerSignInView = typeof McpServerSignInView.Type;
+export const decodeMcpServerSignInView = Schema.decodeUnknownSync(McpServerSignInView);
+
+/**
+ * Plugins pinned to Projects: a pin offers the plugin on every Work or Code
+ * turn in that Project without a per-send selection. The listing names the
+ * Projects a local window may pin to, so Settings can show a switch per
+ * Project.
+ */
+export const ExtensionProjectPin = Schema.Struct({
+  projectId: ProjectId,
+  extensionId: ToolExtensionId,
+}).annotations(strict);
+export type ExtensionProjectPin = typeof ExtensionProjectPin.Type;
+export const ExtensionProjectPinListing = Schema.Struct({
+  projects: Schema.Array(
+    Schema.Struct({
+      projectId: ProjectId,
+      name: boundedText(256),
+      type: Schema.Literal("work", "code"),
+    }).annotations(strict),
+  ).pipe(Schema.maxItems(512)),
+  pins: Schema.Array(ExtensionProjectPin).pipe(Schema.maxItems(4096)),
+}).annotations(strict);
+export type ExtensionProjectPinListing = typeof ExtensionProjectPinListing.Type;
+export const decodeExtensionProjectPinListing = Schema.decodeUnknownSync(
+  ExtensionProjectPinListing,
+);
+export const ExtensionProjectPinRequest = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("set"),
+    projectId: ProjectId,
+    extensionId: ToolExtensionId,
+    pinned: Schema.Boolean,
+  }).annotations(strict),
+);
+export type ExtensionProjectPinRequest = typeof ExtensionProjectPinRequest.Type;
+export const decodeExtensionProjectPinRequest = Schema.decodeUnknownSync(
+  ExtensionProjectPinRequest,
+);
+
+export const DiscoveredAgentToolingRequest = Schema.Union(
+  Schema.Struct({ kind: Schema.Literal("list") }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("add-server"), id: discoveredId }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("import-plugin"), id: discoveredId }).annotations(strict),
+);
+export type DiscoveredAgentToolingRequest = typeof DiscoveredAgentToolingRequest.Type;
+export const decodeDiscoveredAgentToolingRequest = Schema.decodeUnknownSync(
+  DiscoveredAgentToolingRequest,
+);
 
 export const ExtensionCommand = Schema.Union(
   Schema.Struct({
@@ -327,6 +519,13 @@ export const ExtensionCommandResult = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("extension-state-updated"),
     snapshot: ExtensionSnapshot,
+    /** Set only when the update was a user-added server: the package that add created. */
+    addedPackage: Schema.optional(
+      Schema.Struct({
+        extensionId: ToolExtensionId,
+        componentId: Schema.optional(ExtensionComponentId),
+      }).annotations(strict),
+    ),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("extension-effective-state"),

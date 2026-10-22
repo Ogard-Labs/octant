@@ -47,6 +47,10 @@ describe("composeHostDataMap", () => {
       location: { kind: "known", path: `${dataDirectory}/providers/plan-usage.json` },
     });
     expect(decoded.host.caches).toContainEqual({
+      name: "Provider usage readings",
+      location: { kind: "known", path: `${dataDirectory}/providers/usage-readings.json` },
+    });
+    expect(decoded.host.caches).toContainEqual({
       name: "Codex account homes",
       location: { kind: "known", path: "/Users/ada/.codex-accounts" },
     });
@@ -92,6 +96,7 @@ describe("composeHostDataMap", () => {
         { service: "app.octant.host-identity.v1" },
         { service: "app.octant.replica-device-keys.v1" },
         { service: "app.octant.replica-store-credentials.v1" },
+        { service: "app.octant.mcp-server-credentials.v1" },
       ],
     });
     expect(decoded.host.outbound.map((entry) => entry.category)).toEqual([
