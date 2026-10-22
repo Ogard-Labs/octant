@@ -484,7 +484,14 @@ has no 24px step and `ui:check` refuses a raw size, so the nearest token,
 One quiet line under it, at the detail step in muted ink, says
 "Pick a project, or just start typing". The start screen names no time of day
 and counts nothing: what is running and what waits for review live in the
-sidebar. Each mode's own prompt stays in the composer's placeholder ("Ask
+sidebar. Once a Code start screen has a Project chosen, a quick-tools column
+stands beside it on the stage (320px, one hairline, hidden below 1100px): the
+Project's own Terminal and Browser as plain rows in the middle of the column.
+Each opens in that column without starting a thread, the same window-local
+Project terminal and browser Zen uses, which no agent can see or reach;
+"Quick tools" returns to the list, and closing the terminal (or leaving the
+start screen) stops its shell, since nothing else could reopen it. The
+composer never remounts when the Project is chosen, so the draft stays. Each mode's own prompt stays in the composer's placeholder ("Ask
 anything…", "Describe the work…", "Describe the change…"), and the message
 field keeps its accessible name. The composer is prompt first, four lines tall before it
 grows; its toolbar row holds how the thread runs (attach, image and access
@@ -1013,6 +1020,19 @@ because an empty ring would claim a limit nobody reported. The rings read the
 host's last observation every few minutes, never a fresh provider call. The
 host keeps that observation across restarts, so the rings are there on launch;
 when the reading is more than a few hours old the card says "Last read 5h ago".
+
+**Back and forward.** Back and Forward sit in the title band beside the
+sidebar control (beside Show sidebar while the sidebar is hidden, under it on
+the collapsed icon rail, and in the sidebar's header in a browser). They step
+through the pages (Inbox, Board, Pull requests, Projects, the other sidebar
+places, Review, and the archive) and the tabs (threads, drafts, canvases) this
+window opened. A step in another mode switches to that exact mode (Chat and
+Work keep separate layouts though they share one visible mode) and opens the
+page or tab once that mode is on screen, without the home landing a person's
+own mode switch makes. The history belongs to the window and is never stored; it holds
+the last 50 steps, a new place drops the steps ahead of the current one, and
+a step whose tab was closed since is skipped. Each button stays in place,
+disabled, at its end of the history.
 
 **Hiding the sidebar.** Hide sidebar, or Mod+\ (rebindable, "Show or hide
 the sidebar", answered in text fields too and leaving focus where it was),

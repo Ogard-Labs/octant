@@ -79,6 +79,7 @@ import {
   type CodeComposerSuggestion,
   type CodeComposerSubmitInput,
 } from "../code/composer/CodeComposerAdapter";
+import { StartQuickTools } from "./StartQuickTools";
 import { useWorktreeRemoteFacts } from "../code/composer/useWorktreeRemoteFacts";
 import { WorkComposerAdapter } from "../work/composer/WorkComposerAdapter";
 import { ProjectCreateDialog } from "../projects/ProjectCreateDialog";
@@ -716,118 +717,123 @@ export function DraftThreadWorkspace(props: DraftThreadWorkspaceProps) {
         }}
       />
     );
+    const composer = (
+      <CodeComposerAdapter
+        {...(home ? { suggestions: CODE_SUGGESTIONS } : {})}
+        {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
+        {...(beneath === undefined ? {} : { beneath })}
+        {...(promptRequest === undefined ? {} : { promptRequest })}
+        {...hostSelectorBinding}
+        {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
+        projectAvailable={selectedProject !== undefined}
+        {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
+        {...(selectedProjectRoot === undefined ? {} : { projectRoot: selectedProjectRoot })}
+        {...(connectedBaseRepository === undefined
+          ? {}
+          : { baseRepository: connectedBaseRepository })}
+        {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
+        newThreadWorkspace={newThreadWorkspace}
+        {...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts })}
+        defaultExecutionPolicy={props.defaultExecutionPolicy ?? "approval-gated"}
+        defaultPermissionPersistence={props.defaultPermissionPersistence ?? "current-session"}
+        {...(props.onExecutionPolicyChange === undefined
+          ? {}
+          : { onExecutionPolicyChange: props.onExecutionPolicyChange })}
+        projectSetup={
+          selectedProjectId === undefined && compatibleProjects.length === 0 ? (
+            <div aria-label="Set up a Code project" className="code-home__project-setup">
+              <p>Add a folder to choose where this task will work.</p>
+              {props.onCreateProject === undefined && props.onAttachFolder === undefined ? null : (
+                <OctantButton
+                  onClick={addFolder}
+                  disabled={props.creating}
+                  size="sm"
+                  variant="secondary"
+                >
+                  <FolderOpen aria-hidden="true" size={16} />
+                  Add a folder
+                </OctantButton>
+              )}
+              {defaultFolderEntry?.disabled === true ? (
+                <>
+                  <p>
+                    Code needs a Git repository, so it cannot start in the default folder. You can
+                    change this in Code settings.
+                  </p>
+                  {props.onOpenCodeSettings === undefined ? null : (
+                    <OctantButton onClick={props.onOpenCodeSettings} size="sm" variant="link">
+                      Open Code settings
+                    </OctantButton>
+                  )}
+                </>
+              ) : null}
+            </div>
+          ) : undefined
+        }
+        folderControl={folderControl}
+        {...(createFromControl === null ? {} : { createFromControl })}
+        {...(props.codeExecute === undefined ? {} : { execute: props.codeExecute })}
+        providerGroups={props.providerGroups}
+        {...(props.selectedProviderInstanceId === undefined
+          ? {}
+          : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
+        {...(props.selectedModelId === undefined ? {} : { selectedModelId: props.selectedModelId })}
+        onSelectProvider={props.onSelectProvider}
+        {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
+        {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
+        {...(props.windowCapability === undefined
+          ? {}
+          : { windowCapability: props.windowCapability })}
+        {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+        {...(props.extensionClient === undefined ? {} : { extensionClient: props.extensionClient })}
+        {...(props.browserAvailable === undefined
+          ? {}
+          : { browserAvailable: props.browserAvailable })}
+        onCreateThread={(input) => {
+          const submitted = {
+            ...input,
+            ...(issueContext === undefined ? {} : { issueContext }),
+            ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
+          };
+          if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
+            return props.onCreateCodeThread(submitted, selectedProjectId);
+          }
+          // Carry the outcome the user confirmed in the composer, and the
+          // access posture they submitted with, so the fallback path never
+          // re-derives a suggestion or falls back to a Project default.
+          return props.onCreateThread(
+            submitted.prompt,
+            selectedProjectId,
+            submitted.deliveryTarget.outcomeKind,
+            submitted.images,
+            submitted.threadMentionIds,
+            issueContext,
+            linearIssueContext,
+            submitted.computerUseSelection,
+            submitted.extensionSelections,
+            submitted.executionPolicy,
+            submitted.permissionPersistence,
+          );
+        }}
+        onCancel={props.onCancel}
+        {...(props.onCancelFirstTurn === undefined
+          ? {}
+          : { onCancelFirstTurn: props.onCancelFirstTurn })}
+        {...(props.creating === undefined ? {} : { creating: props.creating })}
+        {...(props.errorMessage === undefined ? {} : { errorMessage: props.errorMessage })}
+        {...(props.pendingMessage === undefined ? {} : { pendingMessage: props.pendingMessage })}
+      />
+    );
     return (
       <>
-        <CodeComposerAdapter
-          {...(home ? { suggestions: CODE_SUGGESTIONS } : {})}
-          {...(homeStartNode === undefined ? {} : { homeStart: homeStartNode })}
-          {...(beneath === undefined ? {} : { beneath })}
-          {...(promptRequest === undefined ? {} : { promptRequest })}
-          {...hostSelectorBinding}
-          {...(selectedProjectId === undefined ? {} : { projectId: selectedProjectId })}
-          projectAvailable={selectedProject !== undefined}
-          {...(selectedProjectName === undefined ? {} : { projectName: selectedProjectName })}
-          {...(selectedProjectRoot === undefined ? {} : { projectRoot: selectedProjectRoot })}
-          {...(connectedBaseRepository === undefined
-            ? {}
-            : { baseRepository: connectedBaseRepository })}
-          {...(props.branchName === undefined ? {} : { branchName: props.branchName })}
-          newThreadWorkspace={newThreadWorkspace}
-          {...(worktreeRemoteFacts === undefined ? {} : { worktreeRemoteFacts })}
-          defaultExecutionPolicy={props.defaultExecutionPolicy ?? "approval-gated"}
-          defaultPermissionPersistence={props.defaultPermissionPersistence ?? "current-session"}
-          {...(props.onExecutionPolicyChange === undefined
-            ? {}
-            : { onExecutionPolicyChange: props.onExecutionPolicyChange })}
-          projectSetup={
-            selectedProjectId === undefined && compatibleProjects.length === 0 ? (
-              <div aria-label="Set up a Code project" className="code-home__project-setup">
-                <p>Add a folder to choose where this task will work.</p>
-                {props.onCreateProject === undefined &&
-                props.onAttachFolder === undefined ? null : (
-                  <OctantButton
-                    onClick={addFolder}
-                    disabled={props.creating}
-                    size="sm"
-                    variant="secondary"
-                  >
-                    <FolderOpen aria-hidden="true" size={16} />
-                    Add a folder
-                  </OctantButton>
-                )}
-                {defaultFolderEntry?.disabled === true ? (
-                  <>
-                    <p>
-                      Code needs a Git repository, so it cannot start in the default folder. You can
-                      change this in Code settings.
-                    </p>
-                    {props.onOpenCodeSettings === undefined ? null : (
-                      <OctantButton onClick={props.onOpenCodeSettings} size="sm" variant="link">
-                        Open Code settings
-                      </OctantButton>
-                    )}
-                  </>
-                ) : null}
-              </div>
-            ) : undefined
-          }
-          folderControl={folderControl}
-          {...(createFromControl === null ? {} : { createFromControl })}
-          {...(props.codeExecute === undefined ? {} : { execute: props.codeExecute })}
-          providerGroups={props.providerGroups}
-          {...(props.selectedProviderInstanceId === undefined
-            ? {}
-            : { selectedProviderInstanceId: props.selectedProviderInstanceId })}
-          {...(props.selectedModelId === undefined
-            ? {}
-            : { selectedModelId: props.selectedModelId })}
-          onSelectProvider={props.onSelectProvider}
-          {...(props.onOpenSettings === undefined ? {} : { onOpenSettings: props.onOpenSettings })}
-          {...(props.serverUrl === undefined ? {} : { serverUrl: props.serverUrl })}
-          {...(props.windowCapability === undefined
-            ? {}
-            : { windowCapability: props.windowCapability })}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          {...(props.extensionClient === undefined
-            ? {}
-            : { extensionClient: props.extensionClient })}
-          {...(props.browserAvailable === undefined
-            ? {}
-            : { browserAvailable: props.browserAvailable })}
-          onCreateThread={(input) => {
-            const submitted = {
-              ...input,
-              ...(issueContext === undefined ? {} : { issueContext }),
-              ...(linearIssueContext === undefined ? {} : { linearIssueContext }),
-            };
-            if (props.onCreateCodeThread !== undefined && selectedProjectId !== undefined) {
-              return props.onCreateCodeThread(submitted, selectedProjectId);
-            }
-            // Carry the outcome the user confirmed in the composer, and the
-            // access posture they submitted with, so the fallback path never
-            // re-derives a suggestion or falls back to a Project default.
-            return props.onCreateThread(
-              submitted.prompt,
-              selectedProjectId,
-              submitted.deliveryTarget.outcomeKind,
-              submitted.images,
-              submitted.threadMentionIds,
-              issueContext,
-              linearIssueContext,
-              submitted.computerUseSelection,
-              submitted.extensionSelections,
-              submitted.executionPolicy,
-              submitted.permissionPersistence,
-            );
-          }}
-          onCancel={props.onCancel}
-          {...(props.onCancelFirstTurn === undefined
-            ? {}
-            : { onCancelFirstTurn: props.onCancelFirstTurn })}
-          {...(props.creating === undefined ? {} : { creating: props.creating })}
-          {...(props.errorMessage === undefined ? {} : { errorMessage: props.errorMessage })}
-          {...(props.pendingMessage === undefined ? {} : { pendingMessage: props.pendingMessage })}
-        />
+        {/* The wrapper is always there, so choosing a Project adds the tools
+            beside the composer without remounting it and losing the draft. */}
+        <div className="draft-thread__with-tools">
+          {composer}
+          {selectedProjectId === undefined ? null : (
+            <StartQuickTools projectId={selectedProjectId} />
+          )}
+        </div>
         {addFolderDialog}
       </>
     );

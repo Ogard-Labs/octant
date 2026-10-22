@@ -180,6 +180,8 @@ import {
   type VisibleMode,
   type WorkKind,
 } from "./shell/workKind";
+import { useWindowHistory, type WindowPage, type WindowPlace } from "./shell/windowHistory";
+import { StartQuickToolsContext, type StartQuickToolsServices } from "./shell/StartQuickTools";
 import { FIRST_PARTY_PLUGINS_EFFECTIVE } from "./shell/contributionRegistry";
 import type { CodeDeepLink, OctantHostBridge } from "./shell/hostBridge";
 import { windowIdFromHostBridge } from "./host/windowIdFromHostBridge";
@@ -1458,6 +1460,7 @@ function LaunchedShell(
     hostResourceClient,
     pendingRequestClient,
     projectTerminalClient,
+    projectBrowserClient,
     imageGenerationClient,
     speechClient,
     linearTransport,
@@ -4609,6 +4612,147 @@ function LaunchedShell(
     workspace: controller.workspace,
   });
 
+  // Derived before the loading and recovery returns below: the window history
+  // is a hook, and it must run on every render.
+  // A reader (Board, Inbox, pull requests, issues, archive) is a page about
+  // many threads, and the dock is about the one active thread; while a reader
+  // is up the dock steps aside so the page gets the pane. With the dock kept
+  // open the Board's four columns squeezed to about 90px each.
+  const readerOpen =
+    projectsListOpen ||
+    railPlaceholder !== undefined ||
+    inboxOpen ||
+    reviewOpen ||
+    codeBoardOpen ||
+    workBoardOpen ||
+    codePullRequestsOpen ||
+    githubIssuesOpen ||
+    linearIssuesOpen ||
+    archiveOpen ||
+    automationCenterOpen ||
+    agentsCenterOpen ||
+    artifactLibraryOpen ||
+    imageLibraryOpen;
+  const projectsDestinationActive =
+    projectsListOpen || (selectedProjectTabId !== undefined && !readerOpen);
+  const activeSidebarDestination: SidebarNavigationDescriptorId | undefined =
+    projectsDestinationActive
+      ? "projects"
+      : inboxOpen
+        ? "inbox"
+        : workBoardOpen || codeBoardOpen
+          ? "thread-board"
+          : codePullRequestsOpen
+            ? "pull-requests"
+            : githubIssuesOpen
+              ? "github-issues"
+              : linearIssuesOpen
+                ? "linear-issues"
+                : automationCenterOpen
+                  ? "automations"
+                  : agentsCenterOpen
+                    ? "agents"
+                    : artifactLibraryOpen
+                      ? "artifact-library"
+                      : imageLibraryOpen
+                        ? "image-library"
+                        : undefined;
+  // Back and forward step through the pages and tabs this window opened.
+  // A window still loading or recovering has no workspace yet, so no place.
+  const historyPane =
+    controller.workspace === undefined
+      ? undefined
+      : findWorkspacePane(
+          controller.workspace.layouts[activeMode],
+          controller.workspace.activePaneIds[activeMode],
+        );
+  const historyPaneId = historyPane?.paneId;
+  const historyTabId = historyPane?.surface.id;
+  // Review and the archive are reader pages too, opened from elsewhere than the
+  // sidebar; without their own place, Back skipped straight past them.
+  const historyPage: WindowPage | undefined = reviewOpen
+    ? "review"
+    : archiveOpen
+      ? "archive"
+      : activeSidebarDestination;
+  const currentWindowPlace = useMemo<WindowPlace | undefined>(
+    () =>
+      historyPage !== undefined
+        ? { kind: "page", mode: activeMode, destination: historyPage }
+        : historyPaneId === undefined || historyTabId === undefined
+          ? undefined
+          : { kind: "tab", mode: activeMode, paneId: historyPaneId, tabId: historyTabId },
+    [activeMode, historyPage, historyPaneId, historyTabId],
+  );
+  const windowHistory = useWindowHistory(currentWindowPlace, restoreWindowPlace);
+  // A step in another mode switches the exact mode first (Chat and Work share
+  // one visible mode but keep separate layouts), then opens the place once
+  // that mode is on screen, with the openers of that render: an opener such as
+  // the Board reads the active mode, and run straight away it opened the old
+  // mode's page.
+  const pendingHistoryRestore = useRef<
+    { readonly place: WindowPlace; readonly resolve: (restored: boolean) => void } | undefined
+  >(undefined);
+  const restoreInActiveModeRef = useRef(restoreInActiveMode);
+  restoreInActiveModeRef.current = restoreInActiveMode;
+  useEffect(() => {
+    const pending = pendingHistoryRestore.current;
+    if (pending === undefined || pending.place.mode !== activeMode) return;
+    pendingHistoryRestore.current = undefined;
+    void restoreInActiveModeRef
+      .current(pending.place)
+      .then(pending.resolve, () => pending.resolve(false));
+  }, [activeMode]);
+  // The start screen's quick tools open this window's Project terminal and
+  // browser; they are local to this window, never a thread's.
+  const startQuickToolsServices = useMemo<StartQuickToolsServices>(
+    () => ({
+      hostId: LOCAL_HOST_ID,
+      projectTerminalClient,
+      projectBrowserClient,
+      ...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge }),
+    }),
+    [projectBrowserClient, projectTerminalClient, props.hostBridge],
+  );
+
+  function restoreWindowPlace(place: WindowPlace): Promise<boolean> {
+    if (place.mode === activeMode) return restoreInActiveMode(place);
+    return new Promise<boolean>((resolve) => {
+      pendingHistoryRestore.current?.resolve(false);
+      pendingHistoryRestore.current = { place, resolve };
+      // The bare mode switch: a person's mode switch also lands Code on its
+      // home and opens a Work draft, which ran after the restored page opened
+      // and closed it again. The step opens its own page or tab instead.
+      controller.setMode(place.mode);
+      // A mode the window refused to switch to (turned off since) never
+      // arrives; the step then counts as gone rather than hanging.
+      setTimeout(() => {
+        if (pendingHistoryRestore.current?.place === place) {
+          pendingHistoryRestore.current = undefined;
+          resolve(false);
+        }
+      }, 2_000);
+    });
+  }
+
+  async function restoreInActiveMode(place: WindowPlace): Promise<boolean> {
+    if (place.kind === "page") {
+      const open = windowPageOpeners()[place.destination];
+      if (open === undefined) return false;
+      open();
+      return true;
+    }
+    closeWorkspaceReaders();
+    // Going back from a page to the tab under it only has to close the page:
+    // the pane still shows that tab, which is not among its other open tabs.
+    const shown =
+      controller.workspace === undefined
+        ? undefined
+        : findWorkspacePane(controller.workspace.layouts[place.mode], place.paneId)?.surface;
+    if (shown !== undefined && String(shown.id) === String(place.tabId)) return true;
+    return controller.activateContentTab(place.paneId, place.tabId);
+  }
+
   if (controller.status === "loading") {
     return (
       <main className="shell-boundary">
@@ -5032,49 +5176,6 @@ function LaunchedShell(
    * thread dismisses the reader first instead of opening the destination
    * invisibly behind it.
    */
-  // A reader (Board, Inbox, pull requests, issues, archive) is a page about
-  // many threads, and the dock is about the one active thread; while a reader
-  // is up the dock steps aside so the page gets the pane. With the dock kept
-  // open the Board's four columns squeezed to about 90px each.
-  const readerOpen =
-    projectsListOpen ||
-    railPlaceholder !== undefined ||
-    inboxOpen ||
-    reviewOpen ||
-    codeBoardOpen ||
-    workBoardOpen ||
-    codePullRequestsOpen ||
-    githubIssuesOpen ||
-    linearIssuesOpen ||
-    archiveOpen ||
-    automationCenterOpen ||
-    agentsCenterOpen ||
-    artifactLibraryOpen ||
-    imageLibraryOpen;
-  const projectsDestinationActive =
-    projectsListOpen || (selectedProjectTabId !== undefined && !readerOpen);
-  const activeSidebarDestination: SidebarNavigationDescriptorId | undefined =
-    projectsDestinationActive
-      ? "projects"
-      : inboxOpen
-        ? "inbox"
-        : workBoardOpen || codeBoardOpen
-          ? "thread-board"
-          : codePullRequestsOpen
-            ? "pull-requests"
-            : githubIssuesOpen
-              ? "github-issues"
-              : linearIssuesOpen
-                ? "linear-issues"
-                : automationCenterOpen
-                  ? "automations"
-                  : agentsCenterOpen
-                    ? "agents"
-                    : artifactLibraryOpen
-                      ? "artifact-library"
-                      : imageLibraryOpen
-                        ? "image-library"
-                        : undefined;
   // Readers hide unrelated thread tools. Selecting a pull request explicitly
   // opens its Review beside that list, so the detail must remain visible.
   const dockPresentedOpen =
@@ -5092,6 +5193,24 @@ function LaunchedShell(
   // `bottomPanelOpen`, so which tools the dock may still launch does not
   // change while a reader is up.
   const bottomPanelPresentedOpen = bottomPanelOpen && !readerOpen;
+
+  /** The pages back and forward can return to, by the destination that opens them. */
+  function windowPageOpeners(): Partial<Record<WindowPage, () => void>> {
+    return {
+      review: openReview,
+      archive: openArchive,
+      inbox: openInbox,
+      "thread-board": openThreadBoard,
+      "pull-requests": openPullRequests,
+      "github-issues": openGithubIssues,
+      "linear-issues": openLinearIssues,
+      agents: openAgentsCenter,
+      automations: openAutomationCenter,
+      "artifact-library": openArtifactLibrary,
+      "image-library": openImageLibrary,
+      projects: openProjects,
+    };
+  }
 
   function closeWorkspaceReaders() {
     setProjectsListOpen(false);
@@ -6369,6 +6488,7 @@ function LaunchedShell(
         {...(themeController.draft === undefined ? {} : { theme: themeController.draft })}
         chrome={
           <WindowChromeContainer
+            windowHistory={windowHistory}
             actions={actions}
             activeMode={activeMode}
             activeSurface={activeSurface}
@@ -6405,6 +6525,7 @@ function LaunchedShell(
         sidebar={
           <FollowUpLineageProvider client={launchedClients.followUpSuggestionClient}>
             <SidebarContainer
+              windowHistory={windowHistory}
               actions={actions}
               {...(activeChatThreadId === undefined ? {} : { activeChatThreadId })}
               {...(activeCodeThreadId === undefined ? {} : { activeCodeThreadId })}
@@ -6471,7 +6592,7 @@ function LaunchedShell(
         sidebarWidth={sidebarWidth}
         wideContextOpen={!isNarrow && dockPresentedOpen}
         workspace={
-          <>
+          <StartQuickToolsContext.Provider value={startQuickToolsServices}>
             <div className="primary-workspace-layer">
               <ReaderPagesContainer
                 actions={actions}
@@ -6689,7 +6810,7 @@ function LaunchedShell(
                 writtenDocumentsByThread={writtenDocumentsByThread}
               />
             </TabActivationProvider>
-          </>
+          </StartQuickToolsContext.Provider>
         }
       >
         <ShellDialogHost

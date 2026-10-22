@@ -998,6 +998,7 @@ describe("ShellSidebar", () => {
       "thread-board": vi.fn(),
       agents: vi.fn(),
     };
+    const history = { canGoBack: true, canGoForward: false, goBack: vi.fn(), goForward: vi.fn() };
     render(
       <ShellSidebar
         codeNavigation={{ actions }}
@@ -1012,6 +1013,7 @@ describe("ShellSidebar", () => {
           onExpand,
           projects: [{ id: "p1", name: "octant", active: true, onOpen: openProject }],
         }}
+        history={history}
         settings={defaultShellSettings()}
         workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
       />,
@@ -1034,6 +1036,10 @@ describe("ShellSidebar", () => {
     expect(onExpand).toHaveBeenCalledOnce();
     // The menu-only destinations have left the account menu, so the collapsed
     // rail still reaches them through More, named on keyboard focus too.
+    // Back and Forward stay reachable with the sidebar hidden.
+    await user.click(within(rail).getByRole("button", { name: "Back" }));
+    expect(history.goBack).toHaveBeenCalledOnce();
+    expect(within(rail).getByRole("button", { name: "Forward" })).toBeDisabled();
     const more = within(rail).getByRole("button", { name: "More destinations" });
     more.focus();
     expect(await screen.findByRole("tooltip")).toHaveTextContent("More");
