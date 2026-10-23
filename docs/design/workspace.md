@@ -208,6 +208,33 @@ geometry and close-control presentation are shared with dock tools under
 
 These tabs add no persisted layout or authority; see
 [decision 0156](../decisions/0156-content-opens-beside-the-conversation.md).
+
+**Opening into tabs.** A single click on a sidebar thread opens it in the
+active pane in place: it takes over the pane's open tab unless that tab was
+kept, so browsing threads does not grow the tab row. A double click keeps the
+thread as a tab of its own, and so does a later double click on its tab; a
+kept tab stays when another thread opens in the pane, which then opens beside
+it as a new tab. A tab opened from anywhere else (a link, a search result, a
+drop) is kept.
+
+**Moving tabs and showing them side by side.** A tab drags the way a pane's
+title row does, through the same drop rules: dropped on another pane's edge it
+splits that pane and opens there, dropped on a pane's centre it opens in that
+pane, and a tab that is not the pane's open one may split its own pane, so a
+tab dragged to its pane's right edge lands beside the open thread. A tab that
+moved out of a pane leaves that pane's tab row. ⌘-click (Ctrl-click off Apple
+platforms) adds a tab to a selection or takes it out; Shift-click selects the
+run of tabs from the open one to the clicked one; a plain click clears the
+selection and opens the tab. Selected tabs carry a wash between the plain and
+the open one, and their names say "selected" to assistive technology. Two to
+four selected tabs dragged onto a pane, at its centre or an edge, or **Show
+side by side** from a tab's context menu, lay out in that pane: two side by
+side, three in equal columns, four as a 2×2 grid, in tab order. More than four
+keeps the first four and says the rest stayed as tabs. With no selection,
+**Show side by side** puts the right-clicked tab beside the open one. The
+layout is made of ordinary split commands, so closing or resizing a pane
+afterwards works as for any split, and a placement the window's authority
+refuses (another Project, mode, or host) is refused with the usual message.
 Several same-authority threads can be pinned or dropped into
 that tree; pointer activity and keyboard input make exactly one pane active,
 and the pane's drag handle (its title row) alone marks it visually, with no

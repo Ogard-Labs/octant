@@ -62,6 +62,10 @@ export interface SplitWorkspaceProps {
   readonly contentTabs?: WorkspaceContentTabs;
   readonly onActivateContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
   readonly onCloseContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
+  /** A double click on a thread's tab keeps it when another thread opens. */
+  readonly onKeepContentTab?: (threadId: string) => void;
+  /** Lays two to four tabs out in the pane, in tab order. */
+  readonly onArrangeSideBySide?: (paneId: PaneId, surfaces: ReadonlyArray<WorkspaceTab>) => void;
   readonly onCommitResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
   readonly onFocus: (paneId: PaneId) => void;
   readonly onPreviewResize: (splitNodeId: LayoutNodeId, ratio: number) => void;
@@ -409,6 +413,55 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
   const canSplit = canSplitPane(props.layout, pane.paneId, props.totalWorkspacePaneCount);
   const dragKey = `pane:${String(pane.paneId)}`;
   const [menuOpen, setMenuOpen] = useState(false);
+  // Tabs picked with Cmd/Ctrl- or Shift-click to show side by side. Renderer
+  // state only; a plain click clears it (workspace.md, Moving tabs).
+  const [selectedTabIds, setSelectedTabIds] = useState<ReadonlySet<string>>(new Set());
+  const [menuTabId, setMenuTabId] = useState<string>();
+  const selectedTabs = navigation.filter((entry) => selectedTabIds.has(String(entry.id)));
+  const menuTab = navigation.find((entry) => String(entry.id) === menuTabId);
+  const sideBySide =
+    selectedTabs.length >= 2
+      ? selectedTabs
+      : menuTab !== undefined && String(menuTab.id) !== String(surface.id)
+        ? [surface, menuTab]
+        : undefined;
+  const pickTab = (event: React.MouseEvent, entry: WorkspaceTab): boolean => {
+    const index = navigation.findIndex((item) => String(item.id) === String(entry.id));
+    if (event.metaKey || event.ctrlKey) {
+      setSelectedTabIds((current) => {
+        // The open tab is part of a selection started from it.
+        const next = new Set(current.size === 0 ? [String(surface.id)] : current);
+        if (next.has(String(entry.id))) next.delete(String(entry.id));
+        else next.add(String(entry.id));
+        return next;
+      });
+      return true;
+    }
+    if (event.shiftKey) {
+      const from = navigation.findIndex((item) => String(item.id) === String(surface.id));
+      const [low, high] = from < index ? [from, index] : [index, from];
+      setSelectedTabIds(
+        new Set(navigation.slice(Math.max(0, low), high + 1).map((item) => String(item.id))),
+      );
+      return true;
+    }
+    if (selectedTabIds.size > 0) setSelectedTabIds(new Set());
+    return false;
+  };
+  const tabDragSource = (entry: WorkspaceTab) => {
+    const selected = selectedTabs.length >= 2 && selectedTabIds.has(String(entry.id));
+    return {
+      dragKey: `tab:${String(pane.paneId)}:${String(entry.id)}`,
+      surface: entry,
+      title: workspaceSurfaceTitle(entry, props.liveThreadTitles),
+      // The open tab moves its pane, as the title row does; any other tab
+      // opens where it lands and leaves this pane's row.
+      ...(String(entry.id) === String(surface.id)
+        ? { paneId: pane.paneId }
+        : { fromTab: { paneId: pane.paneId, tabId: entry.id } }),
+      ...(selected ? { surfaces: selectedTabs } : {}),
+    };
+  };
   const environment = paneEnvironment(surface, props.environmentNames);
   const facts =
     "threadId" in surface ? props.paneFactsByThreadId?.get(String(surface.threadId)) : undefined;
@@ -549,9 +602,38 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     className="workspace-content-tabs__list"
                   >
                     {navigation.map((entry) => (
-                      <div className="workspace-content-tabs__entry content-tab" key={entry.id}>
+                      <div
+                        className="workspace-content-tabs__entry content-tab"
+                        data-selected={selectedTabIds.has(String(entry.id)) ? "true" : undefined}
+                        key={entry.id}
+                        onContextMenu={() => setMenuTabId(String(entry.id))}
+                      >
                         <OctantTabsTab
                           className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
+                          onClickCapture={(event) => {
+                            const source = tabDragSource(entry);
+                            // A completed drag ends in a click; it must not
+                            // also open the tab or change the selection.
+                            if (
+                              props.drag.consumeSuppressedClick(source.dragKey) ||
+                              pickTab(event, entry)
+                            ) {
+                              event.preventDefault();
+                              event.stopPropagation();
+                            }
+                          }}
+                          onDoubleClick={() => {
+                            if ("threadId" in entry && entry.threadId !== null) {
+                              props.onKeepContentTab?.(String(entry.threadId));
+                            }
+                          }}
+                          onPointerCancel={props.drag.onPointerCancel}
+                          onPointerDown={(event) => {
+                            if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+                            props.drag.onPointerDown(event, tabDragSource(entry));
+                          }}
+                          onPointerMove={props.drag.onPointerMove}
+                          onPointerUp={props.drag.onPointerUp}
                           value={entry.id}
                           title={workspaceSurfaceTitle(entry, props.liveThreadTitles)}
                         >
@@ -563,6 +645,9 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                             />
                           )}
                           <span>{workspaceSurfaceTitle(entry, props.liveThreadTitles)}</span>
+                          {selectedTabIds.has(String(entry.id)) ? (
+                            <span className="sr-only">, selected</span>
+                          ) : null}
                         </OctantTabsTab>
                         <OctantIconButton
                           className="content-tab__close text-muted-foreground"
@@ -616,6 +701,14 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
             <PaneMenu
               canSplit={canSplit}
               focused={focused}
+              {...(sideBySide === undefined || props.onArrangeSideBySide === undefined
+                ? {}
+                : {
+                    onShowSideBySide: () => {
+                      props.onArrangeSideBySide?.(pane.paneId, sideBySide);
+                      setSelectedTabIds(new Set());
+                    },
+                  })}
               onClearFocus={props.onClearFocus}
               onClose={() => props.onClosePane(pane.paneId)}
               onFocus={() => props.onFocus(pane.paneId)}
@@ -665,6 +758,8 @@ function PaneMenu(props: {
   readonly onClose: () => void;
   readonly onFocus: () => void;
   readonly onSplit: (orientation: "horizontal" | "vertical") => void;
+  /** Present when two to four tabs can be laid out side by side. */
+  readonly onShowSideBySide?: () => void;
   readonly title: string;
 }) {
   const focusLabel = props.focused ? "Show all panes" : "Focus this pane";
@@ -689,6 +784,11 @@ function PaneMenu(props: {
           <OctantContextMenuItem label="Split down" onClick={() => props.onSplit("vertical")}>
             Split down
           </OctantContextMenuItem>
+          {props.onShowSideBySide === undefined ? null : (
+            <OctantContextMenuItem label="Show side by side" onClick={props.onShowSideBySide}>
+              Show side by side
+            </OctantContextMenuItem>
+          )}
         </>
       ) : null}
       <OctantContextMenuSeparator />

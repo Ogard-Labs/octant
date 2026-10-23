@@ -49,6 +49,10 @@ export interface WorkspaceSurfaceDragSource {
   readonly paneId?: PaneId;
   readonly surface: WorkspaceTab;
   readonly title: string;
+  /** A tab that is not its pane's open one: it leaves that pane's row once placed. */
+  readonly fromTab?: { readonly paneId: PaneId; readonly tabId: WorkspaceTab["id"] };
+  /** Two to four selected tabs dragged together; they lay out side by side where dropped. */
+  readonly surfaces?: ReadonlyArray<WorkspaceTab>;
 }
 
 export interface ResolveWorkspaceSurfaceDropInput {

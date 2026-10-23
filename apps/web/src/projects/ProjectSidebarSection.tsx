@@ -147,6 +147,7 @@ import {
 } from "./ProjectThreadList";
 import { SidebarThreadRowContent } from "./SidebarThreadRowContent";
 import { threadRowMenuIsEmpty, type ThreadRowActions } from "./ThreadRowMenu";
+import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 
 type ThreadGroupId = "recents" | "all" | "unfiled";
@@ -1494,6 +1495,7 @@ function ActivityThreadButton(props: {
   readonly thread: SidebarActivityThread;
 }) {
   const shows = useSidebarRowProperties();
+  const tabs = useContext(SidebarThreadTabsContext);
   const parentTitle = lineageParentTitle(props.thread, props.lineageThreads);
   const selected = props.activeThreadId === props.thread.navigationId;
   const pullRequest = shows.pullRequest ? props.thread.pullRequests?.items[0] : undefined;
@@ -1509,7 +1511,11 @@ function ActivityThreadButton(props: {
       className="sidebar-navigation__thread activity-nav__thread justify-start"
       data-attention={props.thread.attention}
       data-thread-id={props.thread.threadId}
-      onClick={() => props.onSelectThread(props.thread.navigationId)}
+      onClick={() => {
+        tabs?.openAsPreview(props.thread.threadId);
+        props.onSelectThread(props.thread.navigationId);
+      }}
+      onDoubleClick={() => tabs?.keep(props.thread.threadId)}
       type="button"
       variant="bare"
     >
