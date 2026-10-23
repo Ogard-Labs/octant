@@ -1086,7 +1086,6 @@ describe("SettingsView", () => {
   it("keeps search and the existing mode-switcher mutation wired", async () => {
     const { onSearchChange } = renderSettingsWithSearch("");
     navigateTo("Appearance");
-    fireEvent.click(screen.getByRole("button", { name: "Search settings" }));
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), {
       target: { value: "translucent" },
@@ -1118,7 +1117,6 @@ describe("SettingsView", () => {
     const { onSearchChange } = renderSettingsWithSearch("");
     navigateTo("Appearance");
 
-    await user.click(screen.getByRole("button", { name: "Search settings" }));
     const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
     await user.type(searchbox, "mode switcher");
     const listbox = await screen.findByRole("listbox", { name: "Settings search results" });
@@ -1733,25 +1731,31 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("navigation", { name: "On this page" })).toBeNull();
   });
 
-  it("focuses search from the rail's icon and from Cmd+F", async () => {
+  it("keeps search in view, focuses it from Cmd+F, and opens the top result with Enter", async () => {
     const user = userEvent.setup();
-    renderSettings();
+    const { onSearchChange } = renderSettingsWithSearch("dark mode");
 
-    expect(screen.queryByRole("searchbox", { name: "Search settings" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Search settings" }));
-    await waitFor(() =>
-      expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveFocus(),
-    );
-    // Leaving the empty field folds it back into the icon.
+    const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+    expect(searchbox).toBeVisible();
     await user.click(document.body);
-    await waitFor(() =>
-      expect(screen.queryByRole("searchbox", { name: "Search settings" })).toBeNull(),
-    );
-
     fireEvent.keyDown(document, { key: "f", metaKey: true });
-    await waitFor(() =>
-      expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveFocus(),
-    );
+    await waitFor(() => expect(searchbox).toHaveFocus());
+
+    const listbox = await screen.findByRole("listbox", { name: "Settings search results" });
+    const top = within(listbox).getAllByRole("option")[0];
+    expect(top).toHaveTextContent("Dark preset");
+    fireEvent.keyDown(searchbox, { key: "Enter" });
+    expect(onSearchChange).toHaveBeenLastCalledWith("");
+  });
+
+  it("opens what was just typed when Enter follows the last keystroke at once", () => {
+    const { onSearchChange } = renderSettingsWithSearch("");
+    const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+    // No wait between typing and Enter: the listed results have not caught up.
+    fireEvent.change(searchbox, { target: { value: "dark mode" } });
+    fireEvent.keyDown(searchbox, { key: "Enter" });
+    expect(onSearchChange).toHaveBeenLastCalledWith("");
+    expect(screen.getByRole("heading", { level: 1, name: "Appearance" })).toBeVisible();
   });
 
   it("assigns the settings surface an explicit visual class contract", () => {
@@ -1775,7 +1779,6 @@ describe("SettingsView", () => {
       "settings-view__sidebar",
     );
     expect(screen.getByRole("button", { name: "Back to app" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Search settings" }));
     expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveClass(
       "settings-view__text-input",
     );

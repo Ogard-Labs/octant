@@ -129,7 +129,8 @@ import {
   AppBackgroundSettings,
   type BackgroundImageLibrary,
 } from "../settings/AppBackgroundSettings";
-import { SettingsSearchResults } from "../settings/SettingsSearchResults";
+import { SettingsSearchResults, searchResultLink } from "../settings/SettingsSearchResults";
+import { isApplePlatform } from "../platform";
 import { useSettingsRoute } from "../settings/useSettingsRoute";
 import { ExtensionsSettingsView } from "../extensions/ExtensionsSettingsView";
 import type { ThemeController } from "../theme/useThemeController";
@@ -352,7 +353,6 @@ export function SettingsView(props: SettingsViewProps) {
   const navigationTrigger = useRef<HTMLButtonElement>(null);
   const navigationClose = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
   // An Octant Harness endpoint's detail sub-page, named for the breadcrumb.
   const [harnessEndpoint, setHarnessEndpoint] = useState<string>();
   // A Provider catalog entry's setup sub-page, named for the breadcrumb.
@@ -406,9 +406,8 @@ export function SettingsView(props: SettingsViewProps) {
   };
 
   const focusSearch = useCallback(() => {
-    setSearchOpen(true);
-    // The field is unhidden by the state above, so focusing waits a frame.
-    requestAnimationFrame(() => searchInput.current?.focus());
+    searchInput.current?.focus();
+    searchInput.current?.select();
   }, []);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -470,14 +469,19 @@ export function SettingsView(props: SettingsViewProps) {
     route.applyDeepLink(link);
     props.onSearchChange("");
   };
+  // Enter usually follows the last keystroke by less than the debounce, so
+  // the listed results can still be the previous query's: read the query as
+  // typed instead, or a fresh search opens nothing and an edited one opens
+  // the old top result.
+  const openFirstResult = () => {
+    const first = searchSettings(availableSections, capabilities, props.search)[0];
+    if (first !== undefined) handleSearchSelect(searchResultLink(first));
+  };
   // A page says once which scope it applies to; its rows then only name a
   // scope that differs (see SettingsPageScope).
   const activeSectionScope = availableSections.find(
     (section) => section.id === route.activeSection,
   )?.scope;
-  // The rail's search is an icon until someone asks for it; a query that is
-  // already typed keeps the field open so the results never lose their input.
-  const searchVisible = searchOpen || hasQuery;
   const PageIcon = hasQuery ? Search : settingsSectionIcon(route.activeSection);
   const subPage = hasQuery
     ? undefined
@@ -520,21 +524,11 @@ export function SettingsView(props: SettingsViewProps) {
           <div className="settings-view__sidebar-content">
             <div className="settings-view__rail-head">
               <h2 className="settings-view__rail-title">Settings</h2>
-              <OctantIconButton
-                aria-expanded={searchVisible}
-                aria-keyshortcuts="Meta+F Control+F"
-                label="Search settings"
-                onClick={focusSearch}
-                type="button"
-              >
-                <Search aria-hidden="true" size={16} strokeWidth={1.5} />
-              </OctantIconButton>
             </div>
             <SettingsSearchField
-              collapsed={!searchVisible}
               inputRef={searchInput}
-              onBlurEmpty={() => setSearchOpen(false)}
               onChange={props.onSearchChange}
+              onOpenFirst={openFirstResult}
               value={props.search}
             />
             <div className="settings-view__navigation-scroll" ref={navigationScroll}>
@@ -589,6 +583,7 @@ export function SettingsView(props: SettingsViewProps) {
             <SettingsSearchField
               className="settings-view__mobile-search"
               onChange={props.onSearchChange}
+              onOpenFirst={openFirstResult}
               value={props.search}
             />
           </header>
@@ -752,12 +747,10 @@ export function SettingsView(props: SettingsViewProps) {
 
 function SettingsSearchField(props: {
   readonly className?: string;
-  /** Hidden but mounted: the rail shows an icon until the field is asked for. */
-  readonly collapsed?: boolean;
   readonly inputRef?: RefObject<HTMLInputElement | null>;
-  /** Focus left the field with nothing typed, so the rail can fold it away again. */
-  readonly onBlurEmpty?: () => void;
   readonly onChange: (value: string) => void;
+  /** Enter in the field opens the top result, so a search is type, then Enter. */
+  readonly onOpenFirst: () => void;
   readonly value: string;
 }) {
   const ownInput = useRef<HTMLInputElement>(null);
@@ -770,28 +763,44 @@ function SettingsSearchField(props: {
           ? "settings-view__field settings-view__field--search"
           : `settings-view__field settings-view__field--search ${props.className}`
       }
-      hidden={props.collapsed === true}
     >
       <label className="settings-view__search-label" htmlFor={inputId}>
         Search settings
       </label>
       <Search aria-hidden="true" className="settings-view__search-icon" size={14} />
       <OctantInput
+        aria-keyshortcuts="Meta+F Control+F"
         className="settings-view__text-input"
         id={inputId}
-        onBlur={() => {
-          if (props.value === "") props.onBlurEmpty?.();
-        }}
         onChange={(event) => props.onChange(event.currentTarget.value)}
         onKeyDown={(event) => {
-          if (event.key === "Escape" && props.value === "") props.onBlurEmpty?.();
+          if (event.key === "Enter") {
+            event.preventDefault();
+            props.onOpenFirst();
+          } else if (event.key === "ArrowDown") {
+            // Down moves into the results, which own arrow keys from there.
+            const results = document.querySelector<HTMLElement>(
+              '[aria-label="Settings search results"]',
+            );
+            if (results !== null) {
+              event.preventDefault();
+              results.focus();
+            }
+          } else if (event.key === "Escape") {
+            if (props.value === "") input.current?.blur();
+            else props.onChange("");
+          }
         }}
-        placeholder="Search settings…"
+        placeholder="Search settings"
         ref={input}
         type="search"
         value={props.value}
       />
-      {props.value === "" ? null : (
+      {props.value === "" ? (
+        <kbd aria-hidden="true" className="settings-view__search-shortcut">
+          {isApplePlatform() ? "⌘F" : "Ctrl+F"}
+        </kbd>
+      ) : (
         <OctantIconButton
           className="settings-view__search-clear"
           label="Clear settings search"

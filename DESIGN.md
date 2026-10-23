@@ -328,11 +328,19 @@ error instead of retaining another integration's account controls.
   with the destructive button variant. The danger is carried by the
   placement and the confirm control; the label keeps its ink.
 - **Rail.** Each page keeps its icon (16px) in the navigation rail, and
-  Device tools has its own, apart from Computer use. Search is an icon beside
-  the "Settings" heading that reveals the field; Cmd/Ctrl+F reveals and
-  focuses it, the field stays mounted while folded away, and it folds back
-  when it loses focus empty. Below the narrow breakpoint the field is always
-  shown.
+  Device tools has its own, apart from Computer use.
+- **Search.** The search field is always shown at the top of the rail, under
+  the "Settings" heading, with its shortcut (Cmd/Ctrl+F) at its trailing edge
+  until something is typed. Every typed word must match the start of a word in
+  a row's name, keywords, or page, in any order; filler words ("my", "the")
+  are ignored, and everyday words map to the rows' own (dark mode → colour
+  scheme presets, password → credentials, delete → purge, telemetry → what
+  leaves this machine, connector → MCP). Results rank a row named by the query
+  above one that only lists it as a keyword, mark the matched part of each
+  name in weight rather than a fill, and name the page. Enter opens the top
+  result, Down moves into the list, and Escape clears the field, then leaves
+  it. Every Settings row a person can see is indexed; a test fails when a new
+  row is not.
 
 ### Content tabs
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { SettingsDeepLink, SettingsSectionId } from "@octant/contracts";
-import type { SettingsSearchResult } from "./registry";
+import { settingsQueryWords, type SettingsSearchResult } from "./registry";
 import { scopeLabel } from "./primitives";
 
 export interface SettingsSearchResultsProps {
@@ -62,7 +62,7 @@ export function SettingsSearchResults({
     if (activeIndex < 0) return;
     const result = results[activeIndex];
     if (result === undefined) return;
-    onSelect(resultToDeepLink(result));
+    onSelect(searchResultLink(result));
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLUListElement>) => {
@@ -94,12 +94,13 @@ export function SettingsSearchResults({
     }
   };
 
+  const queryWords = settingsQueryWords(query);
   const isEmpty = query.trim() !== "" && results.length === 0;
   if (query.trim() === "") return null;
   if (isEmpty) {
     return (
       <p className="settings-search-results__empty" role="status">
-        No settings match your search. Try a different term or browse the sections on the left.
+        No settings match “{query.trim()}”. Try another word, or browse the pages on the left.
       </p>
     );
   }
@@ -120,10 +121,12 @@ export function SettingsSearchResults({
           className="settings-search-results__option"
           id={optionId(index)}
           key={resultKey(result)}
-          onClick={() => onSelect(resultToDeepLink(result))}
+          onClick={() => onSelect(searchResultLink(result))}
           role="option"
         >
-          <span className="settings-search-results__label">{resultLabel(result)}</span>
+          <span className="settings-search-results__label">
+            <MatchedLabel label={resultLabel(result)} words={queryWords} />
+          </span>
           <span className="settings-search-results__section">
             in {sectionLabels[result.sectionId] ?? result.sectionId}
           </span>
@@ -131,6 +134,29 @@ export function SettingsSearchResults({
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * The result's name with the start of each word the query matched marked, so
+ * a person sees why it came up.
+ */
+function MatchedLabel(props: { readonly label: string; readonly words: ReadonlyArray<string> }) {
+  const parts = props.label.split(/([\p{L}\p{N}]+)/u);
+  return (
+    <>
+      {parts.map((part, index) => {
+        const lower = part.toLocaleLowerCase();
+        const word = props.words.find((candidate) => lower.startsWith(candidate));
+        if (word === undefined || word.length === 0) return part;
+        return (
+          <span key={index}>
+            <mark className="settings-search-results__match">{part.slice(0, word.length)}</mark>
+            {part.slice(word.length)}
+          </span>
+        );
+      })}
+    </>
   );
 }
 
@@ -146,7 +172,7 @@ function resultLabel(result: SettingsSearchResult): string {
   return result.label;
 }
 
-function resultToDeepLink(result: SettingsSearchResult): SettingsDeepLink {
+export function searchResultLink(result: SettingsSearchResult): SettingsDeepLink {
   if (result.kind === "setting") {
     return { section: result.sectionId, setting: result.settingId };
   }
