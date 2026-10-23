@@ -1367,11 +1367,11 @@ function LaunchedShell(
           destination,
           row?.projectId === undefined ? undefined : decodeProjectId(row.projectId),
         )
-        .then(() => {
+        .then((placed) => {
           // A tab that was not its pane's open one leaves that pane's row
-          // once it is placed somewhere else.
+          // once it is placed somewhere else; a refused drop leaves it.
           const fromTab = source.fromTab;
-          if (fromTab === undefined) return;
+          if (!placed || fromTab === undefined) return;
           if (
             String(fromTab.paneId) === String(destination.targetPaneId) &&
             destination.kind === "center"

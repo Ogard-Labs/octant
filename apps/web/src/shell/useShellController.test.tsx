@@ -2028,6 +2028,35 @@ describe("useShellController", () => {
     }
   });
 
+  it("moves the first picked tab into the pane the selection lands on", async () => {
+    const chat = (index: number): WorkspaceTab =>
+      ({
+        kind: "chat-thread",
+        id: `00000000-0000-4000-8000-00000000099${String(index)}`,
+        threadId: `00000000-0000-4000-8000-00000000096${String(index)}`,
+        mode: "chat",
+        title: `Chat ${String(index)}`,
+      }) as WorkspaceTab;
+    const server = statefulClient();
+    const { result } = renderHook(() =>
+      useShellController({ client: server.client, serverUrl: "http://127.0.0.1:13773", windowId }),
+    );
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+    await act(async () => result.current.setMode("chat"));
+    const source = firstPane(result.current.workspace!.layouts.chat);
+    await act(async () => result.current.arrangeSideBySide(source.paneId, [chat(0), chat(1)]));
+    // Chat 0 shows in the left pane; drop Chat 0 and Chat 2 on the right one.
+    const target = panes(result.current.workspace!.layouts.chat)[1]!;
+    await act(async () => result.current.arrangeSideBySide(target.paneId, [chat(0), chat(2)]));
+    const titles = panes(result.current.workspace!.layouts.chat).map((pane) => pane.surface.title);
+    expect(titles.filter((title) => title === "Chat 0")).toHaveLength(1);
+    expect(titles).toContain("Chat 2");
+    const shown = panes(result.current.workspace!.layouts.chat).find(
+      (pane) => pane.surface.title === "Chat 0",
+    );
+    expect(String(shown?.paneId)).toBe(String(target.paneId));
+  });
+
   it("commits mode fallback while preserving and restoring the disabled mode layout", async () => {
     const server = statefulClient();
     const storageWrite = vi.spyOn(Storage.prototype, "setItem");

@@ -2,7 +2,7 @@ import { decodeWorkspaceOperation, type WindowWorkspace } from "@octant/contract
 import { applyWorkspaceOperation } from "@octant/domain/shell-policy";
 import { describe, expect, it } from "vitest";
 import { chatShellBootstrap } from "../App.test-fixtures";
-import { rememberWorkspaceContent } from "./workspaceContentTabs";
+import { rememberWorkspaceContent, settleThreadPreview } from "./workspaceContentTabs";
 
 const THREADS = [
   "00000000-0000-4000-8000-000000000901",
@@ -57,5 +57,25 @@ describe("opening threads into a pane's tabs", () => {
 
   it("keeps every tab opened from anywhere else", () => {
     expect(tabsAfter([0, 1, 2], new Set())).toEqual(["Thread 0", "Thread 1", "Thread 2"]);
+  });
+});
+
+describe("which thread is the single-click preview", () => {
+  it("passes the preview to the thread a single click just opened", () => {
+    const opened = open(chatShellBootstrap().workspace, 1);
+    expect(settleThreadPreview({ current: THREADS[0], pending: THREADS[1] }, opened)).toEqual({
+      current: THREADS[1],
+    });
+  });
+
+  it("forgets a replaced preview, so opening it again another way keeps its tab", () => {
+    // Thread 0 was the preview; a search opened thread 2 over it.
+    const opened = open(chatShellBootstrap().workspace, 2);
+    expect(settleThreadPreview({ current: THREADS[0] }, opened)).toEqual({});
+  });
+
+  it("keeps the preview while its thread is still showing", () => {
+    const opened = open(chatShellBootstrap().workspace, 0);
+    expect(settleThreadPreview({ current: THREADS[0] }, opened)).toEqual({ current: THREADS[0] });
   });
 });

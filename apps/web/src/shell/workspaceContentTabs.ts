@@ -72,3 +72,42 @@ export function rememberWorkspaceContent(
   }
   return result;
 }
+
+/**
+ * The thread holding the pane's single-click tab, and one a single click is
+ * about to open. Only one thread is the preview at a time: a preview another
+ * open replaced is forgotten, so opening it again from a link or search keeps
+ * its tab instead of treating it as a sidebar preview.
+ */
+export interface ThreadPreview {
+  readonly current?: string;
+  readonly pending?: string;
+}
+
+function visibleThreads(workspace: WindowWorkspace): ReadonlySet<string> {
+  const threads = new Set<string>();
+  for (const mode of ["chat", "work", "code"] as const) {
+    for (const pane of panes(workspace.layouts[mode])) {
+      const thread = threadIdOf(pane.surface);
+      if (thread !== undefined) threads.add(thread);
+    }
+  }
+  return threads;
+}
+
+/** The preview after a committed workspace change. */
+export function settleThreadPreview(
+  preview: ThreadPreview,
+  workspace: WindowWorkspace,
+): ThreadPreview {
+  const visible = visibleThreads(workspace);
+  if (preview.pending !== undefined && visible.has(preview.pending)) {
+    return { current: preview.pending };
+  }
+  const current =
+    preview.current !== undefined && visible.has(preview.current) ? preview.current : undefined;
+  return {
+    ...(current === undefined ? {} : { current }),
+    ...(preview.pending === undefined ? {} : { pending: preview.pending }),
+  };
+}

@@ -1,4 +1,9 @@
-import { rememberWorkspaceContent, type WorkspaceContentTabs } from "./workspaceContentTabs";
+import {
+  rememberWorkspaceContent,
+  settleThreadPreview,
+  type ThreadPreview,
+  type WorkspaceContentTabs,
+} from "./workspaceContentTabs";
 import {
   type WorkThreadId,
   type BrowserContextId,
@@ -298,16 +303,20 @@ export function useShellController(options: ShellControllerOptions) {
   // Threads opened with a single click from the sidebar; the next open in
   // their pane takes their tab. A double click keeps one (see workspace.md,
   // Opening into tabs). Read at commit time, so a ref rather than state.
-  const previewThreads = useRef(new Set<string>());
+  const previewThreads = useRef<ThreadPreview>({});
   // Stable, so the sidebar rows reading them through context do not re-render
   // with every shell render.
   /** The sidebar is about to open this thread with a single click. */
   const openThreadAsPreview = useCallback((threadId: string) => {
-    previewThreads.current.add(threadId);
+    previewThreads.current = { ...previewThreads.current, pending: threadId };
   }, []);
   /** A double click on the thread's row or tab keeps its tab. */
   const keepThreadTab = useCallback((threadId: string) => {
-    previewThreads.current.delete(threadId);
+    const { current, pending } = previewThreads.current;
+    previewThreads.current = {
+      ...(current === undefined || current === threadId ? {} : { current }),
+      ...(pending === undefined || pending === threadId ? {} : { pending }),
+    };
   }, []);
   const [errorMessage, setErrorMessage] = useState<string>();
   const [crossContextOffer, setCrossContextOffer] = useState<
@@ -356,14 +365,12 @@ export function useShellController(options: ShellControllerOptions) {
           if (!isCurrentRequest(generation, requestGeneration, mounted)) return;
           const next = fromBootstrap(bootstrap);
           const previousWorkspace = committedShell.current?.workspace ?? next.workspace;
+          // Read the preview before settling it: the updater runs later.
+          const preview = currentPreviewSet(previewThreads.current);
           setContentTabs((tabs) =>
-            rememberWorkspaceContent(
-              tabs,
-              previousWorkspace,
-              next.workspace,
-              previewThreads.current,
-            ),
+            rememberWorkspaceContent(tabs, previousWorkspace, next.workspace, preview),
           );
+          previewThreads.current = settleThreadPreview(previewThreads.current, next.workspace);
           committedShell.current = next;
           setAuthoritative(next);
           setResizePreview(undefined);
@@ -493,9 +500,11 @@ export function useShellController(options: ShellControllerOptions) {
         workspaceVersion: result.version,
       };
       committedShell.current = next;
+      const preview = currentPreviewSet(previewThreads.current);
       setContentTabs((tabs) =>
-        rememberWorkspaceContent(tabs, previous.workspace, next.workspace, previewThreads.current),
+        rememberWorkspaceContent(tabs, previous.workspace, next.workspace, preview),
       );
+      previewThreads.current = settleThreadPreview(previewThreads.current, next.workspace);
       setAuthoritative(next);
       setStatus("ready");
       setErrorMessage(undefined);
@@ -1013,10 +1022,16 @@ export function useShellController(options: ShellControllerOptions) {
       const layout = shell.workspace.layouts[shell.workspace.activeMode];
       return findVisibleSurfacePane(layout, surface)?.paneId;
     };
-    if (paneOf(first) !== paneId) {
+    const firstPane = paneOf(first);
+    if (firstPane !== paneId) {
+      // Shown in another pane, the first tab must move here: reopening would
+      // only select it where it already is.
       const opened = await enqueueMutation({
         kind: "workspace",
-        intent: { kind: "reopen-content", paneId, surface: first },
+        intent:
+          firstPane === undefined
+            ? { kind: "reopen-content", paneId, surface: first }
+            : { kind: "replace-pane-surface", paneId, surface: first },
       });
       if (!opened) return;
     }
@@ -1034,8 +1049,12 @@ export function useShellController(options: ShellControllerOptions) {
       const secondPane = paneOf(second);
       if (secondPane !== undefined) await splitPaneChecked(secondPane, "vertical", "after", fourth);
     }
-    // The tabs now shown in their own panes leave the row they came from.
-    const moved = surfaces.slice(1, 4);
+    // The tabs now shown in their own panes leave the row they came from; one
+    // a refused split left unplaced stays a tab.
+    const moved = surfaces.slice(1, 4).filter((surface) => {
+      const placed = paneOf(surface);
+      return placed !== undefined && String(placed) !== String(paneId);
+    });
     setContentTabs((current) =>
       new Map(current).set(
         paneId,
@@ -1091,8 +1110,8 @@ export function useShellController(options: ShellControllerOptions) {
     surface: WorkspaceTab,
     destination: WorkspaceSurfaceDropDestination,
     projectId?: ProjectId,
-  ): Promise<void> {
-    if (destination.kind === "composer") return;
+  ): Promise<boolean> {
+    if (destination.kind === "composer") return false;
     // Cross-Project denial for preview surfaces: a preview carries its own
     // opaque Project binding. Dropping it into a pane whose mode context is
     // bound to a different Project (or no Project) would violate the
@@ -1107,7 +1126,7 @@ export function useShellController(options: ShellControllerOptions) {
         workspace.contextByMode[targetMode].projectId !== surface.projectId
       ) {
         announce("Preview belongs to a different Project. Open it there instead.");
-        return;
+        return false;
       }
       // A Canvas owned by its thread names no Project, so it drops into any
       // Chat pane.
@@ -1119,18 +1138,25 @@ export function useShellController(options: ShellControllerOptions) {
         workspace.contextByMode[targetMode].projectId !== surface.projectId
       ) {
         announce("Canvas belongs to a different Project. Open it there instead.");
-        return;
+        return false;
       }
     }
     if (destination.kind === "center") {
-      await replacePaneSurface(destination.targetPaneId, surface, projectId);
-      return;
+      return enqueueMutation({
+        kind: "workspace",
+        intent: {
+          kind: "replace-pane-surface",
+          paneId: destination.targetPaneId,
+          surface,
+          ...(projectId === undefined ? {} : { projectId }),
+        },
+      });
     }
     const orientation =
       destination.edge === "left" || destination.edge === "right" ? "horizontal" : "vertical";
     const placement =
       destination.edge === "left" || destination.edge === "top" ? "before" : "after";
-    await splitPane(destination.targetPaneId, orientation, placement, surface, projectId);
+    return splitPaneChecked(destination.targetPaneId, orientation, placement, surface, projectId);
   }
 
   function previewSplitResize(splitNodeId: LayoutNodeId, ratio: number): void {
@@ -1929,6 +1955,10 @@ function findPaneMode(workspace: WindowWorkspace, paneId: PaneId): OctantMode | 
     if (findPane(workspace.layouts[mode], paneId) !== undefined) return mode;
   }
   return undefined;
+}
+
+function currentPreviewSet(preview: ThreadPreview): ReadonlySet<string> {
+  return new Set(preview.current === undefined ? [] : [preview.current]);
 }
 
 function findVisibleSurfacePane(
