@@ -285,6 +285,16 @@ describe("SettingsView", () => {
     expect(screen.getByLabelText("Name")).toBeVisible();
   });
 
+  it("keeps links to settings moved out of Host and Data on the pages that hold them now", () => {
+    const { unmount } = renderSettings({
+      initialDeepLink: { section: "host", setting: "host-automation-notifications" },
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "Notifications" })).toBeVisible();
+    unmount();
+    renderSettings({ initialDeepLink: { section: "data", setting: "browser-site-approvals" } });
+    expect(screen.getByRole("heading", { level: 1, name: "Permissions" })).toBeVisible();
+  });
+
   it("moves keyboard shortcuts out of General into a dedicated section", () => {
     renderSettings();
 
@@ -529,13 +539,13 @@ describe("SettingsView", () => {
     await waitFor(() => expect(discoveryController.scan).toHaveBeenCalledTimes(1));
   });
 
-  it("opens the Provider catalog and a driver's setup without scanning the host", async () => {
+  it("lists the provider catalog on Providers & Models and opens a driver's setup without another scan", async () => {
     const providerController = providerControllerFixture();
     const discoveryController = discoveryControllerFixture();
     renderSettings({
       providerController,
       discoveryController,
-      initialDeepLink: { section: "provider-catalog" },
+      initialDeepLink: { section: "providers" },
     });
 
     fireEvent.click(await screen.findByRole("link", { name: /^Codex CLI, / }));
@@ -545,7 +555,9 @@ describe("SettingsView", () => {
         "Codex CLI",
       ),
     ).toBeDefined();
-    expect(discoveryController.scan).not.toHaveBeenCalled();
+    // The page's own look on this host runs once when it opens; browsing the
+    // catalog and opening a driver's setup start no other.
+    expect(discoveryController.scan).toHaveBeenCalledTimes(1);
   });
 
   it("checks every enabled installed provider when discovery is checked again", async () => {
@@ -1543,7 +1555,7 @@ describe("SettingsView", () => {
       extensionClient: extensionClient as never,
       projectNames: new Map([[projectId, "Octant"]]),
     });
-    navigateTo("Data & privacy");
+    navigateTo("Permissions");
 
     expect(screen.getByRole("heading", { name: "Remembered websites" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Remembered tool approvals" })).toBeVisible();
@@ -1558,7 +1570,7 @@ describe("SettingsView", () => {
       revokeToolGrant: vi.fn(),
     };
     renderSettings({ extensionClient: extensionClient as never });
-    navigateTo("Data & privacy");
+    navigateTo("Permissions");
 
     expect(screen.getByRole("heading", { name: "Remembered websites" })).toBeInTheDocument();
     expect(

@@ -74,7 +74,10 @@ export function NavigatorAssistantSettingsView(props: NavigatorAssistantSettings
           Navigator.
         </p>
       ) : null}
-      <SettingsSection title="Models">
+      <SettingsSection
+        description="The models Navigator uses to converse and to review images."
+        title="Navigator"
+      >
         <div className="setgroup">
           <SettingRow
             description="The model Navigator uses. Without one, Navigator stays unavailable rather than silently picking a model."

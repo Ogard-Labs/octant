@@ -199,7 +199,7 @@ describe("NavigatorAssistantService", () => {
     expect(snapshot.status).toBe("unconfigured");
     expect(snapshot.defaultProvider).toBeNull();
     expect(snapshot.settingsTarget).toEqual({
-      section: "navigator-assistant",
+      section: "harness",
       setting: "default-model",
     });
 
@@ -211,7 +211,7 @@ describe("NavigatorAssistantService", () => {
     expect(refusal).toBeInstanceOf(NavigatorAssistantServiceError);
     expect((refusal as NavigatorAssistantServiceError).category).toBe("unconfigured");
     expect((refusal as NavigatorAssistantServiceError).settingsTarget).toEqual({
-      section: "navigator-assistant",
+      section: "harness",
       setting: "default-model",
     });
     expect(chat.created).toEqual([]);

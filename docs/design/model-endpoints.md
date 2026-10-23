@@ -10,7 +10,8 @@ following the [design workflow](README.md#changing-the-design).
 
 ## Provider catalog
 
-Provider catalog, the Models page after Providers & Models, lists every
+Provider catalog, the section of Providers & Models under the providers this
+host has, lists every
 bundled provider driver in the Model endpoints row style. Agent runtimes and
 model endpoints are two sections. A row is one link named with its state
 ("Codex CLI, off. Open setup") and shows the mark, the name, "Agent runtime ·

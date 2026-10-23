@@ -157,6 +157,20 @@ describe("ProviderCatalogView", () => {
     await waitFor(() => expect(view.onConnect).toHaveBeenCalledWith(codexCandidate));
   });
 
+  it("closes the driver's setup when it sends a person to Providers & Models", () => {
+    const view = props();
+    const { rerender } = render(<ProviderCatalogView {...view} />);
+    openSetup(/^Codex CLI, /);
+    // A look that found nothing leaves only the unusual-path route.
+    rerender(
+      <ProviderCatalogView {...view} discovery={{ ...view.discovery!, snapshot: snapshot([]) }} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open Providers & Models" }));
+    expect(view.onOpenProviders).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("heading", { level: 1, name: "Codex CLI" })).toBeNull();
+    expect(screen.getByRole("list", { name: "Agent runtimes" })).toBeDefined();
+  });
+
   it("continues the provider already configured instead of offering to add another", () => {
     const view = props({
       instances: [codex(false)],

@@ -73,7 +73,7 @@ computer that runs Octant, can switch one on; a paired device cannot.
   thread asks you, in a card that says the request came from a program in the
   thread's terminal, not from the thread's agent. **Always allow** remembers
   the site for every Browser use, as it does elsewhere; you can forget it in
-  **Settings → Data & privacy → Remembered websites**.
+  **Settings → Permissions → Remembered websites**.
 - **No captures.** A screenshot the CLI takes is not kept in the thread.
 
 ## How it ends

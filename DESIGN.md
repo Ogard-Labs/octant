@@ -250,26 +250,33 @@ Projects) share one frame: the wide measure, so the title, subtitle, and Back
 control sit on the same left and right edges from page to page. A list there
 runs the frame's width; a board's columns may use all of it. Settings is the same shell with a 920px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
-draws no hairline between groups. The groups are Personal (how Octant looks and
-behaves for you), Modes (each mode's defaults), Models (which provider or model
-answers each job), Agents (what a running agent may do), Integrations, and
-System (the running host, its data, sync, remote access, and usage). Models
+draws no hairline between groups. The groups are General (General, Profile,
+Notifications), Look & feel (Appearance, Sidebar, Keybindings), Modes (each
+mode's defaults), AI & models (Providers & Models, Octant Harness, Voice &
+images: which provider or model answers each job), Tools (Skills & Extensions,
+Computer use, Device tools, GitHub, Linear: what a running agent may reach),
+Privacy & data (Permissions, Data & storage, Sync, Remote access), and Advanced
+(Host, Usage). Permissions holds what a person has already allowed (remembered
+websites, remembered tool approvals, public links); Data & storage holds what
+the host keeps (data map, caches, backup, recovery, export, retention, purge);
+Notifications holds what Octant sends while a person is away. AI & models
 lists each provider kind on the page of what it serves: Providers & Models
-holds only the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK,
-RPC runtimes), and its manual add form offers only those kinds; Octant Harness
+holds the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK, RPC
+runtimes), and its manual add form offers only those kinds, with the Provider
+catalog under them; Octant Harness
 opens with Model endpoints, every endpoint Octant calls over an API itself
 (OpenAI-compatible, Anthropic-compatible, Ollama, Azure AI Foundry), followed
-by model roles and helper agents; with no endpoint yet it offers three ways
+by model roles, helper agents, and Navigator's models; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
-sign-in one click with its terms as a consent line under the button. Image
-generation holds the image profiles and custom image sources. Provider catalog lists
-every bundled driver of both kinds and sends each one to the page that
-configures it. A sign-in
+sign-in one click with its terms as a consent line under the button. Voice &
+images holds speech, transcription, the image profiles, and custom image
+sources. The Provider catalog lists every bundled driver of both kinds and
+sends each one to the page that configures it. A sign-in
 endpoint's row says who is signed in, its detail page offers sign out and
 sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
-to its old page. Personal holds Appearance (theme, window glass, background,
+to its old page. Look & feel holds Appearance (theme, window glass, background,
 text, accessibility) and a separate Sidebar page (layout, destinations, sidebar
 background, and a thread-row grid of detail by list). A page names its scope once, under its title, and a row names
 its own only when it differs. Settings folds long choices it does not need
@@ -544,8 +551,8 @@ Code shows a primary **Set up a provider** action that opens Providers &
 Models and returns to the same draft. The action leaves once any instance is
 ready; the model picker takes its place. Profile,
 appearance, the mode switches, and Navigator are not first-run steps: Profile
-and Appearance live in Settings › Personal, and Navigator in its own Settings
-section. No display name is inferred from the OS account. Continue retains
+lives in Settings › General, Appearance in Settings › Look & feel, and
+Navigator's models in a section of Settings › Octant Harness. No display name is inferred from the OS account. Continue retains
 compact recent-task rows and their status and Git cues.
 Empty Code entry offers folder setup and a direct route to Code settings; opening
 that setting never turns on projectless threads.
@@ -1876,7 +1883,7 @@ callbacks; the existing host or server still decides whether an action may
 proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
-and the window is a local one. Settings › Data & privacy lists those answers by
+and the window is a local one. Settings › Permissions lists those answers by
 Project, each with Revoke, beside Remembered websites. A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent

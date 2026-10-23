@@ -105,7 +105,7 @@ a tombstone. A remote principal cannot set a window or purge. SQLite free
 pages may retain bytes until vacuum; that residual is reported. See
 decision 0035.
 
-**Data map.** Settings → Data & privacy shows a read-only map of journal, projections,
+**Data map.** Settings → Data & storage shows a read-only map of journal, projections,
 artifacts, credential references (never values), caches, and outbound
 categories. It does not purge or export; those actions stay on retention
 and thread export.

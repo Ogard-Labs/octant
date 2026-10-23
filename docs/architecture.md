@@ -555,7 +555,7 @@ document as a future version. Frames follow the
   inside, the approval card names the markup it writes, and a themed design
   is drawn in the theme the person's window hands over; this has shipped.
   Markdown export writes the title. A public link is an export too: off until
-  the person turns on Settings › Data & privacy › Public links, published only from
+  the person turns on Settings › Permissions › Public links, published only from
   the approval card in a local window and never by an agent, it carries the
   share filter's blocks without host, Project, thread, or source identity to
   the public Canvas share service, which can read it, draws design frames only
@@ -1778,7 +1778,7 @@ flowchart LR
   A single narrow SQLite port has two adapters — `bun:sqlite` in production
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
-  the port. Settings → Data & privacy exposes a read-only, server-authoritative data
+  the port. Settings → Data & storage exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
@@ -2493,7 +2493,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   is created disabled. Discovery never installs or updates runtimes, never
   toggles an existing instance, and never treats enablement as readiness
   ([decisions/0112-first-run-claude-codex-enablement.md](decisions/0112-first-run-claude-codex-enablement.md)).
-- **Provider catalog.** Settings › Provider catalog lists the bundled
+- **Provider catalog.** Settings › Providers & Models › Provider catalog lists the bundled
   provider-driver packages (`bundledProviderDriverCatalog` in
   `@octant/plugin-host`). Each entry is validated against the public
   `ProviderDriverCatalogEntry` schema, which `@octant/plugin-api` re-exports
@@ -2601,13 +2601,13 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   keep thread authority and the agent tool generates only into its own thread)
   and an app-managed `octant_create_image` tool invoke that job service
   through `/api/image/` when an enabled image profile exists (a dedicated
-  image provider, or a custom image source named in Settings › Image
-  generation, which every renderer surface lists alongside them). The
+  image provider, or a custom image source named in Settings › Voice &
+  images, which every renderer surface lists alongside them). The
   composer of an open Chat, Work, or Code thread also carries a **Create
   image…** icon beside attach and dictate. It opens the same generation sheet,
   scoped to that thread, so the result lands there as a thread artifact; it is
   a person-driven action only, because the agent's image tool stays in Chat.
-  With no image profile ready the icon opens Settings › Image generation
+  With no image profile ready the icon opens Settings › Voice & images
   instead, and it is absent where the host serves no image generation. Work and
   Code keep their existing saves of a result: a Save click is the consent in
   Work, and Code confirms. The start-screen and draft composers have no
@@ -5440,8 +5440,8 @@ same. This holds in Chat, Work, and Code.
     host stopped before appending the revocation; Settings does not list it
     and a call asks again. A person
     revokes one through the local-only `/api/extensions/tool-grants`, which
-    lists and revokes and has no request that adds a grant. Settings › Data &
-    privacy lists them by Project with Revoke, and the prompt offers "always
+    lists and revokes and has no request that adds a grant. Settings ›
+    Permissions lists them by Project with Revoke, and the prompt offers "always
     allow" only to a client on a loopback host.
   - This covers only the tools Octant itself calls. An MCP server that a
     provider runtime starts from the person's own configuration (for example

@@ -72,7 +72,7 @@ describe("navigatorAssistantImagePolicy", () => {
 
   it("exposes the default-model settings target for unconfigured readiness", () => {
     expect(NAVIGATOR_ASSISTANT_DEFAULT_MODEL_TARGET).toEqual({
-      section: "navigator-assistant",
+      section: "harness",
       setting: "default-model",
     });
   });

@@ -86,6 +86,22 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "notifications",
+      label: "Notifications",
+      scope: "host",
+      keywords:
+        "notifications notify alerts push phone waiting approval failure completion automation routines",
+      settings: [
+        {
+          id: settingId("host-automation-notifications"),
+          label: "Automation notifications",
+          scope: "host",
+          keywords:
+            "automation notifications push waiting approval failure completion opt-in redacted destinations receipts apns fcm unavailable",
+        },
+      ],
+    },
+    {
       id: "appearance",
       label: "Appearance",
       scope: "app",
@@ -568,7 +584,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Providers & Models",
       scope: "app",
       keywords:
-        "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version",
+        "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
       settings: [
         {
           id: settingId("opencode-managed-update"),
@@ -633,19 +649,11 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "provider-catalog",
-      label: "Provider catalog",
-      scope: "host",
-      keywords:
-        "provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
-      settings: [],
-    },
-    {
       id: "harness",
       label: "Octant Harness",
       scope: "app",
       keywords:
-        "octant harness native agent loop model endpoints endpoint api openai-compatible anthropic-compatible ollama azure ai foundry deployment base url api key bearer protocol manual model ids sign in with chatgpt plan openrouter subscription model roles main model backup model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips agents subagents helper agents child creation posture off on automatic bounded hierarchy",
+        "octant harness native agent loop model endpoints endpoint api openai-compatible anthropic-compatible ollama azure ai foundry deployment base url api key bearer protocol manual model ids sign in with chatgpt plan openrouter subscription model roles main model backup model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips agents subagents helper agents child creation posture off on automatic bounded hierarchy navigator assistant default model provider vision reviewer image screenshot dock help",
       settings: [
         {
           id: settingId("model-endpoints"),
@@ -679,15 +687,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "helper agents subagents concurrency at once limit parallel thread",
         },
-      ],
-    },
-    {
-      id: "navigator-assistant",
-      label: "Navigator",
-      scope: "app",
-      keywords:
-        "navigator assistant default model provider vision reviewer image screenshot dock help",
-      settings: [
         {
           id: settingId("default-model"),
           label: "Default model",
@@ -704,10 +703,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     },
     {
       id: "voice",
-      label: "Voice",
+      label: "Voice & images",
       scope: "app",
       keywords:
-        "voice speech microphone dictation transcription speech to text text to speech read aloud whisper tts stt",
+        "voice speech microphone dictation transcription speech to text text to speech read aloud whisper tts stt image generation image provider profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint",
       settings: [
         {
           id: settingId("transcription"),
@@ -721,15 +720,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "voice speech text to speech read aloud tts model voice",
         },
-      ],
-    },
-    {
-      id: "image-generation",
-      label: "Image generation",
-      scope: "app",
-      keywords:
-        "image generation image provider profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint",
-      settings: [
         {
           id: settingId("custom-image-sources"),
           label: "Custom image sources",
@@ -777,6 +767,22 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Image provider API key",
           scope: "app",
           keywords: "image provider api key credential",
+        },
+      ],
+    },
+    {
+      id: "skills",
+      label: "Skills & Extensions",
+      scope: "host",
+      keywords:
+        "skills extensions marketplace installed plugin package trust enable component desired effective provenance compatibility quarantine draining broken unavailable interrupted waiting offline failure mcp skill",
+      settings: [
+        {
+          id: settingId("marketplace-fetches"),
+          label: "Marketplace fetches",
+          scope: "host",
+          keywords:
+            "marketplace fetches skills npm github registry catalog search inspect install privacy off",
         },
       ],
     },
@@ -853,22 +859,6 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "skills",
-      label: "Skills & Extensions",
-      scope: "host",
-      keywords:
-        "skills extensions marketplace installed plugin package trust enable component desired effective provenance compatibility quarantine draining broken unavailable interrupted waiting offline failure mcp skill",
-      settings: [
-        {
-          id: settingId("marketplace-fetches"),
-          label: "Marketplace fetches",
-          scope: "host",
-          keywords:
-            "marketplace fetches skills npm github registry catalog search inspect install privacy off",
-        },
-      ],
-    },
-    {
       id: "github",
       label: "GitHub",
       scope: "host",
@@ -911,85 +901,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "host",
-      label: "Host",
+      id: "permissions",
+      label: "Permissions",
       scope: "host",
       keywords:
-        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities headless automation notifications push waiting approval failure completion apns fcm federated hosts maintenance reset layout window bounds diagnostics export support",
+        "permissions remembered websites sites origins browser always allow forget public links share sharing remembered tool approvals extension tools revoke trust allowed",
       settings: [
-        {
-          id: settingId("host-automation-notifications"),
-          label: "Automation notifications",
-          scope: "host",
-          keywords:
-            "automation notifications push waiting approval failure completion opt-in redacted destinations receipts apns fcm unavailable",
-        },
-        {
-          id: settingId("reset-layout"),
-          label: "Reset active mode layout",
-          scope: "app",
-          keywords: "reset active mode layout workspace",
-        },
-        {
-          id: settingId("reset-window-bounds"),
-          label: "Reset native window bounds",
-          scope: "app",
-          keywords: "reset native window bounds",
-          nativeRequired: "nativeBoundsAvailable",
-        },
-        {
-          id: settingId("export-diagnostics"),
-          label: "Export diagnostics",
-          scope: "host",
-          keywords:
-            "export diagnostics evidence packet support redacted safe sealed receipt provider storage network remote auth migration confinement process cleanup",
-        },
-        {
-          id: settingId("journal-growth"),
-          label: "Journal growth",
-          scope: "host",
-          keywords: "journal growth events per day kind rows database size diagnostics",
-        },
-        {
-          id: settingId("host-automatic-startup"),
-          label: "Automatic startup",
-          scope: "host",
-          keywords: "automatic startup launch at login start",
-        },
-        {
-          id: settingId("host-backup"),
-          label: "Host snapshot",
-          scope: "host",
-          keywords: "snapshot backup restore before risky changes",
-        },
-        {
-          id: settingId("host-lifecycle"),
-          label: "Host process",
-          scope: "host",
-          keywords: "host process stop restart",
-        },
-      ],
-    },
-    {
-      id: "data",
-      label: "Data & privacy",
-      scope: "host",
-      keywords:
-        "data privacy backup snapshot restore recovery stored data map location journal projections artifacts credentials keychain caches what leaves this machine retention purge export erase delete history",
-      settings: [
-        {
-          id: settingId("data-map"),
-          label: "Data map",
-          scope: "host",
-          keywords:
-            "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
-        },
-        {
-          id: settingId("thread-retention"),
-          label: "Thread retention",
-          scope: "host",
-          keywords: "thread retention window purge journal erase delete history",
-        },
         {
           id: settingId("public-links"),
           label: "Public links",
@@ -1016,6 +933,28 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords:
             "remembered tool approvals mcp plugin extension server project allow always revoke ask again permission",
+        },
+      ],
+    },
+    {
+      id: "data",
+      label: "Data & storage",
+      scope: "host",
+      keywords:
+        "data privacy backup snapshot restore recovery stored data map location journal projections artifacts credentials keychain caches what leaves this machine retention purge export erase delete history",
+      settings: [
+        {
+          id: settingId("data-map"),
+          label: "Data map",
+          scope: "host",
+          keywords:
+            "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
+        },
+        {
+          id: settingId("thread-retention"),
+          label: "Thread retention",
+          scope: "host",
+          keywords: "thread retention window purge journal erase delete history",
         },
       ],
     },
@@ -1120,6 +1059,59 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Pair with another computer",
           scope: "host",
           keywords: "pair pairing another computer code",
+        },
+      ],
+    },
+    {
+      id: "host",
+      label: "Host",
+      scope: "host",
+      keywords:
+        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities headless automation notifications push waiting approval failure completion apns fcm federated hosts maintenance reset layout window bounds diagnostics export support",
+      settings: [
+        {
+          id: settingId("reset-layout"),
+          label: "Reset active mode layout",
+          scope: "app",
+          keywords: "reset active mode layout workspace",
+        },
+        {
+          id: settingId("reset-window-bounds"),
+          label: "Reset native window bounds",
+          scope: "app",
+          keywords: "reset native window bounds",
+          nativeRequired: "nativeBoundsAvailable",
+        },
+        {
+          id: settingId("export-diagnostics"),
+          label: "Export diagnostics",
+          scope: "host",
+          keywords:
+            "export diagnostics evidence packet support redacted safe sealed receipt provider storage network remote auth migration confinement process cleanup",
+        },
+        {
+          id: settingId("journal-growth"),
+          label: "Journal growth",
+          scope: "host",
+          keywords: "journal growth events per day kind rows database size diagnostics",
+        },
+        {
+          id: settingId("host-automatic-startup"),
+          label: "Automatic startup",
+          scope: "host",
+          keywords: "automatic startup launch at login start",
+        },
+        {
+          id: settingId("host-backup"),
+          label: "Host snapshot",
+          scope: "host",
+          keywords: "snapshot backup restore before risky changes",
+        },
+        {
+          id: settingId("host-lifecycle"),
+          label: "Host process",
+          scope: "host",
+          keywords: "host process stop restart",
         },
       ],
     },

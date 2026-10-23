@@ -143,6 +143,12 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
           setReturnFocusTo(open.listing.entry.driverKind);
           setOpenKind(undefined);
         }}
+        // The catalog shares a page with Providers & Models, so sending a
+        // person there means closing this setup to show the providers list.
+        onOpenProviders={() => {
+          setOpenKind(undefined);
+          props.onOpenProviders();
+        }}
       />
     );
   }
@@ -167,17 +173,21 @@ export function ProviderCatalogView(props: ProviderCatalogViewProps) {
       <div aria-live="polite" className="provider-settings__message-slot">
         {props.status === "loading" ? <p role="status">Loading providers…</p> : null}
       </div>
-      <p className="settings-section-line provider-catalog__intro">
-        Every provider driver here ships with Octant, so each is already installed and trusted.
-        Opening one reads what this host already knows; nothing runs until you choose a step.
-        <span
-          aria-label="Provider catalog summary"
-          className="endpoint-list__summary provider-catalog__summary"
-          role="status"
-        >
-          {entries.length} drivers · {ready} ready · {needsYou} need you
-        </span>
-      </p>
+      {/* The catalog shares Providers & Models with the providers this host
+          has, so it names itself before its two lists. */}
+      <SettingsSection title="Provider catalog">
+        <p className="settings-section-line provider-catalog__intro">
+          Every provider driver here ships with Octant, so each is already installed and trusted.
+          Opening one reads what this host already knows; nothing runs until you choose a step.
+          <span
+            aria-label="Provider catalog summary"
+            className="endpoint-list__summary provider-catalog__summary"
+            role="status"
+          >
+            {entries.length} drivers · {ready} ready · {needsYou} need you
+          </span>
+        </p>
+      </SettingsSection>
       <SettingsSection
         description="Runtimes run their own agent loop. Octant finds them on this host and drives them."
         title="Agent runtimes"
