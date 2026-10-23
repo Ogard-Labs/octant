@@ -353,7 +353,12 @@ error instead of retaining another integration's account controls.
 ### Content tabs
 
 Workspace content and dock tool tabs share a compact 26px recipe for height,
-spacing, selected fill and edge, and close controls. Close controls retain their
+spacing, selected fill and edge, and close controls. A pane's conversation tabs
+then become a row of equal soft pills, 28px tall at a shared 196px (never
+narrower than 112px), 8px apart: every tab carries a faint wash of the ink, the
+hovered one a little more, and the open one the brightest wash with a hairline
+edge, so the row reads as a set of open conversations rather than a line of
+links with one highlighted. Dock tool tabs keep the bare recipe. Close controls retain their
 width; inactive controls appear on hover or keyboard focus and stay visible on
 touch devices. Thread tabs retain provider marks when enabled. The pane's drag
 handle stays quiet: an environment mark (a 20px neutral tile, laptop for this
