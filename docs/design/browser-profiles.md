@@ -221,12 +221,14 @@ Each refusal is a value the pane shows in words; none is a silent no-op.
 ## Decisions for review
 
 - **Extension toolbar popups.** Electron alone does not show an extension's
-  toolbar popup or implement most of `chrome.tabs`. The MIT-licensed
-  `electron-chrome-extensions` package adds both. Without it, extensions get
-  content scripts, a background service worker, and an options page, which is
-  enough for page-changing extensions but not for ones driven from a popup.
-  This specification builds without it first; adding it is a separate change
-  that needs the maintainer's approval of the dependency.
+  toolbar popup or implement most of `chrome.tabs`. The
+  `electron-chrome-extensions` package adds both, but it is offered under
+  GPL-3.0 or a paid commercial license, not a permissive one. Without popup
+  support, extensions get content scripts, a background service worker, and an
+  options page, which is enough for page-changing extensions but not for ones
+  driven from a popup. This specification builds without it first; popup
+  support is a separate change, either Octant's own or that package under a
+  paid license, and needs the maintainer's decision before it is built.
 - **Rationale for per-pair approvals.** Remembering an origin for Private pages
   is safe because a Private page carries no sign-in. The same origin in a
   profile acts as the person's account, so the grant has to name the profile it
