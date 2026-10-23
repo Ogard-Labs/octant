@@ -19,6 +19,130 @@ const firstPaneId = decodePaneId("00000000-0000-4000-8000-000000000612");
 const secondPaneId = decodePaneId("00000000-0000-4000-8000-000000000622");
 const splitNodeId = "00000000-0000-4000-8000-000000000610";
 
+function chatTab(index: number) {
+  return {
+    kind: "chat-thread" as const,
+    id: `00000000-0000-4000-8000-00000000094${String(index)}`,
+    threadId: `00000000-0000-4000-8000-00000000095${String(index)}`,
+    mode: "chat" as const,
+    title: `Chat ${String(index)}`,
+  };
+}
+
+function threeChatTabs() {
+  const layout = decodeWorkspaceLayoutNode({
+    kind: "pane",
+    nodeId: "00000000-0000-4000-8000-000000000611",
+    paneId: String(firstPaneId),
+    surface: chatTab(0),
+  });
+  const contentTabs = new Map([[firstPaneId, [chatTab(0), chatTab(1), chatTab(2)] as never]]);
+  return { layout, contentTabs };
+}
+
+describe("tabs side by side", () => {
+  it("picks tabs with Cmd- and Shift-click, then shows them side by side from the menu", async () => {
+    const user = userEvent.setup();
+    const { layout, contentTabs } = threeChatTabs();
+    const onActivateContentTab = vi.fn();
+    const onArrangeSideBySide = vi.fn();
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        contentTabs={contentTabs}
+        layout={layout}
+        mode="chat"
+        onActivateContentTab={onActivateContentTab}
+        onArrangeSideBySide={onArrangeSideBySide}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+    const tab = (name: string) => screen.getByRole("tab", { name: new RegExp(`^${name}`) });
+
+    await user.keyboard("[MetaLeft>]");
+    await user.click(tab("Chat 1"));
+    await user.keyboard("[/MetaLeft]");
+    expect(onActivateContentTab).not.toHaveBeenCalled();
+    // The open tab joins a selection started from it.
+    expect(tab("Chat 0")).toHaveAccessibleName("Chat 0, selected");
+    expect(tab("Chat 1")).toHaveAccessibleName("Chat 1, selected");
+
+    await user.keyboard("[ShiftLeft>]");
+    await user.click(tab("Chat 2"));
+    await user.keyboard("[/ShiftLeft]");
+    expect(tab("Chat 2")).toHaveAccessibleName("Chat 2, selected");
+
+    fireEvent.contextMenu(tab("Chat 2"));
+    await user.click(await screen.findByRole("menuitem", { name: "Show side by side" }));
+    expect(onArrangeSideBySide).toHaveBeenCalledWith(firstPaneId, [
+      chatTab(0),
+      chatTab(1),
+      chatTab(2),
+    ]);
+  });
+
+  it("puts a right-clicked tab beside the open one when nothing is selected", async () => {
+    const user = userEvent.setup();
+    const { layout, contentTabs } = threeChatTabs();
+    const onArrangeSideBySide = vi.fn();
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        contentTabs={contentTabs}
+        layout={layout}
+        mode="chat"
+        onArrangeSideBySide={onArrangeSideBySide}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+    fireEvent.contextMenu(screen.getByRole("tab", { name: "Chat 2" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Show side by side" }));
+    expect(onArrangeSideBySide).toHaveBeenCalledWith(firstPaneId, [chatTab(0), chatTab(2)]);
+  });
+
+  it("keeps a thread's tab on double click", async () => {
+    const user = userEvent.setup();
+    const { layout, contentTabs } = threeChatTabs();
+    const onKeepContentTab = vi.fn();
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        contentTabs={contentTabs}
+        layout={layout}
+        mode="chat"
+        onKeepContentTab={onKeepContentTab}
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+    await user.dblClick(screen.getByRole("tab", { name: "Chat 1" }));
+    expect(onKeepContentTab).toHaveBeenCalledWith(chatTab(1).threadId);
+  });
+
+  it("drags the open tab with its pane, and another tab as one leaving this pane's row", () => {
+    const { layout, contentTabs } = threeChatTabs();
+    const callbacks = splitCallbacks();
+    render(
+      <SplitWorkspace
+        {...callbacks}
+        contentTabs={contentTabs}
+        layout={layout}
+        mode="chat"
+        renderSurface={(surface) => surface.title}
+      />,
+    );
+    fireEvent.pointerDown(screen.getByRole("tab", { name: "Chat 0" }), { button: 0 });
+    fireEvent.pointerDown(screen.getByRole("tab", { name: "Chat 2" }), { button: 0 });
+    const sources = vi.mocked(callbacks.drag.onPointerDown).mock.calls.map(([, source]) => source);
+    expect(sources[0]).toMatchObject({ paneId: firstPaneId, surface: chatTab(0) });
+    expect(sources[0]).not.toHaveProperty("fromTab");
+    expect(sources[1]).toMatchObject({
+      surface: chatTab(2),
+      fromTab: { paneId: firstPaneId, tabId: chatTab(2).id },
+    });
+    expect(sources[1]).not.toHaveProperty("paneId");
+  });
+});
+
 describe("SplitWorkspace", () => {
   it("keeps a restored file closable even when it is the only content tab", async () => {
     const user = userEvent.setup();

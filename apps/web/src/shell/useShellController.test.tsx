@@ -1978,6 +1978,56 @@ describe("useShellController", () => {
     }
   });
 
+  it("lays two, three, or four tabs out in one pane in tab order", async () => {
+    const chat = (index: number): WorkspaceTab =>
+      ({
+        kind: "chat-thread",
+        id: `00000000-0000-4000-8000-00000000097${String(index)}`,
+        threadId: `00000000-0000-4000-8000-00000000098${String(index)}`,
+        mode: "chat",
+        title: `Chat ${String(index)}`,
+      }) as WorkspaceTab;
+    const titles = (layout: WorkspaceLayoutNode) => panes(layout).map((pane) => pane.surface.title);
+    for (const count of [2, 3, 4]) {
+      const server = statefulClient();
+      const { result } = renderHook(() =>
+        useShellController({
+          client: server.client,
+          serverUrl: "http://127.0.0.1:13773",
+          windowId,
+        }),
+      );
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+      await act(async () => result.current.setMode("chat"));
+      const pane = firstPane(result.current.workspace!.layouts.chat);
+      const surfaces = [0, 1, 2, 3].slice(0, count).map(chat);
+      await act(async () => result.current.arrangeSideBySide(pane.paneId, surfaces));
+      const layout = result.current.workspace!.layouts.chat;
+      if (count === 2) {
+        expect(layout).toMatchObject({ kind: "split", orientation: "horizontal" });
+        expect(titles(layout)).toEqual(["Chat 0", "Chat 1"]);
+        // The tab now shown in its own pane leaves the first pane's row.
+        expect(
+          result.current.contentTabs.get(pane.paneId)?.map((tab) => tab.title) ?? [],
+        ).not.toContain("Chat 1");
+      } else if (count === 3) {
+        // Equal columns: the first takes a third, the rest split what remains.
+        expect(layout).toMatchObject({ kind: "split", orientation: "horizontal" });
+        expect(layout.kind === "split" ? layout.ratio : 0).toBeCloseTo(1 / 3);
+        expect(titles(layout)).toEqual(["Chat 0", "Chat 1", "Chat 2"]);
+      } else {
+        // A 2×2 grid read left column then right column: 0 over 2, 1 over 3.
+        expect(layout).toMatchObject({
+          kind: "split",
+          orientation: "horizontal",
+          first: { kind: "split", orientation: "vertical" },
+          second: { kind: "split", orientation: "vertical" },
+        });
+        expect(titles(layout)).toEqual(["Chat 0", "Chat 2", "Chat 1", "Chat 3"]);
+      }
+    }
+  });
+
   it("commits mode fallback while preserving and restoring the disabled mode layout", async () => {
     const server = statefulClient();
     const storageWrite = vi.spyOn(Storage.prototype, "setItem");

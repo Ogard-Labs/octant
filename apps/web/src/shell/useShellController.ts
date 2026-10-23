@@ -246,6 +246,8 @@ type WorkspaceIntent =
       /** Omitted for an empty split: the new pane opens on the mode welcome. */
       readonly surface?: WorkspaceTab;
       readonly projectId?: ProjectId;
+      /** The first child's share; half when omitted. */
+      readonly ratio?: number;
     }
   | {
       readonly kind: "pin-in-pane";
@@ -293,6 +295,20 @@ export function useShellController(options: ShellControllerOptions) {
   const [status, setStatus] = useState<ShellControllerStatus>("loading");
   const [authoritative, setAuthoritative] = useState<AuthoritativeShell>();
   const [contentTabs, setContentTabs] = useState<WorkspaceContentTabs>(new Map());
+  // Threads opened with a single click from the sidebar; the next open in
+  // their pane takes their tab. A double click keeps one (see workspace.md,
+  // Opening into tabs). Read at commit time, so a ref rather than state.
+  const previewThreads = useRef(new Set<string>());
+  // Stable, so the sidebar rows reading them through context do not re-render
+  // with every shell render.
+  /** The sidebar is about to open this thread with a single click. */
+  const openThreadAsPreview = useCallback((threadId: string) => {
+    previewThreads.current.add(threadId);
+  }, []);
+  /** A double click on the thread's row or tab keeps its tab. */
+  const keepThreadTab = useCallback((threadId: string) => {
+    previewThreads.current.delete(threadId);
+  }, []);
   const [errorMessage, setErrorMessage] = useState<string>();
   const [crossContextOffer, setCrossContextOffer] = useState<
     | {
@@ -341,7 +357,12 @@ export function useShellController(options: ShellControllerOptions) {
           const next = fromBootstrap(bootstrap);
           const previousWorkspace = committedShell.current?.workspace ?? next.workspace;
           setContentTabs((tabs) =>
-            rememberWorkspaceContent(tabs, previousWorkspace, next.workspace),
+            rememberWorkspaceContent(
+              tabs,
+              previousWorkspace,
+              next.workspace,
+              previewThreads.current,
+            ),
           );
           committedShell.current = next;
           setAuthoritative(next);
@@ -472,7 +493,9 @@ export function useShellController(options: ShellControllerOptions) {
         workspaceVersion: result.version,
       };
       committedShell.current = next;
-      setContentTabs((tabs) => rememberWorkspaceContent(tabs, previous.workspace, next.workspace));
+      setContentTabs((tabs) =>
+        rememberWorkspaceContent(tabs, previous.workspace, next.workspace, previewThreads.current),
+      );
       setAuthoritative(next);
       setStatus("ready");
       setErrorMessage(undefined);
@@ -946,7 +969,19 @@ export function useShellController(options: ShellControllerOptions) {
     surface?: WorkspaceTab,
     projectId?: ProjectId,
   ): Promise<void> {
-    await enqueueMutation({
+    await splitPaneChecked(targetPaneId, orientation, placement, surface, projectId);
+  }
+
+  /** `splitPane` that says whether the host took the split, for chained layouts. */
+  async function splitPaneChecked(
+    targetPaneId: PaneId,
+    orientation: "horizontal" | "vertical",
+    placement: "before" | "after" = "after",
+    surface?: WorkspaceTab,
+    projectId?: ProjectId,
+    ratio?: number,
+  ): Promise<boolean> {
+    return enqueueMutation({
       kind: "workspace",
       intent: {
         kind: "split-pane",
@@ -955,8 +990,65 @@ export function useShellController(options: ShellControllerOptions) {
         placement,
         ...(surface === undefined ? {} : { surface }),
         ...(projectId === undefined ? {} : { projectId }),
+        ...(ratio === undefined ? {} : { ratio }),
       },
     });
+  }
+
+  /**
+   * Lays two to four tabs out in one pane, in tab order: two side by side,
+   * three in equal columns, four as a 2×2 grid (workspace.md, Moving tabs and
+   * showing them side by side). Each step is an ordinary command, so a
+   * refused placement stops the arrangement where the host refused it.
+   */
+  async function arrangeSideBySide(
+    paneId: PaneId,
+    surfaces: ReadonlyArray<WorkspaceTab>,
+  ): Promise<void> {
+    const [first, second, third, fourth] = surfaces;
+    if (first === undefined || second === undefined) return;
+    const paneOf = (surface: WorkspaceTab): PaneId | undefined => {
+      const shell = committedShell.current;
+      if (shell === undefined) return undefined;
+      const layout = shell.workspace.layouts[shell.workspace.activeMode];
+      return findVisibleSurfacePane(layout, surface)?.paneId;
+    };
+    if (paneOf(first) !== paneId) {
+      const opened = await enqueueMutation({
+        kind: "workspace",
+        intent: { kind: "reopen-content", paneId, surface: first },
+      });
+      if (!opened) return;
+    }
+    if (third === undefined) {
+      await splitPaneChecked(paneId, "horizontal", "after", second);
+    } else if (fourth === undefined) {
+      if (!(await splitPaneChecked(paneId, "horizontal", "after", second, undefined, 1 / 3)))
+        return;
+      const secondPane = paneOf(second);
+      if (secondPane !== undefined)
+        await splitPaneChecked(secondPane, "horizontal", "after", third);
+    } else {
+      if (!(await splitPaneChecked(paneId, "horizontal", "after", second))) return;
+      if (!(await splitPaneChecked(paneId, "vertical", "after", third))) return;
+      const secondPane = paneOf(second);
+      if (secondPane !== undefined) await splitPaneChecked(secondPane, "vertical", "after", fourth);
+    }
+    // The tabs now shown in their own panes leave the row they came from.
+    const moved = surfaces.slice(1, 4);
+    setContentTabs((current) =>
+      new Map(current).set(
+        paneId,
+        (current.get(paneId) ?? []).filter(
+          (entry) => !moved.some((surface) => sameWorkspaceSurface(surface, entry)),
+        ),
+      ),
+    );
+    if (surfaces.length > 4) {
+      announce(
+        `Showing the first four side by side; ${String(surfaces.length - 4)} stayed as tabs.`,
+      );
+    }
   }
 
   async function replacePaneSurface(
@@ -1130,8 +1222,11 @@ export function useShellController(options: ShellControllerOptions) {
     dismissCrossContextOffer,
     openCrossContextInNewWindow,
     canOpenCrossContextInNewWindow: options.nativeHost?.openInNewWindow !== undefined,
+    arrangeSideBySide,
     dropSurface,
     errorMessage,
+    keepThreadTab,
+    openThreadAsPreview,
     focusPane,
     pinInPane,
     openDraftThread,
@@ -1632,7 +1727,7 @@ function createWorkspaceMutation(
           newPaneId: newPaneId(),
           orientation: intent.orientation,
           placement: intent.placement,
-          ratio: 0.5 as SplitRatio,
+          ratio: (intent.ratio ?? 0.5) as SplitRatio,
         },
         message: `${intent.orientation === "horizontal" ? "Horizontal" : "Vertical"} split created.`,
         activatedSurfaceId: existing?.surface.id ?? surface.id,

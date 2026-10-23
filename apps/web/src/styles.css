@@ -7706,6 +7706,11 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .workspace-content-tabs .content-tab:hover {
   background: color-mix(in oklab, var(--oct-fg) 7%, transparent);
 }
+/* Picked for side by side: a step between a plain tab and the open one. */
+.workspace-content-tabs .content-tab[data-selected="true"] {
+  background: color-mix(in oklab, var(--oct-fg) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--oct-fg) 6%, transparent);
+}
 .workspace-content-tabs .content-tab:has([role="tab"][aria-selected="true"]) {
   background: color-mix(in oklab, var(--oct-fg) 11%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--oct-fg) 9%, transparent);

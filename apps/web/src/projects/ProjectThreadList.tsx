@@ -38,6 +38,7 @@ import { describePullRequestSummary } from "../threadBoard/ThreadBoardPullReques
 import { githubPullRequestUrl } from "../threadBoard/githubPullRequestUrl";
 import { pullRequestKey, threadRowPullRequestDestinations } from "./threadRowPullRequests";
 import { SidebarThreadDragContext } from "../shell/useWorkspaceTabDrag";
+import { SidebarThreadTabsContext } from "../shell/sidebarThreadTabs";
 import { useSidebarRowProperties } from "../shell/sidebarRowProperties";
 import {
   groupThreadsByCheckout,
@@ -760,6 +761,7 @@ interface ProjectThreadRowProps {
 
 const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowProps) {
   const drag = useContext(SidebarThreadDragContext);
+  const tabs = useContext(SidebarThreadTabsContext);
   const followUpParent = useContext(FollowUpLineageContext).get(props.thread.threadId);
   const nestedUnderParent =
     followUpParent !== undefined &&
@@ -780,8 +782,9 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
   ) : null;
   const onSelect = useCallback(() => {
     if (drag?.consumeThreadClickSuppression(rowId) === true) return;
+    tabs?.openAsPreview(props.thread.threadId);
     props.onSelectThread(rowId);
-  }, [drag, props.onSelectThread, rowId]);
+  }, [drag, props.onSelectThread, props.thread.threadId, rowId, tabs]);
   const onRename = useCallback(
     (title: string) => {
       props.onCancelRename();
@@ -843,6 +846,7 @@ const ProjectThreadRow = memo(function ProjectThreadRow(props: ProjectThreadRowP
         props.thread.unread === undefined ? undefined : props.thread.unread ? "true" : "false"
       }
       onClick={onSelect}
+      onDoubleClick={() => tabs?.keep(props.thread.threadId)}
       {...(drag === null
         ? {}
         : {

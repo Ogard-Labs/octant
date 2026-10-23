@@ -19,11 +19,23 @@ function isContent(surface: WorkspaceTab): boolean {
   );
 }
 
-/** Navigation references only. Every activation still goes through the host. */
+function threadIdOf(surface: WorkspaceTab): string | undefined {
+  return "threadId" in surface && surface.threadId !== null ? String(surface.threadId) : undefined;
+}
+
+/**
+ * Navigation references only. Every activation still goes through the host.
+ *
+ * `preview` names threads opened with a single click from the sidebar. When
+ * a pane moves on from one of those, the next surface takes its tab in place
+ * instead of adding one, so browsing threads does not grow the row; a thread
+ * kept with a double click, or opened any other way, keeps its tab.
+ */
 export function rememberWorkspaceContent(
   current: WorkspaceContentTabs,
   previous: WindowWorkspace,
   next: WindowWorkspace,
+  preview: ReadonlySet<string> = new Set(),
 ): WorkspaceContentTabs {
   const result = new Map<PaneId, ReadonlyArray<WorkspaceTab>>();
   for (const mode of ["chat", "work", "code"] as const) {
@@ -34,6 +46,21 @@ export function rememberWorkspaceContent(
       const prior = sameContext
         ? panes(previous.layouts[mode]).find((item) => item.paneId === pane.paneId)?.surface
         : undefined;
+      const priorThread = prior === undefined ? undefined : threadIdOf(prior);
+      const takesOver =
+        prior !== undefined &&
+        priorThread !== undefined &&
+        preview.has(priorThread) &&
+        isContent(pane.surface) &&
+        !sameWorkspaceSurface(prior, pane.surface) &&
+        !entries.some((entry) => sameWorkspaceSurface(entry, pane.surface));
+      if (takesOver) {
+        const index = entries.findIndex((entry) => sameWorkspaceSurface(entry, prior));
+        if (index >= 0) entries[index] = pane.surface;
+        else entries.push(pane.surface);
+        result.set(pane.paneId, entries);
+        continue;
+      }
       for (const surface of [prior, pane.surface]) {
         if (surface === undefined || !isContent(surface)) continue;
         const index = entries.findIndex((entry) => sameWorkspaceSurface(entry, surface));

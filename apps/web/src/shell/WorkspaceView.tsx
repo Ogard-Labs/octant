@@ -234,6 +234,8 @@ export interface WorkspaceViewProps {
   readonly contentTabs?: WorkspaceContentTabs;
   readonly onActivateContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
   readonly onCloseContentTab?: (paneId: PaneId, tabId: WorkspaceTab["id"]) => void;
+  readonly onKeepContentTab?: (threadId: string) => void;
+  readonly onArrangeSideBySide?: (paneId: PaneId, surfaces: ReadonlyArray<WorkspaceTab>) => void;
   readonly onClosePane: (paneId: PaneId) => Promise<boolean | void> | boolean | void;
   readonly onCreateChat: (
     prompt?: string,
@@ -729,6 +731,12 @@ export function WorkspaceView(props: WorkspaceViewProps) {
           {...(props.onActivateContentTab === undefined
             ? {}
             : { onActivateContentTab: props.onActivateContentTab })}
+          {...(props.onKeepContentTab === undefined
+            ? {}
+            : { onKeepContentTab: props.onKeepContentTab })}
+          {...(props.onArrangeSideBySide === undefined
+            ? {}
+            : { onArrangeSideBySide: props.onArrangeSideBySide })}
           {...(props.onCloseContentTab === undefined
             ? {}
             : { onCloseContentTab: props.onCloseContentTab })}
