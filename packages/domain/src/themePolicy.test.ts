@@ -338,6 +338,72 @@ describe("application background policy", () => {
     expect(resolveAppBackground({ ...settings, increasedContrast: true }).kind).toBe("none");
   });
 
+  it("moves the dithered pixel field unless a person chose Still or reduced motion holds it", () => {
+    const settings: ThemeSettings = {
+      ...baseSettings,
+      appBackground: {
+        ...baseSettings.appBackground,
+        kind: "pixels",
+        effectCell: 4,
+        effectTones: 5,
+      },
+    };
+    expect(resolveAppBackground(settings)).toEqual({
+      ...resolvedDefaults,
+      kind: "pixels",
+      backgroundId: null,
+      backgroundAnimated: true,
+      // The field is always printed: dither unless a person picked plain pixels.
+      effect: { kind: "dither", cell: 4, levels: 5 },
+    });
+    const still = {
+      ...settings,
+      appBackground: { ...settings.appBackground, motion: "still" as const },
+    };
+    expect(resolveAppBackground(still).backgroundAnimated).toBe(false);
+    expect(resolveAppBackground(settings, true).backgroundAnimated).toBe(false);
+    const pixelate = {
+      ...settings,
+      appBackground: { ...settings.appBackground, effect: "pixelate" as const },
+    };
+    expect(resolveAppBackground(pixelate).effect.kind).toBe("pixelate");
+    expect(resolveAppBackground({ ...settings, increasedContrast: true }).kind).toBe("none");
+  });
+
+  it("waves a printed picture only when a person chose Wave, and never under reduced motion", () => {
+    const printed: ThemeSettings = {
+      ...baseSettings,
+      appBackground: {
+        ...baseSettings.appBackground,
+        kind: "photo",
+        backgroundId: photoId as never,
+        effect: "dither",
+      },
+    };
+    // A print saved before motion existed stays still.
+    expect(resolveAppBackground(printed).backgroundAnimated).toBe(false);
+    const waving = {
+      ...printed,
+      appBackground: { ...printed.appBackground, motion: "wave" as const },
+    };
+    expect(resolveAppBackground(waving).backgroundAnimated).toBe(true);
+    expect(resolveAppBackground(waving, true).backgroundAnimated).toBe(false);
+    // A picture shown as it is has no cells to move.
+    const plain = {
+      ...waving,
+      appBackground: { ...waving.appBackground, effect: "none" as const },
+    };
+    expect(resolveAppBackground(plain).backgroundAnimated).toBe(false);
+  });
+
+  it("holds the character field still when a person chose Still", () => {
+    const settings: ThemeSettings = {
+      ...baseSettings,
+      appBackground: { ...baseSettings.appBackground, kind: "characters", motion: "still" },
+    };
+    expect(resolveAppBackground(settings).backgroundAnimated).toBe(false);
+  });
+
   it("hands a gradient its light-theme picture beside the dark one", () => {
     const settings: ThemeSettings = {
       ...baseSettings,

@@ -160,13 +160,23 @@ use cannot be deleted. **Pulsing characters** fills the ground with faint
 letters and digits that slowly brighten and fade in patches, and a click sends
 a wobbly ring of letters in your theme's accent colour across it (now and then a
 heart); it has no picture,
-so **Effect** does not apply. **None** keeps the plain page.
+so **Effect** does not apply. **Dithered pixels** fills the ground with faint
+square pixels in your theme's ink that drift in slow waves, printed as a dither
+(or plain pixels) at the **Pixel size** and **Colours** you pick; a click sends
+a ring through it that pushes the pixels outward and lights them in your accent
+colour. **None** keeps the plain page.
 
 **Effect** prints a picture: **Off** shows it as it is, **Pixelate** draws it in
 square pixels, and **Dither** does that with fewer colours, like a print.
 **Pixel size** (2–16 px) and **Colours** (2–16, fewer is bolder) tune it. An
 animated built-in is printed from its still frame. A photo saved before this
 choice existed keeps its original two-pixel, four-colour dither.
+
+**Motion** decides whether the ground moves. For a printed picture, **Still**
+keeps the print as it is and **Wave** makes a click send a ring through its
+pixels. For Pulsing characters and Dithered pixels, **Wave** (the default) lets
+them drift and answer clicks, and **Still** holds them on one frame. Reduce
+motion holds every ground still.
 
 **Show behind** puts the background behind the start screens only, where it is
 masked away behind the composer and fades out below it, or behind every page,
@@ -247,7 +257,8 @@ replay across restarts.
 The everywhere background also shows behind page surfaces such as Board, Inbox,
 Archive, and Pull requests, and faintly behind threads, where a veil keeps it
 at about a fifth of its strength so it does not pull at the transcript.
-Clicking sends a ring through Pulsing characters only on a start screen.
+Clicking sends a ring through Pulsing characters, Dithered pixels, or a waving
+print only on a start screen.
 Cards, menus, and controls keep their own surfaces.
 
 When an everywhere background covers the sidebar, separate sidebar decoration
