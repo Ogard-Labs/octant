@@ -143,6 +143,47 @@ describe("tabs side by side", () => {
   });
 });
 
+describe("a pane's tab bar", () => {
+  const tab = (index: number) => ({
+    kind: "chat-thread" as const,
+    id: `00000000-0000-4000-8000-00000000074${String(index)}`,
+    threadId: `00000000-0000-4000-8000-00000000075${String(index)}`,
+    mode: "chat" as const,
+    title: `Thread ${String(index)}`,
+  });
+
+  it("holds only the tabs, names the Project in the handle's tooltip, and marks a running tab", () => {
+    const layout = decodeWorkspaceLayoutNode({
+      kind: "pane",
+      nodeId: "00000000-0000-4000-8000-000000000611",
+      paneId: String(firstPaneId),
+      surface: tab(0),
+    });
+    render(
+      <SplitWorkspace
+        {...splitCallbacks()}
+        contentTabs={new Map([[firstPaneId, [tab(0), tab(1)] as never]])}
+        layout={layout}
+        mode="chat"
+        paneFactsByThreadId={new Map([[tab(0).threadId, { projectName: "auroradocs-mcp" }]])}
+        renderSurface={(surface) => surface.title}
+        runningThreadIds={new Set([tab(1).threadId])}
+      />,
+    );
+    const header = document.querySelector(".workspace-pane__header");
+    expect(header).not.toHaveTextContent("auroradocs-mcp");
+    expect(document.querySelector(".workspace-pane__grip")).toHaveAttribute(
+      "title",
+      "auroradocs-mcp · Drag to move or split",
+    );
+    // The running thread's own tab says so; the bar carries no separate pill.
+    expect(screen.getByRole("tab", { name: /^Thread 1/ })).toHaveAccessibleName(
+      "Thread 1, running",
+    );
+    expect(document.querySelector(".workspace-pane__status")).toBeNull();
+  });
+});
+
 describe("SplitWorkspace", () => {
   it("keeps a restored file closable even when it is the only content tab", async () => {
     const user = userEvent.setup();
@@ -300,12 +341,12 @@ describe("SplitWorkspace", () => {
         />,
       );
 
-      const handle = screen.getByTitle("Drag to move or split");
+      const handle = screen.getByTitle(/Drag to move or split$/);
       expect(within(handle).getByRole("img", { name: "Runs on this computer" })).toBeVisible();
       if (multiple) {
-        // The tabs carry the titles, but the Project chip names the pane's
-        // execution context rather than the active tab, so it still shows.
-        expect(within(handle).getByText("repro-work")).toBeVisible();
+        // The bar is tabs alone; the Project moves to the handle's tooltip.
+        expect(within(handle).queryByText("repro-work")).toBeNull();
+        expect(handle).toHaveAttribute("title", "repro-work · Drag to move or split");
         expect(screen.getByRole("tab", { name: "A thread" })).toContainElement(
           screen.getByTitle("Claude"),
         );

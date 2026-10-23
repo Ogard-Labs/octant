@@ -396,6 +396,23 @@ function paneEnvironment(
   return label === undefined ? { kind: "remote" } : { kind: "remote", label };
 }
 
+/** What a tab says about its own thread: executing, or parked on the person. */
+function tabState(
+  entry: WorkspaceTab,
+  props: {
+    readonly runningThreadIds?: ReadonlySet<string>;
+    readonly waitingThreadIds?: ReadonlySet<string>;
+  },
+): "running" | "waiting" | undefined {
+  if (!("threadId" in entry) || entry.threadId === null || entry.threadId === undefined) {
+    return undefined;
+  }
+  const thread = String(entry.threadId);
+  if (props.runningThreadIds?.has(thread) === true) return "running";
+  if (props.waitingThreadIds?.has(thread) === true) return "waiting";
+  return undefined;
+}
+
 function PaneProviderMark(props: { readonly provider: ThreadProviderIdentity | undefined }) {
   const provider = props.provider;
   return provider === undefined ? null : (
@@ -558,7 +575,13 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                 }
                 onPointerMove={props.drag.onPointerMove}
                 onPointerUp={props.drag.onPointerUp}
-                title="Drag to move or split"
+                // With tabs open the bar holds only tabs; the Project the pane
+                // runs in moves to this tooltip (the composer strip names it too).
+                title={
+                  showTabs && projectName !== undefined
+                    ? `${projectName} · Drag to move or split`
+                    : "Drag to move or split"
+                }
               >
                 {environment !== undefined ? (
                   <EnvironmentMark {...environment} />
@@ -580,11 +603,11 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                   />
                 )}
                 {/* A breadcrumb: the Project the pane runs in, then what it
-                    shows. Tabs replace the title text, but the Project names
-                    the pane's execution context rather than the active tab,
-                    so it stays when content tabs are open. The branch lives
-                    in the composer's strip, beside the thread it runs. */}
-                {projectName === undefined ? null : (
+                    shows. With tabs open the bar is tabs alone: a Project name
+                    ahead of them read as a tab of its own, so it moves to the
+                    handle's tooltip. The branch lives in the composer's strip,
+                    beside the thread it runs. */}
+                {showTabs || projectName === undefined ? null : (
                   <span className="workspace-pane__context" title={projectName}>
                     {projectName}
                   </span>
@@ -604,9 +627,10 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                     </span>
                   </>
                 )}
-                {running ? (
+                {showTabs ? null : running ? (
                   // The host reports that a turn is executing, not when it
                   // began, so the pill names the state and no elapsed time.
+                  // With tabs open, each tab carries its own thread's state.
                   <span className="workspace-pane__status">
                     <span aria-hidden="true" className="spinner spinner-sm" />
                     Running
@@ -644,7 +668,7 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                         onContextMenu={() => setMenuTabId(String(entry.id))}
                       >
                         <OctantTabsTab
-                          className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
+                          className="content-tab__select rounded-lg border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
                           onClickCapture={(event) => {
                             const source = tabDragSource(entry);
                             // A completed drag ends in a click; it must not
@@ -672,14 +696,24 @@ function WorkspacePaneView(props: WorkspaceNodeProps & { readonly pane: Workspac
                           value={entry.id}
                           title={workspaceSurfaceTitle(entry, props.liveThreadTitles)}
                         >
-                          {props.showProviderIcons === false ||
-                          !["chat-thread", "work-thread", "code-overview"].includes(entry.kind) ||
-                          !("threadId" in entry) ? null : (
+                          {tabState(entry, props) === "running" ? (
+                            <span aria-hidden="true" className="spinner spinner-sm" />
+                          ) : props.showProviderIcons === false ||
+                            !["chat-thread", "work-thread", "code-overview"].includes(entry.kind) ||
+                            !("threadId" in entry) ? null : (
                             <PaneProviderMark
                               provider={props.providerByThreadId?.get(String(entry.threadId))}
                             />
                           )}
                           <span>{workspaceSurfaceTitle(entry, props.liveThreadTitles)}</span>
+                          {tabState(entry, props) === "waiting" ? (
+                            <span aria-hidden="true" className="content-tab__attention" />
+                          ) : null}
+                          {tabState(entry, props) === undefined ? null : (
+                            <span className="sr-only">
+                              {tabState(entry, props) === "running" ? ", running" : ", needs you"}
+                            </span>
+                          )}
                           {selectedTabIds.has(String(entry.id)) ? (
                             <span className="sr-only">, selected</span>
                           ) : null}

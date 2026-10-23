@@ -7715,6 +7715,30 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
   background: color-mix(in oklab, var(--oct-fg) 11%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--oct-fg) 9%, transparent);
 }
+/* The tab's own button spans the whole pill, with the × laid over its end,
+   so the shared keyboard focus edge outlines the whole tab: on the label
+   alone it boxed the title and left the × outside. */
+.workspace-content-tabs .content-tab {
+  position: relative;
+}
+.workspace-content-tabs .content-tab > .content-tab__select {
+  padding-right: var(--oct-space-8);
+}
+.workspace-content-tabs .content-tab > .content-tab__close {
+  position: absolute;
+  top: 50%;
+  right: var(--oct-space-1);
+  transform: translateY(-50%);
+}
+/* A thread parked on the person: a small dot after the title, in the tab. */
+.content-tab__attention {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-left: var(--oct-space-1);
+  background: var(--oct-warn-fg);
+  border-radius: var(--oct-radius-pill);
+}
 .workspace-content-tabs .content-tab > .content-tab__select {
   flex: 1 1 auto;
   height: 28px;

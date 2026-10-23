@@ -360,7 +360,11 @@ then become a row of equal soft pills, 28px tall at a shared 196px (never
 narrower than 112px), 8px apart: every tab carries a faint wash of the ink, the
 hovered one a little more, and the open one the brightest wash with a hairline
 edge, so the row reads as a set of open conversations rather than a line of
-links with one highlighted. A tab picked for side by side (Cmd/Ctrl- or
+links with one highlighted. A pane tab's own button spans the whole pill with
+the × laid over its end, so the shared keyboard focus edge outlines the whole
+tab: drawn on the label alone it boxed the title and left the × outside. A tab whose
+thread runs shows a spinner in place of its provider mark; one waiting on the
+person ends in a small dot in the warning ink. A tab picked for side by side (Cmd/Ctrl- or
 Shift-click) sits a step between the two, with a fainter edge. Dock tool tabs
 keep the bare recipe. Close controls retain their
 width; inactive controls appear on hover or keyboard focus and stay visible on

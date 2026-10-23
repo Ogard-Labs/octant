@@ -198,6 +198,12 @@ a spinner follows them; it carries no elapsed time because the host does not
 report when the turn began. A thread whose turn is parked on the agent's own
 approval is not running: the pill reads "Needs you", with no spinner, until
 someone decides. A surface that is not a thread shows no environment mark.
+With content tabs open the bar holds the drag handle and the tabs alone: the
+Project and the Running or Needs you pill leave it. A Project name ahead of
+the tabs read as one more tab, so it moves into the handle's tooltip ("Project
+· Drag to move or split"), and the composer's strip still names it; each tab
+carries its own thread's state, a spinner in place of its provider mark while
+it runs and a small warning dot after its title while it waits on the person.
 At phone width (680px and below) the title row drops both chips so the title
 stays readable; the composer's context strip below the thread names the
 Project and branch there.
