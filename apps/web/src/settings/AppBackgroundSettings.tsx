@@ -33,7 +33,7 @@ export interface AppBackgroundSettingsProps {
   readonly onChange: (next: AppBackground) => void;
 }
 
-type Choice = "builtin" | "photo" | "characters" | "none";
+type Choice = "builtin" | "photo" | "characters" | "pixels" | "none";
 
 /** A ground saved as the retired dot pattern draws nothing, and says so. */
 function choiceFor(kind: AppBackground["kind"]): Choice {
@@ -87,6 +87,24 @@ function currentEffect(background: AppBackground): AppBackgroundEffect {
   return background.kind === "photo" && background.photoDithered ? "dither" : "none";
 }
 
+/** The pixel field is always printed, so it offers only the two prints. */
+const FIELD_EFFECTS = [
+  { id: "pixelate", label: "Pixelate" },
+  { id: "dither", label: "Dither" },
+] as const satisfies ReadonlyArray<{ id: AppBackgroundEffect; label: string }>;
+
+type Motion = "still" | "wave";
+
+/**
+ * Whether the ground moves, as the row shows it: a drawn field moves unless
+ * a person chose Still; a printed picture moves only once a person chose Wave.
+ */
+function currentMotion(background: AppBackground): Motion {
+  if (background.motion === "still") return "still";
+  if (background.motion === "wave" || background.motion === "pulse") return "wave";
+  return background.kind === "characters" || background.kind === "pixels" ? "wave" : "still";
+}
+
 const EFFECTS = [
   { id: "none", label: "Off" },
   { id: "pixelate", label: "Pixelate" },
@@ -120,7 +138,13 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   const showBuiltin = choice === "builtin" || selectedPresetId !== null;
   const showDials = choiceFor(background.kind) !== "none";
   const picture = background.kind === "builtin" || background.kind === "photo";
-  const effect = currentEffect(background);
+  const field = background.kind === "pixels";
+  const savedEffect = currentEffect(background);
+  // The pixel field has no plain print; a field saved without one dithers.
+  const effect: AppBackgroundEffect = field && savedEffect === "none" ? "dither" : savedEffect;
+  const printed = (picture && effect !== "none") || field;
+  const motion = currentMotion(background);
+  const moves = printed || background.kind === "characters";
   // A photo dithered before the effect choice existed prints at 2 px and 4
   // colours. Moving one slider saves an explicit effect, which retires that
   // legacy reading, so the untouched slider's value is saved with it rather
@@ -157,7 +181,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
   }, [library, showPhoto]);
 
   const choose = (kind: string) => {
-    if (kind === "none" || kind === "characters") {
+    if (kind === "none" || kind === "characters" || kind === "pixels") {
       setChoice(kind);
       setStatus(undefined);
       props.onChange({ ...carry(background), kind });
@@ -210,7 +234,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
     <>
       <div className="setgroup">
         <SettingRow
-          description="What sits behind Octant: a built-in picture, your own photo, pulsing characters, or none."
+          description="What sits behind Octant: a built-in picture, your own photo, pulsing characters, dithered pixels, or none."
           focused={props.focused === true}
           label="Background"
           labelledBySection
@@ -225,6 +249,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               { id: "builtin", label: "Built-in picture" },
               { id: "photo", label: "Your photo" },
               { id: "characters", label: "Pulsing characters" },
+              { id: "pixels", label: "Dithered pixels" },
               { id: "none", label: "None" },
             ]}
             value={choice}
@@ -428,9 +453,13 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               />
             </SettingRow>
           ) : null}
-          {picture ? (
+          {picture || field ? (
             <SettingRow
-              description="Show the picture as it is, in square pixels, or dithered with fewer colours."
+              description={
+                field
+                  ? "Plain square pixels, or dithered into a pattern of shades."
+                  : "Show the picture as it is, in square pixels, or dithered with fewer colours."
+              }
               label="Effect"
               scope="app"
               settingId="app-background-effect"
@@ -443,7 +472,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 }}
                 value={[effect]}
               >
-                {EFFECTS.map((option) => (
+                {(field ? FIELD_EFFECTS : EFFECTS).map((option) => (
                   <OctantToggleGroupItem key={option.id} value={option.id}>
                     {option.label}
                   </OctantToggleGroupItem>
@@ -451,7 +480,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               </OctantToggleGroup>
             </SettingRow>
           ) : null}
-          {picture && effect !== "none" ? (
+          {printed ? (
             <SettingRow
               description="How big each square is."
               label="Pixel size"
@@ -477,7 +506,7 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
               />
             </SettingRow>
           ) : null}
-          {picture && effect === "dither" ? (
+          {(picture && effect === "dither") || field ? (
             <SettingRow
               description="How many shades each colour keeps. Fewer looks bolder."
               label="Colours"
@@ -501,6 +530,30 @@ export function AppBackgroundSettings(props: AppBackgroundSettingsProps) {
                 step={1}
                 value={printTones}
               />
+            </SettingRow>
+          ) : null}
+          {moves ? (
+            <SettingRow
+              description={
+                picture
+                  ? "Still keeps the print as it is. Wave sends a wave through its pixels when you click a start screen."
+                  : "Still holds one frame. Wave lets it drift and sends a wave out when you click a start screen."
+              }
+              label="Motion"
+              scope="app"
+              settingId="app-background-motion"
+            >
+              <OctantToggleGroup<Motion>
+                aria-label="Background motion"
+                onValueChange={(value) => {
+                  const next = value[0];
+                  if (next !== undefined) props.onChange({ ...background, motion: next });
+                }}
+                value={[motion]}
+              >
+                <OctantToggleGroupItem value="still">Still</OctantToggleGroupItem>
+                <OctantToggleGroupItem value="wave">Wave</OctantToggleGroupItem>
+              </OctantToggleGroup>
             </SettingRow>
           ) : null}
         </div>

@@ -71,7 +71,7 @@ export function resolveEffectiveSidebarBackground(
 }
 
 export interface ResolvedAppBackground {
-  readonly kind: "builtin" | "photo" | "characters" | "none";
+  readonly kind: "builtin" | "photo" | "characters" | "pixels" | "none";
   readonly backgroundId: string | null;
   /** Public asset used by a first-party built-in, or null for other grounds. */
   readonly backgroundUrl: string | null;
@@ -137,10 +137,18 @@ export function resolveAppBackground(
     };
   }
   const motionAllowed = !settings.reducedMotion && !systemPrefersReducedMotion;
+  // A drawn field moves unless a person chose Still; a printed picture moves
+  // only when a person chose Wave, since prints were still before the choice.
+  const fieldMoves = motionAllowed && background.motion !== "still";
+  const printMoves =
+    motionAllowed &&
+    effect.kind !== "none" &&
+    (background.motion === "wave" || background.motion === "pulse");
   if (background.kind === "builtin") {
     const preset = getZenBuiltinBackground(background.presetId);
     const stillUrl = "stillSrc" in preset ? preset.stillSrc : preset.src;
-    const backgroundAnimated = motionAllowed && preset.motion === "animated";
+    const backgroundAnimated =
+      effect.kind === "none" ? motionAllowed && preset.motion === "animated" : printMoves;
     return {
       ...tuning,
       kind: "builtin",
@@ -160,7 +168,19 @@ export function resolveAppBackground(
       backgroundUrl: null,
       backgroundStillUrl: null,
       backgroundLightUrl: null,
-      backgroundAnimated: motionAllowed,
+      backgroundAnimated: fieldMoves,
+    };
+  }
+  if (background.kind === "pixels") {
+    return {
+      ...tuning,
+      effect: { ...effect, kind: effect.kind === "pixelate" ? "pixelate" : "dither" },
+      kind: "pixels",
+      backgroundId: null,
+      backgroundUrl: null,
+      backgroundStillUrl: null,
+      backgroundLightUrl: null,
+      backgroundAnimated: fieldMoves,
     };
   }
   return {
@@ -170,6 +190,6 @@ export function resolveAppBackground(
     backgroundUrl: null,
     backgroundStillUrl: null,
     backgroundLightUrl: null,
-    backgroundAnimated: false,
+    backgroundAnimated: printMoves,
   };
 }
