@@ -145,6 +145,7 @@ import {
   ComposerSlashTypeahead,
   useComposerSlashCommands,
 } from "../composer/useComposerSlashCommands";
+import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 
 /** Only the person's messages carry a time here; the rows after one share it. */
 function workRowHappenedAt(row: WorkTranscriptRow): string | undefined {
@@ -599,6 +600,9 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
     ...(props.draftStore === undefined ? {} : { store: props.draftStore }),
   });
   const prompt = composerDraft.text;
+  const suggestionInput = useComposerSuggestionInput(prompt, (text) =>
+    composerDraft.setDraft(text, text.length),
+  );
   const runtimeCarriesTools = pickerGroupCarriesAppManagedTools(
     props.providerGroups ?? [],
     thread === undefined
@@ -1635,6 +1639,7 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
   }, [props.threadId]);
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (suggestionInput.takeOnTab(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (browser.handleKeyDown(event)) return;
     if (slash.handleKeyDown(event)) return;
@@ -2141,9 +2146,10 @@ export function WorkThreadWorkspace(props: WorkThreadWorkspaceProps) {
               if ((creating && !preparingQueue.current) || completionLocked) return;
               if (attachFromTransfer(event.clipboardData)) event.preventDefault();
             }}
-            placeholder={turnRunning ? "Send the next message…" : "Reply…"}
+            data-suggested={suggestionInput.suggested ? "true" : undefined}
+            placeholder={suggestionInput.placeholder}
             ref={textareaRef}
-            rows={4}
+            rows={3}
             value={prompt}
           />
         }

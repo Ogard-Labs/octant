@@ -127,7 +127,42 @@ interface WorkspaceNodeProps extends SplitWorkspaceProps {
   readonly node: WorkspaceLayoutNode;
 }
 
+/*
+ * Every composer in a split takes the narrowest pane's width, so panes side by
+ * side show one composer shape. Each one used to fill its own pane, and a
+ * 560px and a 420px pane drew a 515px and a 380px composer next to each other.
+ * The width is published on the root as `--octant-split-composer-width`, and
+ * removed again while one pane is shown. It is measured again whenever the
+ * layout or a pane's size changes.
+ */
+function useSplitComposerWidth(
+  rootRef: SplitWorkspaceProps["drag"]["rootRef"],
+  layout: WorkspaceLayoutNode,
+) {
+  useEffect(() => {
+    const root = rootRef.current;
+    if (root === null || typeof ResizeObserver === "undefined") return;
+    const panes = [...root.querySelectorAll<HTMLElement>(".workspace-pane")];
+    if (panes.length < 2) {
+      root.style.removeProperty("--octant-split-composer-width");
+      return;
+    }
+    const publish = () => {
+      const narrowest = Math.min(...panes.map((pane) => pane.getBoundingClientRect().width));
+      root.style.setProperty("--octant-split-composer-width", `${Math.floor(narrowest)}px`);
+    };
+    const observer = new ResizeObserver(publish);
+    for (const pane of panes) observer.observe(pane);
+    publish();
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--octant-split-composer-width");
+    };
+  }, [rootRef, layout]);
+}
+
 export function SplitWorkspace(props: SplitWorkspaceProps) {
+  useSplitComposerWidth(props.drag.rootRef, props.layout);
   return (
     <div className="workspace-root" ref={props.drag.rootRef} style={splitContainerStyle}>
       <WorkspaceNode {...props} node={props.layout} />

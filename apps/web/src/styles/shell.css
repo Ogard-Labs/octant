@@ -2160,7 +2160,8 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
 
 /* The same geometry as `.welcome`: the question takes the free height and
    centres in it, which docks the composer at the foot of the page where the
-   thread continues.
+   thread continues, 12px above the pane's foot as a thread's composer sits,
+   so a start screen beside a thread puts its composer on the same line.
 
    The canvas also takes a level above the ground, which paints at z-index 0 under this
    same start screen. Without one the ground's dots landed over the greeting
@@ -2171,12 +2172,12 @@ html[data-octant-increased-contrast="true"] .shell-frame > .sidebar {
   z-index: 1;
   box-sizing: border-box;
   display: flex;
-  width: min(100% - 48px, 768px);
+  width: min(100% - 40px, var(--oct-composer-width));
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
   min-height: 100%;
-  padding-block: min(8vh, 64px) var(--oct-space-5);
+  padding-block: min(8vh, 64px) 12px;
   margin: 0 auto;
   gap: var(--oct-space-2);
 }

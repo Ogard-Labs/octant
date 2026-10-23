@@ -4364,7 +4364,9 @@ input.switch:checked::after {
   /* The card role is white on the light well and the floating step in
      dark, so the composer is the one raised object in both modes. */
   background: var(--octant-card);
-  box-shadow: var(--octant-shadow-md);
+  box-shadow:
+    var(--octant-shadow-md),
+    inset 0 0 0 1px var(--oct-border);
   transition: box-shadow var(--oct-dur-base) var(--oct-ease-color);
 }
 .composer[data-drop-target="true"] {
@@ -4405,10 +4407,16 @@ input.switch:checked::after {
 .composer-attachment-input[hidden] {
   display: none;
 }
+/* Every composer, on a start screen or under a thread, in Chat, Work, and
+   Code, has this one prompt: two lines and the same insets before it grows,
+   and the transcript's own type, so a message reads the same in the box as in
+   the bubble it becomes. The start screen's box was four lines and the
+   thread's under two, with smaller insets and 14px type beside a 13px
+   transcript, so the same message changed shape as it moved. */
 .composer-input {
   display: block;
   width: 100%;
-  min-height: 48px;
+  min-height: calc(2lh + 30px);
   max-height: 180px;
   /* 18px is the measured prompt offset the visual language contract pins, so it
      stays off the 4px scale on purpose. */
@@ -4419,7 +4427,7 @@ input.switch:checked::after {
   box-shadow: none;
   color: var(--oct-fg);
   font-family: var(--oct-font-transcript);
-  font-size: var(--oct-text-sm);
+  font-size: var(--oct-transcript-font-size);
   line-height: var(--oct-leading-body);
   resize: none;
   field-sizing: content;
@@ -4573,36 +4581,71 @@ input.switch:checked::after {
   position: relative;
   z-index: 2;
   flex: 0 0 auto;
+  width: min(100% - 40px, var(--oct-composer-width));
   margin: 24px auto 12px;
+}
+
+/* One width for every composer: the reading measure, and in a split the
+   narrowest pane's room (SplitWorkspace publishes it), so composers side by
+   side are the same size rather than each filling its own pane. A start
+   screen's column takes it too, so its cards and suggestions end on the
+   composer's edges. It is declared on each element that uses it because the
+   split's width is published below the shell. */
+.composer.thread-composer,
+.composer-stack,
+.welcome,
+.draft-thread__canvas {
+  --oct-composer-width: min(
+    var(--oct-thread-measure, 680px),
+    var(--octant-split-composer-width, 100vw) - 40px
+  );
 }
 
 /* Existing conversations keep the message surface distinct from its binding:
    the strip above it (context and stats) sits on the page, and only the
-   surface where the person types is raised. Feedback appears only when there
-   is something to act on. */
+   surface where the person types is raised, with the same corner, lift, and
+   insets as a start screen's composer. Feedback appears only when there is
+   something to act on. */
 .composer.composer--follow-up {
   display: grid;
   gap: var(--oct-space-1);
   background: transparent;
-  border-radius: var(--oct-radius-md);
+  border-radius: var(--oct-radius-lg);
   box-shadow: none;
 }
 .thread-composer__surface {
   min-width: 0;
   background: var(--octant-card);
-  border: 1px solid var(--oct-border);
-  border-radius: var(--oct-radius-md);
+  border: 0;
+  border-radius: var(--oct-radius-lg);
+  box-shadow:
+    var(--octant-shadow-md),
+    inset 0 0 0 1px var(--oct-border);
 }
 .thread-composer__surface > label {
   display: block;
 }
-.thread-composer__surface .composer-input {
-  min-height: calc(40px + 1lh);
-  padding: 12px 12px var(--oct-space-2);
+/* While the empty composer shows the reply's suggested next message, a quiet
+   key cap at its top-right says that Tab takes it. The prompt keeps clear of
+   the cap. */
+.thread-composer__surface:has(.composer-input[data-suggested="true"]) {
+  position: relative;
 }
-.thread-composer__surface > .composer-row {
-  min-height: 32px;
-  padding: 0 8px 4px;
+.composer-input[data-suggested="true"]:placeholder-shown {
+  padding-inline-end: 64px;
+}
+.thread-composer__surface:has(.composer-input[data-suggested="true"]:placeholder-shown)::after {
+  position: absolute;
+  top: 16px;
+  right: var(--oct-composer-gutter);
+  padding: 1px var(--oct-space-2);
+  border-radius: var(--oct-radius-pill);
+  box-shadow: inset 0 0 0 1px var(--oct-border);
+  color: var(--oct-meta);
+  content: "Tab";
+  font-size: var(--oct-text-xs);
+  line-height: 18px;
+  pointer-events: none;
 }
 .thread-composer__feedback {
   position: relative;
