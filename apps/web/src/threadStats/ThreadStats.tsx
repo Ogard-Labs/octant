@@ -10,16 +10,17 @@ import { useThreadStatsScope } from "./threadStatsScope";
 import "./threadStats.css";
 
 /**
- * The thread's quiet stats line above the composer. It reads the host's
+ * The thread's quiet stats line under the composer. It reads the host's
  * recorded turns, so every provider and mode shows the same figures worded by
- * one shared module. The provider's account windows lead the line when it
- * reported any, so a person sees how much of the 5-hour or weekly limit is
- * left without opening the meter. It is the first thing to go when there is
- * nothing honest to say: a provider that reported neither usage nor limits
- * shows no line, and the per-turn detail is still reachable from the context
- * meter.
+ * one shared module. Where the provider's account windows have a place of
+ * their own ({@link ThreadPlanWindows} in the strip above a thread's box),
+ * `windows={false}` leaves them out; elsewhere they lead the line, so a person
+ * sees how much of the 5-hour or weekly limit is left without opening the
+ * meter. It is the first thing to go when there is nothing honest to say: a
+ * provider that reported neither usage nor limits shows no line, and the
+ * per-turn detail is still reachable from the context meter.
  */
-export function ThreadStats() {
+export function ThreadStats(props: { readonly windows?: boolean }) {
   const scope = useThreadStatsScope();
   const meter = useComposerContextMeterScope();
   const stats = useMemo(
@@ -30,17 +31,44 @@ export function ThreadStats() {
   // limits come from one shell-wide scope, so an inactive split pane would
   // otherwise show another thread's figures and provider capacity.
   if (!meter.visible) return null;
-  // Read on every render, not memoized: a window whose reset passes must drop
-  // out of the line when the next render comes, not stay until the figures change.
-  const limits = composerLimitWindows({
-    now: Date.now(),
-    snapshot: meter.snapshot,
-    fallback: meter.fallback,
-  });
+  const limits = props.windows === false ? [] : currentLimitWindows(meter);
   const showLine = scope.lineVisible && (stats.length > 0 || limits.length > 0);
   return showLine ? (
     <ThreadStatsLine limits={limits} onHide={() => scope.setLineVisible(false)} stats={stats} />
   ) : null;
+}
+
+/**
+ * The provider's remaining plan usage for a thread, right-aligned in the strip
+ * above its box, as the start screen shows it beside where a new thread runs.
+ * The stats line's switch hides the figures under the box, not these meters:
+ * the start screen offers no way to hide them either. Active pane only, for the
+ * same reason as the line.
+ */
+export function ThreadPlanWindows() {
+  const meter = useComposerContextMeterScope();
+  if (!meter.visible) return null;
+  const limits = currentLimitWindows(meter);
+  if (limits.length === 0) return null;
+  return (
+    <div className="thread-plan-windows">
+      <PlanUsageMeters windows={limits} />
+    </div>
+  );
+}
+
+/**
+ * Read on every render, not memoized: a window whose reset passes must drop
+ * out when the next render comes, not stay until the figures change.
+ */
+function currentLimitWindows(
+  meter: ReturnType<typeof useComposerContextMeterScope>,
+): ReadonlyArray<ComposerLimitWindow> {
+  return composerLimitWindows({
+    now: Date.now(),
+    snapshot: meter.snapshot,
+    fallback: meter.fallback,
+  });
 }
 
 function ThreadStatsLine(props: {

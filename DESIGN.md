@@ -451,13 +451,16 @@ where it is. Side-task offers stack above them as hairline cards: a target icon
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
 
-A thread's stats line sits above the follow-up composer, in one strip with the
-context: where the thread runs (Project and branch) on the left, the stats on the
-right, on the page rather than in the box, so the box holds only the message and
-its controls. The stats are one row of figures at the 12px meta step in the meta ink,
-separated by middle dots, with no hue on any number and no fill on the row. When the
-provider reported account limit windows, they lead the row as the plan meters
-described below. It wraps at narrow widths rather than scrolling,
+A thread's stats line sits under the follow-up composer, on the page rather than
+in the box, where a person reads the last turn's figures after sending. Above the
+box, one strip holds where the thread runs (Project and branch) on the left and
+the plan meters described below on the right, so the box holds only the message
+and its controls. The stats are one row of figures at the 12px meta step in the
+meta ink, separated by middle dots, with no hue on any number and no fill on the
+row: the thread's turns, input and output tokens, thinking tokens when the
+provider reported them (part of the output), the cache hit, speed, first token,
+and cost. The turn count never stands alone. Where the plan meters have no strip
+of their own, they lead the row. It wraps at narrow widths rather than scrolling,
 and a trailing quiet icon button hides it. A figure
 that is approximate carries a leading tilde and a dotted underline that explains it on
 hover; a figure the provider did not report is absent, never zero. The whole line is one
@@ -1446,7 +1449,7 @@ Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
 input, output, and measurement quality. Its thread table uses the same figures
-as the line above the composer: cache, speed, and first token are columns,
+as the line under the composer: cache, speed, and first token are columns,
 omitted when unavailable, and opening a row lists that thread's turns. The
 table stays a hairline table, not a card. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay

@@ -4643,8 +4643,8 @@ input.switch:checked::after {
   display: none;
 }
 /* The strip above a thread's composer: where it runs on the left, the plan's
-   windows and the thread's figures on the right. It reads as part of the
-   page, not the box, so it has no fill or edge of its own. */
+   windows on the right. It reads as part of the page, not the box, so it has
+   no fill or edge of its own. */
 .thread-composer__strip {
   display: flex;
   flex-wrap: wrap;
@@ -4659,7 +4659,7 @@ input.switch:checked::after {
 .thread-composer__strip > .thread-composer__context {
   flex: 0 1 auto;
 }
-.thread-composer__strip > .thread-stats {
+.thread-composer__strip > .thread-plan-windows {
   flex: 0 1 auto;
   margin-left: auto;
   padding: 0 var(--oct-space-2);

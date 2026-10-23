@@ -130,6 +130,39 @@ describe("the thread line", () => {
     );
   });
 
+  it("leads a thread's line with its turns and states thinking after output", () => {
+    const first = record({
+      usage: { inputTokens: 40_000, outputTokens: 2_000, reasoningTokens: 1_200 },
+    });
+    const second = record({ usage: { inputTokens: 8_000, outputTokens: 1_100 } });
+    const summary: TurnMetricsSummary = {
+      turns: [first, second],
+      turnCount: 2,
+      usage: addTurnUsage(first.usage, { inputTokens: 8_000, outputTokens: 1_100 }),
+      metrics: addTurnToSessionMetrics(
+        addTurnToSessionMetrics(undefined, first.metrics),
+        second.metrics,
+      ),
+    };
+    const stats = threadStats(threadStatsInputOf(summary));
+    expect(stats.map((stat) => stat.text).slice(0, 4)).toEqual([
+      "2 turns",
+      "↑ 48k in",
+      "↓ 3.1k out",
+      "1.2k thinking",
+    ]);
+    expect(stats.find((stat) => stat.key === "reasoning")?.hint).toBe("Part of the output tokens.");
+  });
+
+  it("says one turn, and leaves out thinking a provider did not report", () => {
+    const stats = threadStats({ turns: 1, usage: { inputTokens: 1_000, outputTokens: 100 } });
+    expect(stats.map((stat) => stat.text)).toEqual(["1 turn", "↑ 1k in", "↓ 100 out"]);
+  });
+
+  it("states no line from a turn count alone", () => {
+    expect(threadStats({ turns: 3, usage: { inputTokens: 0, outputTokens: 0 } })).toEqual([]);
+  });
+
   it("leaves out the cache share when the provider reported no cache figure", () => {
     const stats = threadStats({ usage: { inputTokens: 48_000, outputTokens: 3_100 } });
     expect(stats.map((stat) => stat.key)).toEqual(["input", "output"]);
@@ -617,7 +650,7 @@ describe("the line for an endpoint that holds a reply and sends it in one burst"
 
     expect(line).not.toContain("tok/s");
     expect(line).not.toContain("first token");
-    expect(line).toBe("↑ 1.9k in · ↓ 1.1k out · cache 0%");
+    expect(line).toBe("2 turns · ↑ 1.9k in · ↓ 1.1k out · cache 0%");
   });
 
   it("states the cache share only when the endpoint reported a cache figure", () => {
@@ -628,8 +661,8 @@ describe("the line for an endpoint that holds a reply and sends it in one burst"
       threadStatsInputOf(summaryOf([burstTurn(649, 456, 3_213, 202, { cacheReadInputTokens: 0 })])),
     );
 
-    expect(unreported).toBe("↑ 649 in · ↓ 456 out");
-    expect(reported).toBe("↑ 649 in · ↓ 456 out · cache 0%");
+    expect(unreported).toBe("1 turn · ↑ 649 in · ↓ 456 out");
+    expect(reported).toBe("1 turn · ↑ 649 in · ↓ 456 out · cache 0%");
   });
 
   it("keeps the speed of a steady stream beside a burst turn", () => {
