@@ -190,7 +190,7 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
                     <span className="dock-browser-pages__page content-tab" key={tab.id}>
                       <OctantButton
                         aria-selected={tab.id === activeTabId}
-                        className="content-tab__select border-0 bg-transparent text-inherit"
+                        className="content-tab__select border-0 bg-transparent text-inherit hover:bg-transparent focus-visible:bg-transparent aria-expanded:bg-transparent"
                         onClick={() => props.onSelectSurface(tab.id)}
                         role="tab"
                         size="sm"

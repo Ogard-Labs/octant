@@ -13,6 +13,7 @@ describe("SettingsSectionId", () => {
     expect(SETTINGS_SECTION_IDS).toEqual([
       "general",
       "profile",
+      "notifications",
       "appearance",
       "sidebar",
       "keybindings",
@@ -20,20 +21,18 @@ describe("SettingsSectionId", () => {
       "work",
       "code",
       "providers",
-      "provider-catalog",
       "harness",
-      "navigator-assistant",
       "voice",
-      "image-generation",
+      "skills",
       "computer-use",
       "device-tools",
-      "skills",
       "github",
       "linear",
-      "host",
+      "permissions",
       "data",
       "sync",
       "remote-access",
+      "host",
       "usage",
     ]);
   });
@@ -76,6 +75,13 @@ describe("SettingsDeepLink", () => {
       setting: "reset-layout",
     });
     expect(decode({ section: "agents" })).toEqual({ section: "harness" });
+    // Pages folded into another by the 2026-10 regrouping.
+    expect(decode({ section: "provider-catalog" })).toEqual({ section: "providers" });
+    expect(decode({ section: "navigator-assistant", setting: "default-model" })).toEqual({
+      section: "harness",
+      setting: "default-model",
+    });
+    expect(decode({ section: "image-generation" })).toEqual({ section: "voice" });
     expect(Schema.encodeSync(SettingsDeepLink)({ section: "host" })).toEqual({ section: "host" });
   });
 

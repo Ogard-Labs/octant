@@ -63,6 +63,8 @@ export interface ThreadPaneContainerProps {
     | "activatePane"
     | "clearFocus"
     | "closeContentTab"
+    | "keepThreadTab"
+    | "arrangeSideBySide"
     | "closePane"
     | "closeWorkspaceReaders"
     | "createChat"
@@ -314,6 +316,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
     activatePane,
     clearFocus,
     closeContentTab,
+    keepThreadTab,
+    arrangeSideBySide,
     closePane,
     closeWorkspaceReaders,
     commitSplitResize,
@@ -566,6 +570,8 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
               contentTabs={contentTabs}
               onActivateContentTab={(paneId, tabId) => void activateContentTab(paneId, tabId)}
               onCloseContentTab={(paneId, tabId) => void closeContentTab(paneId, tabId)}
+              onKeepContentTab={keepThreadTab}
+              onArrangeSideBySide={(paneId, surfaces) => void arrangeSideBySide(paneId, surfaces)}
               onClosePane={closePane}
               onCommitResize={commitSplitResize}
               onCreateChat={createChat}
@@ -839,7 +845,9 @@ export const ThreadPaneContainer = memo(function ThreadPaneContainer(
                 })
               }
               onOpenProviderSettings={() => void openSettings({ section: "providers" })}
-              onOpenImageSettings={() => void openSettings({ section: "image-generation" })}
+              onOpenImageSettings={() =>
+                void openSettings({ section: "voice", setting: "custom-image-sources" })
+              }
               onOpenSettings={() => void openSettings()}
             />
           </ComposerContextMeterProvider>

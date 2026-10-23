@@ -55,7 +55,7 @@ export function draftThreadModePresentation(
         heading: "What are we working on?",
         description:
           "Start a work thread inside this confined folder. Documents, presentations, spreadsheets, reports, and artifacts stay local.",
-        composerPlaceholder: "Describe the work…",
+        composerPlaceholder: "Ask anything…",
         intentCards: [
           {
             id: "document",
@@ -81,7 +81,7 @@ export function draftThreadModePresentation(
         heading: "What should we build?",
         description:
           "Start a Code thread in this repository. The thread inherits the current checkout and approval policy.",
-        composerPlaceholder: "Describe the change…",
+        composerPlaceholder: "Ask anything…",
         intentCards: [
           {
             id: "implement",

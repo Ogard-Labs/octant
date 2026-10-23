@@ -174,7 +174,7 @@ function navigatorAssistantClient(
   const snapshot = (): NavigatorAssistantSnapshot =>
     ({
       status: "ready",
-      settingsTarget: { section: "navigator-assistant", setting: "default-model" },
+      settingsTarget: { section: "harness", setting: "default-model" },
       threadId: null,
       transcript: current,
       defaultProvider: {
@@ -5121,7 +5121,6 @@ describe("App", () => {
 
     await openSettingsFromSidebar(user);
     // The rail shows an icon until search is asked for.
-    await user.click(await screen.findByRole("button", { name: "Search settings" }));
     await screen.findByRole("searchbox", { name: "Search settings" });
 
     // Search is navigation: typing "material" shows a result list, and
@@ -5153,7 +5152,6 @@ describe("App", () => {
     expect(await screen.findByRole("button", { name: "Workspace mode, Code" })).toBeVisible();
     await openSettingsFromSidebar(user);
     // The rail shows an icon until search is asked for.
-    await user.click(await screen.findByRole("button", { name: "Search settings" }));
     await screen.findByRole("searchbox", { name: "Search settings" });
 
     // Search "providers" and deep-link to the Providers & Models section.

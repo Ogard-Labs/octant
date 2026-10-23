@@ -179,7 +179,14 @@ export const DEFAULT_SIDEBAR_BACKGROUND: SidebarBackground = Schema.decodeSync(S
 // image library on the host; the ground does not keep a second copy. The
 // tuning fields travel with every kind so switching away and back keeps what a
 // person dialled in; each is optional on the wire so old rows still decode.
-export const AppBackgroundKind = Schema.Literal("theme", "builtin", "photo", "characters", "none");
+export const AppBackgroundKind = Schema.Literal(
+  "theme",
+  "builtin",
+  "photo",
+  "characters",
+  "pixels",
+  "none",
+);
 export type AppBackgroundKind = typeof AppBackgroundKind.Type;
 
 /** The first-party image catalog shared with Zen's Appearance panel. */
@@ -203,8 +210,11 @@ export const AppBackgroundEffect = Schema.Literal("none", "pixelate", "dither");
 export type AppBackgroundEffect = typeof AppBackgroundEffect.Type;
 
 /**
- * Retired: the ground no longer moves or draws a pattern. Kept so rows that
- * chose still, pulse, or wave still decode; nothing reads it.
+ * Whether a drawn or printed ground moves. `still` holds one frame and takes
+ * no clicks; `wave` (and `pulse`, which rows from the retired dot pattern
+ * carry) lets the cells drift and sends a wave out from a click. Absent, the
+ * character and pixel fields move and a printed picture stays still, which is
+ * what each did before the choice existed.
  */
 export const AppBackgroundMotion = Schema.Literal("still", "pulse", "wave");
 export type AppBackgroundMotion = typeof AppBackgroundMotion.Type;
@@ -260,6 +270,16 @@ const CharactersAppBackground = Schema.Struct({
   ...AppBackgroundTuning,
 }).annotations(strict);
 
+/**
+ * A field of square cells in the theme's own ink, its brightness drifting in
+ * slow waves and printed through an ordered dither (or plain pixels). It
+ * carries no picture; the effect cell and tones size it.
+ */
+const PixelsAppBackground = Schema.Struct({
+  kind: Schema.Literal("pixels"),
+  ...AppBackgroundTuning,
+}).annotations(strict);
+
 const NoneAppBackground = Schema.Struct({
   kind: Schema.Literal("none"),
   ...AppBackgroundTuning,
@@ -270,6 +290,7 @@ export const AppBackground = Schema.Union(
   BuiltinAppBackground,
   PhotoAppBackground,
   CharactersAppBackground,
+  PixelsAppBackground,
   NoneAppBackground,
 );
 export type AppBackground = typeof AppBackground.Type;

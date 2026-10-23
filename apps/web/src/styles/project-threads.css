@@ -68,6 +68,23 @@
   line-height: 1.45;
 }
 
+/* The first-run empty state sits a step below the header, with its title in
+   the primary ink so it reads as a message rather than a stray caption. */
+.project-nav__empty--first {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding-top: var(--oct-space-4);
+}
+
+.project-nav__empty--first > p {
+  margin: 0;
+}
+
+.project-nav__empty-title {
+  color: var(--octant-text-secondary);
+  font-weight: 500;
+}
+
 .project-nav__status button {
   display: block;
   margin-top: var(--oct-space-2);
@@ -203,6 +220,20 @@
 .project-section__header h2 {
   margin: 0;
   font: inherit;
+}
+
+/* In the Project tree the list's view, filter, and arrangement controls share
+   the Projects heading's row, after the label, so the sidebar has one header
+   row before the first Project. */
+.project-section__header h2 {
+  flex: none;
+}
+
+.project-section__header > .project-nav__toolbar {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
+  margin-inline-start: var(--oct-space-2);
 }
 
 .project-section > .sidebar-section {

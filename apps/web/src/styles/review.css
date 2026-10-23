@@ -12,10 +12,6 @@
   background: var(--oct-bg);
 }
 
-.shell--app-backdrop.shell-frame .review-layer {
-  background: transparent;
-}
-
 .review-page {
   container: review / inline-size;
 }

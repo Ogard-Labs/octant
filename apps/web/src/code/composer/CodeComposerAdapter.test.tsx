@@ -247,11 +247,11 @@ describe("CodeComposerAdapter", () => {
     expect(new Set(composerIds).size).toBe(2);
   });
 
-  it("asks for the change in plain words rather than opening on a tip", () => {
+  it("asks in the same plain words as every start screen rather than opening on a tip", () => {
     render(<CodeComposerAdapter {...defaultProps} />);
     expect(screen.getByRole("textbox", { name: "First message" })).toHaveAttribute(
       "placeholder",
-      "Describe the change…",
+      "Ask anything…",
     );
   });
 

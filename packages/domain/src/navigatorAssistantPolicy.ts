@@ -3,13 +3,13 @@ import type { SettingsDeepLink } from "@octant/contracts";
 
 /** Deep link to the Navigator default-model setting. */
 export const NAVIGATOR_ASSISTANT_DEFAULT_MODEL_TARGET: SettingsDeepLink = {
-  section: "navigator-assistant",
+  section: "harness",
   setting: "default-model",
 };
 
 /** Deep link to the Navigator vision-reviewer setting. */
 export const NAVIGATOR_ASSISTANT_VISION_REVIEWER_TARGET: SettingsDeepLink = {
-  section: "navigator-assistant",
+  section: "harness",
   setting: "vision-reviewer",
 };
 

@@ -54,7 +54,7 @@ address and time. The strip is absent until the thread has a capture.
 - A thread keeps its newest 32 captures; the oldest is dropped when a new one
   arrives. Deleting the thread deletes its captures.
 - Captures stay on this computer, in Octant's data folder. **Settings → Data &
-  privacy** lists **Browser captures** under Caches with where they are stored. They are not added to Canvases, shared,
+  storage** lists **Browser captures** under Caches with where they are stored. They are not added to Canvases, shared,
   synced to your other computers, or included in diagnostics. Exporting a thread
   includes them: each capture is listed with its page title, address, and time,
   but not the picture itself. A paired device's export leaves them out.
@@ -151,7 +151,7 @@ waiting or the page half-open.
   turn can use the Browser again, and asks again for any site you did not
   choose **Always allow** for.
 - **You chose Always allow for a site.** It opens without asking, in Work and
-  Code, until you forget it under **Settings → Data & privacy → Remembered
+  Code, until you forget it under **Settings → Permissions → Remembered
   websites**. Switching the thread's model still asks, because the remembered
   site covers the page, not who drives it.
 - **The provider cannot carry the tool.** The composer does not offer

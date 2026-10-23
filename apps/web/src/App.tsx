@@ -1,3 +1,4 @@
+import { SidebarThreadTabsContext, type SidebarThreadTabs } from "./shell/sidebarThreadTabs";
 import {
   createTabActivationRegistry,
   TabActivationProvider,
@@ -1354,11 +1355,30 @@ function LaunchedShell(
         });
         return;
       }
-      void controller.dropSurface(
-        source.surface,
-        destination,
-        row?.projectId === undefined ? undefined : decodeProjectId(row.projectId),
-      );
+      // Two to four selected tabs dragged together lay out side by side in
+      // the pane they land on, at its centre or an edge alike.
+      if (source.surfaces !== undefined && source.surfaces.length >= 2) {
+        void controller.arrangeSideBySide(destination.targetPaneId, source.surfaces);
+        return;
+      }
+      void controller
+        .dropSurface(
+          source.surface,
+          destination,
+          row?.projectId === undefined ? undefined : decodeProjectId(row.projectId),
+        )
+        .then((placed) => {
+          // A tab that was not its pane's open one leaves that pane's row
+          // once it is placed somewhere else; a refused drop leaves it.
+          const fromTab = source.fromTab;
+          if (!placed || fromTab === undefined) return;
+          if (
+            String(fromTab.paneId) === String(destination.targetPaneId) &&
+            destination.kind === "center"
+          )
+            return;
+          void controller.closeContentTab(fromTab.paneId, fromTab.tabId);
+        });
     },
   });
   // Every sidebar row reads this through context, so it is rebuilt only when
@@ -1381,6 +1401,10 @@ function LaunchedShell(
         workspaceDrag.consumeSuppressedClick(`thread:${rowId}`),
     }),
     [activeMode, workspaceDrag],
+  );
+  const sidebarThreadTabs = useMemo<SidebarThreadTabs>(
+    () => ({ openAsPreview: controller.openThreadAsPreview, keep: controller.keepThreadTab }),
+    [controller.openThreadAsPreview, controller.keepThreadTab],
   );
   useEffect(() => {
     if (activeDraftKey === undefined) return;
@@ -4405,6 +4429,8 @@ function LaunchedShell(
       closeBottomPanel,
       closeBottomPanelTab,
       closeContentTab: controller.closeContentTab,
+      keepThreadTab: controller.keepThreadTab,
+      arrangeSideBySide: controller.arrangeSideBySide,
       closeDock,
       closeDockTab,
       closePane: controller.closePane,
@@ -7016,34 +7042,36 @@ function LaunchedShell(
               />
               <TrackerReferenceProvider ports={trackerReferencePorts}>
                 <SidebarThreadDragContext.Provider value={sidebarThreadDrag}>
-                  <ProjectThreadsProvider value={projectThreadsAccess}>
-                    <NewTaskDraftsContext.Provider value={newTaskDrafts}>
-                      <StreamRepliesContext.Provider
-                        value={controller.settings?.streamReplies !== false}
-                      >
-                        {/* The floor for every rendered link: panes that can host a
+                  <SidebarThreadTabsContext.Provider value={sidebarThreadTabs}>
+                    <ProjectThreadsProvider value={projectThreadsAccess}>
+                      <NewTaskDraftsContext.Provider value={newTaskDrafts}>
+                        <StreamRepliesContext.Provider
+                          value={controller.settings?.streamReplies !== false}
+                        >
+                          {/* The floor for every rendered link: panes that can host a
                     Browser layer their in-app open over this, and surfaces that
                     never can — dock tools, dialogs, Chat — still get the
                     external open and copy rather than a dead anchor. */}
-                        <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
-                          <WorkKindChoiceContext.Provider value={workKindChoice}>
-                            <ModelToolVerificationContext.Provider
-                              value={providerController.verifyModelTools}
-                            >
-                              <HostFederationStackContext.Provider value={federation}>
-                                <PlanUsageProvider
-                                  barStyle={controller.settings?.usageBars ?? "smooth"}
-                                  client={launchedClients.providerUsageLimitsClient}
-                                >
-                                  {shell}
-                                </PlanUsageProvider>
-                              </HostFederationStackContext.Provider>
-                            </ModelToolVerificationContext.Provider>
-                          </WorkKindChoiceContext.Provider>
-                        </MarkdownLinkActionsContext.Provider>
-                      </StreamRepliesContext.Provider>
-                    </NewTaskDraftsContext.Provider>
-                  </ProjectThreadsProvider>
+                          <MarkdownLinkActionsContext.Provider value={rootLinkActions}>
+                            <WorkKindChoiceContext.Provider value={workKindChoice}>
+                              <ModelToolVerificationContext.Provider
+                                value={providerController.verifyModelTools}
+                              >
+                                <HostFederationStackContext.Provider value={federation}>
+                                  <PlanUsageProvider
+                                    barStyle={controller.settings?.usageBars ?? "smooth"}
+                                    client={launchedClients.providerUsageLimitsClient}
+                                  >
+                                    {shell}
+                                  </PlanUsageProvider>
+                                </HostFederationStackContext.Provider>
+                              </ModelToolVerificationContext.Provider>
+                            </WorkKindChoiceContext.Provider>
+                          </MarkdownLinkActionsContext.Provider>
+                        </StreamRepliesContext.Provider>
+                      </NewTaskDraftsContext.Provider>
+                    </ProjectThreadsProvider>
+                  </SidebarThreadTabsContext.Provider>
                 </SidebarThreadDragContext.Provider>
               </TrackerReferenceProvider>
             </NeedsYouProvider>

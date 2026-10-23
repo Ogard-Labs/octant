@@ -117,6 +117,11 @@
   --oct-elev-subtle: var(--octant-shadow-sm);
   --oct-elev-raised: var(--octant-shadow-overlay);
 
+  /* The glass floor is the theme's page colour at the floor's measured 66%.
+     Its fixed warm near-black put a brown cast under the composer and the
+     user bubbles on a neutral or green-black preset such as Onyx. */
+  --oct-glass-floor: color-mix(in srgb, var(--octant-workspace) 66%, transparent);
+
   /* ─── focus and scrim ───────────────────────────────────────────────
      The focus role stays available to imported themes and accent tints, but
      it is never painted as the indicator: a themed focus colour would put a

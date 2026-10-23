@@ -72,6 +72,8 @@ export type ShellActions = {
   readonly closeBottomPanel: (restoreFocus?: boolean) => void;
   readonly closeBottomPanelTab: (surface: RightUtilityDockSurfaceId) => void;
   readonly closeContentTab: ShellController["closeContentTab"];
+  readonly keepThreadTab: ShellController["keepThreadTab"];
+  readonly arrangeSideBySide: ShellController["arrangeSideBySide"];
   readonly closeDock: () => void;
   readonly closeDockTab: (tabId: string) => void;
   readonly closePane: ShellController["closePane"];

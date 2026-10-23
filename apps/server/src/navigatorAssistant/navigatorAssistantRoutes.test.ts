@@ -161,7 +161,7 @@ describe("navigator assistant routes", () => {
     expect(command?.status).toBe(409);
     expect(await command!.json()).toMatchObject({
       category: "unconfigured",
-      settingsTarget: { section: "navigator-assistant", setting: "default-model" },
+      settingsTarget: { section: "harness", setting: "default-model" },
     });
   });
 

@@ -425,9 +425,8 @@ describe("the public-block visual language", () => {
     const surface = readFileSync(join(webRoot, "styles/surface.css"), "utf8");
     const stack = surface.match(/\.composer-stack \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const strip = surface.match(/\.composer-tray--inside \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
-    const prompt =
-      surface.match(/\.composer-stack > \.composer > \.composer-input \{\n(?:.*\n)*?\}/m)?.[0] ??
-      "";
+    const system = readFileSync(join(webRoot, "styles/octant.css"), "utf8");
+    const prompt = system.match(/\.composer-input \{\n(?:.*\n)*?\}/m)?.[0] ?? "";
     const welcomes = [
       "chat/ChatWelcome.tsx",
       "work/composer/WorkComposerAdapter.tsx",
@@ -443,8 +442,11 @@ describe("the public-block visual language", () => {
     expect(strip).not.toMatch(/position:\s*absolute/);
     expect(strip).not.toMatch(/background/);
     expect(strip).not.toMatch(/border-top/);
-    // A prompt is a paragraph: four lines before the box grows.
-    expect(prompt).toMatch(/min-height:\s*96px/);
+    // Every composer, start screen or thread, has one prompt: two lines before
+    // the box grows. A start screen redefining it made the same message change
+    // shape between the first send and the next.
+    expect(prompt).toMatch(/min-height:\s*calc\(2lh \+ 30px\)/);
+    expect(surface).not.toMatch(/\.composer-stack > \.composer > \.composer-input \{/);
     for (const source of welcomes) {
       expect(source).toMatch(/className="composer-tray composer-tray--inside"/);
       expect(source).not.toMatch(/footer=\{\s*<div className="composer-tray"/);

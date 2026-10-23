@@ -300,5 +300,5 @@ function latestAssistantReply(
 
 /** The host names the destination; an absent one still lands on the section. */
 function navigatorSettingsTarget(target: SettingsDeepLink | undefined): SettingsDeepLink {
-  return target ?? ({ section: "navigator-assistant" } as SettingsDeepLink);
+  return target ?? ({ section: "harness" } as SettingsDeepLink);
 }

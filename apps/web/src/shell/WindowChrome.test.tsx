@@ -80,6 +80,30 @@ const styles = [
   .join("\n")
   .replace(/\/\*[\s\S]*?\*\//g, "");
 
+/*
+ * A rule's selectors, split only at commas outside parentheses. Split at every
+ * comma, a list inside `:is()` handed back its members as selectors of their
+ * own, so a rule that merely named `.review-layer` among others stood in for
+ * the layer's own rule.
+ */
+function selectorList(prelude: string | undefined): ReadonlyArray<string> {
+  const selectors: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const character of prelude ?? "") {
+    if (character === "(") depth += 1;
+    if (character === ")") depth -= 1;
+    if (character === "," && depth === 0) {
+      selectors.push(current);
+      current = "";
+    } else {
+      current += character;
+    }
+  }
+  selectors.push(current);
+  return selectors.map((candidate) => candidate.trim().replace(/\s+/g, " "));
+}
+
 function cssRule(selector: string, occurrence = 0): string {
   if (selector === ":root" && occurrence === 0) {
     const start = styles.indexOf(":root {");
@@ -89,10 +113,7 @@ function cssRule(selector: string, occurrence = 0): string {
     return styles.slice(openingBrace + 1, closingBrace);
   }
   const matches = [...styles.matchAll(/([^{}]+)\{([^{}]*)\}/gs)].filter((match) =>
-    match[1]
-      ?.split(",")
-      .map((candidate) => candidate.trim().replace(/\s+/g, " "))
-      .includes(selector),
+    selectorList(match[1]).includes(selector),
   );
   expect(matches, `missing CSS rule for ${selector}`).not.toHaveLength(0);
   return matches[occurrence]?.[2] ?? "";
@@ -310,10 +331,7 @@ describe("WindowChrome", () => {
     const layerStyles = `${styles}\n${railStyles}`;
     const stackingRank = (selector: string): number => {
       const rule = [...layerStyles.matchAll(/([^{}]+)\{([^{}]*)\}/gs)].find((candidate) =>
-        candidate[1]
-          ?.split(",")
-          .map((value) => value.trim())
-          .includes(selector),
+        selectorList(candidate[1]).includes(selector),
       );
       expect(rule, `missing CSS rule for ${selector}`).toBeDefined();
       const zIndex = /z-index:\s*(-?\d+);/.exec(rule?.[2] ?? "");
@@ -512,7 +530,9 @@ describe("WindowChrome", () => {
     // The frame and the sheet are painted from three surfaces on the shell
     // root, so reduced transparency makes those opaque rather than
     // repainting each column.
-    expect(reducedTransparency).toContain(".shell.shell-frame");
+    expect(reducedTransparency).toContain(
+      ":is(.shell, .shell.shell--material-translucent[data-octant-sidebar-vibrancy])",
+    );
     expect(reducedTransparency).toContain("--octant-window-surface: var(--octant-sidebar-opaque);");
     expect(reducedTransparency).toContain("--octant-sheet-surface: var(--octant-workspace);");
     expect(reducedTransparency).not.toContain("--octant-border-strong");
@@ -707,10 +727,10 @@ describe("WindowChrome", () => {
   it("lets the native window glass through one window surface under an integrated titlebar", () => {
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("background: transparent;");
     expect(cssRule(".shell.shell-frame")).toContain("background: var(--octant-window-surface);");
-    expect(cssRule(".shell.shell-frame.shell--material-translucent")).toContain(
+    expect(cssRule(".shell.shell--material-translucent")).toContain(
       "--octant-window-surface: var(--octant-sidebar-translucent);",
     );
-    expect(cssRule(".shell.shell-frame.shell--material-translucent")).toContain(
+    expect(cssRule(".shell.shell--material-translucent")).toContain(
       "--octant-sheet-surface: var(--octant-workspace-translucent);",
     );
     expect(cssRule('html[data-octant-native-host="true"]')).toContain("overflow: clip;");
@@ -730,7 +750,7 @@ describe("WindowChrome", () => {
       "background: transparent;",
     );
     // The stage piece sits below the ground, so the shell holds its own level.
-    expect(cssRule(".shell.shell-frame", 2)).toContain("isolation: isolate;");
+    expect(cssRule(".shell.shell-frame", 1)).toContain("isolation: isolate;");
   });
 
   it("lays a veil over the application ground behind a thread, below the title band", () => {
@@ -759,7 +779,7 @@ describe("WindowChrome", () => {
       .replace(/\s+/g, " ");
     const glass =
       systemStyles.match(
-        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) \.shell--app-backdrop :is\(\.turn-user \.bubble, \.composer:not\(\.composer--follow-up\)\) \{([^}]*)\}/,
+        /@media \(prefers-reduced-transparency: no-preference\) \{ html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) :is\(\.turn-user \.bubble, \.composer:not\(\.composer--follow-up\)\) \{([^}]*)\}/,
       )?.[1] ?? "";
     // The floor goes under the tint, as on Zen's cards: without it body text
     // over a white photo falls under 3:1.
@@ -770,7 +790,7 @@ describe("WindowChrome", () => {
     // glass, and the surface where the person types takes the whole material.
     const surface =
       systemStyles.match(
-        /html:not\(\[data-octant-reduced-transparency="true"\]\) \.shell--app-backdrop \.thread-composer__surface \{([^}]*)\}/,
+        /html:not\(\[data-octant-reduced-transparency="true"\]\) :is\(\.shell--app-backdrop, \.shell--material-translucent\) \.thread-composer__surface \{([^}]*)\}/,
       )?.[1] ?? "";
     expect(surface).toContain("background-color: var(--oct-glass-floor);");
     expect(surface).toContain("backdrop-filter: blur(var(--oct-glass-blur-thick))");
@@ -784,6 +804,27 @@ describe("WindowChrome", () => {
         ? `.shell-frame${surface}`
         : `.shell-frame > ${surface}`;
       expect(cssRule(selector)).toContain("background: transparent;");
+    }
+  });
+
+  it("clears every destination page under Glass as well as under a ground", () => {
+    // Inbox, Board, and Archive were cleared under a ground alone, so the
+    // other pages painted the opaque page colour over the glass beside them.
+    const railSource = readFileSync(
+      resolve(process.cwd(), "src/shell/WorkspaceRailLayers.tsx"),
+      "utf8",
+    );
+    const layers = [
+      ...new Set([...railSource.matchAll(/className="([a-z-]+-layer)"/g)].map((match) => match[1])),
+    ];
+    expect(layers).toEqual(expect.arrayContaining(["inbox-layer", "automation-center-layer"]));
+    const flattened = styles.replace(/\s+/g, " ");
+    const cleared =
+      /:is\(\.shell--app-backdrop, \.shell--material-translucent\)\.shell-frame :is\(([^)]*)\)/.exec(
+        flattened,
+      )?.[1] ?? "";
+    for (const layer of [...layers, "projects-page-layer", "review-layer"]) {
+      expect(cleared, `${layer ?? ""} stays opaque under Glass`).toContain(`.${layer ?? ""}`);
     }
   });
 

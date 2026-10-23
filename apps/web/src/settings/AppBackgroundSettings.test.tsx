@@ -119,6 +119,41 @@ describe("AppBackgroundSettings", () => {
     });
   });
 
+  it("saves dithered pixels in one choice, then sizes, shades, and stills the field", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const { rerender } = render(
+      <AppBackgroundSettings
+        background={DEFAULT_APP_BACKGROUND}
+        library={library()}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Application background" }));
+    await user.click(await screen.findByRole("option", { name: "Dithered pixels" }));
+    expect(onChange).toHaveBeenLastCalledWith({ ...dials, kind: "pixels" });
+
+    const field = { ...DEFAULT_APP_BACKGROUND, kind: "pixels" as const };
+    rerender(<AppBackgroundSettings background={field} library={library()} onChange={onChange} />);
+    // The field is always printed: no "Off", and it dithers until told otherwise.
+    const effect = screen.getByRole("group", { name: "Background effect" });
+    expect(within(effect).queryByRole("button", { name: "Off" })).toBeNull();
+    expect(within(effect).getByRole("button", { name: "Dither" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("slider", { name: "Pixel size" })).toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: "Colours" })).toBeInTheDocument();
+    const motion = screen.getByRole("group", { name: "Background motion" });
+    expect(within(motion).getByRole("button", { name: "Wave" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(within(motion).getByRole("button", { name: "Still" }));
+    expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ motion: "still" }));
+  });
+
   it("saves pulsing characters as the ground in one choice, keeping every dial", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -276,7 +311,7 @@ describe("AppBackgroundSettings", () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ photoOpacity: 75 }));
   });
 
-  it("prints a picture as it is, pixelated, or dithered, and never offers motion or dots", async () => {
+  it("prints a picture as it is, pixelated, or dithered, offers motion only once printed, and never dots", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     const walnut = {
@@ -302,6 +337,16 @@ describe("AppBackgroundSettings", () => {
     );
     expect(screen.getByRole("slider", { name: "Pixel size" })).toBeInTheDocument();
     expect(screen.queryByRole("slider", { name: "Colours" })).toBeNull();
+    // A print stays still until a person asks it to wave.
+    const motion = screen.getByRole("group", { name: "Background motion" });
+    expect(within(motion).getByRole("button", { name: "Still" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await user.click(within(motion).getByRole("button", { name: "Wave" }));
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ effect: "pixelate", motion: "wave" }),
+    );
 
     rerender(
       <AppBackgroundSettings

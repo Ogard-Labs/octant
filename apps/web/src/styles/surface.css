@@ -358,18 +358,19 @@
    Chat, Work, and Code start from the same geometry: one question in the
    middle of the page and the raised `.composer` docked at its foot, where it
    sits once the thread starts, so the first message is typed where every
-   later one is. The per-mode adapters only decide which controls sit in the
-   composer's tray. */
+   later one is: 12px above the pane's foot, the thread composer's margin, so
+   a start screen beside a thread puts its composer on the same line. The
+   per-mode adapters only decide which controls sit in the composer's tray. */
 
 .welcome {
   display: flex;
-  width: min(100% - 40px, 768px);
+  width: min(100% - 40px, var(--oct-composer-width));
   min-width: 0;
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
   min-height: 100%;
-  padding-block: min(8vh, 64px) var(--oct-space-5);
+  padding-block: min(8vh, 64px) 12px;
   margin: 0 auto;
   gap: var(--oct-space-4);
 }
@@ -400,12 +401,16 @@
   margin: 0;
 }
 
+/* A start screen's composer is the same width as a thread's (octant.css),
+   centred in its canvas, and keeps the shared prompt height. */
 .composer-stack {
   position: relative;
   isolation: isolate;
   display: flex;
+  width: min(100%, var(--oct-composer-width));
   min-width: 0;
   flex-direction: column;
+  align-self: center;
 }
 
 .composer-stack > .composer {
@@ -413,12 +418,6 @@
   z-index: 1;
   width: 100%;
   margin: 0;
-}
-
-.composer-stack > .composer > .composer-input {
-  /* Four lines before the box has to grow: a prompt is a paragraph, not a
-     search query, and 64px read as one. */
-  min-height: 96px;
 }
 
 /* Where the thread runs is the first row inside the card, as small chips
@@ -499,6 +498,23 @@
 .composer-tray--inside .composer-tray__trailing > * {
   border-radius: var(--oct-radius-pill);
   background: color-mix(in oklab, var(--oct-fg) 6%, transparent);
+}
+
+/* The Project a new thread will run in is the start screen's first choice, so
+   it stands above the composer as plain text, the way a start screen asks
+   "where" before "what". It is lifted out of the row rather than given a row
+   of its own, so it never pushes the prompt down the page (a tray above the
+   card once did), and its menu opens on whichever side has room. */
+.composer-stack
+  > .composer
+  .composer-tray--inside
+  .composer-tray__leading
+  > .composer-folder-selector {
+  position: absolute;
+  bottom: calc(100% + var(--oct-space-2));
+  left: var(--oct-space-1);
+  background: transparent;
+  border-radius: 0;
 }
 
 /* The Environment is a plain span rather than a trigger, so the chip draws
@@ -676,7 +692,8 @@
 
 .app-backdrop__builtin,
 .app-backdrop__photo,
-.app-backdrop__characters {
+.app-backdrop__characters,
+.app-backdrop__pixels {
   position: absolute;
   inset: 0;
   display: block;
@@ -698,7 +715,8 @@
 /* A printed picture is a coarse grid scaled up with nearest-neighbour
    sampling. A clean photo is already at device pixels and must sample
    ordinarily, or it becomes a 1× nearest-neighbour upscale on Retina. */
-.app-backdrop__photo[data-dithered="true"] {
+.app-backdrop__photo[data-dithered="true"],
+.app-backdrop__pixels {
   image-rendering: pixelated;
 }
 
@@ -763,9 +781,22 @@
   }
 }
 
-.shell--app-backdrop.shell-frame .inbox-layer,
-.shell--app-backdrop.shell-frame .code-board-layer,
-.shell--app-backdrop.shell-frame .archive-layer,
+/* Every destination page is clear over the sheet, under a ground or under
+   Glass alone. The list named Inbox, Board, and Archive, and only under a
+   ground, so Projects, Agents, Automations, Artifacts, and the Image
+   generator painted the theme's opaque page (black on an OLED preset) over
+   the glass from the window's top edge, beside pages that let it through. */
+:is(.shell--app-backdrop, .shell--material-translucent).shell-frame
+  :is(
+    .inbox-layer,
+    .code-board-layer,
+    .archive-layer,
+    .review-layer,
+    .projects-page-layer,
+    .agents-center-layer,
+    .automation-center-layer,
+    .artifact-library-layer
+  ),
 .shell--app-backdrop.shell-frame .workspace,
 .shell--app-backdrop.shell-frame .workspace-pane,
 .shell--app-backdrop.shell-frame .draft-thread,
@@ -775,6 +806,41 @@
 .shell--app-backdrop.shell-frame .code-delivery-pane,
 .shell--app-backdrop.shell-frame .code-diff-pane {
   background: transparent;
+}
+
+/* The design system's raised step (`--oct-surface`) is the opaque floating
+   colour, so the creation paths, suggestion cards, and agent cards on these
+   pages stayed solid once the page under them was clear. On a page they are
+   cards, so under Glass they take the card's step of ink. The Board keeps
+   the floating colour: its view popover is drawn in place, not in a portal. */
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell--material-translucent.shell-frame
+  :is(
+    .inbox-layer,
+    .archive-layer,
+    .review-layer,
+    .projects-page-layer,
+    .agents-center-layer,
+    .automation-center-layer,
+    .artifact-library-layer
+  ) {
+  --oct-surface: var(--octant-card);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+    .shell--material-translucent.shell-frame
+    :is(
+      .inbox-layer,
+      .archive-layer,
+      .review-layer,
+      .projects-page-layer,
+      .agents-center-layer,
+      .automation-center-layer,
+      .artifact-library-layer
+    ) {
+    --oct-surface: var(--octant-floating);
+  }
 }
 
 /* Start screens set their question and hints straight on the page. Under a
@@ -887,6 +953,27 @@
   )
   > .app-backdrop[data-placement="shell"] {
   opacity: 0.2;
+}
+
+/* A destination page is cards and lines of text on the same clear sheet, and
+   its letters ran crisp through both: "Describe with Octant" sat on a column
+   of glyphs. It is less dense than a transcript, so the ground keeps a little
+   more. Named after the thread rule, so a page opened over a thread wins. */
+.shell--app-backdrop.shell--material-translucent.shell-frame:has(
+    .primary-workspace-layer
+      > :is(
+        .inbox-layer,
+        .code-board-layer,
+        .archive-layer,
+        .review-layer,
+        .projects-page-layer,
+        .agents-center-layer,
+        .automation-center-layer,
+        .artifact-library-layer
+      )
+  )
+  > .app-backdrop[data-placement="shell"] {
+  opacity: 0.35;
 }
 
 /* Where the pane meets the sheet's rounded corner, its veil rounds with it. */

@@ -1,6 +1,7 @@
 import type { ResolvedAppBackground } from "@octant/domain";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { runCharacterField } from "./appBackdropCharacters";
+import { runMovingPrint } from "./appBackdropPrint";
 import {
   decodePhoto,
   drawPrinted,
@@ -31,6 +32,8 @@ export interface AppBackdropProps {
 export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) {
   const photoCanvas = useRef<HTMLCanvasElement>(null);
   const charactersCanvas = useRef<HTMLCanvasElement>(null);
+  const pixelsCanvas = useRef<HTMLCanvasElement>(null);
+  const wavesWithin = placement === "shell" ? START_SCREEN_SELECTOR : undefined;
   const [photo, setPhoto] = useState<DecodedPhoto | null>(null);
   const active = resolved.kind !== "none";
   const photoId = resolved.kind === "photo" ? resolved.backgroundId : null;
@@ -80,6 +83,17 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
   useEffect(() => {
     const canvas = photoCanvas.current;
     if (photo === null || canvas === null) return;
+    // A print set to Wave is drawn cell by cell so a click can move it; a
+    // still print keeps the one-pass print below.
+    if (resolved.backgroundAnimated && resolved.effect.kind !== "none") {
+      return runMovingPrint(
+        canvas,
+        { picture: { source: photo.source, size: photo.size } },
+        resolved.effect,
+        true,
+        wavesWithin,
+      );
+    }
     const paint = () => {
       const rect = canvas.getBoundingClientRect();
       const viewport = { width: rect.width, height: rect.height };
@@ -93,18 +107,35 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
       observer?.disconnect();
       stopPixelRatio();
     };
-  }, [photo, resolved.effect.kind, resolved.effect.cell, resolved.effect.levels]);
+  }, [
+    photo,
+    resolved.backgroundAnimated,
+    resolved.effect.kind,
+    resolved.effect.cell,
+    resolved.effect.levels,
+    wavesWithin,
+  ]);
 
   const characters = resolved.kind === "characters";
   useEffect(() => {
     const canvas = charactersCanvas.current;
     if (!characters || canvas === null) return;
-    return runCharacterField(
-      canvas,
-      resolved.backgroundAnimated,
-      placement === "shell" ? START_SCREEN_SELECTOR : undefined,
-    );
-  }, [characters, placement, resolved.backgroundAnimated]);
+    return runCharacterField(canvas, resolved.backgroundAnimated, wavesWithin);
+  }, [characters, wavesWithin, resolved.backgroundAnimated]);
+
+  const pixels = resolved.kind === "pixels";
+  useEffect(() => {
+    const canvas = pixelsCanvas.current;
+    if (!pixels || canvas === null) return;
+    return runMovingPrint(canvas, {}, resolved.effect, resolved.backgroundAnimated, wavesWithin);
+  }, [
+    pixels,
+    wavesWithin,
+    resolved.backgroundAnimated,
+    resolved.effect.kind,
+    resolved.effect.cell,
+    resolved.effect.levels,
+  ]);
 
   if (!active) return null;
 
@@ -143,6 +174,13 @@ export function AppBackdrop({ resolved, fetcher, placement }: AppBackdropProps) 
           className="app-backdrop__characters"
           data-animated={resolved.backgroundAnimated ? "true" : "false"}
           ref={charactersCanvas}
+        />
+      ) : null}
+      {pixels ? (
+        <canvas
+          className="app-backdrop__pixels"
+          data-animated={resolved.backgroundAnimated ? "true" : "false"}
+          ref={pixelsCanvas}
         />
       ) : null}
       {pictureSource === null ? null : (

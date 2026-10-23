@@ -1850,10 +1850,14 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   overflow: auto;
 }
 
+/* The row takes the strip's width so the pills share it, shrinking toward
+   their minimum before anything scrolls; sized to its content, three tabs
+   asked for 604px and scrolled in a 400px pane instead of sharing it. Pills
+   at their minimum overflow the row, and the strip scrolls them. */
 .workspace-content-tabs__list {
-  width: max-content;
+  width: 100%;
   max-width: none;
-  gap: 4px;
+  gap: var(--oct-space-2);
 }
 
 .workspace-content-tabs__entry {
@@ -1867,7 +1871,7 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
 }
 
 .workspace-content-tabs__entry [role="tab"] {
-  max-width: 220px;
+  max-width: none;
 }
 
 .workspace-content-tabs__entry [role="tab"] > span {
@@ -7685,6 +7689,37 @@ html[data-octant-increased-contrast="true"] .environment-checkout {
 .content-tab:focus-within > .content-tab__close,
 .content-tab:has([aria-selected="true"]) > .content-tab__close {
   opacity: 1;
+}
+/* A pane's conversation tabs are a row of equal pills: each open thread is
+   its own soft card at a shared width, so the row reads as a set of open
+   conversations rather than a line of links with one highlighted. The open
+   one is the brighter pill with a hairline edge; the rest sit a step back.
+   Dock tool tabs keep the bare recipe above. */
+.workspace-content-tabs .content-tab {
+  flex: 0 1 196px;
+  min-width: 112px;
+  max-width: 196px;
+  height: 28px;
+  background: color-mix(in oklab, var(--oct-fg) 4%, transparent);
+  border-radius: var(--oct-radius-md);
+}
+.workspace-content-tabs .content-tab:hover {
+  background: color-mix(in oklab, var(--oct-fg) 7%, transparent);
+}
+/* Picked for side by side: a step between a plain tab and the open one. */
+.workspace-content-tabs .content-tab[data-selected="true"] {
+  background: color-mix(in oklab, var(--oct-fg) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--oct-fg) 6%, transparent);
+}
+.workspace-content-tabs .content-tab:has([role="tab"][aria-selected="true"]) {
+  background: color-mix(in oklab, var(--oct-fg) 11%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--oct-fg) 9%, transparent);
+}
+.workspace-content-tabs .content-tab > .content-tab__select {
+  flex: 1 1 auto;
+  height: 28px;
+  min-height: 28px;
+  max-width: none;
 }
 .workspace-pane__header:has(.workspace-content-tabs) .workspace-pane__grip {
   flex: 0 0 auto;

@@ -15,7 +15,7 @@ again continues without that answer.
 
 Your name and avatar, appearance, and Navigator are not part of first run. Set
 them whenever you like in **Settings → Profile**, **Settings → Appearance**,
-and **Settings → Navigator**.
+and **Settings → Octant Harness → Navigator**.
 
 The last screen is a readiness view. It reports three facts separately:
 whether a provider can answer, whether a Project exists for the mode you

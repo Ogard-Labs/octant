@@ -53,7 +53,11 @@ existed is kept). It lists the threads flat under counted headings in the
 order a person acts on them: **Pinned**, **Needs input** (waiting on an
 approval or an answer), **Ready for review** (a finished turn nobody has
 looked at), **Working**, and **Idle** (everything else), newest first within
-each. A thread appears once, under the first heading that holds it.
+each. A thread appears once, under the first heading that holds it. A mode
+with no threads at all shows a short first-run note in Status and the Activity
+feed instead of an empty list: "No threads yet" in the secondary ink, then
+"Start one from the composer. Your threads gather here." A search or filter
+that matched nothing keeps its own message, which says nothing was deleted.
 
 Chat, Work, and Code keep the active mode's sidebar current with projection-only
 navigation reads ([routes](host-reads-and-commands.md#sidebar-navigation-reads)).
@@ -204,6 +208,33 @@ geometry and close-control presentation are shared with dock tools under
 
 These tabs add no persisted layout or authority; see
 [decision 0156](../decisions/0156-content-opens-beside-the-conversation.md).
+
+**Opening into tabs.** A single click on a sidebar thread opens it in the
+active pane in place: it takes over the pane's open tab unless that tab was
+kept, so browsing threads does not grow the tab row. A double click keeps the
+thread as a tab of its own, and so does a later double click on its tab; a
+kept tab stays when another thread opens in the pane, which then opens beside
+it as a new tab. A tab opened from anywhere else (a link, a search result, a
+drop) is kept.
+
+**Moving tabs and showing them side by side.** A tab drags the way a pane's
+title row does, through the same drop rules: dropped on another pane's edge it
+splits that pane and opens there, dropped on a pane's centre it opens in that
+pane, and a tab that is not the pane's open one may split its own pane, so a
+tab dragged to its pane's right edge lands beside the open thread. A tab that
+moved out of a pane leaves that pane's tab row. ⌘-click (Ctrl-click off Apple
+platforms) adds a tab to a selection or takes it out; Shift-click selects the
+run of tabs from the open one to the clicked one; a plain click clears the
+selection and opens the tab. Selected tabs carry a wash between the plain and
+the open one, and their names say "selected" to assistive technology. Two to
+four selected tabs dragged onto a pane, at its centre or an edge, or **Show
+side by side** from a tab's context menu, lay out in that pane: two side by
+side, three in equal columns, four as a 2×2 grid, in tab order. More than four
+keeps the first four and says the rest stayed as tabs. With no selection,
+**Show side by side** puts the right-clicked tab beside the open one. The
+layout is made of ordinary split commands, so closing or resizing a pane
+afterwards works as for any split, and a placement the window's authority
+refuses (another Project, mode, or host) is refused with the usual message.
 Several same-authority threads can be pinned or dropped into
 that tree; pointer activity and keyboard input make exactly one pane active,
 and the pane's drag handle (its title row) alone marks it visually, with no
@@ -618,10 +649,12 @@ the composer and Environment explain an admission refusal and its recovery.
 [Context and usage accounting](../architecture.md#context-and-usage-accounting)
 owns budget enforcement, provenance, native-session identity, and journal rules.
 
-Above the composer of every thread, in Chat, Work, and Code and for every provider, a
-quiet stats line, right of the thread's context in one strip, states what the thread used: input and output tokens, the cache
-hit, output speed, time to first token, and cost. When the provider reported account
-limit windows, the line leads with one bar per window, showing the share left
+Under the composer of every thread, in Chat, Work, and Code and for every provider, a
+quiet stats line states what the thread used: its turns, input and output tokens,
+thinking tokens when reported, the cache hit, output speed, time to first token, and
+cost. The provider's account limit windows stand in the strip above the box, right of
+the thread's context, one bar per window showing the share left; the stats line's
+switch hides the figures, not those bars
 (`composerLimitWindows` in `apps/web/src/context`, read from the context snapshot and
 falling back to the Code thread's own report). A provider that reported neither windows
 nor usage shows no line. In a split workspace the line shows in the active pane only: the

@@ -68,12 +68,16 @@
   flex-direction: column;
 }
 
-/* The Project browser is a floating dock in Zen; here it sits in the column. */
+/* The Project browser is a floating dock in Zen; here it sits in the column,
+   on the same stage as the start screen beside it. Zen's floating fill made
+   it an opaque slab from the title band down, the one solid column in a
+   window of glass. */
 .start-quick-tools__body .zen-research {
   position: static;
   height: 100%;
   border: 0;
   border-radius: 0;
+  background: transparent;
   box-shadow: none;
 }
 

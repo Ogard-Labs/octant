@@ -49,6 +49,7 @@ import { ComposerVoiceButton } from "../voice/ComposerVoiceButton";
 import { appendTranscript } from "../voice/appendTranscript";
 import { ComposerModelPicker, isComposerReasoningOption } from "../providers/ComposerModelPicker";
 import { useOctantCommands } from "../palette/CommandRegistry";
+import { useComposerSuggestionInput } from "../composer/useComposerSuggestionInput";
 import {
   applySlashCommandToken,
   filterOctantCommands,
@@ -357,6 +358,10 @@ export function ChatComposer(props: ChatComposerProps) {
     applyComposerCaret(messageRef.current, props.caretIndex, props.draft.length);
   }, [props.caretRestoreKey]);
 
+  const suggestionInput = useComposerSuggestionInput(props.draft, (text) =>
+    props.onDraftChange(text, text.length),
+  );
+
   function rememberCaret(caretIndex: number | null) {
     if (caretIndex === null) return;
     props.onCaretIndexChange?.(caretIndex);
@@ -440,6 +445,7 @@ export function ChatComposer(props: ChatComposerProps) {
 
   async function onDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) return;
+    if (suggestionInput.takeOnTab(event)) return;
     if (computer.handleKeyDown(event)) return;
     if (commandOpen && commandMatches.length > 0) {
       if (event.key === "ArrowDown") {
@@ -675,9 +681,10 @@ export function ChatComposer(props: ChatComposerProps) {
       onKeyDown={onDraftKeyDown}
       onKeyUp={onDraftKeyUp}
       onPaste={onDraftPaste}
-      placeholder={props.isSending ? "Send the next message…" : "Reply…"}
+      data-suggested={suggestionInput.suggested ? "true" : undefined}
+      placeholder={suggestionInput.placeholder}
       ref={messageRef}
-      rows={1}
+      rows={3}
       value={props.draft}
     />
   );

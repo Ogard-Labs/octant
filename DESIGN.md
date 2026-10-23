@@ -55,8 +55,9 @@ application ground, to a Vivid tile's face, and to a Project's letter tile;
 chrome stays flat. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground (0091): a first-party picture or a
-person's photo, shown plain or through one still print effect, or the field of
-Pulsing characters, behind the start screens or behind every page.
+person's photo, shown plain or through one print effect, or the field of
+Pulsing characters or Dithered pixels, behind the start screens or behind
+every page.
 
 ## Language
 
@@ -167,15 +168,15 @@ always publishes `default`. Vivid reads best in the light theme.
 Radius has one number per role. This table is its one statement; elsewhere
 this document names the token, not the number.
 
-| Token                 | Value  | Role                                                                                                         |
-| --------------------- | ------ | ------------------------------------------------------------------------------------------------------------ |
-| `--oct-radius-sm`     | 8px    | A control or a row; a composer context chip                                                                  |
-| `--oct-radius-inset`  | 8px    | An object resting inside a card or well: a Settings page's icon tile, a board card in its column             |
-| `--oct-radius-md`     | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble; a follow-up composer |
-| `--oct-radius-lg`     | 14px   | A welcome composer and a dialog                                                                              |
-| `--oct-radius-pill`   | 9999px | Compact chips, meters, and circular icon controls only                                                       |
-| `--radius` (`md`)     | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                                      |
-| `--radius-lg` / `-xl` | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover                       |
+| Token                 | Value  | Role                                                                                             |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------ |
+| `--oct-radius-sm`     | 8px    | A control or a row; a composer context chip                                                      |
+| `--oct-radius-inset`  | 8px    | An object resting inside a card or well: a Settings page's icon tile, a board card in its column |
+| `--oct-radius-md`     | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble           |
+| `--oct-radius-lg`     | 14px   | Every composer and a dialog                                                                      |
+| `--oct-radius-pill`   | 9999px | Compact chips, meters, and circular icon controls only                                           |
+| `--radius` (`md`)     | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                          |
+| `--radius-lg` / `-xl` | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover           |
 
 The `--oct-radius-*` tokens live in `octant.css`. The shadcn recipes derive
 their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
@@ -250,26 +251,33 @@ Projects) share one frame: the wide measure, so the title, subtitle, and Back
 control sit on the same left and right edges from page to page. A list there
 runs the frame's width; a board's columns may use all of it. Settings is the same shell with a 920px measure and its own
 navigation rail; the rail names each group of pages with a quiet label and
-draws no hairline between groups. The groups are Personal (how Octant looks and
-behaves for you), Modes (each mode's defaults), Models (which provider or model
-answers each job), Agents (what a running agent may do), Integrations, and
-System (the running host, its data, sync, remote access, and usage). Models
+draws no hairline between groups. The groups are General (General, Profile,
+Notifications), Look & feel (Appearance, Sidebar, Keybindings), Modes (each
+mode's defaults), AI & models (Providers & Models, Octant Harness, Voice &
+images: which provider or model answers each job), Tools (Skills & Extensions,
+Computer use, Device tools, GitHub, Linear: what a running agent may reach),
+Privacy & data (Permissions, Data & storage, Sync, Remote access), and Advanced
+(Host, Usage). Permissions holds what a person has already allowed (remembered
+websites, remembered tool approvals, public links); Data & storage holds what
+the host keeps (data map, caches, backup, recovery, export, retention, purge);
+Notifications holds what Octant sends while a person is away. AI & models
 lists each provider kind on the page of what it serves: Providers & Models
-holds only the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK,
-RPC runtimes), and its manual add form offers only those kinds; Octant Harness
+holds the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK, RPC
+runtimes), and its manual add form offers only those kinds, with the Provider
+catalog under them; Octant Harness
 opens with Model endpoints, every endpoint Octant calls over an API itself
 (OpenAI-compatible, Anthropic-compatible, Ollama, Azure AI Foundry), followed
-by model roles and helper agents; with no endpoint yet it offers three ways
+by model roles, helper agents, and Navigator's models; with no endpoint yet it offers three ways
 in instead (Sign in with ChatGPT, Sign in with OpenRouter, Add endpoint), each
-sign-in one click with its terms as a consent line under the button. Image
-generation holds the image profiles and custom image sources. Provider catalog lists
-every bundled driver of both kinds and sends each one to the page that
-configures it. A sign-in
+sign-in one click with its terms as a consent line under the button. Voice &
+images holds speech, transcription, the image profiles, and custom image
+sources. The Provider catalog lists every bundled driver of both kinds and
+sends each one to the page that configures it. A sign-in
 endpoint's row says who is signed in, its detail page offers sign out and
 sign in again, and its configuration fixes the base URL and asks for no key. The
 instances, commands, and credentials are the same on every page. A setting lives
 on the page of the thing it changes, and a moved setting keeps answering links
-to its old page. Personal holds Appearance (theme, window glass, background,
+to its old page. Look & feel holds Appearance (theme, window glass, background,
 text, accessibility) and a separate Sidebar page (layout, destinations, sidebar
 background, and a thread-row grid of detail by list). A page names its scope once, under its title, and a row names
 its own only when it differs. Settings folds long choices it does not need
@@ -328,16 +336,33 @@ error instead of retaining another integration's account controls.
   with the destructive button variant. The danger is carried by the
   placement and the confirm control; the label keeps its ink.
 - **Rail.** Each page keeps its icon (16px) in the navigation rail, and
-  Device tools has its own, apart from Computer use. Search is an icon beside
-  the "Settings" heading that reveals the field; Cmd/Ctrl+F reveals and
-  focuses it, the field stays mounted while folded away, and it folds back
-  when it loses focus empty. Below the narrow breakpoint the field is always
-  shown.
+  Device tools has its own, apart from Computer use. The open page takes the
+  same neutral wash of the ink as the open thread in the workspace sidebar,
+  never the theme's selection hue.
+- **Search.** The search field is always shown at the top of the rail, under
+  the "Settings" heading, with its shortcut (Cmd/Ctrl+F) at its trailing edge
+  until something is typed. Every typed word must match the start of a word in
+  a row's name, keywords, or page, in any order; filler words ("my", "the")
+  are ignored, and everyday words map to the rows' own (dark mode → colour
+  scheme presets, password → credentials, delete → purge, telemetry → what
+  leaves this machine, connector → MCP). Results rank a row named by the query
+  above one that only lists it as a keyword, mark the matched part of each
+  name in weight rather than a fill, and name the page. Enter opens the top
+  result, Down moves into the list, and Escape clears the field, then leaves
+  it. Every Settings row a person can see is indexed; a test fails when a new
+  row is not.
 
 ### Content tabs
 
 Workspace content and dock tool tabs share a compact 26px recipe for height,
-spacing, selected fill and edge, and close controls. Close controls retain their
+spacing, selected fill and edge, and close controls. A pane's conversation tabs
+then become a row of equal soft pills, 28px tall at a shared 196px (never
+narrower than 112px), 8px apart: every tab carries a faint wash of the ink, the
+hovered one a little more, and the open one the brightest wash with a hairline
+edge, so the row reads as a set of open conversations rather than a line of
+links with one highlighted. A tab picked for side by side (Cmd/Ctrl- or
+Shift-click) sits a step between the two, with a fainter edge. Dock tool tabs
+keep the bare recipe. Close controls retain their
 width; inactive controls appear on hover or keyboard focus and stay visible on
 touch devices. Thread tabs retain provider marks when enabled. The pane's drag
 handle stays quiet: an environment mark (a 20px neutral tile, laptop for this
@@ -428,13 +453,16 @@ where it is. Side-task offers stack above them as hairline cards: a target icon
 the one-line reason, a collapsed "Prompt" disclosure, and one primary
 **Start in new worktree** / **Start in new thread** button.
 
-A thread's stats line sits above the follow-up composer, in one strip with the
-context: where the thread runs (Project and branch) on the left, the stats on the
-right, on the page rather than in the box, so the box holds only the message and
-its controls. The stats are one row of figures at the 12px meta step in the meta ink,
-separated by middle dots, with no hue on any number and no fill on the row. When the
-provider reported account limit windows, they lead the row as the plan meters
-described below. It wraps at narrow widths rather than scrolling,
+A thread's stats line sits under the follow-up composer, on the page rather than
+in the box, where a person reads the last turn's figures after sending. Above the
+box, one strip holds where the thread runs (Project and branch) on the left and
+the plan meters described below on the right, so the box holds only the message
+and its controls. The stats are one row of figures at the 12px meta step in the
+meta ink, separated by middle dots, with no hue on any number and no fill on the
+row: the thread's turns, input and output tokens, thinking tokens when the
+provider reported them (part of the output), the cache hit, speed, first token,
+and cost. The turn count never stands alone. Where the plan meters have no strip
+of their own, they lead the row. It wraps at narrow widths rather than scrolling,
 and a trailing quiet icon button hides it. A figure
 that is approximate carries a leading tilde and a dotted underline that explains it on
 hover; a figure the provider did not report is absent, never zero. The whole line is one
@@ -491,16 +519,28 @@ Each opens in that column without starting a thread, the same window-local
 Project terminal and browser Zen uses, which no agent can see or reach;
 "Quick tools" returns to the list, and closing the terminal (or leaving the
 start screen) stops its shell, since nothing else could reopen it. The
-composer never remounts when the Project is chosen, so the draft stays. Each mode's own prompt stays in the composer's placeholder ("Ask
-anything…", "Describe the work…", "Describe the change…"), and the message
-field keeps its accessible name. The composer is prompt first, four lines tall before it
-grows; its toolbar row holds how the thread runs (attach, image and access
+composer never remounts when the Project is chosen, so the draft stays. Every
+start screen's composer asks "Ask anything…", and the message field keeps its
+accessible name.
+
+Every composer has one shape, on a start screen or under a thread, in Chat,
+Work, and Code: the same width, corner (`--oct-radius-lg`), hairline ring and
+mid shadow, a prompt two lines tall before it grows with the same insets, and
+the transcript's own type size, so a message looks the same in the box as in
+the bubble it becomes. Its width is the reading measure; in a split every
+composer takes the narrowest pane's room, so composers side by side match
+instead of each filling its own pane. A start screen's composer docks 12px
+above the pane's foot, where a thread's sits, so the two line up across a
+split; a start screen's card adds only its row of where-it-runs chips. Nothing
+about the box changes while a turn runs. The composer is prompt first; its toolbar row holds how the thread runs (attach, image and access
 on the left; the context ring, model and microphone on the right, next to send).
 The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, base branch, checkout, Environment, repository) is the first row
 inside the card, above the prompt, as small rounded chips on a faint fill with
-no outline, so the composer stays a single object. Code's
+no outline, so the composer stays a single object. On a start screen the
+Project chooser stands just above the card's top-left edge as plain text,
+lifted out of the row so it never pushes the prompt down. Code's
 base-branch chip is absent until a Project is chosen: with no Project it
 would name a branch of nothing. The chip
 is painted on the plain element that holds each control, never on the shared
@@ -534,8 +574,8 @@ Code shows a primary **Set up a provider** action that opens Providers &
 Models and returns to the same draft. The action leaves once any instance is
 ready; the model picker takes its place. Profile,
 appearance, the mode switches, and Navigator are not first-run steps: Profile
-and Appearance live in Settings › Personal, and Navigator in its own Settings
-section. No display name is inferred from the OS account. Continue retains
+lives in Settings › General, Appearance in Settings › Look & feel, and
+Navigator's models in a section of Settings › Octant Harness. No display name is inferred from the OS account. Continue retains
 compact recent-task rows and their status and Git cues.
 Empty Code entry offers folder setup and a direct route to Code settings; opening
 that setting never turns on projectless threads.
@@ -545,7 +585,11 @@ means, and offers Choose a folder… as the primary action with starting
 without one beside it; once a Project exists the new task leads instead.
 Start-screen composers ask in plain words ("Ask anything…"); a thread's
 follow-up composer says "Reply…" in Chat, Work, and Code, and shows no rotating
-tip.
+tip. When the latest reply suggested a next message for this thread ("Next
+step here"), the empty follow-up composer shows it in place of "Reply…", with a
+quiet Tab key cap at its top-right, and a bare Tab puts it in the draft and
+marks the suggestion used; once anything is typed, or with a modifier held,
+Tab keeps its ordinary meaning.
 
 The compact model picker uses explicit horizontal provider selection, sub-provider
 grouping, search, Favorites, and Recent. Source tabs are marks alone and name
@@ -571,15 +615,25 @@ accepting another edit, so the next configuration choice uses the confirmed pair
 
 The screen sits on the application ground (0091, 0129), set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, a field
-of pulsing characters, or the plain page. A fresh install starts on Soft glow, one of three Gradient
+of pulsing characters, a field of dithered pixels, or the plain page. A fresh install starts on Soft glow, one of three Gradient
 pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
 print, so the ground follows the window's scheme; the stylesheet swaps them
 by `data-octant-theme-mode`. A settings row written before the ground
 existed replays as the plain page it showed. Effect: the picture is shown as it is, pixelated, or
 dithered, at a chosen pixel size and colour count; an animated picture is
-printed from its still frame. Nothing is drawn over the picture and nothing
-moves across it; a ground saved with the retired dot pattern resolves to the
-plain page. Pulsing characters is the one drawn ground, and only when a person
+printed from its still frame. A printed picture is still unless a person sets
+its Motion to Wave: then a click on a start screen pushes a ring outward
+through its cells, each cell sampled from a little further in as the ring's
+edge passes and lit toward the accent through the same dither, so the ring
+stays in pixels; between clicks the print rests and draws nothing. A ground
+saved with the retired dot pattern resolves to the plain page. Dithered pixels
+is a drawn ground of square cells in the theme's primary ink, at most about
+two-fifths opaque, whose brightness drifts in slow overlapping waves at twelve
+frames a second and prints through a 4×4 ordered dither (or plain pixels) at
+the chosen pixel size and number of shades; a click on a start screen sends
+the same pushing, accent-lit ring through it at twenty-four frames a second,
+for under two seconds. Motion Still holds either drawn field on one frame and
+takes no clicks. Pulsing characters is the other drawn ground, and only when a person
 picks it: a grid of monospace letters and digits in the theme's primary ink,
 at most half opaque, whose brightness drifts in slow patches and breathes as
 a whole at twelve frames a second while a few glyphs swap. A click over it
@@ -1052,7 +1106,9 @@ drawer.
 The right dock defaults to 640px when open, and opening a Browser or a
 Terminal widens a narrower dock to 640px once (the person can drag it back;
 the next such opening widens it again). A terminal in the dock is an inset,
-rounded plate rather than an edge-to-edge slab. A fresh window
+rounded plate rather than an edge-to-edge slab; under Glass the plate and
+its cells are the page colour with 12% of the ink, a grey that sits with the
+frosted panels instead of a black slab. A fresh window
 starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is `--oct-title-rail-h` in the native host and the status
@@ -1133,16 +1189,19 @@ read through:
 
 - the window's optional glass, which is the tint over the native window
   material behind the whole window;
-- a thread's user bubbles and composer over the application ground (agent
-  replies stay bare prose; see [Transcript](#transcript));
+- a thread's user bubbles and composer over the application ground or window
+  glass, one material either way (agent replies stay bare prose; see
+  [Transcript](#transcript));
 - Zen's windows, dock, pills, and sheets (glass cards);
 - the floating activity picture-in-picture, and the Browser's live preview,
   which shows the page itself and frosts only its caption, count, and close
   control, never the page;
 - the phone's glass surfaces.
 
-Its tint, stroke, and highlight are theme roles. Reduced transparency and
-unsupported `backdrop-filter` resolve every one of them to an opaque surface.
+Its tint, stroke, and highlight are theme roles, and its floor is the theme's
+page colour at 66%, so a neutral or tinted preset gets no fixed warm cast under
+the composer. Reduced transparency and unsupported `backdrop-filter` resolve
+every one of them to an opaque surface.
 
 Window glass is the `sidebarMaterial` shell setting with the theme's vibrancy
 level, shown as the Window section's Glass control (Off, Subtle, Strong) and
@@ -1155,13 +1214,41 @@ over it stay opaque semantic surfaces. The older `workspaceMaterial` setting
 is still read and stored but no longer changes anything: the whole window is
 glass or none of it is.
 
+Under Glass nothing inside the shell paints the theme's opaque page,
+workspace, or card colour over the sheet; every layer takes one of the
+shell's three surfaces (`--octant-window-surface` for the frame,
+`--octant-sheet-surface` for the sheet, `--octant-stage-surface` for the
+stage), defined once on every shell in `shell.css`:
+
+- **Settings** is the same frame and sheet: the navigation and gutters are the
+  frame, the page is the sheet with the sheet's soft hairline, and a section
+  card is the card step below.
+- **Destination pages** (Inbox, Board, Archive, Review, Projects, Agents,
+  Automations, Artifacts, Image generator) are clear over the sheet, and their
+  cards drawn with the raised step (`--oct-surface`) take the card step.
+- **A card** (`--octant-card`, the recipe's `bg-card`) is one step of ink over
+  the sheet: the primary text at 4%.
+- **An outline button** rests on that card step instead of the page colour
+  (`--octant-outline-rest`); its hover and pressed fills stay the control
+  fills.
+- **Quick tools** beside a Code start screen are a clear column on the stage.
+- **The Browser** is clear on its own start page, whose rows take the card
+  step; a loaded page keeps its opaque canvas.
+
+Controls keep their own opaque fills (a switch thumb, a filled or secondary
+button, a segmented track), and menus, popovers, and dialogs keep the opaque
+floating surface. Increased contrast and reduced transparency return cards and
+outline buttons to their opaque colours. The ground behind it all steps down
+by what is on screen: a fifth of its strength behind a thread, about a third
+behind a destination page.
+
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,
 `--octant-shadow-overlay`, and `--octant-shadow-pop`. Use the smallest level
 that establishes a genuine layer: navigation panes and open form layouts stay
 unshadowed; the card recipe uses a hairline ring instead of a shadow (0090);
 compact state and grouped surfaces use `--octant-shadow-sm`; welcome composers
-use `--octant-shadow-md`, while follow-up composers use a hairline boundary; focused or promoted raised
+and follow-up composers use `--octant-shadow-md` over a hairline ring; focused or promoted raised
 objects may use `--octant-shadow-lg`; overlays use only their overlay or pop
 token. A shadow must explain depth, not decorate a flat row.
 
@@ -1409,7 +1496,7 @@ Skill rows show the source class and one effective state;
 filesystem paths, qualified identifiers, hashes, requested/effective
 breakdowns, and content size live behind Details. Usage opens on requests,
 input, output, and measurement quality. Its thread table uses the same figures
-as the line above the composer: cache, speed, and first token are columns,
+as the line under the composer: cache, speed, and first token are columns,
 omitted when unavailable, and opening a row lists that thread's turns. The
 table stays a hairline table, not a card. Reasoning, cache, execution time, and
 latency live in one Operational details disclosure; technical filters stay
@@ -1830,9 +1917,10 @@ interfaces. Revealing them must not move the transcript.
 
 Functional feedback uses 120–160ms transitions; the base system duration is
 200ms. Use standard easing and no decorative entrance animation. There is no
-ambient motion behind the work by default; an animated built-in picture and
-the Pulsing characters ground are the moving grounds a person may choose, and
-reduced motion holds each on a still frame. Running state
+ambient motion behind the work by default; an animated built-in picture, the
+Pulsing characters and Dithered pixels grounds, and a printed picture set to
+Wave are the moving grounds a person may choose, and reduced motion holds each
+on a still frame. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-
 motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.
@@ -1864,7 +1952,7 @@ callbacks; the existing host or server still decides whether an action may
 proceed. Native Code approvals keep their isolated host-owned document. The
 extension tool request names the plugin, its server, and the tool, and adds
 "Always allow in this Project" only when the host marks the call rememberable
-and the window is a local one. Settings › Data & privacy lists those answers by
+and the window is a local one. Settings › Permissions lists those answers by
 Project, each with Revoke, beside Remembered websites. A Browser request from a
 CLI in a Code thread's terminal names the origin and the thread and says a
 program in the terminal asked, not the thread's agent

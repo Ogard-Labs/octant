@@ -57,6 +57,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords:
             "put away complete completed threads archive automatically days never snooze snoozed shelf sidebar",
         },
+        {
+          id: settingId("app-update-automatic-checks"),
+          label: "Automatic update checks",
+          scope: "app",
+          keywords: "automatic checks update updates service daily contact",
+        },
+        {
+          id: settingId("app-update-ring"),
+          label: "Release ring",
+          scope: "app",
+          keywords: "release ring stable preview candidate nightly beta channel updates",
+        },
       ],
     },
     {
@@ -70,6 +82,22 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Your profile",
           scope: "app",
           keywords: "profile name email avatar gravatar initials colour color picture",
+        },
+      ],
+    },
+    {
+      id: "notifications",
+      label: "Notifications",
+      scope: "host",
+      keywords:
+        "notifications notify alerts push phone waiting approval failure completion automation routines",
+      settings: [
+        {
+          id: settingId("host-automation-notifications"),
+          label: "Automation notifications",
+          scope: "host",
+          keywords:
+            "automation notifications push waiting approval failure completion opt-in redacted destinations receipts apns fcm unavailable",
         },
       ],
     },
@@ -179,6 +207,114 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Reset appearance",
           scope: "app",
           keywords: "reset appearance defaults theme restore",
+        },
+        {
+          id: settingId("appearance.scheme.accent"),
+          label: "Accent colour",
+          scope: "app",
+          keywords: "accent colour color highlight theme",
+        },
+        {
+          id: settingId("appearance.accessibility.reduced-motion"),
+          label: "Reduce motion",
+          scope: "app",
+          keywords: "reduce reduced motion animation accessibility",
+        },
+        {
+          id: settingId("appearance.accessibility.reduced-transparency"),
+          label: "Reduce transparency",
+          scope: "app",
+          keywords: "reduce reduced transparency glass opaque accessibility",
+        },
+        {
+          id: settingId("app-background-motion"),
+          label: "Background motion",
+          scope: "app",
+          keywords: "background motion still wave animate animated move click ripple bounce pixels",
+        },
+        {
+          id: settingId("app-background-effect"),
+          label: "Background effect",
+          scope: "app",
+          keywords: "background effect pixels pixelated dithered dither picture photo",
+        },
+        {
+          id: settingId("app-background-effect-cell"),
+          label: "Pixel size",
+          scope: "app",
+          keywords: "background pixel size square cell dither",
+        },
+        {
+          id: settingId("app-background-effect-tones"),
+          label: "Background colours",
+          scope: "app",
+          keywords: "background colours colors tones shades dither bold",
+        },
+        {
+          id: settingId("app-background-photo"),
+          label: "Background photo",
+          scope: "app",
+          keywords: "background photo picture image library wallpaper",
+        },
+        {
+          id: settingId("app-background-photo-opacity"),
+          label: "Photo strength",
+          scope: "app",
+          keywords: "background photo strength opacity show through",
+        },
+        {
+          id: settingId("app-background-scope"),
+          label: "Show the background behind",
+          scope: "app",
+          keywords: "background show behind start screens every page everywhere",
+        },
+        {
+          id: settingId("app-background-sidebar"),
+          label: "Background under the sidebar",
+          scope: "app",
+          keywords: "background cover sidebar under",
+        },
+        {
+          id: settingId("appearance.typography.ui.size"),
+          label: "Interface text size",
+          scope: "app",
+          keywords: "interface text font size typography",
+        },
+        {
+          id: settingId("appearance.typography.editor.size"),
+          label: "Code font size",
+          scope: "app",
+          keywords: "code editor font size typography",
+        },
+        {
+          id: settingId("appearance.typography.editor.line-height"),
+          label: "Code line height",
+          scope: "app",
+          keywords: "code editor line height spacing typography",
+        },
+        {
+          id: settingId("appearance.typography.editor.ligatures"),
+          label: "Code ligatures",
+          scope: "app",
+          keywords: "code editor ligatures typography",
+        },
+        {
+          id: settingId("appearance.typography.terminal.size"),
+          label: "Terminal font size",
+          scope: "app",
+          keywords: "terminal font size typography",
+        },
+        {
+          id: settingId("appearance.typography.terminal.line-height"),
+          label: "Terminal line height",
+          scope: "app",
+          keywords: "terminal line height spacing typography",
+        },
+        {
+          id: settingId("appearance.typography.terminal.ligatures"),
+          label: "Terminal ligatures",
+          scope: "app",
+          keywords: "terminal ligatures typography",
         },
       ],
     },
@@ -332,6 +468,42 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "stream streaming answer response finished partial",
         },
+        {
+          id: settingId("chat-default-model"),
+          label: "Default Chat model",
+          scope: "app",
+          keywords: "default provider model new chat thread",
+        },
+        {
+          id: settingId("chat-fallback-model"),
+          label: "Chat fallback model",
+          scope: "app",
+          keywords: "fallback backup provider model chat",
+        },
+        {
+          id: settingId("chat-personality"),
+          label: "Instructions for new Chat threads",
+          scope: "app",
+          keywords: "instructions personality custom system prompt chat",
+        },
+        {
+          id: settingId("chat-research-enabled"),
+          label: "Research by default",
+          scope: "app",
+          keywords: "research web search default chat",
+        },
+        {
+          id: settingId("chat-research-backend"),
+          label: "Default research backend",
+          scope: "app",
+          keywords: "research backend web search searxng",
+        },
+        {
+          id: settingId("chat-searxng-url"),
+          label: "SearXNG base URL",
+          scope: "app",
+          keywords: "searxng url address search engine research",
+        },
       ],
     },
     {
@@ -381,6 +553,36 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "project view switcher icons dropdown sidebar code",
         },
+        {
+          id: settingId("code-default-access"),
+          label: "Default Code access",
+          scope: "app",
+          keywords: "access authority approval approvals full access ask read only new code thread",
+        },
+        {
+          id: settingId("code-approval-persistence"),
+          label: "Default approval persistence",
+          scope: "app",
+          keywords: "approval approvals persistence remember session project",
+        },
+        {
+          id: settingId("code-editor-executable"),
+          label: "External editor",
+          scope: "app",
+          keywords: "external editor executable path open files vscode cursor zed",
+        },
+        {
+          id: settingId("code-editor-arguments"),
+          label: "External editor arguments",
+          scope: "app",
+          keywords: "external editor arguments flags open files",
+        },
+        {
+          id: settingId("open-in-applications"),
+          label: "Open in applications",
+          scope: "app",
+          keywords: "open in applications editor finder terminal ide external",
+        },
       ],
     },
     {
@@ -388,7 +590,7 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       label: "Providers & Models",
       scope: "app",
       keywords:
-        "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version",
+        "providers models agent runtimes provider type opencode codex kimi code acp cli login claude agent sdk subscription gemini qwen cline mistral vibe grok glm fx goose copilot devin kilo pi binary path permissions permission persistence runtime capabilities connection detected installed scan opencode update managed cli version provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
       settings: [
         {
           id: settingId("opencode-managed-update"),
@@ -396,22 +598,68 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "opencode update version managed cli installed available",
         },
+        {
+          id: settingId("provider-display-name"),
+          label: "Provider display name",
+          scope: "host",
+          keywords: "provider display name rename label",
+        },
+        {
+          id: settingId("provider-binary-path"),
+          label: "Provider executable path",
+          scope: "host",
+          keywords: "provider binary executable path location cli install",
+        },
+        {
+          id: settingId("provider-authentication"),
+          label: "Provider sign-in method",
+          scope: "host",
+          keywords: "provider authentication sign in login subscription oauth",
+        },
+        {
+          id: settingId("provider-api-key"),
+          label: "Provider API key",
+          scope: "host",
+          keywords: "provider api key credential secret",
+        },
+        {
+          id: settingId("provider-base-url"),
+          label: "Provider base URL",
+          scope: "host",
+          keywords: "provider base url address endpoint",
+        },
+        {
+          id: settingId("provider-protocol"),
+          label: "Provider protocol",
+          scope: "host",
+          keywords: "provider protocol version api",
+        },
+        {
+          id: settingId("provider-manual-model-ids"),
+          label: "Manual model IDs",
+          scope: "host",
+          keywords: "manual model ids list provider",
+        },
+        {
+          id: settingId("provider-deployment-ids"),
+          label: "Deployment IDs",
+          scope: "host",
+          keywords: "azure deployment ids provider",
+        },
+        {
+          id: settingId("provider-claude-account"),
+          label: "Claude account",
+          scope: "host",
+          keywords: "claude account config directory folder accent sign in login status",
+        },
       ],
-    },
-    {
-      id: "provider-catalog",
-      label: "Provider catalog",
-      scope: "host",
-      keywords:
-        "provider catalog drivers bundled installed trusted available enabled authenticated signed in ready set up setup guided add runtime endpoint find look on this host install modes chat work code agent loop harness capabilities",
-      settings: [],
     },
     {
       id: "harness",
       label: "Octant Harness",
       scope: "app",
       keywords:
-        "octant harness native agent loop model endpoints endpoint api openai-compatible anthropic-compatible ollama azure ai foundry deployment base url api key bearer protocol manual model ids sign in with chatgpt plan openrouter subscription model roles main model backup model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips agents subagents helper agents child creation posture off on automatic bounded hierarchy",
+        "octant harness native agent loop model endpoints endpoint api openai-compatible anthropic-compatible ollama azure ai foundry deployment base url api key bearer protocol manual model ids sign in with chatgpt plan openrouter subscription model roles main model backup model slots default plan slow task smol vision advisor routing fallback cooldown delegate children follow-ups chips agents subagents helper agents child creation posture off on automatic bounded hierarchy navigator assistant default model provider vision reviewer image screenshot dock help",
       settings: [
         {
           id: settingId("model-endpoints"),
@@ -433,15 +681,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "helper agents subagents child runs creation posture off on automatic delegate",
         },
-      ],
-    },
-    {
-      id: "navigator-assistant",
-      label: "Navigator",
-      scope: "app",
-      keywords:
-        "navigator assistant default model provider vision reviewer image screenshot dock help",
-      settings: [
+        {
+          id: settingId("subagent-concurrency-on-host"),
+          label: "Helper agents at once across Octant",
+          scope: "app",
+          keywords: "helper agents subagents concurrency at once limit parallel",
+        },
+        {
+          id: settingId("subagent-concurrency-per-thread"),
+          label: "Helper agents at once in one thread",
+          scope: "app",
+          keywords: "helper agents subagents concurrency at once limit parallel thread",
+        },
         {
           id: settingId("default-model"),
           label: "Default model",
@@ -458,10 +709,10 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
     },
     {
       id: "voice",
-      label: "Voice",
+      label: "Voice & images",
       scope: "app",
       keywords:
-        "voice speech microphone dictation transcription speech to text text to speech read aloud whisper tts stt",
+        "voice speech microphone dictation transcription speech to text text to speech read aloud whisper tts stt image generation image provider profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint",
       settings: [
         {
           id: settingId("transcription"),
@@ -475,15 +726,71 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "app",
           keywords: "voice speech text to speech read aloud tts model voice",
         },
+        {
+          id: settingId("custom-image-sources"),
+          label: "Custom image sources",
+          scope: "app",
+          keywords: "custom image sources provider endpoint",
+        },
+        {
+          id: settingId("default-model"),
+          label: "Default image model",
+          scope: "app",
+          keywords: "default image model provider",
+        },
+        {
+          id: settingId("model-allowlist"),
+          label: "Image models offered",
+          scope: "app",
+          keywords: "image model allowlist models offered",
+        },
+        {
+          id: settingId("quality"),
+          label: "Image quality",
+          scope: "app",
+          keywords: "image quality",
+        },
+        {
+          id: settingId("size"),
+          label: "Image size",
+          scope: "app",
+          keywords: "image size dimensions",
+        },
+        {
+          id: settingId("aspect-ratio"),
+          label: "Image aspect ratio",
+          scope: "app",
+          keywords: "image aspect ratio",
+        },
+        {
+          id: settingId("resolution"),
+          label: "Image resolution",
+          scope: "app",
+          keywords: "image resolution",
+        },
+        {
+          id: settingId("api-key"),
+          label: "Image provider API key",
+          scope: "app",
+          keywords: "image provider api key credential",
+        },
       ],
     },
     {
-      id: "image-generation",
-      label: "Image generation",
-      scope: "app",
+      id: "skills",
+      label: "Skills & Extensions",
+      scope: "host",
       keywords:
-        "image generation image provider profiles openai image gpt-image gemini image black forest labs flux ideogram custom image sources provider api key recraft openai-compatible bring your own endpoint",
-      settings: [],
+        "skills extensions marketplace installed plugin package trust enable component desired effective provenance compatibility quarantine draining broken unavailable interrupted waiting offline failure mcp skill",
+      settings: [
+        {
+          id: settingId("marketplace-fetches"),
+          label: "Marketplace fetches",
+          scope: "host",
+          keywords:
+            "marketplace fetches skills npm github registry catalog search inspect install privacy off",
+        },
+      ],
     },
     {
       id: "computer-use",
@@ -522,6 +829,18 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "automatic updates upgrade",
         },
+        {
+          id: settingId("computer-use-permission-actions"),
+          label: "Computer use permissions",
+          scope: "app",
+          keywords: "permission permissions accessibility screen recording system settings macos",
+        },
+        {
+          id: settingId("computer-use-update-check"),
+          label: "Computer use driver update check",
+          scope: "app",
+          keywords: "driver update check daily",
+        },
       ],
     },
     {
@@ -546,28 +865,25 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
-      id: "skills",
-      label: "Skills & Extensions",
-      scope: "host",
-      keywords:
-        "skills extensions marketplace installed plugin package trust enable component desired effective provenance compatibility quarantine draining broken unavailable interrupted waiting offline failure mcp skill",
-      settings: [
-        {
-          id: settingId("marketplace-fetches"),
-          label: "Marketplace fetches",
-          scope: "host",
-          keywords:
-            "marketplace fetches skills npm github registry catalog search inspect install privacy off",
-        },
-      ],
-    },
-    {
       id: "github",
       label: "GitHub",
       scope: "host",
       keywords:
         "github account gh cli authentication connection setup sign in refresh scopes read:project logout revoke authorization repositories issues pull requests projects capability credential storage device code insecure external token rate limited diagnostics",
-      settings: [],
+      settings: [
+        {
+          id: settingId("github-connection"),
+          label: "GitHub connection",
+          scope: "host",
+          keywords: "connection scopes refresh credential token secure storage sign in login",
+        },
+        {
+          id: settingId("github-logout"),
+          label: "Log out of GitHub",
+          scope: "host",
+          keywords: "log out logout sign out disconnect remove credential",
+        },
+      ],
     },
     {
       id: "linear",
@@ -575,70 +891,28 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       scope: "host",
       keywords:
         "linear workspace authentication connection setup oauth connect disconnect reconnect issues personal api key",
-      settings: [],
-    },
-    {
-      id: "host",
-      label: "Host",
-      scope: "host",
-      keywords:
-        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities headless automation notifications push waiting approval failure completion apns fcm federated hosts maintenance reset layout window bounds diagnostics export support",
       settings: [
         {
-          id: settingId("host-automation-notifications"),
-          label: "Automation notifications",
+          id: settingId("linear-connection"),
+          label: "Linear connection",
           scope: "host",
-          keywords:
-            "automation notifications push waiting approval failure completion opt-in redacted destinations receipts apns fcm unavailable",
+          keywords: "connect reconnect refresh connection sign in login",
         },
         {
-          id: settingId("reset-layout"),
-          label: "Reset active mode layout",
-          scope: "app",
-          keywords: "reset active mode layout workspace",
-        },
-        {
-          id: settingId("reset-window-bounds"),
-          label: "Reset native window bounds",
-          scope: "app",
-          keywords: "reset native window bounds",
-          nativeRequired: "nativeBoundsAvailable",
-        },
-        {
-          id: settingId("export-diagnostics"),
-          label: "Export diagnostics",
+          id: settingId("linear-disconnect"),
+          label: "Disconnect Linear",
           scope: "host",
-          keywords:
-            "export diagnostics evidence packet support redacted safe sealed receipt provider storage network remote auth migration confinement process cleanup",
-        },
-        {
-          id: settingId("journal-growth"),
-          label: "Journal growth",
-          scope: "host",
-          keywords: "journal growth events per day kind rows database size diagnostics",
+          keywords: "disconnect log out logout sign out remove credentials",
         },
       ],
     },
     {
-      id: "data",
-      label: "Data & privacy",
+      id: "permissions",
+      label: "Permissions",
       scope: "host",
       keywords:
-        "data privacy backup snapshot restore recovery stored data map location journal projections artifacts credentials keychain caches what leaves this machine retention purge export erase delete history",
+        "permissions remembered websites sites origins browser always allow forget public links share sharing remembered tool approvals extension tools revoke trust allowed",
       settings: [
-        {
-          id: settingId("data-map"),
-          label: "Data map",
-          scope: "host",
-          keywords:
-            "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
-        },
-        {
-          id: settingId("thread-retention"),
-          label: "Thread retention",
-          scope: "host",
-          keywords: "thread retention window purge journal erase delete history",
-        },
         {
           id: settingId("public-links"),
           label: "Public links",
@@ -669,6 +943,28 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
       ],
     },
     {
+      id: "data",
+      label: "Data & storage",
+      scope: "host",
+      keywords:
+        "data privacy backup snapshot restore recovery stored data map location journal projections artifacts credentials keychain caches what leaves this machine retention purge export erase delete history",
+      settings: [
+        {
+          id: settingId("data-map"),
+          label: "Data map",
+          scope: "host",
+          keywords:
+            "data map privacy stored location journal projections artifacts credentials keychain secret-service caches provider calls update checks marketplace",
+        },
+        {
+          id: settingId("thread-retention"),
+          label: "Thread retention",
+          scope: "host",
+          keywords: "thread retention window purge journal erase delete history",
+        },
+      ],
+    },
+    {
       id: "sync",
       label: "Sync",
       scope: "host",
@@ -694,6 +990,48 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           scope: "host",
           keywords: "test connection probe file store bucket folder",
         },
+        {
+          id: settingId("sync-folder"),
+          label: "Sync folder",
+          scope: "app",
+          keywords: "sync folder synced icloud dropbox store",
+        },
+        {
+          id: settingId("sync-bucket"),
+          label: "Sync bucket",
+          scope: "app",
+          keywords: "sync bucket s3 access key secret store",
+        },
+        {
+          id: settingId("sync-computer-name"),
+          label: "Computer name",
+          scope: "app",
+          keywords: "computer name device sync",
+        },
+        {
+          id: settingId("sync-create-replica"),
+          label: "Set up sync",
+          scope: "app",
+          keywords: "set up sync start create",
+        },
+        {
+          id: settingId("sync-join-replica"),
+          label: "Join another computer",
+          scope: "app",
+          keywords: "join another computer sync",
+        },
+        {
+          id: settingId("sync-leave-without-store"),
+          label: "Leave sync without telling the others",
+          scope: "app",
+          keywords: "leave sync stop without store",
+        },
+        {
+          id: settingId("sync-members"),
+          label: "Sync members and requests",
+          scope: "app",
+          keywords: "sync members computers approvers join requests",
+        },
       ],
     },
     {
@@ -715,6 +1053,71 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           label: "Pair a device",
           scope: "host",
           keywords: "pair pairing link code ticket approve deny comparison browser phone request",
+        },
+        {
+          id: settingId("remote-pairing-code"),
+          label: "Pairing code",
+          scope: "host",
+          keywords: "pairing code pair phone device single use",
+        },
+        {
+          id: settingId("paired-computers-code"),
+          label: "Pair with another computer",
+          scope: "host",
+          keywords: "pair pairing another computer code",
+        },
+      ],
+    },
+    {
+      id: "host",
+      label: "Host",
+      scope: "host",
+      keywords:
+        "host service lifecycle stop restart enable disable startup policy identity owner mode versions readiness store replay clients uptime capabilities headless automation notifications push waiting approval failure completion apns fcm federated hosts maintenance reset layout window bounds diagnostics export support",
+      settings: [
+        {
+          id: settingId("reset-layout"),
+          label: "Reset active mode layout",
+          scope: "app",
+          keywords: "reset active mode layout workspace",
+        },
+        {
+          id: settingId("reset-window-bounds"),
+          label: "Reset native window bounds",
+          scope: "app",
+          keywords: "reset native window bounds",
+          nativeRequired: "nativeBoundsAvailable",
+        },
+        {
+          id: settingId("export-diagnostics"),
+          label: "Export diagnostics",
+          scope: "host",
+          keywords:
+            "export diagnostics evidence packet support redacted safe sealed receipt provider storage network remote auth migration confinement process cleanup",
+        },
+        {
+          id: settingId("journal-growth"),
+          label: "Journal growth",
+          scope: "host",
+          keywords: "journal growth events per day kind rows database size diagnostics",
+        },
+        {
+          id: settingId("host-automatic-startup"),
+          label: "Automatic startup",
+          scope: "host",
+          keywords: "automatic startup launch at login start",
+        },
+        {
+          id: settingId("host-backup"),
+          label: "Host snapshot",
+          scope: "host",
+          keywords: "snapshot backup restore before risky changes",
+        },
+        {
+          id: settingId("host-lifecycle"),
+          label: "Host process",
+          scope: "host",
+          keywords: "host process stop restart",
         },
       ],
     },

@@ -1,17 +1,15 @@
 import type { SettingsSectionId } from "@octant/contracts";
 import {
+  Bell,
   Blocks,
   ChartNoAxesColumnIncreasing,
   Code2,
-  Compass,
   Database,
   FolderGit2,
   FolderOpen,
   FolderSync,
   Hexagon,
-  Image as ImageIcon,
   Keyboard,
-  LayoutGrid,
   ListTodo,
   MessageCircle,
   Monitor,
@@ -22,6 +20,7 @@ import {
   Radio,
   Server,
   Settings2,
+  ShieldCheck,
   TabletSmartphone,
   UserRound,
   type LucideIcon,
@@ -42,15 +41,18 @@ export interface SettingsNavigationProps {
   readonly onSelect: (sectionId: SettingsSectionId) => void;
 }
 
-/* Personal is how Octant looks and behaves for you; Models is which model or
-   provider answers each job; Agents is what an agent may do once running. */
+/* General is who you are and what Octant tells you; Look & feel is how it
+   looks and is driven; AI & models is which model answers each job; Tools is
+   what an agent may reach once running; Privacy & data is what is remembered,
+   stored, and shared; Advanced is the host process and its usage. */
 const SETTINGS_GROUPS = [
-  "Personal",
+  "General",
+  "Look & feel",
   "Modes",
-  "Models",
-  "Agents",
-  "Integrations",
-  "System",
+  "AI & models",
+  "Tools",
+  "Privacy & data",
+  "Advanced",
 ] as const;
 
 const SETTINGS_NAVIGATION_META: Readonly<
@@ -59,30 +61,29 @@ const SETTINGS_NAVIGATION_META: Readonly<
     { readonly group: (typeof SETTINGS_GROUPS)[number]; readonly icon: LucideIcon }
   >
 > = {
-  general: { group: "Personal", icon: Settings2 },
-  profile: { group: "Personal", icon: UserRound },
-  appearance: { group: "Personal", icon: Palette },
-  sidebar: { group: "Personal", icon: PanelLeft },
-  keybindings: { group: "Personal", icon: Keyboard },
+  general: { group: "General", icon: Settings2 },
+  profile: { group: "General", icon: UserRound },
+  notifications: { group: "General", icon: Bell },
+  appearance: { group: "Look & feel", icon: Palette },
+  sidebar: { group: "Look & feel", icon: PanelLeft },
+  keybindings: { group: "Look & feel", icon: Keyboard },
   chat: { group: "Modes", icon: MessageCircle },
   work: { group: "Modes", icon: FolderOpen },
   code: { group: "Modes", icon: Code2 },
-  providers: { group: "Models", icon: Plug },
-  "provider-catalog": { group: "Models", icon: LayoutGrid },
-  harness: { group: "Models", icon: Hexagon },
-  "navigator-assistant": { group: "Models", icon: Compass },
-  voice: { group: "Models", icon: Mic },
-  "image-generation": { group: "Models", icon: ImageIcon },
-  "computer-use": { group: "Agents", icon: Monitor },
-  "device-tools": { group: "Agents", icon: TabletSmartphone },
-  skills: { group: "Agents", icon: Blocks },
-  github: { group: "Integrations", icon: FolderGit2 },
-  linear: { group: "Integrations", icon: ListTodo },
-  host: { group: "System", icon: Server },
-  data: { group: "System", icon: Database },
-  sync: { group: "System", icon: FolderSync },
-  "remote-access": { group: "System", icon: Radio },
-  usage: { group: "System", icon: ChartNoAxesColumnIncreasing },
+  providers: { group: "AI & models", icon: Plug },
+  harness: { group: "AI & models", icon: Hexagon },
+  voice: { group: "AI & models", icon: Mic },
+  skills: { group: "Tools", icon: Blocks },
+  "computer-use": { group: "Tools", icon: Monitor },
+  "device-tools": { group: "Tools", icon: TabletSmartphone },
+  github: { group: "Tools", icon: FolderGit2 },
+  linear: { group: "Tools", icon: ListTodo },
+  permissions: { group: "Privacy & data", icon: ShieldCheck },
+  data: { group: "Privacy & data", icon: Database },
+  sync: { group: "Privacy & data", icon: FolderSync },
+  "remote-access": { group: "Privacy & data", icon: Radio },
+  host: { group: "Advanced", icon: Server },
+  usage: { group: "Advanced", icon: ChartNoAxesColumnIncreasing },
 };
 
 /** The page's nav icon, shared with the tile in that page's header. */

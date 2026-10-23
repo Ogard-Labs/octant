@@ -117,16 +117,16 @@ describe("ChatComposer", () => {
     }
   });
 
-  it("starts as a compact one-line composer and hides a redundant provider picker", () => {
+  it("starts with the composer's shared prompt height and hides a redundant provider picker", () => {
     renderComposer();
 
-    expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute("rows", "1");
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute("rows", "3");
     expect(screen.getByRole("toolbar", { name: "Composer controls" })).toBeVisible();
     expect(screen.queryByRole("combobox", { name: "Provider" })).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Model" })).toBeVisible();
   });
 
-  it("asks for a plain reply, and says the next message can be sent while a turn is running", () => {
+  it("asks for a plain reply that stays put while a turn is running", () => {
     const { rerender, props } = renderComposer();
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute(
       "placeholder",
@@ -136,7 +136,7 @@ describe("ChatComposer", () => {
     rerender(<ChatComposer {...props} isSending />);
     expect(screen.getByRole("textbox", { name: "Message" })).toHaveAttribute(
       "placeholder",
-      "Send the next message…",
+      "Reply…",
     );
   });
 

@@ -92,6 +92,7 @@ import type { FolderBrowseClient } from "@octant/client-runtime/folder-browse-cl
 import type { ReplicaMembershipClient } from "@octant/client-runtime/replica-membership-client";
 import type { ReplicaStoreSettingsClient } from "@octant/client-runtime/replica-store-settings-client";
 import type { ReplicaSyncStatusClient } from "@octant/client-runtime/replica-sync-status-client";
+import { AutomationNotificationSettings } from "../host/AutomationNotificationSettings";
 import { FederatedHostsLifecyclePanel } from "../host/FederatedHostsLifecyclePanel";
 import {
   type SettingsNativeCapabilities,
@@ -129,7 +130,8 @@ import {
   AppBackgroundSettings,
   type BackgroundImageLibrary,
 } from "../settings/AppBackgroundSettings";
-import { SettingsSearchResults } from "../settings/SettingsSearchResults";
+import { SettingsSearchResults, searchResultLink } from "../settings/SettingsSearchResults";
+import { isApplePlatform } from "../platform";
 import { useSettingsRoute } from "../settings/useSettingsRoute";
 import { ExtensionsSettingsView } from "../extensions/ExtensionsSettingsView";
 import type { ThemeController } from "../theme/useThemeController";
@@ -253,19 +255,19 @@ const SECTION_DESCRIPTIONS: Readonly<Partial<Record<SettingsSectionId, string>>>
   chat: "Defaults for new Chat conversations.",
   work: "Defaults for new Work threads: the model they start on and what they may do without asking.",
   code: "Defaults for Code threads and delivery.",
-  "navigator-assistant": "The models Navigator uses to converse and to review images.",
-  voice: "The providers that turn speech into text and text into speech.",
-  "image-generation": "Choose connected providers and models for image generation.",
+  notifications: "What Octant tells you while you are away, and where it sends it.",
+  voice: "The providers that turn speech into text, text into speech, and prompts into images.",
   "computer-use": "Control applications through the bundled Computer use plugin.",
   "device-tools": "Bundled simulator and emulator streaming tools and their updates.",
-  providers: "Connect providers, manage authentication, and pick default models.",
-  "provider-catalog":
-    "Every provider driver bundled with Octant, what this host has of each, and how to set it up.",
-  harness: "Octant's own agent loop for API-key and local models: which model does which job.",
+  providers:
+    "Connect providers, manage authentication, pick default models, and see every provider Octant can set up.",
+  harness:
+    "Octant's own agent loop for API-key and local models: which model does which job, including Navigator's.",
   skills:
     "Skills extend what agents can do. Review the source, then trust and enable only what you want.",
   github: "Connection and repository access on the selected host.",
   host: "The host process: its status, startup, notifications, and maintenance.",
+  permissions: "What you have already allowed: websites, extension tools, and public links.",
   data: "What this host stores, how long it keeps threads, and how to back it up.",
   sync: "Where artifact versions go when sync is on, in a store you own.",
   usage: "Activity and usage across providers.",
@@ -287,6 +289,10 @@ const MOVED_SETTINGS: ReadonlyArray<{
   readonly to: SettingsSectionId;
 }> = [
   { from: "general", setting: "user-profile", to: "profile" },
+  { from: "host", setting: "host-automation-notifications", to: "notifications" },
+  ...["public-links", "public-link-service", "browser-site-approvals", "tool-approvals"].map(
+    (setting) => ({ from: "data" as const, setting, to: "permissions" as const }),
+  ),
   { from: "general", setting: "marketplace-fetches", to: "skills" },
   { from: "appearance", setting: "stream-replies", to: "chat" },
   { from: "appearance", setting: "project-view-switcher", to: "code" },
@@ -352,7 +358,6 @@ export function SettingsView(props: SettingsViewProps) {
   const navigationTrigger = useRef<HTMLButtonElement>(null);
   const navigationClose = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  const [searchOpen, setSearchOpen] = useState(false);
   // An Octant Harness endpoint's detail sub-page, named for the breadcrumb.
   const [harnessEndpoint, setHarnessEndpoint] = useState<string>();
   // A Provider catalog entry's setup sub-page, named for the breadcrumb.
@@ -406,9 +411,8 @@ export function SettingsView(props: SettingsViewProps) {
   };
 
   const focusSearch = useCallback(() => {
-    setSearchOpen(true);
-    // The field is unhidden by the state above, so focusing waits a frame.
-    requestAnimationFrame(() => searchInput.current?.focus());
+    searchInput.current?.focus();
+    searchInput.current?.select();
   }, []);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -470,20 +474,25 @@ export function SettingsView(props: SettingsViewProps) {
     route.applyDeepLink(link);
     props.onSearchChange("");
   };
+  // Enter usually follows the last keystroke by less than the debounce, so
+  // the listed results can still be the previous query's: read the query as
+  // typed instead, or a fresh search opens nothing and an edited one opens
+  // the old top result.
+  const openFirstResult = () => {
+    const first = searchSettings(availableSections, capabilities, props.search)[0];
+    if (first !== undefined) handleSearchSelect(searchResultLink(first));
+  };
   // A page says once which scope it applies to; its rows then only name a
   // scope that differs (see SettingsPageScope).
   const activeSectionScope = availableSections.find(
     (section) => section.id === route.activeSection,
   )?.scope;
-  // The rail's search is an icon until someone asks for it; a query that is
-  // already typed keeps the field open so the results never lose their input.
-  const searchVisible = searchOpen || hasQuery;
   const PageIcon = hasQuery ? Search : settingsSectionIcon(route.activeSection);
   const subPage = hasQuery
     ? undefined
     : route.activeSection === "harness"
       ? harnessEndpoint
-      : route.activeSection === "provider-catalog"
+      : route.activeSection === "providers"
         ? catalogEntry
         : undefined;
   const currentSectionLabel = hasQuery
@@ -520,21 +529,11 @@ export function SettingsView(props: SettingsViewProps) {
           <div className="settings-view__sidebar-content">
             <div className="settings-view__rail-head">
               <h2 className="settings-view__rail-title">Settings</h2>
-              <OctantIconButton
-                aria-expanded={searchVisible}
-                aria-keyshortcuts="Meta+F Control+F"
-                label="Search settings"
-                onClick={focusSearch}
-                type="button"
-              >
-                <Search aria-hidden="true" size={16} strokeWidth={1.5} />
-              </OctantIconButton>
             </div>
             <SettingsSearchField
-              collapsed={!searchVisible}
               inputRef={searchInput}
-              onBlurEmpty={() => setSearchOpen(false)}
               onChange={props.onSearchChange}
+              onOpenFirst={openFirstResult}
               value={props.search}
             />
             <div className="settings-view__navigation-scroll" ref={navigationScroll}>
@@ -589,6 +588,7 @@ export function SettingsView(props: SettingsViewProps) {
             <SettingsSearchField
               className="settings-view__mobile-search"
               onChange={props.onSearchChange}
+              onOpenFirst={openFirstResult}
               value={props.search}
             />
           </header>
@@ -752,12 +752,10 @@ export function SettingsView(props: SettingsViewProps) {
 
 function SettingsSearchField(props: {
   readonly className?: string;
-  /** Hidden but mounted: the rail shows an icon until the field is asked for. */
-  readonly collapsed?: boolean;
   readonly inputRef?: RefObject<HTMLInputElement | null>;
-  /** Focus left the field with nothing typed, so the rail can fold it away again. */
-  readonly onBlurEmpty?: () => void;
   readonly onChange: (value: string) => void;
+  /** Enter in the field opens the top result, so a search is type, then Enter. */
+  readonly onOpenFirst: () => void;
   readonly value: string;
 }) {
   const ownInput = useRef<HTMLInputElement>(null);
@@ -770,28 +768,44 @@ function SettingsSearchField(props: {
           ? "settings-view__field settings-view__field--search"
           : `settings-view__field settings-view__field--search ${props.className}`
       }
-      hidden={props.collapsed === true}
     >
       <label className="settings-view__search-label" htmlFor={inputId}>
         Search settings
       </label>
       <Search aria-hidden="true" className="settings-view__search-icon" size={14} />
       <OctantInput
+        aria-keyshortcuts="Meta+F Control+F"
         className="settings-view__text-input"
         id={inputId}
-        onBlur={() => {
-          if (props.value === "") props.onBlurEmpty?.();
-        }}
         onChange={(event) => props.onChange(event.currentTarget.value)}
         onKeyDown={(event) => {
-          if (event.key === "Escape" && props.value === "") props.onBlurEmpty?.();
+          if (event.key === "Enter") {
+            event.preventDefault();
+            props.onOpenFirst();
+          } else if (event.key === "ArrowDown") {
+            // Down moves into the results, which own arrow keys from there.
+            const results = document.querySelector<HTMLElement>(
+              '[aria-label="Settings search results"]',
+            );
+            if (results !== null) {
+              event.preventDefault();
+              results.focus();
+            }
+          } else if (event.key === "Escape") {
+            if (props.value === "") input.current?.blur();
+            else props.onChange("");
+          }
         }}
-        placeholder="Search settings…"
+        placeholder="Search settings"
         ref={input}
         type="search"
         value={props.value}
       />
-      {props.value === "" ? null : (
+      {props.value === "" ? (
+        <kbd aria-hidden="true" className="settings-view__search-shortcut">
+          {isApplePlatform() ? "⌘F" : "Ctrl+F"}
+        </kbd>
+      ) : (
         <OctantIconButton
           className="settings-view__search-clear"
           label="Clear settings search"
@@ -959,42 +973,32 @@ function ActiveSectionContent({
           </SettingsSection>
         </div>
       );
-    case "navigator-assistant":
-      return (
-        <NavigatorAssistantSettingsView
-          focusedSetting={focusedSetting}
-          onSettingsChange={props.onSettingsChange}
-          {...(props.providerController?.snapshot === undefined
-            ? {}
-            : { providerSnapshot: props.providerController.snapshot })}
-          settings={props.settings.navigatorAssistant}
-        />
-      );
     case "voice":
+      // Voice and image generation both pick a model endpoint to send media
+      // through, so they share one page under AI & models.
       return (
-        <VoiceSettingsView
-          focusedSetting={focusedSetting}
-          onSettingsChange={props.onSettingsChange}
-          onOpenModelEndpoints={openModelEndpoints}
-          {...(props.providerController?.snapshot === undefined
-            ? {}
-            : { providerSnapshot: props.providerController.snapshot })}
-          settings={props.settings.voice}
-        />
-      );
-    case "image-generation":
-      return (
-        <ImageGenerationSettingsView
-          onSettingsChange={props.onSettingsChange}
-          onOpenModelEndpoints={openModelEndpoints}
-          {...(props.providerController?.snapshot === undefined
-            ? {}
-            : { providerSnapshot: props.providerController.snapshot })}
-          {...(props.providerController === undefined
-            ? {}
-            : { providerController: props.providerController })}
-          settings={props.settings.imageGeneration}
-        />
+        <div className="settings-section-stack" id="settings-voice">
+          <VoiceSettingsView
+            focusedSetting={focusedSetting}
+            onSettingsChange={props.onSettingsChange}
+            onOpenModelEndpoints={openModelEndpoints}
+            {...(props.providerController?.snapshot === undefined
+              ? {}
+              : { providerSnapshot: props.providerController.snapshot })}
+            settings={props.settings.voice}
+          />
+          <ImageGenerationSettingsView
+            onSettingsChange={props.onSettingsChange}
+            onOpenModelEndpoints={openModelEndpoints}
+            {...(props.providerController?.snapshot === undefined
+              ? {}
+              : { providerSnapshot: props.providerController.snapshot })}
+            {...(props.providerController === undefined
+              ? {}
+              : { providerController: props.providerController })}
+            settings={props.settings.imageGeneration}
+          />
+        </div>
       );
     case "computer-use":
       return (
@@ -1011,26 +1015,42 @@ function ActiveSectionContent({
         />
       );
     case "providers":
+      // The catalog of every provider Octant can set up sits under the ones
+      // this host has, so finding and configuring a provider is one page. A
+      // catalog entry's own page hides the configured list while it is open.
       return props.providerController !== undefined ? (
-        <ProvidersSection
-          discoveryController={props.discoveryController}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          {...(props.providerUsageLimitsClient === undefined
-            ? {}
-            : { usageLimitsClient: props.providerUsageLimitsClient })}
-          providerController={props.providerController}
-        />
-      ) : null;
-    case "provider-catalog":
-      return props.providerController !== undefined ? (
-        <ProviderCatalogSection
-          discoveryController={props.discoveryController}
-          {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
-          onDetailChange={onCatalogEntryChange}
-          onOpenModelEndpoints={openModelEndpoints}
-          onOpenProviders={() => onApplyDeepLink({ section: "providers" })}
-          providerController={props.providerController}
-        />
+        <div className="settings-section-stack" id="settings-providers">
+          <div
+            className="settings-section-stack"
+            hidden={harnessEndpointOpen}
+            id="settings-configured-providers"
+          >
+            <ProvidersSection
+              discoveryController={props.discoveryController}
+              {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+              {...(props.providerUsageLimitsClient === undefined
+                ? {}
+                : { usageLimitsClient: props.providerUsageLimitsClient })}
+              providerController={props.providerController}
+            />
+          </div>
+          <ProviderCatalogSection
+            discoveryController={props.discoveryController}
+            {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
+            onDetailChange={onCatalogEntryChange}
+            onOpenModelEndpoints={openModelEndpoints}
+            onOpenProviders={() =>
+              // The list is on this page; once the catalog's setup closes,
+              // bring the providers to the top of the view.
+              requestAnimationFrame(() =>
+                document
+                  .getElementById("settings-configured-providers")
+                  ?.scrollIntoView?.({ block: "start" }),
+              )
+            }
+            providerController={props.providerController}
+          />
+        </div>
       ) : null;
     case "harness":
       // Everything the Octant Harness decides lives on this one page: the
@@ -1096,6 +1116,18 @@ function ActiveSectionContent({
               />
             </div>
           )}
+          {/* Navigator's models are one more job a model does, so they sit
+              with the roles rather than on a page of their own. */}
+          <div className="settings-section-stack" hidden={harnessEndpointOpen}>
+            <NavigatorAssistantSettingsView
+              focusedSetting={focusedSetting}
+              onSettingsChange={props.onSettingsChange}
+              {...(props.providerController?.snapshot === undefined
+                ? {}
+                : { providerSnapshot: props.providerController.snapshot })}
+              settings={props.settings.navigatorAssistant}
+            />
+          </div>
         </div>
       );
     case "usage":
@@ -1149,9 +1181,6 @@ function ActiveSectionContent({
       return props.hostControlClient !== undefined ? (
         <HostSettingsSection
           client={props.hostControlClient}
-          {...(props.automationNotificationClient === undefined
-            ? {}
-            : { automationNotifications: props.automationNotificationClient })}
           {...(props.hostFederationLifecycle === undefined
             ? {}
             : { hostFederationLifecycle: props.hostFederationLifecycle })}
@@ -1178,9 +1207,22 @@ function ActiveSectionContent({
           status={props.replicaSyncStatusClient}
         />
       );
-    case "data":
+    case "notifications":
+      return props.automationNotificationClient !== undefined ? (
+        <div className="settings-section-stack" id="settings-notifications">
+          <AutomationNotificationSettings
+            client={props.automationNotificationClient}
+            focused={focusedSetting === "host-automation-notifications"}
+          />
+        </div>
+      ) : (
+        <section aria-label="Notifications" id="settings-notifications">
+          <p>Notifications are set up on the host machine.</p>
+        </section>
+      );
+    case "permissions":
       return (
-        <div className="settings-section-stack" id="settings-data">
+        <div className="settings-section-stack" id="settings-permissions">
           <RememberedBrowserOriginsPanel
             origins={props.settings.rememberedBrowserOrigins}
             {...(focusedSetting === undefined ? {} : { focusedSetting })}
@@ -1206,6 +1248,11 @@ function ActiveSectionContent({
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           )}
+        </div>
+      );
+    case "data":
+      return (
+        <div className="settings-section-stack" id="settings-data">
           {props.hostControlClient !== undefined ? (
             <HostDataSettingsSection
               client={props.hostControlClient}
@@ -1213,7 +1260,7 @@ function ActiveSectionContent({
               {...(focusedSetting === undefined ? {} : { focusedSetting })}
             />
           ) : (
-            <section aria-label="Data & privacy">
+            <section aria-label="Data & storage">
               <p>
                 Backup, recovery, and retention controls are available on the host machine only.
               </p>

@@ -71,11 +71,11 @@ export function cellBrightness(column: number, row: number, phase: number, t: nu
 }
 
 /** How fast a click's ring spreads, how wide it is, and how long it lasts. */
-const RIPPLE_SPEED = 320;
-const RIPPLE_BAND = 40;
+export const RIPPLE_SPEED = 320;
+export const RIPPLE_BAND = 40;
 const RIPPLE_SECONDS = 1.6;
 /** A fainter echo follows each ring this many seconds behind, at this strength. */
-const ECHO_DELAY = 0.22;
+export const ECHO_DELAY = 0.22;
 const ECHO_GAIN = 0.45;
 /** About one click in this many draws a heart instead of a ring. */
 const HEART_ODDS = 6;

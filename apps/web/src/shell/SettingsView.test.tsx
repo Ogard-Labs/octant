@@ -285,6 +285,16 @@ describe("SettingsView", () => {
     expect(screen.getByLabelText("Name")).toBeVisible();
   });
 
+  it("keeps links to settings moved out of Host and Data on the pages that hold them now", () => {
+    const { unmount } = renderSettings({
+      initialDeepLink: { section: "host", setting: "host-automation-notifications" },
+    });
+    expect(screen.getByRole("heading", { level: 1, name: "Notifications" })).toBeVisible();
+    unmount();
+    renderSettings({ initialDeepLink: { section: "data", setting: "browser-site-approvals" } });
+    expect(screen.getByRole("heading", { level: 1, name: "Permissions" })).toBeVisible();
+  });
+
   it("moves keyboard shortcuts out of General into a dedicated section", () => {
     renderSettings();
 
@@ -529,13 +539,13 @@ describe("SettingsView", () => {
     await waitFor(() => expect(discoveryController.scan).toHaveBeenCalledTimes(1));
   });
 
-  it("opens the Provider catalog and a driver's setup without scanning the host", async () => {
+  it("lists the provider catalog on Providers & Models and opens a driver's setup without another scan", async () => {
     const providerController = providerControllerFixture();
     const discoveryController = discoveryControllerFixture();
     renderSettings({
       providerController,
       discoveryController,
-      initialDeepLink: { section: "provider-catalog" },
+      initialDeepLink: { section: "providers" },
     });
 
     fireEvent.click(await screen.findByRole("link", { name: /^Codex CLI, / }));
@@ -545,7 +555,9 @@ describe("SettingsView", () => {
         "Codex CLI",
       ),
     ).toBeDefined();
-    expect(discoveryController.scan).not.toHaveBeenCalled();
+    // The page's own look on this host runs once when it opens; browsing the
+    // catalog and opening a driver's setup start no other.
+    expect(discoveryController.scan).toHaveBeenCalledTimes(1);
   });
 
   it("checks every enabled installed provider when discovery is checked again", async () => {
@@ -920,11 +932,35 @@ describe("SettingsView", () => {
     expect(styles).toContain("@supports");
     expect(styles).toContain("not (backdrop-filter: blur(1px))");
     expect(styles).toContain("not (-webkit-backdrop-filter: blur(1px))");
+    // Settings reads the window's own surfaces, which turn opaque on the shell
+    // under reduced transparency; the narrow drawer's blur goes with them.
     expect(styles).toMatch(
-      /\.shell--material-translucent \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-sidebar-translucent\);[^}]*backdrop-filter:/s,
+      /\.shell--material-translucent \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-window-surface\);[^}]*backdrop-filter:/s,
     );
     expect(styles).toMatch(
-      /@media \(prefers-reduced-transparency: reduce\)[\s\S]*\.shell--material-translucent \.settings-view__sidebar,\s*\.shell--material-translucent\[data-octant-sidebar-vibrancy="subtle"\] \.settings-view__sidebar,\s*\.shell--material-translucent\[data-octant-sidebar-vibrancy="strong"\] \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-sidebar-opaque\);[^}]*backdrop-filter:\s*none;/,
+      /@media \(prefers-reduced-transparency: reduce\)\s*\{\s*\.shell--material-translucent \.settings-view__sidebar\s*\{\s*backdrop-filter:\s*none;/,
+    );
+  });
+
+  it("wears the window's frame and sheet under Glass rather than an opaque page", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\s+/g, " ");
+
+    expect(styles).toContain(
+      ".settings-view:not(.settings-view--narrow), .shell--material-translucent .settings-view:not(.settings-view--narrow) { background: var(--octant-window-surface); }",
+    );
+    expect(styles).toMatch(
+      /\.settings-view:not\(\.settings-view--narrow\) > \.settings-view__workspace \{[^}]*background: var\(--octant-sheet-surface\);/,
+    );
+    // The narrow page and its header lie on the stage rather than painting the
+    // page colour.
+    expect(styles).toContain(
+      ".shell--material-translucent :is(.settings-view__workspace, .settings-view__mobile-header) { background: transparent; }",
+    );
+    // A section card is the card step under Glass, not a mix into the page.
+    expect(styles).toMatch(
+      /\.shell--material-translucent \.settings-view \{ --oct-settings-card-fill: var\(--octant-card\); \}/,
     );
   });
 
@@ -1086,7 +1122,6 @@ describe("SettingsView", () => {
   it("keeps search and the existing mode-switcher mutation wired", async () => {
     const { onSearchChange } = renderSettingsWithSearch("");
     navigateTo("Appearance");
-    fireEvent.click(screen.getByRole("button", { name: "Search settings" }));
 
     fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), {
       target: { value: "translucent" },
@@ -1118,7 +1153,6 @@ describe("SettingsView", () => {
     const { onSearchChange } = renderSettingsWithSearch("");
     navigateTo("Appearance");
 
-    await user.click(screen.getByRole("button", { name: "Search settings" }));
     const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
     await user.type(searchbox, "mode switcher");
     const listbox = await screen.findByRole("listbox", { name: "Settings search results" });
@@ -1545,7 +1579,7 @@ describe("SettingsView", () => {
       extensionClient: extensionClient as never,
       projectNames: new Map([[projectId, "Octant"]]),
     });
-    navigateTo("Data & privacy");
+    navigateTo("Permissions");
 
     expect(screen.getByRole("heading", { name: "Remembered websites" })).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Remembered tool approvals" })).toBeVisible();
@@ -1560,7 +1594,7 @@ describe("SettingsView", () => {
       revokeToolGrant: vi.fn(),
     };
     renderSettings({ extensionClient: extensionClient as never });
-    navigateTo("Data & privacy");
+    navigateTo("Permissions");
 
     expect(screen.getByRole("heading", { name: "Remembered websites" })).toBeInTheDocument();
     expect(
@@ -1733,25 +1767,31 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("navigation", { name: "On this page" })).toBeNull();
   });
 
-  it("focuses search from the rail's icon and from Cmd+F", async () => {
+  it("keeps search in view, focuses it from Cmd+F, and opens the top result with Enter", async () => {
     const user = userEvent.setup();
-    renderSettings();
+    const { onSearchChange } = renderSettingsWithSearch("dark mode");
 
-    expect(screen.queryByRole("searchbox", { name: "Search settings" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Search settings" }));
-    await waitFor(() =>
-      expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveFocus(),
-    );
-    // Leaving the empty field folds it back into the icon.
+    const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+    expect(searchbox).toBeVisible();
     await user.click(document.body);
-    await waitFor(() =>
-      expect(screen.queryByRole("searchbox", { name: "Search settings" })).toBeNull(),
-    );
-
     fireEvent.keyDown(document, { key: "f", metaKey: true });
-    await waitFor(() =>
-      expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveFocus(),
-    );
+    await waitFor(() => expect(searchbox).toHaveFocus());
+
+    const listbox = await screen.findByRole("listbox", { name: "Settings search results" });
+    const top = within(listbox).getAllByRole("option")[0];
+    expect(top).toHaveTextContent("Dark preset");
+    fireEvent.keyDown(searchbox, { key: "Enter" });
+    expect(onSearchChange).toHaveBeenLastCalledWith("");
+  });
+
+  it("opens what was just typed when Enter follows the last keystroke at once", () => {
+    const { onSearchChange } = renderSettingsWithSearch("");
+    const searchbox = screen.getByRole("searchbox", { name: "Search settings" });
+    // No wait between typing and Enter: the listed results have not caught up.
+    fireEvent.change(searchbox, { target: { value: "dark mode" } });
+    fireEvent.keyDown(searchbox, { key: "Enter" });
+    expect(onSearchChange).toHaveBeenLastCalledWith("");
+    expect(screen.getByRole("heading", { level: 1, name: "Appearance" })).toBeVisible();
   });
 
   it("assigns the settings surface an explicit visual class contract", () => {
@@ -1775,7 +1815,6 @@ describe("SettingsView", () => {
       "settings-view__sidebar",
     );
     expect(screen.getByRole("button", { name: "Back to app" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Search settings" }));
     expect(screen.getByRole("searchbox", { name: "Search settings" })).toHaveClass(
       "settings-view__text-input",
     );

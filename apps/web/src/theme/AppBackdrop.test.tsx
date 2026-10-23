@@ -37,6 +37,22 @@ describe("AppBackdrop", () => {
     expect(container.querySelector("[data-octant-app-backdrop]")).toBeNull();
   });
 
+  it("draws the dithered pixel field on its own canvas and asks for no picture", () => {
+    const fetcher = vi.fn();
+    const { container } = render(
+      <AppBackdrop
+        fetcher={fetcher}
+        placement="welcome"
+        resolved={{ ...dials, kind: "pixels", backgroundId: null, backgroundAnimated: true }}
+      />,
+    );
+    const field = container.querySelector(".app-backdrop__pixels");
+    expect(field).not.toBeNull();
+    expect(field).toHaveAttribute("data-animated", "true");
+    expect(container.querySelector(".app-backdrop__photo")).toBeNull();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("asks the authenticated fetcher for the photo the ground names", async () => {
     const fetcher = vi.fn(
       async () => new Blob([new Uint8Array([0x89, 0x50])], { type: "image/png" }),

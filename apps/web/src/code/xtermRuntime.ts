@@ -12,7 +12,7 @@ export const mount: XtermAdapterRuntime["mount"] = (element, options) => {
   let interactive = options.interactive;
   let output = options.output;
   const typography = options.typography ?? DEFAULT_TERMINAL_TYPOGRAPHY;
-  const theme = resolvedTerminalTheme();
+  const theme = resolvedTerminalTheme(element);
   const terminal = new Terminal({
     convertEol: true,
     cursorBlink: true,
@@ -115,7 +115,7 @@ function attachGpuRenderer(terminal: Terminal): { readonly dispose: () => void }
  * session today (typography flows through props, colors do not), so a theme
  * switched mid-session repaints on the terminal's next mount.
  */
-function resolvedTerminalTheme(): ITheme | undefined {
+function resolvedTerminalTheme(element: HTMLElement): ITheme | undefined {
   if (typeof document === "undefined") return undefined;
   const root = document.documentElement;
   const styles = getComputedStyle(root);
@@ -158,11 +158,12 @@ function resolvedTerminalTheme(): ITheme | undefined {
   const dark = root.dataset.octantThemeMode !== "light";
   const black = dark ? base : ink;
   const white = dark ? ink : base;
+  const plate = glassPlate(element, ground, ink);
   return {
-    background: ground,
+    background: plate,
     foreground: ink,
     cursor: ink,
-    cursorAccent: ground,
+    cursorAccent: plate,
     selectionBackground: selection,
     black,
     red,
@@ -226,4 +227,36 @@ export function withPromptIconFonts(family: string): string {
   return generic === null
     ? `${family}, ${missing.join(", ")}`
     : `${family.slice(0, generic.index)}, ${missing.join(", ")}${generic[0]}`;
+}
+
+/**
+ * Under Glass the terminal is a grey plate rather than the page colour: on an
+ * OLED preset that colour is black, and the terminal stood as a black slab in
+ * the frosted dock. The plate is the page colour with 12% of the ink, the same
+ * mix the stylesheet paints around the cells. The terminal stays opaque so the
+ * ground's letters never run behind its text.
+ */
+function glassPlate(element: HTMLElement, ground: string, ink: string): string {
+  const glass =
+    element.closest(".shell--material-translucent") !== null &&
+    document.documentElement.dataset.octantReducedTransparency !== "true";
+  if (!glass) return ground;
+  return mixHex(ground, ink, 0.12) ?? ground;
+}
+
+function mixHex(base: string, tint: string, amount: number): string | undefined {
+  const parse = (value: string) =>
+    /^#[0-9a-f]{6}$/i.test(value)
+      ? [1, 3, 5].map((start) => Number.parseInt(value.slice(start, start + 2), 16))
+      : undefined;
+  const from = parse(base);
+  const to = parse(tint);
+  if (from === undefined || to === undefined) return undefined;
+  return `#${from
+    .map((channel, index) =>
+      Math.round(channel + ((to[index] ?? channel) - channel) * amount)
+        .toString(16)
+        .padStart(2, "0"),
+    )
+    .join("")}`;
 }

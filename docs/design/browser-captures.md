@@ -30,7 +30,7 @@ the Browser pane
 
 - The bytes live in the managed attachment store under
   `browser-captures/<thread id>/<capture id>`, declared in the host data map
-  (it appears under Caches in Settings → Data & privacy as "Browser captures").
+  (it appears under Caches in Settings → Data & storage as "Browser captures").
 - The media type is sniffed from the bytes, never read from the data URL. The
   size is bounded by the screenshot envelope (about 40 KiB): a capture is the
   picture the model received, not a full-resolution screenshot.
