@@ -336,7 +336,9 @@ error instead of retaining another integration's account controls.
   with the destructive button variant. The danger is carried by the
   placement and the confirm control; the label keeps its ink.
 - **Rail.** Each page keeps its icon (16px) in the navigation rail, and
-  Device tools has its own, apart from Computer use.
+  Device tools has its own, apart from Computer use. The open page takes the
+  same neutral wash of the ink as the open thread in the workspace sidebar,
+  never the theme's selection hue.
 - **Search.** The search field is always shown at the top of the rail, under
   the "Settings" heading, with its shortcut (Cmd/Ctrl+F) at its trailing edge
   until something is typed. Every typed word must match the start of a word in
@@ -1173,16 +1175,19 @@ read through:
 
 - the window's optional glass, which is the tint over the native window
   material behind the whole window;
-- a thread's user bubbles and composer over the application ground (agent
-  replies stay bare prose; see [Transcript](#transcript));
+- a thread's user bubbles and composer over the application ground or window
+  glass, one material either way (agent replies stay bare prose; see
+  [Transcript](#transcript));
 - Zen's windows, dock, pills, and sheets (glass cards);
 - the floating activity picture-in-picture, and the Browser's live preview,
   which shows the page itself and frosts only its caption, count, and close
   control, never the page;
 - the phone's glass surfaces.
 
-Its tint, stroke, and highlight are theme roles. Reduced transparency and
-unsupported `backdrop-filter` resolve every one of them to an opaque surface.
+Its tint, stroke, and highlight are theme roles, and its floor is the theme's
+page colour at 66%, so a neutral or tinted preset gets no fixed warm cast under
+the composer. Reduced transparency and unsupported `backdrop-filter` resolve
+every one of them to an opaque surface.
 
 Window glass is the `sidebarMaterial` shell setting with the theme's vibrancy
 level, shown as the Window section's Glass control (Off, Subtle, Strong) and
@@ -1194,6 +1199,34 @@ transparency or an unsupported host leaves them opaque. Menus, dialogs, popovers
 over it stay opaque semantic surfaces. The older `workspaceMaterial` setting
 is still read and stored but no longer changes anything: the whole window is
 glass or none of it is.
+
+Under Glass nothing inside the shell paints the theme's opaque page,
+workspace, or card colour over the sheet; every layer takes one of the
+shell's three surfaces (`--octant-window-surface` for the frame,
+`--octant-sheet-surface` for the sheet, `--octant-stage-surface` for the
+stage), defined once on every shell in `shell.css`:
+
+- **Settings** is the same frame and sheet: the navigation and gutters are the
+  frame, the page is the sheet with the sheet's soft hairline, and a section
+  card is the card step below.
+- **Destination pages** (Inbox, Board, Archive, Review, Projects, Agents,
+  Automations, Artifacts, Image generator) are clear over the sheet, and their
+  cards drawn with the raised step (`--oct-surface`) take the card step.
+- **A card** (`--octant-card`, the recipe's `bg-card`) is one step of ink over
+  the sheet: the primary text at 4%.
+- **An outline button** rests on that card step instead of the page colour
+  (`--octant-outline-rest`); its hover and pressed fills stay the control
+  fills.
+- **Quick tools** beside a Code start screen are a clear column on the stage.
+- **The Browser** is clear on its own start page, whose rows take the card
+  step; a loaded page keeps its opaque canvas.
+
+Controls keep their own opaque fills (a switch thumb, a filled or secondary
+button, a segmented track), and menus, popovers, and dialogs keep the opaque
+floating surface. Increased contrast and reduced transparency return cards and
+outline buttons to their opaque colours. The ground behind it all steps down
+by what is on screen: a fifth of its strength behind a thread, about a third
+behind a destination page.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,

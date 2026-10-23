@@ -11,6 +11,11 @@ import { cn } from "./utils";
  * A press moves the button down a pixel, except where it opens something — a
  * menu trigger that sinks while its menu appears reads as a glitch, not a
  * press, so `aria-haspopup` opts out.
+ *
+ * An outline button rests on the page colour, unless the shell names another
+ * rest fill: under Glass the page colour is opaque while the page around the
+ * button is not, and every outline button drew a black pill on the grey
+ * glass of an OLED preset.
  */
 const buttonVariants = cva(
   "group/button inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color] outline-none select-none active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
@@ -20,7 +25,7 @@ const buttonVariants = cva(
         default: "bg-primary text-primary-foreground hover:bg-primary/80",
         destructive: "bg-destructive/10 text-destructive hover:bg-destructive/20",
         outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground [html[data-octant-increased-contrast=true]_&]:border-(--octant-border-strong)",
+          "border-border bg-[var(--octant-outline-rest,var(--background))] hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground [html[data-octant-increased-contrast=true]_&]:border-(--octant-border-strong)",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
         ghost:

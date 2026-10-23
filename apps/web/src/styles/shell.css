@@ -30,28 +30,42 @@
      the frost reaches the whole window and not the sidebar alone: with the
      old floating cards the glass showed only in a sidebar strip, and an
      opaque card covered everything a person worked in. */
-  --octant-window-surface: var(--octant-sidebar-opaque);
-  --octant-sheet-surface: var(--octant-workspace);
-  --octant-stage-surface: var(--octant-app-background);
   background: var(--octant-window-surface);
   border: 0;
   border-radius: 0;
   box-shadow: none;
 }
 
-.shell.shell-frame.shell--material-translucent {
+/* The surfaces belong to every shell, the standalone one Settings stands in
+   included, so Settings wears the same frame and sheet as the window it
+   replaces rather than a material of its own. */
+.shell {
+  --octant-window-surface: var(--octant-sidebar-opaque);
+  --octant-sheet-surface: var(--octant-workspace);
+  --octant-stage-surface: var(--octant-app-background);
+}
+
+/* Under Glass a card is one step of ink over the sheet rather than the
+   theme's opaque card colour: a Code Home panel, an intent card, a Settings
+   section, and a board card each sat as a near-black slab on the grey glass
+   of an OLED preset. Menus, popovers, and dialogs render outside the shell,
+   so they keep the opaque floating surface. */
+.shell.shell--material-translucent {
   --octant-window-surface: var(--octant-sidebar-translucent);
   --octant-sheet-surface: var(--octant-workspace-translucent);
   --octant-stage-surface: var(--octant-workspace-translucent);
+  --octant-card: color-mix(in srgb, var(--octant-text-primary) 4%, transparent);
+  --card: var(--octant-card);
+  --octant-outline-rest: var(--octant-card);
 }
 
-.shell.shell-frame.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"] {
+.shell.shell--material-translucent[data-octant-sidebar-vibrancy="subtle"] {
   --octant-window-surface: var(--octant-sidebar-translucent-subtle);
   --octant-sheet-surface: var(--octant-workspace-translucent-subtle);
   --octant-stage-surface: var(--octant-workspace-translucent-subtle);
 }
 
-.shell.shell-frame.shell--material-translucent[data-octant-sidebar-vibrancy="strong"] {
+.shell.shell--material-translucent[data-octant-sidebar-vibrancy="strong"] {
   --octant-window-surface: var(--octant-sidebar-translucent-strong);
   --octant-sheet-surface: var(--octant-workspace-translucent-strong);
   --octant-stage-surface: var(--octant-workspace-translucent-strong);
@@ -59,18 +73,33 @@
 
 /* The material class already carries the host's contrast and
    reduced-transparency gates; these cover the person's own Reduced
-   transparency switch and the system setting, which a page can see first. */
-html[data-octant-reduced-transparency="true"] .shell.shell-frame {
+   transparency switch and the system setting, which a page can see first.
+   Each names the vibrancy attribute too, so it outranks the Subtle and Strong
+   levels; matching only the shell, it lost to them and left the glass on.
+   The card colour inherits the theme's opaque one again. */
+html[data-octant-reduced-transparency="true"] :is(.shell, .shell[data-octant-sidebar-vibrancy]) {
   --octant-window-surface: var(--octant-sidebar-opaque);
   --octant-sheet-surface: var(--octant-workspace);
   --octant-stage-surface: var(--octant-app-background);
+  --octant-card: inherit;
+  --card: inherit;
+  --octant-outline-rest: initial;
+}
+
+html[data-octant-increased-contrast="true"] .shell {
+  --octant-card: inherit;
+  --card: inherit;
+  --octant-outline-rest: initial;
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .shell.shell-frame {
+  :is(.shell, .shell.shell--material-translucent[data-octant-sidebar-vibrancy]) {
     --octant-window-surface: var(--octant-sidebar-opaque);
     --octant-sheet-surface: var(--octant-workspace);
     --octant-stage-surface: var(--octant-app-background);
+    --octant-card: inherit;
+    --card: inherit;
+    --octant-outline-rest: initial;
   }
 }
 
@@ -3295,6 +3324,20 @@ form > .work-composer-adapter__attachments {
 .browser-workspace__local-note {
   color: var(--oct-muted);
   font-size: var(--oct-text-xs);
+}
+
+/* Under Glass the Browser is clear wherever it shows Octant's own start page,
+   and its rows are cards. Its page colour made the dock's Browser a black
+   slab beside a thread of glass on an OLED preset. A loaded page keeps its
+   own opaque canvas (the native view, the remote frame, the preview). */
+.shell--material-translucent .browser-workspace {
+  background: transparent;
+}
+
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell--material-translucent
+  .browser-workspace__server-row {
+  background: var(--octant-card);
 }
 
 /* A Browser that has not opened a page is a start page: the running servers,

@@ -932,11 +932,35 @@ describe("SettingsView", () => {
     expect(styles).toContain("@supports");
     expect(styles).toContain("not (backdrop-filter: blur(1px))");
     expect(styles).toContain("not (-webkit-backdrop-filter: blur(1px))");
+    // Settings reads the window's own surfaces, which turn opaque on the shell
+    // under reduced transparency; the narrow drawer's blur goes with them.
     expect(styles).toMatch(
-      /\.shell--material-translucent \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-sidebar-translucent\);[^}]*backdrop-filter:/s,
+      /\.shell--material-translucent \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-window-surface\);[^}]*backdrop-filter:/s,
     );
     expect(styles).toMatch(
-      /@media \(prefers-reduced-transparency: reduce\)[\s\S]*\.shell--material-translucent \.settings-view__sidebar,\s*\.shell--material-translucent\[data-octant-sidebar-vibrancy="subtle"\] \.settings-view__sidebar,\s*\.shell--material-translucent\[data-octant-sidebar-vibrancy="strong"\] \.settings-view__sidebar\s*\{[^}]*background:\s*var\(--octant-sidebar-opaque\);[^}]*backdrop-filter:\s*none;/,
+      /@media \(prefers-reduced-transparency: reduce\)\s*\{\s*\.shell--material-translucent \.settings-view__sidebar\s*\{\s*backdrop-filter:\s*none;/,
+    );
+  });
+
+  it("wears the window's frame and sheet under Glass rather than an opaque page", () => {
+    const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\s+/g, " ");
+
+    expect(styles).toContain(
+      ".settings-view:not(.settings-view--narrow), .shell--material-translucent .settings-view:not(.settings-view--narrow) { background: var(--octant-window-surface); }",
+    );
+    expect(styles).toMatch(
+      /\.settings-view:not\(\.settings-view--narrow\) > \.settings-view__workspace \{[^}]*background: var\(--octant-sheet-surface\);/,
+    );
+    // The narrow page and its header lie on the stage rather than painting the
+    // page colour.
+    expect(styles).toContain(
+      ".shell--material-translucent :is(.settings-view__workspace, .settings-view__mobile-header) { background: transparent; }",
+    );
+    // A section card is the card step under Glass, not a mix into the page.
+    expect(styles).toMatch(
+      /\.shell--material-translucent \.settings-view \{ --oct-settings-card-fill: var\(--octant-card\); \}/,
     );
   });
 

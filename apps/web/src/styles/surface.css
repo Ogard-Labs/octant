@@ -782,9 +782,22 @@
   }
 }
 
-.shell--app-backdrop.shell-frame .inbox-layer,
-.shell--app-backdrop.shell-frame .code-board-layer,
-.shell--app-backdrop.shell-frame .archive-layer,
+/* Every destination page is clear over the sheet, under a ground or under
+   Glass alone. The list named Inbox, Board, and Archive, and only under a
+   ground, so Projects, Agents, Automations, Artifacts, and the Image
+   generator painted the theme's opaque page (black on an OLED preset) over
+   the glass from the window's top edge, beside pages that let it through. */
+:is(.shell--app-backdrop, .shell--material-translucent).shell-frame
+  :is(
+    .inbox-layer,
+    .code-board-layer,
+    .archive-layer,
+    .review-layer,
+    .projects-page-layer,
+    .agents-center-layer,
+    .automation-center-layer,
+    .artifact-library-layer
+  ),
 .shell--app-backdrop.shell-frame .workspace,
 .shell--app-backdrop.shell-frame .workspace-pane,
 .shell--app-backdrop.shell-frame .draft-thread,
@@ -794,6 +807,41 @@
 .shell--app-backdrop.shell-frame .code-delivery-pane,
 .shell--app-backdrop.shell-frame .code-diff-pane {
   background: transparent;
+}
+
+/* The design system's raised step (`--oct-surface`) is the opaque floating
+   colour, so the creation paths, suggestion cards, and agent cards on these
+   pages stayed solid once the page under them was clear. On a page they are
+   cards, so under Glass they take the card's step of ink. The Board keeps
+   the floating colour: its view popover is drawn in place, not in a portal. */
+html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+  .shell--material-translucent.shell-frame
+  :is(
+    .inbox-layer,
+    .archive-layer,
+    .review-layer,
+    .projects-page-layer,
+    .agents-center-layer,
+    .automation-center-layer,
+    .artifact-library-layer
+  ) {
+  --oct-surface: var(--octant-card);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contrast="true"])
+    .shell--material-translucent.shell-frame
+    :is(
+      .inbox-layer,
+      .archive-layer,
+      .review-layer,
+      .projects-page-layer,
+      .agents-center-layer,
+      .automation-center-layer,
+      .artifact-library-layer
+    ) {
+    --oct-surface: var(--octant-floating);
+  }
 }
 
 /* Start screens set their question and hints straight on the page. Under a
@@ -906,6 +954,27 @@
   )
   > .app-backdrop[data-placement="shell"] {
   opacity: 0.2;
+}
+
+/* A destination page is cards and lines of text on the same clear sheet, and
+   its letters ran crisp through both: "Describe with Octant" sat on a column
+   of glyphs. It is less dense than a transcript, so the ground keeps a little
+   more. Named after the thread rule, so a page opened over a thread wins. */
+.shell--app-backdrop.shell--material-translucent.shell-frame:has(
+    .primary-workspace-layer
+      > :is(
+        .inbox-layer,
+        .code-board-layer,
+        .archive-layer,
+        .review-layer,
+        .projects-page-layer,
+        .agents-center-layer,
+        .automation-center-layer,
+        .artifact-library-layer
+      )
+  )
+  > .app-backdrop[data-placement="shell"] {
+  opacity: 0.35;
 }
 
 /* Where the pane meets the sheet's rounded corner, its veil rounds with it. */
