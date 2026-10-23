@@ -1850,8 +1850,12 @@ html[data-octant-native-host="true"] .shell--sidebar-collapsed .workspace-pane__
   overflow: auto;
 }
 
+/* The row takes the strip's width so the pills share it, shrinking toward
+   their minimum before anything scrolls; sized to its content, three tabs
+   asked for 604px and scrolled in a 400px pane instead of sharing it. Pills
+   at their minimum overflow the row, and the strip scrolls them. */
 .workspace-content-tabs__list {
-  width: max-content;
+  width: 100%;
   max-width: none;
   gap: var(--oct-space-2);
 }
