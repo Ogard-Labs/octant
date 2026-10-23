@@ -693,7 +693,8 @@
 
 .app-backdrop__builtin,
 .app-backdrop__photo,
-.app-backdrop__characters {
+.app-backdrop__characters,
+.app-backdrop__pixels {
   position: absolute;
   inset: 0;
   display: block;
@@ -715,7 +716,8 @@
 /* A printed picture is a coarse grid scaled up with nearest-neighbour
    sampling. A clean photo is already at device pixels and must sample
    ordinarily, or it becomes a 1× nearest-neighbour upscale on Retina. */
-.app-backdrop__photo[data-dithered="true"] {
+.app-backdrop__photo[data-dithered="true"],
+.app-backdrop__pixels {
   image-rendering: pixelated;
 }
 

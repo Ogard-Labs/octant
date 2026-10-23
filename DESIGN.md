@@ -55,8 +55,9 @@ application ground, to a Vivid tile's face, and to a Project's letter tile;
 chrome stays flat. A feature that is not available must explain why and offer the
 next useful action, or stay out of the primary layout. The one thing allowed
 to be decorative is the application ground (0091): a first-party picture or a
-person's photo, shown plain or through one still print effect, or the field of
-Pulsing characters, behind the start screens or behind every page.
+person's photo, shown plain or through one print effect, or the field of
+Pulsing characters or Dithered pixels, behind the start screens or behind
+every page.
 
 ## Language
 
@@ -588,15 +589,25 @@ accepting another edit, so the next configuration choice uses the confirmed pair
 
 The screen sits on the application ground (0091, 0129), set as two plain
 choices. What: one of the first-party Zen pictures, a person's photo, a field
-of pulsing characters, or the plain page. A fresh install starts on Soft glow, one of three Gradient
+of pulsing characters, a field of dithered pixels, or the plain page. A fresh install starts on Soft glow, one of three Gradient
 pictures (Soft glow, Graphite, Sunset) that each carry a light and a dark
 print, so the ground follows the window's scheme; the stylesheet swaps them
 by `data-octant-theme-mode`. A settings row written before the ground
 existed replays as the plain page it showed. Effect: the picture is shown as it is, pixelated, or
 dithered, at a chosen pixel size and colour count; an animated picture is
-printed from its still frame. Nothing is drawn over the picture and nothing
-moves across it; a ground saved with the retired dot pattern resolves to the
-plain page. Pulsing characters is the one drawn ground, and only when a person
+printed from its still frame. A printed picture is still unless a person sets
+its Motion to Wave: then a click on a start screen pushes a ring outward
+through its cells, each cell sampled from a little further in as the ring's
+edge passes and lit toward the accent through the same dither, so the ring
+stays in pixels; between clicks the print rests and draws nothing. A ground
+saved with the retired dot pattern resolves to the plain page. Dithered pixels
+is a drawn ground of square cells in the theme's primary ink, at most about
+two-fifths opaque, whose brightness drifts in slow overlapping waves at twelve
+frames a second and prints through a 4×4 ordered dither (or plain pixels) at
+the chosen pixel size and number of shades; a click on a start screen sends
+the same pushing, accent-lit ring through it at twenty-four frames a second,
+for under two seconds. Motion Still holds either drawn field on one frame and
+takes no clicks. Pulsing characters is the other drawn ground, and only when a person
 picks it: a grid of monospace letters and digits in the theme's primary ink,
 at most half opaque, whose brightness drifts in slow patches and breathes as
 a whole at twelve frames a second while a few glyphs swap. A click over it
@@ -1849,9 +1860,10 @@ interfaces. Revealing them must not move the transcript.
 
 Functional feedback uses 120–160ms transitions; the base system duration is
 200ms. Use standard easing and no decorative entrance animation. There is no
-ambient motion behind the work by default; an animated built-in picture and
-the Pulsing characters ground are the moving grounds a person may choose, and
-reduced motion holds each on a still frame. Running state
+ambient motion behind the work by default; an animated built-in picture, the
+Pulsing characters and Dithered pixels grounds, and a printed picture set to
+Wave are the moving grounds a person may choose, and reduced motion holds each
+on a still frame. Running state
 must have a textual or shape distinction in addition to motion. `prefers-reduced-
 motion` and the persisted reduced-motion setting disable transitions and
 animations without removing state information.

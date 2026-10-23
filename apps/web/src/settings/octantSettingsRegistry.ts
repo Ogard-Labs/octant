@@ -227,6 +227,12 @@ export const octantSettingsRegistry: SettingsRegistry = createSettingsRegistry({
           keywords: "reduce reduced transparency glass opaque accessibility",
         },
         {
+          id: settingId("app-background-motion"),
+          label: "Background motion",
+          scope: "app",
+          keywords: "background motion still wave animate animated move click ripple bounce pixels",
+        },
+        {
           id: settingId("app-background-effect"),
           label: "Background effect",
           scope: "app",
