@@ -68,6 +68,23 @@
   line-height: 1.45;
 }
 
+/* The first-run empty state sits a step below the header, with its title in
+   the primary ink so it reads as a message rather than a stray caption. */
+.project-nav__empty--first {
+  display: grid;
+  gap: var(--oct-space-1);
+  padding-top: var(--oct-space-4);
+}
+
+.project-nav__empty--first > p {
+  margin: 0;
+}
+
+.project-nav__empty-title {
+  color: var(--octant-text-secondary);
+  font-weight: 500;
+}
+
 .project-nav__status button {
   display: block;
   margin-top: var(--oct-space-2);

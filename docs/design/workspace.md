@@ -53,7 +53,11 @@ existed is kept). It lists the threads flat under counted headings in the
 order a person acts on them: **Pinned**, **Needs input** (waiting on an
 approval or an answer), **Ready for review** (a finished turn nobody has
 looked at), **Working**, and **Idle** (everything else), newest first within
-each. A thread appears once, under the first heading that holds it.
+each. A thread appears once, under the first heading that holds it. A mode
+with no threads at all shows a short first-run note in Status and the Activity
+feed instead of an empty list: "No threads yet" in the secondary ink, then
+"Start one from the composer. Your threads gather here." A search or filter
+that matched nothing keeps its own message, which says nothing was deleted.
 
 Chat, Work, and Code keep the active mode's sidebar current with projection-only
 navigation reads ([routes](host-reads-and-commands.md#sidebar-navigation-reads)).

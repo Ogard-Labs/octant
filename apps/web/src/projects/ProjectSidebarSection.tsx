@@ -1417,8 +1417,14 @@ function ActivityThreadList(props: {
   const earlierShown = earlierOpen || props.searching === true;
   const earlierThreadsId = useId();
   if (props.groups.length === 0) {
+    // A first run read a lone "No threads in this mode." in small type at the
+    // top of an otherwise blank sidebar: it said what was missing but not what
+    // to do. Name where threads will appear and how one starts.
     return props.emptyLabel === undefined ? (
-      <p className="project-nav__empty">No threads in this mode.</p>
+      <div className="project-nav__empty project-nav__empty--first">
+        <p className="project-nav__empty-title">No threads yet</p>
+        <p>Start one from the composer. Your threads gather here.</p>
+      </div>
     ) : (
       <p className="project-nav__empty" role="status">
         {props.emptyLabel}
