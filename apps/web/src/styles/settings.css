@@ -413,6 +413,21 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   appearance: none;
 }
 
+/* The shortcut that focuses the field, where the clear button will be once
+   there is something to clear. */
+.settings-view__search-shortcut {
+  position: absolute;
+  right: var(--oct-space-2);
+  padding: 0 var(--oct-space-1);
+  border: 1px solid var(--octant-border);
+  border-radius: var(--oct-radius-sm);
+  color: var(--octant-text-muted);
+  font-family: var(--oct-font-display);
+  font-size: var(--oct-text-xs);
+  line-height: 1.5;
+  pointer-events: none;
+}
+
 .settings-view__search-clear {
   position: absolute;
   z-index: 1;
@@ -856,7 +871,15 @@ html[data-octant-native-host="true"] .settings-view__mobile-titlebar {
 
 .settings-search-results__label {
   color: var(--octant-text-primary);
-  font-weight: 500;
+  font-weight: 400;
+}
+
+/* The part of the name the query matched: weight, not a fill, so a result
+   never reads as selected. */
+.settings-search-results__match {
+  background: none;
+  color: inherit;
+  font-weight: 600;
 }
 
 .settings-search-results__section {

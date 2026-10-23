@@ -330,11 +330,19 @@ error instead of retaining another integration's account controls.
 - **Rail.** Each page keeps its icon (16px) in the navigation rail, and
   Device tools has its own, apart from Computer use. The open page takes the
   same neutral wash of the ink as the open thread in the workspace sidebar,
-  never the theme's selection hue. Search is an icon beside
-  the "Settings" heading that reveals the field; Cmd/Ctrl+F reveals and
-  focuses it, the field stays mounted while folded away, and it folds back
-  when it loses focus empty. Below the narrow breakpoint the field is always
-  shown.
+  never the theme's selection hue.
+- **Search.** The search field is always shown at the top of the rail, under
+  the "Settings" heading, with its shortcut (Cmd/Ctrl+F) at its trailing edge
+  until something is typed. Every typed word must match the start of a word in
+  a row's name, keywords, or page, in any order; filler words ("my", "the")
+  are ignored, and everyday words map to the rows' own (dark mode → colour
+  scheme presets, password → credentials, delete → purge, telemetry → what
+  leaves this machine, connector → MCP). Results rank a row named by the query
+  above one that only lists it as a keyword, mark the matched part of each
+  name in weight rather than a fill, and name the page. Enter opens the top
+  result, Down moves into the list, and Escape clears the field, then leaves
+  it. Every Settings row a person can see is indexed; a test fails when a new
+  row is not.
 
 ### Content tabs
 
@@ -502,7 +510,9 @@ The model button names a chosen reasoning effort after the model in muted ink
 ("GPT-6 Astra Medium"); the provider default names none. Where the thread runs
 (Project, base branch, checkout, Environment, repository) is the first row
 inside the card, above the prompt, as small rounded chips on a faint fill with
-no outline, so the composer stays a single object. Code's
+no outline, so the composer stays a single object. On a start screen the
+Project chooser stands just above the card's top-left edge as plain text,
+lifted out of the row so it never pushes the prompt down. Code's
 base-branch chip is absent until a Project is chosen: with no Project it
 would name a branch of nothing. The chip
 is painted on the plain element that holds each control, never on the shared
@@ -1054,7 +1064,9 @@ drawer.
 The right dock defaults to 640px when open, and opening a Browser or a
 Terminal widens a narrower dock to 640px once (the person can drag it back;
 the next such opening widens it again). A terminal in the dock is an inset,
-rounded plate rather than an edge-to-edge slab. A fresh window
+rounded plate rather than an edge-to-edge slab; under Glass the plate and
+its cells are the page colour with 12% of the ink, a grey that sits with the
+frosted panels instead of a black slab. A fresh window
 starts with it
 closed; choosing a tool or restoring an explicit prior choice opens it. The
 pane/title control rail is `--oct-title-rail-h` in the native host and the status

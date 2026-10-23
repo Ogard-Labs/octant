@@ -246,6 +246,90 @@ describe("searchSettings", () => {
     ]);
   });
 
+  it("matches every word in any order, and a word from its start", () => {
+    const registry = buildRegistry();
+    const available = listAvailableSections(registry, ALL_CAPABLE);
+    const ids = (query: string) =>
+      searchSettings(available, ALL_CAPABLE, query).map((r) =>
+        r.kind === "setting" ? r.settingId : r.sectionId,
+      );
+    expect(ids("width sidebar")).toEqual(["sidebar-width"]);
+    expect(ids("sideb wid")).toEqual(["sidebar-width"]);
+    expect(ids("sidebar height")).toEqual([]);
+  });
+
+  it("finds a setting by a word people use for it rather than its own", () => {
+    const registry = createSettingsRegistry({
+      sections: [
+        {
+          id: "appearance",
+          label: "Appearance",
+          scope: "app",
+          keywords: "",
+          settings: [
+            {
+              id: settingId("color-scheme"),
+              label: "Color scheme",
+              scope: "app",
+              keywords: "light system",
+            },
+          ],
+        },
+      ],
+    });
+    const available = listAvailableSections(registry, ALL_CAPABLE);
+    expect(searchSettings(available, ALL_CAPABLE, "dark mode")).toEqual([
+      {
+        kind: "setting",
+        sectionId: "appearance",
+        settingId: "color-scheme",
+        label: "Color scheme",
+        scope: "app",
+      },
+    ]);
+  });
+
+  it("puts a setting named by the query above one that only lists it as a keyword", () => {
+    const registry = createSettingsRegistry({
+      sections: [
+        {
+          id: "general",
+          label: "General",
+          scope: "app",
+          keywords: "",
+          settings: [
+            {
+              id: settingId("default-folder"),
+              label: "Default folder",
+              scope: "host",
+              keywords: "files artifacts location",
+            },
+          ],
+        },
+        {
+          id: "data",
+          label: "Data & privacy",
+          scope: "host",
+          keywords: "",
+          settings: [
+            {
+              id: settingId("artifacts"),
+              label: "Artifacts",
+              scope: "host",
+              keywords: "files",
+            },
+          ],
+        },
+      ],
+    });
+    const available = listAvailableSections(registry, ALL_CAPABLE);
+    expect(
+      searchSettings(available, ALL_CAPABLE, "artifacts").map((r) =>
+        r.kind === "setting" ? r.settingId : r.sectionId,
+      ),
+    ).toEqual(["artifacts", "default-folder"]);
+  });
+
   it("excludes settings gated by an unmet native capability", () => {
     const registry = buildRegistry();
     const capabilities = { nativeBoundsAvailable: true, sidebarVibrancySupported: false };
