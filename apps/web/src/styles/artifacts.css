@@ -31,12 +31,6 @@
   object-fit: contain;
 }
 
-/* A composer's Create image icon while no image profile is ready: it still opens
-   Settings, and reads as not ready, so it is not mistaken for a working action. */
-.image-generation-action--unavailable {
-  color: var(--oct-muted);
-}
-
 .image-library__note {
   margin: 0;
   padding: var(--oct-space-4) 0;

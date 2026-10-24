@@ -157,10 +157,12 @@ export function ImageGenerationContent(
           />
           {iconOnly ? null : <span>Create image…</span>}
         </OctantButton>
-      ) : iconOnly && props.onOpenSettings === undefined ? null : (
+      ) : iconOnly ? null : (
+        // A composer offers no image button until a profile is ready: a dimmed
+        // icon that only opened Settings sat among the working controls of
+        // every thread. Settings search finds image profiles.
         <OctantButton
           aria-label="Create image unavailable. Open Settings to add an image profile."
-          {...(iconOnly ? { className: "image-generation-action--unavailable" } : {})}
           disabled={props.onOpenSettings === undefined}
           onClick={props.onOpenSettings}
           size={iconOnly ? "icon" : "sm"}

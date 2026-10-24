@@ -114,7 +114,7 @@ describe("ProviderSettingsView", () => {
     }
   });
 
-  it("adds no pane heading of its own and orders discovery, then providers, then defaults", () => {
+  it("adds no pane heading of its own and opens on the providers and their defaults before discovery", () => {
     renderProviderSettings(
       <ProviderSettingsView {...fixture()} discovery={<section aria-label="Find providers" />} />,
     );
@@ -128,10 +128,10 @@ describe("ProviderSettingsView", () => {
     const defaults = screen.getByRole("region", { name: "Defaults" });
     expect(within(defaults).getByLabelText("Permission persistence")).toBeVisible();
     expect(
-      discovery.compareDocumentPosition(providers) & Node.DOCUMENT_POSITION_FOLLOWING,
+      providers.compareDocumentPosition(defaults) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      providers.compareDocumentPosition(defaults) & Node.DOCUMENT_POSITION_FOLLOWING,
+      defaults.compareDocumentPosition(discovery) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 

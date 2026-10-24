@@ -33,8 +33,9 @@ export interface WorkingNowCardSource extends Omit<WorkingNowInput, "runs"> {
 /**
  * The Working now card: threads and agent runs in progress across Projects,
  * read from the navigation rows and AgentRun projection the shell already
- * holds. It is never unavailable (a window always sees its own threads), and
- * says so in one line when nothing is running.
+ * holds. It is never unavailable (a window always sees its own threads). Like
+ * Needs you it leaves the grid while nothing runs: an empty card saying so
+ * stood beside the start screen's other cards on every visit.
  */
 export function createWorkingNowCard(source: WorkingNowCardSource): HomeCardDefinition {
   return {
@@ -43,6 +44,7 @@ export function createWorkingNowCard(source: WorkingNowCardSource): HomeCardDefi
     icon: Activity,
     defaultOn: true,
     available: true,
+    hideWhenEmpty: true,
     emptyLabel: WORKING_NOW_EMPTY_LABEL,
     useContent: () => useWorkingNowContent(source),
   };

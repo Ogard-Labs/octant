@@ -2568,8 +2568,7 @@ describe("WorkThreadWorkspace", () => {
     );
   });
 
-  it("points the Work composer at image Settings when no image profile is ready", async () => {
-    const user = userEvent.setup();
+  it("offers no Create image in the Work composer until an image profile is ready", async () => {
     const onOpenImageSettings = vi.fn();
     const threadClient = {
       bootstrap: vi.fn(async () => ({ threads: [workThread()] })),
@@ -2586,13 +2585,9 @@ describe("WorkThreadWorkspace", () => {
         title="Draft brief"
       />,
     );
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Create image unavailable. Open Settings to add an image profile.",
-      }),
-    );
-    expect(onOpenImageSettings).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("button", { name: "Create image" })).not.toBeInTheDocument();
+    await screen.findByLabelText("Work prompt");
+    expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
+    expect(onOpenImageSettings).not.toHaveBeenCalled();
   });
 
   it("offers no Create image when the host serves no image generation", async () => {
