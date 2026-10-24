@@ -304,6 +304,74 @@ describe("ProviderUsageLimitsPanel", () => {
     },
   );
 
+  it("collapses providers that cannot report limits into one closing row", async () => {
+    const offId = "33333333-3333-4333-8333-333333333333" as ProviderInstanceId;
+    const localId = "44444444-4444-4444-8444-444444444444" as ProviderInstanceId;
+    const data = decodeProviderUsageLimitsSnapshot({
+      version: 1,
+      refreshedAt: "2026-08-23T12:00:00.000Z",
+      entries: [
+        ...snapshot().entries,
+        {
+          providerInstanceId: offId,
+          status: "unavailable",
+          source: "provider-runtime",
+          reason: "not-configured",
+          observedAt: "2026-08-23T12:00:00.000Z",
+        },
+        {
+          providerInstanceId: localId,
+          status: "unavailable",
+          source: "provider-runtime",
+          reason: "local-runtime",
+          observedAt: "2026-08-23T12:00:00.000Z",
+        },
+      ],
+    });
+    const { container } = render(
+      <ProviderUsageLimitsPanel
+        client={{ list: async () => data, refresh: async () => data }}
+        instances={[
+          provider,
+          { ...provider, id: offId, displayName: "Off provider" },
+          {
+            ...provider,
+            id: localId,
+            displayName: "Local model",
+            driverKind: "ollama",
+          } as ProviderInstance,
+        ]}
+      />,
+    );
+
+    await screen.findByRole("meter", { name: "5-hour window remaining" });
+    const quiet = screen.getByText("Not reporting limits").closest("li");
+    expect(quiet).not.toBeNull();
+    expect(container.querySelectorAll(".provider-limits__row")).toHaveLength(2);
+    expect(quiet).toHaveTextContent("Off provider · Provider off");
+    expect(quiet).toHaveTextContent("Local model · Runs locally, no account limits");
+    expect(screen.getByText("Primary provider")).toBeVisible();
+    expect(screen.getByText("Account limits · includes other apps")).toBeVisible();
+  });
+
+  it("keeps the closing row and skips the empty note when nothing reports limits", async () => {
+    render(
+      <ProviderUsageLimitsPanel
+        client={{
+          list: async () => snapshot("unavailable"),
+          refresh: async () => snapshot("unavailable"),
+        }}
+        instances={[provider]}
+      />,
+    );
+
+    expect(await screen.findByText("Not reporting limits")).toBeVisible();
+    expect(screen.getByText(/Primary provider · Not reported yet/)).toBeVisible();
+    expect(
+      screen.queryByText("No configured providers have reported limits."),
+    ).not.toBeInTheDocument();
+  });
+
   it("labels Codex account windows by their length", async () => {
     const codex = decodeProviderUsageLimitsSnapshot({
       version: 1,
@@ -378,7 +446,7 @@ describe("ProviderUsageLimitsPanel", () => {
         instances={[{ ...provider, driverKind: "claude" } as ProviderInstance]}
       />,
     );
-    expect(await screen.findByText("Plan limits do not apply")).toBeVisible();
+    expect(await screen.findByText(/Plan limits do not apply/)).toBeVisible();
     expect(screen.queryByRole("meter")).not.toBeInTheDocument();
   });
 

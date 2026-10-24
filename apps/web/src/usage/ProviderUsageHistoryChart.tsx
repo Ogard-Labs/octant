@@ -99,11 +99,9 @@ export function ProviderUsageHistoryChart(props: {
                 fill="none"
                 strokeWidth={2}
               />
-              {row.points.length === 1
-                ? row.points.map((point) => (
-                    <circle key={point.day} cx={x(point.day)} cy={y(point.value)} r={3} />
-                  ))
-                : null}
+              {row.points.map((point) => (
+                <circle key={point.day} cx={x(point.day)} cy={y(point.value)} r={2.5} />
+              ))}
             </g>
           ))}
           {days.length === 0 ? null : (
