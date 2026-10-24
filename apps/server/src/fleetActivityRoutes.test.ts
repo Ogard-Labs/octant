@@ -4,6 +4,7 @@ import {
   decodeWindowId,
   type PendingRequest,
   type ProductSurfaceSettings,
+  type ProjectId,
   type WindowId,
 } from "@octant/contracts";
 import type { DeviceId, RemoteSessionId, StableHostId } from "@octant/contracts/remote-access";
@@ -16,6 +17,7 @@ import {
   FleetActivityService,
   type FleetActivitySources,
   type FleetRunningThread,
+  windowsBoundToACodeProject,
   windowsBoundToAProject,
 } from "./fleetActivityService";
 import { bindPrincipalRouteContext } from "./principalRouteContext";
@@ -209,10 +211,11 @@ describe("fleet activity route", () => {
     expect(sources.codePending).not.toHaveBeenCalled();
   });
 
-  it("asks for a waiting subagent in every saved window bound to a Project, open or not, and in none bound to no Project", () => {
+  it("asks for a waiting subagent in every saved window bound to a Project, open or not, and in none bound to no Project, once per binding", () => {
     const unbound = decodeWindowId("00000000-0000-4000-8000-000000000811");
     const codeBound = decodeWindowId("00000000-0000-4000-8000-000000000812");
     const workBound = decodeWindowId("00000000-0000-4000-8000-000000000813");
+    const codeBoundAgain = decodeWindowId("00000000-0000-4000-8000-000000000814");
     const bind = (window: WindowId, mode: "code" | "work") => {
       const empty = defaultWindowWorkspace(window);
       return {
@@ -230,9 +233,38 @@ describe("fleet activity route", () => {
         { workspace: defaultWindowWorkspace(unbound) },
         bind(codeBound, "code"),
         bind(workBound, "work"),
+        bind(codeBoundAgain, "code"),
       ]),
     ).toEqual([codeBound, workBound]);
     expect(windowsBoundToAProject([{ workspace: defaultWindowWorkspace(unbound) }])).toEqual([]);
+  });
+
+  it("asks for a Code request once per bound Code Project, not once per saved window", () => {
+    const first = decodeWindowId("00000000-0000-4000-8000-000000000821");
+    const sameProject = decodeWindowId("00000000-0000-4000-8000-000000000822");
+    const otherProject = decodeWindowId("00000000-0000-4000-8000-000000000823");
+    const workOnly = decodeWindowId("00000000-0000-4000-8000-000000000824");
+    const otherProjectId = decodeProjectId("00000000-0000-4000-8000-000000000911");
+    const bind = (window: WindowId, mode: "code" | "work", project: ProjectId = projectId) => {
+      const empty = defaultWindowWorkspace(window);
+      return {
+        workspace: {
+          ...empty,
+          contextByMode: {
+            ...empty.contextByMode,
+            [mode]: contextKeyForProject(mode, LOCAL_HOST_ID, project, "/repo"),
+          },
+        },
+      };
+    };
+    expect(
+      windowsBoundToACodeProject([
+        bind(first, "code"),
+        bind(sameProject, "code"),
+        bind(otherProject, "code", otherProjectId),
+        bind(workOnly, "work"),
+      ]),
+    ).toEqual([first, otherProject]);
   });
 
   it("leaves a waiting subagent out of the menu bar when its mode is off", async () => {

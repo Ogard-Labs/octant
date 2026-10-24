@@ -105,6 +105,7 @@ import { accessSync, constants, realpathSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { Cause, Effect, Exit, Fiber, Option, Schema, Stream } from "effect";
 import { admittedBundledProviderDriverKinds } from "@octant/plugin-host/provider-drivers";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
@@ -1842,6 +1843,11 @@ export class ProviderService implements ProviderServiceApi {
       invalidated: false,
       updatedAt: observed.observedAt,
     });
+    // A probe that taught nothing new is not a catalogue change. Every probe
+    // used to append the whole catalogue (527 models, 115 KB for one
+    // endpoint), so a few days of use left 795 such rows that each host
+    // start decoded again.
+    if (current !== undefined && sameCatalogContent(current, snapshot)) return;
     this.#persistence.journal.append({
       aggregate: {
         aggregateType: "provider-catalog",
@@ -2295,6 +2301,16 @@ export class ProviderService implements ProviderServiceApi {
       message: "Octant Provider service is unavailable.",
     });
   }
+}
+
+/** Whether two catalogue snapshots say the same thing, whenever they were written. */
+function sameCatalogContent(
+  current: ProviderCatalogSnapshot,
+  next: ProviderCatalogSnapshot,
+): boolean {
+  const { version: _currentVersion, updatedAt: _currentUpdatedAt, ...currentContent } = current;
+  const { version: _nextVersion, updatedAt: _nextUpdatedAt, ...nextContent } = next;
+  return isDeepStrictEqual(currentContent, nextContent);
 }
 
 /**

@@ -467,6 +467,22 @@ describe("ProviderService", () => {
     expect(fixture.catalogs()[0]).toMatchObject({ version: 1, invalidated: false });
   });
 
+  it("journals a probed catalogue once, not again for every probe that lists the same models", async () => {
+    const fixture = serviceFixture({
+      instances: [provider()],
+      withCatalogPersistence: true,
+    });
+
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.catalogs()[0]).toMatchObject({ version: 1, invalidated: false });
+    const appends = fixture.append.mock.calls.length;
+
+    await fixture.service.probe(windowId, instanceId);
+    await fixture.service.probe(windowId, instanceId);
+    expect(fixture.catalogs()[0]).toMatchObject({ version: 1 });
+    expect(fixture.append.mock.calls.length).toBe(appends);
+  });
+
   it("persists residency tags on an individual provider model", async () => {
     const fixture = serviceFixture({
       instances: [provider()],

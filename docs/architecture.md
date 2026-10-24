@@ -422,7 +422,9 @@ probe (every 2 s while a window is visible, 10 s otherwise). Every row names its
   question, is `session`, the live provider session parked on it. Code reach is
   per bound window and the menu bar's own window binds no Code Project, so its
   Code rows are the requests and decisions each local window with a persisted
-  Code binding could answer; a Code Project no local window binds stays out. A
+  Code binding could answer, read once per distinct binding since what a window
+  can answer depends only on what it binds; a Code Project no local window
+  binds stays out. A
   waiting subagent, and the agent's own approval, are read the same way. The
   menu bar's window binds no Project, so its Work and Code rows for them are the
   waits that each saved local window with a Work or Code Project binding could

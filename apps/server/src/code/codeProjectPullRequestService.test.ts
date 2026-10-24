@@ -212,6 +212,31 @@ describe("CodeProjectPullRequestService", () => {
     expect(journal.append).not.toHaveBeenCalled();
   });
 
+  it("asks a Project's folder for its remotes once per minute, not on every board and list read", async () => {
+    let nowMs = Date.parse(now);
+    const remoteLookup = vi.fn(
+      async (
+        _root: string,
+      ): Promise<ReadonlyArray<{ name: string; fetchUrl: string; pushUrl: string }>> => [],
+    );
+    const { service } = serviceFixture({
+      remoteLookup,
+      clock: () => new Date(nowMs).toISOString(),
+    });
+
+    await service.query(windowId, { version: 1 });
+    await service.boardSnapshot(windowId);
+    await service.query(windowId, { version: 1 });
+    expect(remoteLookup.mock.calls.map(([root]) => root)).toEqual([
+      "/repos/octant",
+      "/repos/notes",
+    ]);
+
+    nowMs += 61_000;
+    await service.query(windowId, { version: 1 });
+    expect(remoteLookup).toHaveBeenCalledTimes(4);
+  });
+
   it("drops the cached list after a merge so the merged row cannot stay open", async () => {
     const mergeByIdentity = vi.fn(async () => ({ status: "merged" }) as const);
     const fixture = serviceFixture({ merge: { mergeByIdentity } });
@@ -678,7 +703,7 @@ describe("CodeProjectPullRequestService", () => {
         },
       ],
     );
-    const { service, listActive } = serviceFixture({
+    const { service, listActive, listThreads } = serviceFixture({
       projects: [codeProject({ id: projectA, name: "Octant", root: "/repos/octant" })],
       remoteLookup,
       clock: () => new Date(clockMs).toISOString(),
@@ -689,16 +714,17 @@ describe("CodeProjectPullRequestService", () => {
 
     expect(second).toBe(first);
     expect(remoteLookup).toHaveBeenCalledTimes(1);
+    expect(listThreads).toHaveBeenCalledTimes(1);
     expect(listActive).not.toHaveBeenCalled();
 
     clockMs += 10_001;
     await service.navigationSnapshot(windowId);
-    expect(remoteLookup).toHaveBeenCalledTimes(2);
+    expect(listThreads).toHaveBeenCalledTimes(2);
 
     await service.refresh(windowId, { kind: "refresh-all" }, new AbortController().signal);
-    const refreshedCalls = remoteLookup.mock.calls.length;
+    const refreshedCalls = listThreads.mock.calls.length;
     const afterRefresh = await service.navigationSnapshot(windowId);
-    expect(remoteLookup.mock.calls.length).toBe(refreshedCalls + 1);
+    expect(listThreads.mock.calls.length).toBe(refreshedCalls + 1);
     expect(afterRefresh.rows.map((row) => row.number)).toEqual([12]);
 
     service.revokeGithub();
