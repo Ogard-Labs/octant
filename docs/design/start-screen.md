@@ -50,8 +50,8 @@ decision's options the same way, the recommended one first with a trailing
 are told apart by a hairline, never a tinted fill, and the waiting state is a
 glyph and words with no hue. **Working now**
 lists up to five rows of threads and agent runs in progress, each with the
-provider mark, the title, a time, and a one-line step; it says "Nothing is
-running right now." when empty. A running tool is shown in mono
+provider mark, the title, a time, and a one-line step; like Needs you it leaves
+the grid while nothing runs. A running tool is shown in mono
 (`Command: bun run test`); a turn waiting on the person is plain prose. A turn's
 time says "Running 12m" from the start time the host reports, and "Active 4m
 ago" only for a host that reports none; a fact the host does not report is left

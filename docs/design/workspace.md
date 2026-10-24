@@ -290,7 +290,7 @@ wording, and reads are specified in [Start screen](start-screen.md).
   nothing to show. Computers leaves the grid while the only computer is this
   one and no agent is running on it (or while that count is still landing, so
   the gauges do not flash). It comes back when a second computer is connected
-  or an agent is running. Working now says "Nothing is running right now." Pull requests
+  or an agent is running. Working now leaves the grid while nothing runs. Pull requests
   says "Nothing is waiting on you." only after a successful read that a refresh
   has carried to every connected Project; otherwise it says it could not read or
   has not checked yet. Running services says it could not check rather than that

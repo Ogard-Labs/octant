@@ -3111,8 +3111,7 @@ describe("ChatWorkspace", () => {
     );
   });
 
-  it("points the composer at image Settings when no image profile is ready", async () => {
-    const user = userEvent.setup();
+  it("offers no Create image in the composer until an image profile is ready", () => {
     const onOpenImageSettings = vi.fn();
     render(
       <ChatWorkspace
@@ -3124,13 +3123,7 @@ describe("ChatWorkspace", () => {
       />,
     );
 
-    expect(screen.queryByRole("button", { name: "Create image" })).not.toBeInTheDocument();
-    await user.click(
-      screen.getByRole("button", {
-        name: "Create image unavailable. Open Settings to add an image profile.",
-      }),
-    );
-    expect(onOpenImageSettings).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
   });
 
   it("does not attach a generated image after the thread has changed", async () => {

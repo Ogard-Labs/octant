@@ -263,8 +263,9 @@ the host keeps (data map, caches, backup, recovery, export, retention, purge);
 Notifications holds what Octant sends while a person is away. AI & models
 lists each provider kind on the page of what it serves: Providers & Models
 holds the agent runtimes Octant drives (ACP agents, CLIs, the Agent SDK, RPC
-runtimes), and its manual add form offers only those kinds, with the Provider
-catalog under them; Octant Harness
+runtimes), and its manual add form offers only those kinds. It opens on the
+person's providers and their Defaults, then Find providers and Octant's own
+OpenCode copy, with the Provider catalog under them; Octant Harness
 opens with Model endpoints, every endpoint Octant calls over an API itself
 (OpenAI-compatible, Anthropic-compatible, Ollama, Azure AI Foundry), followed
 by model roles, helper agents, and Navigator's models; with no endpoint yet it offers three ways
@@ -661,7 +662,9 @@ shows an animated picture's still frame. It is chosen in Settings ›
 Appearance › Background. The phone shares the same pictures and print effect under
 Appearance › Background.
 When the ground runs behind everything, a start screen's reading column
-carries a soft wash of the page colour that fades out before the edges, and a
+carries a soft wash of the page colour that fades out before the edges (under
+Glass the ground steps down instead, and the question and its hint carry a
+thin glow in the page colour), and a
 conversation pane's title rail shares the conversation's reading surface, so
 no text sits straight on a busy photo.
 
@@ -1160,7 +1163,8 @@ a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch.
 Every composer's control row is two groups with the row's free space between
 them, in one order on a new task and in the thread it becomes: what the person
-adds on the left (attach, Create image in an open thread, dictation, a
+adds on the left (attach, Create image in an open thread once an image
+profile is ready, dictation, a
 surface's own extras such as Web or Task actions), then how the turn runs on the right (model, access, the context
 meter, send). A control never changes sides between the two composers.
 All six composers use `ComposerAttachButton` for their file chooser. The visible
@@ -1243,8 +1247,8 @@ Controls keep their own opaque fills (a switch thumb, a filled or secondary
 button, a segmented track), and menus, popovers, and dialogs keep the opaque
 floating surface. Increased contrast and reduced transparency return cards and
 outline buttons to their opaque colours. The ground behind it all steps down
-by what is on screen: a fifth of its strength behind a thread, about a third
-behind a destination page.
+by what is on screen: a fifth of its strength behind a thread or a
+destination page.
 
 Shadow tokens are `--octant-shadow-hairline`, `--octant-shadow-xs`,
 `--octant-shadow-sm`, `--octant-shadow-md`, `--octant-shadow-lg`,

@@ -2,6 +2,7 @@ import type { AgentRunClient } from "@octant/client-runtime/agent-run-client";
 import type { AgentRunCenterSummary } from "@octant/contracts";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Activity } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatThreadNavigationItem } from "../shell/navigationModel";
 import { createComputersCard } from "./ComputersCard";
@@ -56,11 +57,28 @@ function client(items: ReadonlyArray<unknown>): AgentRunClient {
 }
 
 describe("the Working now card", () => {
-  it("says nothing is running in one quiet line when no thread is", async () => {
-    renderCard(createWorkingNowCard(source({ threads: [thread(1, { activity: "idle" })] })));
-    const card = await screen.findByRole("region", { name: "Working now" });
-    expect(within(card).getByText("Nothing is running right now.")).toBeInTheDocument();
-    expect(within(card).queryByRole("button")).toBeNull();
+  it("leaves the start screen while nothing is running, like Needs you", async () => {
+    render(
+      <HomeDashboard
+        cards={[
+          createWorkingNowCard(source({ threads: [thread(1, { activity: "idle" })] })),
+          {
+            id: "beside",
+            title: "Beside",
+            icon: Activity,
+            defaultOn: true,
+            available: true,
+            emptyLabel: "Beside is quiet.",
+            useContent: () => ({ status: "ready", count: 0, body: null }),
+          },
+        ]}
+        customization={{ order: [], visibility: [] }}
+        onCustomizationChange={vi.fn()}
+      />,
+    );
+    await screen.findByRole("region", { name: "Beside" });
+    expect(screen.queryByRole("region", { name: "Working now" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Nothing is running right now.")).not.toBeInTheDocument();
   });
 
   it("lists a running thread with its provider, current step, and when it last moved", async () => {
@@ -257,7 +275,11 @@ describe("the Working now card", () => {
       ),
     } as unknown as AgentRunClient;
     const startScreen = (revision: number) => {
-      const shared = source({ agentRunClient: reader, runRevision: revision });
+      const shared = source({
+        agentRunClient: reader,
+        runRevision: revision,
+        threads: [thread(1)],
+      });
       return (
         <>
           <HomeDashboard
