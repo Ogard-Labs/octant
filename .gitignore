@@ -24,3 +24,9 @@ core
 
 # Local Claude Code session state and agent worktrees; never product code
 .claude/
+
+# Playwright MCP captures and page snapshots
+.playwright-mcp/
+
+# Stray tsc declaration emit in package sources
+packages/*/src/**/*.d.ts
