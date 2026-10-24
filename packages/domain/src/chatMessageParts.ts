@@ -69,6 +69,36 @@ function parseToolMeta(info: string): { name: string; status: ChatToolPartStatus
   return { name, status: normalizeStatus(statusMatch?.[1] ?? trimmed) };
 }
 
+// Codex research replies carry private-use citation markers: U+E200 opens a
+// marker, U+E202 separates its fields, and U+E201 closes it, as in
+// "\ue200cite\ue202turn9view0\ue202turn12search0\ue201". The ids inside name
+// provider-internal records the Codex driver never reports as citations, so
+// there is nothing to resolve and the reader sees none of it. A marker can
+// arrive split across deltas; callers join a reply's refs before parsing, so
+// an opener with no closer means the marker is still streaming in and the
+// tail is held back with it.
+const CITATION_MARKER_OPEN = "\uE200";
+const CITATION_MARKER_CLOSE = "\uE201";
+
+/** Remove every provider citation marker span from a reply body. */
+export function withoutProviderCitationMarkers(body: string): string {
+  let cleaned = "";
+  let from = 0;
+  for (;;) {
+    const open = body.indexOf(CITATION_MARKER_OPEN, from);
+    if (open === -1) {
+      cleaned += body.slice(from);
+      break;
+    }
+    cleaned += body.slice(from, open);
+    const close = body.indexOf(CITATION_MARKER_CLOSE, open + 1);
+    if (close === -1) break;
+    from = close + 1;
+  }
+  // Separator and close characters outside a span are leftover fragments.
+  return cleaned.replace(/[\uE201\uE202]/g, "");
+}
+
 /**
  * Split a host message body into reasoning / tool / markdown parts.
  * Recognizes ```reasoning|thinking fences, ```tool fences, and <thinking>,
@@ -78,7 +108,7 @@ function parseToolMeta(info: string): { name: string; status: ChatToolPartStatus
  * while it is still streaming in.
  */
 export function parseChatMessageBody(streamed: string): ReadonlyArray<ChatMessagePart> {
-  const body = withoutOpenFollowUpBlock(streamed);
+  const body = withoutOpenFollowUpBlock(withoutProviderCitationMarkers(streamed));
   if (body.length === 0) return [{ kind: "markdown", text: "" }];
 
   // Reasoning markers inside code samples are literal source, including an
@@ -227,7 +257,8 @@ export function parseChatMessageBody(streamed: string): ReadonlyArray<ChatMessag
  * While the reply is still streaming, an opener that has only partly arrived
  * ("```octant-fol") is held back too, since it may turn out to be the block.
  */
-export function withoutFollowUpBlocks(body: string, options: { streaming: boolean }): string {
+export function withoutFollowUpBlocks(streamed: string, options: { streaming: boolean }): string {
+  const body = withoutProviderCitationMarkers(streamed);
   let visible = "";
   let cursor = 0;
   for (const match of body.matchAll(FENCE)) {

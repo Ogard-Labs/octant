@@ -1597,6 +1597,38 @@ describe("ChatTranscript", () => {
     vi.unstubAllGlobals();
   });
 
+  it("copies a reply whose citation marker arrived across two deltas without any of the marker", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, clipboard: { writeText } });
+    const view = viewFixture({
+      turns: [
+        {
+          ...viewFixture().turns[0]!,
+          attempts: [
+            {
+              ...viewFixture().turns[0]!.attempts[1]!,
+              responseRefs: [
+                reference(ids.responseContent, "b"),
+                reference(ids.responseContent2, "e"),
+              ],
+            },
+          ],
+        },
+      ],
+      contents: [
+        body(ids.userContent, "user", "Please summarize this.", "a"),
+        body(ids.responseContent, "assistant", "Claim.\uE200cite\uE202turn", "b"),
+        body(ids.responseContent2, "assistant", "9view0\uE201 Next sentence.", "e"),
+      ],
+    });
+    render(<ChatTranscript view={view} />);
+
+    await chooseTurnAction("Copy as Markdown");
+    // Exact text: neither marker character nor the split-off "9view0" survives.
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Claim. Next sentence."));
+    vi.unstubAllGlobals();
+  });
+
   it("quotes a finished selection into the composer via Add to chat", async () => {
     const user = userEvent.setup();
     const onQuoteSelection = vi.fn();

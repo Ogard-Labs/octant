@@ -13,6 +13,7 @@ import type {
 import type { ProviderUsageLimit } from "@octant/contracts/providers";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
+import { withoutProviderCitationMarkers } from "@octant/domain/chat-message-parts";
 import type { PickerGroup } from "@octant/domain";
 import { threadHandoffDisclosure } from "../providers/conversationHandoff";
 import { providerModelLabel } from "../providers/providerModelLabel";
@@ -410,12 +411,20 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         const turnCitations = turn.attempts.flatMap(
           (attempt) => citationsByAttempt.get(String(attempt.id)) ?? [],
         );
-        const assistantBodies = turn.attempts.flatMap((attempt) =>
-          attempt.responseRefs.flatMap((reference) => {
-            const content = resolvedContent(contentById, reference, "assistant");
-            return content === undefined ? [] : [content.body];
-          }),
-        );
+        // One body per attempt, joined before the markers are stripped: the
+        // runner persists every streamed delta as its own reference, so a
+        // marker split across deltas ("Claim.\uE200cite\uE202turn" then
+        // "9view0\uE201 Next sentence.") leaked "9view0" into both copies when
+        // each reference was cleaned on its own.
+        const assistantBodies = turn.attempts.flatMap((attempt) => {
+          const joined = attempt.responseRefs
+            .flatMap((reference) => {
+              const content = resolvedContent(contentById, reference, "assistant");
+              return content === undefined ? [] : [content.body];
+            })
+            .join("");
+          return joined.length === 0 ? [] : [withoutProviderCitationMarkers(joined)];
+        });
         const canBranch = props.onBranchTurn !== undefined;
         const actions = editing
           ? []
