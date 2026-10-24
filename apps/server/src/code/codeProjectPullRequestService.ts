@@ -65,6 +65,17 @@ const GITHUB_READ_CONCURRENCY = 4;
  */
 const NAVIGATION_SNAPSHOT_MAX_AGE_MS = 10_000;
 
+/**
+ * How long one Project's Git remotes answer is reused across reads. Only a
+ * Project without a connected repository is asked at all, and that answer
+ * changes when its folder gains or loses a remote, not between two reads of
+ * the board. Without this, every board, list, and detail read ran `git` under
+ * a seatbelt for each such Project: an idle host with two of them spawned
+ * five sandboxed git processes a second, each first walking the home folder
+ * to build its profile.
+ */
+const REMOTES_MAX_AGE_MS = 60_000;
+
 export interface CodeProjectPullRequestAuthorizedProject {
   readonly id: ProjectId;
   readonly name: string;
@@ -237,6 +248,14 @@ export class CodeProjectPullRequestService {
   readonly #navigationSnapshots = new Map<
     string,
     { readonly computedAtMs: number; readonly snapshot: Promise<BoardSnapshot> }
+  >();
+  /** Each unconnected Project's remotes answer, by root. See `REMOTES_MAX_AGE_MS`. */
+  readonly #remotesByRoot = new Map<
+    string,
+    {
+      readonly computedAtMs: number;
+      readonly remotes: ReturnType<CodeProjectPullRequestRemoteSource["remotes"]>;
+    }
   >();
   /**
    * Bumped by every revocation. A refresh captures it before its GitHub reads
@@ -899,7 +918,7 @@ export class CodeProjectPullRequestService {
         const remotes =
           project.connectedRepository !== undefined || project.binding === undefined
             ? undefined
-            : await this.#remotes.remotes(project.binding.canonicalRoot);
+            : await this.#rememberedRemotes(project.binding.canonicalRoot);
         const identity =
           project.connectedRepository === undefined
             ? githubIdentityFromRemotes(remotes ?? [])
@@ -921,6 +940,21 @@ export class CodeProjectPullRequestService {
     return resolved.filter(
       (connection): connection is CodeProjectPullRequestConnection => connection !== undefined,
     );
+  }
+
+  #rememberedRemotes(root: string): ReturnType<CodeProjectPullRequestRemoteSource["remotes"]> {
+    const nowMs = Date.parse(this.#clock());
+    const remembered = this.#remotesByRoot.get(root);
+    if (remembered !== undefined && nowMs - remembered.computedAtMs < REMOTES_MAX_AGE_MS) {
+      return remembered.remotes;
+    }
+    const remotes = this.#remotes.remotes(root);
+    this.#remotesByRoot.set(root, { computedAtMs: nowMs, remotes });
+    // A read that failed is not an answer; the next read asks again.
+    remotes.catch(() => {
+      if (this.#remotesByRoot.get(root)?.remotes === remotes) this.#remotesByRoot.delete(root);
+    });
+    return remotes;
   }
 
   /**
