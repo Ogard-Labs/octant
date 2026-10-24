@@ -13,6 +13,7 @@ import type {
 import type { ProviderUsageLimit } from "@octant/contracts/providers";
 import type { ThreadCheckpoint } from "@octant/contracts/thread-checkpoints";
 import { activeChatTurns } from "@octant/domain/chat-policy";
+import { withoutProviderCitationMarkers } from "@octant/domain/chat-message-parts";
 import type { PickerGroup } from "@octant/domain";
 import { threadHandoffDisclosure } from "../providers/conversationHandoff";
 import { providerModelLabel } from "../providers/providerModelLabel";
@@ -413,7 +414,7 @@ export function ChatTranscript(props: ChatTranscriptProps) {
         const assistantBodies = turn.attempts.flatMap((attempt) =>
           attempt.responseRefs.flatMap((reference) => {
             const content = resolvedContent(contentById, reference, "assistant");
-            return content === undefined ? [] : [content.body];
+            return content === undefined ? [] : [withoutProviderCitationMarkers(content.body)];
           }),
         );
         const canBranch = props.onBranchTurn !== undefined;
