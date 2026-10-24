@@ -35,8 +35,18 @@ export function applyChatAttemptFrame(
     ) {
       return undefined;
     }
-    // A replayed frame is a no-op: its reference already ends the attempt.
-    if (String(attempt.responseRefs.at(-1)?.contentId) === String(event.responseRef.contentId)) {
+    // A frame the view already covers is a no-op, judged by sequence and by
+    // reference: an attachment upload or discard mid-stream re-reads the thread
+    // without moving the stream cursor, so a buffered frame for a reference the
+    // refreshed snapshot already holds mid-list arrives afterwards. Checking only
+    // the last reference appended it again ([a, b, c] + b -> [a, b, c, b]) and
+    // moved lastSequence backwards.
+    if (
+      frame.sequence <= view.lastSequence ||
+      attempt.responseRefs.some(
+        (reference) => String(reference.contentId) === String(event.responseRef.contentId),
+      )
+    ) {
       return view;
     }
     const attempts = turn.attempts.slice();

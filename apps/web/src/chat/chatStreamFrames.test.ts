@@ -56,6 +56,7 @@ const prompt = body("00000000-0000-4000-8000-000000000902", "?");
 function view(
   attempts: ReadonlyArray<ChatAttempt>,
   contents: ReadonlyArray<ChatContentBody>,
+  lastSequence = 4,
 ): ChatThreadView {
   return decodeChatThreadView({
     thread: {
@@ -82,7 +83,7 @@ function view(
         createdAt: now,
       },
     ],
-    lastSequence: 4,
+    lastSequence,
     contents: [prompt, ...contents],
     attachments: [],
     citations: [],
@@ -177,5 +178,16 @@ describe("applyChatAttemptFrame", () => {
   it("replays an appended frame without duplicating its reference", () => {
     const current = view([attempt("streaming", [first, second])], [first, second]);
     expect(applyChatAttemptFrame(current, appendedFrame(5, second, [second]))).toBe(current);
+  });
+
+  it("leaves a reply alone when an appended frame names a reference a refreshed snapshot already holds", () => {
+    const third = body("00000000-0000-4000-8000-000000000913", "!");
+    const refreshed = view(
+      [attempt("streaming", [first, second, third])],
+      [first, second, third],
+      30,
+    );
+    expect(applyChatAttemptFrame(refreshed, appendedFrame(20, second, [second]))).toBe(refreshed);
+    expect(applyChatAttemptFrame(refreshed, appendedFrame(40, second, [second]))).toBe(refreshed);
   });
 });
