@@ -1543,7 +1543,7 @@ export function useCodeController(options: CodeControllerOptions) {
                       setTurnError(
                         terminalMessage ??
                           (terminalState === "waiting"
-                            ? "The provider turn is waiting for approval, input, or recovery."
+                            ? "Reply to continue."
                             : `Provider turn ${terminalState}.`),
                         { inTranscript: true },
                       );
@@ -2721,7 +2721,7 @@ export function useCodeController(options: CodeControllerOptions) {
                     event.state,
                     event.failure?.message ??
                       (event.state === "waiting"
-                        ? "The provider turn is waiting for approval, input, or recovery."
+                        ? "Reply to continue."
                         : `Provider turn ${event.state}.`),
                   );
                   return false;
@@ -2739,7 +2739,7 @@ export function useCodeController(options: CodeControllerOptions) {
                   settleActiveTurn(
                     event.result.state,
                     event.result.state === "waiting"
-                      ? "The provider turn is waiting for approval, input, or recovery."
+                      ? "Reply to continue."
                       : `Provider turn ${event.result.state}.`,
                   );
                   return false;

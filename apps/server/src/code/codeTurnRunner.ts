@@ -31,7 +31,11 @@ import {
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
-import { countsTowardTurnEventBudget, makeIdleTimeout } from "../providers/turnBudget";
+import {
+  countsTowardTurnEventBudget,
+  makeIdleTimeout,
+  makeTurnTextParagraphs,
+} from "../providers/turnBudget";
 
 export const MAX_CODE_TURN_EVENT_BYTES = 64 * 1024;
 const MAX_CODE_TURN_INPUT_BYTES = MAX_CODE_TURN_EVENT_BYTES * 4;
@@ -386,6 +390,7 @@ export class CodeTurnRunner {
                 event.sessionId === input.sessionId &&
                 event.instanceId === input.thread.providerInstanceId,
             ),
+            Stream.map(makeTurnTextParagraphs()),
             Stream.takeUntil(isTerminalProviderEvent),
             Stream.runForEach((event) =>
               Effect.gen(function* () {
