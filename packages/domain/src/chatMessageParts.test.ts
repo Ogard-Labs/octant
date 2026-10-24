@@ -4,6 +4,7 @@ import {
   parseMarkdownBlocks,
   resolveChatMessageParts,
   withoutFollowUpBlocks,
+  withoutProviderCitationMarkers,
 } from "./chatMessageParts";
 
 describe("resolveChatMessageParts", () => {
@@ -170,6 +171,35 @@ describe("parseChatMessageBody on hostile model output", () => {
     const parts = parseChatMessageBody(body);
     expect(performance.now() - started).toBeLessThan(5_000);
     expect(parts.length).toBeGreaterThan(0);
+  });
+});
+
+describe("provider citation markers", () => {
+  const marker = (id: string) => `\uE200cite\uE202${id}\uE201`;
+
+  it("renders a reply with citation markers as the text on both sides of them", () => {
+    expect(
+      parseChatMessageBody(
+        `First claim.${marker("turn9view0")} Middle text.${marker("turn12search0")} Last sentence.`,
+      ),
+    ).toEqual([{ kind: "markdown", text: "First claim. Middle text. Last sentence." }]);
+  });
+
+  it("holds back a citation marker that is still streaming in", () => {
+    expect(parseChatMessageBody("The final sentence.\uE200cite\uE202turn3sea")).toEqual([
+      { kind: "markdown", text: "The final sentence." },
+    ]);
+  });
+
+  it("drops a citation marker inside a fenced code block like any other", () => {
+    expect(parseChatMessageBody('```ts\nconst cite = "\uE200cite\uE202x\uE201";\n```')).toEqual([
+      { kind: "markdown", text: '```ts\nconst cite = "";\n```' },
+    ]);
+  });
+
+  it("returns a body without markers unchanged", () => {
+    const body = "Plain reply, nothing to strip.";
+    expect(withoutProviderCitationMarkers(body)).toBe(body);
   });
 });
 
