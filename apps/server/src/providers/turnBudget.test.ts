@@ -1,6 +1,28 @@
+import { decodeProviderRuntimeEvent, type ProviderRuntimeEvent } from "@octant/contracts";
 import { Effect, Fiber, TestClock, TestContext } from "effect";
 import { describe, expect, it } from "vitest";
-import { countsTowardTurnEventBudget, makeIdleTimeout } from "./turnBudget";
+import { countsTowardTurnEventBudget, makeIdleTimeout, makeTurnTextParagraphs } from "./turnBudget";
+
+let sequence = 0;
+function runtimeEvent(fields: Record<string, unknown>): ProviderRuntimeEvent {
+  sequence += 1;
+  return decodeProviderRuntimeEvent({
+    instanceId: "00000000-0000-4000-8000-000000000001",
+    sessionId: "00000000-0000-4000-8000-000000000002",
+    sequence,
+    correlationId: "00000000-0000-4000-8000-000000000003",
+    occurredAt: "2026-10-24T00:00:00.000Z",
+    ...fields,
+  });
+}
+
+function answerText(events: ReadonlyArray<Record<string, unknown>>): string {
+  const paragraphs = makeTurnTextParagraphs();
+  return events
+    .map((fields) => paragraphs(runtimeEvent(fields)))
+    .map((event) => (event.kind === "text-delta" ? event.text : ""))
+    .join("");
+}
 
 describe("turn budget", () => {
   it("does not count an app-owned action as provider inactivity", async () => {
@@ -29,6 +51,31 @@ describe("turn budget", () => {
     expect(countsTowardTurnEventBudget({ kind: "tool-start" })).toBe(true);
     expect(countsTowardTurnEventBudget({ kind: "approval-request" })).toBe(true);
     expect(countsTowardTurnEventBudget({ kind: "completed" })).toBe(true);
+  });
+
+  it("starts a new paragraph when the answer resumes after a tool step", () => {
+    expect(
+      answerText([
+        { kind: "text-delta", text: "Let me check the " },
+        { kind: "text-delta", text: "repository." },
+        { kind: "tool-start", toolCallId: "call-1", toolName: "read" },
+        { kind: "tool-success", toolCallId: "call-1", summary: "Read package.json" },
+        { kind: "text-delta", text: "No AGENTS.md found." },
+        { kind: "usage", inputTokens: 1, outputTokens: 1 },
+        { kind: "text-delta", text: " It is a TypeScript server." },
+      ]),
+    ).toBe("Let me check the repository.\n\nNo AGENTS.md found. It is a TypeScript server.");
+  });
+
+  it("adds no break before the first text or where the provider already sent one", () => {
+    expect(
+      answerText([
+        { kind: "tool-start", toolCallId: "call-1", toolName: "read" },
+        { kind: "text-delta", text: "First." },
+        { kind: "tool-start", toolCallId: "call-2", toolName: "read" },
+        { kind: "text-delta", text: "\n\nSecond." },
+      ]),
+    ).toBe("First.\n\nSecond.");
   });
 
   it("only expires after a full idle window without activity", async () => {
