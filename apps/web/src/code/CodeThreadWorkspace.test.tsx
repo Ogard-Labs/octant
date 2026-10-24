@@ -926,6 +926,46 @@ describe("CodeThreadWorkspace", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("offers a new task in the Project when the provider refused to resume its session", async () => {
+    const onNewThreadInProject = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnError: "Mistral Vibe resume identity does not match this Project.",
+        })}
+        onNewThreadInProject={onNewThreadInProject}
+        threadId={threadId}
+      />,
+    );
+
+    const status = screen
+      .getByText("Waiting · Mistral Vibe resume identity does not match this Project.")
+      .closest('[role="status"]');
+    expect(status).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "New task in this Project" }));
+    expect(onNewThreadInProject).toHaveBeenCalledWith(projectId);
+    expect(screen.queryByRole("button", { name: "Stop turn" })).not.toBeInTheDocument();
+  });
+
+  it("leaves the composer ready to send on a turn parked by a refused resume", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnError: "Mistral Vibe resume identity does not match this Project.",
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("Follow-up message"), "Try a different approach");
+    expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+  });
+
   it("says why the host refused an answer while the request stays open", () => {
     render(
       <CodeThreadWorkspace
@@ -3666,6 +3706,7 @@ function controller(
         executionPolicy: "approval-gated",
         permissionPersistence: "current-session",
         checkoutId: "20000000-0000-4000-8000-000000000002",
+        projectId,
         providerInstanceId: providerId,
         modelId,
         version: 1,
