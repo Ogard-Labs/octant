@@ -144,6 +144,11 @@ export interface DockContainerProps {
   readonly dockThreadKey?: ThreadUtilityDockKey;
   readonly dockThreadProjectId?: ProjectId;
   readonly dockThreadRepository?: string;
+  /**
+   * Present while the active pane is a new Code task with no thread yet: the
+   * tools its title band shows disabled until the task starts.
+   */
+  readonly dockToolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly hostBridge?: OctantHostBridge;
   readonly isNarrow: boolean;
   readonly launchableDockSurfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
@@ -213,6 +218,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
     dockThreadOnThisComputer,
     dockThreadProjectId,
     dockThreadRepository,
+    dockToolsAwaitingThread,
     isNarrow,
     launchableDockSurfaces,
     navigation,
@@ -617,6 +623,9 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             ? undefined
             : threadUtility("side-chat")
         }
+        {...(dockToolsAwaitingThread === undefined
+          ? {}
+          : { toolsAwaitingThread: dockToolsAwaitingThread })}
         {...(bottomPanelOpen && activeBottomSurface?.id === "terminal"
           ? {}
           : { terminal: threadUtility("terminal") })}

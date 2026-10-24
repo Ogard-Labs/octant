@@ -297,6 +297,42 @@ describe("the right sidebar surface", () => {
     expect(screen.queryByText("Previous thread Browser")).toBeNull();
     expect(screen.getByRole("heading", { name: "Browser is unavailable" })).toBeVisible();
   });
+
+  it("shows the common tools disabled, with no Add tool, while the pane's task has no thread yet", async () => {
+    const user = userEvent.setup();
+    const onOpenTab = vi.fn();
+    render(
+      <RightUtilityDockSurface
+        launchableSurfaces={[]}
+        onCloseTab={vi.fn()}
+        onOpenTab={onOpenTab}
+        onSelectSurface={vi.fn()}
+        resolution={{ kind: "closed", reason: "no-surface" }}
+        tabs={[]}
+        toolsAwaitingThread={[surface("environment"), terminal, browser, files]}
+      />,
+    );
+
+    const band = screen.getByRole("group", { name: "Quick tools" });
+    const tools = within(band).getAllByRole("button");
+    expect(tools.map((tool) => tool.getAttribute("aria-label"))).toEqual([
+      "Open Environment",
+      "Open Terminal",
+      "Open Browser",
+      "Open Files",
+    ]);
+    for (const tool of tools) {
+      expect(tool).toBeDisabled();
+      expect(tool).toHaveAttribute("title", "Available once the task starts");
+      expect(tool).toHaveAttribute("aria-description", "Available once the task starts");
+    }
+    expect(screen.queryByRole("button", { name: "Add tool" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "Tools open once the task starts" })).toBeVisible();
+    const terminalTool = tools[1];
+    if (terminalTool === undefined) throw new Error("Expected the Terminal tool.");
+    await user.click(terminalTool);
+    expect(onOpenTab).not.toHaveBeenCalled();
+  });
 });
 
 function ruleBody(css: string, selector: string): string {

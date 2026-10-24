@@ -333,7 +333,10 @@ its Git subprocesses are network-denied and its data is an ephemeral read,
 not a second journal. Pages anchor to immutable Git tips, and commit details
 compare immutable object IDs with an explicit parent for merges.
 The top-right control reveals the dock only when the active pane has a bound thread
-or a valid launchable tool. An available empty dock opens on a stack of fact cards (Environment with
+or a valid launchable tool. A new Code task's pane, before its thread exists, keeps
+the dock: its title band shows the common tools disabled ("Available once the task
+starts") and its body says so, so the band does not vanish and return around the
+first message. An available empty dock opens on a stack of fact cards (Environment with
 the local window's Remote access switch, Local servers, Context, Changes,
 Outputs, Background tasks, Running now; see [DESIGN.md](../../DESIGN.md#shell-and-layout));
 its title band offers the common tools, Add tool lists the rest, and an open

@@ -36,8 +36,9 @@ asks for it (Settings › Appearance › Style):
   live in the bottom-left identity menu or an accessible overflow menu.
 - The right dock and bottom panel are contextual working regions for the active
   pane. A capable region with no selected tool shows a compact launcher; a pane
-  with no valid tool exposes no dock toggle. Neither region fabricates a tab or
-  repeats another pane's content.
+  with no valid tool exposes no dock toggle, except a new Code task waiting for
+  its thread (see [Shell and layout](#shell-and-layout)). Neither region
+  fabricates a tab or repeats another pane's content.
 - Hierarchy comes from typography (size first, then weight), spacing, cards
   for discrete objects, and selection fills. In the Default style the chrome is
   monochrome apart from the accent a person picks (Mono by default); colour
@@ -1606,8 +1607,12 @@ Plan, Delivery, Simulator, and Side chat are singleton destinations. One instanc
 still appears in only one region at a time.
 
 A welcome, Project, or other pane with neither a bound thread nor a valid
-launchable tool keeps the dock closed and omits its toggle. Restored presentation
-for another subject never makes unavailable chrome visible.
+launchable tool keeps the dock closed and omits its toggle. The exception is a
+new Code task's pane before its thread exists: the dock keeps its place, its
+title band shows the common tools disabled ("Available once the task starts"),
+and its body says so, so the band does not vanish and return around the first
+message. Restored presentation for another subject never makes unavailable
+chrome visible.
 
 Environment is a right-dock tool, opened from the dock's title band (its
 quick tools or tab strip) or Add tool and nowhere else; the title band carries no second Environment button. It reads
