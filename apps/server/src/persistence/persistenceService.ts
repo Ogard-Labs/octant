@@ -3,6 +3,7 @@ import type {
   AgentProfile,
   AgentProfileId,
   AgentProfileScope,
+  ChatAttempt,
   ChatThread,
   ChatNavigationThread,
   ChatThreadId,
@@ -84,6 +85,7 @@ import {
   readProfilesForScope,
 } from "./agentProfileProjection";
 import {
+  readChatAttempt,
   readChatContent,
   readChatSettings,
   readChatThread,
@@ -213,6 +215,7 @@ export interface PersistenceService {
     request: { readonly limit: number; readonly anchor: ChatThreadWindowAnchor },
   ) => ChatThreadWindowRead;
   readonly readChatContent: (contentId: string) => ProjectedChatContent | undefined;
+  readonly readChatAttempt: (attemptId: string) => ChatAttempt | undefined;
   readonly searchChatThreads: (query: string) => ReadonlyArray<ChatThread>;
   readonly searchChatTranscript: (
     query: string,
@@ -455,6 +458,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       readChatThreadWindow: (threadId, request) =>
         readChatThreadWindow(connection, threadId, request),
       readChatContent: (contentId) => readChatContent(connection, contentId),
+      readChatAttempt: (attemptId) => readChatAttempt(connection, attemptId),
       searchChatThreads: (query) => searchChatThreads(connection, query),
       searchChatTranscript: (query, excludeThreadIds) =>
         searchChatTranscript(connection, query, excludeThreadIds ?? new Set()),

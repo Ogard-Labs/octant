@@ -56,6 +56,7 @@ const prompt = body("00000000-0000-4000-8000-000000000902", "?");
 function view(
   attempts: ReadonlyArray<ChatAttempt>,
   contents: ReadonlyArray<ChatContentBody>,
+  lastSequence = 4,
 ): ChatThreadView {
   return decodeChatThreadView({
     thread: {
@@ -82,7 +83,7 @@ function view(
         createdAt: now,
       },
     ],
-    lastSequence: 4,
+    lastSequence,
     contents: [prompt, ...contents],
     attachments: [],
     citations: [],
@@ -107,6 +108,26 @@ function frame(
 
 const first = body("00000000-0000-4000-8000-000000000911", "Hello");
 const second = body("00000000-0000-4000-8000-000000000912", ", world");
+
+function appendedFrame(
+  sequence: number,
+  response: ChatContentBody,
+  contents?: ReadonlyArray<ChatContentBody>,
+): ChatEventFrame {
+  return decodeChatEventFrame({
+    threadId,
+    sequence,
+    event: {
+      kind: "attempt-response-appended",
+      threadId,
+      turnId,
+      attemptId: "00000000-0000-4000-8000-000000000903",
+      responseRef: reference(response),
+      updatedAt: "2026-07-19T12:00:01.000Z",
+    },
+    ...(contents === undefined ? {} : { contents }),
+  });
+}
 
 describe("applyChatAttemptFrame", () => {
   it("grows a streaming reply from the body its frame carries", () => {
@@ -134,5 +155,39 @@ describe("applyChatAttemptFrame", () => {
     ).toBeUndefined();
     const elsewhere = attempt("streaming", [first, second], "00000000-0000-4000-8000-000000000999");
     expect(applyChatAttemptFrame(current, frame(5, elsewhere, [second]))).toBeUndefined();
+  });
+
+  it("grows a streaming reply from the reference an appended frame carries", () => {
+    const current = view([attempt("streaming", [first])], [first]);
+    const grown = applyChatAttemptFrame(current, appendedFrame(5, second, [second]));
+    expect(grown?.lastSequence).toBe(5);
+    const streamed = grown?.turns[0]?.attempts[0];
+    expect(streamed?.responseRefs.map((entry) => String(entry.contentId))).toEqual([
+      String(first.contentId),
+      String(second.contentId),
+    ]);
+    expect(streamed?.updatedAt).toBe("2026-07-19T12:00:01.000Z");
+    expect(grown?.contents.map((content) => content.body)).toEqual(["?", "Hello", ", world"]);
+  });
+
+  it("asks for the thread when an appended frame does not carry the appended body", () => {
+    const current = view([attempt("streaming", [first])], [first]);
+    expect(applyChatAttemptFrame(current, appendedFrame(5, second))).toBeUndefined();
+  });
+
+  it("replays an appended frame without duplicating its reference", () => {
+    const current = view([attempt("streaming", [first, second])], [first, second]);
+    expect(applyChatAttemptFrame(current, appendedFrame(5, second, [second]))).toBe(current);
+  });
+
+  it("leaves a reply alone when an appended frame names a reference a refreshed snapshot already holds", () => {
+    const third = body("00000000-0000-4000-8000-000000000913", "!");
+    const refreshed = view(
+      [attempt("streaming", [first, second, third])],
+      [first, second, third],
+      30,
+    );
+    expect(applyChatAttemptFrame(refreshed, appendedFrame(20, second, [second]))).toBe(refreshed);
+    expect(applyChatAttemptFrame(refreshed, appendedFrame(40, second, [second]))).toBe(refreshed);
   });
 });

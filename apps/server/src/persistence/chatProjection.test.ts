@@ -29,6 +29,7 @@ import {
   readThreadFollowUp,
   readThreadWorkList,
   searchChatThreads,
+  searchChatTranscript,
   purgeThreadContent,
   writeChatContent,
 } from "./chatProjection";
@@ -537,6 +538,400 @@ describe("ChatProjection", () => {
         executing: true,
       }),
     ]);
+    connection.close();
+  });
+
+  it("finds every streamed delta of a reply while indexing each body only once", () => {
+    const connection = openConnection();
+    const store = journal(connection);
+    const deltas = ["zebra crossing", " then walrus", " finally quokka"];
+    const deltaIds = deltas.map((_, index) => `82000000-0000-4000-8000-00000000006${index}`);
+    const attempt = {
+      id: ids.attempt,
+      turnId: ids.turn,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      modelId: "model-a",
+      contextManifestId: ids.manifest,
+      outcome: "queued",
+      responseRefs: [] as Array<{ contentId: string; digest: string; byteLength: number }>,
+      citationIds: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 0,
+      events: [pending("chat.thread-created@1", { kind: "thread-created", thread: thread() })],
+    });
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 1,
+        events: [
+          pending("chat.turn-created@1", {
+            kind: "turn-created",
+            turn: {
+              id: ids.turn,
+              threadId: ids.thread,
+              sequence: 1,
+              userMessageRef: {
+                contentId: ids.content,
+                digest: digest("ask"),
+                byteLength: "ask".length,
+              },
+              attachmentIds: [],
+              attempts: [attempt],
+              createdAt: now,
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: ids.content,
+            threadId: ids.thread,
+            role: "user",
+            body: "ask",
+            digest: digest("ask"),
+            byteLength: "ask".length,
+          });
+        },
+      },
+    );
+    const indexWrites: Array<number> = [];
+    deltas.forEach((body, index) => {
+      const contentId = deltaIds[index]!;
+      attempt.responseRefs = [
+        ...attempt.responseRefs,
+        { contentId, digest: digest(body), byteLength: body.length },
+      ];
+      const before = connection.prepare("SELECT total_changes() AS changes").get() as {
+        readonly changes: number;
+      };
+      store.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+          expectedVersion: 2 + index,
+          events: [
+            pending("chat.attempt-updated@1", {
+              kind: "attempt-updated",
+              attempt: { ...attempt, outcome: "streaming" },
+            }),
+          ],
+        },
+        {
+          beforeEvents(inner) {
+            writeChatContent(inner, {
+              contentId,
+              threadId: ids.thread,
+              role: "assistant",
+              body,
+              digest: digest(body),
+              byteLength: body.length,
+            });
+          },
+        },
+      );
+      const after = connection.prepare("SELECT total_changes() AS changes").get() as {
+        readonly changes: number;
+      };
+      indexWrites.push(after.changes - before.changes);
+    });
+
+    for (const word of ["zebra", "walrus", "quokka"]) {
+      expect(
+        searchChatTranscript(connection, word, new Set()).hits.map((hit) => hit.turnId),
+      ).toEqual([ids.turn]);
+    }
+    expect(
+      connection
+        .prepare(
+          "SELECT COUNT(*) AS count FROM chat_transcript_search_projection WHERE turn_id = ?",
+        )
+        .get(ids.turn),
+    ).toEqual({ count: 4 });
+    // Each delta writes the same number of rows: the earlier deltas' bodies
+    // are not read and rewritten again as the reply grows.
+    expect(new Set(indexWrites).size).toBe(1);
+    connection.close();
+  });
+
+  it("appends a streamed reference to the attempt and its turn without re-journaling the attempt", () => {
+    const connection = openConnection();
+    const store = journal(connection);
+    const deltas = [
+      { contentId: "82000000-0000-4000-8000-000000000070", body: "first" },
+      { contentId: "82000000-0000-4000-8000-000000000071", body: "second" },
+      { contentId: "82000000-0000-4000-8000-000000000072", body: "third" },
+    ] as const;
+    const queuedAttempt = {
+      id: ids.attempt,
+      turnId: ids.turn,
+      threadId: ids.thread,
+      providerInstanceId: ids.provider,
+      providerSessionId: ids.session,
+      modelId: "model-a",
+      contextManifestId: ids.manifest,
+      outcome: "queued",
+      responseRefs: [] as Array<{ contentId: string; digest: string; byteLength: number }>,
+      citationIds: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 0,
+      events: [pending("chat.thread-created@1", { kind: "thread-created", thread: thread() })],
+    });
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 1,
+        events: [
+          pending("chat.turn-created@1", {
+            kind: "turn-created",
+            turn: {
+              id: ids.turn,
+              threadId: ids.thread,
+              sequence: 1,
+              userMessageRef: {
+                contentId: ids.content,
+                digest: digest("ask"),
+                byteLength: "ask".length,
+              },
+              attachmentIds: [],
+              attempts: [queuedAttempt],
+              createdAt: now,
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: ids.content,
+            threadId: ids.thread,
+            role: "user",
+            body: "ask",
+            digest: digest("ask"),
+            byteLength: "ask".length,
+          });
+        },
+      },
+    );
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 2,
+        events: [
+          pending("chat.attempt-updated@1", {
+            kind: "attempt-updated",
+            attempt: {
+              ...queuedAttempt,
+              outcome: "streaming",
+              responseRefs: [
+                { contentId: deltas[0].contentId, digest: digest(deltas[0].body), byteLength: 5 },
+              ],
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: deltas[0].contentId,
+            threadId: ids.thread,
+            role: "assistant",
+            body: deltas[0].body,
+            digest: digest(deltas[0].body),
+            byteLength: deltas[0].body.length,
+          });
+        },
+      },
+    );
+    deltas.slice(1).forEach(({ contentId, body }, index) => {
+      store.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+          expectedVersion: 3 + index,
+          events: [
+            pending("chat.attempt-response-appended@1", {
+              kind: "attempt-response-appended",
+              threadId: ids.thread,
+              turnId: ids.turn,
+              attemptId: ids.attempt,
+              responseRef: {
+                contentId,
+                digest: digest(body),
+                byteLength: body.length,
+              },
+              updatedAt: `2026-07-19T12:00:0${index + 2}.000Z`,
+            }),
+          ],
+        },
+        {
+          beforeEvents(inner) {
+            writeChatContent(inner, {
+              contentId,
+              threadId: ids.thread,
+              role: "assistant",
+              body,
+              digest: digest(body),
+              byteLength: body.length,
+            });
+          },
+        },
+      );
+    });
+
+    const attempt = readChatThreadView(connection, decodeChatThreadId(ids.thread))?.turns[0]
+      ?.attempts[0];
+    expect(attempt?.responseRefs.map((reference) => reference.contentId)).toEqual(
+      deltas.map((delta) => delta.contentId),
+    );
+    expect(attempt?.updatedAt).toBe("2026-07-19T12:00:03.000Z");
+    // The user message and the three deltas each indexed exactly once.
+    expect(
+      connection
+        .prepare(
+          "SELECT COUNT(*) AS count FROM chat_transcript_search_projection WHERE turn_id = ?",
+        )
+        .get(ids.turn),
+    ).toEqual({ count: 4 });
+    connection.close();
+  });
+
+  it("replays the same appended event without duplicating its reference", () => {
+    const connection = openConnection();
+    const { projection } = chatRuntime();
+    const store = journal(connection);
+    const refA = { contentId: ids.content, digest: digest("a"), byteLength: 1 };
+    const refB = {
+      contentId: "82000000-0000-4000-8000-000000000071",
+      digest: digest("b"),
+      byteLength: 1,
+    };
+
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 0,
+      events: [pending("chat.thread-created@1", { kind: "thread-created", thread: thread() })],
+    });
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 1,
+        events: [
+          pending("chat.turn-created@1", {
+            kind: "turn-created",
+            turn: {
+              id: ids.turn,
+              threadId: ids.thread,
+              sequence: 1,
+              userMessageRef: refA,
+              attachmentIds: [],
+              attempts: [
+                {
+                  id: ids.attempt,
+                  turnId: ids.turn,
+                  threadId: ids.thread,
+                  providerInstanceId: ids.provider,
+                  providerSessionId: ids.session,
+                  modelId: "model-a",
+                  contextManifestId: ids.manifest,
+                  outcome: "queued",
+                  responseRefs: [],
+                  citationIds: [],
+                  createdAt: now,
+                  updatedAt: now,
+                },
+              ],
+              createdAt: now,
+            },
+          }),
+        ],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: ids.content,
+            threadId: ids.thread,
+            role: "user",
+            body: "a",
+            digest: digest("a"),
+            byteLength: 1,
+          });
+        },
+      },
+    );
+    store.append({
+      aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+      expectedVersion: 2,
+      events: [
+        pending("chat.attempt-updated@1", {
+          kind: "attempt-updated",
+          attempt: {
+            id: ids.attempt,
+            turnId: ids.turn,
+            threadId: ids.thread,
+            providerInstanceId: ids.provider,
+            providerSessionId: ids.session,
+            modelId: "model-a",
+            contextManifestId: ids.manifest,
+            outcome: "streaming",
+            responseRefs: [refA],
+            citationIds: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ],
+    });
+    const appended = pending("chat.attempt-response-appended@1", {
+      kind: "attempt-response-appended",
+      threadId: ids.thread,
+      turnId: ids.turn,
+      attemptId: ids.attempt,
+      responseRef: refB,
+      updatedAt: "2026-07-19T12:00:02.000Z",
+    });
+    store.append(
+      {
+        aggregate: { aggregateType: "chat-thread", aggregateId: ids.thread },
+        expectedVersion: 3,
+        events: [appended],
+      },
+      {
+        beforeEvents(inner) {
+          writeChatContent(inner, {
+            contentId: refB.contentId,
+            threadId: ids.thread,
+            role: "assistant",
+            body: "b",
+            digest: digest("b"),
+            byteLength: 1,
+          });
+        },
+      },
+    );
+
+    const envelope = store
+      .replay({ afterSequence: 0, limit: 100 } as never)
+      .find((entry) => entry.eventName === "chat.attempt-response-appended@1");
+    if (envelope === undefined) throw new Error("appended event must be journaled");
+    projection.apply(connection, envelope);
+
+    expect(
+      readChatThreadView(
+        connection,
+        decodeChatThreadId(ids.thread),
+      )?.turns[0]?.attempts[0]?.responseRefs.map((reference) => reference.contentId),
+    ).toEqual([ids.content, "82000000-0000-4000-8000-000000000071"]);
     connection.close();
   });
 

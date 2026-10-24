@@ -1022,6 +1022,7 @@ describe("chat contracts", () => {
       "chat.thread-updated@1",
       "chat.turn-created@1",
       "chat.attempt-updated@1",
+      "chat.attempt-response-appended@1",
       "chat.turn-route-decided@1",
       "chat.attachment-updated@1",
       "chat.citation-recorded@1",

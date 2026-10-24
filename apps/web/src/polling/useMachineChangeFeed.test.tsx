@@ -1,7 +1,7 @@
 import type { MachineChangeClient } from "@octant/client-runtime/machine-change-client";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { useMachineChangeFeed } from "./useMachineChangeFeed";
+import { MACHINE_CHANGE_COALESCE_MS, useMachineChangeFeed } from "./useMachineChangeFeed";
 
 describe("useMachineChangeFeed", () => {
   it("turns one host invalidation into the matching renderer revisions", async () => {
@@ -31,6 +31,30 @@ describe("useMachineChangeFeed", () => {
     await waitFor(() => expect(result.current.workNavigation).toBe(1));
     expect(result.current.codeNavigation).toBe(1);
     expect(result.current.chatNavigation).toBe(0);
+  });
+
+  it("lets the first notice of a burst through at once and merges the rest into one revision", async () => {
+    const frames = Array.from({ length: 8 }, (_, index) => ({
+      kind: "changed" as const,
+      sequence: index + 1,
+      topics: ["chat-navigation" as const],
+    }));
+    let delivered = false;
+    const client: MachineChangeClient = {
+      subscribe: async function* () {
+        if (delivered) return;
+        delivered = true;
+        for (const frame of frames) yield frame;
+      },
+    };
+    const { result } = renderHook(() => useMachineChangeFeed(client));
+
+    await waitFor(() => expect(result.current.chatNavigation).toBe(1));
+    await new Promise((settle) => setTimeout(settle, MACHINE_CHANGE_COALESCE_MS / 2));
+    expect(result.current.chatNavigation).toBe(1);
+    await waitFor(() => expect(result.current.chatNavigation).toBe(2));
+    await new Promise((settle) => setTimeout(settle, MACHINE_CHANGE_COALESCE_MS * 1.5));
+    expect(result.current.chatNavigation).toBe(2);
   });
 
   it("counts an image job change on its own revision", async () => {

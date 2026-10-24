@@ -1161,6 +1161,23 @@ export const ChatAttemptUpdated = Schema.Struct({
 }).annotations(strict);
 export type ChatAttemptUpdated = typeof ChatAttemptUpdated.Type;
 
+/**
+ * One streamed delta of an attempt's reply. `attempt-updated` carries the
+ * whole attempt and grew with every token; a reply of 775 deltas journaled
+ * 42 MB of repeated references. This event carries only the reference the
+ * delta appended and the attempt's new `updatedAt`; everything else about
+ * the attempt is unchanged since its last `attempt-updated`.
+ */
+export const ChatAttemptResponseAppended = Schema.Struct({
+  kind: Schema.Literal("attempt-response-appended"),
+  threadId: ChatThreadId,
+  turnId: ChatTurnId,
+  attemptId: ChatAttemptId,
+  responseRef: ChatContentReference,
+  updatedAt: UtcTimestamp,
+}).annotations(strict);
+export type ChatAttemptResponseAppended = typeof ChatAttemptResponseAppended.Type;
+
 export const ChatTurnRouteDecided = Schema.Struct({
   kind: Schema.Literal("turn-route-decided"),
   decision: ChatTurnRouteDecision,
@@ -1211,6 +1228,7 @@ export const ChatPublicEvent = Schema.Union(
   ChatThreadUpdated,
   ChatTurnCreated,
   ChatAttemptUpdated,
+  ChatAttemptResponseAppended,
   ChatTurnRouteDecided,
   ChatAttachmentUpdated,
   ChatCitationRecorded,
@@ -1242,14 +1260,17 @@ export const ChatEventFrame = Schema.Struct({
   /**
    * `compaction-settled` is sent only to subscribers that asked for it,
    * because a client decoding frames strictly would refuse an event it does
-   * not know.
+   * not know. `attempt-response-appended` is opt-in the same way; subscribers
+   * without `appended` receive the attempt as a full `attempt-updated` frame
+   * instead.
    */
   event: Schema.Union(ChatPublicEvent, ChatCompactionSettled),
   /**
-   * The body of the reference an `attempt-updated` event just appended, so a
-   * subscriber can grow the reply it already shows without re-reading the
-   * whole thread once per text delta. Sent only to subscribers that asked for
-   * it, because a client decoding frames strictly would refuse the field.
+   * The body of the reference an `attempt-updated` or
+   * `attempt-response-appended` event just appended, so a subscriber can grow
+   * the reply it already shows without re-reading the whole thread once per
+   * text delta. Sent only to subscribers that asked for it, because a client
+   * decoding frames strictly would refuse the field.
    */
   contents: Schema.optional(Schema.Array(ChatContentBody).pipe(Schema.maxItems(1))),
 }).annotations(strict);
@@ -1261,6 +1282,7 @@ export const CHAT_EVENT_NAMES = [
   "chat.thread-updated@1",
   "chat.turn-created@1",
   "chat.attempt-updated@1",
+  "chat.attempt-response-appended@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -1317,6 +1339,9 @@ export const decodeChatThreadCreated = Schema.decodeUnknownSync(ChatThreadCreate
 export const decodeChatThreadUpdated = Schema.decodeUnknownSync(ChatThreadUpdated);
 export const decodeChatTurnCreated = Schema.decodeUnknownSync(ChatTurnCreated);
 export const decodeChatAttemptUpdated = Schema.decodeUnknownSync(ChatAttemptUpdated);
+export const decodeChatAttemptResponseAppended = Schema.decodeUnknownSync(
+  ChatAttemptResponseAppended,
+);
 export const decodeChatTurnRouteDecision = Schema.decodeUnknownSync(ChatTurnRouteDecision);
 export const decodeChatTurnRouteDecided = Schema.decodeUnknownSync(ChatTurnRouteDecided);
 export const decodeChatAttachmentUpdated = Schema.decodeUnknownSync(ChatAttachmentUpdated);
