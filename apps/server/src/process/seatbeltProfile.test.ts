@@ -694,6 +694,41 @@ describe("shared Seatbelt profile builder", () => {
     expect(rules).not.toContain(seatbeltDenyRule("file-read*", allowed));
   });
 
+  it("reuses the private-home deny rules while the home folder is unchanged", () => {
+    const root = temporaryRoot();
+    const allowed = join(root, "allowed");
+    mkdirSync(allowed);
+    const input = {
+      allowedPaths: [allowed],
+      homeDirectory: root,
+      usersDirectory: root,
+    };
+
+    const first = privateHomeDenyReadRules(input);
+    // A rebuilt rule set is a new array; the cached answer is the same one.
+    expect(privateHomeDenyReadRules(input)).toBe(first);
+  });
+
+  it("denies a folder created in the home directory after the rules were first built", async () => {
+    const root = temporaryRoot();
+    const allowed = join(root, "allowed");
+    mkdirSync(allowed);
+    const input = {
+      allowedPaths: [allowed],
+      homeDirectory: root,
+      usersDirectory: root,
+    };
+    privateHomeDenyReadRules(input);
+
+    // The cache keys on directory mtimes, which resolve to the millisecond;
+    // a pause keeps the fixture off the boundary it shares with the first walk.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const created = join(root, "created-later");
+    mkdirSync(created);
+
+    expect(privateHomeDenyReadRules(input)).toContain(seatbeltDenyRule("file-read*", created));
+  });
+
   it("opens Apple trust evaluation only when the launch may reach the network", () => {
     const root = temporaryRoot();
     const input = {

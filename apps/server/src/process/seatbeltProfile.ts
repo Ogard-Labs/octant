@@ -456,6 +456,25 @@ function symlinkReachesAllowed(link: string, allowed: ReadonlyArray<string>): bo
   );
 }
 
+/**
+ * The deny rules change only when a directory the walk read does. A
+ * directory's mtime moves whenever an entry is created, removed, renamed, or
+ * replaced — including a symlink swap — so matching mtimes prove the deny set
+ * is unchanged, and a cache hit costs one statSync per listed directory
+ * instead of a readdir and readlink per entry. The walk ran on every confined
+ * launch and measured near a third of server CPU samples during the git probe
+ * storm. Thirty-two entries bound the map to recent (home, users, allowed)
+ * shapes.
+ */
+const privateDenyRulesCache = new Map<
+  string,
+  {
+    readonly rules: ReadonlyArray<string>;
+    readonly watched: ReadonlyArray<{ readonly directory: string; readonly mtimeMs: number }>;
+  }
+>();
+const PRIVATE_DENY_RULES_CACHE_LIMIT = 32;
+
 export function privateHomeDenyReadRules(
   input: PrivateHomeDenyReadRulesInput,
 ): ReadonlyArray<string> {
@@ -467,14 +486,34 @@ export function privateHomeDenyReadRules(
         .filter((path) => existsSync(path))
         .flatMap((path) => [path, realpathSync(path)]),
     ),
-  ];
+  ].sort();
+  const key = JSON.stringify({ home, users, allowed });
+  const cached = privateDenyRulesCache.get(key);
+  if (cached !== undefined) {
+    const unchanged = cached.watched.every((watch) => {
+      try {
+        return statSync(watch.directory).mtimeMs === watch.mtimeMs;
+      } catch {
+        return false;
+      }
+    });
+    if (unchanged) {
+      privateDenyRulesCache.delete(key);
+      privateDenyRulesCache.set(key, cached);
+      return cached.rules;
+    }
+    privateDenyRulesCache.delete(key);
+  }
   const rules: string[] = [];
+  const watchedDirectories: string[] = [];
   const visit = (directory: string) => {
     const descendants = allowed.filter(
       (path) => path === directory || path.startsWith(`${directory}${sep}`),
     );
     if (descendants.some((path) => path === directory)) return;
-    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entries = readdirSync(directory, { withFileTypes: true });
+    watchedDirectories.push(directory);
+    for (const entry of entries) {
       const child = join(directory, entry.name);
       const childAllowed = descendants.some(
         (path) => path === child || path.startsWith(`${child}${sep}`),
@@ -502,6 +541,19 @@ export function privateHomeDenyReadRules(
     }
   };
   visit(users);
+  const watched = watchedDirectories.map((directory) => {
+    try {
+      return { directory, mtimeMs: statSync(directory).mtimeMs };
+    } catch {
+      // A directory that cannot be stat'd can never prove itself unchanged.
+      return { directory, mtimeMs: Number.NaN };
+    }
+  });
+  privateDenyRulesCache.set(key, { rules, watched });
+  if (privateDenyRulesCache.size > PRIVATE_DENY_RULES_CACHE_LIMIT) {
+    const oldest = privateDenyRulesCache.keys().next().value;
+    if (oldest !== undefined) privateDenyRulesCache.delete(oldest);
+  }
   return rules;
 }
 

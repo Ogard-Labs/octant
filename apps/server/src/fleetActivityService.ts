@@ -10,25 +10,59 @@ import {
   type ProjectId,
   type WindowId,
   type WindowWorkspace,
+  type WorkspaceContextKey,
 } from "@octant/contracts";
 import { enabledModes } from "@octant/domain";
 
 /**
- * The windows the menu bar's fleet read asks about waiting subagents: every
- * saved local window whose workspace binds a Work or Code Project, whether or
- * not that window is open now, because the menu bar exists for the moment no
- * window is. A window bound to no Project could open no parent and adds nothing.
+ * The windows the menu bar's fleet read asks about waiting subagents: one saved
+ * local window per distinct Work/Code binding pair, whether or not that window
+ * is open now, because the menu bar exists for the moment no window is. A
+ * window bound to no Project could open no parent and adds nothing. The host
+ * keeps a workspace row for every window it ever saved — one dogfooding host
+ * held 90, of which 52 were bound to a few Code Projects — while what a window
+ * can answer depends only on what it binds, and the menu bar asks every 2 s, so
+ * the second window with the same binding only repeated the read.
  */
 export function windowsBoundToAProject(
   workspaces: ReadonlyArray<{ readonly workspace: WindowWorkspace }>,
 ): ReadonlyArray<WindowId> {
-  return workspaces
-    .filter(
-      ({ workspace }) =>
-        workspace.contextByMode.code.projectId != null ||
-        workspace.contextByMode.work.projectId != null,
-    )
-    .map(({ workspace }) => workspace.windowId);
+  const windows: WindowId[] = [];
+  const seen = new Set<string>();
+  for (const { workspace } of workspaces) {
+    const { work, code } = workspace.contextByMode;
+    if (work.projectId == null && code.projectId == null) continue;
+    const key = `${bindingKey(work)}|${bindingKey(code)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    windows.push(workspace.windowId);
+  }
+  return windows;
+}
+
+/**
+ * The windows the fleet read asks about Code requests: one saved local window
+ * per distinct Code binding, for the same reason as the Work/Code pair above —
+ * a Code reach read is identical for every window bound to the same Project.
+ */
+export function windowsBoundToACodeProject(
+  workspaces: ReadonlyArray<{ readonly workspace: WindowWorkspace }>,
+): ReadonlyArray<WindowId> {
+  const windows: WindowId[] = [];
+  const seen = new Set<string>();
+  for (const { workspace } of workspaces) {
+    const { code } = workspace.contextByMode;
+    if (code.projectId == null) continue;
+    const key = bindingKey(code);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    windows.push(workspace.windowId);
+  }
+  return windows;
+}
+
+function bindingKey(context: WorkspaceContextKey): string {
+  return `${String(context.host)}:${String(context.projectId)}:${String(context.boundRoot)}`;
 }
 
 /** A thread whose turn the journal projects as queued or running. */
