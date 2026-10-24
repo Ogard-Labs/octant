@@ -67,6 +67,18 @@ describe("turn budget", () => {
     ).toBe("Let me check the repository.\n\nNo AGENTS.md found. It is a TypeScript server.");
   });
 
+  it("keeps a sentence whole when reasoning streams in the middle of it", () => {
+    expect(
+      answerText([
+        { kind: "text-delta", text: "Hello " },
+        { kind: "reasoning-delta", text: "Think" },
+        { kind: "text-delta", text: "world" },
+        { kind: "task-progress", taskId: "task-1", status: "in-progress", summary: "Read" },
+        { kind: "text-delta", text: "." },
+      ]),
+    ).toBe("Hello world.");
+  });
+
   it("adds no break before the first text or where the provider already sent one", () => {
     expect(
       answerText([

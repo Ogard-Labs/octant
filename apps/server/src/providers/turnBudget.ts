@@ -37,11 +37,12 @@ export function endsHarnessRetryWait(event: Pick<ProviderRuntimeEvent, "kind">):
 /**
  * Events that mark a step in the agent's work between two stretches of its
  * answer. Usage, rate limits, citations, and liveness arrive mid-sentence and
- * are not steps.
+ * are not steps. Neither are reasoning and plan updates: a Responses-compatible
+ * provider streams reasoning between two deltas of one message ("Hello ",
+ * reasoning, "world"), and a break there split the sentence.
  */
 function isAnswerStep(event: Pick<ProviderRuntimeEvent, "kind">): boolean {
   return (
-    event.kind === "reasoning-delta" ||
     event.kind === "tool-request" ||
     event.kind === "tool-start" ||
     event.kind === "tool-progress" ||
@@ -51,8 +52,6 @@ function isAnswerStep(event: Pick<ProviderRuntimeEvent, "kind">): boolean {
     event.kind === "diff" ||
     event.kind === "approval-request" ||
     event.kind === "user-input-request" ||
-    event.kind === "task-list" ||
-    event.kind === "task-progress" ||
     event.kind === "research-started" ||
     event.kind === "research-completed" ||
     event.kind === "context-compacted"
