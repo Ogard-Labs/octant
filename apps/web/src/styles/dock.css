@@ -85,6 +85,13 @@
   height: var(--oct-icon-sm);
 }
 
+/* A tool waiting for the task's thread explains itself on hover. The shared
+   button recipe drops pointer events when disabled, which also dropped the
+   title that says when the tool opens. */
+.dock-quick-tools__tool:disabled {
+  pointer-events: auto;
+}
+
 .right-utility-dock__tabs {
   display: flex;
   flex: 1 1 auto;

@@ -6053,7 +6053,133 @@ describe("App", () => {
     );
   });
 
-  it("closes the previous thread's dock before a pane with no thread loads", async () => {
+  it("keeps the dock, tools disabled, while a new Code task waits for its thread, and enables them in place once it starts", async () => {
+    const user = userEvent.setup();
+    const base = codes();
+    const initialCode = await base.bootstrap();
+    let createdThread = initialCode.threads[0];
+    const codeApi: CodeClient = {
+      ...base,
+      execute: vi.fn<CodeClient["execute"]>(async (command) => {
+        if (command.kind === "prepare-code-project-checkout") {
+          const checkout = initialCode.checkouts[0];
+          if (checkout === undefined || createdThread === undefined)
+            throw new Error("Missing fixture");
+          return {
+            kind: "checkout-prepared",
+            bindingRevisionId: createdThread.bindingRevisionId,
+            checkout,
+          };
+        }
+        if (command.kind === "create-code-thread") {
+          createdThread = command.thread;
+          return { kind: "thread-created", thread: command.thread };
+        }
+        throw new Error(`Unexpected ${command.kind}`);
+      }),
+      thread: vi.fn(async (threadId) => {
+        const view = await base.thread(codeThreadId);
+        if (createdThread !== undefined && String(threadId) === String(createdThread.id)) {
+          return { ...view, thread: createdThread };
+        }
+        return view;
+      }),
+    };
+    const initial = codeShellBootstrap();
+    const firstPane = initial.workspace.layouts.code;
+    if (firstPane.kind !== "pane") throw new Error("Expected the Code thread pane.");
+    const draftPaneId = "00000000-0000-4000-8000-000000000928" as never;
+    const split = applyWorkspaceOperation(initial.workspace, {
+      kind: "split-pane",
+      mode: "code",
+      targetPaneId: firstPane.paneId,
+      surface: {
+        kind: "draft-thread",
+        id: "00000000-0000-4000-8000-000000000929" as never,
+        mode: "code",
+        title: "New Code thread",
+        projectId,
+      },
+      splitNodeId: "00000000-0000-4000-8000-000000000930" as never,
+      newPaneNodeId: "00000000-0000-4000-8000-000000000931" as never,
+      newPaneId: draftPaneId,
+      orientation: "horizontal",
+      placement: "after",
+      ratio: 0.5 as never,
+    });
+    const workspace = applyWorkspaceOperation(split, {
+      kind: "open-surface",
+      mode: "code",
+      paneId: firstPane.paneId,
+      surface: firstPane.surface,
+    });
+    const workspaceWithContext = {
+      ...workspace,
+      contextByMode: {
+        ...workspace.contextByMode,
+        code: {
+          ...workspace.contextByMode.code,
+          projectId,
+          boundRoot: "/Users/example/Dev/Repos/octant",
+        },
+      },
+    } as typeof workspace;
+
+    render(
+      <App
+        codeClient={codeApi}
+        contextClient={contextClient()}
+        hostClient={hostClient() as never}
+        isNarrow={false}
+        launch={{ serverUrl: "http://127.0.0.1:13773", windowId }}
+        projectClient={projects()}
+        projectWindowCapability={projectWindowCapability}
+        providerClient={providersWithToolModel()}
+        shellClient={client({
+          ...initial,
+          workspace: workspaceWithContext,
+          workspaceVersion: workspaceWithContext.version,
+        })}
+      />,
+    );
+
+    await screen.findByRole("region", { name: "Workspace pane: Controller foundation" });
+    await showRightUtilityDock(user);
+    const dock = await screen.findByRole("complementary", { name: "Right Utility Dock" });
+    expect(within(dock).getByRole("button", { name: "Open Terminal" })).toBeEnabled();
+
+    fireEvent.pointerDown(screen.getByRole("region", { name: "Workspace pane: New Code thread" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("region", { name: "Workspace pane: New Code thread" }),
+      ).toHaveAttribute("aria-current", "true"),
+    );
+
+    // The same dock, not one that closed and reopened.
+    expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBe(dock);
+    expect(screen.getByRole("button", { name: "Close Right sidebar" })).toBeVisible();
+    const quickTools = within(dock).getByRole("group", { name: "Quick tools" });
+    for (const name of ["Open Environment", "Open Terminal", "Open Browser", "Open Files"]) {
+      const tool = within(quickTools).getByRole("button", { name });
+      expect(tool).toBeDisabled();
+      expect(tool).toHaveAttribute("title", "Available once the task starts");
+      expect(tool).toHaveAttribute("aria-description", "Available once the task starts");
+    }
+    expect(within(dock).queryByRole("button", { name: "Add tool" })).toBeNull();
+    expect(within(dock).getByText("Tools open once the task starts")).toBeVisible();
+
+    await user.type(screen.getByRole("textbox", { name: "First message" }), "Start here");
+    await user.click(screen.getByRole("button", { name: "Create thread" }));
+    await screen.findByRole("region", { name: "Workspace pane: Start here" });
+
+    await waitFor(() =>
+      expect(within(dock).getByRole("button", { name: "Open Terminal" })).toBeEnabled(),
+    );
+    expect(screen.getByRole("complementary", { name: "Right Utility Dock" })).toBe(dock);
+    expect(within(dock).queryByText("Tools open once the task starts")).toBeNull();
+  });
+
+  it("closes the dock when the active pane becomes a Project overview, which holds neither a thread nor a task draft", async () => {
     const user = userEvent.setup();
     const initial = codeShellBootstrap();
     const firstPane = initial.workspace.layouts.code;

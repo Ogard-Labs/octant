@@ -18,6 +18,9 @@ function unavailableMessage(): string {
   return "The active pane holds no compatible thread. Focus a thread pane to restore its tools.";
 }
 
+/** Why a tool in the band cannot open yet while the pane's task has no thread. */
+const TOOLS_AWAIT_TASK_START = "Available once the task starts";
+
 export interface RightUtilityDockSurfaceProps {
   readonly activeTabId?: string;
   readonly agents?: ReactNode;
@@ -46,6 +49,13 @@ export interface RightUtilityDockSurfaceProps {
   readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor>;
   readonly terminal?: ReactNode;
   readonly tests?: ReactNode;
+  /**
+   * The active pane is a new Code task whose thread does not exist yet. The
+   * band shows these tools disabled and the body says when they open, so the
+   * dock keeps its place instead of closing and reopening around the first
+   * message; nothing is launchable, so Add tool stays absent.
+   */
+  readonly toolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 }
 
 export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
@@ -110,11 +120,14 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         <div className="right-utility-dock__tabs">
           {props.tabs.length === 0 ? (
             <DockQuickTools
+              {...(props.toolsAwaitingThread === undefined
+                ? {}
+                : { disabledReason: TOOLS_AWAIT_TASK_START })}
               onOpen={(surface) => {
                 focusOpenedTool.current = true;
                 props.onOpenTab(surface);
               }}
-              surfaces={props.launchableSurfaces}
+              surfaces={props.toolsAwaitingThread ?? props.launchableSurfaces}
             />
           ) : (
             <DockToolStrip
@@ -159,7 +172,9 @@ export function RightUtilityDockSurface(props: RightUtilityDockSurfaceProps) {
         </div>
       </header>
       <div className="dock-body right-utility-dock__content">
-        {props.resolution.kind === "closed" ? (
+        {props.toolsAwaitingThread !== undefined && props.resolution.kind !== "surface" ? (
+          <ShellState state="neutral" title="Tools open once the task starts" />
+        ) : props.resolution.kind === "closed" ? (
           <div className="dock-start">{props.overview}</div>
         ) : props.resolution.kind === "unavailable" ? (
           <ShellState
@@ -257,9 +272,14 @@ const QUICK_TOOLS: ReadonlyArray<RightUtilityDockSurfaceId> = [
  * The title band's tools while none is open: Environment by name, the rest as
  * icons, so the band reads the same before and after a tool opens and the
  * tools a thread reaches for most are one click away. A tool this thread
- * cannot open is left out rather than shown dead.
+ * cannot open is left out rather than shown dead. The one exception is a task
+ * whose thread does not exist yet: its tools are shown disabled with the
+ * reason, because they are about to exist and leaving them out made the band
+ * empty, then full, around the first message.
  */
 function DockQuickTools(props: {
+  /** Spoken and hover explanation for tools the reader cannot open yet. */
+  readonly disabledReason?: string;
   readonly onOpen: (surface: RightUtilityDockSurfaceId) => void;
   readonly surfaces: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
 }) {
@@ -271,13 +291,15 @@ function DockQuickTools(props: {
     <div aria-label="Quick tools" className="dock-quick-tools" role="group">
       {available.map((surface) => (
         <OctantButton
+          aria-description={props.disabledReason}
           aria-label={`Open ${surface.label}`}
           className="dock-quick-tools__tool window-no-drag"
           data-labelled={surface.id === "environment" ? "true" : undefined}
+          disabled={props.disabledReason !== undefined}
           key={surface.id}
           onClick={() => props.onOpen(surface.id)}
           size="sm"
-          title={surface.label}
+          title={props.disabledReason ?? surface.label}
           type="button"
           variant="ghost"
         >

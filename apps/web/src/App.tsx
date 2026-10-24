@@ -2771,6 +2771,17 @@ function LaunchedShell(
   // these by identity so that a streaming turn leaves it alone.
   const dockConnectionState =
     projectController.status === "disconnected" ? "disconnected" : "connected";
+  // A new Code task's pane holds no thread until its first message creates
+  // one. Under the thread rule alone the dock closed when that pane became
+  // active and reopened once the thread existed; in the packaged app the title
+  // band vanished and returned around the first message. The dock holds its
+  // place for that pane instead, showing the tools it will offer as disabled
+  // until the task starts.
+  const dockHoldsForCodeDraft =
+    activeMode === "code" &&
+    activeProjectId !== undefined &&
+    dockThreadId === undefined &&
+    activeDraftKey !== undefined;
   const dockPresentation = useMemo(() => {
     const resolveDockSurface = (surface: unknown): RightUtilityDockResolution =>
       resolveRightUtilityDockSurface({
@@ -2868,6 +2879,15 @@ function LaunchedShell(
           !bottomPanelOpen ||
           !bottomPanelSurfaceIds.has(surface.id)),
     );
+    // The tools the thread will have once it exists: every tool that is only
+    // waiting for a thread, not one the mode or a capability rules out.
+    const dockToolsAwaitingThread = dockHoldsForCodeDraft
+      ? RIGHT_UTILITY_DOCK_SURFACES.filter(
+          (surface) =>
+            resolveDockSurface(surface.id).kind === "unavailable" &&
+            isDockToolLaunchable(surface.id, dockToolCapabilities),
+        )
+      : undefined;
     return {
       activeBottomSurface,
       activeBottomTab,
@@ -2879,6 +2899,7 @@ function LaunchedShell(
       displayedDockState,
       dockResolution,
       dockSurface,
+      dockToolsAwaitingThread,
       launchableDockSurfaces,
       renderedBottomPanelState,
     };
@@ -2887,6 +2908,7 @@ function LaunchedShell(
     bottomPanelPresentation.open,
     bottomPanelStatesByThread,
     dockConnectionState,
+    dockHoldsForCodeDraft,
     dockState,
     dockThreadId,
     dockThreadKey,
@@ -2906,6 +2928,7 @@ function LaunchedShell(
     displayedDockState,
     dockResolution,
     dockSurface,
+    dockToolsAwaitingThread,
     launchableDockSurfaces,
     renderedBottomPanelState,
   } = dockPresentation;
@@ -2941,7 +2964,8 @@ function LaunchedShell(
     (dockThreadId !== undefined ||
       projectPullRequestReviewOpen ||
       dockTabs.length > 0 ||
-      launchableDockSurfaces.length > 0);
+      launchableDockSurfaces.length > 0 ||
+      dockHoldsForCodeDraft);
   const dockOpen = dockVisible && dockAvailable;
   // A Browser tab bound to one host-opened context (a link or a local server)
   // is not the thread's shared Browser, so it does not stand in for the agent's
@@ -6820,6 +6844,7 @@ function LaunchedShell(
                 {...(dockThreadKey === undefined ? {} : { dockThreadKey })}
                 {...(dockThreadProjectId === undefined ? {} : { dockThreadProjectId })}
                 {...(dockThreadRepository === undefined ? {} : { dockThreadRepository })}
+                {...(dockToolsAwaitingThread === undefined ? {} : { dockToolsAwaitingThread })}
                 {...(props.hostBridge === undefined ? {} : { hostBridge: props.hostBridge })}
                 isNarrow={isNarrow}
                 launchableDockSurfaces={launchableDockSurfaces}

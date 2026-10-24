@@ -41,6 +41,7 @@ export interface RightUtilityDockProps {
   readonly tabs: ReadonlyArray<RightUtilityDockSurfaceDescriptor | RightUtilityDockTabDescriptor>;
   readonly terminal?: ReactNode;
   readonly tests?: ReactNode;
+  readonly toolsAwaitingThread?: ReadonlyArray<RightUtilityDockSurfaceDescriptor>;
   readonly width: number;
 }
 
@@ -80,6 +81,9 @@ export function RightUtilityDock(props: RightUtilityDockProps) {
       tabs={props.tabs}
       {...(props.terminal === undefined ? {} : { terminal: props.terminal })}
       {...(props.tests === undefined ? {} : { tests: props.tests })}
+      {...(props.toolsAwaitingThread === undefined
+        ? {}
+        : { toolsAwaitingThread: props.toolsAwaitingThread })}
       {...dismiss}
     />
   );
