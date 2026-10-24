@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -11,7 +12,14 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+// Passes through; the mid-walk test below wraps it to change a directory
+// between its listing and the timestamp that is meant to vouch for it.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, readdirSync: vi.fn(actual.readdirSync) };
+});
 import {
   ProcessConfinementError,
   buildDenyDefaultSeatbeltProfile,
@@ -727,6 +735,37 @@ describe("shared Seatbelt profile builder", () => {
     mkdirSync(created);
 
     expect(privateHomeDenyReadRules(input)).toContain(seatbeltDenyRule("file-read*", created));
+  });
+
+  it("does not keep rules a directory changed under while they were being read", async () => {
+    const root = temporaryRoot();
+    const allowed = join(root, "allowed");
+    mkdirSync(allowed);
+    const input = {
+      allowedPaths: [allowed],
+      homeDirectory: root,
+      usersDirectory: root,
+    };
+    // Directory mtimes resolve to the millisecond; the pause keeps the
+    // mid-walk write off the boundary it would otherwise share with `mkdir`.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+    const created = join(root, "created-mid-walk");
+    let listedRoot = false;
+    vi.mocked(readdirSync).mockImplementation((...args: Parameters<typeof readdirSync>) => {
+      const entries = actual.readdirSync(...args);
+      if (!listedRoot && args[0] === root) {
+        listedRoot = true;
+        writeFileSync(created, "");
+      }
+      return entries;
+    });
+    try {
+      privateHomeDenyReadRules(input);
+      expect(privateHomeDenyReadRules(input)).toContain(seatbeltDenyRule("file-read*", created));
+    } finally {
+      vi.mocked(readdirSync).mockImplementation(actual.readdirSync);
+    }
   });
 
   it("opens Apple trust evaluation only when the launch may reach the network", () => {

@@ -465,6 +465,15 @@ function symlinkReachesAllowed(link: string, allowed: ReadonlyArray<string>): bo
  * launch and measured near a third of server CPU samples during the git probe
  * storm. Thirty-two entries bound the map to recent (home, users, allowed)
  * shapes.
+ *
+ * Each directory's mtime is taken before its listing, and the rules are
+ * cached only when every directory still shows that mtime after the walk.
+ * An entry created between a directory's listing and its timestamp would
+ * otherwise be cached away: the rules omit it while the stored mtime already
+ * includes it, so every later launch reused a deny set missing that entry
+ * until the directory changed again. A walk that saw a directory move, or
+ * could not stat one, returns its rules for this launch only and the next
+ * launch walks again.
  */
 const privateDenyRulesCache = new Map<
   string,
@@ -505,14 +514,15 @@ export function privateHomeDenyReadRules(
     privateDenyRulesCache.delete(key);
   }
   const rules: string[] = [];
-  const watchedDirectories: string[] = [];
+  const watched: Array<{ readonly directory: string; readonly mtimeMs: number }> = [];
   const visit = (directory: string) => {
     const descendants = allowed.filter(
       (path) => path === directory || path.startsWith(`${directory}${sep}`),
     );
     if (descendants.some((path) => path === directory)) return;
+    const mtimeMs = directoryMtimeMs(directory);
     const entries = readdirSync(directory, { withFileTypes: true });
-    watchedDirectories.push(directory);
+    watched.push({ directory, mtimeMs });
     for (const entry of entries) {
       const child = join(directory, entry.name);
       const childAllowed = descendants.some(
@@ -541,20 +551,24 @@ export function privateHomeDenyReadRules(
     }
   };
   visit(users);
-  const watched = watchedDirectories.map((directory) => {
-    try {
-      return { directory, mtimeMs: statSync(directory).mtimeMs };
-    } catch {
-      // A directory that cannot be stat'd can never prove itself unchanged.
-      return { directory, mtimeMs: Number.NaN };
-    }
-  });
+  // NaN never equals itself, so a directory that could not be stat'd before
+  // or after the walk also keeps these rules out of the cache.
+  const settled = watched.every((watch) => directoryMtimeMs(watch.directory) === watch.mtimeMs);
+  if (!settled) return rules;
   privateDenyRulesCache.set(key, { rules, watched });
   if (privateDenyRulesCache.size > PRIVATE_DENY_RULES_CACHE_LIMIT) {
     const oldest = privateDenyRulesCache.keys().next().value;
     if (oldest !== undefined) privateDenyRulesCache.delete(oldest);
   }
   return rules;
+}
+
+function directoryMtimeMs(directory: string): number {
+  try {
+    return statSync(directory).mtimeMs;
+  } catch {
+    return Number.NaN;
+  }
 }
 
 /**
