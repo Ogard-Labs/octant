@@ -23,15 +23,43 @@ const INITIAL_REVISIONS: MachineChangeRevisions = {
   imageJobs: 0,
 };
 
+/**
+ * How long a burst of notices is merged into one revision bump after the
+ * first one has gone through. A streamed Chat reply appends one journal
+ * event per text delta, and each one reaches this feed as a `chat-navigation`
+ * notice, so without a window every delta re-read the navigation list and
+ * re-rendered the shell: 775 times for one reply. The first notice of a
+ * burst still lands at once, so a single change is not delayed.
+ */
+export const MACHINE_CHANGE_COALESCE_MS = 200;
+
 /** One Machine stream replaces per-feature navigation timers in the renderer. */
 export function useMachineChangeFeed(client: MachineChangeClient): MachineChangeRevisions {
   const [revisions, setRevisions] = useState(INITIAL_REVISIONS);
   useEffect(() => {
     const controller = new AbortController();
-    void consumeMachineChanges(client, controller.signal, (topics) => {
+    const held = new Set<MachineChangeTopic>();
+    let hold: ReturnType<typeof setTimeout> | undefined;
+    const release = () => {
+      hold = undefined;
+      if (held.size === 0) return;
+      const topics = [...held];
+      held.clear();
       setRevisions((current) => advanceRevisions(current, topics));
+      hold = setTimeout(release, MACHINE_CHANGE_COALESCE_MS);
+    };
+    void consumeMachineChanges(client, controller.signal, (topics) => {
+      if (hold === undefined) {
+        setRevisions((current) => advanceRevisions(current, topics));
+        hold = setTimeout(release, MACHINE_CHANGE_COALESCE_MS);
+        return;
+      }
+      for (const topic of topics) held.add(topic);
     });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      if (hold !== undefined) clearTimeout(hold);
+    };
   }, [client]);
   return revisions;
 }

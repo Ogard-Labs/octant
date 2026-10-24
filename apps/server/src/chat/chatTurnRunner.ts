@@ -260,6 +260,17 @@ export interface ChatTurnRunnerInput {
   readonly resumeCursor?: ProviderResumeCursor;
   readonly persistAttempt: (attempt: ChatAttempt) => Effect.Effect<void, ChatFailure>;
   /**
+   * Journals one streamed delta as only the reference it appended to the
+   * attempt's reply. Journaling the whole attempt per token made the journal
+   * quadratic in reply length — a 775-delta reply wrote 42 MB of repeated
+   * references — while nothing about the attempt changed but the appended
+   * reference and `updatedAt`.
+   */
+  readonly persistAppendedResponse: (
+    attempt: ChatAttempt,
+    responseRef: ChatContentReference,
+  ) => Effect.Effect<void, ChatFailure>;
+  /**
    * Atomically persists a terminal provider failure and its support anchor.
    * The runner supplies the already-transitioned attempt so the caller never
    * has to commit the failure and diagnostics incident in separate writes.
@@ -1013,7 +1024,8 @@ export class ChatTurnRunner {
                 if (event.kind === "text-delta") {
                   if (event.text.trim().length > 0) sawVisibleResponse = true;
                   if (responseText.length < 262_144) responseText += event.text;
-                  if (currentAttempt.outcome === "queued") {
+                  const firstDelta = currentAttempt.outcome === "queued";
+                  if (firstDelta) {
                     currentAttempt = transitionChatAttempt(currentAttempt, {
                       outcome: "streaming",
                       updatedAt: updatedAt(),
@@ -1025,7 +1037,14 @@ export class ChatTurnRunner {
                     responseRefs: [...currentAttempt.responseRefs, responseRef],
                     updatedAt: updatedAt(),
                   };
-                  yield* input.persistAttempt(currentAttempt);
+                  if (firstDelta) {
+                    // The queued→streaming transition is journaled whole so a
+                    // subscriber seeing no body for the appended reference
+                    // re-reads a complete attempt.
+                    yield* input.persistAttempt(currentAttempt);
+                  } else {
+                    yield* input.persistAppendedResponse(currentAttempt, responseRef);
+                  }
                   return;
                 }
                 if (event.kind === "usage") {

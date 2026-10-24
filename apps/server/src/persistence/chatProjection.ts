@@ -1,4 +1,6 @@
 import {
+  decodeChatAttempt,
+  decodeChatAttemptResponseAppended,
   decodeChatAttemptUpdated,
   decodeChatAttachment,
   decodeChatCitation,
@@ -28,6 +30,7 @@ import {
   MAX_CHAT_TRANSCRIPT_SEARCH_SNIPPET_LENGTH,
   ThreadFollowUp as ThreadFollowUpSchema,
   ThreadWorkItem as ThreadWorkItemSchema,
+  type ChatAttempt,
   type ChatSettings,
   type ChatNavigationThread,
   type ChatThread,
@@ -85,6 +88,7 @@ const chatEventNames = new Set([
   "chat.thread-updated@1",
   "chat.turn-created@1",
   "chat.attempt-updated@1",
+  "chat.attempt-response-appended@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -134,6 +138,9 @@ export class ChatProjection implements Projection {
         return;
       case "chat.attempt-updated@1":
         this.#applyAttemptUpdated(connection, event);
+        return;
+      case "chat.attempt-response-appended@1":
+        this.#applyAttemptResponseAppended(connection, event);
         return;
       case "chat.turn-route-decided@1":
         this.#applyTurnRouteDecided(connection, event);
@@ -237,6 +244,41 @@ export class ChatProjection implements Projection {
     assertEnvelope(event.aggregateType === "chat-thread");
     const attempt = decodeProjection(() => decodeChatAttemptUpdated(event.payload).attempt);
     assertEnvelope(String(attempt.threadId) === String(event.aggregateId));
+    this.#projectAttempt(connection, attempt, event);
+  }
+
+  /**
+   * A streamed delta after the attempt turned `streaming`. The journal holds
+   * only the reference the delta appended; the attempt row the first delta's
+   * `attempt-updated` wrote supplies everything else.
+   */
+  #applyAttemptResponseAppended(connection: SqliteConnection, event: EventEnvelope): void {
+    assertEnvelope(event.aggregateType === "chat-thread");
+    const appended = decodeProjection(() => decodeChatAttemptResponseAppended(event.payload));
+    assertEnvelope(String(appended.threadId) === String(event.aggregateId));
+    const attempt = readChatAttempt(connection, String(appended.attemptId));
+    // Replay order guarantees the first delta's attempt-updated wrote this row.
+    assertEnvelope(attempt !== undefined);
+    assertEnvelope(
+      String(attempt.turnId) === String(appended.turnId) &&
+        String(attempt.threadId) === String(appended.threadId),
+    );
+    // Replay delivers the same event again; appending its reference twice
+    // would duplicate the delta in the transcript.
+    const alreadyAppended =
+      String(attempt.responseRefs.at(-1)?.contentId) === String(appended.responseRef.contentId);
+    const next = alreadyAppended
+      ? decodeChatAttempt({ ...attempt, updatedAt: appended.updatedAt })
+      : decodeChatAttempt({
+          ...attempt,
+          responseRefs: [...attempt.responseRefs, appended.responseRef],
+          updatedAt: appended.updatedAt,
+        });
+    this.#projectAttempt(connection, next, event);
+  }
+
+  #projectAttempt(connection: SqliteConnection, attempt: ChatAttempt, event: EventEnvelope): void {
+    const indexedContentIds = readIndexedAttemptContentIds(connection, String(attempt.id));
     upsertAttempt(connection).run(
       attempt.id,
       attempt.turnId,
@@ -270,12 +312,10 @@ export class ChatProjection implements Projection {
     );
     // A late attempt for a turn an edit already replaced must not bring its text back.
     if (!isTurnReplacedByEdit(connection, updatedTurn)) {
-      indexTranscriptSearchForTurn(
-        connection,
-        updatedTurn,
-        event.globalSequence,
-        attempt.updatedAt,
-      );
+      indexTranscriptSearchForAttempt(connection, updatedTurn, attempt, indexedContentIds, {
+        lastSequence: event.globalSequence,
+        updatedAt: attempt.updatedAt,
+      });
     }
   }
 
@@ -1002,6 +1042,18 @@ export function readChatContent(
   };
 }
 
+/** The attempt row exactly as the projection last wrote it. */
+export function readChatAttempt(
+  connection: SqliteConnection,
+  attemptId: string,
+): ChatAttempt | undefined {
+  const row = connection
+    .prepare("SELECT attempt_json FROM chat_attempt_projection WHERE attempt_id = ?")
+    .get(attemptId) as { readonly attempt_json: string } | undefined;
+  if (row === undefined) return undefined;
+  return decodeProjection(() => decodeChatAttempt(JSON.parse(row.attempt_json)));
+}
+
 export function searchChatThreads(
   connection: SqliteConnection,
   query: string,
@@ -1390,6 +1442,56 @@ function indexTranscriptSearchForTurn(
       threadId: String(turn.threadId),
       lastSequence,
       updatedAt,
+    });
+  }
+}
+
+/**
+ * The content the attempt's last projected state already put through the
+ * index, read before that state is replaced. Streaming persists the whole
+ * attempt per delta, so indexing the turn afresh each time read and rewrote
+ * every earlier delta's body: a 775-delta reply cost some 300,000 content
+ * reads and index writes on the host's one thread. Only what the delta added
+ * is new to the index; the user message and earlier attempts were indexed
+ * when their own events applied.
+ */
+function readIndexedAttemptContentIds(
+  connection: SqliteConnection,
+  attemptId: string,
+): ReadonlySet<string> {
+  const row = connection
+    .prepare("SELECT attempt_json FROM chat_attempt_projection WHERE attempt_id = ?")
+    .get(attemptId) as { readonly attempt_json: string } | undefined;
+  if (row === undefined) return new Set();
+  const previous = JSON.parse(row.attempt_json) as {
+    readonly responseRefs?: ReadonlyArray<{ readonly contentId: string }>;
+    readonly researchRef?: { readonly contentId: string };
+  };
+  const ids = new Set((previous.responseRefs ?? []).map((reference) => reference.contentId));
+  if (previous.researchRef !== undefined) ids.add(previous.researchRef.contentId);
+  return ids;
+}
+
+function indexTranscriptSearchForAttempt(
+  connection: SqliteConnection,
+  turn: ChatTurn,
+  attempt: ChatAttempt,
+  indexedContentIds: ReadonlySet<string>,
+  input: { readonly lastSequence: number; readonly updatedAt: string },
+): void {
+  const refs =
+    attempt.researchRef === undefined
+      ? attempt.responseRefs
+      : [...attempt.responseRefs, attempt.researchRef];
+  for (const ref of refs) {
+    const contentId = String(ref.contentId);
+    if (indexedContentIds.has(contentId)) continue;
+    upsertTranscriptSearchContent(connection, {
+      contentId,
+      turnId: String(turn.id),
+      threadId: String(turn.threadId),
+      lastSequence: input.lastSequence,
+      updatedAt: input.updatedAt,
     });
   }
 }

@@ -10,7 +10,8 @@ export function openNodeSqlite(path: string): SqliteConnection {
     database.exec(`
       PRAGMA journal_mode = WAL;
       PRAGMA foreign_keys = ON;
-      PRAGMA synchronous = FULL;
+      -- Streamed replies commit one transaction per token and FULL fsyncs each one; NORMAL under WAL keeps the database consistent after a crash and only risks the last transactions on power loss.
+      PRAGMA synchronous = NORMAL;
       PRAGMA busy_timeout = 5000;
     `);
   } catch (error) {

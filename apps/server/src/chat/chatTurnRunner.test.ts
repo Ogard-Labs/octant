@@ -211,6 +211,10 @@ describe("ChatTurnRunner", () => {
             updates.push(next);
             return Effect.void;
           },
+          persistAppendedResponse: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -273,6 +277,10 @@ describe("ChatTurnRunner", () => {
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
             updates.push(next);
             return Effect.void;
           },
@@ -345,6 +353,10 @@ describe("ChatTurnRunner", () => {
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
             updates.push(next);
             return Effect.void;
           },
@@ -422,6 +434,10 @@ describe("ChatTurnRunner", () => {
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistAppendedResponse: (next) => {
               updates.push(next);
               return Effect.void;
             },
@@ -530,6 +546,7 @@ describe("ChatTurnRunner", () => {
           attachments: [],
           signal: controller.signal,
           persistAttempt: () => Effect.void,
+          persistAppendedResponse: () => Effect.void,
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -630,6 +647,7 @@ describe("ChatTurnRunner", () => {
           onHarnessRetry: () => seen.push("retrying"),
           onHarnessRetryCleared: () => seen.push("retry cleared"),
           persistAttempt: () => Effect.void,
+          persistAppendedResponse: () => Effect.void,
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -703,6 +721,10 @@ describe("ChatTurnRunner", () => {
               close: async () => undefined,
             },
             persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistAppendedResponse: (next) => {
               updates.push(next);
               return Effect.void;
             },
@@ -780,6 +802,10 @@ describe("ChatTurnRunner", () => {
               close: async () => undefined,
             },
             persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistAppendedResponse: (next) => {
               updates.push(next);
               return Effect.void;
             },
@@ -869,6 +895,10 @@ describe("ChatTurnRunner", () => {
               updates.push(next);
               return Effect.void;
             },
+            persistAppendedResponse: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
             persistResponse: () =>
               Effect.succeed({
                 contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -929,6 +959,10 @@ describe("ChatTurnRunner", () => {
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistAppendedResponse: (next) => {
               updates.push(next);
               return Effect.void;
             },
@@ -1005,6 +1039,10 @@ describe("ChatTurnRunner", () => {
             updates.push(next);
             return Effect.void;
           },
+          persistAppendedResponse: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -1060,6 +1098,10 @@ describe("ChatTurnRunner", () => {
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
             updates.push(next);
             return Effect.void;
           },
@@ -1128,6 +1170,10 @@ describe("ChatTurnRunner", () => {
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
             updates.push(next);
             return Effect.void;
           },
@@ -1201,6 +1247,10 @@ describe("ChatTurnRunner", () => {
               updates.push(next);
               return Effect.void;
             },
+            persistAppendedResponse: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
             persistResponse: () =>
               Effect.succeed({
                 contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -1258,6 +1308,10 @@ describe("ChatTurnRunner", () => {
             researchRoute: researchRoute({ kind: "disabled" }),
             attachments: [],
             persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistAppendedResponse: (next) => {
               updates.push(next);
               return Effect.void;
             },
@@ -1325,6 +1379,10 @@ describe("ChatTurnRunner", () => {
             attachments: [],
             signal: controller.signal,
             persistAttempt: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
+            persistAppendedResponse: (next) => {
               updates.push(next);
               return Effect.void;
             },
@@ -1403,6 +1461,10 @@ describe("ChatTurnRunner", () => {
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               persistAttempt: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
+              persistAppendedResponse: (next) => {
                 updates.push(next);
                 return Effect.void;
               },
@@ -1486,6 +1548,7 @@ describe("ChatTurnRunner", () => {
               ? {}
               : { outsideContentMarks: new RuntimeOutsideContentMarks(record) }),
             persistAttempt: (next) => Effect.sync(() => updates.push(next)),
+            persistAppendedResponse: (next) => Effect.sync(() => updates.push(next)),
             persistResponse: () =>
               Effect.succeed({
                 contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -1595,6 +1658,10 @@ describe("ChatTurnRunner", () => {
             updates.push(next);
             return Effect.void;
           },
+          persistAppendedResponse: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -1673,6 +1740,10 @@ describe("ChatTurnRunner", () => {
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
             updates.push(next);
             return Effect.void;
           },
@@ -1769,6 +1840,10 @@ describe("ChatTurnRunner", () => {
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               persistAttempt: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
+              persistAppendedResponse: (next) => {
                 updates.push(next);
                 return Effect.void;
               },
@@ -1913,6 +1988,10 @@ describe("ChatTurnRunner", () => {
                 updates.push(next);
                 return Effect.void;
               },
+              persistAppendedResponse: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
               persistResponse: () =>
                 Effect.succeed({
                   contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -2041,6 +2120,10 @@ describe("ChatTurnRunner", () => {
             updates.push(next);
             return Effect.void;
           },
+          persistAppendedResponse: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -2133,6 +2216,7 @@ describe("ChatTurnRunner", () => {
               researchRoute: researchRoute({ kind: "disabled" }),
               attachments: [],
               persistAttempt: () => Effect.void,
+              persistAppendedResponse: () => Effect.void,
               persistResponse: () =>
                 Effect.succeed({
                   contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -2230,6 +2314,10 @@ describe("ChatTurnRunner", () => {
                 updates.push(next);
                 return Effect.void;
               },
+              persistAppendedResponse: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
               persistResponse: () =>
                 Effect.succeed({
                   contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -2306,6 +2394,10 @@ describe("ChatTurnRunner", () => {
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
             updates.push(next);
             return Effect.void;
           },
@@ -2390,6 +2482,10 @@ describe("ChatTurnRunner", () => {
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
             updates.push(next);
             return Effect.void;
           },
@@ -2489,6 +2585,7 @@ describe("ChatTurnRunner", () => {
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: () => Effect.void,
+          persistAppendedResponse: () => Effect.void,
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -2589,6 +2686,7 @@ describe("ChatTurnRunner", () => {
             },
             onTurnEnded: (turn) => ended.push(turn),
             persistAttempt: () => Effect.void,
+            persistAppendedResponse: () => Effect.void,
             persistResponse: () =>
               Effect.succeed({
                 contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -2818,6 +2916,10 @@ describe("ChatTurnRunner", () => {
             updates.push(next);
             return Effect.void;
           },
+          persistAppendedResponse: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -2903,6 +3005,10 @@ describe("ChatTurnRunner", () => {
             updates.push(next);
             return Effect.void;
           },
+          persistAppendedResponse: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
           persistResponse: (text) => {
             persistedChunks.push(text);
             return Effect.succeed({
@@ -2923,6 +3029,95 @@ describe("ChatTurnRunner", () => {
     expect(updates.at(-1)?.responseRefs).toHaveLength(2);
     expect(updates.at(-1)?.citationIds).toEqual([citationId]);
     expect(updates.at(-1)?.outcome).toBe("completed");
+  });
+
+  it("journals only the appended reference after the first streamed delta", async () => {
+    const persistedAttempts: ChatAttempt[] = [];
+    const appended: { contentId: string; refs: number }[] = [];
+    const queue = Effect.runSync(Queue.unbounded<never>());
+    let chunk = 0;
+    const connection = {
+      subscribe: Effect.succeed(Stream.fromQueue(queue)),
+      start: () => Effect.succeed({ sessionId }),
+      send: () =>
+        Effect.gen(function* () {
+          yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "a" } as never);
+          yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "b" } as never);
+          yield* Queue.offer(queue, { kind: "text-delta", sessionId, text: "c" } as never);
+          yield* Queue.offer(queue, { kind: "completed", sessionId } as never);
+        }),
+      interrupt: () => Effect.void,
+      stop: () => Effect.void,
+      answerApproval: () => Effect.void,
+      answerUserInput: () => Effect.void,
+      answerTool: () => Effect.void,
+    };
+    const { scheduler, reservation } = makeScheduler();
+    const runner = new ChatTurnRunner({
+      capacityScheduler: scheduler,
+      contextHarness: makeHarness(),
+      researchRouter: new ResearchRouter({
+        searxngClient: { search: async () => ({ query: "x", backend: "searxng", results: [] }) },
+        providerNativeExecute: async () => ({
+          query: "x",
+          backend: "provider-native",
+          results: [],
+        }),
+      }),
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        runner.run({
+          thread: thread(),
+          attempt: attempt(),
+          prompt: "hello",
+          scratchRoot: "/tmp/octant-scratch/thread",
+          driver: { acquire: () => Effect.succeed(connection) } as never,
+          providerInstanceId,
+          serviceLimits: serviceLimits(),
+          contextSubject: subject,
+          contextPlanId: "82000000-0000-4000-8000-000000000050" as never,
+          requestShape: "chat-turn",
+          varianceReserve: 20,
+          reservationId: reservation,
+          estimatedTokens: 100,
+          researchEnabled: false,
+          researchRoute: researchRoute({ kind: "disabled" }),
+          attachments: [],
+          persistAttempt: (next) => {
+            persistedAttempts.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next, responseRef) => {
+            appended.push({
+              contentId: String(responseRef.contentId),
+              refs: next.responseRefs.length,
+            });
+            return Effect.void;
+          },
+          persistResponse: () => {
+            chunk += 1;
+            return Effect.succeed({
+              contentId: decodeChatContentId(
+                `82000000-0000-4000-8000-${chunk.toString().padStart(12, "0")}`,
+              ),
+              digest: "a".repeat(64),
+              byteLength: 1,
+            });
+          },
+        }),
+      ),
+    );
+
+    const streamed = persistedAttempts.filter((entry) => entry.outcome === "streaming");
+    expect(streamed).toHaveLength(1);
+    expect(streamed[0]?.responseRefs).toHaveLength(1);
+    expect(appended).toEqual([
+      { contentId: "82000000-0000-4000-8000-000000000002", refs: 2 },
+      { contentId: "82000000-0000-4000-8000-000000000003", refs: 3 },
+    ]);
+    expect(persistedAttempts.at(-1)?.outcome).toBe("completed");
   });
 
   it("keeps the provider's restated task list in the attempt it journals", async () => {
@@ -3022,6 +3217,10 @@ describe("ChatTurnRunner", () => {
           researchRoute: researchRoute({ backend: "searxng" }),
           attachments: [],
           persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
             updates.push(next);
             return Effect.void;
           },
@@ -3129,6 +3328,10 @@ describe("ChatTurnRunner", () => {
             updates.push(next);
             return Effect.void;
           },
+          persistAppendedResponse: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000060"),
@@ -3206,6 +3409,7 @@ describe("ChatTurnRunner", () => {
           researchEnabled: false,
           researchRoute: researchRoute({ kind: "disabled" }),
           persistAttempt: () => Effect.void,
+          persistAppendedResponse: () => Effect.void,
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -3282,6 +3486,7 @@ describe("ChatTurnRunner", () => {
           researchEnabled: true,
           researchRoute: researchRoute({ backend: "provider-native" }),
           persistAttempt: () => Effect.void,
+          persistAppendedResponse: () => Effect.void,
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -3378,6 +3583,7 @@ describe("ChatTurnRunner", () => {
             execute,
           },
           persistAttempt: () => Effect.void,
+          persistAppendedResponse: () => Effect.void,
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -3482,6 +3688,10 @@ describe("ChatTurnRunner", () => {
               updates.push(next);
               return Effect.void;
             },
+            persistAppendedResponse: (next) => {
+              updates.push(next);
+              return Effect.void;
+            },
             persistResponse: () =>
               Effect.succeed({
                 contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -3569,6 +3779,10 @@ describe("ChatTurnRunner", () => {
             updates.push(next);
             return Effect.void;
           },
+          persistAppendedResponse: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -3650,6 +3864,10 @@ describe("ChatTurnRunner", () => {
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
             updates.push(next);
             return Effect.void;
           },
@@ -3738,6 +3956,10 @@ describe("ChatTurnRunner", () => {
             updates.push(next);
             return Effect.void;
           },
+          persistAppendedResponse: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
           persistResponse: () =>
             Effect.succeed({
               contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -3809,6 +4031,10 @@ describe("ChatTurnRunner", () => {
           researchRoute: researchRoute({ kind: "disabled" }),
           attachments: [],
           persistAttempt: (next) => {
+            updates.push(next);
+            return Effect.void;
+          },
+          persistAppendedResponse: (next) => {
             updates.push(next);
             return Effect.void;
           },
@@ -3898,6 +4124,10 @@ describe("ChatTurnRunner", () => {
                 updates.push(next);
                 return Effect.void;
               },
+              persistAppendedResponse: (next) => {
+                updates.push(next);
+                return Effect.void;
+              },
               persistResponse: () =>
                 Effect.succeed({
                   contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),
@@ -3983,6 +4213,7 @@ describe("ChatTurnRunner", () => {
               attachments: [],
               signal: controller.signal,
               persistAttempt: () => Effect.void,
+              persistAppendedResponse: () => Effect.void,
               persistResponse: () =>
                 Effect.succeed({
                   contentId: decodeChatContentId("82000000-0000-4000-8000-000000000070"),

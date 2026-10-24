@@ -16,6 +16,7 @@ import {
   decodeChatAttachment,
   decodeChatAttachmentId,
   decodeChatAttempt,
+  decodeChatAttemptUpdated,
   decodeChatCitation,
   decodeChatCitationId,
   decodeChatCommand,
@@ -316,6 +317,7 @@ const CHAT_EVENT_NAMES = new Set([
   "chat.thread-updated@1",
   "chat.turn-created@1",
   "chat.attempt-updated@1",
+  "chat.attempt-response-appended@1",
   "chat.turn-route-decided@1",
   "chat.attachment-updated@1",
   "chat.citation-recorded@1",
@@ -852,10 +854,20 @@ function openQuestion(attempt: ChatAttempt): ChatAttempt["pendingQuestion"] {
 }
 
 export interface ChatSubscribeOptions {
-  /** Put the body behind each streamed delta on its `attempt-updated` frame. */
+  /**
+   * Put the body behind each streamed delta on its `attempt-updated` or
+   * `attempt-response-appended` frame.
+   */
   readonly contents?: boolean;
   /** Send a `compaction-settled` frame when a compaction of the session ends. */
   readonly compaction?: boolean;
+  /**
+   * Receive streamed deltas as `attempt-response-appended` frames, which carry
+   * only the reference each delta appended. A subscriber that does not ask
+   * still receives every delta as a full `attempt-updated` read back from the
+   * projection, because a strict event reader refuses a kind it does not know.
+   */
+  readonly appended?: boolean;
 }
 
 export class ChatService {
@@ -1646,7 +1658,12 @@ export class ChatService {
           continue;
         }
         if (!CHAT_EVENT_NAMES.has(envelope.eventName)) continue;
-        const frame = this.#toEventFrame(threadId, envelope, options?.contents === true);
+        const frame = this.#toEventFrame(
+          threadId,
+          envelope,
+          options?.contents === true,
+          options?.appended === true,
+        );
         if (frame === undefined) continue;
         yield frame;
       }
@@ -5405,6 +5422,45 @@ export class ChatService {
         pendingContent.delete(String(content.reference.contentId));
       }
     };
+    // Streamed deltas after the first journal only the reference each one
+    // appended; the full attempt went out once when it turned `streaming`.
+    const persistAppendedResponse = async (
+      attempt: ChatAttempt,
+      responseRef: ChatContentReference,
+    ) => {
+      const version = readAggregateVersion(
+        this.#persistence.connection,
+        "chat-thread",
+        input.thread.id,
+      );
+      const content = pendingContent.get(String(responseRef.contentId));
+      this.#persistence.journal.append(
+        {
+          aggregate: { aggregateType: "chat-thread", aggregateId: input.thread.id },
+          expectedVersion: version,
+          events: [
+            this.#pending("chat.attempt-response-appended@1", {
+              kind: "attempt-response-appended",
+              threadId: attempt.threadId,
+              turnId: attempt.turnId,
+              attemptId: attempt.id,
+              responseRef,
+              updatedAt: attempt.updatedAt,
+            }),
+          ],
+        },
+        content === undefined
+          ? undefined
+          : {
+              beforeEvents: (connection) => {
+                this.#writePreparedContent(connection, content);
+              },
+            },
+      );
+      if (content !== undefined) {
+        pendingContent.delete(String(content.reference.contentId));
+      }
+    };
 
     try {
       if (input.prepared.extensionSelections.length > 0) {
@@ -5494,6 +5550,15 @@ export class ChatService {
               persistAttempt: (attempt) =>
                 Effect.tryPromise({
                   try: () => persistAttempt(attempt),
+                  catch: () =>
+                    decodeChatFailure({
+                      category: "unavailable",
+                      message: "Chat attempt persistence failed.",
+                    }),
+                }),
+              persistAppendedResponse: (attempt, responseRef) =>
+                Effect.tryPromise({
+                  try: () => persistAppendedResponse(attempt, responseRef),
                   catch: () =>
                     decodeChatFailure({
                       category: "unavailable",
@@ -5810,9 +5875,10 @@ export class ChatService {
       readonly payload: unknown;
     },
     withContents: boolean,
+    withAppended: boolean,
   ): ChatEventFrame | undefined {
     try {
-      const event = decodeChatPublicEvent(envelope.payload);
+      let event = decodeChatPublicEvent(envelope.payload);
       if (event.kind === "settings-updated") {
         return undefined;
       }
@@ -5868,10 +5934,23 @@ export class ChatService {
       ) {
         return undefined;
       }
-      const contents =
-        withContents && event.kind === "attempt-updated"
-          ? this.#appendedContent(event.attempt)
-          : undefined;
+      let contents: ReadonlyArray<ChatContentBody> | undefined;
+      if (event.kind === "attempt-response-appended") {
+        if (!withAppended) {
+          // A subscriber that did not opt in to appended frames gets the whole
+          // attempt, read back from the projection, so its strict event reader
+          // never sees a kind it does not know. The projection can already be
+          // ahead of this envelope; that is the state the delta left it in.
+          const attempt = this.#persistence.readChatAttempt(String(event.attemptId));
+          if (attempt === undefined) return undefined;
+          event = decodeChatAttemptUpdated({ kind: "attempt-updated", attempt });
+          if (withContents) contents = this.#appendedContent(attempt);
+        } else if (withContents) {
+          contents = this.#contentBody(event.responseRef, event.threadId);
+        }
+      } else if (withContents && event.kind === "attempt-updated") {
+        contents = this.#appendedContent(event.attempt);
+      }
       return decodeChatEventFrame({
         threadId,
         sequence: envelope.globalSequence,
@@ -5895,8 +5974,16 @@ export class ChatService {
     if (attempt.outcome !== "queued" && attempt.outcome !== "streaming") return undefined;
     const reference = attempt.responseRefs.at(-1);
     if (reference === undefined) return undefined;
+    return this.#contentBody(reference, attempt.threadId);
+  }
+
+  /** The decoded body behind one transcript reference, when it is this thread's. */
+  #contentBody(
+    reference: ChatContentReference,
+    threadId: ChatThreadId,
+  ): ReadonlyArray<ChatContentBody> | undefined {
     const content = this.#persistence.readChatContent(String(reference.contentId));
-    if (content === undefined || String(content.threadId) !== String(attempt.threadId)) {
+    if (content === undefined || String(content.threadId) !== String(threadId)) {
       return undefined;
     }
     return [
