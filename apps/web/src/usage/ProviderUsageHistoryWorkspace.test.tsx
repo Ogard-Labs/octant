@@ -200,6 +200,41 @@ describe("Local provider usage history", () => {
     expect(await screen.findByRole("heading", { name: "2.4K" })).toBeVisible();
     expect(load).toHaveBeenCalledTimes(2);
   });
+  it("counts the sessions read so far while the import is still adding them", async () => {
+    const partial = history();
+    const continuation = new Promise<LocalUsageHistoryResponse>(() => undefined);
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ...partial,
+        coverage: partial.coverage.map((source) => ({
+          ...source,
+          status: "partial",
+          hasMore: true,
+        })),
+      })
+      .mockImplementationOnce(() => continuation);
+    render(<ProviderUsageHistoryWorkspace client={{ load }} />);
+
+    expect(await screen.findByText(/sessions so far/)).toBeVisible();
+  });
+
+  it("marks every point of a multi-day series instead of drawing a bare line", async () => {
+    const base = history();
+    const days = base.days.flatMap((row) => [
+      { ...row, day: "2026-09-08" },
+      { ...row, day: "2026-09-09" },
+    ]);
+    const data = { ...base, days };
+    const { container } = render(
+      <ProviderUsageHistoryWorkspace client={{ load: async () => data }} />,
+    );
+
+    await waitFor(() =>
+      expect(container.querySelectorAll(".provider-history__series circle")).toHaveLength(2),
+    );
+  });
+
   it("opens at the host's last reading and keeps it until the fresh read completes", async () => {
     const lastRead = { ...history(), fromLastRead: true };
     const scanning = {

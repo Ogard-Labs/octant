@@ -285,7 +285,9 @@ export function ProviderUsageHistoryWorkspace(props: {
                 ? current?.failed
                   ? "Refresh to try again"
                   : "Collecting usage"
-                : `${data.totals.sessionCount.toLocaleString()} sessions`}
+                : busy && data.fromLastRead !== true
+                  ? `${data.totals.sessionCount.toLocaleString()} sessions so far`
+                  : `${data.totals.sessionCount.toLocaleString()} sessions`}
               {metric === "cost"
                 ? ` · ${costBasis === "apiEstimateUsd" ? "API-equivalent estimate" : "Provider-recorded cost"}`
                 : " · processed tokens"}
