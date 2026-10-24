@@ -101,6 +101,9 @@ export function ProviderUsageLimitsPanel(props: {
   }, [snapshot, now]);
 
   const visible = snapshot?.entries.filter((entry) => names.has(String(entry.providerInstanceId)));
+  // Providers that cannot report limits collapse into one closing row instead
+  // of a wall of identical cards; the runtime's reason still names each.
+  const unavailable = visible?.filter((entry) => entry.status === "unavailable") ?? [];
   const body = (
     <>
       {message === undefined ? null : (
@@ -121,6 +124,7 @@ export function ProviderUsageLimitsPanel(props: {
       {visible === undefined || visible.length === 0 ? null : (
         <ul className="surface-list provider-limits__list">
           {visible.map((entry) => {
+            if (entry.status === "unavailable") return null;
             const instance = names.get(String(entry.providerInstanceId));
             return (
               <li
@@ -152,6 +156,38 @@ export function ProviderUsageLimitsPanel(props: {
               </li>
             );
           })}
+          {unavailable.length === 0 ? null : (
+            <li className="surface-row provider-limits__row provider-limits__row--quiet">
+              <div className="surface-row__copy">
+                <span className="oct-row-label">Not reporting limits</span>
+              </div>
+              <div className="surface-row__control">
+                <ul className="provider-limits__quiet-list">
+                  {unavailable.map((entry) => {
+                    const instance = names.get(String(entry.providerInstanceId));
+                    return (
+                      <li key={String(entry.providerInstanceId)}>
+                        {instance === undefined ? null : (
+                          <ProviderGlyph
+                            displayName={instance.displayName}
+                            driverKind={instance.driverKind}
+                            size={16}
+                          />
+                        )}
+                        {instance?.displayName ?? "Provider"} ·{" "}
+                        {unavailableCopy(
+                          entry.reason,
+                          instance === undefined
+                            ? "This runtime"
+                            : driverLabel(instance.driverKind),
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            </li>
+          )}
         </ul>
       )}
     </>
