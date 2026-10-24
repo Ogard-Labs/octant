@@ -1964,7 +1964,7 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   min-height: 28px;
   align-items: center;
   gap: var(--oct-space-2);
-  margin: 12px auto 0;
+  margin: 12px auto var(--oct-space-2);
   padding-inline: var(--oct-space-1);
   color: var(--octant-text-secondary);
   font-size: var(--oct-text-sm);
@@ -2005,12 +2005,17 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   width: 100%;
 }
 
-/* The scroll frame and its padding are the system's `.transcript-scroll`. */
+/* The scroll frame and its padding are the system's `.transcript-scroll`.
+   Text scrolling under the frame's top edge fades out over the frame's own
+   top padding: cut off sharp right under the waiting row, half a line of the
+   answer read as printed over that row. At rest the first line sits below
+   the fade. */
 .code-thread-workspace__conversation {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
+  mask-image: linear-gradient(to bottom, transparent, var(--oct-fg) var(--oct-space-3));
 }
 
 /* The frame is a flex column, and a windowed list holds only absolutely

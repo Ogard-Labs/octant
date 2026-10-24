@@ -64,6 +64,7 @@ import {
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
   makeIdleTimeout,
+  makeTurnTextParagraphs,
 } from "../providers/turnBudget";
 import type { ResearchRouteDecision, ResearchRouter } from "./research/researchRouter";
 
@@ -913,6 +914,7 @@ export class ChatTurnRunner {
           runtimeEvents.pipe(
             Stream.mapError(markProviderFailure),
             Stream.filter((event) => event.sessionId === input.attempt.providerSessionId),
+            Stream.map(makeTurnTextParagraphs()),
             Stream.takeUntil(
               (event) =>
                 event.kind === "waiting" ||

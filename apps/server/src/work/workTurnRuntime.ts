@@ -44,6 +44,7 @@ import {
   countsTowardTurnEventBudget,
   endsHarnessRetryWait,
   makeIdleTimeout,
+  makeTurnTextParagraphs,
   type IdleTimeout,
 } from "../providers/turnBudget";
 
@@ -317,6 +318,7 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
         consume: (runtimeEvents) =>
           runtimeEvents.pipe(
             Stream.filter((event) => event.sessionId === input.providerSessionId),
+            Stream.map(makeTurnTextParagraphs()),
             Stream.takeUntil((event) => isTerminalEvent(event) || handledEvents > MAX_EVENTS),
             Stream.tap(() => idle.touch),
             // Liveness only restarts the idle clock above; nothing else sees it.
