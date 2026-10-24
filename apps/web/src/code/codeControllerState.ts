@@ -396,12 +396,21 @@ export function commandReloadsThread(command: CodeCommand, threadId: CodeThreadI
   );
 }
 
-export function acceptFrame(
+/**
+ * Where a streamed frame falls against the sequence the last thread read
+ * left. A burst can leave the read ahead of the next buffered frame — the
+ * read that answered frame N already returns sequence N+1 — so a frame at or
+ * behind the cursor still lands on bootstrap but owes no read of its own.
+ * Ahead of cursor + 1, or another thread's frame, is a real gap and the
+ * stream must rebase on a snapshot.
+ */
+export function framePosition(
   frame: CodeEventFrame,
   threadId: CodeThreadId,
   cursor: number,
-): boolean {
-  return frame.threadId === threadId && Number(frame.sequence) === cursor + 1;
+): "gap" | "covered" | "next" {
+  if (frame.threadId !== threadId || Number(frame.sequence) > cursor + 1) return "gap";
+  return Number(frame.sequence) === cursor + 1 ? "next" : "covered";
 }
 
 export function isActive(

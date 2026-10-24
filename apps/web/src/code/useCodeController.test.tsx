@@ -582,6 +582,39 @@ describe("useCodeController", () => {
     unmount();
   });
 
+  it("a burst of thread events keeps the live stream open and reads the thread only for events the last read did not cover", async () => {
+    const gate = deferred<void>();
+    async function* burstStream(signal: AbortSignal) {
+      await gate.promise;
+      yield {
+        threadId: ids.thread,
+        sequence: 2,
+        event: { kind: "thread-updated", thread: thread(2) },
+      } as never;
+      yield {
+        threadId: ids.thread,
+        sequence: 3,
+        event: { kind: "thread-updated", thread: thread(3) },
+      } as never;
+      yield* idleStream(signal);
+    }
+    const client = fakeClient({
+      subscribe: vi.fn((_id, _cursor, signal) => burstStream(signal)),
+      thread: vi.fn().mockResolvedValueOnce(view(1)).mockResolvedValue(view(3)),
+    });
+    const { result, unmount } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+
+    await waitFor(() => expect(result.current.activeView?.lastSequence).toBe(1));
+    await act(async () => gate.resolve());
+
+    await waitFor(() => expect(result.current.activeView?.lastSequence).toBe(3));
+    expect(client.subscribe).toHaveBeenCalledOnce();
+    expect(client.thread).toHaveBeenCalledTimes(2);
+    unmount();
+  });
+
   it("keeps catching up after a failed snapshot instead of freezing the thread", async () => {
     const gap = deferred<void>();
     const thread = vi
