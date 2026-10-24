@@ -205,7 +205,18 @@ export function runMovingPrint(
   let waves: CellWave[] = [];
   let blockColumns = 1;
   let frame: number | undefined;
+  let nextFrame: ReturnType<typeof setTimeout> | undefined;
   let lastDrawn = 0;
+  let ink: readonly [number, number, number] = [128, 128, 128];
+  let accent: readonly [number, number, number] = ink;
+
+  // The ink and accent only move when the theme rewrites the root element,
+  // which the observer below reports, so they are read then, not per frame.
+  const readTheme = () => {
+    const style = getComputedStyle(canvas);
+    ink = parseColor(style.color) ?? [128, 128, 128];
+    accent = parseColor(style.getPropertyValue("--octant-accent").trim()) ?? ink;
+  };
 
   const fit = () => {
     const rect = canvas.getBoundingClientRect();
@@ -231,9 +242,6 @@ export function runMovingPrint(
     if (pixels === undefined) return;
     const t = (now - started) / 1000;
     ripples = ripples.filter((ripple) => t - ripple.start <= WAVE_SECONDS);
-    const style = getComputedStyle(canvas);
-    const ink = parseColor(style.color) ?? [128, 128, 128];
-    const accent = parseColor(style.getPropertyValue("--octant-accent").trim()) ?? ink;
     const out = pixels.data;
     // The wave is smooth across a few pixels, so small cells share one
     // reading per block: at 2px cells a full-window wave measured about 40ms
@@ -296,16 +304,37 @@ export function runMovingPrint(
     context.drawImage(grid, 0, 0, columns * cell, rows * cell);
   };
 
+  // A timer waits out each frame interval and one animation frame draws, for
+  // the reason given on the character field's tick: asking for a frame at
+  // every vsync kept the compositor busy even when most of them drew nothing.
   const tick = (now: number) => {
-    frame = requestAnimationFrame(tick);
+    frame = undefined;
     if (document.hidden) return;
-    const waving = ripples.length > 0;
-    // A picture has nothing to move between waves, so it rests; the field
-    // keeps drifting.
-    if (!waving && picture !== undefined) return;
-    if (now - lastDrawn < (waving ? WAVE_FRAME_MS : IDLE_FRAME_MS)) return;
     lastDrawn = now;
     draw(now);
+    scheduleNext();
+  };
+  const schedule = (intervalMs: number) => {
+    if (frame !== undefined) return;
+    if (nextFrame !== undefined) clearTimeout(nextFrame);
+    nextFrame = setTimeout(
+      () => {
+        nextFrame = undefined;
+        frame = requestAnimationFrame(tick);
+      },
+      Math.max(0, lastDrawn + intervalMs - performance.now()),
+    );
+  };
+  // The field keeps drifting and a wave runs at twice its pace; a picture has
+  // nothing to move between waves, so it rests until the next click.
+  const scheduleNext = () => {
+    const waving = ripples.length > 0;
+    if (!waving && picture !== undefined) return;
+    schedule(waving ? WAVE_FRAME_MS : IDLE_FRAME_MS);
+  };
+  // A hidden window ends the loop above; it starts again on return.
+  const visibility = () => {
+    if (!document.hidden) scheduleNext();
   };
 
   // Clicks are read on the window, like the character field's, and kept only
@@ -319,13 +348,19 @@ export function runMovingPrint(
     const ripple = createRipple(x, y, (performance.now() - started) / 1000);
     // A heart is the character field's joke; the print keeps to rings.
     ripples = [...ripples, { ...ripple, heart: false }];
+    // A click may land mid-way through an idle wait or while a picture
+    // rests; the wave's first frame is due at its own, faster, cadence.
+    scheduleNext();
   };
 
   fit();
-  draw(performance.now());
+  readTheme();
+  lastDrawn = performance.now();
+  draw(lastDrawn);
   if (animated) {
-    frame = requestAnimationFrame(tick);
+    scheduleNext();
     window.addEventListener("pointerdown", wave, { passive: true });
+    document.addEventListener("visibilitychange", visibility);
   }
   const refit = () => {
     fit();
@@ -338,14 +373,19 @@ export function runMovingPrint(
   const themeObserver =
     typeof MutationObserver === "undefined"
       ? undefined
-      : new MutationObserver(() => draw(performance.now()));
+      : new MutationObserver(() => {
+          readTheme();
+          draw(performance.now());
+        });
   themeObserver?.observe(document.documentElement, {
     attributes: true,
     attributeFilter: ["style", "class", "data-octant-theme-mode"],
   });
   return () => {
     if (frame !== undefined) cancelAnimationFrame(frame);
+    if (nextFrame !== undefined) clearTimeout(nextFrame);
     window.removeEventListener("pointerdown", wave);
+    document.removeEventListener("visibilitychange", visibility);
     observer?.disconnect();
     stopPixelRatio();
     themeObserver?.disconnect();

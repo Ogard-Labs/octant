@@ -1,5 +1,64 @@
-import { describe, expect, it } from "vitest";
-import { createRipple, rippleBrightness } from "./appBackdropCharacters";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createRipple, rippleBrightness, runCharacterField } from "./appBackdropCharacters";
+
+describe("character ground frame pacing", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("asks for an animation frame about twelve times a second, not at every vsync, and leaves nothing pending once stopped", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const draws = vi.fn();
+    const context: Partial<CanvasRenderingContext2D> = {
+      setTransform: vi.fn(),
+      clearRect: draws,
+      fillText: vi.fn(),
+    };
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+      context as CanvasRenderingContext2D,
+    );
+    // A stand-in compositor: frames are requested here and delivered at the
+    // next simulated vsync, as a browser would.
+    const pendingFrames = new Map<number, FrameRequestCallback>();
+    let framesRequested = 0;
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      framesRequested += 1;
+      pendingFrames.set(framesRequested, callback);
+      return framesRequested;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
+      pendingFrames.delete(id);
+    });
+    const runSecondAt125Hz = () => {
+      for (let vsync = 0; vsync < 125; vsync += 1) {
+        vi.advanceTimersByTime(8);
+        const due = [...pendingFrames.values()];
+        pendingFrames.clear();
+        for (const callback of due) callback(performance.now());
+      }
+    };
+    const canvas = document.createElement("canvas");
+    document.body.append(canvas);
+
+    const stop = runCharacterField(canvas, true);
+    const drawsBefore = draws.mock.calls.length;
+    runSecondAt125Hz();
+    const drawsInOneSecond = draws.mock.calls.length - drawsBefore;
+    expect(drawsInOneSecond).toBeGreaterThanOrEqual(10);
+    expect(drawsInOneSecond).toBeLessThanOrEqual(13);
+    expect(framesRequested).toBeGreaterThanOrEqual(10);
+    expect(framesRequested).toBeLessThanOrEqual(13);
+
+    stop();
+    expect(pendingFrames.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    const drawsAtStop = draws.mock.calls.length;
+    runSecondAt125Hz();
+    expect(draws.mock.calls.length).toBe(drawsAtStop);
+    canvas.remove();
+  });
+});
 
 describe("character ground click wave", () => {
   const circle = { x: 100, y: 100, start: 0, seed: 0, wobble: 0, heart: false };
