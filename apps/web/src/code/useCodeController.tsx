@@ -62,7 +62,7 @@ import {
 } from "../polling/documentVisibility";
 import { markInteraction } from "../polling/interactionTrace";
 import {
-  acceptFrame,
+  framePosition,
   applyEvent,
   applyResult,
   commandReloadsThread,
@@ -1674,20 +1674,41 @@ export function useCodeController(options: CodeControllerOptions) {
             for await (const frame of frames) {
               if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                 return;
-              if (!acceptFrame(frame, threadId, cursor)) {
+              const position = framePosition(frame, threadId, cursor);
+              if (position === "gap") {
                 snapshotRequired = true;
                 break;
               }
-              cursor = Number(frame.sequence);
               setBootstrap((current) => applyEvent(current, frame));
+              if (position === "covered") {
+                // The thread read that answered the previous frame already
+                // carried this sequence; the frame still lands on bootstrap,
+                // but re-reading the thread for it would only repeat state.
+                continue;
+              }
+              cursor = Number(frame.sequence);
+              // Settling the conversation read up front keeps a thread read
+              // that fails or returns early from leaving it an unhandled
+              // rejection.
+              const conversationRead =
+                conversationPoll === undefined
+                  ? hydrateConversation(threadId, request, controller.signal).then(
+                      (value) => ({ status: "fulfilled" as const, value }),
+                      () => ({ status: "rejected" as const }),
+                    )
+                  : undefined;
               const refreshed = await client.thread(threadId, controller.signal);
               if (!isActive(request, threadGeneration, mounted) || controller.signal.aborted)
                 return;
               installView(refreshed);
               void refreshFollowUp(threadId);
-              if (conversationPoll === undefined) {
-                try {
-                  const hydrated = await hydrateConversation(threadId, request, controller.signal);
+              if (conversationRead !== undefined) {
+                const settled = await conversationRead;
+                if (settled.status === "rejected") {
+                  if (!isActive(request, threadGeneration, mounted)) return;
+                  setTurnError("Conversation history could not be refreshed.");
+                } else {
+                  const hydrated = settled.value;
                   conversationIncomplete = hydrated?.incomplete === true;
                   conversationOperationId = hydrated?.activeOperationId;
                   conversationCursor = hydrated?.nextCursor ?? conversationCursor;
@@ -1701,9 +1722,6 @@ export function useCodeController(options: CodeControllerOptions) {
                       startConversationOperationStream(conversationOperationId);
                     }
                   }
-                } catch {
-                  if (!isActive(request, threadGeneration, mounted)) return;
-                  setTurnError("Conversation history could not be refreshed.");
                 }
               }
               cursor = Number(refreshed.lastSequence);
