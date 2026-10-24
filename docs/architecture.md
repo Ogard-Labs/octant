@@ -1782,7 +1782,11 @@ flowchart LR
   A single narrow SQLite port has two adapters — `bun:sqlite` in production
   and `better-sqlite3` for the Node portability smoke — that pass the same
   conformance suite. Journal, migration, and projection code depend only on
-  the port. Settings → Data & storage exposes a read-only, server-authoritative data
+  the port. Both adapters run the store in WAL mode with `synchronous = NORMAL`:
+  streamed replies commit one transaction per token and FULL would fsync each
+  commit, while NORMAL under WAL keeps the database consistent after a crash
+  and risks only the last transactions on power loss.
+  Settings → Data & storage exposes a read-only, server-authoritative data
   map of those locations (and per-Project facts) so a person can see what
   this host stores without opening a document. Categories the host cannot
   verify are `unknown`; the map never carries secret values.
@@ -3378,7 +3382,15 @@ either way. A Chat thread's events stream reads the outcome back from the
 journal and sends it only to a subscriber that asks with `compaction=1`, as
 `contents=1` is asked for, because a client that decodes frames strictly would
 refuse an event it does not know; a Work thread's turn stream carries it as a
-frame of its own. The receipt is also on the inspector snapshot as
+frame of its own. On that same stream, an attempt's first streamed delta
+journals `chat.attempt-updated@1` (outcome `streaming`, the first response
+reference) and every later delta journals `chat.attempt-response-appended@1`
+carrying only the reference it appended and the attempt's `updatedAt`, so
+journal bytes per reply are linear in its length. The appended frame goes only
+to a subscriber that asks with `appended=1`; every other subscriber still
+receives each delta as a full `attempt-updated` frame read back from the
+projection, which already holds the attempt's current state. The receipt is
+also on the inspector snapshot as
 `latestCompaction`:
 
 - `executor`: `{ kind: "host", providerInstanceId, modelId }`, or

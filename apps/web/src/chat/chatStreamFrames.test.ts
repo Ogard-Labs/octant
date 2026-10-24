@@ -108,6 +108,26 @@ function frame(
 const first = body("00000000-0000-4000-8000-000000000911", "Hello");
 const second = body("00000000-0000-4000-8000-000000000912", ", world");
 
+function appendedFrame(
+  sequence: number,
+  response: ChatContentBody,
+  contents?: ReadonlyArray<ChatContentBody>,
+): ChatEventFrame {
+  return decodeChatEventFrame({
+    threadId,
+    sequence,
+    event: {
+      kind: "attempt-response-appended",
+      threadId,
+      turnId,
+      attemptId: "00000000-0000-4000-8000-000000000903",
+      responseRef: reference(response),
+      updatedAt: "2026-07-19T12:00:01.000Z",
+    },
+    ...(contents === undefined ? {} : { contents }),
+  });
+}
+
 describe("applyChatAttemptFrame", () => {
   it("grows a streaming reply from the body its frame carries", () => {
     const current = view([attempt("streaming", [first])], [first]);
@@ -134,5 +154,28 @@ describe("applyChatAttemptFrame", () => {
     ).toBeUndefined();
     const elsewhere = attempt("streaming", [first, second], "00000000-0000-4000-8000-000000000999");
     expect(applyChatAttemptFrame(current, frame(5, elsewhere, [second]))).toBeUndefined();
+  });
+
+  it("grows a streaming reply from the reference an appended frame carries", () => {
+    const current = view([attempt("streaming", [first])], [first]);
+    const grown = applyChatAttemptFrame(current, appendedFrame(5, second, [second]));
+    expect(grown?.lastSequence).toBe(5);
+    const streamed = grown?.turns[0]?.attempts[0];
+    expect(streamed?.responseRefs.map((entry) => String(entry.contentId))).toEqual([
+      String(first.contentId),
+      String(second.contentId),
+    ]);
+    expect(streamed?.updatedAt).toBe("2026-07-19T12:00:01.000Z");
+    expect(grown?.contents.map((content) => content.body)).toEqual(["?", "Hello", ", world"]);
+  });
+
+  it("asks for the thread when an appended frame does not carry the appended body", () => {
+    const current = view([attempt("streaming", [first])], [first]);
+    expect(applyChatAttemptFrame(current, appendedFrame(5, second))).toBeUndefined();
+  });
+
+  it("replays an appended frame without duplicating its reference", () => {
+    const current = view([attempt("streaming", [first, second])], [first, second]);
+    expect(applyChatAttemptFrame(current, appendedFrame(5, second, [second]))).toBe(current);
   });
 });

@@ -307,12 +307,20 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
         // `compaction=1` asks for a frame when a compaction of the session
         // ends, opt-in for the same reason.
         const compactionParam = url.searchParams.get("compaction");
+        // `appended=1` takes each streamed delta as an
+        // `attempt-response-appended` frame; without it the delta still
+        // arrives as a full `attempt-updated` for strict event readers.
+        const appendedParam = url.searchParams.get("appended");
         if (
           afterSequenceParam === null ||
           url.searchParams.size !==
-            1 + (contentsParam === null ? 0 : 1) + (compactionParam === null ? 0 : 1) ||
+            1 +
+              (contentsParam === null ? 0 : 1) +
+              (compactionParam === null ? 0 : 1) +
+              (appendedParam === null ? 0 : 1) ||
           (contentsParam !== null && contentsParam !== "1") ||
-          (compactionParam !== null && compactionParam !== "1")
+          (compactionParam !== null && compactionParam !== "1") ||
+          (appendedParam !== null && appendedParam !== "1")
         ) {
           return failureResponse(
             { category: "invalid", message: "Chat replay cursor is invalid." },
@@ -336,6 +344,7 @@ export function createChatRouteHandler(dependencies: ChatRouteDependencies) {
               dependencies.service.subscribe(threadId, cursor, signal, {
                 contents: contentsParam === "1",
                 compaction: compactionParam === "1",
+                appended: appendedParam === "1",
               }),
             afterSequence,
             ...(dependencies.waitForThreadChange === undefined

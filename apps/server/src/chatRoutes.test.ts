@@ -278,6 +278,7 @@ describe("Chat routes", () => {
     expect(subscribe).toHaveBeenCalledWith(threadId, 41, expect.any(AbortSignal), {
       contents: false,
       compaction: false,
+      appended: false,
     });
   });
 
@@ -292,6 +293,7 @@ describe("Chat routes", () => {
     expect(subscribe).toHaveBeenCalledWith(threadId, 41, expect.any(AbortSignal), {
       contents: true,
       compaction: false,
+      appended: false,
     });
 
     const refused = await route(
@@ -307,15 +309,23 @@ describe("Chat routes", () => {
     const route = routeFixture({ subscribe });
     await collectFrames(
       route(
-        request(`/api/chat/threads/${threadId}/events?afterSequence=41&contents=1&compaction=1`),
+        request(
+          `/api/chat/threads/${threadId}/events?afterSequence=41&contents=1&compaction=1&appended=1`,
+        ),
       ),
     );
     expect(subscribe).toHaveBeenCalledWith(threadId, 41, expect.any(AbortSignal), {
       contents: true,
       compaction: true,
+      appended: true,
     });
 
-    for (const query of ["compaction=yes", "compaction=1&compaction=1", "compaction=1&other=1"]) {
+    for (const query of [
+      "compaction=yes",
+      "compaction=1&compaction=1",
+      "compaction=1&other=1",
+      "appended=yes",
+    ]) {
       const refused = await route(
         request(`/api/chat/threads/${threadId}/events?afterSequence=41&${query}`),
       );
