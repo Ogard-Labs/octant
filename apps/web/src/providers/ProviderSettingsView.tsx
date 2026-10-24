@@ -431,8 +431,9 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
   };
   // The settings shell already renders the pane's `.oct-title` and
   // `.oct-subtitle`; repeating an identity heading here read as three titles
-  // in a row, so the pane goes straight to content and keeps global knobs in
-  // a trailing Defaults group.
+  // in a row, so the pane goes straight to the person's providers and their
+  // Defaults. Finding more providers and Octant's own OpenCode copy follow:
+  // the OpenCode box used to open the page, above the providers it serves.
   return (
     <div className="provider-settings">
       <div aria-live="polite" className="provider-settings__message-slot">
@@ -452,19 +453,6 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           </OctantAlert>
         )}
       </div>
-      <OpenCodeManagedUpdate
-        instances={props.instances
-          .filter((instance) => instance.driverKind === "opencode")
-          .map((instance) => ({
-            id: instance.id,
-            displayName: instance.displayName,
-            binaryPath:
-              "binaryPath" in instance.configuration ? instance.configuration.binaryPath : "",
-          }))}
-        {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
-        onChangeBinary={props.onChangeBinary}
-      />
-      {props.discovery}
       <ProviderSettingsList
         busy={props.busy}
         onAddAccount={(source) => {
@@ -617,6 +605,19 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           </div>
         </div>
       </SettingsSection>
+      {props.discovery}
+      <OpenCodeManagedUpdate
+        instances={props.instances
+          .filter((instance) => instance.driverKind === "opencode")
+          .map((instance) => ({
+            id: instance.id,
+            displayName: instance.displayName,
+            binaryPath:
+              "binaryPath" in instance.configuration ? instance.configuration.binaryPath : "",
+          }))}
+        {...(props.hostBridge === undefined ? {} : { bridge: props.hostBridge })}
+        onChangeBinary={props.onChangeBinary}
+      />
     </div>
   );
 }

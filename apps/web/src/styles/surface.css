@@ -882,6 +882,17 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   opacity: 0.5;
 }
 
+/* At half strength the ground still ran through the question itself: Code
+   Home's question sits high on the page, outside where a centred clearing
+   would fall. A glow the width of a stroke in the page colour lifts the
+   letters off the ground without the wash's dark stain on the glass. */
+.shell--app-backdrop.shell--material-translucent.shell-frame
+  :is(.welcome__question, .welcome__status) {
+  text-shadow:
+    0 0 var(--oct-space-1) var(--octant-app-background),
+    0 0 var(--oct-space-3) var(--octant-app-background);
+}
+
 /* A conversation needs one quiet reading surface: separate reply cards over
    the dither made even short answers compete with the composer (0155). It is
    a veil rather than a wall: the ground stays faintly visible behind a thread
@@ -957,8 +968,10 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
 
 /* A destination page is cards and lines of text on the same clear sheet, and
    its letters ran crisp through both: "Describe with Octant" sat on a column
-   of glyphs. It is less dense than a transcript, so the ground keeps a little
-   more. Named after the thread rule, so a page opened over a thread wins. */
+   of glyphs. At a third of its strength the To review list still read as
+   names printed over a character ground (walk-through, October 2026), so a
+   page takes the thread's fifth. Named after the thread rule, so a page
+   opened over a thread wins. */
 .shell--app-backdrop.shell--material-translucent.shell-frame:has(
     .primary-workspace-layer
       > :is(
@@ -973,7 +986,7 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
       )
   )
   > .app-backdrop[data-placement="shell"] {
-  opacity: 0.35;
+  opacity: 0.2;
 }
 
 /* Where the pane meets the sheet's rounded corner, its veil rounds with it. */

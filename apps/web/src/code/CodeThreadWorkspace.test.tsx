@@ -3471,8 +3471,7 @@ describe("CodeThreadWorkspace", () => {
     );
   });
 
-  it("points the Code composer at image Settings when no image profile is ready", async () => {
-    const user = userEvent.setup();
+  it("offers no Create image in the Code composer until an image profile is ready", async () => {
     const onOpenImageSettings = vi.fn();
     render(
       <CodeThreadWorkspace
@@ -3484,13 +3483,9 @@ describe("CodeThreadWorkspace", () => {
         threadId={threadId}
       />,
     );
-    await user.click(
-      await screen.findByRole("button", {
-        name: "Create image unavailable. Open Settings to add an image profile.",
-      }),
-    );
-    expect(onOpenImageSettings).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("button", { name: "Create image" })).not.toBeInTheDocument();
+    await screen.findByRole("button", { name: "Add attachment" });
+    expect(screen.queryByRole("button", { name: /Create image/ })).not.toBeInTheDocument();
+    expect(onOpenImageSettings).not.toHaveBeenCalled();
   });
 
   it("offers no Create image when the host serves no image generation", async () => {
