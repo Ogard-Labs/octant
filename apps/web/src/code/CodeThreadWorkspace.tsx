@@ -244,6 +244,8 @@ export interface CodeThreadWorkspaceProps {
     title: string,
     projectId: CodeThread["projectId"],
   ) => void;
+  /** Starts a new Code thread in the same Project, such as when this one's provider session cannot be resumed. */
+  readonly onNewThreadInProject?: (projectId: CodeThread["projectId"]) => void;
   readonly serverUrl?: string;
   readonly windowCapability?: string;
   readonly messageQueueClient?: ThreadMessageQueueClient;
@@ -647,10 +649,18 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(turnAccessOverride === undefined ? {} : { requested: turnAccessOverride }),
   });
   const trimmed = draft.trim();
+  // A wait with no request to answer and no limit to show is a refused resume —
+  // the observed case is Mistral Vibe's "resume identity does not match this
+  // Project" — and the refused turn's operation has already ended.
+  const parkedTurn =
+    props.controller.turnStatus === "waiting" &&
+    props.controller.providerRequests.length === 0 &&
+    props.controller.turnUsageLimit === undefined &&
+    props.controller.turnError !== undefined;
   const busy =
     props.controller.turnStatus === "sending" ||
     props.controller.turnStatus === "running" ||
-    props.controller.turnStatus === "waiting";
+    (props.controller.turnStatus === "waiting" && !parkedTurn);
   const queueFollowUp =
     busy ||
     (messageQueue.snapshot?.items.length ?? 0) > 0 ||
@@ -1233,6 +1243,16 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
                   ? waitingTurnLabel(props.controller.providerRequests)
                   : `${waitingTurnLabel(props.controller.providerRequests)} · ${props.controller.providerAnswerRefusal}`}
             </span>
+            {parkedTurn && props.onNewThreadInProject !== undefined ? (
+              <OctantButton
+                onClick={() => props.onNewThreadInProject?.(thread.projectId)}
+                size="sm"
+                type="button"
+                variant="secondary"
+              >
+                New task in this Project
+              </OctantButton>
+            ) : null}
           </div>
         ) : (
           // A parked turn whose stop the provider's own signal called a usage

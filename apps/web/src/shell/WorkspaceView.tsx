@@ -1172,6 +1172,9 @@ function renderCodeTab(
         controller={codeController}
         holdAccessNotice={props.codeControllers.holdAccessNotice}
         onOpenCodeThread={props.onOpenCodeThread}
+        {...(props.onNewThreadInProject === undefined
+          ? {}
+          : { onNewThreadInProject: props.onNewThreadInProject })}
         {...(props.onPinTerminal === undefined ? {} : { onPinTerminal: props.onPinTerminal })}
         {...(props.onOpenSurface === undefined
           ? {}

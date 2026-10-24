@@ -173,6 +173,13 @@ export interface CodeWorkspaceProps {
     title: string,
     projectId: import("@octant/contracts/projects").ProjectId,
   ) => void;
+  /**
+   * Starts a new Code thread in the same Project — the recovery when the
+   * provider refuses to resume this thread's session.
+   */
+  readonly onNewThreadInProject?: (
+    projectId: import("@octant/contracts/projects").ProjectId,
+  ) => void;
   /** Reaches the host's `#thread` mention surface from the Code composer. */
   readonly serverUrl?: string;
   readonly windowCapability?: string;
@@ -239,6 +246,9 @@ export function CodeWorkspace(props: CodeWorkspaceProps) {
         {...(props.onOpenCodeThread === undefined
           ? {}
           : { onOpenCodeThread: props.onOpenCodeThread })}
+        {...(props.onNewThreadInProject === undefined
+          ? {}
+          : { onNewThreadInProject: props.onNewThreadInProject })}
         {...(props.approvals?.access === undefined
           ? {}
           : { requestFullAccessApproval: props.approvals.access })}
