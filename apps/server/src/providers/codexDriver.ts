@@ -74,6 +74,7 @@ import { CodexRpcClientFailure } from "./codexRpcClient";
 import { modelEvidenceFromObservedState } from "./providerContextFacts";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import { rateLimitWindowId } from "./rateLimitWindowIdentity";
+import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
 export interface CodexThreadStartInput {
   readonly cwd: string;
@@ -1440,7 +1441,17 @@ function makeConnection(
             register(input, thread, input.modelId);
             return {
               sessionId: input.sessionId,
-              resumeCursor: { driverKind: "codex" as const, value: thread.thread.id },
+              resumeCursor: {
+                driverKind: "codex" as const,
+                value: thread.thread.id,
+                binding: providerResumeBinding({
+                  instanceId: options.instanceId,
+                  sessionId: input.sessionId,
+                  projectRoot,
+                  mode,
+                  modelId: input.modelId,
+                }),
+              },
             };
           }),
         ),
@@ -1448,6 +1459,22 @@ function makeConnection(
         if (input.resumeCursor.driverKind !== "codex") {
           return Effect.fail(
             failure("stale-resume", "Provider resume cursor does not belong to Codex."),
+          );
+        }
+        // The thread id alone names no Octant session, folder, or mode; the
+        // binding recorded at start does, so a cursor carried anywhere else is
+        // refused before the app-server is asked. Codex carries a thread onto
+        // another model, so the model is not part of the check.
+        if (
+          resumeBindingRefuses(input.resumeCursor, {
+            instanceId: options.instanceId,
+            sessionId: input.sessionId,
+            projectRoot,
+            mode,
+          })
+        ) {
+          return Effect.fail(
+            failure("stale-resume", "The saved Codex thread belongs to another task or Project."),
           );
         }
         return withPendingLifecycle(() =>

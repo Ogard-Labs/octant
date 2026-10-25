@@ -1136,6 +1136,21 @@ describe("Pi provider driver", () => {
         }),
       ),
     ).rejects.toThrow(/stale-resume/);
+    // A Pi session keeps the model it was opened with.
+    await expect(
+      Effect.runPromise(
+        connection.resume({
+          sessionId,
+          modelId: "openai/gpt-5" as ProviderModelId,
+          resumeCursor: {
+            driverKind: "pi",
+            value: sessionId,
+            binding: { instanceId, sessionId, projectRoot: root, mode: "code", modelId },
+          },
+          executionPolicy: "approval-gated",
+        }),
+      ),
+    ).rejects.toThrow(/stale-resume/);
     await Effect.runPromise(connection.start({ sessionId, modelId, executionPolicy: "plan" }));
     client.emit({
       type: "extension_ui_request",

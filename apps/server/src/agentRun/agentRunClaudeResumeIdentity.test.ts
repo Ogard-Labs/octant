@@ -421,7 +421,17 @@ it("the actual Claude adapter resumes its exact session after the driver and SQL
         executionPolicy: "plan",
       }),
     );
-    expect(started.resumeCursor).toEqual({ driverKind: "claude", value: identity.sdkSessionId });
+    expect(started.resumeCursor).toEqual({
+      driverKind: "claude",
+      value: identity.sdkSessionId,
+      binding: {
+        instanceId: identity.providerInstanceId,
+        sessionId,
+        projectRoot: identity.projectRoot,
+        mode: "chat",
+        modelId: identity.modelId,
+      },
+    });
     expect(first.store.readProviderIdentity(run)?.value).toBe(JSON.stringify(identity));
     // This mirrors the runtime's cursor write only; identity was written above
     // by the actual adapter through its existing port.

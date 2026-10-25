@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   decodeProviderInstanceId,
+  decodeProviderModelId,
   decodeProviderSessionId,
   type ProviderExecutionPolicy,
   type ProviderRuntimeEvent,
@@ -1116,7 +1117,11 @@ describe("Codex thread and turn lifecycle", () => {
     const f = fixture();
     const acquired = await acquireConnection(makeCodexDriver(f.options()));
     const handle = await startSession(acquired.connection);
-    expect(handle.resumeCursor).toEqual({ driverKind: "codex", value: "thread-1" });
+    expect(handle.resumeCursor).toEqual({
+      driverKind: "codex",
+      value: "thread-1",
+      binding: { instanceId, sessionId, projectRoot, mode: "code", modelId: "gpt-5.4" },
+    });
     expect(f.calls.find(({ method }) => method === "thread/start")?.input).toMatchObject({
       cwd: projectRoot,
       model: "gpt-5.4",
@@ -1661,6 +1666,54 @@ describe("Codex thread and turn lifecycle", () => {
       expect(String(exit)).toMatch(/stale-resume|unauthorized/);
       expect(String(exit)).not.toContain("private provider detail");
     }
+    await acquired.close();
+  });
+
+  it("refuses to resume a thread recorded for another task, folder, mode, or provider before asking Codex", async () => {
+    const f = fixture();
+    const acquired = await acquireConnection(makeCodexDriver(f.options()), "work");
+    const binding = {
+      instanceId,
+      sessionId,
+      projectRoot,
+      mode: "work" as const,
+      modelId: decodeProviderModelId("gpt-5.4"),
+    };
+    for (const mismatch of [
+      { sessionId: secondSessionId },
+      { projectRoot: "/tmp/octant-codex-other" },
+      { mode: "code" as const },
+      { instanceId: decodeProviderInstanceId("80000000-0000-4000-8000-000000000069") },
+    ]) {
+      const exit = await Effect.runPromise(
+        Effect.exit(
+          acquired.connection.resume({
+            sessionId,
+            resumeCursor: {
+              driverKind: "codex",
+              value: "thread-existing",
+              binding: { ...binding, ...mismatch },
+            },
+            executionPolicy: "plan",
+          }),
+        ),
+      );
+      expect(String(exit)).toContain("stale-resume");
+    }
+    expect(f.calls.some(({ method }) => method === "thread/resume")).toBe(false);
+    // Codex carries a thread onto another model, so the recorded one does not refuse it.
+    const resumed = await Effect.runPromise(
+      acquired.connection.resume({
+        sessionId,
+        resumeCursor: {
+          driverKind: "codex",
+          value: "thread-existing",
+          binding: { ...binding, modelId: decodeProviderModelId("gpt-5.3") },
+        },
+        executionPolicy: "plan",
+      }),
+    );
+    expect(resumed.resumeCursor?.binding?.sessionId).toBe(sessionId);
     await acquired.close();
   });
 

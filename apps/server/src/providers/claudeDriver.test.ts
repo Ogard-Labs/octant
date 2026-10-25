@@ -3528,11 +3528,16 @@ describe("Claude session lifecycle", () => {
     // The two opens race, so each session is matched to the query it opened.
     const cursorFor = (policy: string) =>
       `sdk-session-${f.opens.findIndex((open) => open.executionPolicy === policy) + 1}`;
-    expect(first.resumeCursor).toEqual({
+    expect(first.resumeCursor).toMatchObject({
       driverKind: "claude",
       value: cursorFor("approval-gated"),
+      binding: { sessionId },
     });
-    expect(second.resumeCursor).toEqual({ driverKind: "claude", value: cursorFor("plan") });
+    expect(second.resumeCursor).toMatchObject({
+      driverKind: "claude",
+      value: cursorFor("plan"),
+      binding: { sessionId: otherSessionId },
+    });
     expect(f.opens).toHaveLength(2);
     expect(
       f.opens.map(({ projectRoot: root, model, executionPolicy }) => ({
@@ -4202,7 +4207,11 @@ describe("Claude exact resume", () => {
         executionPolicy: "plan",
       }),
     );
-    expect(resumed.resumeCursor).toEqual({ driverKind: "claude", value: "sdk-session-1" });
+    expect(resumed.resumeCursor).toEqual({
+      driverKind: "claude",
+      value: "sdk-session-1",
+      binding: { instanceId, sessionId, projectRoot, mode: "code", modelId },
+    });
     expect(f.sdk.findSession).toHaveBeenCalledWith({
       sessionId: "sdk-session-1",
       projectRoot,
@@ -4234,6 +4243,33 @@ describe("Claude exact resume", () => {
     );
     expect(JSON.stringify([...f.resumeIdentities.values()])).not.toContain("secret");
     await recreated.close();
+  });
+
+  it("refuses to reopen a session recorded for another mode before looking up its identity", async () => {
+    const f = harness();
+    const work = await acquire(f.driver, "work");
+    const started = await Effect.runPromise(
+      work.connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    await Effect.runPromise(work.connection.stop(sessionId));
+    await work.close();
+    expect(started.resumeCursor?.binding?.mode).toBe("work");
+    const code = await acquire(f.driver, "code");
+
+    const exit = await Effect.runPromise(
+      Effect.exit(
+        code.connection.resume({
+          sessionId,
+          resumeCursor: started.resumeCursor!,
+          executionPolicy: "approval-gated",
+        }),
+      ),
+    );
+
+    expect(String(exit)).toContain("stale-resume");
+    expect(f.resumeIdentityPort.lookup).not.toHaveBeenCalled();
+    expect(f.opens).toHaveLength(1);
+    await code.close();
   });
 
   it("resumes a session on the model its thread was switched to and records that model", async () => {

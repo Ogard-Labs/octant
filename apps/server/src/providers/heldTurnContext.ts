@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import type {
   ProviderContextBlock,
   ProviderRuntimeEvent,
@@ -21,8 +23,88 @@ interface SessionHold {
   readonly restates?: boolean;
 }
 
+/** One session's held digests, as a store keeps them. */
+export interface HeldSessionRecord {
+  readonly sessionId: string;
+  readonly held: ReadonlyArray<string>;
+}
+
+/** Where the record is kept between server runs. */
+export interface HeldTurnContextStore {
+  readonly load: () => ReadonlyArray<HeldSessionRecord>;
+  readonly save: (records: ReadonlyArray<HeldSessionRecord>) => void;
+}
+
+/** Sessions kept across a restart; the most recently changed survive. */
+const MAX_STORED_SESSIONS = 256;
+/** A standing context of more blocks than this is sent again after a restart. */
+const MAX_STORED_DIGESTS = 64;
+const STORE_VERSION = 1;
+const DIGEST = /^[0-9a-f]{64}$/;
+
 function blockDigest(block: ProviderContextBlock): string {
   return createHash("sha256").update(block.kind).update("\u0000").update(block.text).digest("hex");
+}
+
+/**
+ * The record kept in Octant's host data directory, so the first turn on a
+ * resumed session after a restart sends only what is new, as every later turn
+ * does. The file holds provider session ids and SHA-256 digests of standing
+ * blocks, never their text, and only its owner may read it. It is a
+ * rebuildable view: a missing, unreadable, or malformed file holds nothing,
+ * which costs one copy of the standing context, never a missing one.
+ *
+ * Writes are synchronous and replace the file whole. A record that dropped a
+ * session's holdings (a compaction) has to reach the disk before the next turn
+ * is sent, or a restart could leave out context the runtime no longer has.
+ */
+export class HeldTurnContextFile implements HeldTurnContextStore {
+  readonly #filePath: string;
+
+  constructor(filePath: string) {
+    this.#filePath = filePath;
+  }
+
+  load(): ReadonlyArray<HeldSessionRecord> {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(this.#filePath, "utf8"));
+    } catch {
+      return [];
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
+    const file = parsed as { readonly version?: unknown; readonly sessions?: unknown };
+    if (file.version !== STORE_VERSION || !Array.isArray(file.sessions)) return [];
+    return file.sessions.slice(0, MAX_STORED_SESSIONS).flatMap((candidate: unknown) => {
+      if (typeof candidate !== "object" || candidate === null) return [];
+      const entry = candidate as { readonly sessionId?: unknown; readonly held?: unknown };
+      if (typeof entry.sessionId !== "string" || entry.sessionId.length === 0) return [];
+      if (!Array.isArray(entry.held) || entry.held.length > MAX_STORED_DIGESTS) return [];
+      const held = entry.held.filter(
+        (digest: unknown): digest is string => typeof digest === "string" && DIGEST.test(digest),
+      );
+      return held.length > 0 && held.length === entry.held.length
+        ? [{ sessionId: entry.sessionId, held }]
+        : [];
+    });
+  }
+
+  save(records: ReadonlyArray<HeldSessionRecord>): void {
+    try {
+      mkdirSync(dirname(this.#filePath), { recursive: true });
+      // A new temporary file on every write is what lets the owner-only mode apply.
+      const temporary = `${this.#filePath}.tmp`;
+      writeFileSync(
+        temporary,
+        JSON.stringify({ version: STORE_VERSION, sessions: records.slice(0, MAX_STORED_SESSIONS) }),
+        { encoding: "utf8", mode: 0o600 },
+      );
+      renameSync(temporary, this.#filePath);
+    } catch {
+      // A record that could not be written is one the next run does not
+      // find: it sends the standing context again.
+    }
+  }
 }
 
 /**
@@ -37,9 +119,10 @@ function blockDigest(block: ProviderContextBlock): string {
  * retention (ACP agents) never reports a compaction either, so a dropped copy
  * there would never be sent again. A session started afresh holds nothing,
  * and a compaction, automatic or requested, drops everything, because the
- * runtime keeps only a share of earlier prompts that Octant cannot see. The record lives in memory
- * for the life of the server, so the first turn after a restart sends the
- * standing context once more; that costs one copy, never a missing one.
+ * runtime keeps only a share of earlier prompts that Octant cannot see. With a
+ * store attached the record outlives the server process, as the runtime's own
+ * history does; without one, the first turn after a restart sends the
+ * standing context once more, which costs one copy, never a missing one.
  *
  * It is keyed by Octant's provider session id, which a continued Chat, Work, or
  * Code session keeps across turns. Only a caller whose driver owns the
@@ -48,6 +131,19 @@ function blockDigest(block: ProviderContextBlock): string {
  */
 export class HeldTurnContext {
   readonly #sessions = new Map<string, SessionHold>();
+  #store: HeldTurnContextStore | undefined;
+
+  /**
+   * Keeps the record in `store` from now on, starting from what it holds.
+   * A session this process already follows keeps its own record.
+   */
+  persistTo(store: HeldTurnContextStore): void {
+    this.#store = store;
+    for (const record of [...store.load()].reverse()) {
+      if (this.#sessions.has(record.sessionId)) continue;
+      this.#sessions.set(record.sessionId, { held: new Set(record.held) });
+    }
+  }
 
   /**
    * What this turn sends. `resumed` is whether the turn runs on a native
@@ -60,17 +156,19 @@ export class HeldTurnContext {
   }): ProviderTurnContextDelta {
     const key = String(input.sessionId);
     const context = input.context ?? [];
-    const held = (input.resumed ? this.#sessions.get(key)?.held : undefined) ?? new Set<string>();
+    const previous = this.#sessions.get(key)?.held;
+    const held = (input.resumed ? previous : undefined) ?? new Set<string>();
     const delta = providerTurnContextDelta({
       context,
       holds: (block) => held.has(blockDigest(block)),
       heldCount: held.size,
     });
-    this.#sessions.set(key, {
+    this.#touch(key, {
       held,
       sending: new Set(context.filter(isStandingProviderContext).map(blockDigest)),
       restates: delta.kind === "restated",
     });
+    if (previous !== undefined && previous.size > 0 && held !== previous) this.#persist();
     return delta;
   }
 
@@ -84,12 +182,15 @@ export class HeldTurnContext {
       (event.kind === "usage" && event.promptRetention === "compacted")
     ) {
       this.#sessions.delete(key);
+      if (session.held.size > 0) this.#persist();
       return;
     }
     if (event.kind === "usage" && event.promptRetention === "kept") {
       if (session.sending !== undefined) this.#sessions.set(key, { ...session, keeps: true });
     } else if (event.kind === "completed" && session.sending !== undefined) {
-      this.#sessions.set(key, { held: session.keeps === true ? session.sending : session.held });
+      const held = session.keeps === true ? session.sending : session.held;
+      this.#touch(key, { held });
+      if (!sameDigests(session.held, held)) this.#persist();
     } else if (event.kind === "failed" || event.kind === "interrupted") {
       // A failed restatement may still be in the runtime's history (Claude
       // reports usage before its failed result), where it supersedes blocks the
@@ -100,8 +201,35 @@ export class HeldTurnContext {
 
   /** The session's window changed in a way Octant cannot follow. */
   forget(sessionId: ProviderSessionId): void {
-    this.#sessions.delete(String(sessionId));
+    const key = String(sessionId);
+    const held = this.#sessions.get(key)?.held;
+    this.#sessions.delete(key);
+    if (held !== undefined && held.size > 0) this.#persist();
   }
+
+  /** Records a session's holding as its most recent change. */
+  #touch(key: string, session: SessionHold): void {
+    this.#sessions.delete(key);
+    this.#sessions.set(key, session);
+  }
+
+  /** Writes every session that holds anything, most recently changed first. */
+  #persist(): void {
+    if (this.#store === undefined) return;
+    const records: HeldSessionRecord[] = [];
+    for (const [sessionId, session] of [...this.#sessions].reverse()) {
+      if (session.held.size === 0 || session.held.size > MAX_STORED_DIGESTS) continue;
+      records.push({ sessionId, held: [...session.held] });
+      if (records.length === MAX_STORED_SESSIONS) break;
+    }
+    this.#store.save(records);
+  }
+}
+
+function sameDigests(left: ReadonlySet<string>, right: ReadonlySet<string>): boolean {
+  if (left.size !== right.size) return false;
+  for (const digest of left) if (!right.has(digest)) return false;
+  return true;
 }
 
 /** One record per server process, shared by every surface that runs provider turns. */
