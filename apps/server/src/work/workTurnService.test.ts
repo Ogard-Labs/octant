@@ -2860,6 +2860,67 @@ describe("WorkTurnService", () => {
     },
   );
 
+  it.each([
+    ["completed", true],
+    ["cancelled", true],
+    ["failed", false],
+  ] as const)(
+    "continues a host-resumable Work session after a %s turn only when it ended cleanly or was cancelled",
+    async (ending, continues) => {
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        input.onSessionReady?.({
+          sessionId: input.providerSessionId,
+          resumeCursor: {
+            driverKind: "openai-compatible" as const,
+            value: String(input.providerSessionId),
+          },
+        });
+        if (run.mock.calls.length === 1 && ending === "cancelled") {
+          return { kind: "cancelled" as const };
+        }
+        if (run.mock.calls.length === 1 && ending === "failed") {
+          return {
+            kind: "failed" as const,
+            failure: { category: "unavailable" as const, message: "The endpoint stopped." },
+          };
+        }
+        return { kind: "completed" as const, response: "Earlier harness reply" };
+      });
+      const fixture = serviceFixture({
+        turnRuntime: { run },
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          conversationOwnership: "host-resumable",
+        }),
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      await fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+        turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+        prompt: "Continue",
+      });
+      await fixture.waitForIdle();
+      const first = run.mock.calls[0]?.[0];
+      const second = run.mock.calls[1]?.[0];
+      if (continues) {
+        expect(second).toMatchObject({
+          providerSessionId: first?.providerSessionId,
+          resumeCursor: {
+            driverKind: "openai-compatible",
+            value: String(first?.providerSessionId),
+          },
+        });
+        expect(JSON.stringify(second?.context)).not.toContain("Summarize the brief");
+      } else {
+        expect(second?.providerSessionId).not.toBe(first?.providerSessionId);
+        expect(second?.resumeCursor).toBeUndefined();
+        expect(JSON.stringify(second?.context)).toContain("Summarize the brief");
+      }
+    },
+  );
+
   it.each([true, false])(
     "keeps a native Work conversation after a switch to another model of the same provider only when it can: %s",
     async (canSwitch) => {

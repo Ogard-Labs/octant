@@ -3757,23 +3757,30 @@ export class ChatService {
     const driver = routed.driver;
     const probe = routed.probe;
     const nativeConversation = driver.conversationOwnership === "provider";
+    // Only a new message continues a host-resumable session; a retry, resume,
+    // or edit is planned on the host as before.
+    const resumableHost =
+      driver.conversationOwnership === "host-resumable" &&
+      extensionPhase === "send" &&
+      historyTurns === undefined;
     const threadView = this.#persistence.readChatThreadView(thread.id);
     const previousTurn = threadView?.turns.at(-1);
     const previous = previousTurn?.attempts.at(-1);
     const sessionDecision = decideConversationSession({
       recipient: {
         providerInstanceId: String(thread.providerInstanceId),
-        owner: nativeConversation ? "runtime" : "host",
+        owner: nativeConversation ? "runtime" : resumableHost ? "host-resumable" : "host",
       },
       ...(previous === undefined
         ? {}
         : {
             previous: {
               providerInstanceId: String(previous.providerInstanceId),
-              continuable:
-                previous.resumeCursor !== undefined &&
-                (previous.modelId === thread.modelId ||
-                  probe.capabilities.modelSwitch === "supported"),
+              continuable: resumableHost
+                ? this.#hostResumableSessionContinues(thread, previous)
+                : previous.resumeCursor !== undefined &&
+                  (previous.modelId === thread.modelId ||
+                    probe.capabilities.modelSwitch === "supported"),
               // The session cursor is recorded when the session starts, before
               // the provider is sent anything, so an attempt that carried a
               // handoff and did not complete may never have delivered it.
@@ -3908,15 +3915,18 @@ export class ChatService {
       providerFacts.modelLimitObservations,
       providerFacts.serviceLimits,
       researchRoute,
-      nativeConversation ? [] : historyTurns,
+      // A continued session already holds the conversation; sending it
+      // again would duplicate every earlier message inside the session.
+      nativeConversation || sessionDecision.kind === "continue-session" ? [] : historyTurns,
       sideChatSourceContext,
       threadMentionContexts,
       handoff?.blocks,
       offersCanvasTool(tools?.definitions),
     );
-    const maintained = nativeConversation
-      ? context
-      : await this.#compactDroppedConversation(thread, context, driver, providerInstanceId);
+    const maintained =
+      nativeConversation || sessionDecision.kind === "continue-session"
+        ? context
+        : await this.#compactDroppedConversation(thread, context, driver, providerInstanceId);
     return {
       executionThread: thread,
       ...(nativeSession === undefined ? {} : { nativeSession }),
@@ -3928,6 +3938,29 @@ export class ChatService {
       ...(tools === undefined ? {} : { appManagedTools: tools }),
       extensionSelections: resolvedExtensions.selections,
     };
+  }
+
+  /**
+   * Whether a new message may continue the previous attempt's harness session
+   * instead of rebuilding the history. The session is taken up only as it
+   * stands: on the model it was opened with (a resume keeps the session's own
+   * model), after an attempt that ended cleanly or was cancelled or cut off
+   * (the harness closes any open step on resume), and only while no host
+   * compaction has summarized the conversation since, because the session
+   * would never read that summary. Anything else is rebuilt on the host.
+   */
+  #hostResumableSessionContinues(thread: ChatThread, previous: ChatAttempt): boolean {
+    return (
+      previous.resumeCursor !== undefined &&
+      previous.modelId === thread.modelId &&
+      (previous.outcome === "completed" ||
+        previous.outcome === "cancelled" ||
+        previous.outcome === "interrupted") &&
+      !this.#contextHarness.hostCompactedSince(
+        decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: String(thread.id) }),
+        previous.updatedAt,
+      )
+    );
   }
 
   /**

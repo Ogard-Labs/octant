@@ -3231,7 +3231,7 @@ action.
 
 | Thread                                                   | Who compacts             | How                                                                                                                                                                                                                                                                                                                                                                                                                                    | Refuses with                                                  |
 | -------------------------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Chat or Work on a direct endpoint (host-planned history) | Host                     | `ContextHarnessService` summarizes the planned conversation before the tail through the existing summary generator (`makeContextSummaryGenerator`, a one-shot session on the thread's provider and model), then commits it as `maintainContext` does today.                                                                                                                                                                            | `nothing-to-compact`                                          |
+| Chat or Work on a direct endpoint (host-planned history) | Host                     | `ContextHarnessService` summarizes the planned conversation before the tail through the existing summary generator (`makeContextSummaryGenerator`, a one-shot session on the thread's provider and model), then commits it as `maintainContext` does today. The next message rebuilds a fresh harness session from the compacted plan rather than continuing the old one.                                                              | `nothing-to-compact`                                          |
 | Code on Octant Harness (journaled transcript)            | Octant Harness           | The harness connection's `compact` summarizes the transcript turns before the tail with the same endpoint and journals a `compacted` transcript event; later requests are built from the summary and the tail.                                                                                                                                                                                                                         | `nothing-to-compact`, `no-session`                            |
 | Codex app-server, any mode                               | Codex                    | `thread/compact/start` with the thread id (codex-cli 0.159.3 and 0.162.1 app-server schemas); the run is observed as a turn carrying the `contextCompaction` item.                                                                                                                                                                                                                                                                     | `runtime-version-unsupported` when the method is not found    |
 | Claude Code, any mode                                    | Claude Code              | The runtime's own `/compact`, sent by the port as a user-role input that carries no tools and is not counted as a turn; observed as `system`/`compact_boundary` (`compact_metadata.trigger: "manual"`, `pre_tokens`) and the `status` message's `compact_result`. A resumed session sends its `compacting` status and a `rate_limit_event` before it initializes; the port holds both and delivers them after the initialized message. | `runtime-version-unsupported` when `compact` is not announced |
@@ -3464,8 +3464,9 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   compaction supersedes an earlier one. A fork copies the latest compaction
   made before the turn it was forked at, rewritten for the fork's folder and
   secrets like the messages, so the fork reads what its source read then. Only
-  a Code connection offers `compact`: Chat and Work send the host's planned
-  history.
+  a Code connection offers `compact`: the host compacts a Chat or Work
+  thread's planned history, and the next message after that compaction
+  rebuilds a fresh session from it instead of continuing the old one.
 - The thread's timeline shows a compaction divider from the completed event.
   Everything above it stays visible, searchable and exported. The compaction
   state read carries every completed receipt, oldest first
@@ -3863,8 +3864,22 @@ depends only on the provider it is sent to, decided by the pure
 `decideConversationSession` policy: a provider whose history the host holds
 (`providerKeepsConversation` false) is sent the history again every turn, from
 whatever provider wrote it, so moving to one needs nothing handed over and no
-longer refuses when the previous provider kept a session or is gone. A
-provider that keeps its conversation in a session of its own continues that
+longer refuses when the previous provider kept a session or is gone. Octant
+Harness on a direct endpoint is host-owned in this sense but keeps every
+session durably (`conversationOwnership: "host-resumable"`), so a new message
+continues the previous attempt's session and sends only itself: the same
+session id, which is the endpoint's prompt cache key, and the lead's own
+messages, tool calls and results. It continues only the same provider instance
+and model (in Work also the same folder binding), after a turn that completed,
+was cancelled, or was cut off by a restart, with a recorded resume cursor, and
+with no host compaction completed since that turn, because the session would
+never read the summary. Anything else (the first turn, a failed or parked
+turn, a retry, an edit, a branch, another provider or model) rebuilds the
+history on the host in a fresh session, as before, and the next message
+continues that one. Resuming never widens a thread: the harness refuses a
+transcript opened for another endpoint, folder, or mode as `stale-resume`, and
+each turn offers only the tools its own mode allows, so a Chat thread gains no
+tools by continuing. A provider that keeps its conversation in a session of its own continues that
 session only when it is the same provider instance with a recorded resume
 cursor (and, for another model, the `modelSwitch` capability; in Work also the
 same folder binding). Any other provider instance starts a new session with a
@@ -4062,9 +4077,10 @@ native harness in `apps/server/src/harness`:
   work, and the journal keeps the full conversation for people, replay, and
   export. A journal lookup tool was specified once but never wired to a store,
   so it only ever reported itself unavailable and was removed; the note names
-  no turn or sequence the model could ask for, and Chat and Work start a fresh
-  session each turn, so a lookup needs those handles and a thread-scoped read
-  of the rebuilt history before it can return. When the endpoint still rejects a request as too large,
+  no turn or sequence the model could ask for. Chat and Work now continue one
+  session across turns, so a lookup has a stable handle there too, the session
+  id and the transcript's turn count, but still needs a thread-scoped read of
+  the cut exchange before it can return. When the endpoint still rejects a request as too large,
   the loop recognises the refusal as a filled context window (OpenAI's
   `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
   413 shape from an OpenAI-compatible host), shrinks it one further ladder
@@ -4100,9 +4116,13 @@ native harness in `apps/server/src/harness`:
   Opening an endpoint belongs to the pending start or resume: if that operation
   is cancelled or its connection closes before opening finishes, the late
   endpoint is released without admitting a session or changing its transcript.
-  It cannot restore an active-session count after cleanup. Chat and Work still
-  rebuild their history on the host and
-  start a fresh session each turn.
+  It cannot restore an active-session count after cleanup. Chat and Work
+  continue the same way: a new message resumes the previous turn's session
+  from its cursor, whether the process restarted in between or the turn was
+  cancelled (each Chat or Work turn stops its live session when it ends, and
+  the next one resumes it from the journal), and the host rebuilds the history
+  in a fresh session only when the session cannot be taken up as it stands
+  (see "Chat and Work handoff").
 - **Forks.** A Code fork on a harness model starts its first session from a
   copy of the source's transcript through the fork point
   (`seedCodeForkHarnessSession`), resumed like any other: the lead keeps its

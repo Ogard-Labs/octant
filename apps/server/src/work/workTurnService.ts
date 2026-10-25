@@ -854,11 +854,12 @@ export class WorkTurnService {
     }
     const acceptedAt = decodeTimestamp(this.#clock());
     const nativeConversation = driver.conversationOwnership === "provider";
+    const resumableHost = driver.conversationOwnership === "host-resumable";
     const previous = this.#projection.latestForThread(command.threadId);
     const sessionDecision = decideConversationSession({
       recipient: {
         providerInstanceId: String(command.authority.providerInstanceId),
-        owner: nativeConversation ? "runtime" : "host",
+        owner: nativeConversation ? "runtime" : resumableHost ? "host-resumable" : "host",
       },
       ...(previous === undefined
         ? {}
@@ -868,8 +869,25 @@ export class WorkTurnService {
               continuable:
                 previous.providerSessionId !== undefined &&
                 previous.resumeCursor !== undefined &&
-                (previous.authority.modelId === command.authority.modelId ||
-                  this.#supportsModelSwitch?.(command.authority.providerInstanceId) === true) &&
+                (resumableHost
+                  ? // A harness session resumes on the model it was opened
+                    // with, and is taken up only as it stands: after a turn
+                    // that ended cleanly, was cancelled, or was cut off by a
+                    // restart, and before any host compaction it would not read.
+                    previous.authority.modelId === command.authority.modelId &&
+                    (previous.status === "completed" ||
+                      previous.status === "cancelled" ||
+                      (previous.status === "failed" &&
+                        previous.failure?.category === "interrupted")) &&
+                    this.#contextHarness?.hostCompactedSince(
+                      decodeContextSubjectRef({
+                        aggregateType: "work-thread",
+                        aggregateId: String(command.threadId),
+                      }),
+                      previous.updatedAt,
+                    ) !== true
+                  : previous.authority.modelId === command.authority.modelId ||
+                    this.#supportsModelSwitch?.(command.authority.providerInstanceId) === true) &&
                 previous.authority.bindingRevisionId === command.authority.bindingRevisionId &&
                 previous.authority.workingDirectory === command.authority.workingDirectory,
               // The session cursor is recorded when the session starts, before
@@ -966,7 +984,10 @@ export class WorkTurnService {
           }),
         ),
         ...(await this.#projectBriefContributions(project, command.threadId)),
-        ...(nativeConversation ? [] : this.#priorTranscriptContributions(command.threadId)),
+        // A continued session already holds the earlier turns.
+        ...(nativeConversation || continuing !== undefined
+          ? []
+          : this.#priorTranscriptContributions(command.threadId)),
         ...(handoff === undefined
           ? []
           : handoff.blocks.map(
@@ -1515,7 +1536,8 @@ export class WorkTurnService {
           : { outsideContentMarks: this.#outsideContentMarks }),
         ...(input.access === undefined ? {} : { access: input.access }),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
-        ...(input.driver.conversationOwnership !== "provider"
+        ...(input.driver.conversationOwnership !== "provider" &&
+        input.driver.conversationOwnership !== "host-resumable"
           ? {}
           : {
               onSessionReady: (handle: ProviderSessionHandle) => {

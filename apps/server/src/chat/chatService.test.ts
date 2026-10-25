@@ -217,6 +217,8 @@ function withProbe(
 function openFixture(options?: {
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly nativeConversation?: boolean;
+  /** The provider keeps durable sessions the host can always rebuild, as Octant Harness does. */
+  readonly resumableHostConversation?: boolean;
   /** Which provider instances keep their conversation in a session of their own; overrides `nativeConversation`. */
   readonly nativeConversationFor?: (providerInstanceId: string) => boolean;
   readonly driver?: ProviderDriver;
@@ -600,7 +602,11 @@ function openFixture(options?: {
     withProbe(
       options?.driver ??
         ({
-          ...(native ? { conversationOwnership: "provider" } : {}),
+          ...(native
+            ? { conversationOwnership: "provider" }
+            : options?.resumableHostConversation === true
+              ? { conversationOwnership: "host-resumable" }
+              : {}),
           acquire: (input: ProviderAcquireInput) => {
             acquireInputs.push(input);
             return Effect.succeed(connectionDriver);
@@ -4520,6 +4526,94 @@ describe("ChatService", () => {
       ),
     ).toBe(false);
     expect(service.read(created.thread.id).turns[0]).toEqual(first.turns[0]);
+  });
+
+  describe("a provider whose sessions the host can rebuild", () => {
+    const historyIn = (
+      turn: { readonly context?: ReadonlyArray<{ readonly kind: string }> } | undefined,
+    ) =>
+      turn?.context?.some(
+        (block) => block.kind === "user-message" || block.kind === "assistant-message",
+      ) === true;
+
+    async function twoTurns(
+      outcome: (turnIndex: number) => "completed" | "interrupted" | "failed",
+    ) {
+      const fixture = openFixture({ resumableHostConversation: true, turnOutcome: outcome });
+      const created = await fixture.service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Harness continuity",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread.");
+      await fixture.service
+        .execute({
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Remember this conversation",
+        })
+        .catch(() => undefined);
+      const first = fixture.service.read(created.thread.id);
+      await fixture.service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: first.thread.version,
+        prompt: "Continue",
+      });
+      return { ...fixture, threadId: created.thread.id, first };
+    }
+
+    it("continues the session on the next message instead of resending its history", async () => {
+      const { fakeDriver, first } = await twoTurns(() => "completed");
+      const attempt = first.turns[0]?.attempts[0];
+      expect(fakeDriver.startedSessionIds).toHaveLength(1);
+      expect(fakeDriver.resumeInputs).toEqual([
+        expect.objectContaining({
+          sessionId: attempt?.providerSessionId,
+          resumeCursor: attempt?.resumeCursor,
+        }),
+      ]);
+      expect(fakeDriver.sentTurns[1]?.sessionId).toBe(fakeDriver.sentTurns[0]?.sessionId);
+      expect(historyIn(fakeDriver.sentTurns[1])).toBe(false);
+    });
+
+    it("continues the session after a turn that was cut off", async () => {
+      const { fakeDriver } = await twoTurns((turnIndex) =>
+        turnIndex === 0 ? "interrupted" : "completed",
+      );
+      expect(fakeDriver.startedSessionIds).toHaveLength(1);
+      expect(fakeDriver.resumeInputs).toHaveLength(1);
+      expect(fakeDriver.sentTurns[1]?.sessionId).toBe(fakeDriver.sentTurns[0]?.sessionId);
+    });
+
+    it("rebuilds the history in a fresh session after a turn that failed", async () => {
+      const { fakeDriver } = await twoTurns((turnIndex) =>
+        turnIndex === 0 ? "failed" : "completed",
+      );
+      expect(fakeDriver.startedSessionIds).toHaveLength(2);
+      expect(fakeDriver.resumeInputs).toEqual([]);
+      expect(fakeDriver.sentTurns[1]?.sessionId).not.toBe(fakeDriver.sentTurns[0]?.sessionId);
+    });
+
+    it("retries a turn in a fresh session with the history rebuilt on the host", async () => {
+      const { service, fakeDriver, threadId } = await twoTurns(() => "completed");
+      const view = service.read(threadId);
+      const turn = view.turns[1];
+      const attempt = turn?.attempts[0];
+      if (turn === undefined || attempt === undefined) throw new Error("Expected attempt.");
+      await service.execute({
+        kind: "retry-chat-turn",
+        threadId,
+        expectedVersion: view.thread.version,
+        turnId: turn.id,
+        attemptId: attempt.id,
+      });
+      expect(fakeDriver.startedSessionIds).toHaveLength(2);
+      expect(fakeDriver.resumeInputs).toHaveLength(1);
+      expect(fakeDriver.sentTurns[2]?.sessionId).not.toBe(fakeDriver.sentTurns[0]?.sessionId);
+      expect(historyIn(fakeDriver.sentTurns[2])).toBe(true);
+    });
   });
 
   it.each([true, false])(
