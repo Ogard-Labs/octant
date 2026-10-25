@@ -104,9 +104,10 @@ the page never infers them from what a picker can mention.
 - **Compaction** is **By Octant** when Octant plans the conversation from the
   thread, **By the runtime** when **Compact session** asks the runtime to
   summarize the session it keeps, **Needs a newer version** when this install
-  is too old for the request, or **Not available** when the runtime keeps its
-  own history and takes no compaction request (the ACP agents), so Octant can
-  neither see what it keeps nor compact it.
+  is too old for the request, **Not available** when the runtime keeps its own
+  history and Octant has no compaction request for it (the ACP agents), so
+  Octant can neither see what it keeps nor compact it, or **Not confirmed**
+  while the runtime is not ready to say.
 
 | Runtime                                               | Transport for Octant tools                                     |
 | ----------------------------------------------------- | -------------------------------------------------------------- |

@@ -174,7 +174,7 @@ describe("provider runtime integration facts", () => {
       "Not reportedThis runtime reports no usage, so its threads show no context window and spend limits leave its turns out.",
     );
     expect(fact("Compaction")).toHaveTextContent(
-      "Not availableThe runtime keeps its own history and takes no compaction request, so Octant can't see what it keeps or compact it.",
+      "Not availableThe runtime keeps its own history and Octant has no compaction request for it, so Octant can't see what it keeps or compact it.",
     );
   });
 

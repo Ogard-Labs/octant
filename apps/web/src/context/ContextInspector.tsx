@@ -52,8 +52,7 @@ export function ContextInspector(props: ContextInspectorProps) {
   const remedies = uniqueRemedies(plan.remedies).filter(
     (remedy) =>
       remedy.kind !== "compact-range" ||
-      props.compaction?.offer.kind === "available" ||
-      props.compaction?.offer.kind === "disabled",
+      (props.compaction?.offer.kind !== "hidden" && props.compaction?.offer.kind !== "not-offered"),
   );
   const close = () => {
     props.onClose();

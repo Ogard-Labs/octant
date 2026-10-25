@@ -38,7 +38,7 @@ export type CompactionOffer =
 const RUNTIME_REFUSALS: ReadonlyMap<ContextCompactionRefusalReason, string> = new Map([
   [
     "runtime-cannot-compact",
-    "This runtime keeps its own history and takes no compaction request, so Octant can't compact this session.",
+    "This runtime keeps its own history and Octant has no compaction request for it, so this session can't be compacted.",
   ],
   [
     "runtime-version-unsupported",

@@ -119,7 +119,7 @@ export function describeProviderRuntimeIntegration(
     resume,
     context: {
       usage: usageReporting(capabilities.usage),
-      compaction: keepsConversation ? runtimeCompaction(capabilities) : "octant",
+      compaction: keepsConversation ? runtimeCompaction(observed) : "octant",
     },
   };
 }
@@ -134,14 +134,29 @@ function usageReporting(
 /**
  * Mirrors the host's compaction decision for a conversation the runtime keeps:
  * a mode the adapter did not answer reads as unsupported, as the host reads
- * it, so the card never claims a compaction the host would refuse.
+ * it, so the card never claims a compaction the host would refuse. A runtime
+ * that is not ready answered nothing (a signed-out Claude reports no
+ * capabilities), so its silence is not read as "cannot compact".
  */
 function runtimeCompaction(
-  capabilities: ProviderObservedState["capabilities"],
+  observed: Pick<ProviderObservedState, "readiness" | "capabilities">,
 ): ProviderCompactionOwner {
-  const modes = capabilities.sessionCompaction;
-  if (modes === undefined) return "none";
+  const modes = observed.capabilities.sessionCompaction;
+  if (modes === undefined) {
+    return runtimeAnsweredCapabilities(observed.readiness) ? "none" : "not-confirmed";
+  }
   const answers = [modes.chat, modes.work, modes.code];
   if (answers.includes("supported")) return "runtime";
   return answers.includes("unavailable") ? "runtime-update-required" : "none";
+}
+
+/**
+ * Whether a runtime in this readiness reported the capabilities it has. A
+ * degraded runtime still runs turns (an ACP agent that listed no models), so
+ * its report stands; any other non-ready runtime reported placeholders.
+ */
+export function runtimeAnsweredCapabilities(
+  readiness: ProviderObservedState["readiness"],
+): boolean {
+  return readiness === "ready" || readiness === "degraded";
 }

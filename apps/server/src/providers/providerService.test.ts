@@ -790,7 +790,7 @@ describe("ProviderService", () => {
             },
             activity: { source: "none" },
             resume: "none",
-            context: { usage: "not-confirmed", compaction: "none" },
+            context: { usage: "not-confirmed", compaction: "not-confirmed" },
           },
           message: "This provider driver is not available.",
           observedAt: now,

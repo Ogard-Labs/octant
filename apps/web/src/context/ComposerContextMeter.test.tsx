@@ -1154,7 +1154,7 @@ describe("Compact session", () => {
 
     expect(
       screen.getByText(
-        "This runtime keeps its own history and takes no compaction request, so Octant can't compact this session.",
+        "This runtime keeps its own history and Octant has no compaction request for it, so this session can't be compacted.",
       ),
     ).toBeVisible();
   });

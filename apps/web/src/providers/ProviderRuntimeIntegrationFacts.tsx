@@ -178,7 +178,12 @@ const COMPACTION_FACTS: Readonly<Record<ProviderCompactionOwner, Fact>> = {
   none: {
     value: "Not available",
     detail:
-      "The runtime keeps its own history and takes no compaction request, so Octant can't see what it keeps or compact it.",
+      "The runtime keeps its own history and Octant has no compaction request for it, so Octant can't see what it keeps or compact it.",
+  },
+  "not-confirmed": {
+    value: "Not confirmed",
+    detail:
+      "The runtime isn't ready, so its last connection check did not say whether it compacts.",
   },
 };
 

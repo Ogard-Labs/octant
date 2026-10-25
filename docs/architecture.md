@@ -2691,7 +2691,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   declares usage unsupported, `not-confirmed`) with `compaction` (`octant` for
   a host-owned conversation; for a runtime-owned one `runtime` when any mode
   takes the request, `runtime-update-required` when the install is too old,
-  and `none` otherwise, mirroring the host's compaction decision). ACP agents
+  `not-confirmed` when the runtime is neither ready nor degraded and so
+  reported no capabilities, and `none` otherwise, mirroring the host's
+  compaction decision, which treats such a runtime as unavailable rather than
+  unable). ACP agents
   read `not-reported` and `none`: their history is the agent's own and opaque
   to Octant. Settings › Providers & Models shows these facts on each runtime
   card (Octant tools, Activity, Resume, Context window, Compaction), and the

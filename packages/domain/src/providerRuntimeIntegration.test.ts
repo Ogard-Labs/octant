@@ -114,6 +114,14 @@ describe("provider runtime integration", () => {
       "runtime-update-required",
     );
     expect(compacts(undefined)).toBe("none");
+    // A signed-out Claude reports no capabilities at all; that is not a
+    // runtime that cannot compact.
+    expect(
+      describeProviderRuntimeIntegration("claude", {
+        readiness: "unauthenticated",
+        capabilities: { ...capabilities, usage: "unavailable" },
+      })?.context,
+    ).toEqual({ usage: "not-confirmed", compaction: "not-confirmed" });
     expect(
       describeProviderRuntimeIntegration("kilo", {
         readiness: "checking",

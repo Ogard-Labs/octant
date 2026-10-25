@@ -210,7 +210,7 @@ absent rather than imitating them:
 - **No compaction request.** The driver declares no `sessionCompaction`, so
   the host refuses compaction as `runtime-cannot-compact`. The runtime card
   reads **Compaction: Not available**, and the context popover and inspector
-  show a line saying the runtime takes no compaction request where the
+  show a line saying Octant has no compaction request for it where the
   **Compact session** button would be.
 - **Opaque history.** The agent keeps its own conversation and says nothing
   about what it keeps or drops, so `promptRetention` is absent and Octant

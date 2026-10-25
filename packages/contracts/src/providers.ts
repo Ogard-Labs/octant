@@ -1412,15 +1412,17 @@ export type ProviderUsageReporting = typeof ProviderUsageReporting.Type;
  * host plans the conversation from its journal and summarizes it itself.
  * `runtime`: the runtime keeps the conversation and takes a compaction request
  * in at least one mode. `runtime-update-required`: it would, but this install
- * is too old. `none`: the runtime keeps the conversation and has no compaction
- * request (ACP agents), so what it keeps or drops is its own and Octant cannot
- * see or change it.
+ * is too old. `none`: the runtime keeps the conversation and Octant has no
+ * compaction request for it (ACP agents), so what it keeps or drops is its own
+ * and Octant cannot see or change it. `not-confirmed`: the runtime is not
+ * ready, so its last check did not say whether it compacts.
  */
 export const ProviderCompactionOwner = Schema.Literal(
   "octant",
   "runtime",
   "runtime-update-required",
   "none",
+  "not-confirmed",
 );
 export type ProviderCompactionOwner = typeof ProviderCompactionOwner.Type;
 
