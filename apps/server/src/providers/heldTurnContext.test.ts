@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -178,6 +178,16 @@ describe("HeldTurnContext kept on disk", () => {
     const before = restarted(path);
     before.forTurn({ sessionId, resumed: false, context: [instructions] });
     before.observe(completed);
+
+    expect(completeTurn(restarted(path), true, [instructions]).context).toEqual([instructions]);
+  });
+
+  it("sends standing context again after a restart when dropping a holding could not be written", () => {
+    const path = storePath();
+    const before = restarted(path);
+    completeTurn(before, false, [instructions]);
+    mkdirSync(`${path}.tmp`);
+    before.forTurn({ sessionId, resumed: false, context: [] });
 
     expect(completeTurn(restarted(path), true, [instructions]).context).toEqual([instructions]);
   });

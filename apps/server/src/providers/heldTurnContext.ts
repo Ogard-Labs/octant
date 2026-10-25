@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type {
   ProviderContextBlock,
@@ -90,19 +90,27 @@ export class HeldTurnContextFile implements HeldTurnContextStore {
   }
 
   save(records: ReadonlyArray<HeldSessionRecord>): void {
+    const temporary = `${this.#filePath}.tmp`;
     try {
       mkdirSync(dirname(this.#filePath), { recursive: true });
-      // A new temporary file on every write is what lets the owner-only mode apply.
-      const temporary = `${this.#filePath}.tmp`;
+      // The mode applies only to a file the write creates, so a temporary file
+      // left by an interrupted write is removed rather than reused.
+      rmSync(temporary, { force: true });
       writeFileSync(
         temporary,
         JSON.stringify({ version: STORE_VERSION, sessions: records.slice(0, MAX_STORED_SESSIONS) }),
-        { encoding: "utf8", mode: 0o600 },
+        { encoding: "utf8", mode: 0o600, flag: "wx" },
       );
       renameSync(temporary, this.#filePath);
     } catch {
-      // A record that could not be written is one the next run does not
-      // find: it sends the standing context again.
+      // The record on disk may still claim holdings this write dropped, so it
+      // is removed: the next run then finds nothing and sends the standing
+      // context again, rather than leaving out what the runtime lost.
+      try {
+        rmSync(this.#filePath, { force: true });
+      } catch {
+        // Nothing more can be done without the file system.
+      }
     }
   }
 }
