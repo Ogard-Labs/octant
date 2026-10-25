@@ -69,10 +69,6 @@ import {
   ProviderDriverConfigurationError,
 } from "../providers/providerDriverFactory";
 import {
-  JournalOllamaHistoryStore,
-  type OllamaHistoryStore,
-} from "../providers/ollamaHistoryStore";
-import {
   JournalNativeHarnessTranscriptStore,
   type NativeHarnessTranscriptStore,
 } from "../harness/nativeHarnessTranscriptStore";
@@ -191,7 +187,6 @@ export interface ConfiguredProviderDriverOptions {
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly subscriptionOAuth?: import("@octant/provider-sdk/subscription-oauth").SubscriptionOAuthHost;
   readonly fetch?: CompatibleFetch;
-  readonly ollamaHistoryStore?: OllamaHistoryStore;
   /** Shared by every harness driver built from these options, so a later turn can resume an earlier one. */
   readonly nativeHarnessTranscripts?: NativeHarnessTranscriptStore;
   /** How every harness driver built from these options retries and where its lead falls back. */
@@ -293,9 +288,10 @@ export function makeConfiguredProviderDriver(
       ...(options.credentialResolver === undefined
         ? {}
         : { credentialResolver: options.credentialResolver }),
-      ...(options.ollamaHistoryStore === undefined
+      ...(options.nativeHarnessTranscripts === undefined
         ? {}
-        : { ollamaHistoryStore: options.ollamaHistoryStore }),
+        : { nativeHarnessTranscripts: options.nativeHarnessTranscripts }),
+      ...(options.nativeHarness === undefined ? {} : { nativeHarness: options.nativeHarness }),
     });
   }
   const localUsageHistory = options.localUsageHistorySourceForInstance?.(instance);
@@ -911,13 +907,6 @@ export function wireProviders(deps: ProvidersDependencies) {
           clock: () => new Date().toISOString(),
         }),
       });
-    const ollamaHistoryStore =
-      options.ollamaHistoryStore ??
-      new JournalOllamaHistoryStore({
-        persistence,
-        uuid: randomUUID,
-        clock: () => new Date().toISOString(),
-      });
     const nativeHarnessTranscripts = new JournalNativeHarnessTranscriptStore({
       journal: persistence.journal,
       uuid: randomUUID,
@@ -1072,7 +1061,6 @@ export function wireProviders(deps: ProvidersDependencies) {
             piHome,
             ohMyPiProcess,
             ohMyPiHome,
-            ollamaHistoryStore,
             nativeHarnessTranscripts,
             nativeHarness: nativeHarnessEndpointHooks,
             claudeProcess,
@@ -1198,7 +1186,6 @@ export function wireProviders(deps: ProvidersDependencies) {
       piHome,
       ohMyPiProcess,
       ohMyPiHome,
-      ollamaHistoryStore,
       nativeHarnessTranscripts,
       nativeHarness: nativeHarnessEndpointHooks,
       claudeProcess,

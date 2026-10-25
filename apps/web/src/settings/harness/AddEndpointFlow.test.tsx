@@ -517,11 +517,14 @@ describe("Add endpoint, step by step", () => {
     expect(props.onOpenAdded).toHaveBeenCalledWith("key");
   });
 
-  it("lists Ollama's installed models with no Add by ID and no tool requests", async () => {
+  it("lists Ollama's installed models with no Add by ID and verifies each one's tools locally", async () => {
     const user = userEvent.setup();
     const props = renderFlow({
       creates: endpoint("ollama", "Ollama"),
       observedAfterCreate: observed([model("llama3.2"), model("qwen3")]),
+      onCheckModelTools: vi.fn(async (_instance, modelId) => ({
+        outcome: String(modelId) === "qwen3" ? ("supported" as const) : ("unsupported" as const),
+      })),
     });
     const form = await connect(user, "Local (Ollama)", {});
     expect(within(form).queryByLabelText("API key")).not.toBeInTheDocument();
@@ -535,13 +538,19 @@ describe("Add endpoint, step by step", () => {
     const installed = screen.getByRole("list", { name: "Installed models" });
     expect(within(installed).getAllByRole("checkbox", { checked: true })).toHaveLength(2);
     expect(screen.queryByRole("textbox", { name: "Model ID" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByText(/which Ollama runs on this computer/)).toBeVisible();
+    await user.click(
+      screen.getByRole("button", { name: "Continue and verify tools (2 requests)" }),
+    );
 
     const checks = await screen.findByRole("list", { name: "Tool checks" });
-    expect(within(checks).getAllByText("Chat only")).toHaveLength(2);
-    expect(screen.getAllByText(/don't run through Ollama yet/)).toHaveLength(1);
-    expect(within(checks).queryByRole("button", { name: /Retry/ })).not.toBeInTheDocument();
-    expect(props.onCheckModelTools).not.toHaveBeenCalled();
+    expect(await within(checks).findByText("Verified")).toBeVisible();
+    expect(within(checks).getAllByText("Chat only")).toHaveLength(1);
+    expect(within(checks).getByText(/Ollama says it can't use tools/)).toBeVisible();
+    expect(
+      within(checks).getByRole("button", { name: "Retry the tool check for llama3.2" }),
+    ).toBeVisible();
+    expect(props.onCheckModelTools).toHaveBeenCalledTimes(2);
   });
 
   async function reachVerify(

@@ -37,7 +37,8 @@ import { makeOpenCodeGoUsageFacts } from "./openCodeGoUsage";
 import type { OpenCodeProcessPort } from "./openCodeProcess";
 import { makeOllamaDriver } from "./ollamaDriver";
 import type { OllamaFetch } from "./ollamaEndpoint";
-import type { OllamaHistoryStore } from "./ollamaHistoryStore";
+import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
+import type { NativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
 import { makePiDriver } from "./piDriver";
 import { makeOhMyPiDriver } from "./ohMyPiDriver";
 import type { PiProcessPort } from "./piProcess";
@@ -55,7 +56,10 @@ export interface ProviderDriverFactoryOptions {
   readonly piProcess?: PiProcessPort;
   readonly piHome?: (instanceId: ProviderInstance["id"]) => string;
   readonly ollamaFetch?: OllamaFetch;
-  readonly ollamaHistoryStore?: OllamaHistoryStore;
+  /** Where Ollama's harness sessions keep their conversation, shared with the other harness drivers. */
+  readonly nativeHarnessTranscripts?: NativeHarnessTranscriptStore;
+  /** How Ollama's harness retries and where its lead falls back. */
+  readonly nativeHarness?: NativeHarnessEndpointHooks;
   readonly claudeProcess?: ClaudeProcessPort;
   readonly claudeSdk?: ClaudeAgentSdkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
@@ -296,9 +300,10 @@ export function makeProviderDriver(
         configuration: instance.configuration,
         runtimeRegistry: options.runtimeRegistry,
         ...(options.ollamaFetch === undefined ? {} : { fetch: options.ollamaFetch }),
-        ...(options.ollamaHistoryStore === undefined
+        ...(options.nativeHarnessTranscripts === undefined
           ? {}
-          : { historyStore: options.ollamaHistoryStore }),
+          : { transcripts: options.nativeHarnessTranscripts }),
+        ...(options.nativeHarness === undefined ? {} : { harness: options.nativeHarness }),
       });
     default:
       throw new ProviderDriverConfigurationError();

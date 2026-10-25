@@ -4752,10 +4752,30 @@ describe("ProviderService", () => {
       expect(driver).not.toHaveBeenCalled();
     });
 
+    it("records a verified model of the local Ollama provider", async () => {
+      const fixture = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        driver: toolDriver("supported") as never,
+      });
+      fixture.runtime.setObservedState(observation());
+
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "verify-model-tools",
+          instanceId,
+          modelId: decodeProviderModelId("model-1"),
+        }),
+      ).resolves.toMatchObject({ kind: "model-tools-verified", appManagedTools: "supported" });
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String)).toEqual([
+        "model-1",
+      ]);
+    });
+
     it("refuses a provider whose runtime brings its own tools", async () => {
       const driver = toolDriver("supported");
       const fixture = serviceFixture({
-        instances: [ollamaProvider()],
+        instances: [piProvider()],
         withCatalogPersistence: true,
         driver: driver as never,
       });

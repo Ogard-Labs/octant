@@ -7,9 +7,9 @@ import {
 } from "@octant/contracts";
 import { Effect, Exit, Scope, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryNativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
 import { makeOllamaDriver } from "./ollamaDriver";
 import type { OllamaFetch } from "./ollamaEndpoint";
-import { MemoryOllamaHistoryStore } from "./ollamaHistoryStore";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("90000000-0000-4000-8000-000000000711");
@@ -31,7 +31,20 @@ function ndjson(values: readonly unknown[]) {
   });
 }
 
-function driver(fetch: OllamaFetch, historyStore = new MemoryOllamaHistoryStore()) {
+function reply(message: Record<string, unknown>) {
+  return ndjson([
+    {
+      model: "qwen3:latest",
+      message: { role: "assistant", ...message },
+      done: true,
+      done_reason: "stop",
+      prompt_eval_count: 3,
+      eval_count: 1,
+    },
+  ]);
+}
+
+function driver(fetch: OllamaFetch, transcripts = new MemoryNativeHarnessTranscriptStore()) {
   const registry = new ProviderRuntimeRegistry();
   return {
     registry,
@@ -40,7 +53,7 @@ function driver(fetch: OllamaFetch, historyStore = new MemoryOllamaHistoryStore(
       configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
       runtimeRegistry: registry,
       fetch,
-      historyStore,
+      transcripts,
       clock: () => "2026-07-18T09:00:00.000Z",
       correlationId: () => "90000000-0000-4000-8000-000000000713",
     }),
@@ -57,6 +70,17 @@ async function terminal(events: Stream.Stream<ProviderRuntimeEvent, ProviderFail
     ),
   );
   return Array.from(items) as ProviderRuntimeEvent[];
+}
+
+/** A local service with one model that reports the given capabilities. */
+function service(capabilities: readonly string[], chat: (body: unknown) => Response) {
+  return vi.fn<OllamaFetch>(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/version")) return json({ version: "0.31.2" });
+    if (url.endsWith("/tags")) return json({ models: [{ model: "qwen3:latest" }] });
+    if (url.endsWith("/show")) return json({ capabilities });
+    return chat(JSON.parse(String(init?.body)));
+  });
 }
 
 describe("Ollama provider driver", () => {
@@ -91,14 +115,15 @@ describe("Ollama provider driver", () => {
         streaming: "unavailable",
         reasoning: "unavailable",
         usage: "unavailable",
-        toolActivity: "unavailable",
+        toolActivity: "unsupported",
+        appManagedTools: "unsupported",
       },
     });
     expect(fixture.registry.observedState(instanceId)).toEqual(probe);
     expect(fetch.mock.calls.some(([input]) => String(input).endsWith("/chat"))).toBe(false);
   });
 
-  it("streams normalized events and resumes exact Octant-owned bounded history", async () => {
+  it("streams normalized events and resumes the conversation the harness journaled", async () => {
     const requestBodies: unknown[] = [];
     const fetch = vi.fn<OllamaFetch>(async (input, init) => {
       if (!String(input).endsWith("/chat")) throw new Error("unexpected probe");
@@ -119,8 +144,8 @@ describe("Ollama provider driver", () => {
         },
       ]);
     });
-    const historyStore = new MemoryOllamaHistoryStore();
-    const fixture = driver(fetch, historyStore);
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const fixture = driver(fetch, transcripts);
     const scope = await Effect.runPromise(Scope.make());
     const connection = await Effect.runPromise(
       fixture.driver
@@ -135,27 +160,29 @@ describe("Ollama provider driver", () => {
     await Effect.runPromise(
       connection.send({ sessionId, prompt: "first", attachments: [], tools: [] }),
     );
-    expect((await first).map((event) => event.kind)).toEqual([
+    const kinds = (await first).map((event) => event.kind);
+    expect(kinds.filter((kind) => kind !== "usage")).toEqual([
       "reasoning-delta",
       "text-delta",
       "text-delta",
-      "usage",
       "completed",
     ]);
+    expect(kinds).toContain("usage");
     await Effect.runPromise(connection.stop(sessionId));
     await Effect.runPromise(Scope.close(scope, Exit.void));
 
-    const restarted = driver(fetch, historyStore);
+    const restarted = driver(fetch, transcripts);
     const restartedScope = await Effect.runPromise(Scope.make());
     const restartedConnection = await Effect.runPromise(
       restarted.driver
         .acquire({ instanceId, projectRoot: root, mode: "code" })
         .pipe(Effect.provideService(Scope.Scope, restartedScope)),
     );
+    if (handle.resumeCursor === undefined) throw new Error("The session returned no cursor.");
     await Effect.runPromise(
       restartedConnection.resume({
         sessionId,
-        resumeCursor: handle.resumeCursor!,
+        resumeCursor: handle.resumeCursor,
         executionPolicy: "plan",
       }),
     );
@@ -175,6 +202,52 @@ describe("Ollama provider driver", () => {
     await Effect.runPromise(Scope.close(restartedScope, Exit.void));
     expect(fixture.registry.activeSessionCount(instanceId)).toBe(0);
     expect(restarted.registry.activeSessionCount(instanceId)).toBe(0);
+  });
+
+  it("sends a turn's image attachment with that turn only", async () => {
+    const requestBodies: Array<{ readonly messages: ReadonlyArray<Record<string, unknown>> }> = [];
+    const fetch = service(["completion", "vision"], (body) => {
+      requestBodies.push(body as (typeof requestBodies)[number]);
+      return reply({ content: "seen" });
+    });
+    const fixture = driver(fetch);
+    await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      fixture.driver
+        .acquire({ instanceId, projectRoot: root, mode: "chat" })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    for (const turn of [
+      {
+        prompt: "describe",
+        attachments: [
+          {
+            attachmentId: "attachment-1",
+            displayName: "diagram.png",
+            mediaType: "image/png",
+            bytes: new Uint8Array([1, 2, 3]),
+          },
+        ],
+      },
+      { prompt: "again", attachments: [] },
+    ]) {
+      const events = terminal(Stream.unwrapScoped(connection.subscribe));
+      await Effect.runPromise(connection.send({ sessionId, ...turn, tools: [] }));
+      expect((await events).at(-1)?.kind).toBe("completed");
+    }
+    const userMessages = (index: number) =>
+      requestBodies[index]?.messages.filter((message) => message.role === "user");
+    expect(userMessages(0)).toEqual([{ role: "user", content: "describe", images: ["AQID"] }]);
+    expect(userMessages(1)).toEqual([
+      { role: "user", content: "describe" },
+      { role: "user", content: "again" },
+    ]);
+    await Effect.runPromise(connection.stop(sessionId));
+    await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
   it("never declares usage unsupported because one response carried no counts", async () => {
@@ -234,47 +307,6 @@ describe("Ollama provider driver", () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
-  it("fails the turn after normalizing a tool request that Octant cannot execute yet", async () => {
-    const fetch = vi.fn<OllamaFetch>(async () =>
-      ndjson([
-        {
-          model: "qwen3:latest",
-          message: {
-            role: "assistant",
-            content: "",
-            tool_calls: [{ function: { name: "read_file", arguments: {} } }],
-          },
-          done: true,
-          done_reason: "stop",
-          prompt_eval_count: 2,
-          eval_count: 1,
-        },
-      ]),
-    );
-    const fixture = driver(fetch);
-    const scope = await Effect.runPromise(Scope.make());
-    const connection = await Effect.runPromise(
-      fixture.driver
-        .acquire({ instanceId, projectRoot: root, mode: "code" })
-        .pipe(Effect.provideService(Scope.Scope, scope)),
-    );
-    await Effect.runPromise(
-      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
-    );
-    const events = terminal(Stream.unwrapScoped(connection.subscribe));
-    await Effect.runPromise(
-      connection.send({ sessionId, prompt: "use a tool", attachments: [], tools: [] }),
-    );
-    expect((await events).map((event) => event.kind)).toEqual([
-      "tool-start",
-      "tool-failure",
-      "usage",
-      "failed",
-    ]);
-    await Effect.runPromise(connection.stop(sessionId));
-    await Effect.runPromise(Scope.close(scope, Exit.void));
-  });
-
   it("interrupts only the owned HTTP request and rejects stale or mismatched resume", async () => {
     const fetch = vi.fn<OllamaFetch>(
       async (_input, init) =>
@@ -307,5 +339,67 @@ describe("Ollama provider driver", () => {
     expect((await collected).map((event) => event.kind)).toEqual(["interrupted"]);
     expect(fetch).toHaveBeenCalledTimes(1);
     await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+});
+
+describe("Ollama Verify tools", () => {
+  it("reports a model Ollama says takes no tools as Chat only without a generating request", async () => {
+    const fetch = service(["completion"], () => {
+      throw new Error("a model without tools must not be sent a chat request");
+    });
+    const fixture = driver(fetch);
+    const result = await Effect.runPromise(
+      Effect.scoped(fixture.driver.verifyToolCapability!({ instanceId, modelId })),
+    );
+    expect(result).toEqual({ instanceId, modelId, appManagedTools: "unsupported" });
+  });
+
+  it("verifies a model that calls the echo tool in one request", async () => {
+    const bodies: unknown[] = [];
+    const fetch = service(["completion", "tools"], (body) => {
+      bodies.push(body);
+      return reply({
+        content: "",
+        tool_calls: [
+          { function: { name: "octant_capability_echo", arguments: { echo: "ready" } } },
+        ],
+      });
+    });
+    const fixture = driver(fetch);
+    const result = await Effect.runPromise(
+      Effect.scoped(fixture.driver.verifyToolCapability!({ instanceId, modelId })),
+    );
+    expect(result.appManagedTools).toBe("supported");
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]).toMatchObject({
+      model: "qwen3:latest",
+      tools: [{ type: "function", function: { name: "octant_capability_echo" } }],
+    });
+  });
+
+  it("reports a model that answers in text as unsupported and keeps a verification across a probe", async () => {
+    const fetch = service(["completion", "tools"], () => reply({ content: "ready" }));
+    const fixture = driver(fetch);
+    const result = await Effect.runPromise(
+      Effect.scoped(fixture.driver.verifyToolCapability!({ instanceId, modelId })),
+    );
+    expect(result.appManagedTools).toBe("unsupported");
+
+    const probed = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    fixture.registry.setObservedState({ ...probed, verifiedToolModelIds: [modelId] });
+    await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    expect(fixture.registry.observedState(instanceId)?.verifiedToolModelIds).toEqual([modelId]);
+  });
+
+  it("reports an unreachable service as a failure rather than as Chat only", async () => {
+    const fetch = vi.fn<OllamaFetch>(async () => {
+      throw new TypeError("connection refused");
+    });
+    const fixture = driver(fetch);
+    await expect(
+      Effect.runPromise(
+        Effect.scoped(fixture.driver.verifyToolCapability!({ instanceId, modelId })),
+      ),
+    ).rejects.toThrow(/unavailable/);
   });
 });

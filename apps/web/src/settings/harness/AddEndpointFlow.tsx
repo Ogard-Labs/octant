@@ -1122,7 +1122,7 @@ function ModelsActions(props: {
   readonly onContinue: () => void;
   readonly onSkip: () => void;
 }) {
-  const requests = props.kind === "ollama" ? 0 : props.count;
+  const requests = props.count;
   return (
     <>
       {props.count === 0 ? (
@@ -1133,8 +1133,9 @@ function ModelsActions(props: {
       ) : null}
       {requests === 0 ? null : (
         <p className="endpoint-flow__hint">
-          Next, Octant checks each model can use its tools: one short request per model, which the
-          service may bill.
+          {props.kind === "ollama"
+            ? "Next, Octant checks each model can use its tools: one short request per model, which Ollama runs on this computer."
+            : "Next, Octant checks each model can use its tools: one short request per model, which the service may bill."}
         </p>
       )}
       <div className="endpoint-flow__actions">
@@ -1155,9 +1156,6 @@ function ModelsActions(props: {
     </>
   );
 }
-
-const OLLAMA_CHAT_ONLY =
-  "Octant's tools don't run through Ollama yet, so its models answer in chat only.";
 
 function keyMissingReason(keysHere: boolean): string {
   return keysHere
@@ -1227,7 +1225,10 @@ function VerifyStep(props: VerifyStepProps) {
             kind: "chat-only",
             reason: keyMissing
               ? keyMissingReason(props.credentialManagementAvailable)
-              : chatOnlyReason(check, props.credentialManagementAvailable),
+              : local && check.outcome === "unsupported"
+                ? // Ollama answers for a model it says takes no tools without a request.
+                  "Ollama says it can't use tools, or it answered without calling Octant's test tool."
+                : chatOnlyReason(check, props.credentialManagementAvailable),
             retry: true,
           },
     );
@@ -1242,16 +1243,8 @@ function VerifyStep(props: VerifyStepProps) {
       // already verified needs none.
       void (async () => {
         for (const modelId of props.chosen) {
-          if (local) {
-            // The step says once why every Ollama model is Chat only.
-            set(modelId, { kind: "chat-only", reason: "", retry: false });
-          } else if (verified.has(String(modelId))) {
-            set(modelId, { kind: "verified" });
-          } else {
-            set(modelId, { kind: "waiting" });
-          }
+          set(modelId, verified.has(String(modelId)) ? { kind: "verified" } : { kind: "waiting" });
         }
-        if (local) return;
         for (const modelId of props.chosen) {
           if (!mounted.current) return;
           if (verified.has(String(modelId))) continue;
@@ -1274,11 +1267,7 @@ function VerifyStep(props: VerifyStepProps) {
   return (
     <>
       <StepHeading
-        detail={
-          local
-            ? OLLAMA_CHAT_ONLY
-            : "Octant gives its tools only to a model it has seen call one. A model that doesn't is still added, for chat."
-        }
+        detail="Octant gives its tools only to a model it has seen call one. A model that doesn't is still added, for chat."
         headingRef={props.headingRef}
       >
         Verify tools

@@ -967,9 +967,13 @@ export function createNativeHarnessConnection(
               role: "user",
               text: renderProviderTurnPrompt({ prompt: input.prompt, context: rest }),
             };
+            const live: NativeHarnessMessage =
+              input.attachments.length === 0 ? user : { ...user, attachments: input.attachments };
+            // An earlier turn's attachments were sent with that turn only.
+            const earlier = state.messages.map(({ attachments: _sent, ...message }) => message);
             // Nothing is recorded for a request that cannot be sent: the user
             // message joins the conversation only once it provably fits.
-            const request = requestFor(state, [...state.messages, user]);
+            const request = requestFor(state, [...earlier, live]);
             if (request === undefined) {
               throw failure(
                 "invalid-configuration",
@@ -977,7 +981,7 @@ export function createNativeHarnessConnection(
               );
             }
             options.transcripts.append(state.transcriptId, user);
-            state.messages.push(user);
+            state.messages.splice(0, state.messages.length, ...earlier, live);
             state.pending = undefined;
             state.answered.clear();
             // Each turn starts on the lead's own model again.

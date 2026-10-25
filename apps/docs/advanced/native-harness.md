@@ -2,7 +2,7 @@
 
 The native harness is Octant's own agent loop for models you reach through an
 API key or a local endpoint — OpenAI-compatible, Anthropic-compatible, Azure
-AI Foundry providers (Ollama joins once its driver runs the tool loop). Where a coding CLI such as Claude Code or
+AI Foundry providers, and a local Ollama. Where a coding CLI such as Claude Code or
 Codex brings its own tools and its own loop, the harness gives an endpoint
 model Octant's tools, Octant's authority checks, and Octant's journal, in
 every mode and on every surface: web, desktop, phone, and the `octant` CLI.
@@ -119,7 +119,8 @@ answers in text stays Chat only, and a failed request (a wrong key, a timeout)
 shows its error instead of a verdict. Verifying one model, or that model using
 a tool in a thread, never turns tools on for the others on the same endpoint,
 and changing the endpoint's configuration
-asks you to verify again. Ollama has no Verify tools action yet.
+asks you to verify again. On Ollama the request runs on this computer, and a model
+Ollama says cannot use tools stays Chat only without one.
 
 ## Conversations that survive a restart
 
@@ -501,8 +502,8 @@ table.
   they can be delegated to as children, never made the lead. A lead falls back
   only to another endpoint model, never to a coding CLI.
 - Every endpoint model, Anthropic-compatible ones included, is Chat only
-  until you verify its tools. Ollama is not a harness provider yet: its driver
-  has no tool loop, so it is not offered as a slot candidate until it does.
+  until you verify its tools. Ollama is reached only on this computer's loopback
+  address; a remote, LAN, or tunnelled Ollama is refused.
 - Context is reduced by the host's planner; each prune and cut is journaled
   with the cache cost it paid, and the lead can read `context-remaining` to
   checkpoint before one. What a cut leaves out is gone from the lead's view:

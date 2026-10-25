@@ -137,8 +137,6 @@ export function agentLoopLabel(
       }
     case "octant-harness":
       return "Octant Harness runs the agent loop and offers every tool";
-    case "replies-only":
-      return "Replies only; it has no agent loop in Octant yet";
     case "none":
       return "Octant lists its models but does not start turns with it yet";
   }
