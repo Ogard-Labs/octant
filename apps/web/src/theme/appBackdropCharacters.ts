@@ -443,6 +443,11 @@ function createGlPainter(
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     }
     gl.bindTexture(gl.TEXTURE_2D, null);
+    // The default unpack alignment of 4 refuses a grid row that is not a
+    // multiple of 4 bytes: an odd column count makes each row `columns*2`,
+    // texSubImage2D fails INVALID_OPERATION, and every cell falls back to
+    // "A" at phase 0 — observed in review. One-byte rows never pad.
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
   };
 
   const renderAtlas = () => {

@@ -47,7 +47,10 @@ function fakeWebGl2() {
     uniform1f: vi.fn(),
     uniform1i: vi.fn(),
     uniform4fv: vi.fn(),
+    unpackErrors: [] as Array<number>,
   };
+  // GL defaults to four-byte unpack rows; the painter may relax it.
+  let unpackAlignment = 4;
   const uniformNames = new Map<WebGLUniformLocation, string>();
   const gl: Partial<WebGL2RenderingContext> = {
     VERTEX_SHADER: 0x8b31,
@@ -67,6 +70,7 @@ function fakeWebGl2() {
     RGBA: 0x1908,
     RG8: 0x822b,
     RG: 0x8227,
+    UNPACK_ALIGNMENT: 0x0cf5,
     UNSIGNED_BYTE: 0x1401,
     COLOR_BUFFER_BIT: 0x4000,
     TRIANGLES: 0x0004,
@@ -97,8 +101,22 @@ function fakeWebGl2() {
     activeTexture: vi.fn(),
     texParameteri: vi.fn(),
     texImage2D: vi.fn(),
-    texSubImage2D: calls.texSubImage2D,
-    pixelStorei: vi.fn(),
+    texSubImage2D: vi.fn().mockImplementation((...args: Array<unknown>) => {
+      calls.texSubImage2D(...args);
+      // The GL reads each row on the current unpack alignment: an RG8
+      // grid row is width*2 bytes, so the data must cover the padded
+      // stride for every row but the last or the upload fails.
+      const width = args[4] as number;
+      const height = args[5] as number;
+      const data = args[8] as { readonly length: number } | null;
+      const rowBytes = width * 2;
+      const need =
+        Math.ceil(rowBytes / unpackAlignment) * unpackAlignment * (height - 1) + rowBytes;
+      if (data !== null && data.length < need) calls.unpackErrors.push(need - data.length);
+    }),
+    pixelStorei: vi.fn().mockImplementation((pname: number, param: number) => {
+      if (pname === 0x0cf5) unpackAlignment = param;
+    }),
     deleteTexture: vi.fn(),
     viewport: vi.fn(),
     clearColor: vi.fn(),
@@ -115,17 +133,17 @@ function fakeWebGl2() {
   return { gl, calls, uniformNames };
 }
 
-function sizedCanvas() {
+function sizedCanvas(width = 160, height = 104) {
   const canvas = document.createElement("canvas");
   vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue({
     x: 0,
     y: 0,
     left: 0,
     top: 0,
-    width: 160,
-    height: 104,
-    right: 160,
-    bottom: 104,
+    width,
+    height,
+    right: width,
+    bottom: height,
     toJSON: () => ({}),
   } as DOMRect);
   document.body.append(canvas);
@@ -195,6 +213,26 @@ describe("character ground frame pacing", () => {
     const drawsAtStop = calls.drawArrays.mock.calls.length;
     runSecondAt125Hz();
     expect(calls.drawArrays.mock.calls.length).toBe(drawsAtStop);
+    canvas.remove();
+  });
+
+  it("keeps the grid uploading when the window width gives an odd number of columns", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const { context } = fake2dContext();
+    const { gl, calls } = fakeWebGl2();
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation((id) =>
+      id === "webgl2" ? (gl as WebGL2RenderingContext) : (context as CanvasRenderingContext2D),
+    );
+    fakeVsync();
+    // 21 columns by 2 rows: each grid row is 42 bytes, not a multiple of 4.
+    const canvas = sizedCanvas(168, 26);
+
+    const stop = runCharacterField(canvas, true);
+    const uploads = calls.texSubImage2D.mock.calls;
+    expect(uploads.length).toBeGreaterThan(0);
+    expect(uploads.every((args) => args[4] === 21 && args[5] === 2)).toBe(true);
+    expect(calls.unpackErrors).toEqual([]);
+    stop();
     canvas.remove();
   });
 
