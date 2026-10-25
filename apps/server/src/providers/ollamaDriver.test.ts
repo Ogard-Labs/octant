@@ -250,6 +250,54 @@ describe("Ollama provider driver", () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
+  it("sends a vision turn whose photo is larger than the model's window counted as text", async () => {
+    const fetch = vi.fn<OllamaFetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/version")) return json({ version: "0.31.2" });
+      if (url.endsWith("/tags")) return json({ models: [{ model: "qwen3:latest" }] });
+      if (url.endsWith("/show")) {
+        return json({
+          capabilities: ["completion", "vision"],
+          model_info: { "qwen3.context_length": 131072 },
+        });
+      }
+      JSON.parse(String(init?.body));
+      return reply({ content: "seen" });
+    });
+    const fixture = driver(fetch);
+    await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    const scope = await Effect.runPromise(Scope.make());
+    const connection = await Effect.runPromise(
+      fixture.driver
+        .acquire({ instanceId, projectRoot: root, mode: "chat" })
+        .pipe(Effect.provideService(Scope.Scope, scope)),
+    );
+    await Effect.runPromise(
+      connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+    );
+    const events = terminal(Stream.unwrapScoped(connection.subscribe));
+    // Ollama reads the photo as an image embedding; counting its bytes as
+    // text tokens read as over a million and refused the turn.
+    await Effect.runPromise(
+      connection.send({
+        sessionId,
+        prompt: "describe",
+        attachments: [
+          {
+            attachmentId: "attachment-1",
+            displayName: "photo.png",
+            mediaType: "image/png",
+            bytes: new Uint8Array(300_000).fill(200),
+          },
+        ],
+        tools: [],
+      }),
+    );
+    expect((await events).at(-1)?.kind).toBe("completed");
+    await Effect.runPromise(connection.stop(sessionId));
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+  });
+
   it("never declares usage unsupported because one response carried no counts", async () => {
     const replies = [
       { prompt_eval_count: 4, eval_count: 2 },

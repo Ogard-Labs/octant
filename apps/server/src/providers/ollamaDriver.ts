@@ -27,6 +27,7 @@ import {
 } from "../harness/nativeHarnessTranscriptStore";
 import { sendWithEndpointRetry } from "./endpointRetry";
 import {
+  buildOllamaChatBody,
   makeOllamaEndpoint,
   ollamaChatInputFits,
   ollamaModelTakesTools,
@@ -314,8 +315,21 @@ function requestFits(
     ?.models.find((candidate) => String(candidate.id) === String(request.modelId));
   const contextLimit =
     model === undefined ? undefined : resolveModelContextWindow(model)?.contextWindow;
-  // Roughly four bytes per token; only a model whose window is known is held to it.
-  return contextLimit === undefined || JSON.stringify(input).length / 4 <= contextLimit;
+  if (contextLimit === undefined) return true;
+  // Roughly four bytes per token of the body as sent, less its images: Ollama
+  // reads an image as a fixed embedding, not as base64 text, and measuring a
+  // raw byte array serialized as JSON refused a 300 KB photo against a 128K
+  // window. The body size limit above still bounds every image.
+  const withoutImages = request.history.map(({ attachments: _attachments, ...message }) =>
+    message.toolResults === undefined
+      ? message
+      : {
+          ...message,
+          toolResults: message.toolResults.map(({ images: _images, ...result }) => result),
+        },
+  );
+  const text = JSON.stringify(buildOllamaChatBody({ ...input, history: withoutImages }));
+  return text.length / 4 <= contextLimit;
 }
 
 /**
