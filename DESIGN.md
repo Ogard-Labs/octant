@@ -213,7 +213,9 @@ they meet. The sidebar, the stage (the primary workspace), the right dock, and
 the bottom panel sit inside it as one sheet: it starts under the title band,
 stops 8px short of the window's right and bottom edges, rounds its outer
 corners (`--oct-radius-md`) where the frame turns and along the bottom, and
-divides its parts with hairlines. The sidebar's side is the workspace colour,
+divides its parts with one soft hairline (`--octant-border-soft`); no
+stronger line doubles it, and none runs on through the band or the inset
+below the sheet. The sidebar's side is the workspace colour,
 a step lighter than the stage's application background, so the turn of the
 frame reads. Pane headers and dock tabs stay in the title band. With Glass on,
 the frame and the sheet are the Tint over the window's native material, so
@@ -225,7 +227,7 @@ stage are clear. Behind every page the application ground lies on the stage's
 piece of the sheet, under the content, taking the sheet's corners; with Cover
 the sidebar on it runs under the sidebar's piece too, which then lets a
 little of it through. A pane header and the dock head share the
-title rail (`--oct-title-rail-h`), and the pane draws the one hairline under both. At 680px and below the
+title rail (`--oct-title-rail-h`), and the pane draws the one hairline under both, in the sheet's soft hairline so the rule under the band is one shade across the sidebar's edge. At 680px and below the
 workspace sidebar is an overlay drawer and the frame stays flat, with a scrim
 (`--octant-scrim`) dimming the page behind it. The drawer
 starts closed on every load, closes on Escape, on a tap outside it, and on
@@ -1039,9 +1041,11 @@ grid, named by the `--oct-title-rail-h`, `--oct-rail-tab-h`,
 `--oct-nav-inset` tokens in `octant.css`: the title band, the window
 controls, the right dock head, and the bottom panel toolbar share one title
 rail, on which a rail tab and a rail icon control sit on one centreline and
-the band's hairline meets the dock's; the sidebar runs navigation, Project, and
-thread rows at the nav row height between a header row (`--oct-nav-head-h`)
-and a 40px account row, with every leading icon on the nav inset and its section labels at 12px in the
+the band's hairline meets the dock's; the sidebar's header row is its part of
+that rail (`--oct-title-rail-h`), so its controls share the window controls'
+centreline, and below it the sidebar runs navigation, Project, and
+thread rows at the nav row height down to a 40px account row (`--oct-nav-head-h`),
+with every leading icon on the nav inset and its section labels at 12px in the
 meta ink with a 20px gap above, so a label never reads as one more row. A
 thread row that carries a facts line is two lines of type and takes 8px above
 and below them (about 56px). Hover-only actions (add, more, pin, archive,

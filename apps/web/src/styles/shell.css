@@ -778,9 +778,12 @@ html[data-octant-native-host="true"]
   overflow-x: hidden;
 }
 
+/* The header row is the sidebar's part of the title band, so it takes the
+   rail's height: at the 40px nav head its 28px controls sat one pixel below
+   the window controls' centreline across the sidebar's edge. */
 .sidebar__chrome {
   display: flex;
-  min-height: var(--oct-nav-head-h);
+  min-height: var(--oct-title-rail-h);
   align-items: center;
   gap: var(--oct-space-1);
   min-width: 0;
@@ -1840,10 +1843,16 @@ html[data-octant-native-host="true"]
     isolation: isolate;
   }
 
+  /* The sheet piece below draws the sidebar's edge. The recipe's border ran
+     the window's full height one pixel outside it: a stronger line through
+     the title band and the bottom inset, and a double line beside the
+     piece's own hairline, so the edge stepped where the band's rule crossed
+     it. */
   .shell-frame > .sidebar {
     position: relative;
     isolation: isolate;
     padding-bottom: var(--octant-sheet-inset);
+    border-right: 0;
   }
 
   .shell-frame > .sidebar::before {
@@ -1950,7 +1959,9 @@ html[data-octant-native-host="true"]
      so it takes the title rail the dock head already uses and the two heads
      close on one line. The line is drawn by the pane, not the header: the
      header stops short of the window controls by a margin, and a border on
-     it would stop there too. */
+     it would stop there too. It is the sheet's soft hairline, the same line
+     the sidebar's piece draws at this height: in the stronger border the rule
+     under the band changed shade exactly at the sidebar's edge. */
   .shell-frame .workspace-pane__header {
     min-height: var(--oct-title-rail-h);
   }
@@ -1963,7 +1974,7 @@ html[data-octant-native-host="true"]
     right: 0;
     left: 0;
     height: 1px;
-    background: var(--oct-border);
+    background: var(--octant-border-soft);
     content: "";
     pointer-events: none;
   }
