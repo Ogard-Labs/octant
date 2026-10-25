@@ -644,7 +644,10 @@ for under two seconds. Motion Still holds either drawn field on one frame and
 takes no clicks. Pulsing characters is the other drawn ground, and only when a person
 picks it: a grid of monospace letters and digits in the theme's primary ink,
 at most half opaque, whose brightness drifts in slow patches and breathes as
-a whole at twelve frames a second while a few glyphs swap. A click over it
+a whole at twenty-four frames a second while a few glyphs swap. The field is
+drawn on the GPU in one pass, because painting each lit cell from the CPU was
+the cost (ten to sixteen milliseconds a frame at the larger window sizes,
+against a fraction of a millisecond on the GPU). A click over it
 on a start screen (behind every page, only there; a click in a thread or a
 list sends nothing) sends out an uneven ring of glyphs in the theme's accent whose edge wobbles as
 it grows, trailed by a fainter echo, and about one click in six draws a heart
