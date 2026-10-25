@@ -3686,8 +3686,12 @@ prompt is therefore built to be appended, never rewritten:
 - **When a block counts as held.** The server keeps one record per provider
   session id (`apps/server/src/providers/heldTurnContext.ts`), which the Chat,
   Work, and Code turn runners consult before sending. A block counts as held only
-  after a turn that carried it reported `completed` on that same session: a
-  failed or interrupted turn may never have reached the runtime's history. A
+  after a turn that carried it reported `completed` on that same session, with a
+  usage report saying the runtime keeps its prompts (`promptRetention: "kept"`):
+  a failed or interrupted turn may never have reached the runtime's history, and
+  an adapter that cannot say what its runtime keeps (ACP agents today) reports
+  no compaction either, so its sessions are sent the standing context every
+  turn. A
   session opened by `start` holds nothing. A compaction, automatic
   (`context-compacted`, or a usage report with `promptRetention: "compacted"`)
   or requested, drops the record, because the runtime keeps only a share of

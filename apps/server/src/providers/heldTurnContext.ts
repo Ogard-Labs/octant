@@ -15,6 +15,8 @@ interface SessionHold {
   readonly held: ReadonlySet<string>;
   /** Digests of the standing context the running turn carries, held once it completes. */
   readonly sending?: ReadonlySet<string>;
+  /** Whether the running turn's adapter said the runtime keeps its prompts. */
+  readonly keeps?: boolean;
 }
 
 function blockDigest(block: ProviderContextBlock): string {
@@ -26,10 +28,13 @@ function blockDigest(block: ProviderContextBlock): string {
  * a resumed session sends only what is new (see `providerTurnContextDelta`).
  *
  * A block counts as held only after a turn that carried it completed on that
- * same session: a failed or interrupted turn may never have reached the
- * runtime's history. A session started afresh holds nothing, and a compaction,
- * automatic or requested, drops everything, because the runtime keeps only a
- * share of earlier prompts that Octant cannot see. The record lives in memory
+ * same session and reported, on its usage, that the runtime keeps its prompts
+ * (`promptRetention: "kept"`): a failed or interrupted turn may never have
+ * reached the runtime's history, and an adapter that says nothing about
+ * retention (ACP agents) never reports a compaction either, so a dropped copy
+ * there would never be sent again. A session started afresh holds nothing,
+ * and a compaction, automatic or requested, drops everything, because the
+ * runtime keeps only a share of earlier prompts that Octant cannot see. The record lives in memory
  * for the life of the server, so the first turn after a restart sends the
  * standing context once more; that costs one copy, never a missing one.
  *
@@ -77,8 +82,10 @@ export class HeldTurnContext {
       this.#sessions.delete(key);
       return;
     }
-    if (event.kind === "completed" && session.sending !== undefined) {
-      this.#sessions.set(key, { held: session.sending });
+    if (event.kind === "usage" && event.promptRetention === "kept") {
+      if (session.sending !== undefined) this.#sessions.set(key, { ...session, keeps: true });
+    } else if (event.kind === "completed" && session.sending !== undefined) {
+      this.#sessions.set(key, { held: session.keeps === true ? session.sending : session.held });
     } else if (event.kind === "failed" || event.kind === "interrupted") {
       this.#sessions.set(key, { held: session.held });
     }

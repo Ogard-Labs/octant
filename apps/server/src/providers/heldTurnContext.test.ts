@@ -18,6 +18,13 @@ const fields = {
   occurredAt: "2026-10-25T10:00:00.000Z" as UtcTimestamp,
 };
 const completed: ProviderRuntimeEvent = { ...fields, kind: "completed" };
+const keptUsage: ProviderRuntimeEvent = {
+  ...fields,
+  kind: "usage",
+  inputTokens: 100,
+  outputTokens: 10,
+  promptRetention: "kept",
+};
 const instructions = { kind: "instructions", text: "Stay concise." } as const;
 const mention = { kind: "user-message", text: "Mentioned thread." } as const;
 
@@ -27,6 +34,7 @@ function completeTurn(
   context: ReadonlyArray<typeof instructions | typeof mention>,
 ) {
   const delta = ledger.forTurn({ sessionId, resumed, context });
+  ledger.observe(keptUsage);
   ledger.observe(completed);
   return delta;
 }
@@ -47,6 +55,15 @@ describe("HeldTurnContext", () => {
       kind: "failed",
       failure: { category: "provider-failed", message: "The runtime stopped." },
     });
+    expect(ledger.forTurn({ sessionId, resumed: true, context: [instructions] }).context).toEqual([
+      instructions,
+    ]);
+  });
+
+  it("keeps sending standing context to a runtime that never says it keeps its prompts", () => {
+    const ledger = new HeldTurnContext();
+    ledger.forTurn({ sessionId, resumed: false, context: [instructions] });
+    ledger.observe(completed);
     expect(ledger.forTurn({ sessionId, resumed: true, context: [instructions] }).context).toEqual([
       instructions,
     ]);
@@ -78,11 +95,13 @@ describe("HeldTurnContext", () => {
     const ledger = new HeldTurnContext();
     const skill = { kind: "instructions", text: "Review as a skeptic." } as const;
     ledger.forTurn({ sessionId, resumed: false, context: [instructions, skill] });
+    ledger.observe(keptUsage);
     ledger.observe(completed);
     expect(ledger.forTurn({ sessionId, resumed: true, context: [instructions] }).context).toEqual([
       { kind: "instructions", text: PROVIDER_CONTEXT_RESTATED },
       instructions,
     ]);
+    ledger.observe(keptUsage);
     ledger.observe(completed);
     expect(completeTurn(ledger, true, [instructions]).context).toEqual([]);
   });
