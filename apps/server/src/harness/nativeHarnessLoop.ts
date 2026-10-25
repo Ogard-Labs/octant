@@ -792,8 +792,12 @@ export function createNativeHarnessConnection(
       keepFrom?: NativeHarnessMessage,
     ): Promise<{
       readonly result: ProviderSessionCompaction;
-      /** Present once the summary request went out, with the usage it reported. */
-      readonly sent?: { readonly usage: NativeHarnessUsage | undefined };
+      /**
+       * Present once the summary request went out, with the usage it reported
+       * and whether the endpoint retried it, which leaves one request's price
+       * tiers unknown for that usage.
+       */
+      readonly sent?: { readonly usage: NativeHarnessUsage | undefined; readonly retried: boolean };
     }> => {
       const body = state.compaction === undefined ? state.messages : state.messages.slice(1);
       const starts = turnStarts(body);
@@ -827,9 +831,15 @@ export function createNativeHarnessConnection(
         return { result: unchanged("Not even the oldest turn fits one compaction request.") };
       }
       let response: NativeHarnessResponse;
+      let retried = false;
       try {
         // The summary is not a reply: nothing it streams reaches the session's events.
-        response = await state.endpoint.send(chosen.request, { signal, onEvent: () => undefined });
+        response = await state.endpoint.send(chosen.request, {
+          signal,
+          onEvent: (event) => {
+            if (event.kind === "retrying") retried = true;
+          },
+        });
       } catch {
         return {
           result: unchanged(
@@ -838,13 +848,13 @@ export function createNativeHarnessConnection(
               : "The endpoint could not summarize the session.",
           ),
           // A failed request may still have been charged.
-          sent: { usage: undefined },
+          sent: { usage: undefined, retried },
         };
       }
       const usage = response.usage;
       const summarized = response.text.trim();
       if (summarized.length === 0 || state.stopped || signal.aborted) {
-        return { result: unchanged("The endpoint returned no summary."), sent: { usage } };
+        return { result: unchanged("The endpoint returned no summary."), sent: { usage, retried } };
       }
       const replaced = body.slice(0, starts[chosen.turns]);
       const taskList = carriedTaskList(state.compaction, replaced);
@@ -860,7 +870,10 @@ export function createNativeHarnessConnection(
       } catch {
         // The marker never reached the journal, so the session still reads
         // the turns it would have replaced.
-        return { result: unchanged("The compaction could not be recorded."), sent: { usage } };
+        return {
+          result: unchanged("The compaction could not be recorded."),
+          sent: { usage, retried },
+        };
       }
       state.messages.splice(
         0,
@@ -869,7 +882,7 @@ export function createNativeHarnessConnection(
         ...body.slice(starts[chosen.turns]),
       );
       state.compaction = compaction;
-      return { result: { kind: "compacted" }, sent: { usage } };
+      return { result: { kind: "compacted" }, sent: { usage, retried } };
     };
 
     const compactSession = async (state: SessionState): Promise<ProviderSessionCompaction> => {
@@ -909,11 +922,16 @@ export function createNativeHarnessConnection(
       signal: AbortSignal,
     ): Promise<NativeHarnessRequest | undefined> => {
       if (options.mode !== "code" || state.fallback !== undefined) return undefined;
-      if (state.turnMessage === undefined) return undefined;
+      // One summary request per turn: after a success nothing before the
+      // running turn is left to summarize, and after a failure every later
+      // step would pay for the same large request again only to fall back to
+      // the ladder anyway.
+      if (state.turnMessage === undefined || state.compactedThisTurn) return undefined;
       const { result, sent } = await summarizeEarlierTurns(state, signal, state.turnMessage);
       if (sent !== undefined) {
         // The summary request went out whether or not it came back; the turn pays for it.
         state.compactedThisTurn = true;
+        if (sent.retried) state.pricingBoundariesKnown = false;
         chargeRequest(state, sent.usage);
       }
       if (result.kind !== "compacted") return undefined;

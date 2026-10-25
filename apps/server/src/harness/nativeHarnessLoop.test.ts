@@ -1263,6 +1263,20 @@ async function whenRequested(
   }
 }
 
+/** The first tool call not yet answered, or undefined once the turn ended. */
+async function nextUnanswered(
+  events: ReadonlyArray<ProviderRuntimeEvent>,
+  answered: ReadonlySet<string>,
+): Promise<string | undefined> {
+  for (;;) {
+    for (const event of events) {
+      if (event.kind === "tool-request" && !answered.has(event.requestId)) return event.requestId;
+    }
+    if (events.some(isTerminal)) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+}
+
 describe("recovering from a request the endpoint refuses as too large", () => {
   const overflow: ProviderFailure = {
     category: "provider-failed",
@@ -1882,11 +1896,15 @@ describe("compacting an Octant Harness session", () => {
     /**
      * Three turns; the first writes a task list. `refuses` decides which
      * requests the endpoint turns away as too large, `fits` what its own size
-     * estimate admits. A request without tools is the summary request.
+     * estimate admits, `summarize` how the summary request (the one without
+     * tools) is answered, and `thirdTurn` the third turn's replies. Every tool
+     * call is answered as it arrives.
      */
     const runLongSession = async (input: {
       readonly refuses: (request: NativeHarnessRequest) => boolean;
       readonly fits?: (request: NativeHarnessRequest) => boolean;
+      readonly summarize?: () => Promise<NativeHarnessResponse>;
+      readonly thirdTurn?: ReadonlyArray<NativeHarnessResponse>;
     }) => {
       const transcripts = new MemoryNativeHarnessTranscriptStore();
       const requests: NativeHarnessRequest[] = [];
@@ -1898,7 +1916,9 @@ describe("compacting an Octant Harness session", () => {
         },
         { text: "answer 1", toolCalls: [] },
         { text: "answer 2", toolCalls: [] },
-        { text: "answer 3", toolCalls: [], usage: { inputTokens: 100, outputTokens: 10 } },
+        ...(input.thirdTurn ?? [
+          { text: "answer 3", toolCalls: [], usage: { inputTokens: 100, outputTokens: 10 } },
+        ]),
       ];
       const transport: NativeHarnessTransport = {
         open: async () => ({
@@ -1906,6 +1926,7 @@ describe("compacting an Octant Harness session", () => {
           send: async (request) => {
             requests.push(request);
             if (request.tools.length === 0) {
+              if (input.summarize !== undefined) return await input.summarize();
               return {
                 text: "Planned the parser fix and chose the queue design.",
                 toolCalls: [],
@@ -1929,28 +1950,28 @@ describe("compacting an Octant Harness session", () => {
             const connection = yield* connect(transport, transcripts);
             yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
             const seen: ProviderRuntimeEvent[] = [];
-            const first = yield* Effect.fork(
-              Stream.runForEach(
-                (yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal)),
-                (event) => Effect.sync(() => seen.push(event)),
-              ),
-            );
-            yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: offered });
-            yield* Effect.promise(() => whenRequested(seen, "plan"));
-            yield* connection.answerTool({
-              sessionId,
-              requestId: "plan",
-              resultJson: '{"status":"recorded","items":1}',
-              isError: false,
-            });
-            yield* Fiber.join(first);
-            for (const prompt of ["second", "third"]) {
+            const answered = new Set<string>();
+            for (const prompt of ["first", "second", "third"]) {
+              seen.length = 0;
               const turn = yield* Effect.fork(
-                Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+                Stream.runForEach(
+                  (yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal)),
+                  (event) => Effect.sync(() => seen.push(event)),
+                ),
               );
               yield* connection.send({ sessionId, prompt, attachments: [], tools: offered });
-              seen.length = 0;
-              seen.push(...Array.from(yield* Fiber.join(turn)));
+              for (;;) {
+                const requestId = yield* Effect.promise(() => nextUnanswered(seen, answered));
+                if (requestId === undefined) break;
+                answered.add(requestId);
+                yield* connection.answerTool({
+                  sessionId,
+                  requestId,
+                  resultJson: '{"status":"recorded","items":1}',
+                  isError: false,
+                });
+              }
+              yield* Fiber.join(turn);
             }
             return seen;
           }),
@@ -2005,6 +2026,45 @@ describe("compacting an Octant Harness session", () => {
         sent.some((request) => request.history[0]?.text.includes("left out to fit") === true),
       ).toBe(false);
       expect(sent.at(-1)?.history[0]?.text).toContain(taskList);
+    });
+
+    it("falls back to leaving earlier exchanges out when the summary fails, and does not pay for it again on later steps", async () => {
+      let summaries = 0;
+      const run = await runLongSession({
+        refuses: () => false,
+        fits: (request) => {
+          const texts = request.history.map((message) => message.text);
+          return !(texts.includes("first") && texts.includes("third"));
+        },
+        summarize: async () => {
+          summaries += 1;
+          throw { category: "provider-failed", message: "The summary request failed." };
+        },
+        thirdTurn: [
+          {
+            text: "",
+            toolCalls: [{ toolCallId: "look-1", toolName: "read", argumentsJson: "{}" }],
+          },
+          {
+            text: "",
+            toolCalls: [{ toolCallId: "look-2", toolName: "read", argumentsJson: "{}" }],
+          },
+          { text: "answer 3", toolCalls: [] },
+        ],
+      });
+
+      expect(run.events.at(-1)?.kind).toBe("completed");
+      expect(summaries).toBe(1);
+      expect(run.events.some((event) => event.kind === "context-compacted")).toBe(false);
+      expect(run.transcripts.load(sessionId)?.compactions).toEqual([]);
+      const thirdTurnSteps = run.requests.filter(
+        (request) =>
+          request.tools.length > 0 && request.history.some((message) => message.text === "third"),
+      );
+      expect(thirdTurnSteps).toHaveLength(3);
+      for (const step of thirdTurnSteps) {
+        expect(step.history[0]?.text).toContain("left out to fit");
+      }
     });
   });
 

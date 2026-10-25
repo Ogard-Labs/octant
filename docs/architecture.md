@@ -4069,13 +4069,15 @@ native harness in `apps/server/src/harness`:
   out, the loop first compacts: it summarizes the turns before the running
   turn exactly as the connection's `compact` does (below), journals the
   marker, emits `context-compacted` with `trigger: "automatic"`, and rebuilds
-  the request from the summary and the turns after it. It tries this at most
-  once per request, only on the lead's own model (a fallback model's window
+  the request from the summary and the turns after it. It sends at most one
+  summary request per turn, so a summary that failed is not paid for again on
+  every later step, and only on the lead's own model (a fallback model's window
   may differ), and never summarizes the running turn's own prompt or steps,
   even when a steering note opened a later boundary; when there is nothing
   before the running turn, or the summary does not come back, the ladder
   continues as before. The summary request's usage joins the turn's total and
-  cost, and the turn runner journals the compaction as an automatic receipt
+  cost (an endpoint retry of it leaves the turn's estimated cost unknown, as
+  for any request), and the turn runner journals the compaction as an automatic receipt
   and reports the turn's later usage as `compacted`, the same as a
   first-class runtime's own. Rationale: a cut exchange is gone from the
   model's view with only the note in its place, while a summary keeps the
@@ -4092,7 +4094,8 @@ native harness in `apps/server/src/harness`:
   the loop recognises the refusal as a filled context window (OpenAI's
   `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
   413 shape from an OpenAI-compatible host). A Code connection that has not
-  yet tried to compact for that request summarizes earlier turns as above
+  yet tried to compact for that request, nor sent a summary request earlier in
+  the turn, summarizes earlier turns as above
   and sends the rebuilt request; otherwise, or when that request is refused
   too, the loop shrinks it one further ladder step and sends it once more; a
   refusal after that stands. That step always
