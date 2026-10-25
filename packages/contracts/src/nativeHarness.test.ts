@@ -29,10 +29,13 @@ const lead = {
 };
 
 describe("native harness tools", () => {
-  it("offers the nine working tools, the two harness reads, delegation, and the goal tools", () => {
-    expect(NATIVE_HARNESS_TOOL_NAMES.length).toBe(15);
-    // Cut history has no read-back tool; a name with no port behind it only ever refused.
-    expect(NATIVE_HARNESS_TOOL_NAMES).not.toContain("journal-lookup");
+  it("offers the nine working tools, the three harness reads, delegation, and the goal tools", () => {
+    expect(NATIVE_HARNESS_TOOL_NAMES.length).toBe(16);
+    expect(NATIVE_HARNESS_TOOL_NAMES).toContain("journal-lookup");
+    // A lookup names only a message number; it can never point at another thread.
+    expect(() =>
+      decodeNativeHarnessToolArguments("journal-lookup", { from: 0, threadId: "other" }),
+    ).toThrow();
     expect(NATIVE_HARNESS_TOOL_NAMES).toContain("goal-check");
     // A check command must fit whole in the approval a person reads.
     expect(() =>

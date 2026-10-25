@@ -65,6 +65,7 @@ const SOURCE_WORDS: Readonly<Record<string, string>> = {
   "web-search": "Web search results",
   "todo-write": "The task list",
   "context-remaining": "The context estimate",
+  "journal-lookup": "Earlier messages of this conversation",
   "second-opinion": "A second opinion from another model",
   delegate: "A helper agent's reply",
   "ask-user": "Your answer to a question",

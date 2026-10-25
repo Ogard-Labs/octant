@@ -4057,14 +4057,29 @@ native harness in `apps/server/src/harness`:
   results return in one message in call order. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
-  alone does not fit. The lead has no tool to read a cut exchange back: the
-  note tells it that its task list and the files on disk still reflect that
-  work, and the journal keeps the full conversation for people, replay, and
-  export. A journal lookup tool was specified once but never wired to a store,
-  so it only ever reported itself unavailable and was removed; the note names
-  no turn or sequence the model could ask for, and Chat and Work start a fresh
-  session each turn, so a lookup needs those handles and a thread-scoped read
-  of the rebuilt history before it can return. When the endpoint still rejects a request as too large,
+  alone does not fit. The note tells the lead that its task list and the
+  files on disk still reflect that work, and the journal keeps the full
+  conversation for people, replay, and export. A Code lead can also read a
+  cut exchange back: it is offered `journal-lookup`, a read-only harness read
+  of its own `native-harness-transcript`. The note then names the journal
+  message numbers before the first message it kept (`Messages 0 to N`), and
+  only numbers already journaled, so it never hands out a handle the model
+  cannot fetch; the numbering is the journal's, so a compaction summary or an
+  earlier cut does not shift it. A lookup takes `from` (and an optional
+  `count`, at most 20) and nothing else: it cannot name a thread or a session.
+  The host reads the conversation of the session the thread's newest turn
+  recorded in its own journal, and refuses (`journal-unavailable`) when that
+  session is not a harness session of the thread's provider in Code; a number
+  past the end refuses as `journal-message-missing`. A result is bounded (32k
+  characters in all, a long text or payload clipped with a marker saying how
+  much was left out) and says the next number when more follows. The turn's
+  resolved credential values are redacted from it exactly as a fork's copy
+  redacts them, plain and JSON-escaped; nothing but the conversation's own
+  messages leaves, so no approval or other journal record rides along. The
+  lead is not offered the tool without that secret list. Chat and Work start
+  a fresh harness session each turn, so they have no durable conversation to
+  read: the catalog offers `journal-lookup` in Code only, and Chat and Work
+  join once their sessions are durable. Their note names no numbers. When the endpoint still rejects a request as too large,
   the loop recognises the refusal as a filled context window (OpenAI's
   `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
   413 shape from an OpenAI-compatible host), shrinks it one further ladder
@@ -4510,7 +4525,8 @@ native harness in `apps/server/src/harness`:
   Harness parity while any item is open.
   1. **Offered tools.** Always offered: `todo-write`, `context-remaining`,
      and `second-opinion` in every mode; `read`, `grep`, `glob`, `edit`, and
-     `write` in Work and Code; `bash` and `goal-check` in Code only. Offered
+     `write` in Work and Code; `bash`, `goal-check`, and `journal-lookup`
+     in Code only. Offered
      when the host supplies the port: `delegate`, `ask-user`, and `goal`
      (every mode), and `web-fetch` and `web-search` (Work and Code; Chat only
      while its research is on, and `web-search` only with a search

@@ -390,6 +390,38 @@ export class CodeOperationEventStore {
   }
 
   /**
+   * The provider session the thread's newest turn ran on, as its
+   * `provider-session-ready` recorded it. A running turn records it before its
+   * first message is sent. Undefined when none was recorded or the record does
+   * not decode.
+   */
+  latestProviderSession(
+    threadId: CodeThreadId,
+  ): Extract<CodeOperationEvent, { readonly kind: "provider-session-ready" }> | undefined {
+    try {
+      const envelope = this.#journal.latestThreadEvents({
+        aggregateType: "code-operation",
+        threadId: String(threadId),
+        kind: "provider-session-ready",
+        limit: 1,
+      })[0];
+      if (
+        envelope === undefined ||
+        envelope.eventName !== CODE_OPERATION_EVENT_RECORDED ||
+        envelope.eventVersion !== 1
+      )
+        return undefined;
+      const frame = decodeCodeOperationEventFrame(envelope.payload);
+      return String(frame.threadId) === String(threadId) &&
+        frame.event.kind === "provider-session-ready"
+        ? frame.event
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * How full a provider session's window was at the thread's latest usage
    * report: the occupancy the provider reported, or else the input its last
    * request carried, which is what the window held then. Undefined when that

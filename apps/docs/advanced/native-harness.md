@@ -32,7 +32,9 @@ set. A Chat thread gets neither, and cannot open a page, until you turn
 research on for it.
 
 `context-remaining` and `second-opinion` are offered in every mode and reach
-none of those. A thread that has read outside content cannot send a
+none of those. A Code lead also gets `journal-lookup`, which re-reads earlier
+messages of its own conversation after a context cut (see
+[Honest limits](#honest-limits)). A thread that has read outside content cannot send a
 `second-opinion` question, since another model would receive it unmarked.
 
 Every call passes the same server authority check as any other tool. A Chat
@@ -505,8 +507,11 @@ table.
   has no tool loop, so it is not offered as a slot candidate until it does.
 - Context is reduced by the host's planner; each prune and cut is journaled
   with the cache cost it paid, and the lead can read `context-remaining` to
-  checkpoint before one. What a cut leaves out is gone from the lead's view:
-  there is no tool to read it back, so the lead keeps its progress in its task
-  list and the files on disk. An endpoint that never reports the model's window,
+  checkpoint before one. In Code, the note in front of a cut names the
+  earlier messages by number and the lead can read them back with
+  `journal-lookup`, a bounded read of that thread's own conversation with your
+  credentials redacted. Chat and Work have no such tool yet: what a cut
+  leaves out is gone from the lead's view there, so it keeps its progress in
+  its task list and the files on disk. An endpoint that never reports the model's window,
   such as some Azure AI Foundry deployments, gives the lead no figure: the tool
   says the context is unavailable instead of reporting room against an estimate.

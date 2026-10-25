@@ -18,6 +18,7 @@ import { Persistence, makePersistenceLive } from "../persistence/persistenceServ
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { buildUsageDashboard } from "../usageDashboardModel";
+import { createCodeJournalLookup } from "./nativeHarnessJournalLookup";
 import { createNativeHarnessConnection, fitRequest } from "./nativeHarnessLoop";
 import {
   JournalNativeHarnessTranscriptStore,
@@ -43,6 +44,7 @@ const tool = (name: string): ProviderToolDefinition => ({
   inputSchema: { type: "object", properties: {} },
 });
 const tools = [tool("read"), tool("grep"), tool("bash")];
+const withLookup = [...tools, tool("journal-lookup")];
 const directories: string[] = [];
 
 afterEach(() => {
@@ -110,12 +112,13 @@ function sendAndCollect(
   prompt: string,
   until: (event: ProviderRuntimeEvent) => boolean,
   context: NonNullable<Parameters<ProviderConnection["send"]>[0]["context"]> = [],
+  offered: ReadonlyArray<ProviderToolDefinition> = tools,
 ) {
   return Effect.gen(function* () {
     const events = yield* Effect.fork(
       Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(until))),
     );
-    yield* connection.send({ sessionId, prompt, context, attachments: [], tools });
+    yield* connection.send({ sessionId, prompt, context, attachments: [], tools: offered });
     return Array.from(yield* Fiber.join(events));
   });
 }
@@ -836,6 +839,56 @@ describe("fitting a request to the endpoint", () => {
       fitRequest(acceptsAll, forced ?? withMore, { reduceOnce: true }),
       "nothing is left to leave out",
     ).toBeUndefined();
+  });
+
+  it("names the journaled messages a cut left out, and journal-lookup reads one back", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport(
+      [
+        { text: "first answer", toolCalls: [] },
+        { text: "second answer", toolCalls: [] },
+      ],
+      (request) => JSON.stringify(request.history).length <= 700,
+    );
+    const firstPrompt = `first question ${"a".repeat(620)}`;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* sendAndCollect(connection, firstPrompt, isTerminal, [], withLookup);
+          yield* sendAndCollect(connection, "second question", isTerminal, [], withLookup);
+        }),
+      ),
+    );
+
+    const note = requests[1]?.history[0]?.text ?? "";
+    expect(requests[1]?.history.map((message) => message.text).slice(1)).toEqual([
+      "second question",
+    ]);
+    expect(note).toContain("Messages 0 to 1 are kept in the journal");
+    const lookup = createCodeJournalLookup({
+      transcripts,
+      latestSession: () => ({
+        providerInstanceId: instanceId,
+        resumeCursor: { driverKind: "openai-compatible", value: String(sessionId) },
+      }),
+      providerInstanceId: instanceId,
+      secrets: [],
+    });
+    expect(lookup({ from: 0, count: 2 })).toMatchObject({
+      status: "found",
+      messages: [
+        { number: 0, role: "user", text: firstPrompt },
+        { number: 1, role: "assistant", text: "first answer" },
+      ],
+    });
+  });
+
+  it("names no message numbers when the lead is not offered journal-lookup", () => {
+    const fitted = fitRequest(fitsUnder(260), base, { journalNumberOf: () => 4 });
+    expect(fitted?.history[0]?.text).toContain("left out to fit the context window");
+    expect(fitted?.history[0]?.text).not.toContain("journal-lookup");
   });
 
   describe("usage across the requests of one turn", () => {
@@ -1758,6 +1811,51 @@ describe("compacting an Octant Harness session", () => {
       "answer 2",
       "third",
     ]);
+  });
+
+  it("numbers a cut after a compacted resume by the journal, not by the shortened conversation", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    let tight = false;
+    const { transport, requests } = scriptedTransport(
+      [...answers(2), { text: "Earlier: chose the queue design.", toolCalls: [] }, ...answers(1)],
+      (request) => !tight || !request.history.some((message) => message.text === "second"),
+    );
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+          yield* sendAndCollect(connection, "first", isTerminal, [], withLookup);
+          yield* sendAndCollect(connection, "second", isTerminal, [], withLookup);
+          yield* compactOf(connection)({ sessionId, compactionId });
+        }),
+      ),
+    );
+    tight = true;
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: { driverKind: "openai-compatible", value: String(sessionId) },
+            executionPolicy: "approval-gated",
+          });
+          yield* sendAndCollect(connection, "third", isTerminal, [], withLookup);
+        }),
+      ),
+    );
+
+    // The journal holds first, answer 1, second, answer 2, then third: every
+    // number the note names is one a lookup can read.
+    expect(
+      requests
+        .at(-1)
+        ?.history.map((message) => message.text)
+        .slice(1),
+    ).toEqual(["third"]);
+    expect(requests.at(-1)?.history[0]?.text).toContain("Messages 0 to 3 are kept in the journal");
+    expect(transcripts.load(sessionId)?.messages[3]?.text).toBe("answer 2");
   });
 
   it("keeps the compaction in the journal, so a restarted host resumes from the summary", async () => {

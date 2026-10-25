@@ -55,6 +55,7 @@ const REPLAY_SAFE_TOOLS: ReadonlySet<string> = new Set([
   "web-fetch",
   "web-search",
   "context-remaining",
+  "journal-lookup",
 ]);
 
 const OMITTED_RESULT_JSON = JSON.stringify({
@@ -67,6 +68,17 @@ const NOT_RUN_RESULT_JSON = JSON.stringify({
 });
 const OMITTED_HISTORY_NOTE =
   "Earlier messages of this session were left out to fit the context window. Your task list and the files on disk still reflect that work.";
+
+/**
+ * The note in front of a cut. It names message numbers only when the lead is
+ * offered `journal-lookup` and every number it names is already journaled, so
+ * the model is never handed a handle it cannot fetch.
+ */
+function omittedHistoryNote(journaledBefore: number | undefined): string {
+  return journaledBefore === undefined || journaledBefore < 1
+    ? OMITTED_HISTORY_NOTE
+    : `${OMITTED_HISTORY_NOTE} Messages 0 to ${journaledBefore - 1} are kept in the journal: call journal-lookup with one of those numbers as from to re-read them.`;
+}
 
 /**
  * The compaction request asks for continuation material, not a reply: what a
@@ -174,6 +186,12 @@ interface SessionState {
    * and is not a turn of its own.
    */
   compaction: NativeHarnessTranscriptCompaction | undefined;
+  /**
+   * The journal's number for the first message of `messages` it holds (the
+   * one after a compaction summary), so a cut note can name the numbers
+   * `journal-lookup` reads back.
+   */
+  journalOffset: number;
 }
 
 /**
@@ -270,6 +288,7 @@ export function createNativeHarnessConnection(
       readonly messages: NativeHarnessMessage[];
       readonly tools?: ReadonlyArray<ProviderToolDefinition> | undefined;
       readonly compaction?: NativeHarnessTranscriptCompaction | undefined;
+      readonly journalOffset?: number;
     }): SessionState => ({
       sessionId: input.sessionId,
       transcriptId: input.transcriptId,
@@ -299,7 +318,22 @@ export function createNativeHarnessConnection(
       requestEstimateUsd: undefined,
       requestStartedAt: undefined,
       compaction: input.compaction,
+      journalOffset: input.journalOffset ?? 0,
     });
+
+    /**
+     * The journal's number for a message of the session's conversation. One
+     * not journaled yet (the message a send or a steering note is adding) is
+     * numbered as the next, which every message before it precedes.
+     */
+    const journalNumberIn =
+      (state: SessionState) =>
+      (message: NativeHarnessMessage): number | undefined => {
+        const summary = state.compaction === undefined ? 0 : 1;
+        const index = state.messages.indexOf(message);
+        if (index >= 0 && index < summary) return undefined;
+        return state.journalOffset - summary + (index < 0 ? state.messages.length : index);
+      };
 
     // A note is acknowledged only after it is durable and its next request
     // fits. Inserting it between a tool call and its results would break the
@@ -425,10 +459,11 @@ export function createNativeHarnessConnection(
       };
       let current = request;
       if (state.fallback !== undefined) {
-        const refit = fitRequest(state.fallback.endpoint, {
-          ...request,
-          modelId: state.fallback.target.modelId,
-        });
+        const refit = fitRequest(
+          state.fallback.endpoint,
+          { ...request, modelId: state.fallback.target.modelId },
+          { journalNumberOf: journalNumberIn(state) },
+        );
         if (refit === undefined) {
           throw failure(
             "invalid-configuration",
@@ -451,6 +486,7 @@ export function createNativeHarnessConnection(
             if (isContextOverflowFailure(refused)) {
               const refit = fitRequest(state.fallback?.endpoint ?? state.endpoint, current, {
                 reduceOnce: true,
+                journalNumberOf: journalNumberIn(state),
               });
               if (refit !== undefined) {
                 state.pricingBoundariesKnown = false;
@@ -485,10 +521,11 @@ export function createNativeHarnessConnection(
             outcome.endpoint.release();
             throw error;
           }
-          const moved = fitRequest(outcome.endpoint, {
-            ...current,
-            modelId: outcome.target.modelId,
-          });
+          const moved = fitRequest(
+            outcome.endpoint,
+            { ...current, modelId: outcome.target.modelId },
+            { journalNumberOf: journalNumberIn(state) },
+          );
           if (moved === undefined) {
             outcome.endpoint.release();
             throw failure(
@@ -820,12 +857,14 @@ export function createNativeHarnessConnection(
             sessionMayHaveChanged: false,
           };
         }
+        const kept = starts[chosen.turns] ?? 0;
         state.messages.splice(
           0,
           state.messages.length,
           compactionSummaryMessage(summary),
-          ...body.slice(starts[chosen.turns]),
+          ...body.slice(kept),
         );
+        state.journalOffset += kept;
         state.compaction = compaction;
         emit(state, { kind: "context-compacted", trigger: "requested" });
         return { kind: "compacted" };
@@ -855,13 +894,17 @@ export function createNativeHarnessConnection(
     };
 
     const requestFor = (state: SessionState, history: ReadonlyArray<NativeHarnessMessage>) =>
-      fitRequest(state.endpoint, {
-        sessionId: state.sessionId,
-        modelId: state.modelId,
-        system: state.system,
-        history,
-        tools: sortToolDefinitionsByName(state.tools),
-      });
+      fitRequest(
+        state.endpoint,
+        {
+          sessionId: state.sessionId,
+          modelId: state.modelId,
+          system: state.system,
+          history,
+          tools: sortToolDefinitionsByName(state.tools),
+        },
+        { journalNumberOf: journalNumberIn(state) },
+      );
 
     return {
       subscribe: Stream.fromPubSub(events, { scoped: true }),
@@ -947,6 +990,7 @@ export function createNativeHarnessConnection(
               messages: compacted.messages,
               tools: input.tools,
               compaction: compacted.compaction,
+              journalOffset: compacted.journalOffset,
             });
             admit(state);
             return { sessionId: input.sessionId, resumeCursor: cursorFor(state) };
@@ -1234,13 +1278,16 @@ function afterCompaction(
 ): {
   readonly messages: NativeHarnessMessage[];
   readonly compaction: NativeHarnessTranscriptCompaction | undefined;
+  /** The journal's number for the first message kept after the summary. */
+  readonly journalOffset: number;
 } {
-  if (compaction === undefined) return { messages, compaction };
+  if (compaction === undefined) return { messages, compaction, journalOffset: 0 };
   const start = turnStarts(messages)[compaction.turns];
-  if (start === undefined) return { messages, compaction: undefined };
+  if (start === undefined) return { messages, compaction: undefined, journalOffset: 0 };
   return {
     messages: [compactionSummaryMessage(compaction.summary), ...messages.slice(start)],
     compaction,
+    journalOffset: start,
   };
 }
 
@@ -1332,11 +1379,18 @@ export function sortToolDefinitionsByName(
  * as it was (a result already omitted, a note already in front) is skipped,
  * since the refused request may itself have been reduced already; resending
  * the same bytes would only be refused again.
+ *
+ * `journalNumberOf` gives a message's number in the journal. When the request
+ * offers `journal-lookup`, the note names the journaled messages before the
+ * first one kept, which is every message a cut can have left out.
  */
 export function fitRequest(
   endpoint: Pick<NativeHarnessTransportSession, "fits">,
   request: NativeHarnessRequest,
-  options?: { readonly reduceOnce?: boolean | undefined },
+  options?: {
+    readonly reduceOnce?: boolean | undefined;
+    readonly journalNumberOf?: ((message: NativeHarnessMessage) => number | undefined) | undefined;
+  },
 ): NativeHarnessRequest | undefined {
   if (options?.reduceOnce !== true && endpoint.fits(request)) return request;
   const history = [...request.history];
@@ -1358,18 +1412,20 @@ export function fitRequest(
   }
   // Leave out whole exchanges from the front. A cut only lands on a plain
   // user message so no tool result is separated from its call.
+  const lookupOffered = request.tools.some((tool) => String(tool.name) === "journal-lookup");
   let start = 0;
   for (;;) {
     let next = start + 1;
     while (next < history.length - 1 && !isPlainUserMessage(history[next])) next += 1;
     if (next >= history.length - 1 && !isPlainUserMessage(history[next])) return undefined;
     start = next;
+    const kept = history[start];
+    const note = omittedHistoryNote(
+      lookupOffered && kept !== undefined ? options?.journalNumberOf?.(kept) : undefined,
+    );
     // Cutting only an earlier note and putting the same note back changes nothing.
-    const unchanged = start === 1 && history[0]?.text === OMITTED_HISTORY_NOTE;
-    const candidate = [
-      { role: "user" as const, text: OMITTED_HISTORY_NOTE },
-      ...history.slice(start),
-    ];
+    const unchanged = start === 1 && history[0]?.text === note;
+    const candidate = [{ role: "user" as const, text: note }, ...history.slice(start)];
     if (!unchanged && fits(candidate)) return { ...request, history: candidate };
     if (start >= history.length - 1) return undefined;
   }

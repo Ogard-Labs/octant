@@ -24,6 +24,7 @@ import {
   type NativeHarnessGoalArguments,
   type NativeHarnessGoalCheckArguments,
   type NativeHarnessGrepArguments,
+  type NativeHarnessJournalLookupArguments,
   type NativeHarnessReadArguments,
   type NativeHarnessSecondOpinionArguments,
   type NativeHarnessTodoItem,
@@ -46,6 +47,7 @@ import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ToolEgressCallConfirmation } from "./nativeHarnessEgressRules";
 import type { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
+import type { NativeHarnessJournalLookup } from "./nativeHarnessJournalLookup";
 import { nativeHarnessGoalSummary, type NativeHarnessGoalPort } from "./nativeHarnessGoal";
 
 const MAX_TOOL_INPUT_BYTES = 64 * 1024;
@@ -180,6 +182,13 @@ export interface NativeHarnessToolPorts {
     readonly replace: (items: ReadonlyArray<NativeHarnessTodoItem>) => Promise<void>;
   };
   readonly contextRemaining?: () => NativeHarnessContextRemaining | undefined;
+  /**
+   * The lead's own journaled conversation, read back after a context cut.
+   * Only a mode whose harness conversation is durable across turns has one.
+   */
+  readonly journalLookup?: (
+    input: NativeHarnessJournalLookupArguments,
+  ) => NativeHarnessJournalLookup;
   /**
    * The advisor's answer, nothing when no advisor model answered, or a refusal
    * with the reason the lead sees.
@@ -475,6 +484,8 @@ function isOffered(
       return ports.todo !== undefined;
     case "context-remaining":
       return ports.contextRemaining !== undefined;
+    case "journal-lookup":
+      return ports.journalLookup !== undefined;
     case "second-opinion":
       return ports.secondOpinion !== undefined;
     case "delegate":
@@ -571,6 +582,17 @@ async function execute(
     case "context-remaining": {
       const remaining = ports.contextRemaining!();
       return remaining === undefined ? refused("context-unavailable") : ok(remaining);
+    }
+    case "journal-lookup": {
+      const lookup = ports.journalLookup;
+      if (lookup === undefined) return refused("tool-unavailable");
+      const looked = lookup(args as NativeHarnessJournalLookupArguments);
+      if (looked.status === "refused") return refused(looked.reason, looked.message);
+      return ok({
+        messages: looked.messages,
+        total: looked.total,
+        ...(looked.next === undefined ? {} : { next: looked.next }),
+      });
     }
     case "second-opinion": {
       const input = args as NativeHarnessSecondOpinionArguments;

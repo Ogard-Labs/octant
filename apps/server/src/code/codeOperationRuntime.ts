@@ -483,6 +483,8 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
     readonly windowId: WindowId;
+    /** The turn's resolved credential values, which a journal read redacts. */
+    readonly secrets: ReadonlyArray<string>;
   }) => AppManagedToolSet | undefined;
   readonly spendCeiling?: {
     readonly admit: SpendCeilingService["admit"];
@@ -3433,6 +3435,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
           thread: active.thread,
           checkoutRoot: active.checkoutRoot,
           windowId: active.windowId,
+          secrets: active.secrets,
         }),
       );
     }

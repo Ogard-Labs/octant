@@ -55,8 +55,9 @@ export type NativeHarnessTurnId = typeof NativeHarnessTurnId.Type;
 
 /**
  * Every tool the harness may offer a model. The nine working tools are the
- * whole mutation and search surface; `context-remaining` and `second-opinion`
- * are harness reads that let the lead pace itself and ask the advisor.
+ * whole mutation and search surface; `context-remaining`, `journal-lookup`,
+ * and `second-opinion` are harness reads that let the lead pace itself, read
+ * back conversation a context cut left out, and ask the advisor.
  */
 export const NATIVE_HARNESS_TOOL_NAMES = [
   "read",
@@ -69,6 +70,7 @@ export const NATIVE_HARNESS_TOOL_NAMES = [
   "web-search",
   "todo-write",
   "context-remaining",
+  "journal-lookup",
   "second-opinion",
   "delegate",
   "ask-user",
@@ -153,6 +155,7 @@ export const MAX_NATIVE_HARNESS_WRITE_LENGTH = 512 * 1024;
 export const MAX_NATIVE_HARNESS_FETCH_BYTES = 512 * 1024;
 export const MAX_NATIVE_HARNESS_SEARCH_RESULTS = 10;
 export const MAX_NATIVE_HARNESS_TODO_ITEMS = 40;
+export const MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_MESSAGES = 20;
 
 /** A path the model names. Relative to the thread's root; never containing NUL. */
 const ToolPath = Schema.NonEmptyTrimmedString.pipe(
@@ -245,6 +248,19 @@ export const NativeHarnessTodoWriteArguments = Schema.Struct({
 export type NativeHarnessTodoWriteArguments = typeof NativeHarnessTodoWriteArguments.Type;
 
 export const NativeHarnessContextRemainingArguments = Schema.Struct({}).annotations(strict);
+
+/**
+ * A read of the lead's own conversation as the journal holds it. `from` is a
+ * message number the context-cut note names; nothing names a thread or a
+ * session, so the read can only reach the conversation the call came from.
+ */
+export const NativeHarnessJournalLookupArguments = Schema.Struct({
+  from: NonNegativeInt,
+  count: Schema.optional(
+    PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_MESSAGES)),
+  ),
+}).annotations(strict);
+export type NativeHarnessJournalLookupArguments = typeof NativeHarnessJournalLookupArguments.Type;
 
 export const MAX_NATIVE_HARNESS_QUESTION_OPTIONS = 8;
 
@@ -359,6 +375,7 @@ const toolArgumentDecoders: Readonly<Record<NativeHarnessToolName, (value: unkno
   "web-search": Schema.decodeUnknownSync(NativeHarnessWebSearchArguments),
   "todo-write": Schema.decodeUnknownSync(NativeHarnessTodoWriteArguments),
   "context-remaining": Schema.decodeUnknownSync(NativeHarnessContextRemainingArguments),
+  "journal-lookup": Schema.decodeUnknownSync(NativeHarnessJournalLookupArguments),
   "second-opinion": Schema.decodeUnknownSync(NativeHarnessSecondOpinionArguments),
   delegate: Schema.decodeUnknownSync(NativeHarnessDelegateArguments),
   "ask-user": Schema.decodeUnknownSync(NativeHarnessAskUserArguments),
@@ -506,6 +523,19 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
     name: "context-remaining",
     description: "How much of the context window is left. Checkpoint before it runs out.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "journal-lookup",
+    description:
+      "Re-read earlier messages of this conversation that were left out to fit the context window. Pass a message number the note names as from; results are capped and say where to continue.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "integer", minimum: 0 },
+        count: { type: "integer", minimum: 1, maximum: MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_MESSAGES },
+      },
+      required: ["from"],
+    },
   },
   {
     name: "second-opinion",
