@@ -188,6 +188,11 @@ import {
   type CodeDeviceApprovalEffect,
 } from "./codeAppManagedTools";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
+import { heldTurnContext } from "../providers/heldTurnContext";
+import {
+  PROVIDER_CONTEXT_RESTATED,
+  type ProviderTurnContextDelta,
+} from "@octant/provider-sdk/chat-conformance";
 import {
   CANVAS_DELIVERY_INSTRUCTIONS,
   offersCanvasTool,
@@ -3518,13 +3523,32 @@ class RuntimeTurnController implements CodeOperationTurnPort {
         : []),
     ];
     const fullContext = [...harnessContext, ...hostGuidance, ...(context ?? [])];
+    // A runtime that keeps its own conversation already holds the standing
+    // context an earlier completed turn of this session carried; only what is
+    // new goes out, and only that is counted as this turn's copy.
+    const delivery: ProviderTurnContextDelta =
+      active.driver.conversationOwnership === "provider"
+        ? heldTurnContext.forTurn({
+            sessionId: decodeProviderSessionId(active.sessionId),
+            resumed: active.resumeCursor !== undefined,
+            context: fullContext,
+          })
+        : { kind: "appended", context: fullContext, held: [] };
+    const heldKeys = new Set(delivery.held.map((block) => `${block.kind}\u0000${block.text}`));
+    const sentNow = (blocks: ReadonlyArray<ProviderContextBlock>) =>
+      blocks.filter((block) => !heldKeys.has(`${block.kind}\u0000${block.text}`));
     const harnessAutoReviewEnabled = this.#resolveHarnessAutoReview(active.thread);
     const contextAccount: CodeTurnContextAccount = {
       carried: active.carriedSentContext,
       turn: estimateSentContextParts({
         sent: {
-          instructions: [...hostGuidance, ...(active.sentContext?.instructions ?? [])],
-          skills: active.sentContext?.skills ?? [],
+          instructions: [
+            ...(delivery.kind === "restated"
+              ? [{ kind: "instructions" as const, text: PROVIDER_CONTEXT_RESTATED }]
+              : []),
+            ...sentNow([...hostGuidance, ...(active.sentContext?.instructions ?? [])]),
+          ],
+          skills: sentNow(active.sentContext?.skills ?? []),
         },
         attachments,
       }),
@@ -3602,7 +3626,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
             }),
           checkoutRoot: active.checkoutRoot,
           prompt,
-          ...(fullContext.length === 0 ? {} : { context: fullContext }),
+          ...(delivery.context.length === 0 ? {} : { context: delivery.context }),
           contextAccount,
           ...(this.#options.sessionCompactions === undefined
             ? {}

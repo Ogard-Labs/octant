@@ -167,9 +167,11 @@ export interface CodeTurnContextAccount {
 }
 
 /**
- * The size of one copy of what this turn sends inside its prompt. A block is
- * sent as JSON beside the request (`renderProviderTurnPrompt`), so its size is
- * that JSON at four characters to a token, with the floor per entry Work's
+ * The size of one copy of what this turn sends inside its prompt: the caller
+ * passes only the blocks actually sent, never ones the session already holds
+ * from an earlier turn. A block is sent as a tagged section beside the request
+ * (`renderProviderTurnPrompt`); its size is taken from its JSON, slightly larger
+ * than that section, at four characters to a token, with the floor per entry Work's
  * planned input uses. No tokenizer ships with Octant, so every figure here is a
  * conservative heuristic, never an exact or model-family count.
  */

@@ -3004,11 +3004,14 @@ Octant sent inside the prompt is counted. Per runtime:
 
 **What Octant sends with each turn.** Octant's instructions (a profile's
 instructions, the Browser guidance), skills (a profile's admitted skills and the
-skills selected for a turn) and attachments are sent with every turn, inside the
-prompt: `renderProviderTurnPrompt` puts the context blocks in the prompt text as
-JSON, and attachments travel as the prompt's images. A runtime that keeps its
-prompts therefore holds one copy per turn, and a running total is right only
-while every copy is accounted for. The adapter, which knows its runtime, says on
+skills selected for a turn) and attachments travel inside the prompt:
+`renderProviderTurnPrompt` puts each context block in the prompt text as a
+tagged plain-text section ahead of the request, and attachments travel as the
+prompt's images. A runtime that keeps its prompts holds every copy it was sent,
+so standing context it already holds is not sent again (see
+[held standing context](#held-standing-context)); this turn's copy is only what
+actually went out, and a running total is right only while every copy is
+accounted for. The adapter, which knows its runtime, says on
 each usage report what the runtime does with the prompt (`promptRetention`), and
 the turn runner reports `compacted` for the rest of a turn once the adapter's
 `context-compacted` event arrives:
@@ -3025,7 +3028,8 @@ the turn runner reports `compacted` for the rest of a turn once the adapter's
 From that the turn runner builds the parts (`octantWindowBreakdown` in
 `apps/server/src/code/codeTurnContext.ts`):
 
-- This turn's copy is estimated as sent: each context block's JSON at four
+- This turn's copy is estimated as sent, leaving out standing blocks the
+  session already held: each context block's JSON at four
   characters to a token (floor 16), and each image by area as a provider scales
   it (fitted to 1568 px and about 1.15 megapixels, width × height / 750, at
   most 1,600), or 1,600 when its size cannot be read. Octant ships no tokenizer
@@ -3653,6 +3657,57 @@ _Failures._
 | The thread's mode is disabled while compacting                                                                     | A runtime that reports success has changed its session, so the compaction is journaled `completed` and the thread stays unusable until the mode returns. Only an interrupted or unknown outcome is `failed` (`subject-unavailable`), marked as one that may have changed the session. A host summary that has not been committed is dropped and recorded `failed`.                                                                                                                                                                                                                                                                                                                                              |
 | The thread is deleted while compacting                                                                             | The result is discarded and the request ends `failed` (`subject-unavailable`), because an ordinary delete keeps the ledger until a purge and a request left open would read as running. Usage the provider reported is still journaled, because the request was spent; the thread's purge erases the compaction and keeps that usage.                                                                                                                                                                                                                                                                                                                                                                           |
 | The host restarts mid-compaction                                                                                   | Recorded as `failed` (`interrupted`); for a runtime the line says it may have compacted, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+### Held standing context
+
+A provider that keeps its own conversation (`conversationOwnership: "provider"`:
+Claude Code, Codex, OpenCode, Pi, Oh My Pi and ACP agents) records every user
+message it is sent and sends it again with every later request. Octant's turn
+prompt is therefore built to be appended, never rewritten:
+
+- **Framing.** `renderProviderTurnPrompt` writes each context block as a
+  `<octant-context kind="…">` section of plain text, in the order given, then
+  `Current request:` and the request. The framing holds nothing but the blocks'
+  own text, so the same blocks render to the same bytes every turn, and the
+  runtime's own transcript reads as plain user and assistant text. A block's
+  text cannot open or close a section: `<octant-context` and `</octant-context`
+  inside it are written with `&lt;`. This replaced a single JSON array of every
+  block, which put escaped JSON at the head of every recorded user message.
+- **Only what is new.** Standing blocks (`instructions`, which carry Octant's
+  instructions and skills, `project-memory` and `work-item`) that the session
+  already holds are left out of the turn; per-turn blocks (messages, summaries,
+  mentions, issue context, handoffs) are always sent. A new session, including
+  one started afresh after a refused resume, gets everything once. When a held
+  standing block is no
+  longer part of the turn's context (a deselected skill), the whole context is
+  sent again behind a fixed note that it replaces all earlier Octant context, so
+  a stale copy never stands alone. The rule is `providerTurnContextDelta` in
+  `@octant/provider-sdk/chat-conformance`.
+- **When a block counts as held.** The server keeps one record per provider
+  session id (`apps/server/src/providers/heldTurnContext.ts`), which the Chat,
+  Work, and Code turn runners consult before sending. A block counts as held only
+  after a turn that carried it reported `completed` on that same session: a
+  failed or interrupted turn may never have reached the runtime's history. A
+  session opened by `start` holds nothing. A compaction, automatic
+  (`context-compacted`, or a usage report with `promptRetention: "compacted"`)
+  or requested, drops the record, because the runtime keeps only a share of
+  earlier prompts Octant cannot see. The record lives in memory, so after a
+  restart the first turn sends the standing context once more: one extra copy,
+  never a missing one.
+- **What the journal and meter say.** The Chat and Work context plans still list
+  a held block as included: it is in the window, delivered by an earlier turn. A
+  Code turn's window breakdown counts only the copy this turn actually sent, so
+  `octant-instructions` and `skills` grow when they change, not every turn.
+
+Turn usage keeps the provider's cache-read and cache-write counters
+(`cacheReadInputTokens`, `cacheWriteInputTokens`), so the effect is measurable
+on the existing turn metrics: on a multi-turn Claude or Codex thread, each
+later turn's uncached input no longer carries the standing context again.
+
+Agent runs and host-owned conversations (direct endpoints, the native harness,
+Ollama) are unchanged apart from the framing: a host-owned conversation is
+rebuilt from the journal every turn, and the native harness carries
+instructions in its system prompt.
 
 ### Stop reasons
 
