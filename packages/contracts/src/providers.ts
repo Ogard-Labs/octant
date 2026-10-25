@@ -1398,6 +1398,33 @@ export const ProviderResumeQuality = Schema.Literal("precise", "best-effort", "n
 export type ProviderResumeQuality = typeof ProviderResumeQuality.Type;
 
 /**
+ * Whether a runtime reports what its turns occupy and spend. `reported`: its
+ * turns carry usage, so a thread can show a context window. `not-reported`:
+ * the driver declares it never reports usage (ACP agents), so a thread on it
+ * shows no window and a spend ceiling leaves its turns out. `not-confirmed`:
+ * the last connection check did not establish it.
+ */
+export const ProviderUsageReporting = Schema.Literal("reported", "not-reported", "not-confirmed");
+export type ProviderUsageReporting = typeof ProviderUsageReporting.Type;
+
+/**
+ * Who can compact a thread's conversation when a person asks. `octant`: the
+ * host plans the conversation from its journal and summarizes it itself.
+ * `runtime`: the runtime keeps the conversation and takes a compaction request
+ * in at least one mode. `runtime-update-required`: it would, but this install
+ * is too old. `none`: the runtime keeps the conversation and has no compaction
+ * request (ACP agents), so what it keeps or drops is its own and Octant cannot
+ * see or change it.
+ */
+export const ProviderCompactionOwner = Schema.Literal(
+  "octant",
+  "runtime",
+  "runtime-update-required",
+  "none",
+);
+export type ProviderCompactionOwner = typeof ProviderCompactionOwner.Type;
+
+/**
  * The integration a runtime actually has, derived by the server from the
  * driver and its last connection check so a client never guesses it.
  * `activity.source` reuses the fleet vocabulary: `session` is a live provider
@@ -1426,6 +1453,10 @@ export const ProviderRuntimeIntegration = Schema.Struct({
     Schema.Struct({ source: Schema.Literal("none") }).annotations(strict),
   ),
   resume: ProviderResumeQuality,
+  context: Schema.Struct({
+    usage: ProviderUsageReporting,
+    compaction: ProviderCompactionOwner,
+  }).annotations(strict),
 }).annotations(strict);
 export type ProviderRuntimeIntegration = typeof ProviderRuntimeIntegration.Type;
 

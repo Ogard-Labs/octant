@@ -75,9 +75,9 @@ filtering is only a convenience; it cannot bypass the server check. A provider
 must still be installed, enabled, authenticated, and ready regardless of its
 labels or whitelist entry.
 
-### Integration: Octant tools, activity, and resume
+### Integration: Octant tools, activity, resume, and context
 
-Each runtime's details open with an **Integration** section of three facts.
+Each runtime's details open with an **Integration** section of five facts.
 The host derives them from the runtime's driver and its last Connection Check;
 the page never infers them from what a picker can mention.
 
@@ -96,6 +96,17 @@ the page never infers them from what a picker can mention.
   session, **Best effort** when the endpoint keeps no session and Octant sends
   the thread's history again fitted to the model's context window, or **None**
   when the runtime cannot reopen an earlier session.
+- **Context window** is **Reported** when the runtime's turns report what they
+  use, so a thread shows how full its window is; **Not reported** when the
+  runtime never reports usage (the ACP agents), so its threads show no window
+  and a spend limit leaves their turns out; or **Not confirmed** when the last
+  check did not establish it.
+- **Compaction** is **By Octant** when Octant plans the conversation from the
+  thread, **By the runtime** when **Compact session** asks the runtime to
+  summarize the session it keeps, **Needs a newer version** when this install
+  is too old for the request, or **Not available** when the runtime keeps its
+  own history and takes no compaction request (the ACP agents), so Octant can
+  neither see what it keeps nor compact it.
 
 | Runtime                                               | Transport for Octant tools                                     |
 | ----------------------------------------------------- | -------------------------------------------------------------- |
@@ -157,7 +168,8 @@ it instead of imitating it.
 - **Most** for ACP agents: they reopen a session only when the agent offers to,
   and they ask questions on every agent except Mistral Vibe and fx.
 - **Token usage** is not measured for ACP agents. A spend ceiling leaves their
-  turns out and says so.
+  turns out and says so, and a Code thread's context meter says the runtime
+  reports no usage rather than waiting for a figure that will not come.
 - **Ollama** answers in Chat only: no tools, no file changes, no approvals.
 - **Model endpoints** (OpenAI-compatible, Anthropic-compatible, Azure AI
   Foundry) run Octant Harness. They show reasoning and usage only once a reply

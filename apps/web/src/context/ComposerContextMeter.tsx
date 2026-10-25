@@ -15,6 +15,7 @@ import { ContextInspector } from "./ContextInspector";
 import {
   CompactSessionButton,
   CompactSessionConfirm,
+  CompactionNotOffered,
   CompactionStatusLine,
   compactionAnnouncement,
 } from "./CompactSession";
@@ -282,6 +283,7 @@ function CompactControls(props: {
         className="context-window-popover__compaction"
         compaction={props.compaction}
       />
+      <CompactionNotOffered className="context-window-popover__compaction" offer={props.offer} />
       <CompactSessionButton
         className="context-window-popover__compact"
         offer={props.offer}
@@ -489,7 +491,9 @@ function ContextUsageFallback(props: {
           />
           <p className="context-window-popover__source">
             {fallback.inputTokens === undefined || fallback.outputTokens === undefined
-              ? "No usage has been reported for this thread."
+              ? fallback.usageReporting === "not-reported"
+                ? "This runtime reports no usage, so this thread has no context window to show."
+                : "No usage has been reported for this thread."
               : "This provider reports what a turn spent, but not a context-window maximum, so there is no share of a window to show."}
           </p>
           <AutoCompactRoom room={room} />

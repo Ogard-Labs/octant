@@ -67,6 +67,7 @@ const openCodeIntegration = {
     observes: ["replies", "tool-calls", "approvals", "file-changes", "task-progress"],
   },
   resume: "precise",
+  context: { usage: "reported", compaction: "none" },
 } as const;
 
 describe("ProviderService", () => {
@@ -789,6 +790,7 @@ describe("ProviderService", () => {
             },
             activity: { source: "none" },
             resume: "none",
+            context: { usage: "not-confirmed", compaction: "none" },
           },
           message: "This provider driver is not available.",
           observedAt: now,

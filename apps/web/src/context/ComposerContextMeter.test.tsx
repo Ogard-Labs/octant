@@ -66,6 +66,27 @@ function ShortcutTrigger() {
 }
 
 describe("ComposerContextMeter", () => {
+  it("says a runtime that reports no usage will never show a context window", async () => {
+    const user = userEvent.setup();
+    render(
+      <ComposerContextMeterProvider
+        fallback={{ limits: [], usageReporting: "not-reported" }}
+        status="not-planned"
+        subjectKey="code-thread:acp"
+      >
+        <ComposerContextMeterGate enabled>
+          <ComposerContextMeter />
+        </ComposerContextMeterGate>
+      </ComposerContextMeterProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: /Usage not reported/ }));
+    const popover = screen.getByRole("dialog", { name: "Provider usage" });
+    expect(popover).toHaveTextContent(
+      "This runtime reports no usage, so this thread has no context window to show.",
+    );
+    expect(popover).not.toHaveTextContent("No usage has been reported for this thread.");
+  });
+
   it.each([undefined, 0])(
     "distinguishes absent usage from a reported zero (%s)",
     async (tokens) => {
@@ -1119,6 +1140,36 @@ describe("Compact session", () => {
       expect(screen.queryByRole("button", { name: "Compact session" })).not.toBeInTheDocument();
     },
   );
+
+  it("says a runtime that keeps its own history cannot be compacted, instead of leaving it unexplained", async () => {
+    const user = userEvent.setup();
+    render(
+      <CompactionHarness
+        controller={controllerFor({
+          compaction: { status: "refused", reason: "runtime-cannot-compact" },
+        })}
+      />,
+    );
+    await openPopover(user);
+
+    expect(
+      screen.getByText(
+        "This runtime keeps its own history and takes no compaction request, so Octant can't compact this session.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("says nothing about compaction to a paired device the host refuses outright", async () => {
+    const user = userEvent.setup();
+    render(
+      <CompactionHarness
+        controller={controllerFor({ compaction: { status: "refused", reason: "remote-client" } })}
+      />,
+    );
+    await openPopover(user);
+
+    expect(screen.queryByText(/can't compact/)).not.toBeInTheDocument();
+  });
 
   it("reads Compacting… while the host compacts, and holds the composer's send", async () => {
     const user = userEvent.setup();

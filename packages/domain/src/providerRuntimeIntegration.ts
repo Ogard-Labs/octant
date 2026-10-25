@@ -1,9 +1,11 @@
 import type {
+  ProviderCompactionOwner,
   ProviderDriverKind,
   ProviderObservedActivity,
   ProviderObservedState,
   ProviderRuntimeIntegration,
   ProviderToolTransport,
+  ProviderUsageReporting,
 } from "@octant/contracts/providers";
 import {
   isImageProfileDriverKind,
@@ -71,7 +73,8 @@ const OBSERVED_ACTIVITY: ReadonlyArray<
 
 /**
  * What a runtime's Settings card may claim about it: whether Octant's tools
- * reach it and how, what its sessions report, and how a follow-up continues.
+ * reach it and how, what its sessions report, how a follow-up continues, and
+ * whether a thread on it can show a context window or be compacted.
  * Everything comes from the driver kind and the last connection check, the
  * same facts the server gates a send on; nothing is inferred from what a
  * picker can mention. Image profiles run no turns and have no integration.
@@ -104,10 +107,41 @@ export function describeProviderRuntimeIntegration(
   );
   const activity: ProviderRuntimeIntegration["activity"] =
     runsTurns && observes.length > 0 ? { source: "session", observes } : { source: "none" };
-  const resume = !providerKeepsConversation(driverKind)
+  const keepsConversation = providerKeepsConversation(driverKind);
+  const resume = !keepsConversation
     ? "best-effort"
     : capabilities.resume === "supported"
       ? "precise"
       : "none";
-  return { tools, activity, resume };
+  return {
+    tools,
+    activity,
+    resume,
+    context: {
+      usage: usageReporting(capabilities.usage),
+      compaction: keepsConversation ? runtimeCompaction(capabilities) : "octant",
+    },
+  };
+}
+
+function usageReporting(
+  usage: ProviderObservedState["capabilities"]["usage"],
+): ProviderUsageReporting {
+  if (usage === "supported") return "reported";
+  return usage === "unsupported" ? "not-reported" : "not-confirmed";
+}
+
+/**
+ * Mirrors the host's compaction decision for a conversation the runtime keeps:
+ * a mode the adapter did not answer reads as unsupported, as the host reads
+ * it, so the card never claims a compaction the host would refuse.
+ */
+function runtimeCompaction(
+  capabilities: ProviderObservedState["capabilities"],
+): ProviderCompactionOwner {
+  const modes = capabilities.sessionCompaction;
+  if (modes === undefined) return "none";
+  const answers = [modes.chat, modes.work, modes.code];
+  if (answers.includes("supported")) return "runtime";
+  return answers.includes("unavailable") ? "runtime-update-required" : "none";
 }

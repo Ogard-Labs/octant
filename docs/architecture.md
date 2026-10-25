@@ -2668,7 +2668,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the host reports a runtime to a client (the registry snapshot and a
   Connection Check result) it attaches an `integration` derived in
   `@octant/domain/provider-runtime-integration` from the driver kind and that
-  observation; drivers never set it and it is not stored. It states three
+  observation; drivers never set it and it is not stored. It states four
   facts. **Octant tools** is `available` with its transport, or `unavailable`
   with a reason (`not-confirmed`, `model-verification-required`,
   `runtime-not-confirmed`, `no-transport`). The transport per runtime:
@@ -2686,8 +2686,15 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   event kinds the live session reports, or `none` when no session runs here.
   **Resume** is `precise` for a provider-owned conversation whose driver
   resumes its session, `best-effort` for a host-owned conversation whose
-  history Octant plans again from the journal, and `none` otherwise. Settings ›
-  Providers & Models shows the three facts on each runtime card, and the
+  history Octant plans again from the journal, and `none` otherwise.
+  **Context** pairs `usage` (`reported`, `not-reported` when the driver
+  declares usage unsupported, `not-confirmed`) with `compaction` (`octant` for
+  a host-owned conversation; for a runtime-owned one `runtime` when any mode
+  takes the request, `runtime-update-required` when the install is too old,
+  and `none` otherwise, mirroring the host's compaction decision). ACP agents
+  read `not-reported` and `none`: their history is the agent's own and opaque
+  to Octant. Settings › Providers & Models shows these facts on each runtime
+  card (Octant tools, Activity, Resume, Context window, Compaction), and the
   composers offer neither `@Browser` nor `@Computer` for a selection whose
   runtime does not carry Octant's tools. Bounded
   provider subprocesses run under a deny-default profile: Seatbelt via
@@ -2985,7 +2992,9 @@ Octant sent inside the prompt is counted. Per runtime:
   tokens and the model's `limit.context`) and Pi (assistant `message_end` usage;
   the occupancy is the last message's input, cache and output) report one
   figure and no categories. The ACP driver reports no usage at all, so an ACP
-  thread shows no window. Lists of tools, MCP servers, skills or instruction
+  thread shows no window, and its Code context meter says the runtime reports
+  no usage (from the runtime's integration `context.usage`) rather than that
+  none has arrived yet. Lists of tools, MCP servers, skills or instruction
   files exist in some runtimes but carry no token weight, so they are not parts.
 
   Pi usage is accumulated from completed assistant messages, not streaming usage
@@ -3237,7 +3246,7 @@ action.
 | Claude Code, any mode                                    | Claude Code              | The runtime's own `/compact`, sent by the port as a user-role input that carries no tools and is not counted as a turn; observed as `system`/`compact_boundary` (`compact_metadata.trigger: "manual"`, `pre_tokens`) and the `status` message's `compact_result`. A resumed session sends its `compacting` status and a `rate_limit_event` before it initializes; the port holds both and delivers them after the initialized message. | `runtime-version-unsupported` when `compact` is not announced |
 | OpenCode, any mode                                       | OpenCode                 | `/api/session/:sessionID/compact` (served by OpenCode 2.0.26); observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                                                                                                                                                                                                         | `runtime-version-unsupported` on a server without the route   |
 | Pi and Oh My Pi, any mode                                | Pi                       | Pi's RPC `compact` command (`packages/coding-agent/docs/rpc.md`); observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                                                                                                                                                                                                     | `runtime-version-unsupported` when the command is refused     |
-| ACP agents                                               | Nobody                   | The protocol has no compaction request.                                                                                                                                                                                                                                                                                                                                                                                                | `runtime-cannot-compact`                                      |
+| ACP agents                                               | Nobody                   | The protocol has no compaction request; the thread says so in place of the button.                                                                                                                                                                                                                                                                                                                                                     | `runtime-cannot-compact`                                      |
 | Any other adapter                                        | Nobody, unless it claims | An adapter compacts only by reporting the capability and implementing the seam below.                                                                                                                                                                                                                                                                                                                                                  | `runtime-cannot-compact`                                      |
 
 The Codex and Claude rows cite the schema and message shapes they were read

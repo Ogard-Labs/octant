@@ -108,8 +108,10 @@ Code) where the runtime keeps it. While it runs the popover reads
 **Compacting…** and the composer holds send. Afterwards the popover says how
 much was freed and who wrote the summary, or why it could not compact. The
 button is disabled, with the reason, while something you can wait out stands
-in the way, such as a reply that is still running, and is left out where the
-runtime cannot compact at all or on a paired device.
+in the way, such as a reply that is still running. Where the runtime keeps its
+own history and takes no compaction request (the ACP agents), or this version
+of it is too old, the button is replaced by a line saying so; on a paired
+device it is left out.
 
 ## Watching usage
 

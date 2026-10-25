@@ -2,7 +2,7 @@
 
 This topic specification owns runtime-specific wire behaviour that the provider
 boundary normalizes: OpenCode's version-selected routes, the Pi release
-gate, the local-server adapter, and the vendor sign-in dialects of the host OAuth runner. Architecture
+gate, the shared ACP stack and its registry coverage, the local-server adapter, and the vendor sign-in dialects of the host OAuth runner. Architecture
 owns the driver interface, honest capability, credentials, and confinement
 ([Architecture: providers](../architecture.md#providers) and
 [security and authority](../architecture.md#security-and-authority)).
@@ -183,6 +183,154 @@ an aborted run is reported as interrupted, never as completed. Pi 1.0.3
 renamed the Azure provider from `azure-openai-responses` to `azure` and kept
 its `AZURE_OPENAI_*` variables, so a thread holds them under either name.
 
+## ACP agents
+
+Every ACP agent runs on one shared stack: `acpDriver.ts`, `acpProcess.ts`,
+`acpProtocol.ts`, `acpEventMapper.ts`, and `acpManagedTools.ts` in
+`apps/server/src/providers`. A vendor is a profile in `acpProfiles.ts`: its
+version contract, launch argv, environment guards, managed-home layout,
+host-profile reads and denials, project-root denials, mode mapping, and
+capability quirks. A new agent is a profile, its driver-kind registration,
+and conformance evidence; it never adds a transport, process supervisor,
+protocol client, or event mapper. Claude Code (Agent SDK), Codex
+(app-server), OpenCode (native routes, ACP turns on 2.x), and Pi (RPC) keep
+their own runtimes and do not move onto this stack, although the registry
+lists ACP wrappers for them.
+
+### What an ACP agent cannot do
+
+The protocol leaves three things to the agent, and the driver reports them as
+absent rather than imitating them:
+
+- **No usage window.** A prompt result carries only a stop reason, so the
+  driver declares `usage: "unsupported"`. The runtime card reads **Context
+  window: Not reported**, a Code thread's context meter says the runtime
+  reports no usage instead of waiting for a figure, and a spend ceiling
+  leaves the turns out.
+- **No compaction request.** The driver declares no `sessionCompaction`, so
+  the host refuses compaction as `runtime-cannot-compact`. The runtime card
+  reads **Compaction: Not available**, and the context popover and inspector
+  show a line saying the runtime takes no compaction request where the
+  **Compact session** button would be.
+- **Opaque history.** The agent keeps its own conversation and says nothing
+  about what it keeps or drops, so `promptRetention` is absent and Octant
+  never estimates the window. Resume is `precise` only where the agent
+  advertises `loadSession` or session resume.
+
+These are read from `ProviderRuntimeIntegration.context`, which the host
+derives from the driver's reported capabilities
+(`packages/domain/src/providerRuntimeIntegration.ts`); a renderer never
+infers them from the driver kind.
+
+Octant's tools reach an ACP session only through the session MCP bridge, and
+only when the agent's `initialize` result advertises `mcpCapabilities.http`
+(or the profile names an exact release that accepts it unadvertised) and the
+host is macOS. Otherwise the session reports app-managed tools `unsupported`,
+and a session that is offered tools is refused before `session/new` rather
+than started without them.
+
+### Registry coverage
+
+Snapshot of the official ACP registry
+(`https://cdn.agentclientprotocol.com/registry/v1/latest/registry.json`,
+read from its source repository `agentclientprotocol/registry` at commit
+`814a241`, 2026-10-25). **Shipped** has a profile; **probe next** needs the
+live probe below before a profile ships; **blocked** will not ship as an ACP
+profile for the stated reason. The registry command is its macOS
+distribution.
+
+| Registry id               | Agent              | Registry command                                       | Octant status                                                                                       |
+| ------------------------- | ------------------ | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `cline`                   | Cline              | `npx cline --acp`                                      | Shipped (`cline`)                                                                                   |
+| `devin`                   | Devin              | `devin acp` (binary)                                   | Shipped (`devin`)                                                                                   |
+| `gemini`                  | Gemini CLI         | `npx @google/gemini-cli --acp`                         | Shipped (`gemini`)                                                                                  |
+| `github-copilot-cli`      | Copilot            | `npx @github/copilot --acp`                            | Shipped (`copilot`)                                                                                 |
+| `glm-acp-agent`           | GLM Agent          | `npx glm-acp-agent`                                    | Shipped (`glm`)                                                                                     |
+| `goose`                   | goose              | `goose acp` (binary)                                   | Shipped (`goose`)                                                                                   |
+| `grok-build`              | Grok Build         | `npx @xai-official/grok agent stdio`                   | Shipped (`grok`; Octant adds `--no-leader`)                                                         |
+| `kilo`                    | Kilo               | `kilo acp` (binary or `npx @kilocode/cli`)             | Shipped (`kilo`)                                                                                    |
+| `kimi`                    | Kimi CLI           | `kimi acp` (binary, Apple Silicon only)                | Shipped (`kimi-code`)                                                                               |
+| `mistral-vibe`            | Mistral Vibe       | `vibe-acp` (binary)                                    | Shipped (`mistral-vibe`)                                                                            |
+| `qwen-code`               | Qwen Code          | `npx @qwen-code/qwen-code --acp --experimental-skills` | Shipped (`qwen`; Octant does not pass `--experimental-skills`)                                      |
+| `opencode`, `opencode-v2` | OpenCode           | `opencode acp` (binary)                                | Shipped as the native OpenCode driver, not an ACP profile                                           |
+| `antigravity-acp`         | Google Antigravity | `agy_acp_server.par` (binary)                          | Probe next (shortlist)                                                                              |
+| `junie`                   | Junie              | `junie --acp=true` (binary inside `junie.app`)         | Probe next (shortlist)                                                                              |
+| `amp-acp`                 | Amp                | `amp-acp` (binary)                                     | Probe next                                                                                          |
+| `auggie`                  | Auggie CLI         | `npx @augmentcode/auggie --acp`                        | Probe next                                                                                          |
+| `factory-droid`           | Factory Droid      | `npx droid exec --output-format acp-daemon`            | Probe next                                                                                          |
+| `autohand`                | Autohand Code      | `npx @autohandai/autohand-acp`                         | Probe next                                                                                          |
+| `bob`                     | Bob                | `npx @ibm/bob acp`                                     | Probe next                                                                                          |
+| `codebuddy-code`          | Codebuddy Code     | `npx @tencent-ai/codebuddy-code --acp`                 | Probe next                                                                                          |
+| `cortex-code`             | Cortex Code        | `cortex acp serve` (binary)                            | Probe next                                                                                          |
+| `corust-agent`            | Corust Agent       | `corust-agent-acp` (binary)                            | Probe next                                                                                          |
+| `dimcode`                 | DimCode            | `npx dimcode acp`                                      | Probe next                                                                                          |
+| `dirac`                   | Dirac              | `npx dirac-cli --acp`                                  | Probe next                                                                                          |
+| `harn`                    | Harn               | `harn serve acp` (binary)                              | Probe next                                                                                          |
+| `kimchi`                  | Kimchi             | `kimchi --mode acp` (binary)                           | Probe next                                                                                          |
+| `minimax-code`            | MiniMax Code       | `npx @minimax-ai/code acp`                             | Probe next                                                                                          |
+| `nova`                    | Nova               | `npx @compass-ai/nova acp`                             | Probe next                                                                                          |
+| `poolside`                | Poolside           | `pool acp` (binary)                                    | Probe next                                                                                          |
+| `sigit`                   | siGit Code         | `sigit` (binary or `npx @smbcloud/sigit`)              | Probe next                                                                                          |
+| `stakpak`                 | Stakpak            | `stakpak acp` (binary)                                 | Probe next                                                                                          |
+| `claude-acp`              | Claude Agent       | `npx @agentclientprotocol/claude-agent-acp`            | Blocked: Claude Code stays on the Agent SDK driver                                                  |
+| `codex-acp`               | Codex              | `npx @agentclientprotocol/codex-acp`                   | Blocked: Codex stays on the app-server driver                                                       |
+| `pi-acp`                  | pi ACP             | `npx pi-acp`                                           | Blocked: Pi stays on the RPC driver                                                                 |
+| `cursor`                  | Cursor             | `cursor-agent acp` (binary)                            | Blocked: kept out of production                                                                     |
+| `github-copilot`          | Copilot            | `npx @github/copilot-language-server --acp`            | Blocked: Copilot ships through the Copilot CLI entry; the language server is not a coding-agent CLI |
+| `agoragentic-acp`         | Agoragentic        | `npx agoragentic-mcp --acp`                            | Blocked: registry quarantine (postinstall script)                                                   |
+| `crow-cli`                | crow-cli           | `crow-cli acp` (binary)                                | Blocked: registry quarantine (initialize fails)                                                     |
+| `deepagents`              | DeepAgents         | `npx deepagents-acp`                                   | Blocked: registry quarantine (missing dependency)                                                   |
+| `fast-agent`              | fast-agent         | `uvx fast-agent-acp -x`                                | Blocked: registry quarantine (initialize times out)                                                 |
+| `minion-code`             | Minion Code        | `uvx minion-code acp`                                  | Blocked: registry quarantine (Python dependency)                                                    |
+| `qoder`                   | Qoder CLI          | `npx @qoder-ai/qodercli --acp`                         | Blocked: registry quarantine (initialize fails)                                                     |
+| `vtcode`                  | VT Code            | `vtcode acp` (binary)                                  | Blocked: registry quarantine (missing Windows builds) until it is lifted                            |
+
+fx ships as an ACP profile (`fx`) but is not in the registry; see
+[fx-acp-compatibility.md](../fx-acp-compatibility.md).
+
+### Probe before a profile ships
+
+A profile ships only after a live probe against a signed-in install on Apple
+Silicon shows each of the following, recorded as a smoke test beside
+`devinSmoke.integration.test.ts` and a case in `acpConformance.test.ts`.
+Nothing is inferred from the registry entry alone.
+
+1. **Locate and version.** The binary is found where the registry
+   distribution or the vendor installer puts it, `--version` (or the npm
+   `package.json`) matches the profile's pattern, and an older release is
+   refused as incompatible by Connection Check.
+2. **Authentication.** Sign-in happens in the agent's own flow (registry
+   Agent Auth or Terminal Auth), outside Octant. The probe names the profile
+   directory or credential file the agent reads and the variable that points
+   it there, and shows a signed-out install fails Connection Check as
+   unauthenticated before any session starts.
+3. **Initialize.** The `agentInfo.name` the profile pins, and the advertised
+   `loadSession`, session resume, `promptCapabilities`, and
+   `mcpCapabilities.http`.
+4. **Session.** `session/new` in the project root, the models and modes or
+   config options it returns, and the mapping of Chat, Work, Code, and Plan
+   to them; a mode with no safe mapping is refused by the profile.
+5. **Prompt.** A streamed reply, tool calls with their declared kinds, a
+   permission request answered once, an `execute` request refused at the
+   agent, and the stop reason.
+6. **Cancel.** `session/cancel` during a running turn ends it as cancelled
+   and leaves the process usable for the next prompt.
+7. **Confinement.** Below Full access the agent runs under the deny-default
+   Seatbelt profile: it cannot write outside the root and managed home, the
+   project and home skill, MCP, and configuration roots it would load are
+   denied (and added to the architecture's skill-root table), and any child
+   server it spawns is declared.
+8. **Tools and resume.** Where `mcpCapabilities.http` is advertised, an
+   Octant tool round-trips through the session bridge; where it is not, the
+   integration reports tools unavailable. Where resume is advertised, a
+   follow-up reopens the agent's session.
+
+For the shortlist the probe must also settle: for Google Antigravity, how
+`agy_acp_server` authenticates outside its IDE extension and whether it runs
+without the IDE (the registry's Linux entry passes `--uid=`); for Junie,
+whether the executable inside `junie.app` launches under Seatbelt from its
+bundle path, and which JetBrains account state it reads.
+
 ## Local-server provider adapter
 
 The local-server provider adapter owns a separate process for each acquired
@@ -278,6 +426,13 @@ failing the check with their typed states.
 - Pi: `apps/server/src/providers/piDriver.test.ts`, `piProcess.test.ts`,
   `piConformance.test.ts`, and the `piSmoke.integration.test.ts` real-runtime
   probe (verified release attestation and the hostile MCP configuration).
+- ACP agents: `apps/server/src/providers/acpDriver.test.ts`,
+  `acpProcess.test.ts`, `acpProtocol.test.ts`, `acpEventMapper.test.ts`,
+  `acpManagedTools.test.ts`, `acpConformance.test.ts`, the `devinSmoke`,
+  `grokSmoke`, `kimiSmoke`, and `vibeSmoke` real-runtime smokes,
+  `packages/domain/src/providerRuntimeIntegration.test.ts` for the derived
+  context facts, and `apps/web/src/providers/ProviderRuntimeIntegrationFacts.test.tsx`
+  and `apps/web/src/context/ComposerContextMeter.test.tsx` for how they show.
 - Sign-in dialects: `apps/server/src/providers/directEndpointSubscriptionOAuth.test.ts`,
   `chatGptPlanProfile.test.ts`, `packages/domain/src/subscriptionOAuthCatalog.test.ts`,
   and `packages/provider-sdk/src/subscriptionOAuthConformance.test.ts`.

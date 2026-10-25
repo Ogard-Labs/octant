@@ -25,17 +25,25 @@ export interface CompactionNames {
 export type CompactionOffer =
   | { readonly kind: "hidden" }
   | { readonly kind: "available"; readonly executor: ContextCompactionExecutor }
-  | { readonly kind: "disabled"; readonly reason: string };
+  | { readonly kind: "disabled"; readonly reason: string }
+  | { readonly kind: "not-offered"; readonly note: string };
 
 /**
- * Refusals nothing at this window can change. The runtime cannot compact, or
- * the host refuses this client outright (a paired device), so the button is
- * left out instead of shown as something to wait for.
+ * Refusals that come from the runtime itself. Nothing at this window can
+ * change them, so there is no button to wait on, but a thread whose runtime
+ * keeps a history no one can compact (an ACP agent) says so: with the button
+ * simply gone, a person looking for it could not tell a missing feature from
+ * a broken one.
  */
-const PERMANENT_REFUSALS: ReadonlySet<ContextCompactionRefusalReason> = new Set([
-  "runtime-cannot-compact",
-  "runtime-version-unsupported",
-  "remote-client",
+const RUNTIME_REFUSALS: ReadonlyMap<ContextCompactionRefusalReason, string> = new Map([
+  [
+    "runtime-cannot-compact",
+    "This runtime keeps its own history and takes no compaction request, so Octant can't compact this session.",
+  ],
+  [
+    "runtime-version-unsupported",
+    "This version of the runtime can't compact; a newer release takes the request.",
+  ],
 ]);
 
 /**
@@ -50,7 +58,10 @@ export function compactionOffer(state: ContextCompactionState | undefined): Comp
       ? { kind: "hidden" }
       : { kind: "available", executor: state.executor };
   }
-  if (PERMANENT_REFUSALS.has(compaction.reason)) return { kind: "hidden" };
+  const runtimeNote = RUNTIME_REFUSALS.get(compaction.reason);
+  if (runtimeNote !== undefined) return { kind: "not-offered", note: runtimeNote };
+  // A paired device is refused outright; the host window is where it is done.
+  if (compaction.reason === "remote-client") return { kind: "hidden" };
   return { kind: "disabled", reason: sentence(refusalClause(compaction.reason)) };
 }
 
