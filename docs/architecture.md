@@ -3874,7 +3874,8 @@ and model (in Work also the same folder binding), after a turn that completed,
 was cancelled, or was cut off by a restart, with a recorded resume cursor, and
 with no host compaction completed since that turn, because the session would
 never read the summary. Anything else (the first turn, a failed or parked
-turn, a retry, an edit, a branch, another provider or model) rebuilds the
+turn, a retry, an edit, a branch, an earlier turn regenerated or resumed
+after the previous turn ran, another provider or model) rebuilds the
 history on the host in a fresh session, as before, and the next message
 continues that one. Resuming never widens a thread: the harness refuses a
 transcript opened for another endpoint, folder, or mode as `stale-resume`, and

@@ -3777,7 +3777,7 @@ export class ChatService {
             previous: {
               providerInstanceId: String(previous.providerInstanceId),
               continuable: resumableHost
-                ? this.#hostResumableSessionContinues(thread, previous)
+                ? this.#hostResumableSessionContinues(thread, previous, threadView?.turns ?? [])
                 : previous.resumeCursor !== undefined &&
                   (previous.modelId === thread.modelId ||
                     probe.capabilities.modelSwitch === "supported"),
@@ -3948,9 +3948,25 @@ export class ChatService {
    * (the harness closes any open step on resume), and only while no host
    * compaction has summarized the conversation since, because the session
    * would never read that summary. Anything else is rebuilt on the host.
+   *
+   * Regenerating or resuming an earlier turn appends an attempt to that turn
+   * after the tail ran, and the conversation then carries the new answer while
+   * the tail's session still holds the one it replaced; continuing it would
+   * answer from a history the thread no longer shows.
    */
-  #hostResumableSessionContinues(thread: ChatThread, previous: ChatAttempt): boolean {
+  #hostResumableSessionContinues(
+    thread: ChatThread,
+    previous: ChatAttempt,
+    turns: ReadonlyArray<ChatTurn>,
+  ): boolean {
+    const startedAt = Date.parse(previous.createdAt);
+    const earlierTurnRevisedSince = activeChatTurns(turns).some(
+      (turn) =>
+        String(turn.id) !== String(previous.turnId) &&
+        turn.attempts.some((attempt) => Date.parse(attempt.createdAt) > startedAt),
+    );
     return (
+      !earlierTurnRevisedSince &&
       previous.resumeCursor !== undefined &&
       previous.modelId === thread.modelId &&
       (previous.outcome === "completed" ||

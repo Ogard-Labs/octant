@@ -219,6 +219,8 @@ function openFixture(options?: {
   readonly nativeConversation?: boolean;
   /** The provider keeps durable sessions the host can always rebuild, as Octant Harness does. */
   readonly resumableHostConversation?: boolean;
+  /** The service's clock, for a scenario whose order the journal's timestamps must show. */
+  readonly clock?: () => string;
   /** Which provider instances keep their conversation in a session of their own; overrides `nativeConversation`. */
   readonly nativeConversationFor?: (providerInstanceId: string) => boolean;
   readonly driver?: ProviderDriver;
@@ -677,7 +679,7 @@ function openFixture(options?: {
     persistence,
     dataDirectory,
     uuid: () => crypto.randomUUID(),
-    clock: () => now,
+    clock: options?.clock ?? (() => now),
     driver: (providerInstanceId) => {
       const refusal = options?.refuseDriverFor?.(String(providerInstanceId));
       if (refusal !== undefined) throw refusal;
@@ -4538,8 +4540,13 @@ describe("ChatService", () => {
 
     async function twoTurns(
       outcome: (turnIndex: number) => "completed" | "interrupted" | "failed",
+      clock?: () => string,
     ) {
-      const fixture = openFixture({ resumableHostConversation: true, turnOutcome: outcome });
+      const fixture = openFixture({
+        resumableHostConversation: true,
+        turnOutcome: outcome,
+        ...(clock === undefined ? {} : { clock }),
+      });
       const created = await fixture.service.execute({
         kind: "create-chat-thread",
         hostId: "local",
@@ -4613,6 +4620,35 @@ describe("ChatService", () => {
       expect(fakeDriver.resumeInputs).toHaveLength(1);
       expect(fakeDriver.sentTurns[2]?.sessionId).not.toBe(fakeDriver.sentTurns[0]?.sessionId);
       expect(historyIn(fakeDriver.sentTurns[2])).toBe(true);
+    });
+
+    it("rebuilds the history after an earlier answer was regenerated, since the session holds the replaced one", async () => {
+      let tick = Date.parse(now);
+      const { service, fakeDriver, threadId } = await twoTurns(
+        () => "completed",
+        () => new Date((tick += 1000)).toISOString(),
+      );
+      const view = service.read(threadId);
+      const earlier = view.turns[0];
+      const attempt = earlier?.attempts[0];
+      if (earlier === undefined || attempt === undefined) throw new Error("Expected attempt.");
+      await service.execute({
+        kind: "retry-chat-turn",
+        threadId,
+        expectedVersion: view.thread.version,
+        turnId: earlier.id,
+        attemptId: attempt.id,
+      });
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        prompt: "And now?",
+      });
+      expect(fakeDriver.startedSessionIds).toHaveLength(3);
+      expect(fakeDriver.resumeInputs).toHaveLength(1);
+      expect(fakeDriver.sentTurns[3]?.sessionId).not.toBe(fakeDriver.sentTurns[1]?.sessionId);
+      expect(historyIn(fakeDriver.sentTurns[3])).toBe(true);
     });
   });
 
