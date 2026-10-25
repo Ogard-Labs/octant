@@ -203,9 +203,9 @@
   /* The shell frame's grid. The title rail is the height of the thread tab
      band; the window controls, the right dock head, and the bottom panel
      toolbar take the same height so their hairlines meet and a 30px tab and
-     a 28px icon control share one centreline. The sidebar runs 30px rows
-     between a 40px header row and a 40px account row, and every leading
-     icon in it sits on one 12px inset. */
+     a 28px icon control share one centreline. The sidebar's header row is
+     its part of that rail; below it the sidebar runs 30px rows down to a
+     40px account row, and every leading icon in it sits on one 12px inset. */
   --oct-title-rail-h: 38px;
   --oct-rail-tab-h: 30px;
   --oct-rail-button-h: 28px;
