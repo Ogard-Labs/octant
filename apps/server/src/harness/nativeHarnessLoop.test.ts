@@ -123,6 +123,14 @@ function sendAndCollect(
 const isTerminal = (event: ProviderRuntimeEvent) =>
   event.kind === "completed" || event.kind === "failed" || event.kind === "interrupted";
 
+/** How the model is told that a compaction summary stands for the session's first turns. */
+const summaryLead = (turns: number) =>
+  `${
+    turns === 1
+      ? "The first turn of this session was summarized and is"
+      : `The first ${turns} turns of this session were summarized and are`
+  } no longer shown in full; the files on disk still reflect that work. Summary:`;
+
 describe("native harness loop", () => {
   it.each([
     ["start", "cancel"],
@@ -1695,7 +1703,7 @@ describe("compacting an Octant Harness session", () => {
     expect(summaryRequest?.history[0]?.text).toContain("Assistant: answer 2");
     expect(summaryRequest?.history[0]?.text).not.toContain("third");
     expect(requests[4]?.history.map((message) => message.text)).toEqual([
-      "Summary of the earlier turns of this session:\n\nThe parser was rewritten; tests still fail on Windows paths.",
+      `${summaryLead(2)}\n\nThe parser was rewritten; tests still fail on Windows paths.`,
       "third",
       "answer 3",
       "fourth",
@@ -1753,7 +1761,7 @@ describe("compacting an Octant Harness session", () => {
       ),
     );
     expect(requests.at(-1)?.history.map((message) => message.text)).toEqual([
-      "Summary of the earlier turns of this session:\n\nEarlier: chose the queue design.",
+      `${summaryLead(1)}\n\nEarlier: chose the queue design.`,
       "second",
       "answer 2",
       "third",
@@ -1810,7 +1818,7 @@ describe("compacting an Octant Harness session", () => {
       }),
     );
     expect(requests.at(-1)?.history.map((message) => message.text)).toEqual([
-      "Summary of the earlier turns of this session:\n\nChose the queue design.",
+      `${summaryLead(1)}\n\nChose the queue design.`,
       "second",
       "answer 2",
       "third",
@@ -1860,6 +1868,144 @@ describe("compacting an Octant Harness session", () => {
     });
     expect(requests).toHaveLength(3);
     expect(transcripts.load(sessionId)?.compactions).toEqual([]);
+  });
+
+  describe("when a long session no longer fits", () => {
+    const overflow: ProviderFailure = {
+      category: "provider-failed",
+      message:
+        "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (context_length_exceeded).",
+    };
+    const taskList = '{"items":[{"content":"Fix the parser","status":"in_progress"}]}';
+    const offered = [...tools, tool("todo-write")];
+
+    /**
+     * Three turns; the first writes a task list. `refuses` decides which
+     * requests the endpoint turns away as too large, `fits` what its own size
+     * estimate admits. A request without tools is the summary request.
+     */
+    const runLongSession = async (input: {
+      readonly refuses: (request: NativeHarnessRequest) => boolean;
+      readonly fits?: (request: NativeHarnessRequest) => boolean;
+    }) => {
+      const transcripts = new MemoryNativeHarnessTranscriptStore();
+      const requests: NativeHarnessRequest[] = [];
+      let refusals = 0;
+      const replies: NativeHarnessResponse[] = [
+        {
+          text: "",
+          toolCalls: [{ toolCallId: "plan", toolName: "todo-write", argumentsJson: taskList }],
+        },
+        { text: "answer 1", toolCalls: [] },
+        { text: "answer 2", toolCalls: [] },
+        { text: "answer 3", toolCalls: [], usage: { inputTokens: 100, outputTokens: 10 } },
+      ];
+      const transport: NativeHarnessTransport = {
+        open: async () => ({
+          fits: input.fits ?? (() => true),
+          send: async (request) => {
+            requests.push(request);
+            if (request.tools.length === 0) {
+              return {
+                text: "Planned the parser fix and chose the queue design.",
+                toolCalls: [],
+                usage: { inputTokens: 500, outputTokens: 50 },
+              };
+            }
+            if (input.refuses(request)) {
+              refusals += 1;
+              throw overflow;
+            }
+            const next = replies.shift();
+            if (next === undefined) throw new Error("The script ran out of responses.");
+            return next;
+          },
+          release: () => undefined,
+        }),
+      };
+      const events = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(transport, transcripts);
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            const seen: ProviderRuntimeEvent[] = [];
+            const first = yield* Effect.fork(
+              Stream.runForEach(
+                (yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal)),
+                (event) => Effect.sync(() => seen.push(event)),
+              ),
+            );
+            yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: offered });
+            yield* Effect.promise(() => whenRequested(seen, "plan"));
+            yield* connection.answerTool({
+              sessionId,
+              requestId: "plan",
+              resultJson: '{"status":"recorded","items":1}',
+              isError: false,
+            });
+            yield* Fiber.join(first);
+            for (const prompt of ["second", "third"]) {
+              const turn = yield* Effect.fork(
+                Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+              );
+              yield* connection.send({ sessionId, prompt, attachments: [], tools: offered });
+              seen.length = 0;
+              seen.push(...Array.from(yield* Fiber.join(turn)));
+            }
+            return seen;
+          }),
+        ),
+      );
+      return { events, requests, refusals: () => refusals, transcripts };
+    };
+
+    it("summarizes earlier turns after an overflow refusal and continues without a second refusal", async () => {
+      // The real window refuses any request that still carries the first turn
+      // beside the third, although the endpoint's estimate admitted it.
+      const run = await runLongSession({
+        refuses: (request) => {
+          const texts = request.history.map((message) => message.text);
+          return texts.includes("first") && texts.includes("third");
+        },
+      });
+
+      expect(run.events.at(-1)?.kind).toBe("completed");
+      expect(run.refusals()).toBe(1);
+      expect(run.events.filter((event) => event.kind === "context-compacted")).toMatchObject([
+        { trigger: "automatic" },
+      ]);
+      const continued = run.requests.at(-1);
+      expect(continued?.history.map((message) => message.text)).toEqual([
+        `${summaryLead(2)}\n\nPlanned the parser fix and chose the queue design.\n\nYour task list as you last wrote it with todo-write in those turns:\n${taskList}`,
+        "third",
+      ]);
+      expect(run.transcripts.load(sessionId)?.compactions).toMatchObject([
+        { turns: 2, afterTurns: 3 },
+      ]);
+      // The turn paid for its summary request, so its closing total says so.
+      expect(run.events.filter((event) => event.kind === "usage").at(-1)).toMatchObject({
+        inputTokens: 600,
+        outputTokens: 60,
+      });
+    });
+
+    it("summarizes earlier turns instead of leaving them out when the estimate says they no longer fit", async () => {
+      const run = await runLongSession({
+        refuses: () => false,
+        fits: (request) => {
+          const texts = request.history.map((message) => message.text);
+          return !(texts.includes("first") && texts.includes("third"));
+        },
+      });
+
+      expect(run.events.at(-1)?.kind).toBe("completed");
+      expect(run.events.some((event) => event.kind === "context-compacted")).toBe(true);
+      const sent = run.requests.filter((request) => request.tools.length > 0);
+      expect(
+        sent.some((request) => request.history[0]?.text.includes("left out to fit") === true),
+      ).toBe(false);
+      expect(sent.at(-1)?.history[0]?.text).toContain(taskList);
+    });
   });
 
   it("offers no compaction on a Chat or Work connection, whose history the host plans", async () => {

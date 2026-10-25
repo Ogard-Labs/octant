@@ -3461,7 +3461,14 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   the session's own endpoint with no tools, and nothing is journaled unless the
   summary came back. Earlier messages stay in the aggregate; resume and replay
   build requests from the summary and the turns after it, and a later
-  compaction supersedes an earlier one. A fork copies the latest compaction
+  compaction supersedes an earlier one. The model reads the summary behind a
+  line saying how many of the session's first turns it stands for and that
+  they are no longer shown in full. Because the lead keeps its task list only
+  through `todo-write` calls, the summary carries the arguments of the latest
+  successful `todo-write` in the summarized turns verbatim (or the list the
+  earlier summary carried) instead of trusting the model to restate it. The
+  same compaction runs automatically mid-turn when a Code request would
+  otherwise lose whole exchanges (see the native harness loop). A fork copies the latest compaction
   made before the turn it was forked at, rewritten for the fork's folder and
   secrets like the messages, so the fork reads what its source read then. Only
   a Code connection offers `compact`: Chat and Work send the host's planned
@@ -3532,7 +3539,8 @@ Codex RPC itself.
   Claude's `compact_boundary` (`requested` only while the connection's
   `compact` waits on it; a `/compact` the person typed into the session is the
   runtime's own, `automatic`), Octant Harness
-  once its marker is journaled, and, as `automatic`, the OpenCode events and
+  once its marker is journaled (`automatic` when its loop compacted to fit a
+  request mid-turn), and, as `automatic`, the OpenCode events and
   Pi's `compaction_end` with a `result`, which those adapters already read to
   tell a compacted window. They claim no requested compaction until their rows
   are probed. OpenCode may announce one compaction under more than one of its
@@ -4057,18 +4065,37 @@ native harness in `apps/server/src/harness`:
   results return in one message in call order. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
-  alone does not fit. The lead has no tool to read a cut exchange back: the
-  note tells it that its task list and the files on disk still reflect that
-  work, and the journal keeps the full conversation for people, replay, and
-  export. A journal lookup tool was specified once but never wired to a store,
+  alone does not fit. On a Code connection, before any whole exchange is left
+  out, the loop first compacts: it summarizes the turns before the running
+  turn exactly as the connection's `compact` does (below), journals the
+  marker, emits `context-compacted` with `trigger: "automatic"`, and rebuilds
+  the request from the summary and the turns after it. It tries this at most
+  once per request, only on the lead's own model (a fallback model's window
+  may differ), and never summarizes the running turn's own prompt or steps,
+  even when a steering note opened a later boundary; when there is nothing
+  before the running turn, or the summary does not come back, the ladder
+  continues as before. The summary request's usage joins the turn's total and
+  cost, and the turn runner journals the compaction as an automatic receipt
+  and reports the turn's later usage as `compacted`, the same as a
+  first-class runtime's own. Rationale: a cut exchange is gone from the
+  model's view with only the note in its place, while a summary keeps the
+  task, decisions and open work in view at the cost of one tool-less
+  request, so a long Code session survives an overflow more often than a
+  single ladder step lets it. The lead has no tool to read a cut exchange
+  back: the note tells it that its task list and the files on disk still
+  reflect that work, and the journal keeps the full conversation for people,
+  replay, and export. A journal lookup tool was specified once but never wired to a store,
   so it only ever reported itself unavailable and was removed; the note names
   no turn or sequence the model could ask for, and Chat and Work start a fresh
   session each turn, so a lookup needs those handles and a thread-scoped read
   of the rebuilt history before it can return. When the endpoint still rejects a request as too large,
   the loop recognises the refusal as a filled context window (OpenAI's
   `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
-  413 shape from an OpenAI-compatible host), shrinks it one further ladder
-  step, and sends it once more; a second refusal stands. That step always
+  413 shape from an OpenAI-compatible host). A Code connection that has not
+  yet tried to compact for that request summarizes earlier turns as above
+  and sends the rebuilt request; otherwise, or when that request is refused
+  too, the loop shrinks it one further ladder step and sends it once more; a
+  refusal after that stands. That step always
   changes the refused request, which may itself have been reduced already: a
   result already omitted or a note already in front is skipped, and when
   nothing is left to leave out the refusal stands. The size estimate
@@ -4324,8 +4351,8 @@ native harness in `apps/server/src/harness`:
   credential, and a malformed event are never retried. A refusal that names a
   filled context window (OpenAI's `context_length_exceeded`, Anthropic's
   "prompt is too long", or a 400 or 413 shape) is classified as context
-  overflow, which the retry policy never sends again as-is: the loop shrinks
-  the request and retries it once (above). Transports reject with
+  overflow, which the retry policy never sends again as-is: the loop
+  compacts or shrinks the request and retries it (above). Transports reject with
   the typed `ProviderFailure` (`runProviderEffect`), not the Effect runtime's
   wrapper, because the category is what these rules decide on.
 - **Lead fallback.** When a request's retries are spent, the loop asks its

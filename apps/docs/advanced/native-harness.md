@@ -157,8 +157,12 @@ done, and the model is told to check before repeating it. Octant never
 re-runs an interrupted call by itself.
 
 When a long conversation no longer fits the model's window, older tool
-results are left out of the request first, then whole earlier exchanges, with
-a note to the model. The saved conversation keeps everything.
+results are left out of the request first. In Code, Octant then summarizes the
+earlier turns for the model, carrying its latest task list along, and the
+thread shows a compaction divider and the context meter marks the session
+compacted. Only when there is nothing earlier to summarize, or the summary
+fails, are whole earlier exchanges left out, with a note to the model. The
+saved conversation keeps everything.
 
 Forking a Code thread on a harness model gives the fork the model's own
 memory up to the reply you forked from — every message, tool call, and result
