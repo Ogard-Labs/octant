@@ -168,6 +168,7 @@ export const DESKTOP_LEASE_EVENT_NAMES = {
   transitioned: "desktop.lease-transitioned@1",
   extended: "desktop.lease-extended@1",
   artifactSent: "desktop.artifact-sent@1",
+  operated: "desktop.operated@1",
 } as const;
 
 /**
@@ -274,6 +275,36 @@ export const DesktopArtifactSent = Schema.Struct({
 }).annotations(strict);
 export type DesktopArtifactSent = typeof DesktopArtifactSent.Type;
 
+/** An input that changes what a desktop shows. Reading its screen is not one. */
+export const DesktopLeaseOperation = Schema.Literal("launch", "click", "type", "press", "scroll");
+export type DesktopLeaseOperation = typeof DesktopLeaseOperation.Type;
+
+/**
+ * One input an operator sent a desktop, journaled before the driver gets it
+ * with the operator as actor, so the journal says whether the agent or a
+ * person acted. It names the app a launch started and never the text typed
+ * or the key pressed.
+ */
+export const DesktopLeaseOperated = Schema.Struct({
+  leaseId: DesktopLeaseId,
+  owner: DesktopLeaseOwner,
+  providerId: DesktopProviderId,
+  operation: DesktopLeaseOperation,
+  appId: Schema.optional(text(256)),
+}).annotations(strict);
+export type DesktopLeaseOperated = typeof DesktopLeaseOperated.Type;
+
+/**
+ * A send's Computer use destination when it is not this Mac: one of the
+ * sending thread's own leases. The host binds the turn's tool to it at
+ * admission and never chooses between two.
+ */
+export const ComputerUseDestinationSelection = Schema.Struct({
+  kind: Schema.Literal("desktop-lease"),
+  leaseId: DesktopLeaseId,
+}).annotations(strict);
+export type ComputerUseDestinationSelection = typeof ComputerUseDestinationSelection.Type;
+
 const screenCoordinate = Schema.Number.pipe(Schema.finite(), Schema.nonNegative());
 
 /** Input for a desktop's screen, from a person in a Desktop tab or the host. */
@@ -314,3 +345,7 @@ export const decodeDesktopLeaseTransitioned = Schema.decodeUnknownSync(DesktopLe
 export const decodeDesktopLeaseExtended = Schema.decodeUnknownSync(DesktopLeaseExtended);
 export const decodeDesktopArtifactSent = Schema.decodeUnknownSync(DesktopArtifactSent);
 export const decodeDesktopInputEvent = Schema.decodeUnknownSync(DesktopInputEvent);
+export const decodeDesktopLeaseOperated = Schema.decodeUnknownSync(DesktopLeaseOperated);
+export const decodeComputerUseDestinationSelection = Schema.decodeUnknownSync(
+  ComputerUseDestinationSelection,
+);
