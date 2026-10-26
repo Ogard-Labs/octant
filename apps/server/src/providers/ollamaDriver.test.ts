@@ -7,6 +7,7 @@ import {
 } from "@octant/contracts";
 import { Effect, Exit, Scope, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { MemoryNativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
 import { makeOllamaDriver } from "./ollamaDriver";
 import type { OllamaFetch } from "./ollamaEndpoint";
@@ -48,15 +49,22 @@ function driver(fetch: OllamaFetch, transcripts = new MemoryNativeHarnessTranscr
   const registry = new ProviderRuntimeRegistry();
   return {
     registry,
-    driver: makeOllamaDriver({
-      instanceId,
-      configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
-      runtimeRegistry: registry,
-      fetch,
-      transcripts,
-      clock: () => "2026-07-18T09:00:00.000Z",
-      correlationId: () => "90000000-0000-4000-8000-000000000713",
-    }),
+    driver: runOnNativeHarness(
+      makeOllamaDriver({
+        instanceId,
+        configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+        runtimeRegistry: registry,
+        fetch,
+        clock: () => "2026-07-18T09:00:00.000Z",
+      }),
+      {
+        instanceId,
+        runtimeRegistry: registry,
+        transcripts,
+        clock: () => "2026-07-18T09:00:00.000Z",
+        correlationId: () => "90000000-0000-4000-8000-000000000713",
+      },
+    ),
   };
 }
 

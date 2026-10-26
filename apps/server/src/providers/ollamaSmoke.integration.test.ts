@@ -8,6 +8,7 @@ import {
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { makeOllamaDriver } from "./ollamaDriver";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const probeEnabled = process.env.OCTANT_OLLAMA_PROBE === "1";
@@ -18,11 +19,14 @@ const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000732"
 
 function fixture() {
   const registry = new ProviderRuntimeRegistry();
-  const driver = makeOllamaDriver({
-    instanceId,
-    configuration: { kind: "ollama-native-http", baseUrl },
-    runtimeRegistry: registry,
-  });
+  const driver = runOnNativeHarness(
+    makeOllamaDriver({
+      instanceId,
+      configuration: { kind: "ollama-native-http", baseUrl },
+      runtimeRegistry: registry,
+    }),
+    { instanceId, runtimeRegistry: registry },
+  );
   return { registry, driver };
 }
 

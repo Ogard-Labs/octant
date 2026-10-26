@@ -37,6 +37,7 @@ import { makeOpenCodeGoUsageFacts } from "./openCodeGoUsage";
 import type { OpenCodeProcessPort } from "./openCodeProcess";
 import { makeOllamaDriver } from "./ollamaDriver";
 import type { OllamaFetch } from "./ollamaEndpoint";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
 import type { NativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
 import { makePiDriver } from "./piDriver";
@@ -58,7 +59,7 @@ export interface ProviderDriverFactoryOptions {
   readonly ollamaFetch?: OllamaFetch;
   /** Where Ollama's harness sessions keep their conversation, shared with the other harness drivers. */
   readonly nativeHarnessTranscripts?: NativeHarnessTranscriptStore;
-  /** How Ollama's harness retries and where its lead falls back. */
+  /** How Ollama's harness retries, where its lead falls back, and where its endpoint is registered. */
   readonly nativeHarness?: NativeHarnessEndpointHooks;
   readonly claudeProcess?: ClaudeProcessPort;
   readonly claudeSdk?: ClaudeAgentSdkPort;
@@ -295,16 +296,24 @@ export function makeProviderDriver(
         : driver;
     }
     case "ollama":
-      return makeOllamaDriver({
-        instanceId: instance.id,
-        configuration: instance.configuration,
-        runtimeRegistry: options.runtimeRegistry,
-        ...(options.ollamaFetch === undefined ? {} : { fetch: options.ollamaFetch }),
-        ...(options.nativeHarnessTranscripts === undefined
-          ? {}
-          : { transcripts: options.nativeHarnessTranscripts }),
-        ...(options.nativeHarness === undefined ? {} : { harness: options.nativeHarness }),
-      });
+      // Ollama supplies only its endpoint through the provider-sdk harness
+      // endpoint port; the host runs its sessions on the harness loop.
+      return runOnNativeHarness(
+        makeOllamaDriver({
+          instanceId: instance.id,
+          configuration: instance.configuration,
+          runtimeRegistry: options.runtimeRegistry,
+          ...(options.ollamaFetch === undefined ? {} : { fetch: options.ollamaFetch }),
+        }),
+        {
+          instanceId: instance.id,
+          runtimeRegistry: options.runtimeRegistry,
+          ...(options.nativeHarnessTranscripts === undefined
+            ? {}
+            : { transcripts: options.nativeHarnessTranscripts }),
+          ...(options.nativeHarness === undefined ? {} : { harness: options.nativeHarness }),
+        },
+      );
     default:
       throw new ProviderDriverConfigurationError();
   }

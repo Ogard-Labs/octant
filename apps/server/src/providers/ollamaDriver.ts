@@ -1,9 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { isAbsolute, resolve } from "node:path";
 import {
   decodeProviderFailure,
   decodeProviderProbeResult,
-  type OctantMode,
   type OllamaProviderConfiguration,
   type ProviderFailure,
   type ProviderInstanceId,
@@ -11,21 +8,14 @@ import {
   type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import { validateChatTurnInput } from "@octant/provider-sdk/chat-conformance";
+import type {
+  HarnessEndpointDriver,
+  HarnessEndpointRequest,
+  HarnessEndpointTransport,
+} from "@octant/provider-sdk/harness-endpoint";
 import { resolveModelContextWindow } from "@octant/domain/model-context-window";
 import { Effect } from "effect";
-import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
-import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
-import type {
-  NativeHarnessRequest,
-  NativeHarnessTransport,
-} from "../harness/nativeHarnessTransport";
-import {
-  MemoryNativeHarnessTranscriptStore,
-  type NativeHarnessTranscriptStore,
-} from "../harness/nativeHarnessTranscriptStore";
-import { sendWithEndpointRetry } from "./endpointRetry";
 import {
   buildOllamaChatBody,
   makeOllamaEndpoint,
@@ -53,12 +43,6 @@ export interface OllamaDriverOptions {
   readonly fetch?: OllamaFetch;
   readonly limits?: Partial<OllamaHttpLimits>;
   readonly clock?: () => string;
-  readonly correlationId?: () => string;
-  readonly onConnectionReleased?: () => void;
-  /** Where harness sessions keep their conversation; see the OpenAI-compatible driver. */
-  readonly transcripts?: NativeHarnessTranscriptStore;
-  /** How the harness retries this endpoint and where its lead goes when it stays down. */
-  readonly harness?: NativeHarnessEndpointHooks;
 }
 
 /**
@@ -68,28 +52,26 @@ export interface OllamaDriverOptions {
 const TOOL_CHECK_PROMPT = `Call the ${OCTANT_CAPABILITY_ECHO_TOOL_NAME} tool with echo set to "ready". Do not answer in text.`;
 
 /**
- * The local Ollama service as an Octant Harness endpoint. The harness loop
- * owns the conversation and every tool call; this driver supplies the
- * transport over Ollama's native chat API on literal loopback, and the
+ * The local Ollama service as an Octant Harness endpoint, through the
+ * provider-sdk harness endpoint port. The host's harness loop owns the
+ * conversation, every tool call, and retries; this driver supplies one
+ * request attempt over Ollama's native chat API on literal loopback, and the
  * per-model Verify tools check that gates which models are offered tools.
  */
-export function makeOllamaDriver(options: OllamaDriverOptions): ProviderDriver {
+export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointDriver {
   const clock = options.clock ?? (() => new Date().toISOString());
-  const makeCorrelation = options.correlationId ?? randomUUID;
   const endpoint = makeOllamaEndpoint({
     baseUrl: options.configuration.baseUrl,
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     ...(options.limits === undefined ? {} : { limits: options.limits }),
   });
-  const transcripts = options.transcripts ?? new MemoryNativeHarnessTranscriptStore();
-  const transport = ollamaTransport(options, endpoint, clock);
-  options.harness?.endpoints?.register(options.instanceId, {
-    open: transport.open,
-    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
-  });
 
   return {
     kind: "ollama",
+    harnessEndpoint: {
+      ...ollamaTransport(options, endpoint, clock),
+      admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
+    },
     probe: ({ instanceId }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
@@ -154,63 +136,7 @@ export function makeOllamaDriver(options: OllamaDriverOptions): ProviderDriver {
             },
             catch: sanitizeFailure,
           }),
-    acquire: ({ instanceId, projectRoot, mode }) => {
-      if (instanceId !== options.instanceId) {
-        return Effect.fail(
-          failure("invalid-configuration", "Provider instance does not match driver."),
-        );
-      }
-      if (mode === undefined) {
-        return Effect.fail(
-          failure("invalid-configuration", "Ollama requires an explicit product mode."),
-        );
-      }
-      if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) {
-        return Effect.fail(
-          failure(
-            "invalid-configuration",
-            "Provider Project root must be an absolute normalized path.",
-          ),
-        );
-      }
-      return makeConnection(options, transport, clock, makeCorrelation, transcripts, {
-        projectRoot,
-        mode,
-      });
-    },
   };
-}
-
-function makeConnection(
-  options: OllamaDriverOptions,
-  transport: NativeHarnessTransport,
-  clock: () => string,
-  makeCorrelation: () => string,
-  transcripts: NativeHarnessTranscriptStore,
-  input: { readonly projectRoot: string; readonly mode: OctantMode },
-): Effect.Effect<ProviderConnection, never, import("effect").Scope.Scope> {
-  return createNativeHarnessConnection({
-    instanceId: options.instanceId,
-    driverKind: "ollama",
-    projectRoot: input.projectRoot,
-    mode: input.mode,
-    transport,
-    transcripts,
-    ...(options.harness?.leadFallback === undefined
-      ? {}
-      : { leadFallback: options.harness.leadFallback }),
-    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
-    onSessionCountChange: (delta) =>
-      options.runtimeRegistry.setActiveSessionCount(
-        options.instanceId,
-        Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) + delta),
-      ),
-    ...(options.onConnectionReleased === undefined
-      ? {}
-      : { onReleased: options.onConnectionReleased }),
-    clock,
-    correlationId: makeCorrelation,
-  });
 }
 
 /**
@@ -241,12 +167,15 @@ function admitTurn(
   );
 }
 
-/** Ollama as the harness loop sees it: one `/api/chat` request per step. */
+/**
+ * Ollama as the harness loop sees it: one `/api/chat` request per step, sent
+ * once. The host retries a failure that usually passes.
+ */
 function ollamaTransport(
   options: OllamaDriverOptions,
   endpoint: OllamaEndpoint,
   clock: () => string,
-): NativeHarnessTransport {
+): HarnessEndpointTransport {
   return {
     open: async () => {
       let active: OllamaEndpoint | undefined = endpoint;
@@ -255,39 +184,32 @@ function ollamaTransport(
         send: async (request, stream) => {
           const current = active;
           if (current === undefined) throw failure("protocol", "Provider session is not active.");
-          return sendWithEndpointRetry({
-            signal: stream.signal,
-            onEvent: stream.onEvent,
-            options: options.harness?.retry,
-            attempt: async (attempt) => {
-              let result: OllamaChatResult;
-              try {
-                result = await sendOllamaChat(current, {
-                  modelId: String(request.modelId),
-                  system: request.system,
-                  history: request.history,
-                  tools: request.tools,
-                  signal: attempt.signal,
-                  onEvent: attempt.onEvent,
-                });
-              } catch (error) {
-                if (attempt.signal.aborted) {
-                  throw failure("interrupted", "The provider request was cancelled.");
-                }
-                throw sanitizeFailure(error);
-              }
-              recordObservedTurn(options, result, clock);
-              const stop = outputStopReason(result.doneReason);
-              return {
-                text: result.text,
-                toolCalls: result.toolCalls,
-                ...(result.usage === undefined ? {} : { usage: result.usage }),
-                ...(stop === undefined || result.toolCalls.length > 0
-                  ? {}
-                  : { outputStopReason: stop }),
-              };
-            },
-          });
+          let result: OllamaChatResult;
+          try {
+            result = await sendOllamaChat(current, {
+              modelId: String(request.modelId),
+              system: request.system,
+              history: request.history,
+              tools: request.tools,
+              signal: stream.signal,
+              onEvent: stream.onEvent,
+            });
+          } catch (error) {
+            if (stream.signal.aborted) {
+              throw failure("interrupted", "The provider request was cancelled.");
+            }
+            throw sanitizeFailure(error);
+          }
+          recordObservedTurn(options, result, clock);
+          const stop = outputStopReason(result.doneReason);
+          return {
+            text: result.text,
+            toolCalls: result.toolCalls,
+            ...(result.usage === undefined ? {} : { usage: result.usage }),
+            ...(stop === undefined || result.toolCalls.length > 0
+              ? {}
+              : { outputStopReason: stop }),
+          };
         },
         release: () => {
           active = undefined;
@@ -301,7 +223,7 @@ function ollamaTransport(
 function requestFits(
   options: OllamaDriverOptions,
   endpoint: OllamaEndpoint,
-  request: NativeHarnessRequest,
+  request: HarnessEndpointRequest,
 ): boolean {
   const input = {
     modelId: String(request.modelId),

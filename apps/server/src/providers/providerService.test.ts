@@ -24,6 +24,7 @@ import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import { ProviderDriverConfigurationError } from "./providerDriverFactory";
 import { makeOllamaDriver } from "./ollamaDriver";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { createProviderRouteHandler } from "./providerRoutes";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import {
@@ -4338,12 +4339,15 @@ describe("ProviderService", () => {
       persistence: fixture.persistence,
       runtimeRegistry: fixture.runtime,
       driver: (instance) =>
-        makeOllamaDriver({
-          instanceId: instance.id,
-          configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
-          runtimeRegistry: fixture.runtime,
-          fetch: async () => new Response("secret upstream page", { status: 503 }),
-        }),
+        runOnNativeHarness(
+          makeOllamaDriver({
+            instanceId: instance.id,
+            configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+            runtimeRegistry: fixture.runtime,
+            fetch: async () => new Response("secret upstream page", { status: 503 }),
+          }),
+          { instanceId: instance.id, runtimeRegistry: fixture.runtime },
+        ),
       uuid: () => crypto.randomUUID(),
       clock: () => now,
     });

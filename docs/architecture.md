@@ -4214,7 +4214,9 @@ so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
   `NativeHarnessEndpointRegistry` with the driver's `admitTurn`, wires lead
   fallback and the shared transcript store, and keeps the instance's session
   count. `runHarnessEndpointConformance` proves an endpoint refuses unverified
-  tools, rejects a cancel as `interrupted`, and stops sending after release. The
+  tools, rejects a cancel as `interrupted`, and stops sending after release.
+  Ollama is the port's first driver: it imports nothing from the harness or the
+  retry module, and the provider factory runs it with `runOnNativeHarness`. The
   OpenAI-compatible, Anthropic-compatible, and Azure AI Foundry drivers predate
   the port and still build their connection, registration, and retries
   themselves from host modules; they are queued to move onto it, and no new

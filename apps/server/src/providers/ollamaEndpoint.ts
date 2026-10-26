@@ -11,7 +11,7 @@ import {
   type ProviderToolDefinition,
 } from "@octant/contracts";
 import { unsupportedChatCapabilities } from "@octant/provider-sdk/chat-conformance";
-import type { NativeHarnessMessage } from "../harness/nativeHarnessTransport";
+import type { HarnessEndpointMessage } from "@octant/provider-sdk/harness-endpoint";
 import { encodeChatCompletionsTools } from "./openAiToolEncoding";
 
 export type OllamaFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -50,7 +50,7 @@ export interface OllamaChatInput {
   readonly modelId: string;
   readonly system?: string | undefined;
   /** Ends with a user message or with the results of the previous step's calls. */
-  readonly history: ReadonlyArray<NativeHarnessMessage>;
+  readonly history: ReadonlyArray<HarnessEndpointMessage>;
   readonly tools?: ReadonlyArray<ProviderToolDefinition> | undefined;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: OllamaTurnEvent) => void;

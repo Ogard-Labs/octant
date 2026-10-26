@@ -7,8 +7,10 @@ import {
 } from "@octant/contracts";
 import { runProviderConformance } from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
+import { runHarnessEndpointConformance } from "@octant/provider-sdk/harness-endpoint-conformance";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeOllamaDriver } from "./ollamaDriver";
 import {
   recordProviderChatConformanceEvidence,
@@ -43,14 +45,21 @@ describe("Ollama provider conformance", () => {
       chatRequests += 1;
       return chatRequests === 1 ? completedChat() : hangingChat();
     };
-    const driver = makeOllamaDriver({
-      instanceId,
-      configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
-      runtimeRegistry: registry,
-      fetch,
-      clock: () => "2026-07-18T08:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000723",
-    });
+    const driver = runOnNativeHarness(
+      makeOllamaDriver({
+        instanceId,
+        configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+        runtimeRegistry: registry,
+        fetch,
+        clock: () => "2026-07-18T08:00:00.000Z",
+      }),
+      {
+        instanceId,
+        runtimeRegistry: registry,
+        clock: () => "2026-07-18T08:00:00.000Z",
+        correlationId: () => "80000000-0000-4000-8000-000000000723",
+      },
+    );
 
     const evidence = await runProviderConformance({
       driver,
@@ -159,6 +168,44 @@ describe("Ollama provider conformance", () => {
     });
     expect(chatEvidence).toMatchObject({ nativeAttachmentHonest: true, released: true });
   });
+
+  it("keeps the provider-sdk harness endpoint promises the host's loop relies on", async () => {
+    const endpoint = makeOllamaDriver({
+      instanceId,
+      configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      fetch: async (input) => {
+        if (!String(input).endsWith("/chat"))
+          throw new Error(`Unexpected Ollama request: ${String(input)}`);
+        return completedChat();
+      },
+    }).harnessEndpoint;
+
+    await expect(
+      runHarnessEndpointConformance({
+        endpoint,
+        modelId,
+        request: {
+          sessionId: successfulSessionId,
+          modelId,
+          system: undefined,
+          history: [{ role: "user", text: "successful fixture prompt" }],
+          tools: [],
+        },
+        unverifiedToolTurn: {
+          sessionId: successfulSessionId,
+          prompt: "Read the file",
+          attachments: [],
+          tools: [
+            decodeProviderToolDefinition({
+              name: "read_file",
+              inputSchema: { type: "object", properties: {} },
+            }),
+          ],
+        },
+      }),
+    ).resolves.toMatchObject({ cancelledRequestInterrupted: true, releasedSessionRefused: true });
+  });
 });
 
 describe("Ollama harness tool round trip", () => {
@@ -181,13 +228,16 @@ describe("Ollama harness tool round trip", () => {
       chatBodies.push(body);
       return chat(body);
     };
-    const driver = makeOllamaDriver({
-      instanceId,
-      configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
-      runtimeRegistry: registry,
-      fetch,
-      clock: () => "2026-07-18T08:00:00.000Z",
-    });
+    const driver = runOnNativeHarness(
+      makeOllamaDriver({
+        instanceId,
+        configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+        runtimeRegistry: registry,
+        fetch,
+        clock: () => "2026-07-18T08:00:00.000Z",
+      }),
+      { instanceId, runtimeRegistry: registry, clock: () => "2026-07-18T08:00:00.000Z" },
+    );
     return { registry, driver, chatBodies };
   }
 
