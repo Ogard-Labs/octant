@@ -648,7 +648,7 @@ describe("remote route policy", () => {
     expect(accepted.status).toBe(200);
   });
 
-  it("forwards a paired device's physical device read and keeps device leases local", () => {
+  it("forwards a paired device's physical device read and keeps device leases and actions local", () => {
     const routePolicy = createRemoteRoutePolicy({ origin });
     const inspect = (path: string) =>
       routePolicy.inspect(
@@ -666,9 +666,11 @@ describe("remote route policy", () => {
       kind: "allow",
       surface: "authenticated-product",
     });
-    const lease = inspect("/api/apple/device-leases");
-    expect(lease).toMatchObject({ kind: "reject", facts: { surface: "local-only" } });
-    if (lease.kind === "reject") expect(lease.response.status).toBe(404);
+    for (const path of ["/api/apple/device-leases", "/api/apple/device-actions"]) {
+      const local = inspect(path);
+      expect(local).toMatchObject({ kind: "reject", facts: { surface: "local-only" } });
+      if (local.kind === "reject") expect(local.response.status).toBe(404);
+    }
   });
 
   it("forwards a paired device's MCP tool prompt list and answer, and keeps remembered approvals local", () => {

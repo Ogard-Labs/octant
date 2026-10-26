@@ -3,6 +3,7 @@ import {
   decodeValidationPlan,
   decodeValidationReport,
   type AppleBuildEvidence,
+  type AppleDeviceEvidence,
   type ValidationEvidenceRecord,
   type ValidationOutcome,
   type ValidationPlan,
@@ -17,20 +18,27 @@ export interface ComposedAppleValidationEvents {
 }
 
 export function composeAppleValidationEvents(input: {
-  readonly evidence: AppleBuildEvidence;
+  readonly evidence: AppleBuildEvidence | AppleDeviceEvidence;
   readonly startedAt: string;
   readonly newId: () => string;
 }): ComposedAppleValidationEvents {
-  const stepId = `apple-${input.evidence.kind}`;
-  const outcome = validationOutcome(input.evidence.outcome);
-  const redactTyped = input.evidence.kind === "type-text";
+  const evidence = input.evidence;
+  // A physical device's evidence is journaled beside the Simulator's under
+  // steps of its own; it carries no typed input to redact.
+  const device = "deviceId" in evidence;
+  const stepId = device ? `apple-device-${evidence.kind}` : `apple-${evidence.kind}`;
+  const outcome = validationOutcome(evidence.outcome);
+  const redactTyped = evidence.kind === "type-text";
+  const simulatorInput = !("deviceId" in evidence) && isAppleSimulatorInputKind(evidence.kind);
   const plan = decodeValidationPlan({
     planId: input.evidence.actionId,
     authority: input.evidence.authority,
     steps: [
       {
         stepId,
-        description: `Run bounded Apple ${input.evidence.kind} validation.`,
+        description: device
+          ? `Run bounded Apple device ${evidence.kind}.`
+          : `Run bounded Apple ${evidence.kind} validation.`,
         sources: [source(input.evidence)],
         expectedOutcome: "passed",
       },
@@ -59,7 +67,7 @@ export function composeAppleValidationEvents(input: {
     observedAt: input.evidence.completedAt,
     ...(detail === undefined || detail.length === 0 ? {} : { detail }),
     // Typed Simulator input never stores characters in durable evidence.
-    redacted: redactTyped || isAppleSimulatorInputKind(input.evidence.kind),
+    redacted: redactTyped || simulatorInput,
   });
   const report = decodeValidationReport({
     planId: plan.planId,
@@ -72,7 +80,7 @@ export function composeAppleValidationEvents(input: {
   return { plan, record, report };
 }
 
-function source(evidence: AppleBuildEvidence) {
+function source(evidence: AppleBuildEvidence | AppleDeviceEvidence) {
   return {
     kind: evidence.kind === "test" ? ("apple-test" as const) : ("apple-build" as const),
     reference: evidence.artifacts[0]?.reference ?? `apple-action-${String(evidence.actionId)}`,

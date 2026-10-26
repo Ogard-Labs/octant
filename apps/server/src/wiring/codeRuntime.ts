@@ -388,6 +388,8 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
         codeOperationRuntime?.validateAppleApproval(windowId, request),
       validateAppleDeviceLease: (windowId, request) =>
         codeOperationRuntime?.validateAppleDeviceLease?.(windowId, request),
+      validateAppleDeviceAction: (windowId, request) =>
+        codeOperationRuntime?.validateAppleDeviceAction?.(windowId, request),
       validateAndroidApproval: (windowId, request) =>
         codeOperationRuntime?.validateAndroidApproval(windowId, request),
     });

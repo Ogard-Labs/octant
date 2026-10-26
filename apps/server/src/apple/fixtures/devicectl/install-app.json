@@ -1,0 +1,33 @@
+{
+  "info": {
+    "arguments": [
+      "devicectl",
+      "device",
+      "install",
+      "app",
+      "--device",
+      "6E2B1C4A-0D5F-4E8B-9A71-3C2D1E0F9A01",
+      "--json-output",
+      "/private/output.json",
+      "/private/derived/Build/Products/Debug-iphoneos/SimulatorFixture.app"
+    ],
+    "commandType": "devicectl.device.install.app",
+    "environment": { "TERM": "xterm-256color" },
+    "jsonVersion": 2,
+    "outcome": "success",
+    "version": "477.29"
+  },
+  "result": {
+    "deviceIdentifier": "6E2B1C4A-0D5F-4E8B-9A71-3C2D1E0F9A01",
+    "installedApplications": [
+      {
+        "bundleID": "sh.octant.SimulatorFixture",
+        "databaseSequenceNumber": 1204,
+        "databaseUUID": "0B5D7C61-6A3E-4F32-9E5C-7A1B2C3D4E5F",
+        "installationURL": "file:///private/var/containers/Bundle/Application/2F8C6E1A-3B4D-4C5E-8F9A-0B1C2D3E4F5A/SimulatorFixture.app/",
+        "launchServicesIdentifier": "unknown",
+        "options": {}
+      }
+    ]
+  }
+}

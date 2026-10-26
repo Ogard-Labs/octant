@@ -690,6 +690,8 @@ export interface CodeOperationRuntime {
   validateAndroidApproval(windowId: WindowId, request: AndroidEmulatorRequest): Promise<boolean>;
   /** Whether a person at this window confirmed exactly this device lease. */
   validateAppleDeviceLease?(windowId: WindowId, request: AppleDeviceRequest): Promise<boolean>;
+  /** Whether this window holds the one-use approval of exactly this device effect. */
+  validateAppleDeviceAction?(windowId: WindowId, request: AppleDeviceRequest): Promise<boolean>;
   revokeApprovals(windowId: WindowId): void;
   /**
    * Shows a native-harness question on the thread's running turn so it is
@@ -1134,6 +1136,16 @@ export function createCodeOperationRuntime(
         directContext = await approvalContext(options, undefined, lease.thread, lease.checkout);
         directThreadTitle = lease.thread.title;
         directPrompt = appleDeviceLeasePrompt(lease);
+      } else if (request.effect.kind === "apple-device-action") {
+        const action = await resolveAppleDeviceActionScope(
+          options,
+          windowId,
+          request.effect.request,
+        );
+        if (action === undefined) return undefined;
+        directContext = await approvalContext(options, undefined, action.thread, action.checkout);
+        directThreadTitle = action.thread.title;
+        directPrompt = appleDeviceActionPrompt(action, request.effect.request);
       } else if (request.effect.kind === "create-thread-full-access") {
         thread = request.effect.thread;
         checkout = options.persistence.readCodeCheckout(thread.checkoutId);
@@ -1287,6 +1299,19 @@ export function createCodeOperationRuntime(
       return await approvalValidator.validate({
         windowId,
         effect: { kind: "apple-device-lease", request },
+        contextDigest: approvalContextDigest(context),
+        approvalId: request.approval.approvalId,
+      });
+    },
+    validateAppleDeviceAction: async (windowId, request) => {
+      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
+      const resolved = await resolveDeviceApprovalScope(options, windowId, request);
+      if (resolved === undefined) return false;
+      const context = await approvalContext(options, undefined, resolved.thread, resolved.checkout);
+      if (context === undefined) return false;
+      return await approvalValidator.validate({
+        windowId,
+        effect: { kind: "apple-device-action", request },
         contextDigest: approvalContextDigest(context),
         approvalId: request.approval.approvalId,
       });
@@ -1826,6 +1851,62 @@ function appleDeviceLeasePrompt(lease: AppleDeviceLeaseScope): {
   };
 }
 
+/**
+ * The thread, checkout, and device a device effect's approval names. Like a
+ * Simulator effect's, it is asked only while the thread's posture decides
+ * effects by approval: Plan refuses them and Full access runs them unasked.
+ */
+async function resolveAppleDeviceActionScope(
+  options: CodeOperationRuntimeOptions,
+  windowId: WindowId,
+  request: AppleDeviceRequest,
+): Promise<Omit<AppleDeviceLeaseScope, "from"> | undefined> {
+  const resolved = await resolveDeviceApprovalScope(options, windowId, request);
+  const device =
+    request.deviceId === undefined ? undefined : options.describeAppleDevice?.(request.deviceId);
+  if (resolved === undefined || device === undefined) return undefined;
+  return { ...resolved, device };
+}
+
+/** Names the device, the thread, and exactly what this one approval runs. */
+function appleDeviceActionPrompt(
+  scope: Omit<AppleDeviceLeaseScope, "from">,
+  request: AppleDeviceRequest,
+): { readonly message: string; readonly detail: string } {
+  const { device, thread } = scope;
+  const app = request.bundleIdentifier ?? "this thread's app";
+  const message =
+    request.kind === "build"
+      ? `Build this thread's app for ${device.name}?`
+      : request.kind === "run"
+        ? `Build and run this thread's app on ${device.name}?`
+        : request.kind === "install"
+          ? `Install this thread's app on ${device.name}?`
+          : request.kind === "launch"
+            ? `Launch ${app} on ${device.name}?`
+            : `Stop ${app} on ${device.name}?`;
+  return {
+    message,
+    detail: boundApprovalDetail(
+      [
+        `Action: ${request.kind}`,
+        `Device: ${device.name} · ${device.model} · iOS ${device.osVersion} · ${device.connection === "wired" ? "connected by cable" : "on the network"}`,
+        `Thread: ${thread.title}`,
+        ...(request.projectPath === undefined ? [] : [`Project: ${request.projectPath}`]),
+        ...(request.scheme === undefined ? [] : [`Scheme: ${request.scheme}`]),
+        ...(request.teamId === undefined
+          ? []
+          : [
+              `Team: ${request.teamId}`,
+              "Signs for development with your own identity for this team from the login keychain. Octant changes no certificate or provisioning profile.",
+            ]),
+        ...(request.artifact === undefined ? [] : [`Signed app: ${request.artifact}`]),
+        ...(request.bundleIdentifier === undefined ? [] : [`App: ${request.bundleIdentifier}`]),
+      ].join("\n"),
+    ),
+  };
+}
+
 async function resolveDeviceApprovalScope(
   options: CodeOperationRuntimeOptions,
   windowId: WindowId,
@@ -1919,10 +2000,10 @@ function approvalPrompt(
         ? [`Scheme: ${effect.request.scheme}`]
         : []),
     ].join("\n");
-  } else if (effect.kind === "apple-device-lease") {
-    // prepareApproval words a lease from the device it names, which this
-    // function is not given; reaching here is a wiring fault.
-    throw new TypeError("A device lease is prompted with the device it names.");
+  } else if (effect.kind === "apple-device-lease" || effect.kind === "apple-device-action") {
+    // prepareApproval words a device request from the device it names, which
+    // this function is not given; reaching here is a wiring fault.
+    throw new TypeError("A device request is prompted with the device it names.");
   } else if (effect.kind === "android-action") {
     const input =
       isAndroidEmulatorInputKind(effect.request.kind) ||

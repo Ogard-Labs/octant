@@ -447,6 +447,82 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("asks once for a device build naming the device, the team, and that it signs with the person's own identity", async () => {
+    const deviceId = "90000000-0000-4000-8000-000000000021";
+    const fixture = runtimeFixture({
+      approvalValidator: false,
+      describeAppleDevice: (id) =>
+        String(id) === deviceId
+          ? {
+              name: "Henrik's iPhone",
+              model: "iPhone 16 Pro",
+              osVersion: "26.1",
+              connection: "wired",
+            }
+          : undefined,
+    });
+    const request = {
+      actionId: operationId(850) as never,
+      correlationId: operationId(851) as never,
+      authority: {
+        hostId: "90000000-0000-4000-8000-000000000010" as never,
+        mode: "code" as const,
+        projectId: thread().projectId,
+        providerInstanceId: thread().providerInstanceId,
+        extension: { kind: "core" as const },
+      },
+      threadId,
+      checkoutId,
+      kind: "build" as const,
+      deviceId: deviceId as never,
+      requestedBy: { kind: "local-user" as const, actorId: operationId(852) as never },
+      projectPath: "SimulatorFixture.xcodeproj" as never,
+      teamId: "A1B2C3D4E5" as never,
+      timeoutMs: 600_000,
+      approval: { kind: "pending" as const },
+    };
+    const challenge = await fixture.runtime.prepareApproval(windowId, {
+      effect: { kind: "apple-device-action", request },
+    });
+    expect(challenge?.message).toBe("Build this thread's app for Henrik's iPhone?");
+    expect(challenge?.detail).toContain("Team: A1B2C3D4E5");
+    expect(challenge?.detail).toContain("own identity for this team from the login keychain");
+    expect(challenge?.detail).toContain("Project: SimulatorFixture.xcodeproj");
+
+    const receipt = await fixture.runtime.confirmApproval(windowId, {
+      challengeId: challenge!.challengeId,
+    });
+    const approved = {
+      ...request,
+      approval: { kind: "approved" as const, approvalId: receipt!.approvalId as never },
+    };
+    // The approval binds the request: another team or project is not covered.
+    await expect(
+      fixture.runtime.validateAppleDeviceAction?.(windowId, {
+        ...approved,
+        teamId: "Z9Y8X7W6V5" as never,
+      }),
+    ).resolves.toBe(false);
+    await expect(fixture.runtime.validateAppleDeviceAction?.(windowId, approved)).resolves.toBe(
+      true,
+    );
+    await expect(fixture.runtime.validateAppleDeviceAction?.(windowId, approved)).resolves.toBe(
+      false,
+    );
+
+    // Full access runs a device effect without asking, and Plan refuses it,
+    // so neither posture is ever shown this approval.
+    for (const executionPolicy of ["full-access", "plan"] as const) {
+      fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy }));
+      await expect(
+        fixture.runtime.prepareApproval(windowId, {
+          effect: { kind: "apple-device-action", request },
+        }),
+      ).resolves.toBeUndefined();
+    }
+    fixture.close();
+  });
+
   it("bounds oversized approval display details while preserving challenge creation", async () => {
     const fixture = runtimeFixture({ approvalValidator: false });
     const challenge = await fixture.runtime.prepareApproval(windowId, {

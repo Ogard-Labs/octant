@@ -5,8 +5,7 @@ import {
   type AppleDeviceResponse,
   type WindowId,
 } from "@octant/contracts";
-import type { AppleDeviceExecutionScope } from "@octant/domain";
-import type { AppleDeviceService } from "./apple/appleDeviceService";
+import type { AppleDeviceExecutionContext, AppleDeviceService } from "./apple/appleDeviceService";
 import type { ClientPrincipal } from "./clientPrincipal";
 import { authenticateRoutePrincipal } from "./principalRouteContext";
 import { isAllowedRendererOrigin, isLoopbackHostname } from "./shellRoutes";
@@ -15,45 +14,56 @@ import { WindowAuthorityError, type WindowAuthorityStore } from "./windowAuthori
 const DEFAULT_BODY_LIMIT = 64 * 1024;
 const DEVICES_PATH = "/api/apple/devices";
 const LEASES_PATH = "/api/apple/device-leases";
+const ACTIONS_PATH = "/api/apple/device-actions";
 
 // Each route takes only its own kinds, so the remote listener's split between
-// the readable device route and the local-only lease route cannot be crossed
-// by naming another kind in the body.
-const ROUTE_KINDS: Readonly<Record<string, ReadonlySet<AppleDeviceRequest["kind"]>>> = {
-  [DEVICES_PATH]: new Set(["discover", "status"]),
-  [LEASES_PATH]: new Set(["use-device", "release-device"]),
-};
+// the readable device route and the local-only lease and action routes cannot
+// be crossed by naming another kind in the body.
+const ROUTE_KINDS: ReadonlyMap<string, ReadonlySet<AppleDeviceRequest["kind"]>> = new Map([
+  [DEVICES_PATH, new Set<AppleDeviceRequest["kind"]>(["discover", "status"])],
+  [LEASES_PATH, new Set<AppleDeviceRequest["kind"]>(["use-device", "release-device"])],
+  // The thread's own app inside its lease. Remote clients observe only, so
+  // this route is local-only and a paired device never reaches it.
+  [
+    ACTIONS_PATH,
+    new Set<AppleDeviceRequest["kind"]>(["build", "run", "install", "launch", "terminate", "logs"]),
+  ],
+]);
+/** Routes only a person at a local window may call. */
+const LOCAL_ONLY_PATHS: ReadonlySet<string> = new Set([LEASES_PATH, ACTIONS_PATH]);
 
 export interface AppleDeviceRouteDependencies {
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly service: Pick<AppleDeviceService, "request">;
   /**
-   * The thread scope this window may act in, with the posture and the
-   * confirmation the host validated for exactly this request. Undefined
-   * refuses the request before the device service sees it.
+   * The thread scope this window may act in, with the posture, the checkout,
+   * and the approval or confirmation the host validated for exactly this
+   * request. Undefined refuses the request before the device service sees it.
    */
   readonly resolveScope: (
     windowId: WindowId,
     request: AppleDeviceRequest,
     principal: ClientPrincipal,
-  ) => Promise<AppleDeviceExecutionScope | undefined>;
+  ) => Promise<AppleDeviceExecutionContext | undefined>;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
 
 /**
- * Physical Apple device discovery, status, and leases
- * (docs/design/apple-devices.md). Discovery and status are reads a paired
- * device may make; a lease starts, moves, and ends only from a local window,
- * and its start needs a person's confirmation the host validated.
+ * Physical Apple device discovery, status, leases, and the thread's own app on
+ * a leased device (docs/design/apple-devices.md). Discovery and status are
+ * reads a paired device may make. A lease starts, moves, and ends, and the
+ * app is built, installed, launched, stopped, or read, only from a local
+ * window: a lease's start on a person's confirmation the host validated, and
+ * an effect on the approval its thread's posture asks for.
  */
 export function createAppleDeviceRouteHandler(dependencies: AppleDeviceRouteDependencies) {
   const now = dependencies.now ?? Date.now;
   const bodyLimit = dependencies.maxRequestBodySize ?? DEFAULT_BODY_LIMIT;
   return async (request: Request): Promise<Response | undefined> => {
     const url = new URL(request.url);
-    const kinds = ROUTE_KINDS[url.pathname];
-    if (url.pathname !== DEVICES_PATH && url.pathname !== LEASES_PATH) return undefined;
+    const kinds = ROUTE_KINDS.get(url.pathname);
+    if (kinds === undefined) return undefined;
     const origin = request.headers.get("origin");
     if (
       !isLoopbackHostname(url.hostname) ||
@@ -99,16 +109,16 @@ export function createAppleDeviceRouteHandler(dependencies: AppleDeviceRouteDepe
     } catch {
       return failure("invalid", "Apple device request is invalid.", 400, origin);
     }
-    if (kinds === undefined || !kinds.has(deviceRequest.kind)) {
+    if (!kinds.has(deviceRequest.kind)) {
       return failure("invalid", "Apple device request is invalid.", 400, origin);
     }
     if (
       !namesAskingPerson(deviceRequest, principal) ||
-      (url.pathname === LEASES_PATH && principal.kind !== "local-window")
+      (LOCAL_ONLY_PATHS.has(url.pathname) && principal.kind !== "local-window")
     ) {
       return failure("unauthorized", "Apple device request is unauthorized.", 403, origin);
     }
-    let scope: AppleDeviceExecutionScope | undefined;
+    let scope: AppleDeviceExecutionContext | undefined;
     try {
       scope = await dependencies.resolveScope(windowId, deviceRequest, principal);
     } catch {
