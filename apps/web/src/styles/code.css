@@ -537,6 +537,26 @@ html:not([data-octant-reduced-transparency="true"])
   font-size: var(--oct-text-xs);
 }
 
+/* What the host's language server says about this file: starting, off,
+   refused, stopped (with Retry), or the problem count. One quiet line that
+   wraps at pane and dock widths rather than pushing the editor down far. */
+.code-editor-pane__language {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--oct-space-1) var(--oct-space-3);
+  padding: var(--oct-space-2) var(--oct-space-4);
+  border-bottom: 1px solid var(--oct-border);
+  color: var(--oct-muted);
+  font-size: var(--oct-text-xs);
+}
+
+.code-editor-pane__language p {
+  min-width: 0;
+  margin: 0;
+}
+
 .code-editor-pane__warning,
 .code-diff-pane__warning {
   padding: var(--oct-space-3) var(--oct-space-4);

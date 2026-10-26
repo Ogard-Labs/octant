@@ -162,6 +162,7 @@ describe("octantSettingsRegistry", () => {
     expect(code?.settings.map((setting) => setting.id)).toEqual([
       "code-require-git",
       "code-default-diff-layout",
+      "code-language-services",
       "project-view-switcher",
       "code-default-access",
       "code-approval-persistence",
