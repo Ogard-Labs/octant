@@ -1,4 +1,4 @@
-import type { ProviderDriverKind } from "@octant/contracts";
+import { isAcpAgentKind, type ProviderDriverKind } from "@octant/contracts";
 import {
   DISCOVERY_DESCRIPTORS,
   discoverableDescriptors,
@@ -14,25 +14,10 @@ import {
  */
 export type ProviderDriverHostRuntime = "acp-host-profile" | "managed-process" | "direct-endpoint";
 
-const ACP_HOST_PROFILE_DRIVER_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
-  "kilo",
-  "devin",
-  "mistral-vibe",
-  "kimi-code",
-  "grok",
-  "goose",
-  "glm",
-  "gemini",
-  "copilot",
-  "cline",
-  "qwen",
-  "fx",
-]);
-
 export function providerDriverHostRuntime(
   driverKind: ProviderDriverKind,
 ): ProviderDriverHostRuntime {
-  if (ACP_HOST_PROFILE_DRIVER_KINDS.has(driverKind)) return "acp-host-profile";
+  if (isAcpAgentKind(driverKind)) return "acp-host-profile";
   const descriptor = DISCOVERY_DESCRIPTORS.find((entry) => entry.driverKind === driverKind);
   if (descriptor?.isDirectEndpoint === true) return "direct-endpoint";
   return "managed-process";

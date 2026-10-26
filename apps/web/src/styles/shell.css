@@ -2043,6 +2043,66 @@ html[data-octant-native-host="true"]
     border-right: 1px solid var(--octant-border-strong);
     border-bottom: 0;
     box-shadow: var(--octant-shadow-overlay);
+    /* The wide sidebar is transparent over the window surface; as an overlay
+       that let the start screen's question, hint, and composer chips print
+       through the header and count tiles at 640px under Vivid and Glass. The
+       drawer reads on the opaque sidebar colour in every material. */
+    background: var(--octant-sidebar-opaque);
+  }
+
+  /* Rows, not tiles, in the drawer: icon, name, and the count at the trailing
+     edge, with no fill and no hue. The selectors outrank the Vivid tile paint
+     above, which would otherwise colour them. */
+  .sidebar-tiles--rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  :root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__face {
+    min-height: var(--oct-rail-button-h);
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 0 var(--oct-space-3);
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    color: var(--oct-fg);
+  }
+
+  :root[data-octant-style][data-octant-theme-mode]
+    .sidebar-tiles--rows
+    .sidebar-tile:hover
+    .sidebar-tile__face {
+    background: var(--oct-fg-soft);
+    filter: none;
+  }
+
+  :root[data-octant-style][data-octant-theme-mode]
+    .sidebar-tiles--rows
+    .sidebar-tile[aria-current="page"]
+    .sidebar-tile__face {
+    background: transparent;
+    font-weight: var(--oct-weight-strong);
+  }
+
+  :root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__icon {
+    color: var(--oct-muted);
+  }
+
+  :root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__label {
+    min-width: 0;
+    flex: 1 1 auto;
+    color: var(--oct-fg);
+    font-size: var(--oct-text-sm);
+  }
+
+  :root[data-octant-style][data-octant-theme-mode] .sidebar-tiles--rows .sidebar-tile__count {
+    margin-inline-start: auto;
+    color: var(--oct-muted);
+    font-size: var(--oct-text-detail);
+    font-weight: var(--oct-weight-medium);
   }
 
   .shell--projects-sidebar-open.shell-frame > .sidebar {

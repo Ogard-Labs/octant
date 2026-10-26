@@ -53,11 +53,7 @@ import {
   resolveSettingsSectionContribution,
   type FirstPartyPluginComponentId,
 } from "./contributionRegistry";
-import {
-  SettingsNavigation,
-  settingsSectionIcon,
-  type SettingsNavigationItem,
-} from "./SettingsNavigation";
+import { SettingsNavigation, type SettingsNavigationItem } from "./SettingsNavigation";
 import { useSettingsSaved, type SettingsWriteResult } from "./useSettingsSaved";
 import { SidebarDestinationSettings } from "./SidebarDestinationSettings";
 import { PluginSettingsSection } from "./PluginSettingsSection";
@@ -358,9 +354,9 @@ export function SettingsView(props: SettingsViewProps) {
   const navigationTrigger = useRef<HTMLButtonElement>(null);
   const navigationClose = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  // An Octant Harness endpoint's detail sub-page, named for the breadcrumb.
+  // An Octant Harness endpoint's detail sub-page, named in the narrow title bar.
   const [harnessEndpoint, setHarnessEndpoint] = useState<string>();
-  // A Provider catalog entry's setup sub-page, named for the breadcrumb.
+  // A Provider catalog entry's setup sub-page, named in the narrow title bar.
   const [catalogEntry, setCatalogEntry] = useState<string>();
   const resetAppearanceButton = useRef<HTMLButtonElement>(null);
   const [outline, setOutline] = useState<ReadonlyArray<SettingsOutlineEntry>>([]);
@@ -487,7 +483,6 @@ export function SettingsView(props: SettingsViewProps) {
   const activeSectionScope = availableSections.find(
     (section) => section.id === route.activeSection,
   )?.scope;
-  const PageIcon = hasQuery ? Search : settingsSectionIcon(route.activeSection);
   const subPage = hasQuery
     ? undefined
     : route.activeSection === "harness"
@@ -593,23 +588,9 @@ export function SettingsView(props: SettingsViewProps) {
             />
           </header>
         ) : (
+          // No breadcrumb: the rail's selected row names the page, and a
+          // sub-page carries its own Back control.
           <div className="settings-view__workspace-titlebar window-drag-region">
-            <nav
-              aria-label="Settings breadcrumb"
-              className="settings-view__breadcrumb window-no-drag"
-            >
-              <span>Settings</span>
-              <span aria-hidden="true">/</span>
-              {subPage === undefined ? (
-                <strong>{currentSectionLabel}</strong>
-              ) : (
-                <>
-                  <span>{currentSectionLabel}</span>
-                  <span aria-hidden="true">/</span>
-                  <strong aria-current="page">{subPage}</strong>
-                </>
-              )}
-            </nav>
             {/* A slot of fixed size, so the mark arriving and leaving moves
                 nothing around it. The status is inserted only while the mark
                 shows, which is what makes a screen reader announce it. */}
@@ -628,24 +609,28 @@ export function SettingsView(props: SettingsViewProps) {
             {/* A sub-page brings its own heading and Back control. */}
             <div className="settings-view__page-head" hidden={subPage !== undefined}>
               <header className="settings-view__header">
-                <span aria-hidden="true" className="settings-view__header-tile">
-                  <PageIcon size={20} strokeWidth={1.5} />
-                </span>
                 <div className="settings-view__header-text">
-                  <h1 className="oct-title" id="settings-heading">
+                  <h1 className="settings-view__title" id="settings-heading">
                     {currentSectionLabel}
                   </h1>
                   {/* The page scope stands in for every matching row's own mark,
-                      so it shows whether or not the page has a subtitle: Remote
-                      access has none, and its host-scoped rows had no scope at
-                      all. */}
+                      so it shows whether or not the page has a description:
+                      Remote access has none, and its host-scoped rows had no
+                      scope at all. The description keeps to one line and the
+                      scope sits outside its ellipsis, so a long one never hides
+                      the scope. */}
                   {!hasQuery &&
                   (SECTION_DESCRIPTIONS[route.activeSection] !== undefined ||
                     activeSectionScope !== undefined) ? (
-                    <p className="oct-subtitle">
-                      {SECTION_DESCRIPTIONS[route.activeSection] === undefined
-                        ? null
-                        : `${SECTION_DESCRIPTIONS[route.activeSection]} `}
+                    <p className="settings-view__description">
+                      {SECTION_DESCRIPTIONS[route.activeSection] === undefined ? null : (
+                        <span
+                          className="settings-view__description-text"
+                          title={SECTION_DESCRIPTIONS[route.activeSection]}
+                        >
+                          {SECTION_DESCRIPTIONS[route.activeSection]}
+                        </span>
+                      )}
                       {activeSectionScope === undefined ? null : (
                         <ScopeIndicator scope={activeSectionScope} />
                       )}
@@ -668,8 +653,10 @@ export function SettingsView(props: SettingsViewProps) {
                 ) : null}
               </header>
               {/* Links, not headings: the page already has its h1 and one h2 per
-                  section, and this row only moves the reader between them. */}
-              {!hasQuery && outline.length >= 3 ? (
+                  section, and this row only moves the reader between them. A
+                  page of three sections or fewer fits in a glance, so an index
+                  there is only more chrome above the first control. */}
+              {!hasQuery && outline.length >= 4 ? (
                 <nav aria-label="On this page" className="settings-view__outline">
                   <ul>
                     {outline.map((entry) => (
@@ -1567,20 +1554,10 @@ function providerSettingsViewProps(
     onChangeBinary: controller.changeBinary,
     onChangeClaudeConfiguration: controller.changeClaudeConfiguration,
     onChangeCodexConfiguration: controller.changeCodexConfiguration,
-    onChangeDevinConfiguration: controller.changeDevinConfiguration,
-    onChangeKiloConfiguration: controller.changeKiloConfiguration,
+    onChangeAcpAgentConfiguration: controller.changeAcpAgentConfiguration,
     onChangePiConfiguration: controller.changePiConfiguration,
     onChangeOhMyPiConfiguration: controller.changeOhMyPiConfiguration,
     onChangeOllamaConfiguration: controller.changeOllamaConfiguration,
-    onChangeMistralVibeConfiguration: controller.changeMistralVibeConfiguration,
-    onChangeGrokConfiguration: controller.changeGrokConfiguration,
-    onChangeGooseConfiguration: controller.changeGooseConfiguration,
-    onChangeGlmConfiguration: controller.changeGlmConfiguration,
-    onChangeGeminiConfiguration: controller.changeGeminiConfiguration,
-    onChangeCopilotConfiguration: controller.changeCopilotConfiguration,
-    onChangeClineConfiguration: controller.changeClineConfiguration,
-    onChangeQwenConfiguration: controller.changeQwenConfiguration,
-    onChangeFxConfiguration: controller.changeFxConfiguration,
     onChangeOpenAiCompatibleConfiguration: controller.changeOpenAiCompatibleConfiguration,
     onChangeOpenAiImageConfiguration: controller.changeOpenAiImageConfiguration,
     onChangeGeminiImageConfiguration: controller.changeGeminiImageConfiguration,
@@ -1597,13 +1574,7 @@ function providerSettingsViewProps(
     onUpdateProviderCli: controller.updateProviderCli,
     onCreate: controller.create,
     onCreateClaude: controller.createClaude,
-    onCreateMistralVibe: controller.createMistralVibe,
-    onCreateGrok: controller.createGrok,
-    onCreateGlm: controller.createGlm,
-    onCreateGemini: controller.createGemini,
-    onCreateCline: controller.createCline,
-    onCreateQwen: controller.createQwen,
-    onCreateFx: controller.createFx,
+    onCreateAcpAgent: controller.createAcpAgent,
     onCreateOllama: controller.createOllama,
     onCreateOpenAiCompatible: controller.createOpenAiCompatible,
     onCreateAnthropicCompatible: controller.createAnthropicCompatible,

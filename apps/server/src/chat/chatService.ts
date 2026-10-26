@@ -786,6 +786,11 @@ export type ChatExtensionSelectionContextResolver = (input: {
 
 interface ProviderRuntimeRegistryLike {
   readonly setObservedState: (value: unknown) => ProviderObservedState;
+  readonly observedState: (instanceId: ProviderInstanceId) => ProviderObservedState | undefined;
+  readonly setVerifiedToolModels: (
+    instanceId: ProviderInstanceId,
+    modelIds: ReadonlyArray<ProviderModelId>,
+  ) => ProviderObservedState | undefined;
 }
 
 export class ChatServiceError extends Error {
@@ -4551,15 +4556,13 @@ export class ChatService {
     providerInstanceId: ProviderInstanceId,
   ): Promise<ProviderProbeResult> {
     try {
-      let probe = await Effect.runPromise(
+      // Which models may take Octant's tools is the host's Verify tools
+      // record, never the driver's probe: a driver that claimed a model
+      // verified would hand it tools a person never proved it can call.
+      const { verifiedToolModelIds: _driverClaim, ...probed } = await Effect.runPromise(
         Effect.scoped(driver.probe({ instanceId: providerInstanceId })),
       );
-      // The driver probe carries verifiedToolModelIds forward from the
-      // in-memory runtime observation, which is empty after an app restart.
-      // Merge from the persisted catalog so a verified Foundry deployment
-      // used after restart does not lose its tool verification before the
-      // Chat turn/research preflight. Skip invalidated catalogs: a config
-      // change invalidates prior verification evidence.
+      let probe: ProviderProbeResult = probed;
       const persistedCatalog = this.#persistence.readProviderCatalog?.(providerInstanceId);
       // A window a person set for a model, or one its endpoint taught, is
       // kept with the catalogue; after a restart the probe knows neither.
@@ -4573,26 +4576,31 @@ export class ChatService {
           models: withFacts,
         };
       }
+      // The in-memory record is empty after an app restart, so the one the
+      // catalogue saved is merged in; an invalidated catalogue is skipped,
+      // since a configuration change invalidates prior verification.
       const persistedVerified =
-        persistedCatalog?.invalidated === false ? persistedCatalog.verifiedToolModelIds : undefined;
-      if (persistedVerified === undefined || persistedVerified.length === 0) {
-        return probe;
-      }
-      const merged = [
-        ...new Set([
-          ...(probe.verifiedToolModelIds ?? []),
-          ...persistedVerified.map((id) => String(id) as ProviderModelId),
-        ]),
+        persistedCatalog?.invalidated === false
+          ? (persistedCatalog.verifiedToolModelIds ?? [])
+          : [];
+      const hostVerified = [
+        ...new Set(
+          [
+            ...(this.#providerRuntimeRegistry?.observedState(providerInstanceId)
+              ?.verifiedToolModelIds ?? []),
+            ...persistedVerified,
+          ].map(String),
+        ),
       ].map((id) => id as ProviderModelId);
-      const mergedProbe = { ...probe, verifiedToolModelIds: merged };
-      // Write the merged verification back to the provider runtime registry
-      // so openAiCompatibleDriver.send (which re-checks
-      // observed?.verifiedToolModelIds before accepting the SearXNG research
-      // tool) sees the effective capability. Without this, preflight would
-      // pass but the actual turn would fail as "App-managed tools are
+      if (hostVerified.length === 0) return probe;
+      // Write the merged record back to the provider runtime registry so the
+      // driver's send (which re-checks observed?.verifiedToolModelIds before
+      // accepting the SearXNG research tool) sees it. Without this, preflight
+      // would pass but the actual turn would fail as "App-managed tools are
       // unsupported" until the user runs Settings → Check connection.
-      this.#providerRuntimeRegistry?.setObservedState(mergedProbe);
-      return mergedProbe;
+      this.#providerRuntimeRegistry?.setObservedState(probe);
+      this.#providerRuntimeRegistry?.setVerifiedToolModels(providerInstanceId, hostVerified);
+      return { ...probe, verifiedToolModelIds: hostVerified };
     } catch (error) {
       throw this.#mapProviderProbeFailure(error);
     }

@@ -310,6 +310,7 @@ export function startOctantServer(
       launchSessionRoutes,
       machineChangeRoutes,
       stopComputerSettingsWatch,
+      stopDesktopLeases,
       webAssets,
     } = wireComputerUse({
       onWindowRevoked,
@@ -466,6 +467,7 @@ export function startOctantServer(
       turnMetrics,
       windowAuthorityStore,
       workThreadProjection,
+      workTurnProjection,
     });
     const {
       agentProfileRoutes,
@@ -1385,6 +1387,7 @@ export function startOctantServer(
           browserToolApprovalService?.close();
           try {
             stopComputerSettingsWatch();
+            stopDesktopLeases();
             if (computerUseTools !== undefined) await computerUseTools.close();
             else await computerUseRuntime.close();
           } catch (error) {

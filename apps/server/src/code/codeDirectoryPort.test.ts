@@ -1,8 +1,9 @@
+import { execFileSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { liveCodeDirectoryPort } from "./codeDirectoryPort";
+import { liveCodeDirectoryPort, liveCodeTestSourcePort } from "./codeDirectoryPort";
 
 const roots: string[] = [];
 
@@ -65,4 +66,30 @@ describe("liveCodeDirectoryPort.openDirectory", () => {
 
     await expect(liveCodeDirectoryPort.openDirectory(join(root, "notes.md"))).rejects.toThrow();
   });
+});
+
+describe("liveCodeTestSourcePort.openFile", () => {
+  // A file swapped for a FIFO between the containment check and the open used
+  // to block the open until a writer appeared, stalling the read for good.
+  it.skipIf(process.platform === "win32")(
+    "opens a FIFO without waiting for a writer, so the caller can refuse it",
+    async () => {
+      const root = await tempRoot();
+      const fifo = join(root, "notes.md");
+      execFileSync("mkfifo", [fifo]);
+
+      const opened = await Promise.race([
+        liveCodeTestSourcePort.openFile(fifo),
+        new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 2_000)),
+      ]);
+
+      expect(opened).not.toBe("blocked");
+      if (opened === "blocked") return;
+      try {
+        expect((await opened.stat()).isFile).toBe(false);
+      } finally {
+        await opened.close();
+      }
+    },
+  );
 });

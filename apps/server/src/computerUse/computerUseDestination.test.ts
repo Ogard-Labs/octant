@@ -1,9 +1,19 @@
+import { decodeDesktopProviderId } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
   isComputerUseDestinationRefusal,
   refuseComputerUseDestination,
   reportComputerUseDestination,
 } from "./computerUseDestination";
+
+const leasable = [
+  {
+    providerId: decodeDesktopProviderId("host-local"),
+    displayName: "Host-local desktop",
+    locality: "host-local",
+    billed: false,
+  },
+] as const;
 
 describe("computer-use destination capability", () => {
   it("reports a macOS host screen as an available destination", () => {
@@ -38,11 +48,32 @@ describe("computer-use destination capability", () => {
     });
   });
 
-  it("reports no destination when a provider is configured but no screen exists", () => {
-    expect(reportComputerUseDestination({ platform: "linux", providerConfigured: true })).toEqual({
-      status: "unavailable",
-      kind: "no-destination",
+  it("names the providers a headless host could lease a disposable desktop from", () => {
+    expect(reportComputerUseDestination({ platform: "linux", leasable })).toEqual({
+      status: "leasable",
+      kind: "disposable-desktop",
+      leasable,
     });
+    expect(
+      reportComputerUseDestination({ platform: "darwin", hasScreen: false, leasable }),
+    ).toEqual({ status: "leasable", kind: "disposable-desktop", leasable });
+    expect(reportComputerUseDestination({ platform: "darwin", hasScreen: true, leasable })).toEqual(
+      {
+        status: "available",
+        kind: "macos-host",
+        leasable,
+      },
+    );
+    expect(reportComputerUseDestination({ platform: "linux", leasable: [] })).toEqual({
+      status: "unavailable",
+      kind: "no-provider-configured",
+    });
+  });
+
+  it("refuses the Mac runtime on a host that can only lease a desktop", () => {
+    expect(
+      refuseComputerUseDestination({ status: "leasable", kind: "disposable-desktop", leasable }),
+    ).toEqual({ status: "refused", kind: "unavailable", reason: "no-destination" });
   });
 
   it("refuses as a value rather than throwing when the destination is absent", () => {

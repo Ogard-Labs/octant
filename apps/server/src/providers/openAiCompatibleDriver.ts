@@ -1,42 +1,33 @@
 import { chatCompletionsToolImages } from "./openAiToolEncoding";
-import { randomUUID } from "node:crypto";
-import { isAbsolute, resolve } from "node:path";
 import {
   decodeProviderFailure,
   decodeProviderObservedState,
-  type OctantMode,
   type OpenAiCompatibleProviderConfiguration,
   type ProviderCapabilities,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
+  type ProviderObservedState,
   type ProviderToolAnswer,
   type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
   unsupportedChatCapabilities,
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
+import type {
+  HarnessEndpointDriver,
+  HarnessEndpointRequest,
+  HarnessEndpointStreamEvent,
+  HarnessEndpointTransport,
+} from "@octant/provider-sdk/harness-endpoint";
 import { Cause, Effect, Exit, Option } from "effect";
 import {
   resolveModelContextWindow,
   resolveModelInputModalities,
 } from "@octant/domain/model-context-window";
-import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
-import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
-import type {
-  NativeHarnessRequest,
-  NativeHarnessStreamEvent,
-  NativeHarnessTransport,
-} from "../harness/nativeHarnessTransport";
-import {
-  MemoryNativeHarnessTranscriptStore,
-  type NativeHarnessTranscriptStore,
-} from "../harness/nativeHarnessTranscriptStore";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
-import { sendWithEndpointRetry } from "./endpointRetry";
 import { runProviderEffect } from "./runProviderEffect";
 import {
   directEndpointRequestResolver,
@@ -44,12 +35,22 @@ import {
   inspectDirectEndpointCredential,
 } from "./directEndpointSubscriptionOAuth";
 import { chatGptPlanModelsListing, isChatGptPlanDescriptor } from "./chatGptPlanProfile";
+import {
+  directoryRefusalOf,
+  directoryRefusalReport,
+  directoryRequestAuthorization,
+  observedDirectoryBinding,
+  readDirectoryPointer,
+  refusedFailure,
+  type DirectEndpointDirectoryOAuth,
+} from "./directEndpointDirectoryOAuth";
 import { sendChatCompletionsTurn, type ChatCompletionsTurnResult } from "./openAiChatCompletions";
 import {
   makeOpenAiCompatibleEndpoint,
   markCompatibleModelVerified,
   probeModels,
   type CompatibleFetch,
+  type CompatibleRequestAuthorization,
   type OpenAiCompatibleAuthStrategy,
   type OpenAiCompatibleEndpoint,
 } from "./openAiCompatibleEndpoint";
@@ -65,13 +66,9 @@ import {
   type ProtocolTurnFailureMetadata,
   type ProtocolTurnResult,
 } from "./openAiResponses";
-import { capabilityEchoToolDefinition, isCapabilityEchoToolCall } from "./openAiToolEncoding";
-import {
-  carryModelContextWindowFacts,
-  learnFromEndpointRequest,
-  type EndpointRequestOutcome,
-} from "./modelContextWindowFacts";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import { capabilityEchoToolDefinition } from "./openAiToolEncoding";
+import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
+import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
 
 /** The request profile the resolved credential selects, when it selects one. */
@@ -128,12 +125,10 @@ export interface OpenAiCompatibleDriverProfile {
 export interface OpenAiCompatibleDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly configuration: OpenAiCompatibleProviderConfiguration;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
   readonly clock?: () => string;
-  readonly correlationId?: () => string;
-  readonly onConnectionReleased?: () => void;
   /**
    * Driver identity and credential strategy. Defaults to the OpenAI-compatible
    * profile derived from the configuration. Azure AI Foundry reuses this driver
@@ -141,46 +136,56 @@ export interface OpenAiCompatibleDriverOptions {
    */
   readonly profile?: OpenAiCompatibleDriverProfile;
   /**
-   * Where harness sessions keep their conversation. Shared by every
-   * connection of this driver, so a later turn can resume what an earlier
-   * one started; the server passes the journal-backed store.
-   */
-  readonly transcripts?: NativeHarnessTranscriptStore;
-  /** How the harness retries this endpoint and where its lead goes when it stays down. */
-  readonly harness?: NativeHarnessEndpointHooks;
-  /**
    * Host refresh and access for a subscription-oauth credential. Absent means
    * a stored pointer cannot be used; it is never sent as an API key.
    */
   readonly subscriptionOAuth?: SubscriptionOAuthHost;
+  /**
+   * Organization sign-in in place of a stored key. When present the instance
+   * sends only a directory bearer resolved per request, never a stored value.
+   */
+  readonly directoryOAuth?: DirectEndpointDirectoryOAuth;
 }
 
 type CompatibleTurnResult = ProtocolTurnResult | ChatCompletionsTurnResult;
 
-export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOptions): ProviderDriver {
+/**
+ * An OpenAI-compatible endpoint as an Octant Harness endpoint, through the
+ * provider-sdk harness endpoint port. The host's harness loop owns the
+ * conversation, every tool call, retries, and what each request teaches about
+ * its model's window; this driver supplies one request attempt over whichever
+ * OpenAI protocol the endpoint speaks, its credential gate, and the per-model
+ * Verify tools check.
+ */
+export function makeOpenAiCompatibleDriver(
+  options: OpenAiCompatibleDriverOptions,
+): HarnessEndpointDriver {
   const clock = options.clock ?? (() => new Date().toISOString());
-  const makeCorrelation = options.correlationId ?? randomUUID;
   const profile: OpenAiCompatibleDriverProfile = options.profile ?? {
     driverKind: "openai-compatible",
     authStrategy: options.configuration.authentication,
   };
-  const transcripts = options.transcripts ?? new MemoryNativeHarnessTranscriptStore();
-  const transport = openAiCompatibleTransport(options, profile, clock);
-  options.harness?.endpoints?.register(options.instanceId, {
-    open: transport.open,
-    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
-  });
   return {
-    // Harness sessions are journaled, so a Chat or Work follow-up resumes the
-    // last one, and the host can always rebuild the history when it cannot.
-    conversationOwnership: "host-resumable",
     kind: profile.driverKind,
+    harnessEndpoint: {
+      ...openAiCompatibleTransport(options, profile, clock),
+      admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
+    },
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.tryPromise({
             try: async () => {
               const observedAt = clock() as UtcTimestamp;
+              if (options.directoryOAuth !== undefined) {
+                return probeDirectoryEndpoint(
+                  options,
+                  options.directoryOAuth,
+                  profile,
+                  instanceId,
+                  observedAt,
+                );
+              }
               const gate = await inspectDirectEndpointCredential({
                 authentication: profile.authStrategy,
                 expectedDescriptorId: options.configuration.oauthDescriptorId,
@@ -228,28 +233,11 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
               // first listed model while setting the provider-level
               // appManagedTools flag, enabling tools for unverified models.
               // Tool support is gated on per-model verification instead: a
-              // person's "Verify tools" request records the model in
-              // verifiedToolModelIds, which outlives this probe. The
+              // person's "Verify tools" request records the model in the
+              // host's verifiedToolModelIds, which outlives this probe. The
               // provider-level flag stays "unsupported" so one verified model
               // never unlocks tools for the other models of the profile.
-              const prior = options.runtimeRegistry.observedState(instanceId);
-              const priorVerified = prior?.verifiedToolModelIds;
-              const probe = decodeProviderObservedState({
-                instanceId,
-                readiness: result.readiness,
-                processState: "stopped",
-                ...(profile.authStrategy !== "none" ? { credentialStatus: "stored" } : {}),
-                // What requests taught about each model's window, and a
-                // person's override, outlive the probe a Chat turn runs first.
-                models: carryModelContextWindowFacts(result.models, prior?.models),
-                capabilities: initialCapabilities,
-                ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
-                ...(result.failure === undefined ? {} : { message: result.failure.message }),
-                lastSuccessfulProbeAt: observedAt,
-                observedAt,
-              });
-              options.runtimeRegistry.setObservedState(probe);
-              return probe;
+              return recordProbe(options, profile, instanceId, result, observedAt);
             },
             catch: sanitizeFailure,
           }),
@@ -258,11 +246,14 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
         : Effect.tryPromise({
             try: async () => {
-              const endpoint = endpointFor(
-                options,
-                directEndpointRequestResolver(oauthResolverInput(options, profile, clock)),
-                profile,
-              );
+              const endpoint =
+                options.directoryOAuth === undefined
+                  ? endpointFor(
+                      options,
+                      directEndpointRequestResolver(oauthResolverInput(options, profile, clock)),
+                      profile,
+                    )
+                  : await directoryEndpointFor(options, options.directoryOAuth, profile, clock);
               // Propagate transport failures (auth, timeout, provider error)
               // so the user sees the actual error instead of a false
               // "unsupported" result.
@@ -281,54 +272,7 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
             },
             catch: sanitizeFailure,
           }),
-    acquire: ({ instanceId, projectRoot, mode }) =>
-      instanceId !== options.instanceId
-        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
-        : !isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot
-          ? Effect.fail(
-              failure(
-                "invalid-configuration",
-                "Provider Project root must be an absolute normalized path.",
-              ),
-            )
-          : makeConnection(options, profile, transport, clock, makeCorrelation, transcripts, {
-              projectRoot,
-              mode: mode ?? "chat",
-            }),
   };
-}
-
-function makeConnection(
-  options: OpenAiCompatibleDriverOptions,
-  profile: OpenAiCompatibleDriverProfile,
-  transport: NativeHarnessTransport,
-  clock: () => string,
-  makeCorrelation: () => string,
-  transcripts: NativeHarnessTranscriptStore,
-  input: { readonly projectRoot: string; readonly mode: OctantMode },
-): Effect.Effect<ProviderConnection, never, import("effect").Scope.Scope> {
-  return createNativeHarnessConnection({
-    instanceId: options.instanceId,
-    driverKind: profile.driverKind,
-    projectRoot: input.projectRoot,
-    mode: input.mode,
-    transport,
-    transcripts,
-    ...(options.harness?.leadFallback === undefined
-      ? {}
-      : { leadFallback: options.harness.leadFallback }),
-    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
-    onSessionCountChange: (delta) =>
-      options.runtimeRegistry.setActiveSessionCount(
-        options.instanceId,
-        Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) + delta),
-      ),
-    ...(options.onConnectionReleased === undefined
-      ? {}
-      : { onReleased: options.onConnectionReleased }),
-    clock,
-    correlationId: makeCorrelation,
-  });
 }
 
 /** Whether the endpoint accepts this turn's input for the session's model. */
@@ -339,8 +283,6 @@ function admitTurn(
 ): ProviderFailure | undefined {
   const observed = options.runtimeRegistry.observedState(options.instanceId);
   const model = observed?.models.find((candidate) => candidate.id === modelId);
-  const isCapabilityEchoProbe =
-    input.tools.length > 0 && input.tools.every((tool) => isCapabilityEchoToolCall(tool.name));
   // Tool support is verified per model through the verify-model-tools command,
   // and the sender gates tool requests on the per-model verifiedToolModelIds
   // set alone, so one verified model does not unlock tools for the other
@@ -349,25 +291,39 @@ function admitTurn(
     observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;
   const effectiveCapabilities = {
     ...(observed?.capabilities ?? initialCapabilities),
-    appManagedTools:
-      isCapabilityEchoProbe || isVerifiedModel ? ("supported" as const) : ("unsupported" as const),
+    appManagedTools: isVerifiedModel ? ("supported" as const) : ("unsupported" as const),
   };
   return validateChatTurnInput(input, effectiveCapabilities, model);
 }
 
 /**
- * The endpoint as the harness loop sees it: one request at a time over
- * whichever OpenAI protocol the endpoint speaks, plus what each response
- * teaches the registry about the model.
+ * The endpoint as the harness loop sees it: one request attempt over
+ * whichever OpenAI protocol the endpoint speaks, sent once. The host retries
+ * a failure that usually passes and keeps what the response or refusal
+ * teaches about the model's window.
  */
 function openAiCompatibleTransport(
   options: OpenAiCompatibleDriverOptions,
   profile: OpenAiCompatibleDriverProfile,
   clock: () => string,
-): NativeHarnessTransport {
+): HarnessEndpointTransport {
   return {
     open: async () => {
       const observedAt = clock();
+      if (options.directoryOAuth !== undefined) {
+        // The pointer is read once per session; the bearer is resolved for
+        // every send, since a session outlives a token.
+        const directoryEndpoint = await directoryEndpointFor(
+          options,
+          options.directoryOAuth,
+          profile,
+          clock,
+        );
+        return sessionOver(options, directoryEndpoint, clock, {
+          profile: undefined,
+          subscriptionUsageGranted: undefined,
+        });
+      }
       const gate = await inspectDirectEndpointCredential({
         authentication: profile.authStrategy,
         expectedDescriptorId: options.configuration.oauthDescriptorId,
@@ -392,81 +348,61 @@ function openAiCompatibleTransport(
           : plainCredential !== undefined && plainCredential.length > 0
             ? { has: async () => true, resolve: async () => plainCredential }
             : undefined;
-      let endpoint: OpenAiCompatibleEndpoint | undefined = endpointFor(options, resolver, profile);
       // The ChatGPT plan request profile applies when the resolved
       // credential's descriptor is the plan offer; plan usage is disabled
       // when the sign-in did not grant use of the subscription.
-      const planProfile = planProfileOf(options);
-      const subscriptionUsageGranted =
-        gate.kind === "oauth" ? gate.subscriptionUsageGranted : undefined;
-      // What each protocol's last successful call measured and billed. A
-      // responses token count must not calibrate a request automatic mode may
-      // send as chat completions.
-      const calibration: Partial<Record<CompatibleProtocol, ObservedRequestCalibration>> = {};
+      return sessionOver(options, endpointFor(options, resolver, profile), clock, {
+        profile: planProfileOf(options),
+        subscriptionUsageGranted: gate.kind === "oauth" ? gate.subscriptionUsageGranted : undefined,
+      });
+    },
+  };
+}
+
+/** One harness session over an endpoint whose credential path is already settled. */
+function sessionOver(
+  options: OpenAiCompatibleDriverOptions,
+  opened: OpenAiCompatibleEndpoint,
+  clock: () => string,
+  plan: {
+    readonly profile: CompatiblePlanProfile;
+    readonly subscriptionUsageGranted: boolean | undefined;
+  },
+): Awaited<ReturnType<HarnessEndpointTransport["open"]>> {
+  let endpoint: OpenAiCompatibleEndpoint | undefined = opened;
+  // What each protocol's last successful call measured and billed. A
+  // responses token count must not calibrate a request automatic mode may
+  // send as chat completions.
+  const calibration: Partial<Record<CompatibleProtocol, ObservedRequestCalibration>> = {};
+  return {
+    fits: (request) =>
+      endpoint !== undefined && requestFits(options, endpoint, request, calibration),
+    send: async (request, stream) => {
+      const active = endpoint;
+      if (active === undefined) throw failure("protocol", "Provider session is not active.");
+      const result = await sendCompatibleRequest(options, active, request, stream, plan);
+      recordObservedTurn(options, result, clock);
+      if (result.usage !== undefined && result.usage.inputTokens > 0) {
+        calibration[result.protocol] = {
+          measured: JSON.stringify(estimateBody(request, result.protocol)).length,
+          tokens: result.usage.inputTokens,
+        };
+      }
       return {
-        fits: (request) =>
-          endpoint !== undefined && requestFits(options, endpoint, request, calibration),
-        send: async (request, stream) => {
-          const active = endpoint;
-          if (active === undefined) throw failure("protocol", "Provider session is not active.");
-          const learn = (outcome: EndpointRequestOutcome) =>
-            learnFromEndpointRequest({
-              runtimeRegistry: options.runtimeRegistry,
-              instanceId: options.instanceId,
-              modelId: request.modelId,
-              outcome,
-              memory: options.harness?.contextWindows,
-            });
-          return sendWithEndpointRetry({
-            signal: stream.signal,
-            onEvent: stream.onEvent,
-            options: options.harness?.retry,
-            attempt: async (attempt) => {
-              let result: CompatibleTurnResult;
-              try {
-                result = await sendCompatibleRequest(options, active, request, attempt, {
-                  profile: planProfile,
-                  subscriptionUsageGranted,
-                });
-              } catch (error) {
-                // Learned before the harness shrinks and resends, so the
-                // shrink is measured against the window the endpoint named.
-                learn({ kind: "refused", failure: sanitizeFailure(error) });
-                throw error;
-              }
-              recordObservedTurn(options, result, clock);
-              learn({
-                kind: "completed",
-                servedModelId: result.servedModelId,
-                usedTokens:
-                  result.usage === undefined
-                    ? undefined
-                    : result.usage.inputTokens + result.usage.outputTokens,
-              });
-              if (result.usage !== undefined && result.usage.inputTokens > 0) {
-                calibration[result.protocol] = {
-                  measured: JSON.stringify(estimateBody(request, result.protocol)).length,
-                  tokens: result.usage.inputTokens,
-                };
-              }
-              return {
-                text: result.text,
-                toolCalls: result.toolCalls,
-                ...(result.usage === undefined ? {} : { usage: result.usage }),
-                ...(result.rateLimitBuckets === undefined
-                  ? {}
-                  : { rateLimitBuckets: result.rateLimitBuckets }),
-                ...(result.outputStopReason === undefined
-                  ? {}
-                  : { outputStopReason: result.outputStopReason }),
-              };
-            },
-          });
-        },
-        release: () => {
-          endpoint = undefined;
-        },
+        text: result.text,
+        toolCalls: result.toolCalls,
+        ...(result.usage === undefined ? {} : { usage: result.usage }),
+        ...(result.rateLimitBuckets === undefined
+          ? {}
+          : { rateLimitBuckets: result.rateLimitBuckets }),
+        ...(result.outputStopReason === undefined
+          ? {}
+          : { outputStopReason: result.outputStopReason }),
+        ...(result.servedModelId === undefined ? {} : { servedModelId: result.servedModelId }),
       };
+    },
+    release: () => {
+      endpoint = undefined;
     },
   };
 }
@@ -477,7 +413,7 @@ function openAiCompatibleTransport(
  * Results are sent once, from the conversation; passing them again as answers
  * would encode every result twice.
  */
-function protocolInput(request: NativeHarnessRequest): {
+function protocolInput(request: HarnessEndpointRequest): {
   readonly history: readonly ProtocolHistoryMessage[];
   readonly prompt: string;
   readonly toolAnswers: readonly ProviderToolAnswer[] | undefined;
@@ -500,10 +436,10 @@ function protocolInput(request: NativeHarnessRequest): {
 async function sendCompatibleRequest(
   options: OpenAiCompatibleDriverOptions,
   endpoint: OpenAiCompatibleEndpoint,
-  request: NativeHarnessRequest,
+  request: HarnessEndpointRequest,
   stream: {
     readonly signal: AbortSignal;
-    readonly onEvent: (event: NativeHarnessStreamEvent) => void;
+    readonly onEvent: (event: HarnessEndpointStreamEvent) => void;
   },
   plan: {
     readonly profile: "chatgpt-plan" | undefined;
@@ -629,9 +565,6 @@ function recordObservedTurn(
       usage: result.usage === undefined ? "unavailable" : "supported",
     },
     ...(current?.message === undefined ? {} : { message: current.message }),
-    ...(current?.verifiedToolModelIds === undefined
-      ? {}
-      : { verifiedToolModelIds: current.verifiedToolModelIds }),
     ...(current?.lastSuccessfulProbeAt === undefined
       ? {}
       : { lastSuccessfulProbeAt: current.lastSuccessfulProbeAt }),
@@ -663,14 +596,110 @@ function endpointFor(
   options: OpenAiCompatibleDriverOptions,
   credentialResolver: ProviderCredentialResolver | undefined,
   profile: OpenAiCompatibleDriverProfile,
+  requestAuthorization?: CompatibleRequestAuthorization,
 ): OpenAiCompatibleEndpoint {
   return makeOpenAiCompatibleEndpoint({
     instanceId: options.instanceId,
     configuration: options.configuration,
     authStrategy: profile.authStrategy,
     ...(credentialResolver === undefined ? {} : { credentialResolver }),
+    ...(requestAuthorization === undefined ? {} : { requestAuthorization }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
   });
+}
+
+/**
+ * The endpoint for a directory sign-in: no stored value is ever sent, and
+ * each request resolves its own bearer. A missing or unreadable pointer, or a
+ * store that cannot be reached, refuses before any request.
+ */
+async function directoryEndpointFor(
+  options: OpenAiCompatibleDriverOptions,
+  directory: DirectEndpointDirectoryOAuth,
+  profile: OpenAiCompatibleDriverProfile,
+  clock: () => string,
+): Promise<OpenAiCompatibleEndpoint> {
+  const pointer = await readDirectoryPointer(options.credentialResolver, options.instanceId);
+  if (pointer.kind === "refused") throw refusedFailure(pointer.refusal);
+  return endpointFor(
+    options,
+    undefined,
+    profile,
+    directoryRequestAuthorization({
+      credential: pointer.credential,
+      directory,
+      now: () => Date.parse(clock()),
+    }),
+  );
+}
+
+/**
+ * The authenticated probe of a directory sign-in. Every refusal, whether the
+ * pointer, the broker, or the endpoint gave it, reads as its own readiness
+ * and reason with nothing claimed; the binding it checked is recorded.
+ */
+async function probeDirectoryEndpoint(
+  options: OpenAiCompatibleDriverOptions,
+  directory: DirectEndpointDirectoryOAuth,
+  profile: OpenAiCompatibleDriverProfile,
+  instanceId: ProviderInstanceId,
+  observedAt: UtcTimestamp,
+): Promise<ProviderObservedState> {
+  const binding = observedDirectoryBinding(directory.endpoint);
+  let result: Awaited<ReturnType<typeof probeModels>>;
+  try {
+    const endpoint = await directoryEndpointFor(options, directory, profile, () => observedAt);
+    result = await probeModels(endpoint);
+  } catch (error) {
+    const refusal = directoryRefusalOf(error);
+    if (refusal === undefined) throw error;
+    const report = directoryRefusalReport(refusal);
+    const refused = decodeProviderObservedState({
+      instanceId,
+      readiness: report.readiness,
+      processState: "stopped",
+      credentialStatus: report.credentialStatus,
+      ...(report.unauthenticatedReason === undefined
+        ? {}
+        : { unauthenticatedReason: report.unauthenticatedReason }),
+      ...(binding === undefined ? {} : { directoryBinding: binding }),
+      models: [],
+      capabilities: honestDirectEndpointCapabilities,
+      message: report.message,
+      observedAt,
+    });
+    options.runtimeRegistry.setObservedState(refused);
+    return refused;
+  }
+  return recordProbe(options, profile, instanceId, result, observedAt, binding);
+}
+
+/** A probe that reached the endpoint, as readiness records it. */
+function recordProbe(
+  options: OpenAiCompatibleDriverOptions,
+  profile: OpenAiCompatibleDriverProfile,
+  instanceId: ProviderInstanceId,
+  result: Awaited<ReturnType<typeof probeModels>>,
+  observedAt: UtcTimestamp,
+  directoryBinding?: ProviderObservedState["directoryBinding"],
+): ProviderObservedState {
+  const prior = options.runtimeRegistry.observedState(instanceId);
+  const probe = decodeProviderObservedState({
+    instanceId,
+    readiness: result.readiness,
+    processState: "stopped",
+    ...(profile.authStrategy !== "none" ? { credentialStatus: "stored" } : {}),
+    ...(directoryBinding === undefined ? {} : { directoryBinding }),
+    // What requests taught about each model's window, and a
+    // person's override, outlive the probe a Chat turn runs first.
+    models: carryModelContextWindowFacts(result.models, prior?.models),
+    capabilities: initialCapabilities,
+    ...(result.failure === undefined ? {} : { message: result.failure.message }),
+    lastSuccessfulProbeAt: observedAt,
+    observedAt,
+  });
+  options.runtimeRegistry.setObservedState(probe);
+  return probe;
 }
 
 // Probe tool support by sending a minimal turn with the
@@ -809,7 +838,7 @@ function manualModels(modelIds: readonly ProviderModelId[]) {
 function requestFits(
   options: OpenAiCompatibleDriverOptions,
   endpoint: OpenAiCompatibleEndpoint,
-  request: NativeHarnessRequest,
+  request: HarnessEndpointRequest,
   calibration: Partial<Record<CompatibleProtocol, ObservedRequestCalibration>>,
 ): boolean {
   const body = compatibleEstimateBody(request);
@@ -839,7 +868,7 @@ function contextProtocols(options: OpenAiCompatibleDriverOptions): readonly Comp
 }
 
 function contextEstimateFits(
-  request: NativeHarnessRequest,
+  request: HarnessEndpointRequest,
   protocol: CompatibleProtocol,
   calibration: ObservedRequestCalibration | undefined,
   contextLimit: number,
@@ -859,7 +888,7 @@ interface ObservedRequestCalibration {
 }
 
 function estimateBody(
-  request: NativeHarnessRequest,
+  request: HarnessEndpointRequest,
   protocol: CompatibleProtocol,
 ): Record<string, unknown> {
   return protocol === "responses"
@@ -872,7 +901,7 @@ function estimateBody(
  * check share. It is not the wire body; both sides must use this function so
  * a responses token count is never paired with a chat-completions estimate.
  */
-function responsesEstimateBody(request: NativeHarnessRequest): Record<string, unknown> {
+function responsesEstimateBody(request: HarnessEndpointRequest): Record<string, unknown> {
   const { history, prompt, toolAnswers } = protocolInput(request);
   const includeUserPrompt = !(prompt.length === 0 && toolAnswers !== undefined);
   const input = [
@@ -931,7 +960,7 @@ function responsesEstimateBody(request: NativeHarnessRequest): Record<string, un
   };
 }
 
-function compatibleEstimateBody(request: NativeHarnessRequest): Record<string, unknown> {
+function compatibleEstimateBody(request: HarnessEndpointRequest): Record<string, unknown> {
   const messages = [
     ...(request.system === undefined ? [] : [{ role: "system", content: request.system }]),
     ...request.history.flatMap((entry): Record<string, unknown>[] => {

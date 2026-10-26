@@ -91,6 +91,7 @@
     "./project-view": "./src/projectView.ts",
     "./sidebar-thread-status": "./src/sidebarThreadStatus.ts",
     "./projects": "./src/projects.ts",
+    "./acp-agent-profiles": "./src/acpAgentProfiles.ts",
     "./providers": "./src/providers.ts",
     "./provider-discovery": "./src/providerDiscovery.ts",
     "./provider-driver-catalog": "./src/providerDriverCatalog.ts",
@@ -104,6 +105,7 @@
     "./tool-actions": "./src/toolActions.ts",
     "./tool-catalog": "./src/toolCatalog.ts",
     "./tool-egress": "./src/toolEgress.ts",
+    "./ssh-target": "./src/sshTarget.ts",
     "./usage-rpc": "./src/usageRpc.ts",
     "./spend-ceiling": "./src/spendCeiling.ts",
     "./apple-toolchain": "./src/appleToolchain.ts",
@@ -131,6 +133,7 @@
     "./canvas-share-access-log": "./src/canvasShareAccessLog.ts",
     "./canvas-board": "./src/canvasBoard.ts",
     "./computer-use-plugin": "./src/computerUsePlugin.ts",
+    "./desktop-lease": "./src/desktopLease.ts",
     "./simulator-device": "./src/simulatorDevice.ts",
     "./managed-tooling": "./src/managedTooling.ts"
   },

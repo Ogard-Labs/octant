@@ -108,6 +108,15 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/client-runtime/src/remoteProductMutations.ts",
     "Remote product mutation exercisers whose only consumer is remoteExitEvidenceADriver.ts. Remove once a product caller serves that evidence or the smoke is retired.",
   ],
+  // ── Delivered ahead of its first caller by a staged design ──
+  [
+    "packages/domain/src/sshTargetAdmissionPolicy.ts",
+    "SSH target admission policy, delivered as its own reviewable slice of docs/design/remote-ssh-environments.md before the host connection service that calls it. Remove once that service admits remote launches and file operations through it.",
+  ],
+  [
+    "packages/contracts/src/sshTarget.ts",
+    "SSH target, attestation, and admission schemas, reached only through sshTargetAdmissionPolicy.ts until the executor protocol decodes frames with them. Remove once that policy's entry is removed.",
+  ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
   [
     "packages/provider-sdk/src/conformance.ts",
@@ -118,12 +127,20 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
   ],
   [
+    "packages/provider-sdk/src/directoryOAuthConformance.ts",
+    "Directory sign-in conformance harness, with its fake directory and endpoint, that drivers declaring directory-oauth run in their tests; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the kind is retired.",
+  ],
+  [
     "packages/provider-sdk/src/harnessEndpointConformance.ts",
     "Harness-endpoint-port conformance harness that direct-endpoint driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port is retired.",
   ],
   [
     "packages/provider-sdk/src/imageGenerationConformance.ts",
     "Image-seam conformance harness that image driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the image seam is retired.",
+  ],
+  [
+    "packages/plugin-api/src/desktopProviderConformance.ts",
+    "Desktop-provider seam conformance harness that desktop driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the desktop-provider seam is retired.",
   ],
 ]);
 

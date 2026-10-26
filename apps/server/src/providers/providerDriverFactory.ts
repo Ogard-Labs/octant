@@ -9,6 +9,7 @@ import {
   CODEX_ACCOUNT_PROFILE,
   defaultProviderAccountDirectory,
   effectiveClaudeAccountConfigDirectory,
+  isAcpAgentInstance,
   isImageProfileDriverKind,
 } from "@octant/domain";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
@@ -93,6 +94,37 @@ export function makeProviderDriver(
 ): ProviderDriver {
   if (isImageProfileDriverKind(instance.driverKind)) {
     throw new ProviderDriverConfigurationError();
+  }
+  if (isAcpAgentInstance(instance)) {
+    if (options.acpProcess === undefined || options.acpHome === undefined) {
+      throw new ProviderDriverConfigurationError();
+    }
+    const configuration = instance.configuration;
+    const profile = acpProviderProfiles[instance.driverKind];
+    const driver = makeAcpDriver({
+      profile,
+      instanceId: instance.id,
+      binaryPath: configuration.binaryPath,
+      managedHome: options.acpHome(instance.driverKind, instance.id),
+      process: options.acpProcess,
+      runtimeRegistry: options.runtimeRegistry,
+      ...(configuration.authentication === undefined
+        ? {}
+        : { authentication: configuration.authentication }),
+      ...(options.credentialResolver === undefined
+        ? {}
+        : { credentialResolver: options.credentialResolver }),
+    });
+    const credential = profile.process.hostAuthentication;
+    return instance.driverKind === "devin" && credential?.kind === "credential-file"
+      ? {
+          ...driver,
+          contextFacts: makeDevinPlanUsageFacts({
+            instanceId: instance.id,
+            credentialPath: credential.defaultPath,
+          }),
+        }
+      : driver;
   }
   switch (instance.driverKind) {
     case "opencode":
@@ -247,54 +279,6 @@ export function makeProviderDriver(
         process: options.ohMyPiProcess,
         runtimeRegistry: options.runtimeRegistry,
       });
-    case "kilo":
-    case "devin":
-    case "mistral-vibe":
-    case "kimi-code":
-    case "grok":
-    case "goose":
-    case "glm":
-    case "gemini":
-    case "copilot":
-    case "cline":
-    case "qwen":
-    case "fx": {
-      if (options.acpProcess === undefined || options.acpHome === undefined) {
-        throw new ProviderDriverConfigurationError();
-      }
-      const configuration = instance.configuration;
-      const profile = acpProviderProfiles[instance.driverKind];
-      const driver = makeAcpDriver({
-        profile,
-        instanceId: instance.id,
-        binaryPath: configuration.binaryPath,
-        managedHome: options.acpHome(instance.driverKind, instance.id),
-        process: options.acpProcess,
-        runtimeRegistry: options.runtimeRegistry,
-        ...(configuration.kind === "mistral-vibe-acp" ||
-        configuration.kind === "grok-acp" ||
-        configuration.kind === "glm-acp" ||
-        configuration.kind === "gemini-acp" ||
-        configuration.kind === "cline-acp" ||
-        configuration.kind === "qwen-acp" ||
-        configuration.kind === "fx-acp"
-          ? { authentication: configuration.authentication }
-          : {}),
-        ...(options.credentialResolver === undefined
-          ? {}
-          : { credentialResolver: options.credentialResolver }),
-      });
-      const credential = profile.process.hostAuthentication;
-      return instance.driverKind === "devin" && credential?.kind === "credential-file"
-        ? {
-            ...driver,
-            contextFacts: makeDevinPlanUsageFacts({
-              instanceId: instance.id,
-              credentialPath: credential.defaultPath,
-            }),
-          }
-        : driver;
-    }
     case "ollama":
       // Ollama supplies only its endpoint through the provider-sdk harness
       // endpoint port; the host runs its sessions on the harness loop.

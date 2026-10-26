@@ -1,6 +1,7 @@
 export * from "./browserAutomationPolicy";
 export * from "./browserCapturePolicy";
 export * from "./computerUsePolicy";
+export * from "./desktopLeasePolicy";
 export * from "./validationCompositionPolicy";
 export * from "./providerDiscoveryPolicy";
 export * from "./appleToolchainPolicy";
@@ -178,6 +179,7 @@ export * from "./nativeHarnessRoutingPolicy";
 export * from "./nativeHarnessSessionPolicy";
 export * from "./projectProviderPolicy";
 export * from "./subscriptionOAuthCatalog";
+export * from "./directorySignIn";
 export * from "./connectorCatalog";
 export * from "./turnMetricsPolicy";
 export * from "./liveTurnPolicy";

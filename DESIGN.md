@@ -111,7 +111,7 @@ nothing essential sits under 12px at the default. The roles live in
 | Role          | Size | Weight | Leading | Colour      | Where                                                                                                   |
 | ------------- | ---- | ------ | ------- | ----------- | ------------------------------------------------------------------------------------------------------- |
 | Hero          | 26   | 400    | 30px    | primary     | Welcome question only (`oct-title--hero` with `welcome__question`, `--oct-text-2xl`; 20 at phone width) |
-| Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens)                                     |
+| Title         | 28   | 700    | 1.15    | primary     | One per page (`oct-title`; a role size, not one of the size tokens); Settings pages use a compact head  |
 | Section label | 14   | 600    | 1.3     | secondary   | Group heading over a hairline (`oct-section-label`), and a Settings section's label                     |
 | Row label     | 14   | 500    | 1.35    | primary     | Setting, list row, menu option                                                                          |
 | Body          | 13   | 400    | 1.5     | primary     | Interface text and the transcript (the interface size, `body`)                                          |
@@ -169,15 +169,15 @@ always publishes `default`. Vivid reads best in the light theme.
 Radius has one number per role. This table is its one statement; elsewhere
 this document names the token, not the number.
 
-| Token                 | Value  | Role                                                                                             |
-| --------------------- | ------ | ------------------------------------------------------------------------------------------------ |
-| `--oct-radius-sm`     | 8px    | A control or a row; a composer context chip                                                      |
-| `--oct-radius-inset`  | 8px    | An object resting inside a card or well: a Settings page's icon tile, a board card in its column |
-| `--oct-radius-md`     | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble           |
-| `--oct-radius-lg`     | 14px   | Every composer and a dialog                                                                      |
-| `--oct-radius-pill`   | 9999px | Compact chips, meters, and circular icon controls only                                           |
-| `--radius` (`md`)     | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                          |
-| `--radius-lg` / `-xl` | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover           |
+| Token                 | Value  | Role                                                                                   |
+| --------------------- | ------ | -------------------------------------------------------------------------------------- |
+| `--oct-radius-sm`     | 8px    | A control or a row; a composer context chip                                            |
+| `--oct-radius-inset`  | 8px    | An object resting inside a card or well: a board card in its column                    |
+| `--oct-radius-md`     | 12px   | A card, panel, or well; a Settings section card; the window-frame cards; a user bubble |
+| `--oct-radius-lg`     | 14px   | Every composer and a dialog                                                            |
+| `--oct-radius-pill`   | 9999px | Compact chips, meters, and circular icon controls only                                 |
+| `--radius` (`md`)     | 6px    | The recipes' compact step: xs and sm buttons, menu items (`rounded-md`)                |
+| `--radius-lg` / `-xl` | 8 / 12 | The recipes' control and card steps (`rounded-lg`, `rounded-xl`): a menu and a popover |
 
 The `--oct-radius-*` tokens live in `octant.css`. The shadcn recipes derive
 their scale in `tailwind.css` from `--radius`, which `shadcn-theme.css` sets to
@@ -296,17 +296,23 @@ Selecting a page replaces its controls as well as its heading. Plugin pages
 resolve the currently selected entry point; a missing entry point shows an
 error instead of retaining another integration's account controls.
 
-- **Page header.** A 42px icon tile (`--oct-radius-inset`, a faint 8% ink fill, a
-  hairline) holding the page's own navigation icon at 20px, the page title
-  (`.oct-title`, 28px), a one-line subtitle with the page scope, and an
-  optional ghost action at the far edge (Appearance's "Reset to default").
-  The tile is decoration and hidden from assistive technology; the h1 is the
-  only heading that names the page.
-- **On this page.** A page with three sections or more shows a row of pill
-  links to them under the header. They are links, not headings, so the page's
-  heading outline is unchanged. Sections register themselves with the shell,
-  so one that mounts late joins the row and the row never names one that is
-  not drawn.
+- **Page header.** Compact, as in a preference window: the selected rail row
+  already names the page, and search is always in view. There is no
+  breadcrumb above it and no icon tile. The page title is the h1, the only
+  heading that names the page, at the section-label scale (14px, weight 600,
+  primary ink), not the 28px `.oct-title`. Under it sits at most one line of
+  description in the secondary ink: a longer one ends in an ellipsis with its
+  full text as the tooltip, and the page scope follows outside the ellipsis.
+  An optional ghost action sits at the far edge (Appearance's "Reset to
+  default"). A sub-page (a Harness endpoint, a Provider catalog entry) hides
+  the page header and brings its own heading and Back control.
+- **On this page.** A page with four sections or more shows one row of plain
+  text links to them under the header, in the secondary ink; links that do not
+  fit wrap onto a second text line rather than hiding past the edge. A page
+  with fewer shows none. They are links,
+  not headings, so the page's heading outline is unchanged. Sections register
+  themselves with the shell, so one that mounts late joins the row and the row
+  never names one that is not drawn.
 - **Section.** A 14px label in medium weight, an optional one-line
   description in the secondary ink below it, then one grouped card: the
   `--oct-radius-md` card radius, one hairline, a fill one step above the workspace
@@ -1408,7 +1414,9 @@ decorative shortcuts.
 
 The sidebar header carries the mode switcher, Search, and New thread (New
 chat in Chat, New task in Work and Code); no New thread row repeats it. Under the header sit four count tiles in a 2×2 grid: Inbox (the
-threads that need the person), Running (threads the host projects as
+threads that need the person: an approval, a question, a follow-up that is due,
+or a subagent request waiting on them; a finished turn is not one, and the
+dock badge counts the same threads), Running (threads the host projects as
 executing), To review (finished turns not opened since), and Done today
 (threads put away since local midnight). Each tile is one button whose name
 carries its count ("Running, 2"); Inbox opens the Inbox, Running opens the
@@ -1418,7 +1426,13 @@ the Inbox and Board rows are left out because their tiles go to the same
 place. Settings › Sidebar › Count tiles turns them off and brings the rows
 back. Tiles are neutral faces in the Default style; under Vivid each takes a
 palette hue, as a solid face with primary-foreground text in the light theme
-and as a tint with a coloured count in the dark one.
+and as a tint with a coloured count in the dark one. In the narrow drawer
+(under 681px) the four destinations are compact rows instead: icon, name, and
+the count at the trailing edge, with no fill and no hue in any style, so they
+sit quieter than the thread list under them. Each row keeps its name with its
+count and its destination. The drawer itself paints the opaque sidebar surface
+in every material, since it overlays the page and a transparent drawer let the
+page's text show through it.
 
 Primary sidebar destinations are Board and Pull requests when valid for the
 active mode. The destinations a person placed under Menu

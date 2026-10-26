@@ -6,7 +6,7 @@ import {
   type ProviderReadiness,
 } from "@octant/contracts";
 import type { ProviderCredentialLease, ProviderCredentialResolver } from "./credentialBrokerClient";
-import { CONTEXT_OVERFLOW_FAILURE_MESSAGE } from "./endpointRetry";
+import { CONTEXT_OVERFLOW_FAILURE_MESSAGE } from "./contextOverflowRefusal";
 import { acquireProviderCredential, reportKeyRejection } from "./providerApiKeyPool";
 import { trimTrailingSlashes } from "@octant/domain/trim-trailing";
 import { resolveModelInputModalities } from "@octant/domain/model-context-window";

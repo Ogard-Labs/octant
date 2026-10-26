@@ -19,7 +19,16 @@ import {
   readThreadExternalContentTaint,
 } from "../context/externalContentTaintProjection";
 import { readFile as readFileFromDisk, stat as statFromDisk } from "node:fs/promises";
+import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { decodeDesktopHostTag, type DesktopHostTag } from "@octant/contracts";
 import { defaultShellSettings } from "@octant/domain";
+import { createDesktopLeaseService } from "../computerUse/desktopLeaseService";
+import { createHostLocalDesktopLaunch } from "../computerUse/hostLocalDesktopLaunch";
+import {
+  createHostLocalDesktopProvider,
+  HOST_LOCAL_DESKTOP_PROGRAMS,
+} from "../plugins/hostLocalDesktop/hostLocalDesktopProvider";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { withToolFamilyHelp } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import { COMPUTER_USE_TOOL_HELP } from "../plugins/computerUse/computerUsePlugin";
@@ -35,6 +44,32 @@ export function resolveWebAssetsPath(): string {
   const serverRoot = dirname(fileURLToPath(import.meta.url));
   return resolve(serverRoot, "..", "..", "web", "dist");
 }
+
+/**
+ * This host's desktop tag: a random id minted once and kept beside the
+ * journal. A data-directory path can repeat on two machines that share one
+ * provider account, so the tag is never derived from it.
+ */
+function readOrMintDesktopHostTag(directory: string): DesktopHostTag {
+  const path = join(directory, "host-tag");
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  // Minted whole beside the tag and linked into place, which refuses to
+  // replace an existing tag. Creating the tag file directly could leave it
+  // empty after a crash, and an unreadable tag stops every later start.
+  const minted = join(directory, `host-tag.${randomUUID()}.tmp`);
+  writeFileSync(minted, randomUUID(), { flag: "wx", mode: 0o600 });
+  try {
+    linkSync(minted, path);
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+  } finally {
+    rmSync(minted, { force: true });
+  }
+  return decodeDesktopHostTag(readFileSync(path, "utf8").trim());
+}
+
+/** How often lease clocks and failed releases are checked between journal commits. */
+const DESKTOP_LEASE_SWEEP_INTERVAL_MS = 30_000;
 
 export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence"> &
   Pick<
@@ -172,6 +207,85 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     queueMicrotask(syncComputerUseSettings),
   );
   syncComputerUseSettings();
+  // No Project stores a recipe yet, so every lease command refuses as a
+  // value; the service still reconciles and sweeps so a lease journaled by any
+  // later build is torn down on start. Callers bring their own authority when
+  // the Desktop pane and the agent's lease binding arrive, so until then no
+  // caller may open a thread here.
+  //
+  // On Linux the bundled host-local driver is always loaded, so teardown and
+  // restart reconciliation can reap its desktops even after the programs it
+  // needs were removed; it is offered for leasing only when its readiness
+  // reported ready as the host started.
+  const desktopLeaseDirectory = join(persistence.dataDirectory, "desktop-leases");
+  const desktopHostTag = readOrMintDesktopHostTag(desktopLeaseDirectory);
+  const hostLocalDesktopLaunch =
+    process.platform === "linux"
+      ? createHostLocalDesktopLaunch({
+          directory: desktopLeaseDirectory,
+          hostTag: desktopHostTag,
+          platform: process.platform,
+          provisioning: (leaseId) =>
+            persistence.desktopLeaseProjection.get(leaseId)?.lease.state === "provisioning",
+        })
+      : undefined;
+  const hostLocalDesktops =
+    hostLocalDesktopLaunch === undefined
+      ? []
+      : [
+          {
+            provider: createHostLocalDesktopProvider(hostLocalDesktopLaunch),
+            effective:
+              hostLocalDesktopLaunch.readiness(HOST_LOCAL_DESKTOP_PROGRAMS).status === "ready",
+          },
+        ];
+  const desktopLeases = createDesktopLeaseService({
+    journal: persistence.journal,
+    projection: persistence.desktopLeaseProjection,
+    hostTag: desktopHostTag,
+    platform: process.platform,
+    hasScreen: computerUseDesktop !== undefined || options.computerUseAdapter !== undefined,
+    providers: () => hostLocalDesktops,
+    recipe: () => undefined,
+    thread: (owner) => {
+      const current =
+        owner.mode === "code"
+          ? persistence.readCodeThread(decodeCodeThreadId(owner.threadId))
+          : workThreadProjection.read(decodeWorkThreadId(owner.threadId));
+      if (current === undefined) return undefined;
+      return {
+        active:
+          current.lifecycle !== "archived" &&
+          current.lifecycle !== "deleting" &&
+          current.lifecycle !== "deleted" &&
+          current.completedAt === undefined,
+        executionPolicy:
+          "executionPolicy" in current
+            ? current.executionPolicy
+            : current.access === "auto-accept-edits"
+              ? "auto-accept-edits"
+              : "approval-gated",
+      };
+    },
+    callerMayOpen: () => false,
+    computerUseEnabled: () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings()).computerUse.enabled,
+    confirm: async () => "declined",
+    systemActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    now: () => Date.now(),
+    uuid: randomUUID,
+  });
+  void desktopLeases.start().catch(() => undefined);
+  const sweepDesktopLeases = () => void desktopLeases.sweep().catch(() => undefined);
+  const stopDesktopLeaseCommits = persistence.journal.subscribeCommitted(() =>
+    queueMicrotask(sweepDesktopLeases),
+  );
+  const desktopLeaseTimer = setInterval(sweepDesktopLeases, DESKTOP_LEASE_SWEEP_INTERVAL_MS);
+  desktopLeaseTimer.unref();
+  const stopDesktopLeases = () => {
+    stopDesktopLeaseCommits();
+    clearInterval(desktopLeaseTimer);
+  };
   const computerUseRuntime =
     options.computerUseRuntime ??
     computerUseTools?.runtime ??
@@ -179,7 +293,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
       ...(options.computerUseAdapter === undefined ? {} : { adapter: options.computerUseAdapter }),
       destination:
         options.computerUseAdapter === undefined
-          ? { status: "unavailable", kind: "no-destination" }
+          ? desktopLeases.destination()
           : { status: "available", kind: "macos-host" },
       evidence: createComputerUseValidationEvidenceRecorder({
         eventStore: validationEventStore,
@@ -227,6 +341,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     launchSessionRoutes,
     machineChangeRoutes,
     stopComputerSettingsWatch,
+    stopDesktopLeases,
     webAssets,
   };
 }

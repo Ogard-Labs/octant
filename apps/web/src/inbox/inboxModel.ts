@@ -1,7 +1,7 @@
 import type { GithubAssignedWorkItem } from "@octant/contracts";
 import type { LinearIssueRow } from "@octant/contracts/linear-issues";
 import { decodeProjectId, type ProjectId } from "@octant/contracts/projects";
-import type { ThreadAttentionSignal } from "../notifications/threadAttention";
+import { needsThePerson, type ThreadAttentionSignal } from "../notifications/threadAttention";
 import { visibleModeOf, type VisibleMode } from "../shell/workKind";
 
 /**
@@ -23,8 +23,9 @@ const VISIBLE_MODE_NAMES: Readonly<Record<VisibleMode, string>> = {
 };
 
 /**
- * Blocked threads outrank finished ones: an approval or question stops an
- * agent cold, while a finished turn merely waits to be read.
+ * An approval or question stops an agent cold, so it outranks a due follow-up.
+ * A finished turn is never listed (see `needsThePerson`); its entry only
+ * completes the table.
  */
 const REASON_PRIORITY: Readonly<Record<ThreadAttentionSignal["reason"], number>> = {
   "approval-required": 0,
@@ -55,6 +56,7 @@ export function buildInboxAttentionItems(
   const seen = new Set<string>();
   const items: InboxAttentionItem[] = [];
   for (const signal of signals) {
+    if (!needsThePerson(signal)) continue;
     const key = `${signal.threadId} ${signal.reason}`;
     if (seen.has(key)) continue;
     seen.add(key);

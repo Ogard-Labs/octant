@@ -1391,7 +1391,7 @@ describe("ProviderService", () => {
         instanceId,
         expectedVersion: 0,
         displayName: "Kimi local",
-        binaryPath: "/opt/homebrew/bin/kimi",
+        configuration: { kind: "kimi-code-acp", binaryPath: "/opt/homebrew/bin/kimi" },
       }),
     ).resolves.toMatchObject({
       kind: "provider-created",
@@ -1411,10 +1411,10 @@ describe("ProviderService", () => {
     });
     await expect(
       fixture.service.execute(windowId, {
-        kind: "change-provider-binary",
+        kind: "change-kimi-code-configuration",
         instanceId,
         expectedVersion: 1,
-        binaryPath: "/usr/local/bin/kimi",
+        configuration: { kind: "kimi-code-acp", binaryPath: "/usr/local/bin/kimi" },
       }),
     ).resolves.toMatchObject({
       kind: "provider-updated",
@@ -1424,6 +1424,15 @@ describe("ProviderService", () => {
         version: 2,
       },
     });
+    // Kimi Code takes its binary through its configuration, like every ACP agent.
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-provider-binary",
+        instanceId,
+        expectedVersion: 2,
+        binaryPath: "/opt/homebrew/bin/kimi",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
     expect(JSON.stringify(fixture.append.mock.calls)).not.toMatch(
       /apiKey|oauthToken|credential|account|KIMI_CODE_HOME/,
     );
@@ -3764,17 +3773,24 @@ describe("ProviderService", () => {
         persistence: fixture.persistence,
         runtimeRegistry: runtime,
         driver: (instance) =>
-          makeOpenAiCompatibleDriver({
-            instanceId: instance.id,
-            configuration: instance.configuration as never,
-            runtimeRegistry: runtime,
-            credentialResolver: {
-              has: async () => true,
-              resolve: async () => "secret-api-key",
+          runOnNativeHarness(
+            makeOpenAiCompatibleDriver({
+              instanceId: instance.id,
+              configuration: instance.configuration as never,
+              runtimeRegistry: runtime,
+              credentialResolver: {
+                has: async () => true,
+                resolve: async () => "secret-api-key",
+              },
+              fetch: async () => response(),
+              clock: () => now,
+            }),
+            {
+              instanceId: instance.id,
+              runtimeRegistry: runtime,
+              clock: () => now,
             },
-            fetch: async () => response(),
-            clock: () => now,
-          }),
+          ),
         uuid: () => crypto.randomUUID(),
         clock: () => now,
       });
@@ -4687,9 +4703,8 @@ describe("ProviderService", () => {
         withCatalogPersistence: true,
         driver: toolDriver("unsupported") as never,
       });
-      fixture.runtime.setObservedState(
-        observation({ verifiedToolModelIds: [decodeProviderModelId("model-1")] }),
-      );
+      fixture.runtime.setObservedState(observation());
+      fixture.runtime.setVerifiedToolModels(instanceId, [decodeProviderModelId("model-1")]);
 
       await fixture.service.execute(windowId, {
         kind: "verify-model-tools",
@@ -4698,6 +4713,154 @@ describe("ProviderService", () => {
       });
 
       expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds).toEqual([]);
+    });
+
+    it.each([
+      [
+        // A check that fails while the run is in flight leaves an
+        // observation with no models, which is no catalogue to persist.
+        "a check failed during the run",
+        (runtime: ProviderRuntimeRegistry): void => {
+          runtime.setObservedState(
+            observation({ readiness: "unavailable", processState: "stopped", models: [] }),
+          );
+        },
+      ],
+      [
+        "the observation was cleared during the run",
+        (runtime: ProviderRuntimeRegistry): void => runtime.clearObservedState(instanceId),
+      ],
+    ] as const)(
+      "forgets a model whose Verify tools run found no tool support even when %s",
+      async (_during, change) => {
+        const model = decodeProviderModelId("model-1");
+        let runtime: ProviderRuntimeRegistry | undefined;
+        const fixture = serviceFixture({
+          instances: [ollamaProvider()],
+          withCatalogPersistence: true,
+          initialCatalog: decodeProviderCatalogSnapshot({
+            ...persistedCatalog(),
+            verifiedToolModelIds: [model],
+          }),
+          driver: vi.fn((instance: ProviderInstance) => ({
+            kind: instance.driverKind,
+            probe: () => Effect.die("unused"),
+            acquire: () => Effect.die("unused"),
+            verifyToolCapability: () =>
+              Effect.sync(() => {
+                if (runtime !== undefined) change(runtime);
+                return { instanceId, modelId: model, appManagedTools: "unsupported" as const };
+              }),
+          })) as never,
+        });
+        runtime = fixture.runtime;
+        await fixture.service.probe(windowId, instanceId);
+        expect(
+          fixture.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String),
+        ).toEqual(["model-1"]);
+
+        await fixture.service.execute(windowId, {
+          kind: "verify-model-tools",
+          instanceId,
+          modelId: model,
+        });
+
+        expect(fixture.catalogs()[0]?.verifiedToolModelIds ?? []).toEqual([]);
+        const probed = await fixture.service.probe(windowId, instanceId);
+        expect(probed.verifiedToolModelIds ?? []).toEqual([]);
+      },
+    );
+
+    it("offers no tools to a model a driver's own probe claims verified until a host Verify tools run succeeds", async () => {
+      const model = decodeProviderModelId("model-1");
+      const claimed = observation({ instanceId, verifiedToolModelIds: [model] });
+      let runtime: ProviderRuntimeRegistry | undefined;
+      const fixture = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        driver: toolDriver("supported") as never,
+        // The driver writes its claim into the shared observation, as a
+        // driver that probes into the registry can, and returns it too.
+        probe: async () => {
+          runtime?.setObservedState(claimed);
+          return claimed;
+        },
+      });
+      runtime = fixture.runtime;
+
+      const probed = await fixture.service.probe(windowId, instanceId);
+
+      expect(probed.verifiedToolModelIds ?? []).toEqual([]);
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds ?? []).toEqual([]);
+      expect(fixture.catalogs()[0]?.verifiedToolModelIds ?? []).toEqual([]);
+
+      await fixture.service.execute(windowId, {
+        kind: "verify-model-tools",
+        instanceId,
+        modelId: model,
+      });
+
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String)).toEqual([
+        "model-1",
+      ]);
+    });
+
+    it("keeps a host Verify tools record across probe refreshes and a restart", async () => {
+      const model = decodeProviderModelId("model-1");
+      const fixture = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        driver: toolDriver("supported") as never,
+      });
+      await fixture.service.probe(windowId, instanceId);
+      await fixture.service.execute(windowId, {
+        kind: "verify-model-tools",
+        instanceId,
+        modelId: model,
+      });
+
+      await fixture.service.probe(windowId, instanceId);
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String)).toEqual([
+        "model-1",
+      ]);
+
+      const restarted = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        initialCatalog: decodeProviderCatalogSnapshot(fixture.catalogs()[0]),
+        driver: toolDriver("supported") as never,
+      });
+      const probed = await restarted.service.probe(windowId, instanceId);
+
+      expect(probed.verifiedToolModelIds?.map(String)).toEqual(["model-1"]);
+      expect(
+        restarted.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String),
+      ).toEqual(["model-1"]);
+    });
+
+    it("forgets a Verify tools record when the endpoint's address changes, and a later check does not restore it", async () => {
+      const fixture = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        driver: toolDriver("supported") as never,
+      });
+      await fixture.service.probe(windowId, instanceId);
+      await fixture.service.execute(windowId, {
+        kind: "verify-model-tools",
+        instanceId,
+        modelId: decodeProviderModelId("model-1"),
+      });
+
+      await fixture.service.execute(windowId, {
+        kind: "change-ollama-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: { kind: "ollama-native-http", baseUrl: "http://localhost:11434" },
+      });
+      const probed = await fixture.service.probe(windowId, instanceId);
+
+      expect(probed.verifiedToolModelIds ?? []).toEqual([]);
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds ?? []).toEqual([]);
     });
 
     it("refuses a model the endpoint does not list and never calls the driver", async () => {
@@ -5178,13 +5341,20 @@ describe("a stored provider key and the base URL it was entered for", () => {
         persistence: fixture.persistence,
         runtimeRegistry: runtime,
         driver: (instance) =>
-          makeOpenAiCompatibleDriver({
-            instanceId: instance.id,
-            configuration: instance.configuration as never,
-            runtimeRegistry: runtime,
-            credentialResolver: credentials,
-            clock: () => now,
-          }),
+          runOnNativeHarness(
+            makeOpenAiCompatibleDriver({
+              instanceId: instance.id,
+              configuration: instance.configuration as never,
+              runtimeRegistry: runtime,
+              credentialResolver: credentials,
+              clock: () => now,
+            }),
+            {
+              instanceId: instance.id,
+              runtimeRegistry: runtime,
+              clock: () => now,
+            },
+          ),
         clearProviderCredential: credentials.delete,
         uuid: () => crypto.randomUUID(),
         clock: () => now,
@@ -5375,5 +5545,90 @@ describe("a stored provider key and the base URL it was entered for", () => {
     expect(fixture.persistence.readProviderInstance(instanceId)?.configuration).toMatchObject({
       baseUrl: "https://gateway.example/v1/",
     });
+  });
+
+  it("removes Azure AI Foundry's stored credential when it moves between a key and an organization sign-in, its sign-in names another tenant or client, or it is removed", async () => {
+    const keyed = {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+      authentication: "api-key",
+      protocol: "auto",
+      manualModelIds: ["deployment-a"],
+    } as const;
+    const signedIn = (tenantId: string, clientId: string) => ({
+      ...keyed,
+      authentication: "directory-oauth" as const,
+      directory: { tenantId, clientId },
+    });
+    const tenant = "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
+    const client = "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d";
+    const clearProviderCredential = vi.fn(async () => undefined);
+    const fixture = serviceFixture({
+      instances: [httpProvider({ driverKind: "azure-foundry", configuration: keyed })],
+      clearProviderCredential,
+    });
+    let version = 1;
+    const change = async (configuration: unknown) => {
+      await fixture.service.execute(windowId, {
+        kind: "change-azure-foundry-configuration",
+        instanceId,
+        expectedVersion: version,
+        configuration,
+      } as never);
+      version += 1;
+      return clearProviderCredential.mock.calls.length;
+    };
+
+    // A key is never read as a sign-in's pointer, nor a pointer as a key.
+    expect(await change(signedIn(tenant, client))).toBe(1);
+    // Only the deployments changed: the sign-in still holds.
+    expect(await change({ ...signedIn(tenant, client), manualModelIds: ["deployment-b"] })).toBe(1);
+    // Another tenant or client drops the grant; it is never rebound.
+    expect(await change(signedIn("1e2d3c4b-5a69-4788-9a0b-c1d2e3f40516", client))).toBe(2);
+    expect(await change(signedIn(tenant, "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a"))).toBe(3);
+    expect(await change(keyed)).toBe(4);
+    expect(await change(signedIn(tenant, client))).toBe(5);
+
+    await fixture.service.execute(windowId, {
+      kind: "remove-provider",
+      instanceId,
+      expectedVersion: version,
+    } as never);
+    expect(clearProviderCredential).toHaveBeenCalledTimes(6);
+  });
+
+  it("keeps an Azure AI Foundry organization sign-in when its removal is refused for active sessions", async () => {
+    const clearProviderCredential = vi.fn(async () => undefined);
+    const fixture = serviceFixture({
+      instances: [
+        httpProvider({
+          driverKind: "azure-foundry",
+          configuration: {
+            kind: "azure-foundry-openai-http",
+            baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+            authentication: "directory-oauth",
+            directory: {
+              tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+            },
+            protocol: "auto",
+            manualModelIds: ["deployment-a"],
+          },
+        }),
+      ],
+      clearProviderCredential,
+    });
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: "Stop active sessions before removing this provider." },
+    });
+    expect(clearProviderCredential).not.toHaveBeenCalled();
   });
 });

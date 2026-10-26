@@ -11,7 +11,7 @@ import {
   type AnthropicCompatibleEndpoint,
   requestAnthropicGeneration,
 } from "./anthropicCompatibleEndpoint";
-import { contextOverflowFromBody } from "./endpointRetry";
+import { contextOverflowFromBody } from "./contextOverflowRefusal";
 import { decodeSse } from "./openAiCompatibleSse";
 import { readAnthropicRateLimitBuckets, type ObservedRateLimitBucket } from "./rateLimitHeaders";
 import { outputStopReason } from "./outputStopReason";

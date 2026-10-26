@@ -397,6 +397,7 @@ describe("Project restart recovery", () => {
       { projection_name: "code", reason: "unknown-event-name" },
       { projection_name: "code-usage", reason: "unknown-event-name" },
       { projection_name: "contexts", reason: "unknown-event-name" },
+      { projection_name: "desktop-leases", reason: "unknown-event-name" },
       { projection_name: "diagnostics-exports", reason: "unknown-event-name" },
       { projection_name: "extension-project-pins", reason: "unknown-event-name" },
       { projection_name: "extension-tool-grants", reason: "unknown-event-name" },

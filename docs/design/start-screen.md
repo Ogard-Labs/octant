@@ -363,8 +363,9 @@ from the host's next list. The Inbox lists each decision, each waiting subagent,
 harness approval as the same row (a decision answered in place, a subagent
 request reviewed in its Agents tab, an approval reviewed in its thread, where
 the approval card decides it), above its other waiting threads, and a thread
-with a decision is not listed again as a finished turn, nor a thread with a
-listed approval again as waiting for approval. The list is read at a local
+with a listed approval is not listed again as waiting for approval. A finished
+turn is never listed in the Inbox or counted by its tile or the dock badge; it
+belongs to To review, and its one-shot banner is unchanged. The list is read at a local
 window only, so a remote window has no Needs you source. What it includes and leaves out is in
 [Architecture: pending requests across modes](../architecture.md#security-and-authority).
 With every window closed, the desktop menu bar carries the same waiting threads

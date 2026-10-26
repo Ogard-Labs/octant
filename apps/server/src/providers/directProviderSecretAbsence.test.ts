@@ -5,8 +5,25 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSessionId,
 } from "@octant/contracts";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { HarnessEndpointDriver } from "@octant/provider-sdk/harness-endpoint";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { rewriteForFork } from "../harness/nativeHarnessFork";
+import { excerptNativeHarnessJournal } from "../harness/nativeHarnessJournalLookup";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
+import { JournalNativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
+import { Persistence, makePersistenceLive } from "../persistence/persistenceService";
+import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
+import {
+  FOUNDRY_DEPLOYMENT,
+  FOUNDRY_POINTER,
+  FoundryGrantBroker,
+  foundryDirectoryConfiguration,
+  foundryEndpoint,
+} from "./foundryDirectory.test-support";
 import type { AnthropicCompatibleFetch } from "./anthropicCompatibleEndpoint";
 import { makeAnthropicCompatibleDriver } from "./anthropicCompatibleDriver";
 import { makeAzureFoundryDriver } from "./azureFoundryDriver";
@@ -63,10 +80,15 @@ describe("Direct-provider secret-absence harness", () => {
         resolve: async () => SENTINEL_SECRET,
       },
       fetch,
-      onConnectionReleased: () => {},
     });
 
-    const events = await runTurnAndCollectEvents(driver, instanceId, sessionId, modelId);
+    const events = await runTurnAndCollectEvents(
+      driver,
+      runtimeRegistry,
+      instanceId,
+      sessionId,
+      modelId,
+    );
     assertSecretAbsent("OpenAI-compatible events", events);
 
     const observed = runtimeRegistry.observedState(instanceId);
@@ -129,10 +151,15 @@ describe("Direct-provider secret-absence harness", () => {
         resolve: async () => SENTINEL_SECRET,
       },
       fetch,
-      onConnectionReleased: () => {},
     });
 
-    const events = await runTurnAndCollectEvents(driver, instanceId, sessionId, modelId);
+    const events = await runTurnAndCollectEvents(
+      driver,
+      runtimeRegistry,
+      instanceId,
+      sessionId,
+      modelId,
+    );
     assertSecretAbsent("Anthropic-compatible events", events);
 
     const observed = runtimeRegistry.observedState(instanceId);
@@ -160,10 +187,15 @@ describe("Direct-provider secret-absence harness", () => {
         resolve: async () => SENTINEL_SECRET,
       },
       fetch,
-      onConnectionReleased: () => {},
     });
 
-    const events = await runTurnAndCollectEvents(driver, instanceId, sessionId, modelId);
+    const events = await runTurnAndCollectEvents(
+      driver,
+      runtimeRegistry,
+      instanceId,
+      sessionId,
+      modelId,
+    );
     assertSecretAbsent("Azure Foundry events", events);
 
     const observed = runtimeRegistry.observedState(instanceId);
@@ -207,16 +239,18 @@ describe("Direct-provider secret-absence harness", () => {
 });
 
 async function runTurnAndCollectEvents(
-  driver: ReturnType<typeof makeOpenAiCompatibleDriver>,
+  endpointDriver: HarnessEndpointDriver,
+  runtimeRegistry: ProviderRuntimeRegistry,
   instanceId: ReturnType<typeof decodeProviderInstanceId>,
   sessionId: ProviderSessionId,
   modelId: ProviderModelId,
 ): Promise<ProviderRuntimeEvent[]> {
+  const driver = runOnNativeHarness(endpointDriver, { instanceId, runtimeRegistry });
   const events: ProviderRuntimeEvent[] = [];
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp" });
+        const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp", mode: "chat" });
         yield* connection.start({
           sessionId,
           modelId,
@@ -356,4 +390,123 @@ function anthropicStreamingFixture(modelId: ProviderModelId): AnthropicCompatibl
       { headers: { "content-type": "text/event-stream" } },
     );
   };
+}
+
+describe("Organization sign-in secret absence", () => {
+  const directories: string[] = [];
+  afterEach(() => {
+    for (const directory of directories.splice(0)) rmSync(directory, { recursive: true });
+  });
+
+  it("keeps every directory bearer out of the journal, a lookup, a fork copy, events, and failures", async () => {
+    const dataDirectory = mkdtempSync(join(tmpdir(), "octant-directory-secret-absence-"));
+    directories.push(dataDirectory);
+    const now = "2026-10-26T09:00:00.000Z";
+    const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000861");
+    const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000862");
+    const broker = new FoundryGrantBroker();
+    let refusing = false;
+    // Once refusing, the endpoint echoes the bearer it was sent in its error
+    // body, as a careless gateway might; nothing Octant records may keep it.
+    const fetch = foundryEndpoint(broker, {
+      reply: "Signed-in answer.",
+      refuse: () =>
+        refusing
+          ? Response.json(
+              { error: { code: "401", message: `Token ${broker.current()} was refused.` } },
+              { status: 401 },
+            )
+          : undefined,
+    });
+    let identity = 0;
+    const recorded: unknown[] = [];
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const persistence = yield* Persistence;
+          const transcripts = new JournalNativeHarnessTranscriptStore({
+            journal: persistence.journal,
+            uuid: () => `80000000-0000-4000-8000-${String(++identity).padStart(12, "0")}`,
+            clock: () => now,
+            actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+          });
+          const runtimeRegistry = new ProviderRuntimeRegistry();
+          const endpoint = makeAzureFoundryDriver({
+            instanceId,
+            configuration: foundryDirectoryConfiguration(),
+            runtimeRegistry,
+            credentialResolver: { has: async () => true, resolve: async () => FOUNDRY_POINTER },
+            directoryOAuth: broker,
+            fetch,
+            clock: () => now,
+          });
+          recorded.push(yield* endpoint.probe({ instanceId }));
+          const driver = runOnNativeHarness(endpoint, { instanceId, runtimeRegistry, transcripts });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp",
+            mode: "code",
+          });
+          yield* connection.start({
+            sessionId,
+            modelId: FOUNDRY_DEPLOYMENT,
+            executionPolicy: "approval-gated",
+          });
+          const turn = (prompt: string) =>
+            Effect.gen(function* () {
+              const events: ProviderRuntimeEvent[] = [];
+              const collector = yield* Effect.fork(
+                (yield* connection.subscribe).pipe(
+                  Stream.filter((event) => event.sessionId === sessionId),
+                  Stream.takeUntil(
+                    (event) =>
+                      event.kind === "completed" ||
+                      event.kind === "interrupted" ||
+                      event.kind === "failed",
+                  ),
+                  Stream.runForEach((event) => Effect.sync(() => void events.push(event))),
+                ),
+              );
+              yield* connection.send({ sessionId, prompt, attachments: [], tools: [] });
+              yield* Fiber.join(collector);
+              return events;
+            });
+          const answered = yield* turn("First question.");
+          expect(answered.at(-1)?.kind).toBe("completed");
+          refusing = true;
+          const refused = yield* turn("Second question.");
+          expect(refused.at(-1)).toMatchObject({ kind: "failed" });
+          recorded.push(answered, refused, runtimeRegistry.observedState(instanceId));
+
+          const transcript = transcripts.load(sessionId);
+          if (transcript === undefined) throw new Error("expected a journaled transcript");
+          recorded.push(
+            transcript,
+            excerptNativeHarnessJournal(transcript, { from: 0 }, []),
+            transcript.messages.map((message) =>
+              rewriteForFork(message, { fromRoot: "/tmp", toRoot: "/tmp/fork", secrets: [] }),
+            ),
+          );
+          yield* connection.stop(sessionId);
+        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory, clock: () => now }))),
+      ),
+    );
+
+    // The endpoint refused a renewed bearer too, so at least two were issued.
+    expect(broker.issued.length).toBeGreaterThanOrEqual(2);
+    const serialized = JSON.stringify(recorded);
+    const stored = filesUnder(dataDirectory).map((path) => readFileSync(path).toString("latin1"));
+    expect(stored.length).toBeGreaterThan(0);
+    for (const token of broker.issued) {
+      expect(serialized, "a report, event, failure, lookup, or fork copy").not.toContain(token);
+      for (const bytes of stored) expect(bytes, "the journal's stored bytes").not.toContain(token);
+    }
+  });
+});
+
+function filesUnder(directory: string): string[] {
+  return readdirSync(directory).flatMap((name) => {
+    const path = join(directory, name);
+    return statSync(path).isDirectory() ? filesUnder(path) : [path];
+  });
 }

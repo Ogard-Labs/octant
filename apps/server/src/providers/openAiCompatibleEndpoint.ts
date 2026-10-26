@@ -6,8 +6,9 @@ import {
   type ProviderModel,
   type ProviderReadiness,
 } from "@octant/contracts";
+import { readDirectoryOAuthCredential } from "@octant/provider-sdk/directory-oauth";
 import type { ProviderCredentialLease, ProviderCredentialResolver } from "./credentialBrokerClient";
-import { CONTEXT_OVERFLOW_FAILURE_MESSAGE } from "./endpointRetry";
+import { CONTEXT_OVERFLOW_FAILURE_MESSAGE } from "./contextOverflowRefusal";
 import { acquireProviderCredential, reportKeyRejection } from "./providerApiKeyPool";
 import {
   readReportedInputModalities,
@@ -45,7 +46,23 @@ export interface OpenAiCompatibleEndpointOptions {
    * of `Authorization: Bearer` without forking the shared endpoint.
    */
   readonly authStrategy?: OpenAiCompatibleAuthStrategy;
+  /**
+   * A credential the caller resolves around each request in place of a
+   * stored key, such as a directory sign-in's bearer. When present it
+   * replaces the strategy's key lookup.
+   */
+  readonly requestAuthorization?: CompatibleRequestAuthorization;
 }
+
+/**
+ * Runs one request with a credential the caller resolves for it. It is handed
+ * a function that sends the request once with the headers it names; it may
+ * send again after renewing the credential, and answers with the response to
+ * read or rejects with a provider failure in the caller's own words.
+ */
+export type CompatibleRequestAuthorization = (
+  send: (headers: Readonly<Record<string, string>>) => Promise<Response>,
+) => Promise<Response>;
 
 export interface OpenAiCompatibleEndpoint {
   readonly instanceId: string;
@@ -53,6 +70,7 @@ export interface OpenAiCompatibleEndpoint {
   readonly authStrategy: OpenAiCompatibleAuthStrategy;
   readonly fetch: CompatibleFetch;
   readonly credentialResolver?: ProviderCredentialResolver;
+  readonly requestAuthorization?: CompatibleRequestAuthorization;
   readonly limits: CompatibleHttpLimits;
   readonly url: (path: CompatibleEndpointPath) => string;
 }
@@ -116,6 +134,9 @@ export function makeOpenAiCompatibleEndpoint(
     ...(options.credentialResolver === undefined
       ? {}
       : { credentialResolver: options.credentialResolver }),
+    ...(options.requestAuthorization === undefined
+      ? {}
+      : { requestAuthorization: options.requestAuthorization }),
     limits,
     url: (path: CompatibleEndpointPath) => `${baseUrl}/${path}`,
   });
@@ -421,6 +442,24 @@ async function performRequest(
   const attempt: { lease?: ProviderCredentialLease | undefined } = {};
 
   try {
+    const authorize = endpoint.requestAuthorization;
+    if (authorize !== undefined) {
+      // The caller may send twice, renewing its credential between: a stream
+      // body the refused send consumed could not be sent again.
+      if (init.body instanceof ReadableStream) {
+        throw fail("invalid-configuration", "The provider request could not be encoded.");
+      }
+      const authorized = authorize((authorization) => {
+        const headers = new Headers(init.headers);
+        for (const [name, value] of Object.entries(authorization)) headers.set(name, value);
+        return sendOnce(endpoint, url, init, headers, deadline, callerSignal);
+      });
+      // The deadline may win while the broker is still answering; that late
+      // rejection has nobody left to read it.
+      authorized.catch(() => undefined);
+      const response = await Promise.race([authorized, deadline.failure]);
+      return boundResponse(response, endpoint.limits, callerSignal);
+    }
     const headers = new Headers(init.headers);
     if (endpoint.authStrategy !== "none") {
       let credential: string;
@@ -438,7 +477,9 @@ async function performRequest(
         if (isProviderFailure(error)) throw error;
         throw fail("unauthenticated", "The provider credential is missing or unavailable.");
       }
-      if (credential.length === 0) {
+      // A directory sign-in's pointer is a reference to a grant, not a key. One
+      // left in the store after the instance moved to a key is never sent.
+      if (credential.length === 0 || readDirectoryOAuthCredential(credential) !== undefined) {
         throw fail("unauthenticated", "The provider credential is missing or unavailable.");
       }
       if (endpoint.authStrategy === "api-key") {
@@ -450,45 +491,58 @@ async function performRequest(
         headers.set("authorization", `Bearer ${credential}`);
       }
     }
-    let response: Response;
-    try {
-      const fetchRequest = Promise.resolve().then(async () =>
-        endpoint.fetch(url, {
-          ...init,
-          headers: Object.fromEntries(headers),
-          redirect: "manual",
-          signal: deadline.signal,
-        }),
-      );
-      const outcome = await Promise.race([
-        fetchRequest.then(
-          (value) => ({ kind: "response", value }) as const,
-          (error: unknown) => ({ kind: "fetch-failure", error }) as const,
-        ),
-        deadline.failure.catch(
-          (failure: ProviderFailure) => ({ kind: "deadline-failure", failure }) as const,
-        ),
-      ]);
-      if (outcome.kind === "deadline-failure") {
-        safelyCancelLateResponse(fetchRequest);
-        throw outcome.failure;
-      }
-      if (outcome.kind === "fetch-failure") throw outcome.error;
-      response = outcome.value;
-    } catch (error) {
-      if (isProviderFailure(error)) throw error;
-      if (isAborted(callerSignal)) throw interrupted();
-      throw fail("unavailable", "The provider endpoint could not be reached.");
-    }
-    if (response.status >= 300 && response.status < 400) {
-      await cancelResponseBody(response);
-      throw fail("invalid-configuration", "The configured endpoint returned a redirect.");
-    }
+    const response = await sendOnce(endpoint, url, init, headers, deadline, callerSignal);
     await reportKeyRejection(attempt.lease, response);
     return boundResponse(response, endpoint.limits, callerSignal);
   } finally {
     deadline.close();
   }
+}
+
+/** One send of the request with these headers, within the request's deadline. */
+async function sendOnce(
+  endpoint: OpenAiCompatibleEndpoint,
+  url: string,
+  init: RequestInit,
+  headers: Headers,
+  deadline: RequestDeadline,
+  callerSignal: AbortSignal | null | undefined,
+): Promise<Response> {
+  let response: Response;
+  try {
+    const fetchRequest = Promise.resolve().then(async () =>
+      endpoint.fetch(url, {
+        ...init,
+        headers: Object.fromEntries(headers),
+        redirect: "manual",
+        signal: deadline.signal,
+      }),
+    );
+    const outcome = await Promise.race([
+      fetchRequest.then(
+        (value) => ({ kind: "response", value }) as const,
+        (error: unknown) => ({ kind: "fetch-failure", error }) as const,
+      ),
+      deadline.failure.catch(
+        (failure: ProviderFailure) => ({ kind: "deadline-failure", failure }) as const,
+      ),
+    ]);
+    if (outcome.kind === "deadline-failure") {
+      safelyCancelLateResponse(fetchRequest);
+      throw outcome.failure;
+    }
+    if (outcome.kind === "fetch-failure") throw outcome.error;
+    response = outcome.value;
+  } catch (error) {
+    if (isProviderFailure(error)) throw error;
+    if (isAborted(callerSignal)) throw interrupted();
+    throw fail("unavailable", "The provider endpoint could not be reached.");
+  }
+  if (response.status >= 300 && response.status < 400) {
+    await cancelResponseBody(response);
+    throw fail("invalid-configuration", "The configured endpoint returned a redirect.");
+  }
+  return response;
 }
 
 function boundResponse(

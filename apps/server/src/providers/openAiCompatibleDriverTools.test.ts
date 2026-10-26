@@ -10,6 +10,7 @@ import {
 } from "@octant/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -38,14 +39,31 @@ const echoTool: ProviderToolDefinition = {
 function makeDriver(fetch: CompatibleFetch) {
   const runtimeRegistry = new ProviderRuntimeRegistry();
   return {
-    driver: makeOpenAiCompatibleDriver({
-      instanceId,
-      configuration,
-      runtimeRegistry,
-      fetch,
-    }),
+    driver: runOnNativeHarness(
+      makeOpenAiCompatibleDriver({
+        instanceId,
+        configuration,
+        runtimeRegistry,
+        fetch,
+      }),
+      { instanceId, runtimeRegistry },
+    ),
     runtimeRegistry,
   };
+}
+
+/**
+ * A probed endpoint whose test model a person verified for tools: the host
+ * hands Octant's tools, the capability echo included, only to a verified
+ * model.
+ */
+async function verifiedToolDriver(fetch: CompatibleFetch) {
+  const fixture = makeDriver(fetch);
+  await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+  if (fixture.runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]) === undefined) {
+    throw new Error("The probe recorded no observation.");
+  }
+  return fixture;
 }
 
 function responsesToolCallStream(callId: string, toolName: string, args: string): Response {
@@ -218,14 +236,16 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     const fetch = routeFetch(() =>
       responsesToolCallStream("call_abc", "octant_capability_echo", '{"echo":"hi"}'),
     );
-    const { driver } = makeDriver(fetch as CompatibleFetch);
-
-    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const { driver } = await verifiedToolDriver(fetch as CompatibleFetch);
 
     const collected = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* connection.subscribe;
           yield* connection.send({
@@ -264,14 +284,16 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         ? responsesToolCallStream("call_abc", "octant_capability_echo", '{"echo":"hi"}')
         : responsesTextStream("done");
     });
-    const { driver } = makeDriver(fetch as CompatibleFetch);
-
-    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const { driver } = await verifiedToolDriver(fetch as CompatibleFetch);
 
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* connection.subscribe;
           yield* connection.send({
@@ -304,14 +326,16 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
     const fetch = routeFetch(() =>
       responsesToolCallStream("call_abc", "octant_capability_echo", '{"echo":"hi"}'),
     );
-    const { driver } = makeDriver(fetch as CompatibleFetch);
-
-    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const { driver } = await verifiedToolDriver(fetch as CompatibleFetch);
 
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* connection.subscribe;
           yield* connection.send({
@@ -338,14 +362,16 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
 
   it("rejects answerTool when no tools were supplied for the turn", async () => {
     const fetch = routeFetch(() => responsesTextStream("hello"));
-    const { driver } = makeDriver(fetch as CompatibleFetch);
-
-    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const { driver } = await verifiedToolDriver(fetch as CompatibleFetch);
 
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           yield* connection.send({
             sessionId,
@@ -376,14 +402,16 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         ? responsesToolCallStream("call_abc", "octant_capability_echo", '{"echo":"hi"}')
         : responsesTextStream("done");
     });
-    const { driver, runtimeRegistry } = makeDriver(fetch as CompatibleFetch);
-
-    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const { driver, runtimeRegistry } = await verifiedToolDriver(fetch as CompatibleFetch);
 
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* connection.subscribe;
           yield* connection.send({
@@ -422,14 +450,16 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
 
   it("keeps answering an unoffered tool call and fails once the model will not correct itself", async () => {
     const fetch = routeFetch(() => responsesToolCallStream("call_abc", "unknown_tool", '{"x":1}'));
-    const { driver } = makeDriver(fetch as CompatibleFetch);
-
-    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const { driver } = await verifiedToolDriver(fetch as CompatibleFetch);
 
     const collected = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* connection.subscribe;
           yield* connection.send({
@@ -567,14 +597,16 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
       callCount += 1;
       return callCount === 1 ? duplicateStream() : responsesTextStream("done");
     });
-    const { driver } = makeDriver(fetch as CompatibleFetch);
-
-    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const { driver } = await verifiedToolDriver(fetch as CompatibleFetch);
 
     const collected = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* connection.subscribe;
           yield* connection.send({
@@ -611,14 +643,16 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         ? responsesToolCallStream("call_abc", "octant_capability_echo", '{"echo":"hi"}')
         : responsesTextStream("done");
     });
-    const { driver } = makeDriver(fetch as unknown as CompatibleFetch);
-
-    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const { driver } = await verifiedToolDriver(fetch as unknown as CompatibleFetch);
 
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* connection.subscribe;
           yield* connection.send({
@@ -676,14 +710,16 @@ describe("makeOpenAiCompatibleDriver tool loop", () => {
         ? responsesToolCallStream("call_abc", "octant_capability_echo", '{"echo":"hi"}')
         : responsesTextStream("done");
     });
-    const { driver } = makeDriver(fetch as CompatibleFetch);
-
-    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    const { driver } = await verifiedToolDriver(fetch as CompatibleFetch);
 
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* connection.subscribe;
           yield* connection.send({
@@ -731,7 +767,11 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
     return Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId: model, executionPolicy: "approval-gated" });
           const outcome = yield* Effect.either(
             connection.send({
@@ -765,8 +805,7 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
       "unsupported",
     );
 
-    const observed = runtimeRegistry.observedState(instanceId)!;
-    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+    runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]);
 
     expect((await sendWithOctantTool(driver, modelId))._tag).toBe("Right");
     expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Left");
@@ -779,13 +818,16 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
     );
     const { driver, runtimeRegistry } = makeDriver(fetch as CompatibleFetch);
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-    const observed = runtimeRegistry.observedState(instanceId)!;
-    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+    runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]);
 
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* connection.subscribe;
           yield* connection.send({
@@ -811,8 +853,7 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
     const fetch = routeFetch(() => responsesTextStream("ok"));
     const { driver, runtimeRegistry } = makeDriver(fetch as CompatibleFetch);
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-    const observed = runtimeRegistry.observedState(instanceId)!;
-    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+    runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]);
 
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
 

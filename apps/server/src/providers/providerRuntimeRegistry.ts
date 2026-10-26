@@ -3,6 +3,7 @@ import {
   decodeProviderObservedState,
   decodeProviderFailure,
   type ProviderInstanceId,
+  type ProviderModelId,
   type ProviderObservedState,
 } from "@octant/contracts";
 import type { ProviderFailure } from "@octant/contracts";
@@ -49,14 +50,21 @@ export interface ProviderRuntimeAcquireOptions<T> {
   ) => Promise<ProviderRuntimeResource<T>>;
 }
 
+/**
+ * The registry as a provider driver holds it. The Verify tools record is the
+ * host's: a driver that could write it would admit Octant's tools for a model
+ * no person verified, so the record's writer is left out.
+ */
+export type ProviderDriverRuntimeRegistry = Omit<ProviderRuntimeRegistry, "setVerifiedToolModels">;
+
 export function trackProviderProcess<
   T extends { readonly pid: number; readonly exited: Promise<void> },
 >(
-  registry: ProviderRuntimeRegistry,
+  registry: ProviderDriverRuntimeRegistry,
   instanceId: ProviderInstanceId,
   process: T,
 ): Effect.Effect<T, ProviderFailure> {
-  if (typeof (registry as Partial<ProviderRuntimeRegistry>).trackProcess !== "function") {
+  if (typeof (registry as Partial<ProviderDriverRuntimeRegistry>).trackProcess !== "function") {
     return Effect.succeed(process);
   }
   return Effect.tryPromise({
@@ -93,6 +101,10 @@ export class ProviderRuntimeRegistry {
     | ((durationMs: number, kind: "started" | "reused") => void)
     | undefined;
   readonly #observedByInstance = new Map<ProviderInstanceId, ProviderObservedState>();
+  readonly #verifiedToolModelsByInstance = new Map<
+    ProviderInstanceId,
+    ReadonlyArray<ProviderModelId>
+  >();
   readonly #activeSessionsByInstance = new Map<ProviderInstanceId, number>();
   readonly #compatibleProtocols = new Map<ProviderInstanceId, CompatibleProtocol>();
   readonly #runtimes = new Map<ProviderInstanceId, RuntimeEntry>();
@@ -121,14 +133,44 @@ export class ProviderRuntimeRegistry {
     return this.#observedByInstance.get(instanceId);
   }
 
+  /**
+   * Replaces what the instance was last observed to be. The Verify tools
+   * record is never taken from the value: drivers and probes write here, and a
+   * driver that claimed a model verified would otherwise widen tool admission
+   * for it. The host's own record is kept across the replacement instead.
+   */
   setObservedState(value: unknown): ProviderObservedState {
-    const observed = decodeProviderObservedState(value);
-    this.#observedByInstance.set(observed.instanceId, observed);
-    return observed;
+    return this.#storeObservedState(decodeProviderObservedState(value));
+  }
+
+  /**
+   * Records which models a host-run Verify tools proved, either just now or as
+   * restored from the persisted catalog. Only the provider service and Chat's
+   * restore after a restart call this. Without an observation to attach it to
+   * nothing is recorded, so a record cannot outlive a cleared observation.
+   */
+  setVerifiedToolModels(
+    instanceId: ProviderInstanceId,
+    modelIds: ReadonlyArray<ProviderModelId>,
+  ): ProviderObservedState | undefined {
+    const current = this.#observedByInstance.get(instanceId);
+    if (current === undefined) return undefined;
+    this.#verifiedToolModelsByInstance.set(instanceId, [...modelIds]);
+    return this.#storeObservedState(current);
   }
 
   clearObservedState(instanceId: ProviderInstanceId): void {
     this.#observedByInstance.delete(instanceId);
+    this.#verifiedToolModelsByInstance.delete(instanceId);
+  }
+
+  #storeObservedState(value: ProviderObservedState): ProviderObservedState {
+    const { verifiedToolModelIds: _notTheHostRecord, ...observed } = value;
+    const verified = this.#verifiedToolModelsByInstance.get(observed.instanceId);
+    const stored: ProviderObservedState =
+      verified === undefined ? observed : { ...observed, verifiedToolModelIds: verified };
+    this.#observedByInstance.set(stored.instanceId, stored);
+    return stored;
   }
 
   compatibleProtocol(instanceId: ProviderInstanceId): CompatibleProtocol | undefined {

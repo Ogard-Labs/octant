@@ -21,7 +21,7 @@ Not checked yet, Found, not added, Not looked for yet, Not on this host, Not
 added, Off, Can't start, Version not supported, and Not available. A one-line
 introduction says each driver is already installed and trusted, followed by a
 summary ("21 drivers · 3 ready · 1 need you"). Opening a row replaces the page
-with that driver's setup sub-page: breadcrumb, Back, and Escape as on an
+with that driver's setup sub-page: Back and Escape as on an
 endpoint's page, and an h1 with the driver's name. It leads with Set up, a
 numbered list of steps (Find it on this host, for runtimes only; Add it to
 Octant or Add the endpoint; Turn it on; Sign in; Check the connection). Done
@@ -79,11 +79,11 @@ before profile creation; host-local credential authority is unchanged.
 
 ## Octant Harness model endpoints
 
-Octant Harness lists its model endpoints differently: as rows in one list, never two-up cards. A row is a single link named with its state ("Team gateway, not working, open details") and holds the source mark (the bundled mark keyed by the endpoint's sign-in, a monogram otherwise), the name, a sub-line (who is signed in, or the host and "API key" or "No key"), the state in words beside a dot whose shape carries it (filled for ready, a ring when it needs you, a dashed ring for off, a muted ring for not checked, a turning ring for checking that is a static dotted ring under reduced motion, and a diamond for failed), and the model count ("12 of 63 shown"). The states are Ready, Sign in to use, Signed out, Checking…, Can't connect, Key refused, Key needed, Not working, No models yet, Not checked yet, and Off. One that needs you adds one plain sentence and exactly one fix button under the link (Sign in, Sign in again, Try again, Replace key, Add key, Edit address, Add model IDs, Check now), announced through a polite live region on that row; a failed check never raises a page-level banner. The enable switch is the detail page's Use switch, and an endpoint that is off says "Off · kept, not offered" on its row.
+Octant Harness lists its model endpoints differently: as rows in one list, never two-up cards. A row is a single link named with its state ("Team gateway, not working, open details") and holds the source mark (the bundled mark keyed by the endpoint's sign-in, a monogram otherwise), the name, a sub-line (who is signed in, or the host and "API key" or "No key"), the state in words beside a dot whose shape carries it (filled for ready, a ring when it needs you, a dashed ring for off, a muted ring for not checked, a turning ring for checking that is a static dotted ring under reduced motion, and a diamond for failed), and the model count ("12 of 63 shown"). The states are Ready, Sign in to use, Sign in again, Signed out, Checking…, Can't connect, Key refused, Key needed, No access, Sign-in doesn't match, Not working, No models yet, Not checked yet, and Off. One that needs you adds one plain sentence and exactly one fix button under the link (Sign in, Sign in again, Try again, Replace key, Add key, Edit address, Add model IDs, Check now), announced through a polite live region on that row; a failed check never raises a page-level banner. The enable switch is the detail page's Use switch, and an endpoint that is off says "Off · kept, not offered" on its row.
 
 ### Endpoint detail
 
-Opening a row replaces the page with the endpoint's detail sub-page (breadcrumb Settings / Octant Harness / endpoint, a Back control, and Escape), whose h1 is the endpoint's name; Back returns focus to the row. The sub-page leads with the state, Check now, and Use, then the one fix, then Sign-in or API key, Models (search, a Shown / Hidden / All filter, a switch per model, and the plain tags "Reads images" and "Chat only · Verify tools"), Where your data goes (two labelled checkboxes the person sets, with per-model overrides in a disclosure), Name and address, Diagnostics (a disclosure that opens by itself only while the endpoint is failing, holding the address, protocol, authentication, last check with the host's precise answer, tool use, and capabilities), and Remove last, confirmed in a dialog that starts on Keep and names the model roles that lose a model. Precise terms (protocol names, bearer, capability names) appear only in Diagnostics.
+Opening a row replaces the page with the endpoint's detail sub-page (a Back control and Escape), whose h1 is the endpoint's name; Back returns focus to the row. The sub-page leads with the state, Check now, and Use, then the one fix, then Sign-in or API key, Models (search, a Shown / Hidden / All filter, a switch per model, and the plain tags "Reads images" and "Chat only · Verify tools"), Where your data goes (two labelled checkboxes the person sets, with per-model overrides in a disclosure), Name and address, Diagnostics (a disclosure that opens by itself only while the endpoint is failing, holding the address, protocol, authentication, last check with the host's precise answer, tool use, and capabilities), and Remove last, confirmed in a dialog that starts on Keep and names the model roles that lose a model. Precise terms (protocol names, bearer, capability names) appear only in Diagnostics.
 
 ### Subscription sign-in lifecycle
 
@@ -101,6 +101,37 @@ Signed-in account details keep Sign out visible with a description of its scope.
 Octant asks for provider revocation when supported, then removes the local grant.
 If revocation fails, it keeps the grant and offers an explicit local-only action.
 Neither action promises removal of every provider account connection.
+
+### Organization sign-in (Azure AI Foundry)
+
+An Azure AI Foundry endpoint signs in with an API key or with the
+organization's Microsoft Entra ID account
+([Enterprise provider identity](enterprise-provider-identity.md) owns the
+authority and binding rules). Add endpoint's Connect step for Azure AI Foundry
+has a **Sign in with** choice (API key, or Organization account (Microsoft
+Entra ID)). The organization account replaces the key field with Directory
+(tenant) ID and Application (client) ID; both must be GUIDs, are saved
+lowercased, and a domain name or `common` is refused with a sentence naming
+what to paste. The endpoint is added with no key and reads Sign in to use; the
+sign-in starts from its detail page, never from Add endpoint.
+
+The detail page's Sign-in section is the same sign-in panel subscription
+sign-ins use, with the button "Sign in with your organization", the consent
+line naming what the sign-in does, "Signed in as" the account the directory
+named, and a Sign out line that says it removes this computer's sign-in only and
+does not end the organization session (sign-out answers Signed out on this
+computer). Name and address keeps the endpoint's sign-in method: its
+Authentication select (API key or Organization account) and the tenant and
+client fields, and a note that switching methods removes what was stored for
+the other. Diagnostics adds "Signed in for", the tenant, client, and origin the
+last check bound to.
+
+Row states read the host's reason: Sign in to use (no sign-in), Sign in again
+with "Your organization asks you to sign in again in person…" (multi-factor or
+a consent prompt; the sign-in is kept), Signed out (the sign-in ended), No
+access (signed in without a role on the resource; no fix, a sentence naming
+the role to ask for), and Sign-in doesn't match (the sign-in is for another
+tenant, client, or address; Sign in again). None offers a key.
 
 Octant Harness uses the existing `icons.svg#aperture` brand mark in provider lists
 and model pickers. The mark inherits the theme's text color; the surrounding
