@@ -69,6 +69,7 @@ const DIRECTORY_VERIFICATION_HOSTS: ReadonlySet<string> = new Set([
 // The directory keeps a device code for fifteen minutes; an answer claiming
 // longer would keep the broker polling for a code nobody can still enter.
 const DIRECTORY_DEVICE_MAX_SECONDS = 15 * 60;
+const VISIBLE_ASCII_PATTERN = /^[\x21-\x7e]{1,2048}$/;
 const ACCOUNT_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 .@_'-]{0,127}$/;
 // RFC 6749 §3.3 scope-token: printable ASCII without space, quote, or
 // backslash. A resource may advertise a URL-shaped scope; the authorize URL
@@ -1111,8 +1112,14 @@ async function requestDirectoryDeviceCode(input: {
   };
 }
 
-/** Whether a verification page is one the directory itself serves, over https. */
+/**
+ * Whether a verification page is one the directory itself serves, over https.
+ * The command prints the page as the directory wrote it, and the URL parser
+ * drops line breaks and percent-encodes an escape character before it names
+ * the host, so the text itself must be visible ASCII as well.
+ */
 function isDirectoryVerificationPage(value: string): boolean {
+  if (!VISIBLE_ASCII_PATTERN.test(value)) return false;
   try {
     const url = new URL(value);
     return (

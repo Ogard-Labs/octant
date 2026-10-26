@@ -331,8 +331,10 @@ Rules slice 2 resolved, each the most conservative reading of decision 2:
   reads `device_code`, `user_code`, `verification_uri`, `expires_in`, and
   `interval`, never the directory's free-text `message`. The page must be
   https on `microsoft.com`, `login.microsoft.com`, or
-  `login.microsoftonline.com`, with no port or credentials, or the attempt is
-  refused before any code is shown. A code lives at most 15 minutes and is
+  `login.microsoftonline.com`, with no port or credentials, and its text
+  must be visible ASCII (the URL parser reads past an escape character or a
+  line break that a terminal would act on), or the attempt is refused before
+  any code is shown; the command refuses such a page again before printing. A code lives at most 15 minutes and is
   polled every 1 to 60 seconds. A 4xx answer (an app registration that does
   not allow public client flows, for one) is `exchange-refused`; a 429, a
   5xx, or no answer is `unavailable`.

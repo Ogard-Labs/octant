@@ -192,6 +192,9 @@ function nameOf(record: Readonly<Record<string, unknown>>): string {
 }
 
 function isHttpsPage(value: string): boolean {
+  // The URL parser reads past an escape character or a line break, but the
+  // terminal would not: the page is printed as it came.
+  if (!/^[\x21-\x7e]{1,2048}$/.test(value)) return false;
   try {
     const url = new URL(value);
     return url.protocol === "https:" && url.username === "" && url.password === "";

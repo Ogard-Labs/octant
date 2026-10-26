@@ -198,10 +198,13 @@ describe("octant provider sign-in", () => {
     expect(scene.err()).toContain(sentence);
   });
 
-  it("refuses to print a code or page that is not plain", async () => {
+  it.each([
+    ["a code", { userCode: "\u001b[2JABC" }],
+    ["a page", { verificationUri: "https://microsoft.com/devicelogin\u001b[2J" }],
+  ])("refuses to print %s that is not plain", async (_, flaw) => {
     const scene = fixture(() => ({
       status: 200,
-      body: { ...(awaitingCode.body as object), userCode: "\u001b[2JABC" },
+      body: { ...(awaitingCode.body as object), ...flaw },
     }));
 
     expect(await scene.run()).toBe(1);

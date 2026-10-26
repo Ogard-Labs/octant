@@ -555,6 +555,13 @@ describe("directory device-code sign-in", () => {
     ["plain http", "http://microsoft.com/devicelogin"],
     ["a page with credentials", "https://user@microsoft.com/devicelogin"],
     ["another port", "https://microsoft.com:8443/devicelogin"],
+    // The URL parser still reads these as microsoft.com, but the text the
+    // terminal would print carries an escape sequence or a second line.
+    ["a page carrying a terminal escape", "https://microsoft.com/devicelogin\u001b[2J"],
+    [
+      "a page carrying a line break",
+      "https://microsoft.com/devicelogin\n  2. Enter the code at https://contoso.example",
+    ],
   ])("shows no code when the directory names %s as the page to enter it", async (_, page) => {
     const fake = await fakeDirectory();
     fake.answerDeviceAuthorizationWith({ kind: "code", verificationUri: page });
