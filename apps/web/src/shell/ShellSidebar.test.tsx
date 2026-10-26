@@ -605,6 +605,61 @@ describe("ShellSidebar", () => {
     expect(screen.getByRole("button", { name: "Board" })).toBeVisible();
   });
 
+  it("shows the four destinations as rows with their counts in the phone drawer", async () => {
+    const user = userEvent.setup();
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn((query: string) => ({
+      matches: query === "(max-width: 680px)",
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    try {
+      const actions = { "new-code-thread": vi.fn(), inbox: vi.fn(), "thread-board": vi.fn() };
+      render(
+        <ShellSidebar
+          codeNavigation={{ actions }}
+          countTiles={{
+            running: 2,
+            toReview: 1,
+            doneToday: 4,
+            onOpenReview: vi.fn(),
+            onOpenDone: vi.fn(),
+          }}
+          inboxCount={3}
+          onAddFolder={vi.fn()}
+          onOpenNavigator={vi.fn()}
+          onOpenSettings={vi.fn()}
+          onSelectMode={vi.fn()}
+          projectSection={<nav aria-label="Projects">Project navigation</nav>}
+          settings={defaultShellSettings()}
+          workspace={{ ...defaultWindowWorkspace(windowId), activeMode: "code" }}
+        />,
+      );
+
+      const group = screen.getByRole("group", { name: "Thread counts" });
+      expect(group).toHaveClass("sidebar-tiles--rows");
+      for (const [name, label, count] of [
+        ["Inbox, 3", "Inbox", "3"],
+        ["Running, 2", "Running", "2"],
+        ["To review, 1", "To review", "1"],
+        ["Done today, 4", "Done today", "4"],
+      ] as const) {
+        const row = within(group).getByRole("button", { name });
+        expect(row).toHaveTextContent(`${label}${count}`);
+        expect(row.querySelector(".sidebar-tile__top")).toBeNull();
+      }
+      await user.click(within(group).getByRole("button", { name: "Inbox, 3" }));
+      expect(actions.inbox).toHaveBeenCalledOnce();
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
   it("opens the thread filter from Search, and keeps it shown when Settings asks", async () => {
     const user = userEvent.setup();
     const onQueryChange = vi.fn();
