@@ -26,6 +26,7 @@ The precedence and authorization rules live in [AGENTS.md](../../AGENTS.md#missi
 | Canvas visuals         | [Canvas visuals](canvas-visuals.md)                         | Changing Canvas charts, tables, metric blocks, mockups, designs, or the design frame kit                                               |
 | Provider settings      | [Providers and model endpoints](model-endpoints.md)         | Changing Provider catalog or the Octant Harness model endpoint rows, detail pages, or Add endpoint                                     |
 | Host names             | [Host reads and commands](host-reads-and-commands.md)       | Looking up or renaming a route, server command, or wire value a workspace surface uses                                                 |
+| Language services      | [Language services](language-services.md)                   | Changing Code editor diagnostics or definitions, language-server or debug-adapter processes, their confinement, or their activation    |
 | Release holds          | [Release-boundary holds](../release-boundary-holds.md)      | Considering connector marketplace or full language-tooling scope                                                                       |
 | Historical rationale   | [Decision archive](../decisions/README.md)                  | Investigating why a choice was made, a rejected alternative, or detail not yet consolidated                                            |
 
