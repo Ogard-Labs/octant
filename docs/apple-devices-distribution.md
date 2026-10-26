@@ -1,7 +1,10 @@
 # Apple physical devices and distribution path
 
-Design only. Covers the Apple workbench for a person's own apps and does not
-pull their TestFlight or App Store submission into the technical preview.
+Covers the Apple workbench for a person's own apps. Physical devices, and then
+TestFlight and App Store distribution of those apps, were authorized by the
+maintainer on 2026-10-26 as post-preview work, design-first: each layer is
+built only once its owning specification documents its authority, privacy, and
+release boundaries. None of it enters the technical preview.
 Octant's own internal TestFlight track for its mobile remote client is separate
 and authorized; see [architecture](architecture.md#process-topology). The first-release Apple loop stays Simulator and local macOS
 on Apple Silicon ([0043](decisions/0043-simulator-follows-the-active-thread.md),
@@ -12,11 +15,11 @@ superseding surface of [0014](decisions/0014-apple-development-capability.md)).
 Three layers sit on the same app-managed Apple workbench. They must not collapse
 into one "devices" flag.
 
-| Layer           | What it is                                                                                     | Preview                                 |
-| --------------- | ---------------------------------------------------------------------------------------------- | --------------------------------------- |
-| Simulator       | Host-owned Simulator destinations, live frame, build/run/test, evidence                        | In scope (0043)                         |
-| Physical device | `devicectl` / paired hardware destinations, provisioning profiles, device logs and screenshots | Later design; not preview               |
-| Distribution    | Signing for release, TestFlight, App Store Connect submission                                  | Later; outside Current Release Boundary |
+| Layer           | What it is                                                                                     | Preview                                  |
+| --------------- | ---------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| Simulator       | Host-owned Simulator destinations, live frame, build/run/test, evidence                        | In scope (0043)                          |
+| Physical device | `devicectl` / paired hardware destinations, provisioning profiles, device logs and screenshots | Post-preview, design-first; not preview  |
+| Distribution    | Signing for release, TestFlight, App Store Connect submission                                  | Post-preview, after devices; not preview |
 
 Physical device support reuses Simulator rules where they fit: stable
 destination identity, leases so threads cannot steal each other's device,
@@ -57,13 +60,15 @@ developer directory.
 3. Only after device run/test evidence is solid, design distribution as an
    explicit ship target with its own approvals and credentials.
 
-## Start gate (parent Later item)
+## Start gate
 
 Leave Backlog until:
 
-1. A Proposed ADR (or scoped extension of 0043/0014) separates device vs
-   Simulator vs distribution and states the non-macOS fail-closed rules.
+1. The owning specification separates device vs Simulator vs distribution and
+   states the non-macOS fail-closed rules.
 2. Provisioning and signing material use the credential broker / host secret
    store pattern; no plaintext in the journal.
 3. An explicit maintainer request authorizes the scoped slice (device-only
-   first; distribution only with a boundary update).
+   first; distribution only with a boundary update). The maintainer gave this
+   request for both layers on 2026-10-26; the order and the boundary update
+   still apply.

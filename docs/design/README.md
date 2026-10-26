@@ -26,7 +26,7 @@ The precedence and authorization rules live in [AGENTS.md](../../AGENTS.md#missi
 | Canvas visuals         | [Canvas visuals](canvas-visuals.md)                         | Changing Canvas charts, tables, metric blocks, mockups, designs, or the design frame kit                                               |
 | Provider settings      | [Providers and model endpoints](model-endpoints.md)         | Changing Provider catalog or the Octant Harness model endpoint rows, detail pages, or Add endpoint                                     |
 | Host names             | [Host reads and commands](host-reads-and-commands.md)       | Looking up or renaming a route, server command, or wire value a workspace surface uses                                                 |
-| Release holds          | [Release-boundary holds](../release-boundary-holds.md)      | Considering connector marketplace or full language-tooling scope                                                                       |
+| Release holds          | [Release-boundary holds](../release-boundary-holds.md)      | Checking which post-preview tracks were unlocked on 2026-10-26, their design-first rule, or the former connector and LSP start gates   |
 | Historical rationale   | [Decision archive](../decisions/README.md)                  | Investigating why a choice was made, a rejected alternative, or detail not yet consolidated                                            |
 
 Architecture owns system and authority boundaries; each architecture topic

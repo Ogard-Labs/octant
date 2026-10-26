@@ -234,8 +234,10 @@ revocable Expo token; Apple certificates, profiles, and the App Store Connect
 key stay in EAS's credential service. The App ID enables no optional Apple
 capability (push, associated domains, Sign in with Apple, iCloud), testers are
 maintainer-controlled App Store Connect users, and external groups, public
-links, and store listing stay closed under the
-[mobile store hold](mobile-store-v1-hold.md). A build counts only after the
+links, and store listing stay closed until public store distribution, an
+authorized post-preview track, has its own specification and a separate
+maintainer action for submission ([mobile store note](mobile-store-v1-hold.md)).
+A build counts only after the
 device pass in the [TestFlight runbook](mobile-testflight.md), not when EAS or
 Apple finishes processing it.
 
@@ -2518,8 +2520,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   declared capabilities, contributions, a second component, an entry point
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. Outside drivers need their own design before the schema admits
-  them; third-party provider-driver plugins are parked until after the
-  technical preview. The catalog repeats installed and trusted from the activation context
+  them; third-party provider-driver plugins are an authorized post-preview
+  track that the schema refuses until that design is documented. The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -8053,9 +8055,22 @@ Public links on and approves a publish, and a self-hosted service URL is a
 Settings choice. Deploying it, its DNS and TLS, and its operator contact are
 release steps of their own.
 
-The start gates for the full LSP / extension host / debugger hold are in
-[release-boundary holds](release-boundary-holds.md); that hold is not opened by
-plugin work, a first-party Integration, or Monaco and external-editor handoff.
+The maintainer authorized the previously held post-preview tracks on
+2026-10-26: mobile maturity (Android internal builds, redacted push, capture
+and voice, public store distribution), a ciphertext-only hosted relay, a full
+LSP / extension host / debugger companion, Apple physical devices and then
+TestFlight and App Store distribution of a person's own apps, enterprise
+directory OAuth and cloud-IAM provider identity, disposable Linux desktops for
+headless hosts, remote SSH development environments, third-party
+provider-driver plugins, and the EU/GDPR compliance package (pending legal
+review). None of them is part of the technical preview, whose ship boundary
+above is unchanged. Each is design-first: implementation starts only once its
+owning specification documents its authority, privacy, and release
+boundaries. The authorization covers design and implementation; creating an
+account, spending money, submitting to a store, deploying a hosted service, or
+weakening an invariant in this document each still needs a separate explicit
+maintainer action. The earlier holds and their start gates
+remain as rationale in [release-boundary holds](release-boundary-holds.md).
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a
 bundled first-party catalog, sign-in through the MCP authorization flow, and
