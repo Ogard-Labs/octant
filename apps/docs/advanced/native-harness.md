@@ -162,9 +162,11 @@ When a long conversation no longer fits the model's window, older tool
 results are left out of the request first. In Code, Octant then summarizes the
 earlier turns for the model, carrying its latest task list along, and the
 thread shows a compaction divider and the context meter marks the session
-compacted. Only when there is nothing earlier to summarize, or the summary
-fails, are whole earlier exchanges left out, with a note to the model. The
-saved conversation keeps everything.
+compacted. Only when there is nothing earlier to summarize, the summary
+fails, or the running turn outgrows the window again, are whole earlier
+exchanges left out, with a note to the model; in Code that note names the
+saved messages the model can read back with `journal-lookup`. The saved
+conversation keeps everything.
 
 Forking a Code thread on a harness model gives the fork the model's own
 memory up to the reply you forked from — every message, tool call, and result

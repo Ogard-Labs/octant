@@ -861,7 +861,8 @@ describe("fitting a request to the endpoint", () => {
         { text: "first answer", toolCalls: [] },
         { text: "second answer", toolCalls: [] },
       ],
-      (request) => JSON.stringify(request.history).length <= 700,
+      // No summary request fits either, so the turn cannot compact and the ladder cuts.
+      (request) => request.tools.length > 0 && JSON.stringify(request.history).length <= 700,
     );
     const firstPrompt = `first question ${"a".repeat(620)}`;
     await Effect.runPromise(
@@ -1845,7 +1846,11 @@ describe("compacting an Octant Harness session", () => {
     let tight = false;
     const { transport, requests } = scriptedTransport(
       [...answers(2), { text: "Earlier: chose the queue design.", toolCalls: [] }, ...answers(1)],
-      (request) => !tight || !request.history.some((message) => message.text === "second"),
+      // Once tight, not even a summary request fits, so the turn cannot
+      // compact and the ladder cuts.
+      (request) =>
+        !tight ||
+        (request.tools.length > 0 && !request.history.some((message) => message.text === "second")),
     );
     await Effect.runPromise(
       Effect.scoped(
@@ -2010,6 +2015,7 @@ describe("compacting an Octant Harness session", () => {
         onEvent: (event: NativeHarnessStreamEvent) => void,
       ) => Promise<NativeHarnessResponse>;
       readonly thirdTurn?: ReadonlyArray<NativeHarnessResponse>;
+      readonly offered?: ReadonlyArray<ProviderToolDefinition>;
     }) => {
       const transcripts = new MemoryNativeHarnessTranscriptStore();
       const requests: NativeHarnessRequest[] = [];
@@ -2064,7 +2070,12 @@ describe("compacting an Octant Harness session", () => {
                   (event) => Effect.sync(() => seen.push(event)),
                 ),
               );
-              yield* connection.send({ sessionId, prompt, attachments: [], tools: offered });
+              yield* connection.send({
+                sessionId,
+                prompt,
+                attachments: [],
+                tools: input.offered ?? offered,
+              });
               for (;;) {
                 const requestId = yield* Effect.promise(() => nextUnanswered(seen, answered));
                 if (requestId === undefined) break;
@@ -2190,6 +2201,68 @@ describe("compacting an Octant Harness session", () => {
         sent.some((request) => request.history[0]?.text.includes("left out to fit") === true),
       ).toBe(false);
       expect(sent.at(-1)?.history[0]?.text).toContain(taskList);
+    });
+
+    it("numbers a cut by the journal after the running turn compacted, so journal-lookup reads the cut turn back", async () => {
+      const run = await runLongSession({
+        refuses: () => false,
+        fits: (request) => {
+          const texts = request.history.map((message) => message.text);
+          // One summary request holds the first turn only, so the second stays.
+          if (request.tools.length === 0)
+            return !JSON.stringify(request.history).includes("second");
+          if (texts.includes("first") && texts.includes("third")) return false;
+          // The third turn's tool step no longer fits beside the second turn.
+          return !(
+            texts.includes("second") &&
+            texts.includes("third") &&
+            request.history.some((message) => message.toolResults !== undefined)
+          );
+        },
+        thirdTurn: [
+          {
+            text: "",
+            toolCalls: [{ toolCallId: "look-1", toolName: "read", argumentsJson: "{}" }],
+          },
+          { text: "answer 3", toolCalls: [] },
+        ],
+        offered: [...withLookup, tool("todo-write")],
+      });
+
+      expect(run.events.at(-1)?.kind).toBe("completed");
+      expect(run.events.filter((event) => event.kind === "context-compacted")).toMatchObject([
+        { trigger: "automatic" },
+      ]);
+      expect(run.transcripts.load(sessionId)?.compactions).toMatchObject([
+        { turns: 1, afterTurns: 2 },
+      ]);
+      const thirdTurnSteps = run.requests.filter(
+        (request) =>
+          request.tools.length > 0 && request.history.some((message) => message.text === "third"),
+      );
+      // The turn opened on the summary, not behind a cut.
+      expect(thirdTurnSteps[0]?.history[0]?.text).toContain(summaryLead(1));
+      // The journal holds the first turn (0 to 3), second (4) and answer 2 (5),
+      // then third (6): the cut after the summary still names journal numbers.
+      const cut = thirdTurnSteps[1]?.history ?? [];
+      expect(cut[0]?.text).toContain("Messages 0 to 5 are kept in the journal");
+      expect(cut[1]?.text).toBe("third");
+      const lookup = createCodeJournalLookup({
+        transcripts: run.transcripts,
+        latestSession: () => ({
+          providerInstanceId: instanceId,
+          resumeCursor: { driverKind: "openai-compatible", value: String(sessionId) },
+        }),
+        providerInstanceId: instanceId,
+        secrets: [],
+      });
+      expect(lookup({ from: 4, count: 2 })).toMatchObject({
+        status: "found",
+        messages: [
+          { number: 4, role: "user", text: "second" },
+          { number: 5, role: "assistant", text: "answer 2" },
+        ],
+      });
     });
 
     it("falls back to leaving earlier exchanges out when the summary fails, and does not pay for it again on later steps", async () => {

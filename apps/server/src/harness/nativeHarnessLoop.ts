@@ -1592,7 +1592,8 @@ export function fitRequest(
 /** Whether fitting left whole earlier exchanges out of this request behind the note. */
 function leftOutHistory(request: NativeHarnessRequest): boolean {
   const first = request.history[0];
-  return isPlainUserMessage(first) && first?.text === OMITTED_HISTORY_NOTE;
+  // The note may go on to name the journal numbers a lookup can read back.
+  return isPlainUserMessage(first) && first?.text.startsWith(OMITTED_HISTORY_NOTE) === true;
 }
 
 function isPlainUserMessage(message: NativeHarnessMessage | undefined): boolean {
