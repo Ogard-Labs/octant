@@ -26,10 +26,11 @@ import { isContextOverflowFailure } from "../providers/contextOverflowRefusal";
 import { isEndpointRetriesExhausted } from "../providers/endpointRetry";
 import type { ObservedRateLimitBucket } from "../providers/rateLimitHeaders";
 import { nativeHarnessToolGuide } from "./nativeHarnessInstructions";
-import type {
-  NativeHarnessTranscript,
-  NativeHarnessTranscriptCompaction,
-  NativeHarnessTranscriptStore,
+import {
+  MemoryNativeHarnessTranscriptStore,
+  type NativeHarnessTranscript,
+  type NativeHarnessTranscriptCompaction,
+  type NativeHarnessTranscriptStore,
 } from "./nativeHarnessTranscriptStore";
 import type {
   NativeHarnessLeadFallback,
@@ -69,30 +70,62 @@ const NOT_RUN_RESULT_JSON = JSON.stringify({
   note: "This call was not run: the turn stopped after repeated malformed tool calls.",
 });
 const OMITTED_HISTORY_NOTE =
-  "Earlier messages of this session were left out to fit the context window. Your task list and the files on disk still reflect that work.";
+  "Earlier messages of this session were left out to fit the context window.";
+
+/**
+ * What still carries the work a summary or a cut took out of view. A Chat
+ * session has no folder, so its lead is pointed at its task list only:
+ * naming files on disk would send it after something it cannot reach.
+ */
+function workStillReflected(mode: OctantMode | undefined): string {
+  return mode === "chat" || mode === undefined
+    ? "Your task list still reflects that work."
+    : "Your task list and the files on disk still reflect that work.";
+}
 
 /**
  * The note in front of a cut. It names message numbers only when the lead is
  * offered `journal-lookup` and every number it names is already journaled, so
- * the model is never handed a handle it cannot fetch.
+ * the model is never handed a handle it cannot fetch. A Chat thread has no
+ * folder, so its note does not point the lead at files it cannot reach.
  */
-function omittedHistoryNote(journaledBefore: number | undefined): string {
+function omittedHistoryNote(
+  mode: OctantMode | undefined,
+  journaledBefore: number | undefined,
+): string {
+  const note = `${OMITTED_HISTORY_NOTE} ${workStillReflected(mode)}`;
   return journaledBefore === undefined || journaledBefore < 1
-    ? OMITTED_HISTORY_NOTE
-    : `${OMITTED_HISTORY_NOTE} Messages 0 to ${journaledBefore - 1} are kept in the journal: call journal-lookup with one of those numbers as from to re-read them.`;
+    ? note
+    : `${note} Messages 0 to ${journaledBefore - 1} are kept in the journal: call journal-lookup with one of those numbers as from to re-read them.`;
 }
 
 /**
  * The compaction request asks for continuation material, not a reply: what a
  * later request needs to carry on the same work without the turns it replaces.
+ * A Chat session has no folder, so its summary is asked for no files or
+ * changes: naming them would send the lead after something it cannot reach.
  */
-const COMPACTION_INSTRUCTION = [
-  "Summarize the coding session excerpts below so the session can continue",
-  "without them. Preserve the task and goal, decisions, the files and",
-  "identifiers involved, what was changed, what was verified, and what is",
-  "still open. Do not answer anything, do not add commentary, and do not",
-  "invent detail that is not present.",
-].join(" ");
+function compactionInstruction(mode: OctantMode): string {
+  const preserve =
+    mode === "chat"
+      ? [
+          "Summarize the conversation excerpts below so the conversation can",
+          "continue without them. Preserve the request and goal, decisions, the",
+          "facts and identifiers involved, what was answered, and what is still",
+          "open.",
+        ]
+      : [
+          `Summarize the ${mode === "code" ? "coding" : "work"} session excerpts below so the session can continue`,
+          "without them. Preserve the task and goal, decisions, the files and",
+          "identifiers involved, what was changed, what was verified, and what is",
+          "still open.",
+        ];
+  return [
+    ...preserve,
+    "Do not answer anything, do not add commentary, and do not",
+    "invent detail that is not present.",
+  ].join(" ");
+}
 /**
  * The lead keeps its task list only through `todo-write` calls in the
  * conversation, so a summary that replaced the latest call would leave it
@@ -146,6 +179,12 @@ interface SessionState {
   readonly sessionId: ProviderSessionId;
   /** The journal aggregate this session appends to; a resumed session keeps its original one. */
   readonly transcriptId: ProviderSessionId;
+  /**
+   * Where the conversation is kept: the connection's journal, or for a
+   * single-use session a store that ends with it, since no thread records a
+   * single-use session and a purge could never find its journaled transcript.
+   */
+  readonly transcripts: NativeHarnessTranscriptStore;
   readonly modelId: ProviderModelId;
   readonly correlationId: CorrelationId;
   readonly endpoint: NativeHarnessTransportSession;
@@ -297,6 +336,7 @@ export function createNativeHarnessConnection(
     const newState = (input: {
       readonly sessionId: ProviderSessionId;
       readonly transcriptId: ProviderSessionId;
+      readonly transcripts: NativeHarnessTranscriptStore;
       readonly modelId: ProviderModelId;
       readonly endpoint: NativeHarnessTransportSession;
       readonly messages: NativeHarnessMessage[];
@@ -306,6 +346,7 @@ export function createNativeHarnessConnection(
     }): SessionState => ({
       sessionId: input.sessionId,
       transcriptId: input.transcriptId,
+      transcripts: input.transcripts,
       modelId: input.modelId,
       correlationId: options.correlationId() as CorrelationId,
       endpoint: input.endpoint,
@@ -378,7 +419,7 @@ export function createNativeHarnessConnection(
       });
       try {
         for (const { message } of retained) {
-          options.transcripts.append(state.transcriptId, message);
+          state.transcripts.append(state.transcriptId, message);
           state.messages.push(message);
         }
       } catch (error) {
@@ -478,7 +519,7 @@ export function createNativeHarnessConnection(
         const refit = fitRequest(
           state.fallback.endpoint,
           { ...request, modelId: state.fallback.target.modelId },
-          { journalNumberOf: journalNumberIn(state) },
+          { journalNumberOf: journalNumberIn(state), mode: options.mode },
         );
         if (refit === undefined) {
           throw failure(
@@ -519,6 +560,7 @@ export function createNativeHarnessConnection(
               : fitRequest(state.fallback?.endpoint ?? state.endpoint, current, {
                   reduceOnce: true,
                   journalNumberOf: journalNumberIn(state),
+                  mode: options.mode,
                 });
             if (refit !== undefined) {
               state.pricingBoundariesKnown = false;
@@ -555,7 +597,7 @@ export function createNativeHarnessConnection(
           const moved = fitRequest(
             outcome.endpoint,
             { ...current, modelId: outcome.target.modelId },
-            { journalNumberOf: journalNumberIn(state) },
+            { journalNumberOf: journalNumberIn(state), mode: options.mode },
           );
           if (moved === undefined) {
             outcome.endpoint.release();
@@ -628,7 +670,7 @@ export function createNativeHarnessConnection(
       if (pending === undefined) return;
       const unanswered = pending.calls.filter((call) => !pending.answers.has(call.toolCallId));
       for (const result of interruptedResults(unanswered)) {
-        options.transcripts.settle(state.transcriptId, result);
+        state.transcripts.settle(state.transcriptId, result);
         pending.answers.set(result.toolCallId, {
           sessionId: state.sessionId,
           requestId: result.toolCallId,
@@ -710,7 +752,7 @@ export function createNativeHarnessConnection(
           text: response.text,
           toolCalls: calls,
         };
-        options.transcripts.append(state.transcriptId, message);
+        state.transcripts.append(state.transcriptId, message);
         state.messages.push(message);
         const answers = new Map<string, ProviderToolAnswer>();
         const malformed = new Set<string>();
@@ -728,7 +770,7 @@ export function createNativeHarnessConnection(
             resultJson: problem,
             isError: true,
           });
-          options.transcripts.settle(state.transcriptId, {
+          state.transcripts.settle(state.transcriptId, {
             toolCallId: call.toolCallId,
             resultJson: problem,
             isError: true,
@@ -743,7 +785,7 @@ export function createNativeHarnessConnection(
             // the next send do not carry calls without results.
             for (const call of calls) {
               if (malformed.has(call.toolCallId)) continue;
-              options.transcripts.settle(state.transcriptId, {
+              state.transcripts.settle(state.transcriptId, {
                 toolCallId: call.toolCallId,
                 resultJson: NOT_RUN_RESULT_JSON,
                 isError: true,
@@ -785,7 +827,7 @@ export function createNativeHarnessConnection(
         return;
       }
       const message: NativeHarnessMessage = { role: "assistant", text: response.text };
-      options.transcripts.append(state.transcriptId, message);
+      state.transcripts.append(state.transcriptId, message);
       state.messages.push(message);
       const steered = takeSteeringRequest(state);
       if (steered !== undefined) {
@@ -851,7 +893,7 @@ export function createNativeHarnessConnection(
         const request: NativeHarnessRequest = {
           sessionId: state.sessionId,
           modelId: state.modelId,
-          system: COMPACTION_INSTRUCTION,
+          system: compactionInstruction(options.mode),
           history: [
             {
               role: "user",
@@ -920,7 +962,7 @@ export function createNativeHarnessConnection(
         afterTurns: hidden + (keepFrom === undefined ? starts.length : latest),
       };
       try {
-        options.transcripts.compact(state.transcriptId, compaction);
+        state.transcripts.compact(state.transcriptId, compaction);
       } catch {
         // The marker never reached the journal, so the session still reads
         // the turns it would have replaced.
@@ -933,7 +975,7 @@ export function createNativeHarnessConnection(
       state.messages.splice(
         0,
         state.messages.length,
-        compactionSummaryMessage(compaction),
+        compactionSummaryMessage(compaction, options.mode),
         ...body.slice(kept),
       );
       // Every message the summary replaced was journaled before it, so the
@@ -969,18 +1011,23 @@ export function createNativeHarnessConnection(
 
     /**
      * The turn's request rebuilt after summarizing earlier turns in place,
-     * or undefined when nothing was summarized. A Code session only, whose
-     * transcript the harness keeps (Chat and Work send the host's planned
-     * history), and only on the lead's own model: the summary is sized for
-     * its window, and a fallback model's window may differ. The compaction is
-     * the runtime's own as far as the turn runner can tell, so it is reported
-     * `automatic` and marks the turn's usage compacted.
+     * or undefined when nothing was summarized. Every mode's session keeps
+     * its transcript in the journal and continues it turn after turn, so
+     * Chat and Work summarize exactly as Code does, with the same tool-less
+     * request to the session's own endpoint. A fresh Chat or Work session
+     * carries the host's planned, already compacted history inside its first
+     * message; that is the running turn, which is never summarized, so only
+     * turns the session itself ran before it are. Only on the lead's own
+     * model: the summary is sized for its window, and a fallback model's
+     * window may differ. The compaction is the runtime's own as far as the
+     * turn runner can tell, so it is reported `automatic` and marks the
+     * turn's usage compacted.
      */
     const compactToFit = async (
       state: SessionState,
       signal: AbortSignal,
     ): Promise<NativeHarnessRequest | undefined> => {
-      if (options.mode !== "code" || state.fallback !== undefined) return undefined;
+      if (state.fallback !== undefined) return undefined;
       // One summary request per turn: after a success nothing before the
       // running turn is left to summarize, and after a failure every later
       // step would pay for the same large request again only to fall back to
@@ -1020,7 +1067,7 @@ export function createNativeHarnessConnection(
           history,
           tools: sortToolDefinitionsByName(state.tools),
         },
-        { journalNumberOf: journalNumberIn(state) },
+        { journalNumberOf: journalNumberIn(state), mode: options.mode },
       );
 
     return {
@@ -1034,8 +1081,12 @@ export function createNativeHarnessConnection(
             refuseCancelledOpening(signal);
             const endpoint = await options.transport.open(input.modelId);
             refuseCancelledOpening(signal, endpoint);
+            const transcripts =
+              input.singleUse === true
+                ? new MemoryNativeHarnessTranscriptStore()
+                : options.transcripts;
             try {
-              options.transcripts.open(input.sessionId, {
+              transcripts.open(input.sessionId, {
                 instanceId: options.instanceId,
                 modelId: input.modelId,
                 projectRoot: options.projectRoot,
@@ -1048,13 +1099,16 @@ export function createNativeHarnessConnection(
             const state = newState({
               sessionId: input.sessionId,
               transcriptId: input.sessionId,
+              transcripts,
               modelId: input.modelId,
               endpoint,
               messages: [],
               tools: input.tools,
             });
             admit(state);
-            return { sessionId: input.sessionId, resumeCursor: cursorFor(state) };
+            return input.singleUse === true
+              ? { sessionId: input.sessionId }
+              : { sessionId: input.sessionId, resumeCursor: cursorFor(state) };
           },
           catch: sanitizeFailure,
         }),
@@ -1098,10 +1152,15 @@ export function createNativeHarnessConnection(
               endpoint.release();
               throw error;
             }
-            const compacted = afterCompaction(messages, transcript.compactions.at(-1));
+            const compacted = afterCompaction(
+              messages,
+              transcript.compactions.at(-1),
+              options.mode,
+            );
             const state = newState({
               sessionId: input.sessionId,
               transcriptId,
+              transcripts: options.transcripts,
               modelId: transcript.binding.modelId,
               endpoint,
               messages: compacted.messages,
@@ -1144,7 +1203,7 @@ export function createNativeHarnessConnection(
                 "The provider request exceeded the configured size limit.",
               );
             }
-            options.transcripts.append(state.transcriptId, user);
+            state.transcripts.append(state.transcriptId, user);
             state.messages.splice(0, state.messages.length, ...earlier, live);
             state.pending = undefined;
             state.answered.clear();
@@ -1264,7 +1323,7 @@ export function createNativeHarnessConnection(
             }
             pending.answers.set(input.requestId, input);
             state.answered.add(input.requestId);
-            options.transcripts.settle(state.transcriptId, {
+            state.transcripts.settle(state.transcriptId, {
               toolCallId: input.requestId,
               resultJson: input.resultJson,
               isError: input.isError,
@@ -1392,6 +1451,7 @@ function turnStarts(messages: ReadonlyArray<NativeHarnessMessage>): ReadonlyArra
  */
 function compactionSummaryMessage(
   compaction: NativeHarnessTranscriptCompaction,
+  mode: OctantMode,
 ): NativeHarnessMessage {
   const replaced =
     compaction.turns === 1
@@ -1399,7 +1459,7 @@ function compactionSummaryMessage(
       : `The first ${compaction.turns} turns of this session were summarized and are`;
   return {
     role: "user",
-    text: `${replaced} no longer shown in full; the files on disk still reflect that work. Summary:\n\n${compaction.summary}`,
+    text: `${replaced} no longer shown in full. ${workStillReflected(mode)} Summary:\n\n${compaction.summary}`,
   };
 }
 
@@ -1441,6 +1501,7 @@ function clipCompactionItem(value: string): string {
 function afterCompaction(
   messages: NativeHarnessMessage[],
   compaction: NativeHarnessTranscriptCompaction | undefined,
+  mode: OctantMode,
 ): {
   readonly messages: NativeHarnessMessage[];
   readonly compaction: NativeHarnessTranscriptCompaction | undefined;
@@ -1451,7 +1512,7 @@ function afterCompaction(
   const start = turnStarts(messages)[compaction.turns];
   if (start === undefined) return { messages, compaction: undefined, journalOffset: 0 };
   return {
-    messages: [compactionSummaryMessage(compaction), ...messages.slice(start)],
+    messages: [compactionSummaryMessage(compaction, mode), ...messages.slice(start)],
     compaction,
     journalOffset: start,
   };
@@ -1545,7 +1606,8 @@ export function sortToolDefinitionsByName(
  *
  * `journalNumberOf` gives a message's number in the journal. When the request
  * offers `journal-lookup`, the note names the journaled messages before the
- * first one kept, which is every message a cut can have left out.
+ * first one kept, which is every message a cut can have left out. `mode` is
+ * the session's; without it the note claims no files on disk.
  */
 export function fitRequest(
   endpoint: Pick<NativeHarnessTransportSession, "fits">,
@@ -1553,6 +1615,8 @@ export function fitRequest(
   options?: {
     readonly reduceOnce?: boolean | undefined;
     readonly journalNumberOf?: ((message: NativeHarnessMessage) => number | undefined) | undefined;
+    /** The session's mode; absent, the note points at no folder. */
+    readonly mode?: OctantMode | undefined;
   },
 ): NativeHarnessRequest | undefined {
   if (options?.reduceOnce !== true && endpoint.fits(request)) return request;
@@ -1584,6 +1648,7 @@ export function fitRequest(
     start = next;
     const kept = history[start];
     const note = omittedHistoryNote(
+      options?.mode,
       lookupOffered && kept !== undefined ? options?.journalNumberOf?.(kept) : undefined,
     );
     // Cutting only an earlier note and putting the same note back changes nothing.

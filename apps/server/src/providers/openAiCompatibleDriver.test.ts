@@ -806,10 +806,12 @@ describe("makeOpenAiCompatibleDriver", () => {
 
     const outcomes = await runTurns(driver, ["a".repeat(6_000), "b".repeat(6_000), "next"]);
 
-    // The person sees the turn answered, not the refusal.
+    // The person sees the turn answered, not the refusal: the earlier turns
+    // are summarized first, and the turn is sent once more on that summary.
     expect(outcomes).toEqual(["completed", "completed", "completed"]);
-    expect(bodies).toHaveLength(4);
-    expect(bodies[3]?.messages.length).toBeLessThan(bodies[2]?.messages.length ?? 0);
+    expect(bodies).toHaveLength(5);
+    expect(JSON.stringify(bodies[3])).toContain("Summarize the conversation excerpts");
+    expect(bodies[4]?.messages.length).toBeLessThan(bodies[2]?.messages.length ?? 0);
     expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject({
       learnedContextWindow: 2_048,
     });
@@ -837,7 +839,8 @@ describe("makeOpenAiCompatibleDriver", () => {
     const outcomes = await runTurns(driver, ["a".repeat(600), "b".repeat(600), "next"]);
 
     expect(outcomes).toEqual(["completed", "completed", "completed"]);
-    expect(generations).toBe(4);
+    // The refused request, a summary of the earlier turns, and one retry.
+    expect(generations).toBe(5);
     expect(runtimeRegistry.observedState(instanceId)?.models[0]?.learnedContextWindow).toBe(
       undefined,
     );

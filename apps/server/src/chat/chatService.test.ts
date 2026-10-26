@@ -28,6 +28,7 @@ import {
   decodeContextPlan,
   decodeContextSubjectRef,
   decodeContextSummaryId,
+  decodeProviderCatalogSnapshot,
   decodeProviderInstanceId,
   decodeProviderModelId,
   decodeProviderSessionId,
@@ -43,6 +44,7 @@ import {
   type ContextSummaryId,
   type GlobalSequence,
   type OpenAiCompatibleProviderConfiguration,
+  type ProviderCatalogSnapshot,
   type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderContextBlock,
@@ -291,6 +293,10 @@ function openFixture(options?: {
         readonly execute: () => Promise<{ readonly result: unknown }>;
       }
     | undefined;
+  /** The registry the driver probes into, which holds the host's Verify tools record. */
+  readonly providerRuntimeRegistry?: ProviderRuntimeRegistry;
+  /** The provider's persisted catalogue, which outlives the registry across a restart. */
+  readonly providerCatalog?: ProviderCatalogSnapshot;
   readonly resolveExtensionSelectionContext?: (input: {
     readonly phase: "send" | "replay" | "resume" | "provider-handoff";
     readonly thread: ChatThread;
@@ -442,6 +448,14 @@ function openFixture(options?: {
       };
     },
     readProviderInstances: () => [],
+    ...(options?.providerCatalog === undefined
+      ? {}
+      : {
+          readProviderCatalog: (instanceId: ProviderInstanceId) =>
+            String(instanceId) === String(options.providerCatalog?.instanceId)
+              ? options.providerCatalog
+              : undefined,
+        }),
     readProviderDefaults: () => ({
       defaultProviderInstanceId: ids.provider,
       version: 1 as AggregateVersion,
@@ -714,6 +728,9 @@ function openFixture(options?: {
     ...(options?.resolveExtensionSelectionContext === undefined
       ? {}
       : { resolveExtensionSelectionContext: options.resolveExtensionSelectionContext }),
+    ...(options?.providerRuntimeRegistry === undefined
+      ? {}
+      : { providerRuntimeRegistry: options.providerRuntimeRegistry }),
     ...(options?.gatherMultiModelRuntimeFacts === undefined
       ? {}
       : { gatherMultiModelRuntimeFacts: options.gatherMultiModelRuntimeFacts }),
@@ -1274,6 +1291,110 @@ describe("ChatService", () => {
     });
     expect(fakeDriver.sentTurns[1]?.tools.map(({ name }) => name)).not.toContain("octant_canvas");
     expect(JSON.stringify(fakeDriver.sentTurns[1]?.context)).not.toContain("octant_canvas");
+  });
+
+  it("offers Octant's tools only to a model the host verified, not one the driver's probe claims", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000014");
+    const claimed = probeFixture({
+      capabilities: { ...probeFixture().capabilities, appManagedTools: "unsupported" },
+      verifiedToolModelIds: [decodeProviderModelId("model-a")],
+    });
+    const canvasTool = () => ({
+      definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+    });
+    const toolsSent = async (providerRuntimeRegistry?: ProviderRuntimeRegistry) => {
+      const { service, fakeDriver } = openFixture({
+        probe: claimed,
+        resolveAppManagedTools: canvasTool,
+        ...(providerRuntimeRegistry === undefined ? {} : { providerRuntimeRegistry }),
+      });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Claimed tools",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Write the memo",
+        },
+        { windowId: window },
+      );
+      return fakeDriver.sentTurns[0]?.tools.map(({ name }) => name);
+    };
+
+    expect(await toolsSent()).not.toContain("octant_canvas");
+
+    const verified = new ProviderRuntimeRegistry();
+    verified.setObservedState(claimed);
+    verified.setVerifiedToolModels(claimed.instanceId, [decodeProviderModelId("model-a")]);
+    expect(await toolsSent(verified)).toContain("octant_canvas");
+  });
+
+  it("restores a model's Verify tools record from the catalogue after a restart, never from an invalidated one", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000015");
+    const unclaimed = probeFixture({
+      capabilities: { ...probeFixture().capabilities, appManagedTools: "unsupported" },
+    });
+    const catalog = (invalidated: boolean) =>
+      decodeProviderCatalogSnapshot({
+        instanceId: unclaimed.instanceId,
+        version: 2,
+        models: unclaimed.models,
+        manualModelOrder: [],
+        verifiedToolModelIds: ["model-a"],
+        invalidated,
+        ...(invalidated
+          ? { invalidatedAt: now, invalidationReason: "The endpoint address changed." }
+          : {}),
+        updatedAt: now,
+      });
+    // A fresh registry is what a restart leaves: no Verify tools record.
+    const afterRestart = async (providerCatalog: ProviderCatalogSnapshot) => {
+      const providerRuntimeRegistry = new ProviderRuntimeRegistry();
+      const { service, fakeDriver } = openFixture({
+        probe: unclaimed,
+        providerCatalog,
+        providerRuntimeRegistry,
+        resolveAppManagedTools: () => ({
+          definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+          execute: async () => ({ result: {} }),
+        }),
+      });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "After restart",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Write the memo",
+        },
+        { windowId: window },
+      );
+      return {
+        tools: fakeDriver.sentTurns[0]?.tools.map(({ name }) => name),
+        record: providerRuntimeRegistry
+          .observedState(unclaimed.instanceId)
+          ?.verifiedToolModelIds?.map(String),
+      };
+    };
+
+    const restored = await afterRestart(catalog(false));
+    expect(restored.tools).toContain("octant_canvas");
+    expect(restored.record).toEqual(["model-a"]);
+
+    const invalidated = await afterRestart(catalog(true));
+    expect(invalidated.tools).not.toContain("octant_canvas");
+    expect(invalidated.record ?? []).toEqual([]);
   });
 
   it("registers a refusal-only Computer tool when the send carries no @Computer selection", async () => {
@@ -3773,10 +3894,10 @@ describe("ChatService", () => {
     const observed = await Effect.runPromise(
       Effect.scoped(driver.probe({ instanceId: decodeProviderInstanceId(ids.provider) })),
     );
-    runtimeRegistry.setObservedState({
-      ...observed,
-      verifiedToolModelIds: observed.models.map((model) => model.id),
-    });
+    runtimeRegistry.setVerifiedToolModels(
+      observed.instanceId,
+      observed.models.map((model) => model.id),
+    );
     const snapshot = authoritativeExtensionSnapshot();
     const activation = new ExtensionActivationService({
       policy: {
@@ -3815,7 +3936,11 @@ describe("ChatService", () => {
         execute: async () => ({ result: { status: "built" } }),
       },
     });
-    const { service } = openFixture({ driver, resolveExtensionSelectionContext });
+    const { service } = openFixture({
+      driver,
+      resolveExtensionSelectionContext,
+      providerRuntimeRegistry: runtimeRegistry,
+    });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",

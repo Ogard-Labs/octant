@@ -60,6 +60,8 @@ import { hostOAuthEventJournal } from "../providers/oauth/hostOAuthEventJournal"
 import { createProviderOAuthRouteHandler } from "../providers/oauth/providerOAuthRoutes";
 import { retireClaudeHelperTokens } from "../providers/claudeHelperTokenRetirement";
 import { subscriptionOAuthHostFromBroker } from "../providers/oauth/subscriptionOAuthHost";
+import { directoryOAuthHostFromBroker } from "../providers/oauth/directoryOAuthHost";
+import { readDirectoryOAuthCredential } from "@octant/provider-sdk/directory-oauth";
 import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
 import { type ClaudeAgentSdkPort, makeClaudeAgentSdkPort } from "../providers/claudeAgentSdkPort";
 import type { ClaudeResumeIdentityPort } from "../providers/claudeDriver";
@@ -192,6 +194,7 @@ export interface ConfiguredProviderDriverOptions {
   readonly permissionPersistence: () => PermissionPersistence;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly subscriptionOAuth?: import("@octant/provider-sdk/subscription-oauth").SubscriptionOAuthHost;
+  readonly directoryOAuth?: import("@octant/provider-sdk/directory-oauth").DirectoryOAuthHost;
   readonly fetch?: CompatibleFetch;
   /** Shared by every harness driver built from these options, so a later turn can resume an earlier one. */
   readonly nativeHarnessTranscripts?: NativeHarnessTranscriptStore;
@@ -262,6 +265,7 @@ export function makeConfiguredProviderDriver(
         ...(options.credentialResolver === undefined
           ? {}
           : { credentialResolver: options.credentialResolver }),
+        ...(options.directoryOAuth === undefined ? {} : { directoryOAuth: options.directoryOAuth }),
         ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
       }),
       instance,
@@ -358,6 +362,16 @@ export function pathIsProjectConfined(projectRoot: string, absolutePath: string)
   } catch {
     return false;
   }
+}
+
+/** The credential store's answer for an instance that holds no credential. */
+function isMissingCredential(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "category" in error &&
+    error.category === "unauthenticated"
+  );
 }
 
 function isPathWithin(root: string, candidate: string): boolean {
@@ -1059,6 +1073,27 @@ export function wireProviders(deps: ProvidersDependencies) {
     }
     const subscriptionOAuth =
       oauthBroker === undefined ? undefined : subscriptionOAuthHostFromBroker(oauthBroker);
+    const directoryOAuth =
+      oauthBroker === undefined ? undefined : directoryOAuthHostFromBroker(oauthBroker);
+    // Clearing an instance's credential also forgets an organization
+    // sign-in's grant: the pointer is the only reference to it, so deleting
+    // the pointer alone would leave a live refresh token in the broker.
+    const clearProviderCredential = async (instanceId: string): Promise<void> => {
+      if (credentialBroker === undefined || credentialResolver === undefined) return;
+      let stored: string | undefined;
+      try {
+        stored = await credentialBroker.resolve(instanceId);
+      } catch (error) {
+        // Only a missing credential means there is no pointer. A store that
+        // could not be read may still hold one, and deleting it unread would
+        // orphan its grant, so the change is refused instead.
+        if (!isMissingCredential(error)) throw error;
+        stored = undefined;
+      }
+      const pointer = stored === undefined ? undefined : readDirectoryOAuthCredential(stored);
+      if (pointer !== undefined) await oauthBroker?.forget(pointer.credentialRef);
+      await credentialResolver.delete(instanceId);
+    };
     const providerService = new ProviderService({
       persistence,
       runtimeRegistry: providerRuntimeRegistry,
@@ -1080,9 +1115,7 @@ export function wireProviders(deps: ProvidersDependencies) {
           void providerAccountPlanUsageStore.forget(instanceId).catch(() => undefined);
         }
       },
-      ...(credentialResolver === undefined
-        ? {}
-        : { clearProviderCredential: (instanceId) => credentialResolver.delete(instanceId) }),
+      ...(credentialResolver === undefined ? {} : { clearProviderCredential }),
       driver: (instance) =>
         attachWorkRequestRuntime(
           makeConfiguredProviderDriver(instance, {
@@ -1107,6 +1140,7 @@ export function wireProviders(deps: ProvidersDependencies) {
             onRuntimeEvent: recordProviderRuntimeUsage,
             ...(credentialResolver === undefined ? {} : { credentialResolver }),
             ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
+            ...(directoryOAuth === undefined ? {} : { directoryOAuth }),
           }),
           () => workRequestRuntime,
         ),
@@ -1230,6 +1264,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       onRuntimeEvent: recordProviderRuntimeUsage,
       ...(credentialResolver === undefined ? {} : { credentialResolver }),
       ...(subscriptionOAuth === undefined ? {} : { subscriptionOAuth }),
+      ...(directoryOAuth === undefined ? {} : { directoryOAuth }),
       localUsageHistorySourceForInstance: (instance) => {
         const claudeConfigDirectory =
           instance.driverKind === "claude"

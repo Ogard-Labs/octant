@@ -405,10 +405,21 @@ deliverable, because an updater on an unsigned app is an unauthenticated
 code-delivery channel and macOS refuses the replacement anyway. A local package
 built without maintainer signing credentials is unsigned. Cross-platform
 desktop (macOS, Linux, Windows) remains authorized: Linux desktop shell next, Windows Work/Code only after an
-explicitly approved Windows confinement design is documented. Do not add native mobile store distribution, hosted
-relay, or full LSP/extension host unless an explicit
-request authorizes that scope and the current specification documents its
-authority and release boundaries. Connectors (MCP servers added by hand, imported
+explicitly approved Windows confinement design is documented. These tracks
+are authorized as post-preview work (maintainer decision, 2026-10-26) and are
+not part of the technical preview: mobile maturity (Android internal builds,
+redacted push, capture and voice, public store distribution), a
+ciphertext-only hosted relay, a full LSP / extension host / debugger
+companion, Apple physical devices and then TestFlight and App Store
+distribution of a person's own apps, enterprise directory OAuth and cloud-IAM
+provider identity, disposable Linux desktops for headless hosts, remote SSH
+development environments, third-party provider-driver plugins, and the EU/GDPR
+compliance package (pending legal review). Each is design-first: build it only
+once its owning specification documents its authority, privacy, and release
+boundaries. The authorization covers design and implementation; creating an
+account, spending money, submitting to a store, deploying a hosted service, or
+weakening any invariant each still needs a separate explicit maintainer
+action. Connectors (MCP servers added by hand, imported
 from other tools on this Mac, signed in to, or chosen from the bundled catalog)
 are in scope under the architecture's
 [connector rules](docs/architecture.md#extensions-and-skills): user-added packages

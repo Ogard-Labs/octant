@@ -14,7 +14,11 @@ import {
 import { Effect } from "effect";
 import type { OhMyPiProcessPort } from "./ohMyPiProcess";
 import type { PiRpcResponse } from "./piRpcClient";
-import { trackProviderProcess, type ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import {
+  trackProviderProcess,
+  type ProviderRuntimeRegistry,
+  type ProviderDriverRuntimeRegistry,
+} from "./providerRuntimeRegistry";
 
 export interface OhMyPiDriverOptions {
   readonly instanceId: ProviderInstanceId;
@@ -22,7 +26,7 @@ export interface OhMyPiDriverOptions {
   readonly managedHome: string;
   readonly supportedVersion: string;
   readonly process: OhMyPiProcessPort;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly clock?: () => string;
 }
 

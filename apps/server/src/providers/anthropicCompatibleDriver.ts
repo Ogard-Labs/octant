@@ -45,7 +45,7 @@ import {
   type AnthropicTurnResult,
 } from "./anthropicMessages";
 import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
 
 const initialCapabilities: ProviderCapabilities = {
@@ -77,7 +77,7 @@ const initialCapabilities: ProviderCapabilities = {
 export interface AnthropicCompatibleDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly configuration: AnthropicCompatibleProviderConfiguration;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: AnthropicCompatibleFetch;
   readonly clock?: () => string;
@@ -139,10 +139,7 @@ export function makeAnthropicCompatibleDriver(
                 gate.kind === "oauth",
               );
               const result = await probeAnthropicModels(endpoint);
-              // A person's tool verification outlives routine probes, which
-              // run no generating request of their own.
               const prior = options.runtimeRegistry.observedState(instanceId);
-              const priorVerified = prior?.verifiedToolModelIds;
               const probe = decodeProviderObservedState({
                 instanceId,
                 readiness: result.readiness,
@@ -154,7 +151,6 @@ export function makeAnthropicCompatibleDriver(
                 // person's override, outlive the probe a Chat turn runs first.
                 models: carryModelContextWindowFacts(result.models, prior?.models),
                 capabilities: initialCapabilities,
-                ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
                 ...(result.failure === undefined ? {} : { message: result.failure.message }),
                 lastSuccessfulProbeAt: observedAt,
                 observedAt,
@@ -224,8 +220,6 @@ function admitTurn(
 ): ProviderFailure | undefined {
   const observed = options.runtimeRegistry.observedState(options.instanceId);
   const model = observed?.models.find((candidate) => candidate.id === modelId);
-  const isCapabilityEchoProbe =
-    turn.tools.length > 0 && turn.tools.every((tool) => isCapabilityEchoToolCall(tool.name));
   // A tool call proves only the model that made it, so admission reads the
   // per-model verifiedToolModelIds set and one verified model never unlocks
   // tools for its siblings on the same endpoint.
@@ -235,7 +229,7 @@ function admitTurn(
     turn,
     {
       ...(observed?.capabilities ?? initialCapabilities),
-      appManagedTools: isCapabilityEchoProbe || isVerifiedModel ? "supported" : "unsupported",
+      appManagedTools: isVerifiedModel ? "supported" : "unsupported",
     },
     model,
   );
@@ -362,9 +356,6 @@ function recordObservedTurn(
       usage: result.usage === undefined ? "unavailable" : "supported",
     },
     ...(current?.message === undefined ? {} : { message: current.message }),
-    ...(current?.verifiedToolModelIds === undefined
-      ? {}
-      : { verifiedToolModelIds: current.verifiedToolModelIds }),
     ...(current?.lastSuccessfulProbeAt === undefined
       ? {}
       : { lastSuccessfulProbeAt: current.lastSuccessfulProbeAt }),

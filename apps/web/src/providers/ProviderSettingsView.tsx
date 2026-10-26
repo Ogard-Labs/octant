@@ -1,39 +1,30 @@
-import type {
-  AgentEligibleModelRef,
-  HiddenProviderModelRef,
-  AnthropicCompatibleProviderConfiguration,
-  AzureFoundryProviderConfiguration,
-  BflImageProviderConfiguration,
-  ClaudeProviderConfiguration,
-  CodexProviderConfiguration,
-  DevinProviderConfiguration,
-  DiscoverySnapshot,
-  GrokProviderConfiguration,
-  GlmProviderConfiguration,
-  GeminiProviderConfiguration,
-  CopilotProviderConfiguration,
-  ClineProviderConfiguration,
-  QwenProviderConfiguration,
-  FxProviderConfiguration,
-  GooseProviderConfiguration,
-  IdeogramImageProviderConfiguration,
-  KiloProviderConfiguration,
-  MistralVibeProviderConfiguration,
-  GeminiImageProviderConfiguration,
-  OpenAiCompatibleProviderConfiguration,
-  OpenAiImageProviderConfiguration,
-  OllamaProviderConfiguration,
-  OhMyPiProviderConfiguration,
-  PiProviderConfiguration,
-  PermissionPersistence,
-  ProviderCredentialStatus,
-  ProviderAuthenticationAttempt,
-  ProviderDefaults,
-  ProviderDataTags,
-  ProviderInstance,
-  ProviderInstanceId,
-  ProviderModelId,
-  ProviderObservedState,
+import {
+  ACP_AGENT_KINDS,
+  type AcpAgentConfiguration,
+  type AgentEligibleModelRef,
+  type HiddenProviderModelRef,
+  type AnthropicCompatibleProviderConfiguration,
+  type AzureFoundryProviderConfiguration,
+  type BflImageProviderConfiguration,
+  type ClaudeProviderConfiguration,
+  type CodexProviderConfiguration,
+  type DiscoverySnapshot,
+  type IdeogramImageProviderConfiguration,
+  type GeminiImageProviderConfiguration,
+  type OpenAiCompatibleProviderConfiguration,
+  type OpenAiImageProviderConfiguration,
+  type OllamaProviderConfiguration,
+  type OhMyPiProviderConfiguration,
+  type PiProviderConfiguration,
+  type PermissionPersistence,
+  type ProviderCredentialStatus,
+  type ProviderAuthenticationAttempt,
+  type ProviderDefaults,
+  type ProviderDataTags,
+  type ProviderInstance,
+  type ProviderInstanceId,
+  type ProviderModelId,
+  type ProviderObservedState,
 } from "@octant/contracts";
 import {
   implicitClaudeAccountOwnerId,
@@ -80,19 +71,16 @@ export interface ProviderSettingsViewProps {
   /** Open provider-owned sign-in pages through the desktop host bridge. */
   readonly onOpenExternalUrl?: (url: string) => void;
   readonly onCreate: (
-    driverKind:
-      | "opencode"
-      | "codex"
-      | "kimi-code"
-      | "devin"
-      | "kilo"
-      | "pi"
-      | "oh-my-pi"
-      | "goose"
-      | "copilot",
+    driverKind: "opencode" | "codex" | "pi" | "oh-my-pi",
     displayName: string,
     binaryPath: string,
     accent?: string,
+  ) => Promise<boolean>;
+  /** Creates any ACP agent; an API-key posture carries the key to store. */
+  readonly onCreateAcpAgent: (
+    displayName: string,
+    configuration: AcpAgentConfiguration,
+    credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onCreateOpenAiCompatible: (
     displayName: string,
@@ -133,41 +121,6 @@ export interface ProviderSettingsViewProps {
   readonly onCreateClaude: (
     displayName: string,
     configuration: ClaudeProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onCreateMistralVibe: (
-    displayName: string,
-    configuration: MistralVibeProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onCreateGrok: (
-    displayName: string,
-    configuration: GrokProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onCreateGlm: (
-    displayName: string,
-    configuration: GlmProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onCreateGemini: (
-    displayName: string,
-    configuration: GeminiProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onCreateCline: (
-    displayName: string,
-    configuration: ClineProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onCreateQwen: (
-    displayName: string,
-    configuration: QwenProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onCreateFx: (
-    displayName: string,
-    configuration: FxProviderConfiguration,
     credential: TransientProviderCredential,
   ) => Promise<boolean>;
   readonly onCreateOllama: (
@@ -236,56 +189,11 @@ export interface ProviderSettingsViewProps {
     credential: TransientProviderCredential,
     options?: { readonly reassignAccountDirectory?: boolean },
   ) => Promise<boolean>;
-  readonly onChangeMistralVibeConfiguration: (
+  /** Reconfigures any ACP agent; an API-key posture may carry a new key. */
+  readonly onChangeAcpAgentConfiguration: (
     instanceId: ProviderInstanceId,
-    configuration: MistralVibeProviderConfiguration,
+    configuration: AcpAgentConfiguration,
     credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onChangeGrokConfiguration: (
-    instanceId: ProviderInstanceId,
-    configuration: GrokProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onChangeGooseConfiguration: (
-    instanceId: ProviderInstanceId,
-    configuration: GooseProviderConfiguration,
-  ) => Promise<boolean>;
-  readonly onChangeGlmConfiguration: (
-    instanceId: ProviderInstanceId,
-    configuration: GlmProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onChangeGeminiConfiguration: (
-    instanceId: ProviderInstanceId,
-    configuration: GeminiProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onChangeCopilotConfiguration: (
-    instanceId: ProviderInstanceId,
-    configuration: CopilotProviderConfiguration,
-  ) => Promise<boolean>;
-  readonly onChangeClineConfiguration: (
-    instanceId: ProviderInstanceId,
-    configuration: ClineProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onChangeQwenConfiguration: (
-    instanceId: ProviderInstanceId,
-    configuration: QwenProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onChangeFxConfiguration: (
-    instanceId: ProviderInstanceId,
-    configuration: FxProviderConfiguration,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-  readonly onChangeDevinConfiguration: (
-    instanceId: ProviderInstanceId,
-    configuration: DevinProviderConfiguration,
-  ) => Promise<boolean>;
-  readonly onChangeKiloConfiguration: (
-    instanceId: ProviderInstanceId,
-    configuration: KiloProviderConfiguration,
   ) => Promise<boolean>;
   readonly onChangePiConfiguration: (
     instanceId: ProviderInstanceId,
@@ -369,21 +277,10 @@ function keepUnlistedProviderOrder(
 const GENERAL_PROVIDER_TYPES: ReadonlyArray<ProviderCreateProviderType> = [
   "opencode",
   "codex",
-  "kimi-code",
   "claude",
-  "devin",
-  "kilo",
   "pi",
   "oh-my-pi",
-  "mistral-vibe",
-  "grok",
-  "goose",
-  "glm",
-  "gemini",
-  "copilot",
-  "cline",
-  "qwen",
-  "fx",
+  ...ACP_AGENT_KINDS,
 ];
 
 interface AddAccountRequest {
@@ -486,13 +383,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
             onCreateAnthropicCompatible={props.onCreateAnthropicCompatible}
             onCreateAzureFoundry={props.onCreateAzureFoundry}
             onCreateClaude={(...args) => created(props.onCreateClaude(...args))}
-            onCreateGrok={props.onCreateGrok}
-            onCreateGlm={props.onCreateGlm}
-            onCreateGemini={props.onCreateGemini}
-            onCreateCline={props.onCreateCline}
-            onCreateQwen={props.onCreateQwen}
-            onCreateFx={props.onCreateFx}
-            onCreateMistralVibe={props.onCreateMistralVibe}
+            onCreateAcpAgent={props.onCreateAcpAgent}
             onCreateOllama={props.onCreateOllama}
             onCreateOpenAiCompatible={props.onCreateOpenAiCompatible}
             onCreateOpenAiImage={props.onCreateOpenAiImage}
@@ -538,17 +429,7 @@ export function ProviderSettingsView(props: ProviderSettingsViewProps) {
           : { usageLimitsClient: props.usageLimitsClient })}
         onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
         onChangeCodexConfiguration={props.onChangeCodexConfiguration}
-        onChangeDevinConfiguration={props.onChangeDevinConfiguration}
-        onChangeGrokConfiguration={props.onChangeGrokConfiguration}
-        onChangeGooseConfiguration={props.onChangeGooseConfiguration}
-        onChangeGlmConfiguration={props.onChangeGlmConfiguration}
-        onChangeGeminiConfiguration={props.onChangeGeminiConfiguration}
-        onChangeCopilotConfiguration={props.onChangeCopilotConfiguration}
-        onChangeClineConfiguration={props.onChangeClineConfiguration}
-        onChangeQwenConfiguration={props.onChangeQwenConfiguration}
-        onChangeFxConfiguration={props.onChangeFxConfiguration}
-        onChangeKiloConfiguration={props.onChangeKiloConfiguration}
-        onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
+        onChangeAcpAgentConfiguration={props.onChangeAcpAgentConfiguration}
         onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}
         onChangeOllamaConfiguration={props.onChangeOllamaConfiguration}
         onChangeOpenAiCompatibleConfiguration={props.onChangeOpenAiCompatibleConfiguration}

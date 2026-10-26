@@ -39,9 +39,9 @@ const everyDriverKind = [
 
 describe("bundled provider-driver plugins", () => {
   it("declares each in-tree vendor driver as a reviewed provider-driver component", () => {
-    expect(BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind)).toEqual([
-      ...everyDriverKind,
-    ]);
+    expect(BUNDLED_PROVIDER_DRIVER_PLUGINS.map((plugin) => plugin.driverKind).sort()).toEqual(
+      [...everyDriverKind].sort(),
+    );
     for (const driverKind of everyDriverKind) {
       expect(Schema.decodeUnknownSync(ProviderDriverKind)(driverKind)).toBe(driverKind);
     }
@@ -69,6 +69,44 @@ describe("bundled provider-driver plugins", () => {
     expect(slugs.size).toBe(everyDriverKind.length);
     expect(digests.size).toBe(everyDriverKind.length);
     expect(extensionIds.size).toBe(everyDriverKind.length);
+  });
+
+  // Activation state is stored against a plugin's extension id, so a driver
+  // whose id or digest moved would pick up another plugin's switches.
+  it("keeps every bundled driver's plugin identity across releases", () => {
+    const seeds: Readonly<Record<(typeof everyDriverKind)[number], readonly [string, string]>> = {
+      codex: ["0", "01"],
+      claude: ["1", "02"],
+      opencode: ["2", "03"],
+      kilo: ["3", "04"],
+      pi: ["4", "05"],
+      "oh-my-pi": ["5", "06"],
+      devin: ["6", "07"],
+      "mistral-vibe": ["7", "08"],
+      ollama: ["8", "09"],
+      "kimi-code": ["9", "0a"],
+      grok: ["a", "0b"],
+      "openai-compatible": ["b", "0c"],
+      "anthropic-compatible": ["c", "0d"],
+      "azure-foundry": ["d", "0e"],
+      goose: ["e", "0f"],
+      glm: ["f", "10"],
+      gemini: ["10", "11"],
+      copilot: ["11", "12"],
+      cline: ["12", "13"],
+      qwen: ["13", "14"],
+      fx: ["14", "15"],
+    };
+    for (const plugin of BUNDLED_PROVIDER_DRIVER_PLUGINS) {
+      const [digestSeed, idSuffix] = seeds[plugin.driverKind as (typeof everyDriverKind)[number]];
+      const hex = digestSeed.length === 1 ? digestSeed.repeat(64) : digestSeed.repeat(32);
+      expect(plugin.manifest.extensionId, plugin.driverKind).toBe(
+        `10000000-0000-4000-8000-0000000002${idSuffix}`,
+      );
+      expect(plugin.manifest.digest, plugin.driverKind).toBe(
+        `sha256:${hex === "1".repeat(64) && digestSeed.length !== 1 ? "1b".repeat(32) : hex}`,
+      );
+    }
   });
 
   it("admits every bundled driver by default", () => {

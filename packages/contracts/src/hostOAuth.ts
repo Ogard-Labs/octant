@@ -46,12 +46,15 @@ export type HostOAuthFlow = typeof HostOAuthFlow.Type;
  * ChatGPT plan dialect registers a user-defined agent on first sign-in: the
  * authorize request carries `dynamic_agent_client` plus an agent name hint and
  * a stable host id, and the callback returns the issued `client_id` the
- * exchange and every later refresh must use.
+ * exchange and every later refresh must use. The directory dialect signs in
+ * to an organization's own tenant: the broker builds every authority URL from
+ * its closed issuer host and the tenant, so the descriptor names no URL.
  */
 export const HostOAuthDialect = Schema.Literal(
   "openrouter-pkce",
   "chatgpt-plan-siwc",
   "mcp-authorization",
+  "directory-oidc",
 );
 export type HostOAuthDialect = typeof HostOAuthDialect.Type;
 
@@ -69,6 +72,22 @@ const ExtAgentHostId = Schema.String.pipe(Schema.pattern(/^urn:[a-z0-9][a-z0-9.:
  */
 const AgentNameHint = Schema.String.pipe(Schema.minLength(1), Schema.maxLength(64));
 
+/** A directory tenant or application id: a lowercase GUID, never a multi-tenant alias. */
+const DIRECTORY_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const DirectoryGuid = Schema.String.pipe(Schema.pattern(DIRECTORY_GUID));
+
+/** An https origin and nothing after it: the endpoint a directory grant is signed in for. */
+const HttpsOrigin = Schema.String.pipe(
+  Schema.filter((value) => {
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && url.origin === value;
+    } catch {
+      return false;
+    }
+  }),
+);
+
 export const HostOAuthDescriptor = Schema.Struct({
   descriptorId: DescriptorId,
   /** Absent only for a dialect that sends no `client_id`. */
@@ -77,7 +96,8 @@ export const HostOAuthDescriptor = Schema.Struct({
   dialect: Schema.optional(HostOAuthDialect),
   flow: HostOAuthFlow,
   authorizationEndpoint: Schema.optional(Endpoint),
-  tokenEndpoint: Endpoint,
+  /** Absent only for the directory dialect, whose authority the broker builds. */
+  tokenEndpoint: Schema.optional(Endpoint),
   deviceAuthorizationEndpoint: Schema.optional(Endpoint),
   scopes: Schema.Array(Scope).pipe(Schema.maxItems(16)),
   termsId: TermsId,
@@ -98,11 +118,45 @@ export const HostOAuthDescriptor = Schema.Struct({
    * on, chosen before the flow so the client registration could name it.
    */
   redirectPort: Schema.optional(Schema.Int.pipe(Schema.between(1024, 65535))),
+  /** Directory dialect only: the organization's tenant. */
+  tenantId: Schema.optional(DirectoryGuid),
+  /** Directory dialect only: the one resource the driver kind's endpoint accepts. */
+  audience: Schema.optional(Endpoint),
+  /** Directory dialect only: the origin of the endpoint the grant is signed in for. */
+  endpointOrigin: Schema.optional(HttpsOrigin),
 })
   .pipe(
     Schema.filter(
       (descriptor) => {
         if (descriptor.dialect !== undefined && descriptor.flow !== "authorization-code-pkce") {
+          return false;
+        }
+        // The directory dialect names its tenant, the organization's own
+        // public client, the audience, and the endpoint, and nothing the
+        // broker builds itself: no URL and no scope.
+        if (descriptor.dialect === "directory-oidc") {
+          return (
+            descriptor.clientId !== undefined &&
+            DIRECTORY_GUID.test(descriptor.clientId) &&
+            descriptor.tenantId !== undefined &&
+            descriptor.audience !== undefined &&
+            descriptor.endpointOrigin !== undefined &&
+            descriptor.scopes.length === 0 &&
+            descriptor.authorizationEndpoint === undefined &&
+            descriptor.tokenEndpoint === undefined &&
+            descriptor.deviceAuthorizationEndpoint === undefined &&
+            descriptor.resource === undefined &&
+            descriptor.redirectPort === undefined &&
+            descriptor.extAgentHostId === undefined &&
+            descriptor.agentNameHint === undefined
+          );
+        }
+        if (
+          descriptor.tokenEndpoint === undefined ||
+          descriptor.tenantId !== undefined ||
+          descriptor.audience !== undefined ||
+          descriptor.endpointOrigin !== undefined
+        ) {
           return false;
         }
         // The MCP authorization dialect registers its client before the flow,
@@ -126,7 +180,7 @@ export const HostOAuthDescriptor = Schema.Struct({
       },
       {
         description:
-          "a standard flow requires a client ID and at least one scope; a dialect flow cannot pair with a device-code grant; the ChatGPT plan dialect requires at least one scope",
+          "a standard flow requires a client ID and at least one scope; a dialect flow cannot pair with a device-code grant; the ChatGPT plan dialect requires at least one scope; only the directory dialect omits the token endpoint, and it names its tenant, client, audience, and endpoint and no URL or scope",
       },
     ),
   )
@@ -141,10 +195,25 @@ export const HostOAuthTermsAcknowledgment = Schema.Struct({
 }).annotations(strict);
 export type HostOAuthTermsAcknowledgment = typeof HostOAuthTermsAcknowledgment.Type;
 
-export const HostOAuthSignInAgainReason = Schema.Literal("revoked", "expired", "refresh-reused");
+/**
+ * `interaction-required` (directory dialect): the organization wants the
+ * person present again, for multi-factor or a consent prompt. The broker keeps
+ * that grant, since a later refresh can pass once the person has met the
+ * prompt elsewhere; a new sign-in replaces it with a new grant.
+ */
+export const HostOAuthSignInAgainReason = Schema.Literal(
+  "revoked",
+  "expired",
+  "refresh-reused",
+  "interaction-required",
+);
 export type HostOAuthSignInAgainReason = typeof HostOAuthSignInAgainReason.Type;
 
 const AttemptId = Schema.UUID;
+/** The broker's own label pattern; the directory may name a person with an apostrophe. */
+const SignedInAccountLabel = Schema.String.pipe(
+  Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9 .@_'-]{0,127}$/),
+);
 const CredentialRef = Schema.UUID;
 
 export const HostOAuthSignInState = Schema.Union(
@@ -170,6 +239,11 @@ export const HostOAuthSignInState = Schema.Union(
     attemptId: AttemptId,
     descriptorId: DescriptorId,
     credentialRef: CredentialRef,
+    /**
+     * Directory dialect only: the account the identity token named, when it
+     * named one in plain text. A display label, never a token or a claim set.
+     */
+    accountLabel: Schema.optional(SignedInAccountLabel),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("sign-in-again"),

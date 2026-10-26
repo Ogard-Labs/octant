@@ -141,6 +141,43 @@ describe("host OAuth service", () => {
     expect(called).toBe(false);
   });
 
+  it("refuses a remote principal that refreshes or signs out before any broker call", async () => {
+    const calls: string[] = [];
+    const recording = (name: string) => async () => {
+      calls.push(name);
+      return { kind: "revoked" };
+    };
+    const service = createHostOAuthService({
+      journal: { append: () => undefined },
+      broker: {
+        begin: recording("begin"),
+        status: recording("status"),
+        refresh: recording("refresh"),
+        access: recording("access"),
+        forget: async () => void calls.push("forget"),
+        revoke: recording("revoke"),
+      },
+    });
+    const credentialRef = randomUUID();
+    const sample = descriptor("https://idp.example/authorize", "https://idp.example/token");
+
+    const refreshed = await service.refresh({
+      principalKind: "remote-device",
+      descriptor: sample,
+      credentialRef,
+    });
+    const signedOut = await service.signOut({
+      principalKind: "remote-device",
+      descriptor: chatGptPlan(),
+      credentialRef,
+      forgetWhenNotRevoked: true,
+    });
+
+    expect(refreshed).toMatchObject({ kind: "refused", reason: "local-host-required" });
+    expect(signedOut).toMatchObject({ kind: "refused", reason: "local-host-required" });
+    expect(calls).toEqual([]);
+  });
+
   it("sends an MCP sign-in's resource and callback port to the broker", async () => {
     const seen: unknown[] = [];
     const service = createHostOAuthService({

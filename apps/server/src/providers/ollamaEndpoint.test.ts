@@ -79,6 +79,8 @@ describe("Ollama native endpoint", () => {
           displayName: "qwen3:latest",
           // Its trained 128K window, held to the window Octant loads.
           contextLimit: 32768,
+          // Kept too, as the ceiling on a window a person sets.
+          trainedContextWindow: 131072,
           reasoning: "supported",
           // Observed capability list without "vision": an explicit fact, not
           // an unknown.
@@ -162,6 +164,20 @@ describe("Ollama native endpoint", () => {
       "unreported:latest": OLLAMA_UNKNOWN_CONTEXT_WINDOW,
       "ambiguous:latest": OLLAMA_UNKNOWN_CONTEXT_WINDOW,
       // Ollama reads the window under the model's own architecture.
+      "architecture:latest": 8192,
+    });
+    // The trained window a person's own setting is held to, when Ollama names one.
+    expect(
+      Object.fromEntries(
+        result.models.map((model) => [String(model.id), model.trainedContextWindow]),
+      ),
+    ).toEqual({
+      "small:latest": 8192,
+      "long:latest": 1_048_576,
+      "configured:latest": 131072,
+      "overconfigured:latest": 16384,
+      "unreported:latest": undefined,
+      "ambiguous:latest": undefined,
       "architecture:latest": 8192,
     });
   });

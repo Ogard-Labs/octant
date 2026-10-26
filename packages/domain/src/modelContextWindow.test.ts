@@ -72,6 +72,24 @@ describe("model context window", () => {
     expect(resolveModelContextWindow({ id: "house-model" })).toBeUndefined();
   });
 
+  it("holds a window a person set to the window the model was trained for", () => {
+    const ollama = { id: "qwen3:latest", contextLimit: 32_768, trainedContextWindow: 131_072 };
+    // Ollama loads no more than the trained window, so a larger setting would
+    // let the planner fill room the model never has.
+    expect(resolveModelContextWindow({ ...ollama, contextWindowOverride: 262_144 })).toEqual({
+      contextWindow: 131_072,
+      source: "provider-discovery",
+    });
+    expect(resolveModelContextWindow({ ...ollama, contextWindowOverride: 65_536 })).toEqual({
+      contextWindow: 65_536,
+      source: "user-supplied",
+    });
+    // A model whose trained window is not known keeps the window as set.
+    expect(
+      resolveModelContextWindow({ id: "house-model", contextWindowOverride: 262_144 }),
+    ).toEqual({ contextWindow: 262_144, source: "user-supplied" });
+  });
+
   it("believes a refusal below what the provider reported", () => {
     // The endpoint enforced a smaller window than its own metadata listed.
     expect(

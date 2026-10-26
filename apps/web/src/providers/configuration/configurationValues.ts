@@ -4,6 +4,8 @@ import {
   type AnthropicCompatibleProviderConfiguration,
   type AzureFoundryProviderConfiguration,
   type BflImageProviderConfiguration,
+  type DirectoryClientId,
+  type DirectoryTenantId,
   type GeminiImageAspectRatio,
   type GeminiImageProviderConfiguration,
   type GeminiImageResolution,
@@ -40,14 +42,42 @@ export function anthropicConfigurationFrom(
   };
 }
 
+/**
+ * An Azure AI Foundry configuration from its form. The form names how it signs
+ * in; one without the field (an older form) keeps the API key. An organization
+ * sign-in carries the tenant and client the person pasted, lowercased, since
+ * the host compares them exactly and refuses anything but a GUID.
+ */
 export function foundryConfigurationFrom(data: FormData): AzureFoundryProviderConfiguration {
-  return {
+  const shared = {
     kind: "azure-foundry-openai-http",
     baseUrl: String(data.get("baseUrl") ?? ""),
-    authentication: "api-key",
     protocol: String(data.get("protocol") ?? "auto") as OpenAiCompatibleProtocol,
     manualModelIds: parseManualModelIds(String(data.get("manualModelIds") ?? "")),
+  } as const;
+  if (data.get("authentication") !== "directory-oauth") {
+    return { ...shared, authentication: "api-key" };
+  }
+  return {
+    ...shared,
+    authentication: "directory-oauth",
+    directory: {
+      tenantId: directoryGuid(data.get("tenantId")) as DirectoryTenantId,
+      clientId: directoryGuid(data.get("clientId")) as DirectoryClientId,
+    },
   };
+}
+
+/** A pasted directory id as the host compares it: trimmed and lowercase. */
+export function directoryGuid(value: FormDataEntryValue | string | null): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+const DIRECTORY_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/** Whether a pasted tenant or client id is a GUID once lowercased. */
+export function isDirectoryGuid(value: string): boolean {
+  return DIRECTORY_GUID.test(directoryGuid(value));
 }
 
 export function parseManualModelIds(

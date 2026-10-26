@@ -10,6 +10,7 @@ import { ChevronLeft } from "lucide-react";
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   AnthropicConfigurationForm,
+  DirectoryEndpointSignIn,
   FoundryConfigurationForm,
   HttpConfigurationForm,
   OllamaConfigurationForm,
@@ -49,6 +50,7 @@ import {
   endpointHost,
   endpointModelCount,
   endpointTakesKey,
+  isDirectorySignInEndpoint,
   type EndpointFixKind,
   type EndpointSignIn,
   type EndpointStatus,
@@ -170,9 +172,10 @@ export function ModelEndpointDetail(props: ModelEndpointDetailProps) {
   };
 
   const signInEndpoint =
-    (instance.driverKind === "openai-compatible" ||
+    ((instance.driverKind === "openai-compatible" ||
       instance.driverKind === "anthropic-compatible") &&
-    instance.configuration.oauthDescriptorId !== undefined;
+      instance.configuration.oauthDescriptorId !== undefined) ||
+    isDirectorySignInEndpoint(instance);
   const credential = useCredentialStatus(
     {
       instance,
@@ -311,6 +314,21 @@ function AccessSection(
               {...(props.signInOffer === undefined
                 ? {}
                 : { signInLabel: props.signInOffer.action })}
+              {...(props.onProviderOAuth === undefined
+                ? {}
+                : { onProviderOAuth: props.onProviderOAuth })}
+              {...(props.onOpenExternalUrl === undefined
+                ? {}
+                : { onOpenExternalUrl: props.onOpenExternalUrl })}
+            />
+          )}
+          {instance.driverKind === "azure-foundry" && (
+            <DirectoryEndpointSignIn
+              consentShown={props.signInConsentShown}
+              disabled={props.disabled}
+              instance={instance}
+              onStateChange={props.onSignInState}
+              startSignIn={props.startSignIn}
               {...(props.onProviderOAuth === undefined
                 ? {}
                 : { onProviderOAuth: props.onProviderOAuth })}
@@ -484,9 +502,7 @@ function ModelsSection(props: ModelEndpointDetailProps & { readonly disabled: bo
                         />
                       ) : null}
                     </span>
-                    {/* Ollama reports its own windows; the HTTP endpoints take an override. */}
-                    {props.onModelContextWindowChange === undefined ||
-                    instance.driverKind === "ollama" ? null : (
+                    {props.onModelContextWindowChange === undefined ? null : (
                       <ModelContextWindowField
                         disabled={props.disabled}
                         model={model}
@@ -757,7 +773,11 @@ function authenticationFact(
 ): string {
   if (offer !== undefined) return `${offer.accountLabel} sign-in (bearer token)`;
   if (instance.driverKind === "ollama") return "None (this Mac only)";
-  if (instance.driverKind === "azure-foundry") return "API key (api-key header)";
+  if (instance.driverKind === "azure-foundry") {
+    return instance.configuration.authentication === "directory-oauth"
+      ? "Organization account (Microsoft Entra ID bearer token)"
+      : "API key (api-key header)";
+  }
   const authentication = instance.configuration.authentication;
   if (authentication === "none") return "None";
   if (authentication === "api-key") return "API key (x-api-key header)";
@@ -795,6 +815,14 @@ function DiagnosticsSection(props: ModelEndpointDetailProps & { readonly failing
     { label: "Kind", value: driverLabel(instance.driverKind) },
     { label: "Protocol", value: protocolFact(instance, observed) },
     { label: "Authentication", value: authenticationFact(instance, props.signInOffer) },
+    ...(observed?.directoryBinding === undefined
+      ? []
+      : [
+          {
+            label: "Signed in for",
+            value: `Tenant ${observed.directoryBinding.tenantId} · client ${observed.directoryBinding.clientId} · ${observed.directoryBinding.endpointOrigin}`,
+          },
+        ]),
     {
       label: "Last check",
       value:

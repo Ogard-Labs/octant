@@ -10,6 +10,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { ModelToolCheck } from "../../providers/useProviderController";
+import { chooseSelectFieldOption } from "../../test/chooseSelectFieldOption.test-support";
 import { endpointPreset } from "./addEndpointSteps";
 import { AddEndpointFlow, type AddEndpointFlowProps, type AddedEndpoint } from "./AddEndpointFlow";
 import { EndpointChoices } from "./AddModelEndpoint";
@@ -344,6 +345,59 @@ describe("Add endpoint, step by step", () => {
         manualModelIds: ["gpt-main"],
       }),
       expect.objectContaining({ value: "azure-secret" }),
+    );
+  });
+
+  it("adds an Azure AI Foundry endpoint that signs in with the organization's account, with no key and the ids lowercased", async () => {
+    const user = userEvent.setup();
+    const props = renderFlow();
+    const form = await connect(user, "Azure AI Foundry", {
+      name: "Contoso Foundry",
+      url: "https://contoso.openai.azure.com/openai/v1/",
+    });
+
+    await chooseSelectFieldOption(
+      user,
+      within(form).getByLabelText("Sign in with"),
+      "Organization account (Microsoft Entra ID)",
+    );
+    expect(within(form).queryByLabelText("API key")).not.toBeInTheDocument();
+    await user.type(
+      within(form).getByRole("textbox", { name: "Deployment name" }),
+      "gpt-main{Enter}",
+    );
+    await user.type(
+      within(form).getByLabelText("Directory (tenant) ID"),
+      "contoso.onmicrosoft.com",
+    );
+    await user.type(
+      within(form).getByLabelText("Application (client) ID"),
+      "0A1B2C3D-4E5F-4A6B-9C7D-8E9F0A1B2C3D",
+    );
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    // A domain name would let the directory pick a tenant; only a GUID binds one.
+    expect(screen.getByText(/each a GUID/)).toBeVisible();
+    expect(props.onCreateAzureFoundry).not.toHaveBeenCalled();
+
+    const tenant = within(form).getByLabelText("Directory (tenant) ID");
+    await user.clear(tenant);
+    await user.type(tenant, " 6F1C2D3E-4A5B-4C6D-8E7F-9A0B1C2D3E4F ");
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+
+    expect(props.onCreateAzureFoundry).toHaveBeenCalledWith(
+      "Contoso Foundry",
+      {
+        kind: "azure-foundry-openai-http",
+        baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+        authentication: "directory-oauth",
+        protocol: "auto",
+        manualModelIds: ["gpt-main"],
+        directory: {
+          tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+          clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+        },
+      },
+      expect.objectContaining({ value: "" }),
     );
   });
 

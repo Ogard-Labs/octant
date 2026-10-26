@@ -26,7 +26,10 @@ import type {
 const DEFAULT_LOOKUP_MESSAGES = 5;
 /** The most one lookup returns, in characters of its messages' content. */
 const MAX_LOOKUP_CHARACTERS = 32_000;
-/** The most of one text, argument payload, or result payload a lookup returns. */
+/**
+ * The most of one text, argument payload, or result payload a lookup returns.
+ * A longer one is read in parts through `offset`.
+ */
 const MAX_LOOKUP_ITEM_CHARACTERS = 8_000;
 
 export interface NativeHarnessJournalExcerptMessage {
@@ -44,6 +47,11 @@ export interface NativeHarnessJournalExcerptMessage {
     readonly isError: boolean;
     readonly result: string;
   }>;
+  /**
+   * Present when a text or payload of this message was clipped: the `offset`
+   * that, with `from` set to this message's number, reads its next part.
+   */
+  readonly nextOffset?: number;
 }
 
 export type NativeHarnessJournalLookup =
@@ -57,14 +65,19 @@ export type NativeHarnessJournalLookup =
     }
   | {
       readonly status: "refused";
-      readonly reason: "journal-unavailable" | "journal-message-missing";
+      readonly reason:
+        | "journal-unavailable"
+        | "journal-message-missing"
+        | "journal-offset-past-end";
       readonly message: string;
     };
 
 /**
  * Messages `from` onward, at most `count` and at most the lookup's size bound.
  * A text or payload over its own bound is clipped with a marker saying how
- * much was left out; the first message is always returned, clipped to fit.
+ * much was left out and where to read on; the first message is always
+ * returned, clipped to fit. `offset` starts message `from`'s text and every
+ * payload at that character, so the same bound pages through all of it.
  */
 export function excerptNativeHarnessJournal(
   transcript: NativeHarnessTranscript,
@@ -95,7 +108,17 @@ export function excerptNativeHarnessJournal(
   for (let number = input.from; number < end; number += 1) {
     const message = transcript.messages[number];
     if (message === undefined) break;
-    const excerpt = excerptMessage(number, rewriteForFork(message, redaction));
+    // Redaction runs on the whole message before it is split into parts, so a
+    // secret straddling two parts is never returned a piece at a time.
+    const offset = number === input.from ? (input.offset ?? 0) : 0;
+    const excerpt = excerptMessage(number, rewriteForFork(message, redaction), offset);
+    if (offset > 0 && excerpt.longest <= offset) {
+      return {
+        status: "refused",
+        reason: "journal-offset-past-end",
+        message: `Message ${number} has nothing from offset ${offset}; its longest text or payload is ${excerpt.longest} characters.`,
+      };
+    }
     if (messages.length > 0 && excerpt.characters > remaining) break;
     messages.push(excerpt.message);
     remaining -= excerpt.characters;
@@ -107,23 +130,35 @@ export function excerptNativeHarnessJournal(
 function excerptMessage(
   number: number,
   message: NativeHarnessTranscriptMessage,
-): { readonly message: NativeHarnessJournalExcerptMessage; readonly characters: number } {
+  offset: number,
+): {
+  readonly message: NativeHarnessJournalExcerptMessage;
+  readonly characters: number;
+  /** The length of the message's longest text or payload. */
+  readonly longest: number;
+} {
   const items = 1 + (message.toolCalls?.length ?? 0) + (message.toolResults?.length ?? 0);
-  // A message with many results shares the lookup's bound between them.
+  // A message with many results shares the lookup's bound between them. The
+  // bound depends only on the message, so every part of it is cut the same way.
   const bound = Math.min(MAX_LOOKUP_ITEM_CHARACTERS, Math.floor(MAX_LOOKUP_CHARACTERS / items));
+  const nextOffset = offset + bound;
   let characters = 0;
+  let longest = 0;
   const clip = (value: string) => {
+    longest = Math.max(longest, value.length);
+    const part = value.slice(offset, nextOffset);
     const clipped =
-      value.length <= bound
-        ? value
-        : `${value.slice(0, bound)} [${value.length - bound} more characters left out]`;
+      value.length <= nextOffset
+        ? part
+        : `${part} [${value.length - nextOffset} more characters left out; read on with from ${number} and offset ${nextOffset}]`;
     characters += clipped.length;
     return clipped;
   };
+  const text = clip(message.text);
   const excerpt: NativeHarnessJournalExcerptMessage = {
     number,
     role: message.role,
-    ...(message.text.length === 0 ? {} : { text: clip(message.text) }),
+    ...(text.length === 0 ? {} : { text }),
     ...(message.toolCalls === undefined
       ? {}
       : {
@@ -143,7 +178,11 @@ function excerptMessage(
           })),
         }),
   };
-  return { message: excerpt, characters };
+  return {
+    message: longest > nextOffset ? { ...excerpt, nextOffset } : excerpt,
+    characters,
+    longest,
+  };
 }
 
 /** The provider session a thread's running turn uses, as the thread's own journal recorded it. */

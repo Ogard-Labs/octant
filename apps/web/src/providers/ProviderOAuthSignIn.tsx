@@ -14,7 +14,11 @@ export type ProviderOAuthSignInState =
   | { readonly kind: "signed-in"; readonly accountLabel: string }
   /** Sign-out could not reach the issuer; the sign-in is still active. */
   | { readonly kind: "not-revoked"; readonly accountLabel: string }
-  | { readonly kind: "expired" }
+  /**
+   * The sign-in ended, or (`interaction-required`) the organization wants the
+   * person to sign in again in person, as for multi-factor authentication.
+   */
+  | { readonly kind: "expired"; readonly reason?: "interaction-required" }
   | { readonly kind: "refused"; readonly message: string };
 
 export interface ProviderOAuthSignInProps {
@@ -25,6 +29,11 @@ export interface ProviderOAuthSignInProps {
   readonly disabled?: boolean;
   /** The sign-in button's words, such as "Sign in with ChatGPT"; "Sign in" when absent. */
   readonly signInLabel?: string;
+  /**
+   * Signing out only forgets this computer's sign-in: the issuer offers no
+   * revocation, as an organization directory does not.
+   */
+  readonly localSignOut?: boolean;
   /**
    * Starts the sign-in. When the terms still need acknowledging, the consent
    * line under the button says so, and this one click records the
@@ -90,7 +99,11 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
         </p>
       ) : null}
       {props.state.kind === "expired" ? (
-        <p>Your sign-in expired. Sign in again to use it.</p>
+        <p>
+          {props.state.reason === "interaction-required"
+            ? "Your organization asks you to sign in again in person, for example to complete multi-factor authentication."
+            : "Your sign-in expired. Sign in again to use it."}
+        </p>
       ) : null}
       {props.state.kind === "refused" ? (
         <OctantAlert tone="warning">{props.state.message}</OctantAlert>
@@ -157,8 +170,9 @@ export function ProviderOAuthSignIn(props: ProviderOAuthSignInProps) {
       )}
       {signedIn ? (
         <p className="provider-oauth-sign-in__consent">
-          Sign out removes this computer's saved sign-in and asks the provider to revoke it when
-          supported. It does not remove every connection from your provider account.
+          {props.localSignOut === true
+            ? "Sign out removes this computer's saved sign-in. It does not end your organization session, which your organization's own sign-out or policies end."
+            : "Sign out removes this computer's saved sign-in and asks the provider to revoke it when supported. It does not remove every connection from your provider account."}
         </p>
       ) : null}
       {signedIn ? (
@@ -229,6 +243,8 @@ export function ProviderOAuthSignInPanel(props: {
   readonly termsSummary: string;
   readonly disabled?: boolean;
   readonly signInLabel?: string;
+  /** Signing out forgets this computer's sign-in only; see `ProviderOAuthSignIn`. */
+  readonly localSignOut?: boolean;
   readonly onUseApiKey?: () => void;
   /**
    * Begin the sign-in once, as soon as the host reports the person signed
@@ -374,6 +390,7 @@ export function ProviderOAuthSignInPanel(props: {
       accountLabel={props.accountLabel}
       {...(props.disabled === undefined ? {} : { disabled: props.disabled })}
       {...(props.signInLabel === undefined ? {} : { signInLabel: props.signInLabel })}
+      {...(props.localSignOut === true ? { localSignOut: true } : {})}
       onSignIn={signIn}
       onCheckSignIn={() => checkSignIn(true)}
       onCheckStatus={() => {
@@ -456,7 +473,11 @@ function apply(
   }
   if (result.kind === "expired") {
     setAttemptId(undefined);
-    setState({ kind: "expired" });
+    setState(
+      result.reason === "interaction-required"
+        ? { kind: "expired", reason: "interaction-required" }
+        : { kind: "expired" },
+    );
     return;
   }
   if (result.kind === "refused") {

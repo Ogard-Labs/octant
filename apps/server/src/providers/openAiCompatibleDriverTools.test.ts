@@ -60,9 +60,9 @@ function makeDriver(fetch: CompatibleFetch) {
 async function verifiedToolDriver(fetch: CompatibleFetch) {
   const fixture = makeDriver(fetch);
   await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
-  const observed = fixture.runtimeRegistry.observedState(instanceId);
-  if (observed === undefined) throw new Error("The probe recorded no observation.");
-  fixture.runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+  if (fixture.runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]) === undefined) {
+    throw new Error("The probe recorded no observation.");
+  }
   return fixture;
 }
 
@@ -805,8 +805,7 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
       "unsupported",
     );
 
-    const observed = runtimeRegistry.observedState(instanceId)!;
-    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+    runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]);
 
     expect((await sendWithOctantTool(driver, modelId))._tag).toBe("Right");
     expect((await sendWithOctantTool(driver, otherModelId))._tag).toBe("Left");
@@ -819,8 +818,7 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
     );
     const { driver, runtimeRegistry } = makeDriver(fetch as CompatibleFetch);
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-    const observed = runtimeRegistry.observedState(instanceId)!;
-    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+    runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]);
 
     await Effect.runPromise(
       Effect.scoped(
@@ -855,8 +853,7 @@ describe("makeOpenAiCompatibleDriver per-model tool verification", () => {
     const fetch = routeFetch(() => responsesTextStream("ok"));
     const { driver, runtimeRegistry } = makeDriver(fetch as CompatibleFetch);
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-    const observed = runtimeRegistry.observedState(instanceId)!;
-    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+    runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]);
 
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
 

@@ -158,7 +158,6 @@ describe("sanitizeCodexEnvironment", () => {
         CODEX_ACCESS_TOKEN: "provider-owned-too",
         AWS_BEARER_TOKEN_BEDROCK: "bedrock-provider-owned",
         AWS_REGION: "us-east-1",
-        AWS_PROFILE: "work",
         OCTANT_DESKTOP_BRIDGE_SECRET: "must-not-cross",
         OCTANT_ANOTHER_VALUE: "remove-me",
         ELECTRON_RUN_AS_NODE: "1",
@@ -181,14 +180,15 @@ describe("sanitizeCodexEnvironment", () => {
       CODEX_ACCESS_TOKEN: "provider-owned-too",
       AWS_BEARER_TOKEN_BEDROCK: "bedrock-provider-owned",
       AWS_REGION: "us-east-1",
-      AWS_PROFILE: "work",
     });
   });
 
   it("keeps general-purpose cloud and source-host credentials out of the app-server", () => {
     // The app-server runs model-generated shell commands without confinement,
     // so a host credential that crosses is readable by the model. IAM keys
-    // grant far more than the Bedrock access a bearer token or profile does.
+    // grant far more than the Bedrock access a bearer token does, and an AWS
+    // profile or shared-config location only points the runtime and its
+    // commands at those same reusable keys.
     expect(
       sanitizeCodexEnvironment({
         PATH: "/usr/bin",
@@ -198,6 +198,10 @@ describe("sanitizeCodexEnvironment", () => {
         AWS_ACCESS_KEY_ID: "must-not-cross",
         AWS_SECRET_ACCESS_KEY: "must-not-cross",
         AWS_SESSION_TOKEN: "must-not-cross",
+        AWS_PROFILE: "must-not-cross",
+        AWS_DEFAULT_PROFILE: "must-not-cross",
+        AWS_CONFIG_FILE: "must-not-cross",
+        AWS_SHARED_CREDENTIALS_FILE: "must-not-cross",
         ANTHROPIC_API_KEY: "another-provider",
         STRIPE_SECRET_KEY: "must-not-cross",
       }),
@@ -245,7 +249,7 @@ describe("sanitizeCodexEnvironment", () => {
     expect(JSON.stringify(environment)).not.toMatch(/cli_auth_credentials_store|auth\.json/i);
   });
 
-  it("keeps an extra account's thread state out of the host's database and leaves the AWS profile alone", () => {
+  it("keeps an extra account's thread state out of the host's database and the AWS profile out of every account", () => {
     const hostEnvironment = {
       PATH: "/usr/bin",
       CODEX_SQLITE_HOME: "/Users/test/.codex-state",
@@ -259,7 +263,7 @@ describe("sanitizeCodexEnvironment", () => {
       codexHome: "/Users/test/.codex-accounts/work",
     });
     expect(extra.CODEX_SQLITE_HOME).toBeUndefined();
-    expect(extra.AWS_PROFILE).toBe("work");
+    expect(extra.AWS_PROFILE).toBeUndefined();
     expect(extra.AWS_REGION).toBe("eu-north-1");
 
     const first = codexAccountProcessEnvironment({
@@ -269,6 +273,7 @@ describe("sanitizeCodexEnvironment", () => {
       inheritHostAuth: true,
     });
     expect(first.CODEX_SQLITE_HOME).toBe("/Users/test/.codex-state");
+    expect(first.AWS_PROFILE).toBeUndefined();
   });
 
   it("injects only a broker-resolved API key after stripping inherited auth", () => {

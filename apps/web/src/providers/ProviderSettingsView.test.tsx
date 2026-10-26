@@ -378,8 +378,8 @@ describe("ProviderSettingsView", () => {
     const props = fixture();
     renderExpanded(<ProviderSettingsView {...props} />);
 
-    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Kimi Code CLI");
-    const form = screen.getByRole("form", { name: "Add provider" });
+    await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Kimi Code ACP");
+    const form = screen.getByRole("form", { name: "Add Kimi Code provider" });
     await user.type(within(form).getByLabelText("Provider name"), "Kimi local");
     await user.type(within(form).getByLabelText("Kimi Code binary"), "/opt/homebrew/bin/kimi");
     expect(
@@ -387,10 +387,10 @@ describe("ProviderSettingsView", () => {
     ).not.toBeInTheDocument();
     await user.click(within(form).getByRole("button", { name: "Add Kimi Code" }));
 
-    expect(props.onCreate).toHaveBeenCalledWith(
-      "kimi-code",
+    expect(props.onCreateAcpAgent).toHaveBeenCalledWith(
       "Kimi local",
-      "/opt/homebrew/bin/kimi",
+      { kind: "kimi-code-acp", binaryPath: "/opt/homebrew/bin/kimi" },
+      expect.objectContaining({ value: "" }),
     );
   });
 
@@ -400,17 +400,21 @@ describe("ProviderSettingsView", () => {
     renderExpanded(<ProviderSettingsView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Devin ACP");
-    const form = screen.getByRole("form", { name: "Add provider" });
+    const form = screen.getByRole("form", { name: "Add Devin provider" });
     await user.type(within(form).getByLabelText("Provider name"), "Devin local");
     await user.type(within(form).getByLabelText("Devin binary"), "/Users/example/.local/bin/devin");
-    expect(within(form).getByText(/subscription authentication/i)).toBeVisible();
+    expect(within(form).getByText(/devin auth login/i)).toBeVisible();
     expect(within(form).queryByLabelText(/api key|credential/i)).not.toBeInTheDocument();
     await user.click(within(form).getByRole("button", { name: "Add Devin" }));
 
-    expect(props.onCreate).toHaveBeenCalledWith(
-      "devin",
+    expect(props.onCreateAcpAgent).toHaveBeenCalledWith(
       "Devin local",
-      "/Users/example/.local/bin/devin",
+      {
+        kind: "devin-acp",
+        binaryPath: "/Users/example/.local/bin/devin",
+        authentication: "subscription",
+      },
+      expect.objectContaining({ value: "" }),
     );
   });
 
@@ -456,14 +460,18 @@ describe("ProviderSettingsView", () => {
     renderExpanded(<ProviderSettingsView {...props} />);
 
     await chooseSelectFieldOption(user, screen.getByLabelText("Provider type"), "Kilo ACP");
-    const form = screen.getByRole("form", { name: "Add provider" });
+    const form = screen.getByRole("form", { name: "Add Kilo provider" });
     await user.type(within(form).getByLabelText("Provider name"), "Kilo local");
     await user.type(within(form).getByLabelText("Kilo binary"), "/opt/homebrew/bin/kilo");
-    expect(within(form).getByText(/provider-owned authentication/i)).toBeVisible();
+    expect(within(form).getByText(/kilo auth login/i)).toBeVisible();
     expect(within(form).queryByLabelText(/api key|credential/i)).not.toBeInTheDocument();
     await user.click(within(form).getByRole("button", { name: "Add Kilo" }));
 
-    expect(props.onCreate).toHaveBeenCalledWith("kilo", "Kilo local", "/opt/homebrew/bin/kilo");
+    expect(props.onCreateAcpAgent).toHaveBeenCalledWith(
+      "Kilo local",
+      { kind: "kilo-acp", binaryPath: "/opt/homebrew/bin/kilo" },
+      expect.objectContaining({ value: "" }),
+    );
   });
 
   it("creates and edits Ollama as a loopback-only native API without credentials or binary controls", async () => {
@@ -780,24 +788,24 @@ describe("ProviderSettingsView", () => {
     const create = screen.getByRole("form", { name: "Add Mistral Vibe provider" });
     await user.type(within(create).getByLabelText("Provider name"), "Mistral Vibe local");
     await user.type(
-      within(create).getByLabelText("vibe-acp binary"),
+      within(create).getByLabelText("Mistral Vibe binary"),
       "/Users/example/.local/bin/vibe-acp",
     );
-    expect(within(create).getByLabelText("vibe-acp binary")).toHaveAttribute(
+    expect(within(create).getByLabelText("Mistral Vibe binary")).toHaveAttribute(
       "placeholder",
       "/absolute/path/to/vibe-acp",
     );
     expect(within(create).queryByLabelText("Mistral Vibe authentication")).not.toBeInTheDocument();
-    expect(within(create).getByLabelText("Mistral API key")).toBeInTheDocument();
+    await user.type(within(create).getByLabelText("Mistral API key"), "mistral-key");
     await user.click(within(create).getByRole("button", { name: "Add Mistral Vibe" }));
-    expect(props.onCreateMistralVibe).toHaveBeenCalledWith(
+    expect(props.onCreateAcpAgent).toHaveBeenCalledWith(
       "Mistral Vibe local",
       {
         kind: "mistral-vibe-acp",
         binaryPath: "/Users/example/.local/bin/vibe-acp",
         authentication: "api-key",
       },
-      expect.objectContaining({ value: "" }),
+      expect.objectContaining({ value: "mistral-key" }),
     );
     expect(screen.getAllByText(/uses a Mistral API key/i)).not.toHaveLength(0);
     expect(screen.queryByRole("button", { name: /browser sign-in/i })).not.toBeInTheDocument();
@@ -818,56 +826,52 @@ describe("ProviderSettingsView", () => {
       label: "GLM Agent",
       typeLabel: "GLM Agent ACP",
       formName: "Add GLM Agent provider",
-      submitName: "Add GLM Agent ACP",
-      binaryLabel: "GLM Agent ACP binary",
+      submitName: "Add GLM Agent",
+      binaryLabel: "GLM Agent binary",
       binaryPath: "/Users/example/.local/bin/glm-acp-agent",
       displayName: "GLM local",
-      create: "onCreateGlm",
       kind: "glm-acp",
     },
     {
       label: "Gemini CLI",
       typeLabel: "Gemini CLI ACP",
-      formName: "Add provider",
+      formName: "Add Gemini CLI provider",
       submitName: "Add Gemini CLI",
       binaryLabel: "Gemini CLI binary",
       binaryPath: "/Users/example/.local/bin/gemini",
       displayName: "Gemini local",
-      create: "onCreateGemini",
       kind: "gemini-acp",
     },
     {
       label: "Cline",
       typeLabel: "Cline ACP",
-      formName: "Add provider",
+      formName: "Add Cline provider",
       submitName: "Add Cline",
       binaryLabel: "Cline binary",
       binaryPath: "/Users/example/.local/bin/cline",
       displayName: "Cline local",
-      create: "onCreateCline",
       kind: "cline-acp",
     },
     {
       label: "Qwen Code",
       typeLabel: "Qwen Code ACP",
-      formName: "Add provider",
+      formName: "Add Qwen Code provider",
       submitName: "Add Qwen Code",
       binaryLabel: "Qwen Code binary",
       binaryPath: "/Users/example/.local/bin/qwen",
       displayName: "Qwen local",
-      create: "onCreateQwen",
       kind: "qwen-acp",
     },
   ] as const)(
     "creates $label with provider-owned authentication and no API key",
     async ({
+      label,
       typeLabel,
       formName,
       submitName,
       binaryLabel,
       binaryPath,
       displayName,
-      create,
       kind,
     }) => {
       const user = userEvent.setup();
@@ -878,13 +882,13 @@ describe("ProviderSettingsView", () => {
       const createForm = screen.getByRole("form", { name: formName });
       await user.type(within(createForm).getByLabelText("Provider name"), displayName);
       await user.type(within(createForm).getByLabelText(binaryLabel), binaryPath);
-      expect(within(createForm).getByLabelText("Provider authentication")).toHaveTextContent(
+      expect(within(createForm).getByLabelText(`${label} authentication`)).toHaveTextContent(
         "Provider CLI login (recommended)",
       );
       expect(within(createForm).queryByLabelText(/API key/i)).not.toBeInTheDocument();
       await user.click(within(createForm).getByRole("button", { name: submitName }));
 
-      expect(props[create]).toHaveBeenCalledWith(
+      expect(props.onCreateAcpAgent).toHaveBeenCalledWith(
         displayName,
         {
           kind,
@@ -999,9 +1003,9 @@ describe("ProviderSettingsView", () => {
     );
 
     const card = screen.getByRole("article", { name: "Kimi local" });
-    expect(within(card).getByText("Kimi Code CLI")).toBeVisible();
+    expect(within(card).getByText("Kimi Code ACP")).toBeVisible();
     expect(within(card).getByText(/kimi login/i)).toHaveTextContent(/in your terminal/i);
-    expect(within(card).getByLabelText("Binary path for Kimi local")).toHaveValue(
+    expect(within(card).getByLabelText("kimi binary path for Kimi local")).toHaveValue(
       "/opt/homebrew/bin/kimi",
     );
     expect(
@@ -1134,7 +1138,7 @@ describe("ProviderSettingsView", () => {
     const card = screen.getByRole("article", { name: "Devin local" });
     expect(within(card).getByText("Devin ACP")).toBeVisible();
     expect(within(card).getByText(/devin auth login/i)).toBeVisible();
-    expect(within(card).getByLabelText("Binary path for Devin local")).toHaveValue(
+    expect(within(card).getByLabelText("devin binary path for Devin local")).toHaveValue(
       "/Users/example/.local/bin/devin",
     );
     expect(within(card).getByText(/Devin subscription/i)).toBeVisible();
@@ -1235,7 +1239,7 @@ describe("ProviderSettingsView", () => {
     const card = screen.getByRole("article", { name: "Kilo local" });
     expect(within(card).getByText("Kilo ACP")).toBeVisible();
     expect(within(card).getByText(/kilo auth login/i)).toBeVisible();
-    expect(within(card).getByLabelText("Binary path for Kilo local")).toHaveValue(
+    expect(within(card).getByLabelText("kilo binary path for Kilo local")).toHaveValue(
       "/opt/homebrew/bin/kilo",
     );
     expect(within(card).queryByLabelText(/api key|credential/i)).not.toBeInTheDocument();
@@ -1723,6 +1727,79 @@ describe("ProviderSettingsView", () => {
     expect(onModelContextWindowChange).toHaveBeenCalledTimes(2);
   });
 
+  it("lets an Ollama model take a larger context window, held to the window it was trained for", async () => {
+    const user = userEvent.setup();
+    const onModelContextWindowChange = vi.fn(async () => true);
+    renderExpanded(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: ollamaProvider(),
+          observed: observation({
+            models: [
+              {
+                id: "qwen3:latest" as never,
+                displayName: "qwen3:latest",
+                source: "discovered",
+                verification: "verified",
+                contextLimit: 32_768,
+                trainedContextWindow: 131_072,
+                reasoning: "unsupported",
+                inputModalities: ["text"],
+                options: [],
+              },
+            ],
+          }),
+        })}
+        onModelContextWindowChange={onModelContextWindowChange}
+      />,
+    );
+
+    const field = screen.getByLabelText("Context window for qwen3:latest");
+    expect(field).toHaveAttribute("placeholder", "32,768 · Reported");
+    await user.type(field, "262144{Enter}");
+    // Ollama loads no more than the trained window, so that is what is saved and shown.
+    expect(onModelContextWindowChange).toHaveBeenCalledWith(id, "qwen3:latest", 131_072);
+    expect(field).toHaveValue("131072");
+  });
+
+  it("shows a stored Ollama window above the trained one as the window that takes effect", async () => {
+    const user = userEvent.setup();
+    const onModelContextWindowChange = vi.fn(async () => true);
+    renderExpanded(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: ollamaProvider(),
+          observed: observation({
+            models: [
+              {
+                id: "qwen3:latest" as never,
+                displayName: "qwen3:latest",
+                source: "discovered",
+                verification: "verified",
+                contextLimit: 32_768,
+                // Saved before Ollama named the trained window, or by an
+                // earlier pull of the same tag with a longer one.
+                contextWindowOverride: 262_144,
+                trainedContextWindow: 131_072,
+                reasoning: "unsupported",
+                inputModalities: ["text"],
+                options: [],
+              },
+            ],
+          }),
+        })}
+        onModelContextWindowChange={onModelContextWindowChange}
+      />,
+    );
+
+    const field = screen.getByLabelText("Context window for qwen3:latest");
+    expect(field).toHaveValue("131072");
+    // Passing through the box is not an edit, so nothing is saved.
+    await user.click(field);
+    await user.tab();
+    expect(onModelContextWindowChange).not.toHaveBeenCalled();
+  });
+
   it("asks for no context window on a provider that runs its own model", () => {
     renderExpanded(
       <ProviderSettingsView
@@ -1816,6 +1893,84 @@ describe("ProviderSettingsView", () => {
     });
     expect(credential.value).toBe("rotated-secret");
     expect(document.body.textContent).not.toContain("rotated-secret");
+  });
+
+  it("keeps a Foundry endpoint's organization sign-in when its settings are saved, lowercasing a pasted tenant, and shows who is signed in", async () => {
+    const user = userEvent.setup();
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "signed-in" as const,
+      accountLabel: "person@contoso.example",
+    }));
+    const props = {
+      ...fixture({
+        instance: directoryFoundryProvider(),
+        observed: observation({ models: [], directoryBinding: foundryBinding }),
+      }),
+      onProviderOAuth,
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    expect(await screen.findByText("person@contoso.example")).toBeVisible();
+    expect(onProviderOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "status", descriptorId: "azure-foundry-directory" }),
+    );
+    const card = screen.getByLabelText("Foundry relay");
+    expect(within(card).queryByLabelText("API key for Foundry relay")).not.toBeInTheDocument();
+    expect(
+      within(card).getByText(/Tenant 6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f · client/),
+    ).toBeInTheDocument();
+    const tenant = within(card).getByLabelText("Directory (tenant) ID for Foundry relay");
+    expect(tenant).toHaveValue("6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f");
+    await user.clear(tenant);
+    await user.type(tenant, "1E2D3C4B-5A69-4788-9A0B-C1D2E3F40516");
+    await user.click(
+      within(card).getByRole("button", {
+        name: "Save Azure AI Foundry settings for Foundry relay",
+      }),
+    );
+
+    const [, configuration, credential] = vi.mocked(props.onChangeAzureFoundryConfiguration).mock
+      .calls[0]!;
+    expect(configuration).toEqual({
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["deployment-a"],
+      directory: {
+        tenantId: "1e2d3c4b-5a69-4788-9a0b-c1d2e3f40516",
+        clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+      },
+    });
+    expect(credential.value).toBe("");
+  });
+
+  it("says when the organization wants a Foundry sign-in repeated in person", async () => {
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "expired" as const,
+      accountLabel: "person@contoso.example",
+      reason: "interaction-required",
+    }));
+    const props = {
+      ...fixture({
+        instance: directoryFoundryProvider(),
+        observed: observation({
+          readiness: "unauthenticated",
+          unauthenticatedReason: "interaction-required",
+          credentialStatus: "stored",
+          models: [],
+          directoryBinding: foundryBinding,
+        }),
+      }),
+      onProviderOAuth,
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    const inPerson =
+      "Your organization asks you to sign in again in person, for example to complete multi-factor authentication.";
+    // The row's state and the sign-in panel both say it.
+    await waitFor(() => expect(screen.getAllByText(inPerson)).toHaveLength(2));
+    expect(screen.getByRole("button", { name: "Sign in again" })).toBeVisible();
   });
 
   it("creates an OpenAI image profile with a write-only key and no base URL", async () => {
@@ -4201,20 +4356,10 @@ function ControllerBackedProviderSettings(props: {
       onChangeBinary={controller.changeBinary}
       onChangeClaudeConfiguration={controller.changeClaudeConfiguration}
       onChangeCodexConfiguration={controller.changeCodexConfiguration}
-      onChangeDevinConfiguration={controller.changeDevinConfiguration}
-      onChangeKiloConfiguration={controller.changeKiloConfiguration}
+      onChangeAcpAgentConfiguration={controller.changeAcpAgentConfiguration}
       onChangePiConfiguration={controller.changePiConfiguration}
       onChangeOhMyPiConfiguration={controller.changeOhMyPiConfiguration}
       onChangeOllamaConfiguration={controller.changeOllamaConfiguration}
-      onChangeMistralVibeConfiguration={controller.changeMistralVibeConfiguration}
-      onChangeGrokConfiguration={controller.changeGrokConfiguration}
-      onChangeGooseConfiguration={controller.changeGooseConfiguration}
-      onChangeGlmConfiguration={controller.changeGlmConfiguration}
-      onChangeGeminiConfiguration={controller.changeGeminiConfiguration}
-      onChangeCopilotConfiguration={controller.changeCopilotConfiguration}
-      onChangeClineConfiguration={controller.changeClineConfiguration}
-      onChangeQwenConfiguration={controller.changeQwenConfiguration}
-      onChangeFxConfiguration={controller.changeFxConfiguration}
       onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
       onChangeAnthropicCompatibleConfiguration={controller.changeAnthropicCompatibleConfiguration}
       onChangeAzureFoundryConfiguration={controller.changeAzureFoundryConfiguration}
@@ -4227,13 +4372,7 @@ function ControllerBackedProviderSettings(props: {
       onCompleteProviderAuthentication={controller.completeProviderAuthentication}
       onCreate={controller.create}
       onCreateClaude={controller.createClaude}
-      onCreateMistralVibe={controller.createMistralVibe}
-      onCreateGrok={controller.createGrok}
-      onCreateGlm={controller.createGlm}
-      onCreateGemini={controller.createGemini}
-      onCreateCline={controller.createCline}
-      onCreateQwen={controller.createQwen}
-      onCreateFx={controller.createFx}
+      onCreateAcpAgent={controller.createAcpAgent}
       onCreateOllama={controller.createOllama}
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}
@@ -4347,31 +4486,7 @@ function fixture(
       credential.clear();
       return true;
     }),
-    onCreateMistralVibe: vi.fn(async (_name, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onCreateGrok: vi.fn(async (_name, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onCreateGlm: vi.fn(async (_name, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onCreateGemini: vi.fn(async (_name, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onCreateCline: vi.fn(async (_name, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onCreateQwen: vi.fn(async (_name, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onCreateFx: vi.fn(async (_name, _configuration, credential) => {
+    onCreateAcpAgent: vi.fn(async (_name, _configuration, credential) => {
       credential.clear();
       return true;
     }),
@@ -4411,41 +4526,13 @@ function fixture(
       return true;
     }),
     onChangeCodexConfiguration: vi.fn(async () => true),
-    onChangeDevinConfiguration: vi.fn(async () => true),
-    onChangeKiloConfiguration: vi.fn(async () => true),
+    onChangeAcpAgentConfiguration: vi.fn(async (_id, _configuration, credential) => {
+      credential.clear();
+      return true;
+    }),
     onChangePiConfiguration: vi.fn(async () => true),
     onChangeOhMyPiConfiguration: vi.fn(async () => true),
     onChangeOllamaConfiguration: vi.fn(async () => true),
-    onChangeMistralVibeConfiguration: vi.fn(async (_id, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onChangeGrokConfiguration: vi.fn(async (_id, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onChangeGooseConfiguration: vi.fn(async () => true),
-    onChangeGlmConfiguration: vi.fn(async (_id, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onChangeGeminiConfiguration: vi.fn(async (_id, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onChangeCopilotConfiguration: vi.fn(async () => true),
-    onChangeClineConfiguration: vi.fn(async (_id, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onChangeQwenConfiguration: vi.fn(async (_id, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
-    onChangeFxConfiguration: vi.fn(async (_id, _configuration, credential) => {
-      credential.clear();
-      return true;
-    }),
     onBeginProviderAuthentication: vi.fn(async () => ({
       attemptId: "provider-attempt-1" as never,
       signInUrl: "https://auth.mistral.example/attempt",
@@ -4754,6 +4841,36 @@ function foundryProvider(): ProviderInstance {
     updatedAt: "2026-07-19T10:00:00.000Z" as never,
   };
 }
+
+function directoryFoundryProvider(): ProviderInstance {
+  return {
+    id,
+    displayName: "Foundry relay",
+    driverKind: "azure-foundry",
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as never,
+    createdAt: "2026-07-19T10:00:00.000Z" as never,
+    updatedAt: "2026-07-19T10:00:00.000Z" as never,
+    configuration: {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["deployment-a" as never],
+      directory: {
+        tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f" as never,
+        clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d" as never,
+      },
+    },
+  };
+}
+
+const foundryBinding = {
+  tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f" as never,
+  clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d" as never,
+  endpointOrigin: "https://contoso.openai.azure.com",
+};
 
 function observation(patch: Partial<ProviderObservedState> = {}): ProviderObservedState {
   return {

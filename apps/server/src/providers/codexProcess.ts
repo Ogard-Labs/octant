@@ -123,8 +123,9 @@ const CODEX_NATIVE_VARIABLES = new Set([
 ]);
 // The auth variables the CLI itself names when no stored credential is found,
 // plus the bearer token its built-in Bedrock provider takes: scoped to model
-// access, so the same class as `OPENAI_API_KEY`. `codex login` has no Bedrock
-// flow, so without it a Bedrock configuration authenticates by nothing. A
+// access, so the same class as `OPENAI_API_KEY`. Without it, a Bedrock
+// account signs in only through its token command or a sign-in stored in its
+// own Codex home; every other route is refused (`codexBedrockSignIn`). A
 // `config.toml` model provider may declare any other variable as its
 // `env_key`; that variable does not cross, and `codex doctor` names the
 // refusal ("active model provider auth env var is missing") rather than
@@ -135,18 +136,13 @@ const CODEX_CREDENTIALS = new Set([
   "CODEX_API_KEY",
   "OPENAI_API_KEY",
 ]);
-// Where the Bedrock provider looks for its credential, not the credential:
-// the region Bedrock bearer authentication requires, and the profile and file
-// locations of the AWS shared config the CLI reads keys from under `HOME`.
-// Static IAM keys exported into the host environment do not cross; a profile
-// carries them to the CLI without putting them in every command's environment.
-const AWS_CONFIGURATION = new Set([
-  "AWS_CONFIG_FILE",
-  "AWS_DEFAULT_REGION",
-  "AWS_PROFILE",
-  "AWS_REGION",
-  "AWS_SHARED_CREDENTIALS_FILE",
-]);
+// The region Bedrock bearer authentication requires, and nothing that leads
+// to an AWS identity. A profile name or a shared-config location used to
+// cross, but it only told the CLI, and every command the model runs under it,
+// where to read reusable IAM keys; the files under `~/.aws` stay readable
+// through `HOME` regardless, so the driver refuses a Bedrock sign-in that
+// would rely on them (`codexBedrockSignIn`).
+const AWS_REGION_VARIABLES = new Set(["AWS_DEFAULT_REGION", "AWS_REGION"]);
 
 interface ManagedCodexConnection {
   readonly connection: CodexAppServerConnection;
@@ -292,7 +288,7 @@ export function sanitizeCodexEnvironment(environment: NodeJS.ProcessEnv): NodeJS
           PROXY_VARIABLES.has(key) ||
           CODEX_NATIVE_VARIABLES.has(key) ||
           CODEX_CREDENTIALS.has(key) ||
-          AWS_CONFIGURATION.has(key) ||
+          AWS_REGION_VARIABLES.has(key) ||
           key.startsWith("LC_")),
     ),
   );
@@ -325,11 +321,6 @@ const ACCOUNT_AUTH_VARIABLES = [
  * the host's instead of at its own home. The first account, on the host
  * profile, keeps them: existing installs authenticate and store state that
  * way, and Settings has no Codex API-key field to populate the broker.
- *
- * The AWS profile and file variables stay for every account. They choose
- * among the AWS identities of the one operating-system user and hold no
- * login of their own, so removing them would move an extra account to the
- * default AWS profile without separating anything.
  *
  * Octant never reads `auth.json` or the keyring, and never writes
  * `cli_auth_credentials_store` into the user's config. Codex names its

@@ -9,6 +9,8 @@ export * from "./harnessEndpoint";
 export * from "./harnessEndpointConformance";
 export * from "./acpClientCapabilities";
 export * from "./subscriptionOAuth";
+export * from "./directoryOAuth";
+export * from "./directoryOAuthConformance";
 export * from "./childObservations";
 export * from "./imageGeneration";
 export * from "./imageGenerationConformance";

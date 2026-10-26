@@ -343,8 +343,8 @@ describe("Anthropic-compatible provider conformance", () => {
     );
     expect(result.appManagedTools).toBe("unsupported");
 
-    const probed = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-    registry.setObservedState({ ...probed, verifiedToolModelIds: [modelId] });
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    registry.setVerifiedToolModels(instanceId, [modelId]);
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
     expect(registry.observedState(instanceId)?.verifiedToolModelIds).toEqual([modelId]);
   });
@@ -423,7 +423,7 @@ describe("Anthropic-compatible per-model tool verification", () => {
   function verify(runtimeRegistry: ProviderRuntimeRegistry, verified: ProviderModelId) {
     const observed = runtimeRegistry.observedState(instanceId);
     if (observed === undefined) throw new Error("The driver was not probed.");
-    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [verified] });
+    runtimeRegistry.setVerifiedToolModels(instanceId, [verified]);
   }
 
   async function sendWithTools(

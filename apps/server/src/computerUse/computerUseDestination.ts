@@ -1,7 +1,23 @@
 import { execSync } from "node:child_process";
+import type { LeasableDesktopProvider } from "@octant/contracts";
 
+/**
+ * Where computer use can act on this host. A Mac with a screen is a
+ * destination of its own; a disposable desktop becomes one only once a thread
+ * leases it, so a host whose only option is a desktop provider reports which
+ * providers it could lease from rather than an available destination.
+ */
 export type ComputerUseDestinationReport =
-  | { readonly status: "available"; readonly kind: "macos-host" }
+  | {
+      readonly status: "available";
+      readonly kind: "macos-host";
+      readonly leasable?: ReadonlyArray<LeasableDesktopProvider>;
+    }
+  | {
+      readonly status: "leasable";
+      readonly kind: "disposable-desktop";
+      readonly leasable: ReadonlyArray<LeasableDesktopProvider>;
+    }
   | { readonly status: "unavailable"; readonly kind: "no-destination" | "no-provider-configured" };
 
 export type ComputerUseDestinationRefusal = {
@@ -13,20 +29,23 @@ export type ComputerUseDestinationRefusal = {
 export function reportComputerUseDestination(input: {
   readonly platform: NodeJS.Platform;
   readonly hasScreen?: boolean;
-  readonly providerConfigured?: boolean;
+  readonly leasable?: ReadonlyArray<LeasableDesktopProvider>;
 }): ComputerUseDestinationReport {
-  if (input.platform === "darwin") {
-    if (input.hasScreen === false) {
-      return { status: "unavailable", kind: "no-destination" };
-    }
-    return { status: "available", kind: "macos-host" };
+  const leasable = input.leasable ?? [];
+  if (input.platform === "darwin" && input.hasScreen !== false) {
+    return leasable.length === 0
+      ? { status: "available", kind: "macos-host" }
+      : { status: "available", kind: "macos-host", leasable };
   }
-  if (input.providerConfigured === true) {
-    return { status: "unavailable", kind: "no-destination" };
-  }
+  if (leasable.length > 0) return { status: "leasable", kind: "disposable-desktop", leasable };
+  if (input.platform === "darwin") return { status: "unavailable", kind: "no-destination" };
   return { status: "unavailable", kind: "no-provider-configured" };
 }
 
+/**
+ * The Mac runtime's refusal. A leasable provider is not a screen that runtime
+ * can drive: until a send binds a lease, there is no destination.
+ */
 export function refuseComputerUseDestination(
   destination: ComputerUseDestinationReport,
 ): ComputerUseDestinationRefusal | undefined {
@@ -34,7 +53,7 @@ export function refuseComputerUseDestination(
   return {
     status: "refused",
     kind: "unavailable",
-    reason: destination.kind,
+    reason: destination.status === "leasable" ? "no-destination" : destination.kind,
   };
 }
 

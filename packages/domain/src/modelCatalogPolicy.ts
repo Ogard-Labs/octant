@@ -7,7 +7,8 @@ import type {
   ProviderModel,
 } from "@octant/contracts";
 import type { UtcTimestamp } from "@octant/contracts/events";
-import { isNativeHarnessDriverKind } from "./providerPolicy";
+import { ACP_AGENT_KINDS } from "@octant/contracts/acp-agent-profiles";
+import { isAcpAgentInstance, isNativeHarnessDriverKind } from "./providerPolicy";
 
 const evidenceSourceRank: Record<CapabilityEvidence["source"], number> = {
   "endpoint-observation": 5,
@@ -97,19 +98,8 @@ const nativeToolRuntimeDrivers: ReadonlySet<ProviderDriverKind> = new Set([
   "codex",
   "claude",
   "opencode",
-  "kilo",
   "pi",
-  "devin",
-  "kimi-code",
-  "mistral-vibe",
-  "grok",
-  "goose",
-  "glm",
-  "gemini",
-  "copilot",
-  "cline",
-  "qwen",
-  "fx",
+  ...ACP_AGENT_KINDS,
 ]);
 
 export function isNativeToolRuntimeDriver(driverKind: ProviderDriverKind): boolean {
@@ -259,24 +249,8 @@ function authenticationOf(instance: ProviderInstance): string | undefined {
       return instance.configuration.authentication;
     case "claude-agent-sdk":
       return instance.configuration.authentication;
-    case "mistral-vibe-acp":
-      return instance.configuration.authentication;
-    case "grok-acp":
-      return instance.configuration.authentication;
-    case "glm-acp":
-      return instance.configuration.authentication;
-    case "gemini-acp":
-      return instance.configuration.authentication;
-    case "cline-acp":
-      return instance.configuration.authentication;
-    case "qwen-acp":
-      return instance.configuration.authentication;
-    case "fx-acp":
-      return instance.configuration.authentication;
-    case "devin-acp":
-      return instance.configuration.authentication;
     default:
-      return undefined;
+      return isAcpAgentInstance(instance) ? instance.configuration.authentication : undefined;
   }
 }
 
@@ -284,23 +258,11 @@ function binaryOf(instance: ProviderInstance): string | undefined {
   switch (instance.configuration.kind) {
     case "opencode-cli":
     case "codex-cli":
-    case "kimi-code-acp":
-    case "kilo-acp":
-    case "devin-acp":
     case "pi-rpc":
-    case "mistral-vibe-acp":
-    case "grok-acp":
-    case "goose-acp":
-    case "glm-acp":
-    case "gemini-acp":
-    case "copilot-acp":
-    case "cline-acp":
-    case "qwen-acp":
-    case "fx-acp":
     case "claude-agent-sdk":
       return instance.configuration.binaryPath;
     default:
-      return undefined;
+      return isAcpAgentInstance(instance) ? instance.configuration.binaryPath : undefined;
   }
 }
 

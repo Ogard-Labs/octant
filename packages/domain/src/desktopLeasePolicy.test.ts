@@ -1,0 +1,135 @@
+import { describe, expect, it } from "vitest";
+import type { DesktopLeaseOwner } from "@octant/contracts";
+import {
+  decideDesktopLeaseAcquire,
+  decideDesktopLeaseExtension,
+  desktopLeaseClockEnds,
+  desktopLeaseFits,
+  desktopLeaseTransitionAllowed,
+  desktopProviderExpiryHolds,
+} from "./desktopLeasePolicy";
+
+const owner = (threadId: string): DesktopLeaseOwner => ({ mode: "code", threadId });
+const threadA = owner("a0000000-0000-4000-8000-000000000001");
+const threadB = owner("a0000000-0000-4000-8000-000000000002");
+const minute = 60_000;
+
+describe("desktop lease policy", () => {
+  it("writes released only from a release attempt, never straight from a running lease", () => {
+    expect(desktopLeaseTransitionAllowed("ready", "released")).toBe(false);
+    expect(desktopLeaseTransitionAllowed("ready", "releasing")).toBe(true);
+    expect(desktopLeaseTransitionAllowed("releasing", "released")).toBe(true);
+    expect(desktopLeaseTransitionAllowed("release-failed", "released")).toBe(true);
+    expect(desktopLeaseTransitionAllowed("released", "releasing")).toBe(false);
+  });
+
+  it("refuses in Plan and makes a person confirm every billed lease, Full access included", () => {
+    expect(
+      decideDesktopLeaseAcquire({
+        executionPolicy: "plan",
+        billed: false,
+        initiator: "local-user",
+      }),
+    ).toEqual({ kind: "refused", reason: "plan-mode" });
+    expect(
+      decideDesktopLeaseAcquire({
+        executionPolicy: "full-access",
+        billed: true,
+        initiator: "agent",
+      }),
+    ).toEqual({ kind: "ask", asks: "billed" });
+    expect(
+      decideDesktopLeaseAcquire({
+        executionPolicy: "full-access",
+        billed: true,
+        initiator: "local-user",
+      }),
+    ).toEqual({ kind: "ask", asks: "billed" });
+  });
+
+  it("asks in the thread below Full access and proceeds for Full access on a host-local desktop", () => {
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+      expect(
+        decideDesktopLeaseAcquire({ executionPolicy, billed: false, initiator: "agent" }),
+      ).toEqual({ kind: "ask", asks: "in-thread" });
+    }
+    expect(
+      decideDesktopLeaseAcquire({
+        executionPolicy: "full-access",
+        billed: false,
+        initiator: "agent",
+      }),
+    ).toEqual({ kind: "proceed" });
+    expect(
+      decideDesktopLeaseAcquire({
+        executionPolicy: "approval-gated",
+        billed: false,
+        initiator: "remote-device",
+      }),
+    ).toEqual({ kind: "proceed" });
+  });
+
+  it("caps a thread at two leases and the host at two host-local ones, counting failed releases", () => {
+    const two = [
+      { owner: threadA, locality: "cloud", state: "ready" },
+      { owner: threadA, locality: "cloud", state: "release-failed" },
+    ] as const;
+    expect(desktopLeaseFits({ holdings: two, owner: threadA, locality: "cloud" })).toBe(false);
+    expect(desktopLeaseFits({ holdings: two, owner: threadB, locality: "cloud" })).toBe(true);
+
+    const hostLocal = [
+      { owner: threadA, locality: "host-local", state: "ready" },
+      { owner: threadB, locality: "host-local", state: "provisioning" },
+    ] as const;
+    const third = owner("a0000000-0000-4000-8000-000000000003");
+    expect(desktopLeaseFits({ holdings: hostLocal, owner: third, locality: "host-local" })).toBe(
+      false,
+    );
+    expect(desktopLeaseFits({ holdings: hostLocal, owner: third, locality: "cloud" })).toBe(true);
+    expect(
+      desktopLeaseFits({
+        holdings: [{ owner: threadA, locality: "host-local", state: "released" }],
+        owner: threadA,
+        locality: "host-local",
+      }),
+    ).toBe(true);
+  });
+
+  it("ends a lease at its expiry, and when idle only while no tab is open", () => {
+    const base = { expiresAt: 30 * minute, idleMinutes: 15, lastActivityAt: 0 };
+    expect(desktopLeaseClockEnds({ ...base, now: 30 * minute, openTabs: 1 })).toBe("expired");
+    expect(desktopLeaseClockEnds({ ...base, now: 16 * minute, openTabs: 1 })).toBeUndefined();
+    expect(desktopLeaseClockEnds({ ...base, now: 16 * minute, openTabs: 0 })).toBe("idle");
+    expect(desktopLeaseClockEnds({ ...base, now: 14 * minute, openTabs: 0 })).toBeUndefined();
+  });
+
+  it("lets only a person extend, and never past the recipe maximum", () => {
+    const lease = { expiresAt: 30 * minute, maximumExpiresAt: 240 * minute };
+    expect(decideDesktopLeaseExtension({ ...lease, actor: "agent", byMinutes: 30 })).toEqual({
+      kind: "refused",
+      reason: "agent-cannot-extend",
+    });
+    expect(decideDesktopLeaseExtension({ ...lease, actor: "local-user", byMinutes: 30 })).toEqual({
+      kind: "allowed",
+      expiresAt: 60 * minute,
+    });
+    expect(
+      decideDesktopLeaseExtension({ ...lease, actor: "remote-device", byMinutes: 211 }),
+    ).toEqual({ kind: "refused", reason: "beyond-maximum" });
+  });
+
+  it("refuses to keep a billed desktop whose provider-side expiry ends before the lease", () => {
+    expect(
+      desktopProviderExpiryHolds({ billed: true, expiresAt: 100, providerExpiresAt: undefined }),
+    ).toBe(false);
+    expect(
+      desktopProviderExpiryHolds({ billed: true, expiresAt: 100, providerExpiresAt: 99 }),
+    ).toBe(false);
+    expect(
+      desktopProviderExpiryHolds({ billed: true, expiresAt: 100, providerExpiresAt: 160 }),
+    ).toBe(true);
+    expect(
+      desktopProviderExpiryHolds({ billed: false, expiresAt: 100, providerExpiresAt: undefined }),
+    ).toBe(true);
+  });
+});

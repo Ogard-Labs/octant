@@ -1,7 +1,12 @@
 import { type ProviderInstance, type ProviderInstanceId } from "@octant/contracts";
-import { normalizeOpenAiCompatibleBaseUrl, subscriptionOAuthOffers } from "@octant/domain";
+import {
+  AZURE_FOUNDRY_DIRECTORY_SIGN_IN,
+  normalizeOpenAiCompatibleBaseUrl,
+  subscriptionOAuthOffers,
+} from "@octant/domain";
 import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { useRef, useState } from "react";
+import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
@@ -23,6 +28,7 @@ import {
   configurationFrom,
   anthropicConfigurationFrom,
   foundryConfigurationFrom,
+  isDirectoryGuid,
 } from "./configurationValues";
 
 interface HttpConfigurationFormProps {
@@ -415,14 +421,35 @@ interface FoundryConfigurationFormProps {
 
 export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
   const credentialInput = useRef<HTMLInputElement>(null);
+  const saved = props.instance.configuration;
+  // The form keeps the way the instance signs in unless the person changes
+  // it: an organization sign-in saved through this form stays one.
+  const [signIn, setSignIn] = useState(saved.authentication);
+  const [problem, setProblem] = useState<string>();
+  const savedDirectory = saved.authentication === "directory-oauth" ? saved.directory : undefined;
+  const name = props.instance.displayName;
   return (
     <form
       className="provider-card__edit provider-card__edit--http"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        const configuration = foundryConfigurationFrom(new FormData(event.currentTarget));
-        const enteredCredential = transientCredential(credentialInput.current);
+        const data = new FormData(event.currentTarget);
+        if (
+          signIn === "directory-oauth" &&
+          !(
+            isDirectoryGuid(String(data.get("tenantId") ?? "")) &&
+            isDirectoryGuid(String(data.get("clientId") ?? ""))
+          )
+        ) {
+          setProblem(DIRECTORY_IDS_PROBLEM);
+          return;
+        }
+        setProblem(undefined);
+        const configuration = foundryConfigurationFrom(data);
+        // An organization sign-in holds no key, so none is sent with it.
+        const typed = transientCredential(credentialInput.current);
+        const enteredCredential = signIn === "api-key" ? typed : emptyTransientCredential(typed);
         const generation =
           enteredCredential.value.length > 0 ? props.credential.beginMutation() : undefined;
         void props.onChange(props.instance.id, configuration, enteredCredential).then(
@@ -438,21 +465,63 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
       }}
     >
       <BaseUrlField
-        ariaLabel={`Foundry OpenAI v1 base URL for ${props.instance.displayName}`}
+        ariaLabel={`Foundry OpenAI v1 base URL for ${name}`}
         instanceId={props.instance.id}
         label="Foundry OpenAI v1 base URL"
-        savedBaseUrl={props.instance.configuration.baseUrl}
-        takesKey
+        savedBaseUrl={saved.baseUrl}
+        takesKey={signIn === "api-key"}
       />
-      <HttpCredentialFields
-        authentication="api-key"
-        authenticationLabel={`Authentication for ${props.instance.displayName}`}
-        credentialInput={credentialInput}
-        credentialLabel={`API key for ${props.instance.displayName}`}
-        credentialManagementAvailable={props.credentialManagementAvailable}
-        fixedAuthentication
-        supportsApiKey
-      />
+      <SettingRow
+        label="Sign in with"
+        scope="host"
+        settingId={`provider-${props.instance.id}-authentication`}
+      >
+        <OctantSelectField
+          aria-label={`Authentication for ${name}`}
+          className="settings-view__select"
+          name="authentication"
+          onValueChange={(value) =>
+            setSignIn(value === "directory-oauth" ? "directory-oauth" : "api-key")
+          }
+          options={[
+            { id: "api-key", label: "API key (api-key header)" },
+            { id: "directory-oauth", label: "Organization account (Microsoft Entra ID)" },
+          ]}
+          value={signIn}
+        />
+      </SettingRow>
+      {signIn === "api-key" ? (
+        <label>
+          <span>API key (leave blank to preserve)</span>
+          <OctantInput
+            aria-label={`API key for ${name}`}
+            autoComplete="new-password"
+            className="settings-view__text-input"
+            disabled={!props.credentialManagementAvailable}
+            name="credential"
+            ref={credentialInput}
+            spellCheck={false}
+            type="password"
+          />
+        </label>
+      ) : (
+        <DirectoryIdFields
+          clientId={savedDirectory === undefined ? "" : String(savedDirectory.clientId)}
+          instanceId={props.instance.id}
+          instanceName={name}
+          tenantId={savedDirectory === undefined ? "" : String(savedDirectory.tenantId)}
+        />
+      )}
+      {saved.authentication !== signIn ? (
+        <p
+          className="provider-settings__field-guidance provider-settings__field-guidance--between-rows"
+          role="status"
+        >
+          {signIn === "api-key"
+            ? "Saving removes this endpoint's organization sign-in from this computer. Enter an API key to keep using it."
+            : "Saving removes this endpoint's stored API key. Sign in with your organization account afterwards."}
+        </p>
+      ) : null}
       <SettingRow
         label="Protocol preference"
         scope="host"
@@ -487,9 +556,15 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
         className="provider-settings__field-guidance"
         id={`endpoint-guidance-${props.instance.id}`}
       >
-        The base URL must end with /openai/v1/. API keys are stored write-only in Keychain and sent
-        as the api-key header. List deployments in the order you want them to appear.
+        {signIn === "api-key"
+          ? "The base URL must end with /openai/v1/. API keys are stored write-only in Keychain and sent as the api-key header. List deployments in the order you want them to appear."
+          : "The base URL must end with /openai/v1/ on an openai.azure.com, services.ai.azure.com, or cognitiveservices.azure.com address. Changing the tenant, client, or address signs this endpoint out. List deployments in the order you want them to appear."}
       </p>
+      {problem === undefined ? null : (
+        <OctantAlert className="provider-settings__alert" tone="warning">
+          {problem}
+        </OctantAlert>
+      )}
       <div className="provider-card__edit-actions">
         <OctantButton
           disabled={props.disabled}
@@ -500,7 +575,7 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
         >
           Save
         </OctantButton>
-        {props.credentialManagementAvailable ? (
+        {props.credentialManagementAvailable && saved.authentication === "api-key" ? (
           <OctantButton
             disabled={props.disabled || props.credential.status !== "stored"}
             onClick={() => {
@@ -520,6 +595,92 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
         ) : null}
       </div>
     </form>
+  );
+}
+
+/** What the person is told when a pasted tenant or client id is not a GUID. */
+export const DIRECTORY_IDS_PROBLEM =
+  "Enter the directory (tenant) ID and the application (client) ID your organization registered, each a GUID such as 6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f.";
+
+/**
+ * The tenant and client an organization sign-in binds to. Neither is secret:
+ * the client is a public app the organization registered in its own tenant.
+ * Pasted ids are lowercased when saved, since the host compares them exactly.
+ */
+function DirectoryIdFields(props: {
+  readonly instanceId: ProviderInstanceId;
+  readonly instanceName: string;
+  readonly tenantId: string;
+  readonly clientId: string;
+}) {
+  return (
+    <>
+      <SettingRow
+        label="Directory (tenant) ID"
+        scope="host"
+        settingId={`provider-${props.instanceId}-directory-tenant`}
+      >
+        <OctantInput
+          aria-label={`Directory (tenant) ID for ${props.instanceName}`}
+          autoComplete="off"
+          className="settings-view__text-input"
+          defaultValue={props.tenantId}
+          name="tenantId"
+          placeholder="00000000-0000-0000-0000-000000000000"
+          spellCheck={false}
+        />
+      </SettingRow>
+      <SettingRow
+        label="Application (client) ID"
+        scope="host"
+        settingId={`provider-${props.instanceId}-directory-client`}
+      >
+        <OctantInput
+          aria-label={`Application (client) ID for ${props.instanceName}`}
+          autoComplete="off"
+          className="settings-view__text-input"
+          defaultValue={props.clientId}
+          name="clientId"
+          placeholder="00000000-0000-0000-0000-000000000000"
+          spellCheck={false}
+        />
+      </SettingRow>
+    </>
+  );
+}
+
+/**
+ * Sign in with the organization account an Azure AI Foundry endpoint binds
+ * to. The host builds the sign-in from the endpoint's own tenant, client, and
+ * address; this panel only starts it and shows the public state.
+ */
+export function DirectoryEndpointSignIn(props: {
+  readonly instance: Extract<ProviderInstance, { driverKind: "azure-foundry" }>;
+  readonly disabled: boolean;
+  readonly startSignIn?: boolean;
+  readonly consentShown?: boolean;
+  readonly onStateChange?: (state: ProviderOAuthSignInState) => void;
+  readonly onProviderOAuth?: (
+    command: ProviderOAuthCommand,
+  ) => Promise<import("../ProviderOAuthSignIn").ProviderOAuthCommandResult | undefined>;
+  readonly onOpenExternalUrl?: (url: string) => void;
+}) {
+  if (props.instance.configuration.authentication !== "directory-oauth") return null;
+  return (
+    <ProviderOAuthSignInPanel
+      accountLabel={AZURE_FOUNDRY_DIRECTORY_SIGN_IN.accountLabel}
+      descriptorId={AZURE_FOUNDRY_DIRECTORY_SIGN_IN.descriptorId}
+      disabled={props.disabled}
+      instanceId={props.instance.id}
+      localSignOut
+      signInLabel="Sign in with your organization"
+      {...(props.startSignIn === true ? { startSignIn: true } : {})}
+      {...(props.consentShown === true ? { consentShown: true } : {})}
+      {...(props.onStateChange === undefined ? {} : { onStateChange: props.onStateChange })}
+      {...(props.onProviderOAuth === undefined ? {} : { run: props.onProviderOAuth })}
+      {...(props.onOpenExternalUrl === undefined ? {} : { openUrl: props.onOpenExternalUrl })}
+      termsSummary={AZURE_FOUNDRY_DIRECTORY_SIGN_IN.termsSummary}
+    />
   );
 }
 

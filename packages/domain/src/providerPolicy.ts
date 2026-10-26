@@ -1,15 +1,32 @@
 import type { AggregateVersion, UtcTimestamp } from "@octant/contracts/events";
-import { CLAUDE_ACCOUNT_ACCENTS } from "@octant/contracts/providers";
+import {
+  acpAgentChangeCommandKind,
+  acpAgentCreateCommandKind,
+  CLAUDE_ACCOUNT_ACCENTS,
+} from "@octant/contracts/providers";
 import {
   assignedProviderAccountDirectory,
   CLAUDE_ACCOUNT_PROFILE,
   CODEX_ACCOUNT_PROFILE,
   formatProviderAccountSignInCommand,
 } from "./providerAccountProfile";
+import {
+  ACP_AGENT_KINDS,
+  acpAgentKindOfConfiguration,
+  acpAgentProfile,
+  isAcpAgentKind,
+} from "@octant/contracts/acp-agent-profiles";
+import { isAzureFoundryDirectoryHost } from "./directorySignIn";
 import type {
+  AcpAgentConfiguration,
+  AcpAgentProviderInstance,
+  ChangeAcpAgentConfigurationCommand,
+  CreateAcpAgentProviderCommand,
+  ProviderRegistryCommand,
   AnthropicCompatibleProviderConfiguration,
   AnthropicCompatibleProviderInstance,
   AzureFoundryProviderConfiguration,
+  DirectoryBinding,
   AzureFoundryProviderInstance,
   BflImageProviderConfiguration,
   BflImageProviderInstance,
@@ -19,41 +36,12 @@ import type {
   ClaudeProviderInstance,
   CodexProviderConfiguration,
   CodexProviderInstance,
-  DevinProviderConfiguration,
-  DevinProviderInstance,
   GeminiImageAspectRatio,
   GeminiImageProviderConfiguration,
   GeminiImageProviderInstance,
   GeminiImageResolution,
-  GrokAuthentication,
-  GrokProviderConfiguration,
-  GrokProviderInstance,
-  GlmAuthentication,
-  GlmProviderConfiguration,
-  GlmProviderInstance,
-  GeminiAuthentication,
-  GeminiProviderConfiguration,
-  GeminiProviderInstance,
-  CopilotProviderConfiguration,
-  CopilotProviderInstance,
-  ClineAuthentication,
-  ClineProviderConfiguration,
-  ClineProviderInstance,
-  QwenAuthentication,
-  QwenProviderConfiguration,
-  QwenProviderInstance,
-  FxProviderConfiguration,
-  FxProviderInstance,
-  GooseProviderConfiguration,
-  GooseProviderInstance,
   IdeogramImageProviderConfiguration,
   IdeogramImageProviderInstance,
-  KimiCodeProviderInstance,
-  KiloProviderConfiguration,
-  KiloProviderInstance,
-  MistralVibeAuthentication,
-  MistralVibeProviderConfiguration,
-  MistralVibeProviderInstance,
   OllamaProviderConfiguration,
   OllamaProviderInstance,
   OpenAiImageProviderConfiguration,
@@ -83,6 +71,7 @@ export type ProviderPolicyRejectionCode =
   | "disabled-provider"
   | "invalid-authentication"
   | "invalid-binary-path"
+  | "invalid-configuration"
   | "invalid-version"
   | "invalid-base-url"
   | "invalid-model-id"
@@ -130,19 +119,15 @@ export function isImageProfileDriverKind(
 const PROVIDER_CLI_UPDATE_COMMANDS: Partial<Record<ProviderDriverKind, ReadonlyArray<string>>> = {
   codex: ["update"],
   claude: ["update"],
-  devin: ["update"],
-  "mistral-vibe": ["update"],
-  grok: ["update"],
-  "kimi-code": ["upgrade"],
-  cline: ["update"],
-  copilot: ["update"],
 };
 
 /** Returns the provider-owned update command, when the CLI documents one. */
 export function providerCliUpdateArgs(
   driverKind: ProviderDriverKind,
 ): ReadonlyArray<string> | undefined {
-  return PROVIDER_CLI_UPDATE_COMMANDS[driverKind];
+  return isAcpAgentKind(driverKind)
+    ? acpAgentProfile(driverKind).cliUpdateArgs
+    : PROVIDER_CLI_UPDATE_COMMANDS[driverKind];
 }
 
 export function supportsProviderCliUpdate(driverKind: ProviderDriverKind): boolean {
@@ -152,27 +137,17 @@ export function supportsProviderCliUpdate(driverKind: ProviderDriverKind): boole
 /**
  * The agent runtimes "Locate binary" can point at an executable the person
  * picked: every runtime whose configuration names a binary and whose version
- * probe the host can run to check the pick. GLM Agent is left out because its
- * ACP agent has no version flag; run bare it starts the agent and waits on
- * stdin, so the host could never accept a picked file.
+ * probe the host can run to check the pick. An ACP agent with no version flag
+ * (GLM Agent: run bare, it starts and waits on stdin) is left out, because the
+ * host could never accept a picked file.
  */
 const LOCATABLE_RUNTIME_DRIVER_KINDS: ReadonlySet<ProviderDriverKind> = new Set([
   "codex",
   "opencode",
-  "kimi-code",
   "claude",
-  "mistral-vibe",
-  "grok",
-  "goose",
-  "gemini",
-  "copilot",
-  "cline",
-  "qwen",
-  "fx",
-  "devin",
-  "kilo",
   "pi",
   "oh-my-pi",
+  ...ACP_AGENT_KINDS.filter((kind) => acpAgentProfile(kind).versionProbeArgs.length > 0),
 ]);
 
 export function canLocateRuntimeBinary(driverKind: ProviderDriverKind): boolean {
@@ -355,6 +330,41 @@ export interface AzureFoundryConfigurationInput {
   readonly authentication: AzureFoundryProviderConfiguration["authentication"];
   readonly protocol: AzureFoundryProviderConfiguration["protocol"];
   readonly manualModelIds: ReadonlyArray<string>;
+  /** The organization's tenant and client; present exactly for `directory-oauth`. */
+  readonly directory?: { readonly tenantId: string; readonly clientId: string };
+}
+
+const DIRECTORY_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * A directory sign-in's tenant and client, refused unless each is a lowercase
+ * GUID and the address lies under the Foundry host list: a typo or a crafted
+ * address must not become a place a directory bearer is sent.
+ */
+function azureFoundryDirectoryBinding(
+  baseUrl: string,
+  directory: AzureFoundryConfigurationInput["directory"],
+): DirectoryBinding {
+  if (
+    directory === undefined ||
+    !DIRECTORY_GUID.test(directory.tenantId) ||
+    !DIRECTORY_GUID.test(directory.clientId)
+  ) {
+    reject(
+      "invalid-authentication",
+      "Organization sign-in needs your directory's tenant ID and the application (client) ID your organization registered, each a GUID.",
+    );
+  }
+  if (!isAzureFoundryDirectoryHost(baseUrl)) {
+    reject(
+      "invalid-base-url",
+      "Organization sign-in works only with an Azure AI Foundry address under openai.azure.com, services.ai.azure.com, or cognitiveservices.azure.com.",
+    );
+  }
+  return {
+    tenantId: directory.tenantId as DirectoryBinding["tenantId"],
+    clientId: directory.clientId as DirectoryBinding["clientId"],
+  };
 }
 
 function normalizeAzureFoundryConfiguration(
@@ -369,11 +379,19 @@ function normalizeAzureFoundryConfiguration(
   if (!url.pathname.endsWith("/openai/v1/")) {
     reject("invalid-base-url", "Azure AI Foundry base URL must end with the /openai/v1/ path.");
   }
-  if (configuration.authentication !== "api-key") {
+  if (
+    configuration.authentication !== "api-key" &&
+    configuration.authentication !== "directory-oauth"
+  ) {
     reject(
       "invalid-authentication",
-      "Azure AI Foundry technical preview supports API-key authentication only.",
+      "Azure AI Foundry signs in with an API key or an organization account.",
     );
+  }
+  // An API-key instance carries no directory binding: one left from an
+  // earlier sign-in would read as a sign-in the instance no longer uses.
+  if (configuration.authentication === "api-key" && configuration.directory !== undefined) {
+    reject("invalid-authentication", "An API-key endpoint does not name a directory tenant.");
   }
   const manualModelIds = normalizeManualModelIds(
     configuration.manualModelIds,
@@ -385,13 +403,20 @@ function normalizeAzureFoundryConfiguration(
   if (manualModelIds.length === 0) {
     reject("invalid-model-ids", "Azure AI Foundry requires at least one deployment ID.");
   }
-  return {
+  const shared = {
     kind: configuration.kind,
     baseUrl,
-    authentication: configuration.authentication,
     protocol: configuration.protocol,
     manualModelIds,
   };
+  if (configuration.authentication === "directory-oauth") {
+    return {
+      ...shared,
+      authentication: "directory-oauth",
+      directory: azureFoundryDirectoryBinding(baseUrl, configuration.directory),
+    };
+  }
+  return { ...shared, authentication: "api-key" };
 }
 
 interface CreateProviderInput {
@@ -518,64 +543,6 @@ function normalizeClaudeConfigDirectory(path: string | undefined): string | unde
   return normalized;
 }
 
-export interface MistralVibeConfigurationInput {
-  readonly kind: MistralVibeProviderConfiguration["kind"];
-  readonly binaryPath: string;
-  readonly authentication: MistralVibeAuthentication;
-}
-
-export interface GrokConfigurationInput {
-  readonly kind: GrokProviderConfiguration["kind"];
-  readonly binaryPath: string;
-  readonly authentication: GrokAuthentication;
-}
-
-export interface GooseConfigurationInput {
-  readonly kind: GooseProviderConfiguration["kind"];
-  readonly binaryPath: string;
-}
-
-export interface GlmConfigurationInput {
-  readonly kind: GlmProviderConfiguration["kind"];
-  readonly binaryPath: string;
-  readonly authentication: GlmAuthentication;
-}
-
-export interface GeminiConfigurationInput {
-  readonly kind: GeminiProviderConfiguration["kind"];
-  readonly binaryPath: string;
-  readonly authentication: GeminiAuthentication;
-}
-
-export interface CopilotConfigurationInput {
-  readonly kind: CopilotProviderConfiguration["kind"];
-  readonly binaryPath: string;
-}
-
-export interface ClineConfigurationInput {
-  readonly kind: ClineProviderConfiguration["kind"];
-  readonly binaryPath: string;
-  readonly authentication: ClineAuthentication;
-}
-
-export interface QwenConfigurationInput {
-  readonly kind: QwenProviderConfiguration["kind"];
-  readonly binaryPath: string;
-  readonly authentication: QwenAuthentication;
-}
-
-export interface FxConfigurationInput {
-  readonly kind: FxProviderConfiguration["kind"];
-  readonly binaryPath: string;
-  readonly authentication: FxProviderConfiguration["authentication"];
-}
-
-export interface DevinConfigurationInput {
-  readonly kind: DevinProviderConfiguration["kind"];
-  readonly binaryPath: string;
-  readonly authentication: DevinProviderConfiguration["authentication"];
-}
-
 export interface PiConfigurationInput {
   readonly kind: PiProviderConfiguration["kind"];
   readonly binaryPath: string;
@@ -585,11 +552,6 @@ export interface OhMyPiConfigurationInput {
   readonly kind: OhMyPiProviderConfiguration["kind"];
   readonly binaryPath: string;
   readonly supportedVersion: string;
-}
-
-export interface KiloConfigurationInput {
-  readonly kind: KiloProviderConfiguration["kind"];
-  readonly binaryPath: string;
 }
 
 export interface OllamaConfigurationInput {
@@ -647,151 +609,6 @@ function normalizeOhMyPiConfiguration(
   };
 }
 
-function normalizeKiloConfiguration(
-  configuration: KiloConfigurationInput,
-): KiloProviderConfiguration {
-  return { kind: "kilo-acp", binaryPath: normalizeBinaryPath(configuration.binaryPath) };
-}
-
-function normalizeDevinConfiguration(
-  configuration: DevinConfigurationInput,
-): DevinProviderConfiguration {
-  if (configuration.authentication !== "subscription") {
-    reject("invalid-authentication", "Devin authentication must be subscription.");
-  }
-  return {
-    kind: "devin-acp",
-    binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: "subscription",
-  };
-}
-
-function normalizeMistralVibeConfiguration(
-  configuration: MistralVibeConfigurationInput,
-): MistralVibeProviderConfiguration {
-  if (
-    configuration.authentication !== "subscription" &&
-    configuration.authentication !== "api-key"
-  ) {
-    reject(
-      "invalid-authentication",
-      "Mistral Vibe authentication must be subscription or api-key.",
-    );
-  }
-  return {
-    kind: "mistral-vibe-acp",
-    binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: configuration.authentication,
-  };
-}
-
-function normalizeGrokConfiguration(
-  configuration: GrokConfigurationInput,
-): GrokProviderConfiguration {
-  if (
-    configuration.authentication !== "subscription" &&
-    configuration.authentication !== "api-key"
-  ) {
-    reject("invalid-authentication", "Grok Build authentication must be subscription or api-key.");
-  }
-  return {
-    kind: "grok-acp",
-    binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: configuration.authentication,
-  };
-}
-
-function normalizeGooseConfiguration(
-  configuration: GooseConfigurationInput,
-): GooseProviderConfiguration {
-  return {
-    kind: "goose-acp",
-    binaryPath: normalizeBinaryPath(configuration.binaryPath),
-  };
-}
-
-function normalizeGlmConfiguration(configuration: GlmConfigurationInput): GlmProviderConfiguration {
-  if (
-    configuration.authentication !== "provider-owned" &&
-    configuration.authentication !== "api-key"
-  ) {
-    reject("invalid-authentication", "GLM Agent authentication must be provider-owned or api-key.");
-  }
-  return {
-    kind: "glm-acp",
-    binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: configuration.authentication,
-  };
-}
-
-function normalizeGeminiConfiguration(
-  configuration: GeminiConfigurationInput,
-): GeminiProviderConfiguration {
-  if (
-    configuration.authentication !== "provider-owned" &&
-    configuration.authentication !== "api-key"
-  ) {
-    reject(
-      "invalid-authentication",
-      "Gemini CLI authentication must be provider-owned or api-key.",
-    );
-  }
-  return {
-    kind: "gemini-acp",
-    binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: configuration.authentication,
-  };
-}
-
-function normalizeCopilotConfiguration(
-  configuration: CopilotConfigurationInput,
-): CopilotProviderConfiguration {
-  return {
-    kind: "copilot-acp",
-    binaryPath: normalizeBinaryPath(configuration.binaryPath),
-  };
-}
-
-function normalizeClineConfiguration(
-  configuration: ClineConfigurationInput,
-): ClineProviderConfiguration {
-  if (
-    configuration.authentication !== "provider-owned" &&
-    configuration.authentication !== "api-key"
-  ) {
-    reject("invalid-authentication", "Cline authentication must be provider-owned or api-key.");
-  }
-  return {
-    kind: "cline-acp",
-    binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: configuration.authentication,
-  };
-}
-
-function normalizeQwenConfiguration(
-  configuration: QwenConfigurationInput,
-): QwenProviderConfiguration {
-  if (
-    configuration.authentication !== "provider-owned" &&
-    configuration.authentication !== "api-key"
-  ) {
-    reject("invalid-authentication", "Qwen Code authentication must be provider-owned or api-key.");
-  }
-  return {
-    kind: "qwen-acp",
-    binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: configuration.authentication,
-  };
-}
-
-function normalizeFxConfiguration(configuration: FxConfigurationInput): FxProviderConfiguration {
-  return {
-    kind: "fx-acp",
-    binaryPath: normalizeBinaryPath(configuration.binaryPath),
-    authentication: "api-key",
-  };
-}
-
 function normalizeClaudeConfiguration(
   configuration: ClaudeConfigurationInput,
 ): ClaudeProviderConfiguration {
@@ -817,6 +634,105 @@ function normalizeClaudeConfiguration(
   };
 }
 
+export function isAcpAgentInstance(
+  instance: ProviderInstance,
+): instance is AcpAgentProviderInstance {
+  return isAcpAgentKind(instance.driverKind);
+}
+
+const acpAgentCreateCommandKinds: ReadonlySet<string> = new Set(
+  ACP_AGENT_KINDS.map(acpAgentCreateCommandKind),
+);
+const acpAgentChangeCommandKinds: ReadonlySet<string> = new Set(
+  ACP_AGENT_KINDS.map(acpAgentChangeCommandKind),
+);
+
+export function isCreateAcpAgentProviderCommand(
+  command: ProviderRegistryCommand,
+): command is CreateAcpAgentProviderCommand {
+  return acpAgentCreateCommandKinds.has(command.kind);
+}
+
+export function isChangeAcpAgentConfigurationCommand(
+  command: ProviderRegistryCommand,
+): command is ChangeAcpAgentConfigurationCommand {
+  return acpAgentChangeCommandKinds.has(command.kind);
+}
+
+/**
+ * Checks an ACP agent configuration against its profile: an absolute binary
+ * and, when the profile lists postures, one of them; an agent whose profile
+ * lists none takes no posture.
+ */
+function normalizeAcpAgentConfiguration(
+  configuration: AcpAgentConfiguration,
+): AcpAgentConfiguration {
+  const profile = acpAgentProfile(acpAgentKindOfConfiguration(configuration.kind));
+  const binaryPath = normalizeBinaryPath(configuration.binaryPath);
+  const { authentication } = configuration;
+  if (profile.authentication.length === 0) {
+    if (authentication !== undefined) {
+      reject("invalid-authentication", `${profile.name} takes no authentication setting.`);
+    }
+    return { kind: configuration.kind, binaryPath };
+  }
+  if (authentication === undefined || !profile.authentication.includes(authentication)) {
+    return reject(
+      "invalid-authentication",
+      `${profile.name} authentication must be ${profile.authentication.join(" or ")}.`,
+    );
+  }
+  return { kind: configuration.kind, binaryPath, authentication };
+}
+
+interface CreateAcpAgentProviderInput {
+  readonly id: ProviderInstanceId;
+  readonly displayName: string;
+  readonly configuration: AcpAgentConfiguration;
+  readonly existingInstances: ReadonlyArray<ProviderInstance>;
+  readonly expectedVersion: AggregateVersion;
+  readonly createdAt: UtcTimestamp;
+  readonly enabled?: boolean;
+}
+
+/** Creates an instance of the ACP agent its configuration names. */
+export function createAcpAgentProvider(
+  input: CreateAcpAgentProviderInput,
+): AcpAgentProviderInstance {
+  const configuration = normalizeAcpAgentConfiguration(input.configuration);
+  return {
+    id: input.id,
+    displayName: normalizeName(input.displayName, input.existingInstances),
+    driverKind: acpAgentKindOfConfiguration(configuration.kind),
+    configuration,
+    enabled: input.enabled ?? true,
+    environmentPolicy: "inherit-host",
+    version: nextVersion(input.expectedVersion),
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+  };
+}
+
+export function changeAcpAgentConfiguration(
+  provider: AcpAgentProviderInstance,
+  configuration: AcpAgentConfiguration,
+  updatedAt: UtcTimestamp,
+  activeSessionCount = 0,
+): AcpAgentProviderInstance {
+  if (activeSessionCount > 0) {
+    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
+  }
+  if (configuration.kind !== provider.configuration.kind) {
+    reject("invalid-configuration", "The configuration names a different provider runtime.");
+  }
+  return {
+    ...provider,
+    configuration: normalizeAcpAgentConfiguration(configuration),
+    version: nextVersion(provider.version),
+    updatedAt,
+  };
+}
+
 interface CreateClaudeProviderInput {
   readonly id: ProviderInstanceId;
   readonly displayName: string;
@@ -838,459 +754,6 @@ export function createClaudeProvider(input: CreateClaudeProviderInput): ClaudePr
     version: nextVersion(input.expectedVersion),
     createdAt: input.createdAt,
     updatedAt: input.createdAt,
-  };
-}
-
-interface CreateMistralVibeProviderInput {
-  readonly id: ProviderInstanceId;
-  readonly displayName: string;
-  readonly configuration: MistralVibeConfigurationInput;
-  readonly existingInstances: ReadonlyArray<ProviderInstance>;
-  readonly expectedVersion: AggregateVersion;
-  readonly createdAt: UtcTimestamp;
-  readonly enabled?: boolean;
-}
-
-export function createMistralVibeProvider(
-  input: CreateMistralVibeProviderInput,
-): MistralVibeProviderInstance {
-  return {
-    id: input.id,
-    displayName: normalizeName(input.displayName, input.existingInstances),
-    driverKind: "mistral-vibe",
-    configuration: normalizeMistralVibeConfiguration(input.configuration),
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: nextVersion(input.expectedVersion),
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-  };
-}
-
-export function changeMistralVibeConfiguration(
-  provider: MistralVibeProviderInstance,
-  configuration: MistralVibeConfigurationInput,
-  updatedAt: UtcTimestamp,
-  activeSessionCount = 0,
-): MistralVibeProviderInstance {
-  if (activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
-  }
-  return {
-    ...provider,
-    configuration: normalizeMistralVibeConfiguration(configuration),
-    version: nextVersion(provider.version),
-    updatedAt,
-  };
-}
-
-interface CreateGrokProviderInput {
-  readonly id: ProviderInstanceId;
-  readonly displayName: string;
-  readonly configuration: GrokConfigurationInput;
-  readonly existingInstances: ReadonlyArray<ProviderInstance>;
-  readonly expectedVersion: AggregateVersion;
-  readonly createdAt: UtcTimestamp;
-  readonly enabled?: boolean;
-}
-
-export function createGrokProvider(input: CreateGrokProviderInput): GrokProviderInstance {
-  return {
-    id: input.id,
-    displayName: normalizeName(input.displayName, input.existingInstances),
-    driverKind: "grok",
-    configuration: normalizeGrokConfiguration(input.configuration),
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: nextVersion(input.expectedVersion),
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-  };
-}
-
-export function changeGrokConfiguration(
-  provider: GrokProviderInstance,
-  configuration: GrokConfigurationInput,
-  updatedAt: UtcTimestamp,
-  activeSessionCount = 0,
-): GrokProviderInstance {
-  if (activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
-  }
-  return {
-    ...provider,
-    configuration: normalizeGrokConfiguration(configuration),
-    version: nextVersion(provider.version),
-    updatedAt,
-  };
-}
-
-interface CreateGooseProviderInput {
-  readonly id: ProviderInstanceId;
-  readonly displayName: string;
-  readonly configuration: GooseConfigurationInput;
-  readonly existingInstances: ReadonlyArray<ProviderInstance>;
-  readonly expectedVersion: AggregateVersion;
-  readonly createdAt: UtcTimestamp;
-  readonly enabled?: boolean;
-}
-
-export function createGooseProvider(input: CreateGooseProviderInput): GooseProviderInstance {
-  return {
-    id: input.id,
-    displayName: normalizeName(input.displayName, input.existingInstances),
-    driverKind: "goose",
-    configuration: normalizeGooseConfiguration(input.configuration),
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: nextVersion(input.expectedVersion),
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-  };
-}
-
-export function changeGooseConfiguration(
-  provider: GooseProviderInstance,
-  configuration: GooseConfigurationInput,
-  updatedAt: UtcTimestamp,
-  activeSessionCount = 0,
-): GooseProviderInstance {
-  if (activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
-  }
-  return {
-    ...provider,
-    configuration: normalizeGooseConfiguration(configuration),
-    version: nextVersion(provider.version),
-    updatedAt,
-  };
-}
-
-interface CreateGlmProviderInput {
-  readonly id: ProviderInstanceId;
-  readonly displayName: string;
-  readonly configuration: GlmConfigurationInput;
-  readonly existingInstances: ReadonlyArray<ProviderInstance>;
-  readonly expectedVersion: AggregateVersion;
-  readonly createdAt: UtcTimestamp;
-  readonly enabled?: boolean;
-}
-
-export function createGlmProvider(input: CreateGlmProviderInput): GlmProviderInstance {
-  return {
-    id: input.id,
-    displayName: normalizeName(input.displayName, input.existingInstances),
-    driverKind: "glm",
-    configuration: normalizeGlmConfiguration(input.configuration),
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: nextVersion(input.expectedVersion),
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-  };
-}
-
-export function changeGlmConfiguration(
-  provider: GlmProviderInstance,
-  configuration: GlmConfigurationInput,
-  updatedAt: UtcTimestamp,
-  activeSessionCount = 0,
-): GlmProviderInstance {
-  if (activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
-  }
-  return {
-    ...provider,
-    configuration: normalizeGlmConfiguration(configuration),
-    version: nextVersion(provider.version),
-    updatedAt,
-  };
-}
-
-interface CreateGeminiProviderInput {
-  readonly id: ProviderInstanceId;
-  readonly displayName: string;
-  readonly configuration: GeminiConfigurationInput;
-  readonly existingInstances: ReadonlyArray<ProviderInstance>;
-  readonly expectedVersion: AggregateVersion;
-  readonly createdAt: UtcTimestamp;
-  readonly enabled?: boolean;
-}
-
-export function createGeminiProvider(input: CreateGeminiProviderInput): GeminiProviderInstance {
-  return {
-    id: input.id,
-    displayName: normalizeName(input.displayName, input.existingInstances),
-    driverKind: "gemini",
-    configuration: normalizeGeminiConfiguration(input.configuration),
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: nextVersion(input.expectedVersion),
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-  };
-}
-
-export function changeGeminiConfiguration(
-  provider: GeminiProviderInstance,
-  configuration: GeminiConfigurationInput,
-  updatedAt: UtcTimestamp,
-  activeSessionCount = 0,
-): GeminiProviderInstance {
-  if (activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
-  }
-  return {
-    ...provider,
-    configuration: normalizeGeminiConfiguration(configuration),
-    version: nextVersion(provider.version),
-    updatedAt,
-  };
-}
-
-interface CreateCopilotProviderInput {
-  readonly id: ProviderInstanceId;
-  readonly displayName: string;
-  readonly configuration: CopilotConfigurationInput;
-  readonly existingInstances: ReadonlyArray<ProviderInstance>;
-  readonly expectedVersion: AggregateVersion;
-  readonly createdAt: UtcTimestamp;
-  readonly enabled?: boolean;
-}
-
-export function createCopilotProvider(input: CreateCopilotProviderInput): CopilotProviderInstance {
-  return {
-    id: input.id,
-    displayName: normalizeName(input.displayName, input.existingInstances),
-    driverKind: "copilot",
-    configuration: normalizeCopilotConfiguration(input.configuration),
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: nextVersion(input.expectedVersion),
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-  };
-}
-
-export function changeCopilotConfiguration(
-  provider: CopilotProviderInstance,
-  configuration: CopilotConfigurationInput,
-  updatedAt: UtcTimestamp,
-  activeSessionCount = 0,
-): CopilotProviderInstance {
-  if (activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
-  }
-  return {
-    ...provider,
-    configuration: normalizeCopilotConfiguration(configuration),
-    version: nextVersion(provider.version),
-    updatedAt,
-  };
-}
-
-interface CreateClineProviderInput {
-  readonly id: ProviderInstanceId;
-  readonly displayName: string;
-  readonly configuration: ClineConfigurationInput;
-  readonly existingInstances: ReadonlyArray<ProviderInstance>;
-  readonly expectedVersion: AggregateVersion;
-  readonly createdAt: UtcTimestamp;
-  readonly enabled?: boolean;
-}
-
-export function createClineProvider(input: CreateClineProviderInput): ClineProviderInstance {
-  return {
-    id: input.id,
-    displayName: normalizeName(input.displayName, input.existingInstances),
-    driverKind: "cline",
-    configuration: normalizeClineConfiguration(input.configuration),
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: nextVersion(input.expectedVersion),
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-  };
-}
-
-export function changeClineConfiguration(
-  provider: ClineProviderInstance,
-  configuration: ClineConfigurationInput,
-  updatedAt: UtcTimestamp,
-  activeSessionCount = 0,
-): ClineProviderInstance {
-  if (activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
-  }
-  return {
-    ...provider,
-    configuration: normalizeClineConfiguration(configuration),
-    version: nextVersion(provider.version),
-    updatedAt,
-  };
-}
-
-interface CreateQwenProviderInput {
-  readonly id: ProviderInstanceId;
-  readonly displayName: string;
-  readonly configuration: QwenConfigurationInput;
-  readonly existingInstances: ReadonlyArray<ProviderInstance>;
-  readonly expectedVersion: AggregateVersion;
-  readonly createdAt: UtcTimestamp;
-  readonly enabled?: boolean;
-}
-
-export function createQwenProvider(input: CreateQwenProviderInput): QwenProviderInstance {
-  return {
-    id: input.id,
-    displayName: normalizeName(input.displayName, input.existingInstances),
-    driverKind: "qwen",
-    configuration: normalizeQwenConfiguration(input.configuration),
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: nextVersion(input.expectedVersion),
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-  };
-}
-
-export function changeQwenConfiguration(
-  provider: QwenProviderInstance,
-  configuration: QwenConfigurationInput,
-  updatedAt: UtcTimestamp,
-  activeSessionCount = 0,
-): QwenProviderInstance {
-  if (activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
-  }
-  return {
-    ...provider,
-    configuration: normalizeQwenConfiguration(configuration),
-    version: nextVersion(provider.version),
-    updatedAt,
-  };
-}
-
-interface CreateFxProviderInput {
-  readonly id: ProviderInstanceId;
-  readonly displayName: string;
-  readonly configuration: FxConfigurationInput;
-  readonly existingInstances: ReadonlyArray<ProviderInstance>;
-  readonly expectedVersion: AggregateVersion;
-  readonly createdAt: UtcTimestamp;
-  readonly enabled?: boolean;
-}
-
-export function createFxProvider(input: CreateFxProviderInput): FxProviderInstance {
-  return {
-    id: input.id,
-    displayName: normalizeName(input.displayName, input.existingInstances),
-    driverKind: "fx",
-    configuration: normalizeFxConfiguration(input.configuration),
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: nextVersion(input.expectedVersion),
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-  };
-}
-
-export function changeFxConfiguration(
-  provider: FxProviderInstance,
-  configuration: FxConfigurationInput,
-  updatedAt: UtcTimestamp,
-  activeSessionCount = 0,
-): FxProviderInstance {
-  if (activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
-  }
-  return {
-    ...provider,
-    configuration: normalizeFxConfiguration(configuration),
-    version: nextVersion(provider.version),
-    updatedAt,
-  };
-}
-
-interface CreateDevinProviderInput {
-  readonly id: ProviderInstanceId;
-  readonly displayName: string;
-  readonly configuration: DevinConfigurationInput;
-  readonly existingInstances: ReadonlyArray<ProviderInstance>;
-  readonly expectedVersion: AggregateVersion;
-  readonly createdAt: UtcTimestamp;
-  readonly enabled?: boolean;
-}
-
-export function createDevinProvider(input: CreateDevinProviderInput): DevinProviderInstance {
-  return {
-    id: input.id,
-    displayName: normalizeName(input.displayName, input.existingInstances),
-    driverKind: "devin",
-    configuration: normalizeDevinConfiguration(input.configuration),
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: nextVersion(input.expectedVersion),
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-  };
-}
-
-export function changeDevinConfiguration(
-  provider: DevinProviderInstance,
-  configuration: DevinConfigurationInput,
-  updatedAt: UtcTimestamp,
-  activeSessionCount = 0,
-): DevinProviderInstance {
-  if (activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
-  }
-  return {
-    ...provider,
-    configuration: normalizeDevinConfiguration(configuration),
-    version: nextVersion(provider.version),
-    updatedAt,
-  };
-}
-
-interface CreateKiloProviderInput {
-  readonly id: ProviderInstanceId;
-  readonly displayName: string;
-  readonly configuration: KiloConfigurationInput;
-  readonly existingInstances: ReadonlyArray<ProviderInstance>;
-  readonly expectedVersion: AggregateVersion;
-  readonly createdAt: UtcTimestamp;
-  readonly enabled?: boolean;
-}
-
-export function createKiloProvider(input: CreateKiloProviderInput): KiloProviderInstance {
-  return {
-    id: input.id,
-    displayName: normalizeName(input.displayName, input.existingInstances),
-    driverKind: "kilo",
-    configuration: normalizeKiloConfiguration(input.configuration),
-    enabled: input.enabled ?? true,
-    environmentPolicy: "inherit-host",
-    version: nextVersion(input.expectedVersion),
-    createdAt: input.createdAt,
-    updatedAt: input.createdAt,
-  };
-}
-
-export function changeKiloConfiguration(
-  provider: KiloProviderInstance,
-  configuration: KiloConfigurationInput,
-  updatedAt: UtcTimestamp,
-  activeSessionCount = 0,
-): KiloProviderInstance {
-  if (activeSessionCount > 0) {
-    reject("active-sessions", "Stop active sessions before changing this provider runtime.");
-  }
-  return {
-    ...provider,
-    configuration: normalizeKiloConfiguration(configuration),
-    version: nextVersion(provider.version),
-    updatedAt,
   };
 }
 
@@ -1750,18 +1213,6 @@ export function createCodexProvider(
   };
 }
 
-export function createKimiCodeProvider(input: CreateProviderInput): KimiCodeProviderInstance {
-  const { binaryPath, ...normalized } = normalizeProviderCreation(input);
-  return {
-    ...normalized,
-    driverKind: "kimi-code",
-    configuration: {
-      kind: "kimi-code-acp",
-      binaryPath,
-    },
-  };
-}
-
 interface RenameProviderInput {
   readonly displayName: string;
   readonly existingInstances: ReadonlyArray<ProviderInstance>;
@@ -1787,7 +1238,7 @@ interface ChangeProviderBinaryInput {
 }
 
 export function changeProviderBinary(
-  provider: OpenCodeProviderInstance | CodexProviderInstance | KimiCodeProviderInstance,
+  provider: OpenCodeProviderInstance | CodexProviderInstance,
   input: ChangeProviderBinaryInput,
 ): ProviderInstance {
   if ((input.activeSessionCount ?? 0) > 0) {
@@ -1803,13 +1254,6 @@ export function changeProviderBinary(
         updatedAt: input.updatedAt,
       };
     case "codex":
-      return {
-        ...provider,
-        configuration: { ...provider.configuration, binaryPath },
-        version: nextVersion(provider.version),
-        updatedAt: input.updatedAt,
-      };
-    case "kimi-code":
       return {
         ...provider,
         configuration: { ...provider.configuration, binaryPath },
