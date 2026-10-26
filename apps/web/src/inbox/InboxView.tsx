@@ -163,28 +163,15 @@ export function InboxView(props: InboxViewProps) {
   const decisionRows = (requestRows ?? []).filter(
     (entry) => entry.request.kind === "decision" || isFindOnlyPendingRequest(entry.request),
   );
-  // A thread whose finished turn asked a decision is listed once, as that
-  // decision, rather than again as a turn waiting to be read.
-  const deciding = new Set(
-    decisionRows
-      .filter((entry) => entry.request.kind === "decision")
-      .map((entry) => String(entry.request.threadId)),
-  );
   // A thread whose agent waits on its own approval is listed once, as that
-  // approval, rather than again as the thread's attention signal for it or as
-  // a finished turn it has not been read since.
+  // approval, rather than again as the thread's attention signal for it.
   const approving = new Set(
     decisionRows
       .filter((entry) => isLeadApprovalPendingRequest(entry.request))
       .map((entry) => String(entry.request.threadId)),
   );
   const attentionItems = props.attentionItems.filter(
-    (item) =>
-      !(item.signal.reason === "turn-finished" && deciding.has(item.signal.threadId)) &&
-      !(
-        (item.signal.reason === "approval-required" || item.signal.reason === "turn-finished") &&
-        approving.has(item.signal.threadId)
-      ),
+    (item) => !(item.signal.reason === "approval-required" && approving.has(item.signal.threadId)),
   );
 
   return (

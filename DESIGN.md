@@ -1408,7 +1408,9 @@ decorative shortcuts.
 
 The sidebar header carries the mode switcher, Search, and New thread (New
 chat in Chat, New task in Work and Code); no New thread row repeats it. Under the header sit four count tiles in a 2×2 grid: Inbox (the
-threads that need the person), Running (threads the host projects as
+threads that need the person: an approval, a question, a follow-up that is due,
+or a subagent request waiting on them; a finished turn is not one, and the
+dock badge counts the same threads), Running (threads the host projects as
 executing), To review (finished turns not opened since), and Done today
 (threads put away since local midnight). Each tile is one button whose name
 carries its count ("Running, 2"); Inbox opens the Inbox, Running opens the
