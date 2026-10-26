@@ -21,7 +21,7 @@ Not checked yet, Found, not added, Not looked for yet, Not on this host, Not
 added, Off, Can't start, Version not supported, and Not available. A one-line
 introduction says each driver is already installed and trusted, followed by a
 summary ("21 drivers · 3 ready · 1 need you"). Opening a row replaces the page
-with that driver's setup sub-page: breadcrumb, Back, and Escape as on an
+with that driver's setup sub-page: Back and Escape as on an
 endpoint's page, and an h1 with the driver's name. It leads with Set up, a
 numbered list of steps (Find it on this host, for runtimes only; Add it to
 Octant or Add the endpoint; Turn it on; Sign in; Check the connection). Done
@@ -83,7 +83,7 @@ Octant Harness lists its model endpoints differently: as rows in one list, never
 
 ### Endpoint detail
 
-Opening a row replaces the page with the endpoint's detail sub-page (breadcrumb Settings / Octant Harness / endpoint, a Back control, and Escape), whose h1 is the endpoint's name; Back returns focus to the row. The sub-page leads with the state, Check now, and Use, then the one fix, then Sign-in or API key, Models (search, a Shown / Hidden / All filter, a switch per model, and the plain tags "Reads images" and "Chat only · Verify tools"), Where your data goes (two labelled checkboxes the person sets, with per-model overrides in a disclosure), Name and address, Diagnostics (a disclosure that opens by itself only while the endpoint is failing, holding the address, protocol, authentication, last check with the host's precise answer, tool use, and capabilities), and Remove last, confirmed in a dialog that starts on Keep and names the model roles that lose a model. Precise terms (protocol names, bearer, capability names) appear only in Diagnostics.
+Opening a row replaces the page with the endpoint's detail sub-page (a Back control and Escape), whose h1 is the endpoint's name; Back returns focus to the row. The sub-page leads with the state, Check now, and Use, then the one fix, then Sign-in or API key, Models (search, a Shown / Hidden / All filter, a switch per model, and the plain tags "Reads images" and "Chat only · Verify tools"), Where your data goes (two labelled checkboxes the person sets, with per-model overrides in a disclosure), Name and address, Diagnostics (a disclosure that opens by itself only while the endpoint is failing, holding the address, protocol, authentication, last check with the host's precise answer, tool use, and capabilities), and Remove last, confirmed in a dialog that starts on Keep and names the model roles that lose a model. Precise terms (protocol names, bearer, capability names) appear only in Diagnostics.
 
 ### Subscription sign-in lifecycle
 

@@ -118,8 +118,8 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
     border-radius: var(--oct-radius-md);
   }
 
-  /* The native band matches the page's title rail, so the "Settings" title
-     sits level with the breadcrumb beside it. */
+  /* The native band matches the page's title rail, so the two read as one
+     band across the window. */
   .settings-view:not(.settings-view--narrow) .settings-view__sidebar-titlebar,
   .settings-view:not(.settings-view--narrow) .settings-view__workspace-titlebar {
     height: var(--oct-title-rail-h);
@@ -212,52 +212,20 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   border-bottom: 1px solid var(--octant-border-soft);
 }
 
-.settings-view__breadcrumb {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 8px;
-  color: var(--octant-text-muted);
-  font-size: var(--oct-text-xs);
-}
-
-.settings-view__breadcrumb strong {
-  overflow: hidden;
-  color: var(--octant-text-secondary);
-  font-weight: var(--oct-weight-display);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* The page head is the icon tile, the title and one line under it, and an
-   optional ghost action at the far edge, with the "On this page" row under it
-   on a page that has three sections or more. The shared title/subtitle roles
-   carry the type; this only places them, and the subtitle's own end margin
-   must not stack on top. */
+/* The page head is a preference window's: the title at the section-label
+   scale, at most one line under it, and an optional ghost action at the far
+   edge, with the "On this page" row under it on a page of four sections or
+   more. The rail already names the page, so the head only has to anchor it. */
 .settings-view__page-head {
   display: grid;
-  gap: var(--oct-space-4);
-  margin-bottom: var(--oct-space-8);
+  gap: var(--oct-space-3);
+  margin-bottom: var(--oct-space-6);
 }
 
 .settings-view__header {
   display: flex;
   align-items: center;
   gap: var(--oct-space-4);
-}
-
-/* A faint tile holding the page's own navigation icon, so the page and its
-   rail row read as one thing. It is decoration: the h1 names the page. */
-.settings-view__header-tile {
-  display: grid;
-  flex: 0 0 auto;
-  width: 42px;
-  height: 42px;
-  place-items: center;
-  color: var(--octant-text-primary);
-  background: var(--oct-settings-tile-fill);
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-inset);
 }
 
 .settings-view__header-text {
@@ -271,49 +239,70 @@ html:not([data-octant-reduced-transparency="true"], [data-octant-increased-contr
   flex: 0 0 auto;
 }
 
-/* Size, weight, and tracking come from the shared page-title role. */
-.settings-view__header h1 {
+/* The section labels' size and tracking in primary ink: one step above them,
+   never the 28px page-title role. */
+.settings-view__title {
+  margin: 0;
   color: var(--octant-text-primary);
-  margin: 0;
-}
-
-.settings-view__header .oct-subtitle {
-  max-width: 68ch;
-  margin: 0;
-  color: var(--octant-text-secondary);
   font-family: var(--oct-font-display);
   font-size: var(--oct-text-sm);
-  line-height: 1.45;
+  font-weight: var(--oct-weight-strong);
+  letter-spacing: var(--oct-tracking-snug);
+  line-height: 1.35;
 }
 
-/* Pill links to the page's own sections. Fills select and hairlines
-   separate, so a pill is a hairline ring that takes the faint fill on hover. */
+/* One line: a longer description ends in an ellipsis (its full text is the
+   tooltip) and the scope mark stays in view after it. */
+.settings-view__description {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--oct-space-1);
+  margin: 0;
+  color: var(--octant-text-secondary);
+  font-size: var(--oct-text-detail);
+  line-height: 1.45;
+  white-space: nowrap;
+}
+
+.settings-view__description-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.settings-view__description > :not(.settings-view__description-text) {
+  flex: 0 0 auto;
+}
+
+/* Plain text links to the page's own sections. Providers & Models has ten:
+   as pills they took two tall rows before the first control, and a row that
+   scrolled sideways with no scrollbar cut "Model endpoints" off at the edge
+   with no sign more followed. Short text links wrap onto a second line
+   instead, which costs one text line, not a row of pills. */
 .settings-view__outline ul {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--oct-space-2);
+  gap: var(--oct-space-1) var(--oct-space-4);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
+.settings-view__outline li {
+  flex: 0 0 auto;
+}
+
 .settings-view__outline-link {
-  display: inline-flex;
-  height: 28px;
-  align-items: center;
-  padding: 0 var(--oct-space-3);
   color: var(--octant-text-secondary);
-  font-family: var(--oct-font-display);
   font-size: var(--oct-text-detail);
-  line-height: 1;
+  line-height: 1.45;
   text-decoration: none;
-  border: 1px solid var(--oct-hairline);
-  border-radius: var(--oct-radius-pill);
+  white-space: nowrap;
 }
 
 .settings-view__outline-link:hover {
   color: var(--octant-text-primary);
-  background: var(--oct-settings-tile-fill);
 }
 
 /* The Saved mark has a slot of its own width, so it arriving and leaving moves
