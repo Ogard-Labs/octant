@@ -1,4 +1,5 @@
-import { constants, lstat, open, opendir, readlink, realpath, stat } from "node:fs/promises";
+import { constants, lstat, opendir, readlink, realpath, stat } from "node:fs/promises";
+import { confinedEnumerationPath, openConfinedPath, statConfinedPath } from "../confinedPathOpen";
 
 /**
  * Filesystem facts the confined Code surfaces need.
@@ -132,39 +133,29 @@ const toStat = (info: LiveStat): CodeDirectoryStat => ({
 const livePathPort: CodePathPort = {
   realpath,
   lstat: async (path) => toStat(await lstat(path, { bigint: true })),
-  stat: async (path) => toStat(await stat(path, { bigint: true })),
+  // Only ever called on a canonical path, and the identity it reports is what
+  // every later open is compared against, so it comes from a proved open too.
+  stat: async (path) => toStat(await statConfinedPath(path)),
   readlink,
 };
 
 export const liveCodeDirectoryPort: CodeDirectoryPort = {
   ...livePathPort,
   openDirectory: async (path) => {
-    // `opendir` and `open` resolve the path independently, and Node has no way
-    // to enumerate from an already-open descriptor, so what `stat` reports is
-    // the identity of the *handle* — not, provably, of the object the stream is
-    // reading. A racer that swaps the name to a foreign directory before the
-    // first call and back before the second would still match. What this does
-    // close is the ordinary case: a name that is a symlink or not a directory
-    // when the handle opens, and any object whose identity differs from the one
-    // containment resolved. The listing walk is what refuses foreign *names*,
-    // by re-resolving every child against the canonical directory, so a name
-    // this stream yields is listed only if it also exists inside the checkout.
-    //
-    // `opendir` yields entries in bounded batches of its own, so nothing here
-    // materializes a directory the caller never asked for.
-    const stream = await opendir(path);
-    let handle: Awaited<ReturnType<typeof open>>;
+    // The handle must land on the directory containment resolved, proved by
+    // the open itself, so an ancestor swapped for a link after containment is
+    // refused here rather than matched by identity. O_DIRECTORY refuses
+    // anything that is not a directory, and holding the handle open for the
+    // enumeration pins the inode, so the identity cannot be recycled underneath
+    // the caller's comparison.
+    const handle = await openConfinedPath(path, constants.O_RDONLY | constants.O_DIRECTORY);
+    let stream: Awaited<ReturnType<typeof opendir>>;
     try {
-      // O_NOFOLLOW refuses a final component that is a symlink and O_DIRECTORY
-      // refuses anything that is not a directory. Neither says anything about
-      // the ancestors, which is why the caller must still have run the
-      // containment sequence and must still compare the identity below against
-      // the object that sequence resolved. Holding this handle open for the
-      // enumeration also pins the inode, so the identity cannot be recycled
-      // underneath the comparison.
-      handle = await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+      // `opendir` yields entries in bounded batches of its own, so nothing here
+      // materializes a directory the caller never asked for.
+      stream = await opendir(confinedEnumerationPath(handle, path));
     } catch (error) {
-      await stream.close().catch(() => undefined);
+      await handle.close().catch(() => undefined);
       throw error;
     }
     return {
@@ -196,15 +187,12 @@ export const liveCodeDirectoryPort: CodeDirectoryPort = {
 export const liveCodeTestSourcePort: CodeTestSourcePort = {
   ...livePathPort,
   openFile: async (path) => {
-    // O_NOFOLLOW refuses a final component that is a symlink. It says nothing
-    // about the ancestors, which is why the caller must still have run the
-    // containment sequence — this only closes the window after it. O_NONBLOCK
-    // keeps a FIFO swapped in after that sequence from holding the open until a
-    // writer appears; the caller's isFile check on the handle then refuses it.
-    const handle = await open(
-      path,
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-    );
+    // The caller must still have run the containment sequence; the open then
+    // proves it landed on the path that sequence resolved, so an ancestor
+    // swapped for a link in between is refused. O_NONBLOCK keeps a FIFO swapped
+    // in after that sequence from holding the open until a writer appears; the
+    // caller's isFile check on the handle then refuses it.
+    const handle = await openConfinedPath(path, constants.O_RDONLY | constants.O_NONBLOCK);
     return {
       stat: async () => {
         const info = await handle.stat({ bigint: true });

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readdir, readFile, rename, rm, symlink } from "node:fs/promises";
+import { mkdtemp, mkdir, readdir, readFile, realpath, rename, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -131,7 +131,7 @@ describe("writeConfinedWorkFile", () => {
   });
 
   it("refuses a create after the proven parent is swapped for an escaping symlink", async () => {
-    const root = await mkdtemp(join(tmpdir(), "octant-create-parent-"));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-create-parent-")));
     const secret = await mkdtemp(join(tmpdir(), "octant-create-secret-"));
     const assets = join(root, "assets");
     try {
@@ -159,7 +159,7 @@ describe("writeConfinedWorkFile", () => {
   });
 
   it("never lets a swapped parent name redirect a create", async () => {
-    const root = await mkdtemp(join(tmpdir(), "octant-create-bound-"));
+    const root = await realpath(await mkdtemp(join(tmpdir(), "octant-create-bound-")));
     const secret = await mkdtemp(join(tmpdir(), "octant-create-bound-secret-"));
     const assets = join(root, "assets");
     const assetsReal = join(root, "assets-real");
