@@ -25,6 +25,7 @@ import { RemoteCredentialLifecycleService } from "../remoteCredentialLifecycleSe
 import {
   createRemoteRouteHandler,
   createRemoteRoutePolicy,
+  listDefaultRemoteAuthenticatedRoutes,
   type RemoteRouteDefinition,
 } from "../remoteRoutePolicy";
 import { canonicalDeviceKeyFacts } from "./deviceKeyFacts";
