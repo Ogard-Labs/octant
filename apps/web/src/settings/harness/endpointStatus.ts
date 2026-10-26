@@ -103,6 +103,10 @@ export function endpointStatus(input: EndpointStatusInput): EndpointStatus {
     if (input.signIn?.kind === "expired") return signedOut(offer);
     if (input.signIn?.kind === "signed-out") return signInToUse(offer);
   }
+  if (isDirectorySignInEndpoint(instance)) {
+    const signedIn = directorySignInStatus(observed, failure);
+    if (signedIn !== undefined) return signedIn;
+  }
   if (failure !== undefined) return failureStatus(input, failure);
   if (observed === undefined && input.keyMissing === true && endpointTakesKey(instance)) {
     return keyNeeded(input);
@@ -296,10 +300,78 @@ export function endpointHost(instance: ModelEndpointInstance): string {
   }
 }
 
+/** Whether the endpoint signs in with an organization account in place of a key. */
+export function isDirectorySignInEndpoint(instance: ModelEndpointInstance): boolean {
+  return (
+    instance.driverKind === "azure-foundry" &&
+    instance.configuration.authentication === "directory-oauth"
+  );
+}
+
+/**
+ * An organization sign-in's state from the host's own reason, so a sign-in
+ * the organization wants repeated in person, one that ended, and an account
+ * without a role on the resource each say what to do. Undefined leaves the
+ * ordinary reading (ready, cannot connect, no models) in place.
+ */
+function directorySignInStatus(
+  observed: ProviderObservedState | undefined,
+  failure: ProviderProbeFailure | undefined,
+): EndpointStatus | undefined {
+  if (observed?.readiness === "incompatible" && observed.directoryBinding !== undefined) {
+    return {
+      tone: "needs-you",
+      label: "Sign-in doesn't match",
+      sentence:
+        "The organization sign-in is for another tenant, app, or address. Sign in again for this endpoint.",
+      fix: { kind: "sign-in-again", label: "Sign in again" },
+    };
+  }
+  if (
+    observed?.readiness !== "unauthenticated" &&
+    failure?.category !== "unauthenticated" &&
+    failure?.reason !== "authentication-required"
+  ) {
+    return undefined;
+  }
+  switch (observed?.unauthenticatedReason) {
+    case "interaction-required":
+      return {
+        tone: "needs-you",
+        label: "Sign in again",
+        sentence:
+          "Your organization asks you to sign in again in person, for example to complete multi-factor authentication.",
+        fix: { kind: "sign-in-again", label: "Sign in again" },
+      };
+    case "expired":
+    case "revoked":
+      return {
+        tone: "needs-you",
+        label: "Signed out",
+        sentence: "Your organization sign-in ended. Sign in again to keep using it.",
+        fix: { kind: "sign-in-again", label: "Sign in again" },
+      };
+    case "not-authorized":
+      return {
+        tone: "failed",
+        label: "No access",
+        sentence:
+          "You're signed in, but your account has no role on this Azure resource. Ask an administrator for the Cognitive Services OpenAI User role on it.",
+      };
+    default:
+      return {
+        tone: "needs-you",
+        label: "Sign in to use",
+        sentence: "Sign in with your organization account to use this endpoint.",
+        fix: { kind: "sign-in", label: "Sign in with your organization" },
+      };
+  }
+}
+
 /** Whether the endpoint sends a key at all; one that sends none has no key line anywhere. */
 export function endpointTakesKey(instance: ModelEndpointInstance): boolean {
   if (instance.driverKind === "ollama") return false;
-  if (instance.driverKind === "azure-foundry") return true;
+  if (instance.driverKind === "azure-foundry") return !isDirectorySignInEndpoint(instance);
   return instance.configuration.authentication !== "none";
 }
 
@@ -317,6 +389,7 @@ export function endpointSubLine(
   }
   const host = endpointHost(instance);
   if (instance.driverKind === "ollama") return `Ollama · ${host}`;
+  if (isDirectorySignInEndpoint(instance)) return `${host} · Organization sign-in`;
   return `${host} · ${endpointTakesKey(instance) ? "API key" : "No key"}`;
 }
 
