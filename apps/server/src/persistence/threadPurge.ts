@@ -389,51 +389,19 @@ function collectOwnedAggregates(
   ]) {
     add(NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE, sessionId);
     add(OLLAMA_SESSION_HISTORY_AGGREGATE_TYPE, sessionId);
+    add(CLAUDE_RESUME_IDENTITY_AGGREGATE_TYPE, sessionId);
     for (const match of aggregatesMatching(connection, ["$.sessionId"], sessionId)) {
       add(match.aggregateType, match.aggregateId);
     }
-  }
-  for (const identity of claudeResumeIdentityAggregates(connection, keys)) {
-    add(identity.aggregateType, identity.aggregateId);
   }
   return [...keys.values()];
 }
 
 /**
- * A Claude resume identity is keyed by the Octant session, not by a thread, so
- * no ownership path names the thread. The thread's own events name the session
- * they ran in, which is the only link; an identity whose session a purged
- * thread recorded goes with it.
+ * A Claude resume identity is keyed by the Octant session it resumes and never
+ * names a thread, so it follows the same session ownership as a transcript.
  */
-function claudeResumeIdentityAggregates(
-  connection: SqliteConnection,
-  keys: ReadonlyMap<string, AggregateKey>,
-): ReadonlyArray<AggregateKey> {
-  const identities = connection
-    .prepare(
-      `SELECT DISTINCT aggregate_id FROM event_journal WHERE aggregate_type = 'claude-resume-identity'`,
-    )
-    .all() as ReadonlyArray<{ readonly aggregate_id: string }>;
-  const mentions = connection.prepare(
-    `SELECT aggregate_type, aggregate_id FROM event_journal WHERE instr(payload_json, ?) > 0`,
-  );
-  const owned: AggregateKey[] = [];
-  for (const { aggregate_id: sessionId } of identities) {
-    const named = mentions.all(sessionId) as ReadonlyArray<{
-      readonly aggregate_type: string;
-      readonly aggregate_id: string;
-    }>;
-    if (
-      named.some(
-        (row) =>
-          row.aggregate_type !== "claude-resume-identity" &&
-          keys.has(`${row.aggregate_type}:${row.aggregate_id}`),
-      )
-    )
-      owned.push({ aggregateType: "claude-resume-identity", aggregateId: sessionId });
-  }
-  return owned;
-}
+const CLAUDE_RESUME_IDENTITY_AGGREGATE_TYPE = "claude-resume-identity";
 
 function followLinkedAggregates(
   connection: SqliteConnection,
@@ -536,7 +504,8 @@ const SESSION_RECORDING_AGGREGATE_TYPES = ["chat-thread", "work-turn", "code-ope
  * A session belongs to the thread that recorded it first. A Chat branch copies
  * its source's completed attempts with their real session ids, so the branch
  * names a session it never ran; purging the branch must not take the source's
- * transcript, and purging the source still takes it.
+ * transcript or Claude resume identity, which would break the source's resume,
+ * and purging the source still takes both.
  */
 function providerSessionsStartedBy(
   connection: SqliteConnection,

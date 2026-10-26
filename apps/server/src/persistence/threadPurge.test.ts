@@ -281,50 +281,40 @@ describe("thread purge sweep", () => {
     const harness = openHarness();
     seedControlThread(harness);
     seedCodeProjection(harness, threads.code.id);
-    const identityFor = (sessionId: string) => ({
-      providerInstanceId: "c3630000-0000-4000-8000-0000000000a1",
-      octantSessionId: sessionId,
-      sdkSessionId: `sdk-${sessionId}`,
-      identity: { projectRoot: "/tmp/resume-fixture" },
-    });
     const purgedSession = "c3630000-0000-4000-8000-0000000000d1";
     const keptSession = "c3630000-0000-4000-8000-0000000000d2";
-    insertEvent(
-      harness.connection,
-      "code-thread",
-      threads.code.id,
-      { kind: "provider-session-ready", sessionId: purgedSession },
-      "code.provider-session-ready@1",
-      2,
-    );
+    recordProviderSession(harness.connection, "code", threads.code.id, purgedSession);
     for (const sessionId of [purgedSession, keptSession]) {
-      insertEvent(
-        harness.connection,
-        "claude-resume-identity",
-        sessionId,
-        identityFor(sessionId),
-        "claude.resume-identity-recorded@1",
-      );
+      recordClaudeResumeIdentity(harness.connection, sessionId);
     }
 
-    await harness.service.purge(
-      {
-        scope: {
-          kind: "thread",
-          mode: "code",
-          threadId: decodeThreadRetentionThreadId(threads.code.id),
-        },
-        confirm: true,
-      },
-      "local-window",
-    );
+    await purgeThread(harness, "code", threads.code.id);
 
-    const remaining = harness.connection
-      .prepare(
-        "SELECT aggregate_id FROM event_journal WHERE aggregate_type = 'claude-resume-identity'",
-      )
-      .all();
-    expect(remaining).toEqual([{ aggregate_id: keptSession }]);
+    expect(claudeResumeIdentitySessions(harness.connection)).toEqual([keptSession]);
+  });
+
+  it("keeps a Chat source's Claude resume identity when its branch is purged and erases it with the source", async () => {
+    const harness = openHarness();
+    const sourceId = threads.chat.id;
+    const branchId = controlThreadId;
+    seedChatProjection(harness, sourceId, threads.chat.marker);
+    seedChatProjection(harness, branchId, controlMarker);
+    const sourceSession = uuidFor("chat", "source-session");
+    const branchSession = uuidFor("chat", "branch-session");
+    recordProviderSession(harness.connection, "chat", sourceId, sourceSession);
+    // A branch copies its source's completed attempts with their real session
+    // ids before it runs a session of its own.
+    recordProviderSession(harness.connection, "chat", branchId, sourceSession);
+    recordProviderSession(harness.connection, "chat", branchId, branchSession);
+    for (const sessionId of [sourceSession, branchSession]) {
+      recordClaudeResumeIdentity(harness.connection, sessionId);
+    }
+
+    await purgeThread(harness, "chat", branchId);
+    expect(claudeResumeIdentitySessions(harness.connection)).toEqual([sourceSession]);
+
+    await purgeThread(harness, "chat", sourceId);
+    expect(claudeResumeIdentitySessions(harness.connection)).toEqual([]);
   });
 
   it.each(Object.values(threads))(
@@ -971,6 +961,45 @@ function recordProviderSession(
     cursor: 1,
     event: { kind: "provider-session-ready", sessionId: providerSessionId },
   });
+}
+
+async function purgeThread(
+  harness: Harness,
+  mode: SeededThread["mode"],
+  threadId: string,
+): Promise<void> {
+  await harness.service.purge(
+    {
+      scope: { kind: "thread", mode, threadId: decodeThreadRetentionThreadId(threadId) },
+      confirm: true,
+    },
+    "local-window",
+  );
+}
+
+function recordClaudeResumeIdentity(connection: SqliteConnection, sessionId: string): void {
+  insertEvent(
+    connection,
+    "claude-resume-identity",
+    sessionId,
+    {
+      providerInstanceId: "c3630000-0000-4000-8000-0000000000a1",
+      octantSessionId: sessionId,
+      sdkSessionId: `sdk-${sessionId}`,
+      identity: { projectRoot: "/tmp/resume-fixture" },
+    },
+    "claude.resume-identity-recorded@1",
+  );
+}
+
+function claudeResumeIdentitySessions(connection: SqliteConnection): ReadonlyArray<string> {
+  const rows = connection
+    .prepare(
+      `SELECT DISTINCT aggregate_id FROM event_journal
+       WHERE aggregate_type = 'claude-resume-identity' ORDER BY aggregate_id`,
+    )
+    .all() as ReadonlyArray<{ readonly aggregate_id: string }>;
+  return rows.map((row) => row.aggregate_id);
 }
 
 function seedTranscript(connection: SqliteConnection, sessionId: string, marker: string): void {
