@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { decodeStableHostId } from "@octant/contracts/remote-access";
 import { createChatClient } from "./chatClient";
+import { createSpeechClient } from "./speechClient";
 import { createInMemoryDeviceKeyStore } from "./remotePairingClient";
 import { createRemoteProductFetch } from "./remoteProductFetch";
 import { createRemoteSessionBridge } from "./remoteSessionBridge";
@@ -141,6 +142,38 @@ describe("remote product fetch", () => {
     expect(server.productProofVerified()).toBe(true);
     expect(seen).toEqual(["/api/chat/bootstrap"]);
     await expect(fetch(`${ORIGIN}/index.html`)).rejects.toThrow(/paired host/i);
+  });
+
+  it("sends a paired browser's dictation clip as the signed multipart upload the host reads", async () => {
+    const seen: Array<{ readonly contentType: string | null; readonly audio: Uint8Array }> = [];
+    const { bridge, server } = await readyBridge(async ({ path, headers, body }) => {
+      if (path !== "/api/speech/transcriptions" || !(body instanceof Uint8Array)) {
+        return Response.json({ category: "invalid" }, { status: 400 });
+      }
+      const contentType = headers.get("content-type");
+      const form = await new Response(Uint8Array.from(body), {
+        headers: { "content-type": contentType ?? "" },
+      }).formData();
+      const audio = form.get("audio");
+      if (!(audio instanceof Blob)) return Response.json({ category: "invalid" }, { status: 400 });
+      seen.push({ contentType, audio: new Uint8Array(await audio.arrayBuffer()) });
+      return Response.json({ text: "From the browser" });
+    });
+    const speech = createSpeechClient({
+      baseUrl: ORIGIN,
+      fetch: createRemoteProductFetch({ bridge }),
+      windowCapability: "never-sent",
+    });
+
+    const transcript = await speech.transcribe({
+      audio: new Blob([Uint8Array.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3])], { type: "audio/webm" }),
+    });
+
+    expect(transcript).toEqual({ text: "From the browser" });
+    expect(server.productProofVerified()).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.contentType).toMatch(/^multipart\/form-data; boundary=/);
+    expect([...(seen[0]?.audio ?? [])]).toEqual([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]);
   });
 
   it("fails closed instead of queueing while the session is disconnected", async () => {

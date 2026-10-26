@@ -564,6 +564,7 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
         path === "/api/providers/bootstrap" ||
         path === "/api/projects/bootstrap" ||
         path === "/api/replica-sync/status" ||
+        path.startsWith("/api/speech/") ||
         path.startsWith("/api/agent-profiles")) &&
       (method === "POST" || method === "GET")
     ) {
@@ -573,7 +574,10 @@ export function createFakeRemoteServer(config: FakeRemoteServerConfig): FakeRemo
       if (config.handleProductRequest !== undefined) {
         let body: unknown;
         try {
-          body = parseRequestBody(init?.body);
+          // A form upload reaches the handler as the exact bytes the proof covers.
+          body = new Headers(init?.headers).get("content-type")?.startsWith("multipart/form-data")
+            ? init?.body
+            : parseRequestBody(init?.body);
         } catch {
           return Response.json({ category: "invalid" }, { status: 400 });
         }

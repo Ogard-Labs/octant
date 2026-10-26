@@ -711,6 +711,53 @@ describe("remote route policy", () => {
     ).toThrow("local-only");
   });
 
+  it("admits a paired device's dictation and voice status, and keeps read-aloud off the listener", () => {
+    const routePolicy = createRemoteRoutePolicy({ origin });
+    const inspect = (
+      path: string,
+      method: "GET" | "POST",
+      contentType = "multipart/form-data; boundary=octant",
+      body: string | Uint8Array<ArrayBuffer> = "--octant--",
+    ) =>
+      routePolicy.inspect(
+        request(path, {
+          method,
+          headers: {
+            origin,
+            "sec-fetch-site": "same-origin",
+            ...(method === "POST"
+              ? { "content-type": contentType, "content-length": String(body.length) }
+              : {}),
+          },
+          ...(method === "POST" ? { body } : {}),
+        }),
+      );
+    const status = (decision: ReturnType<typeof inspect>) =>
+      decision.kind === "reject" ? decision.response.status : decision.kind;
+
+    expect(inspect("/api/speech/status", "GET")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+    });
+    expect(inspect("/api/speech/transcriptions", "POST")).toMatchObject({
+      kind: "allow",
+      surface: "authenticated-product",
+      maxBodyBytes: 1_048_576,
+    });
+    // Only the multipart clip the desktop route already reads is accepted.
+    expect(status(inspect("/api/speech/transcriptions", "POST", "application/json", "{}"))).toBe(
+      415,
+    );
+    expect(status(inspect("/api/speech/transcriptions", "POST", "audio/mp4"))).toBe(415);
+    expect(
+      status(inspect("/api/speech/transcriptions", "POST", undefined, new Uint8Array(1_048_577))),
+    ).toBe(413);
+    expect(status(inspect("/api/speech/transcriptions", "GET"))).toBe(405);
+    // Read-aloud and every other speech path stay unforwarded.
+    expect(status(inspect("/api/speech/synthesis", "POST", "application/json", "{}"))).toBe(404);
+    expect(status(inspect("/api/speech/status/extra", "GET"))).toBe(404);
+  });
+
   it("dispatches the grant route only to the proxy surface, never as a product route", async () => {
     const serverProxy = vi.fn(async () => Response.json({ proxy: true }));
     const { route, authenticatedProduct } = handler({ serverProxy });

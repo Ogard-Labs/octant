@@ -50,14 +50,23 @@ export function createRemoteProductFetch(
     }
     const headers = new Headers(init?.headers ?? request?.headers);
     headers.delete(WINDOW_CAPABILITY_HEADER);
-    const contentType = headers.get("content-type") ?? undefined;
+    let contentType = headers.get("content-type") ?? undefined;
     headers.delete("content-type");
     const forwarded: Record<string, string> = {};
     headers.forEach((value, name) => {
       forwarded[name] = value;
     });
     const method = init?.method ?? request?.method ?? "GET";
-    const body = await readBody(init?.body ?? request?.body ?? null);
+    let rawBody = init?.body ?? request?.body ?? null;
+    if (rawBody instanceof FormData) {
+      // A dictation clip is the one product upload sent as a form. Encode it
+      // here exactly as fetch would, so the proof's digest covers the bytes
+      // sent and the boundary travels in the content type.
+      const encoded = new Response(rawBody);
+      contentType = encoded.headers.get("content-type") ?? undefined;
+      rawBody = new Uint8Array(await encoded.arrayBuffer());
+    }
+    const body = await readBody(rawBody);
     const signal = init?.signal ?? request?.signal ?? undefined;
     return connection.authenticatedFetch({
       method,
@@ -80,7 +89,7 @@ async function readBody(body: BodyInit | null): Promise<string | Uint8Array | un
     return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
   }
   if (body instanceof Blob) return new Uint8Array(await body.arrayBuffer());
-  // URLSearchParams, FormData, and streams have no product caller; refusing
+  // URLSearchParams and streams have no product caller; refusing
   // is safer than signing a digest over a body we did not read exactly.
   throw new RemoteConnectionError("invalid", "Remote product request body is unsupported.");
 }

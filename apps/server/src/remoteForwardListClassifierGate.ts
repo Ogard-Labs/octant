@@ -27,6 +27,7 @@ const LOCAL_ONLY_PROBES = [
   { path: "/api/replica-membership/commands", method: "POST" },
   { path: "/api/replica-membership/state", method: "GET" },
   { path: "/api/thread-external-content", method: "POST" },
+  { path: "/api/speech/synthesis", method: "POST" },
 ] as const;
 
 /**

@@ -1,7 +1,10 @@
 import { decodeProviderInstance, type ProviderInstance } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  admitRemoteTranscription,
   listSpeechEligibleInstances,
+  pairedDeviceSpeechStatusOf,
+  REMOTE_TRANSCRIPTION_BUDGET,
   resolveSpeechEndpoint,
   speechStatusOf,
   VOICE_SYNTHESIS_TARGET,
@@ -132,5 +135,53 @@ describe("speech endpoint policy", () => {
       voice: "alloy",
     });
     expect(VOICE_SYNTHESIS_TARGET).toEqual({ section: "voice", setting: "synthesis" });
+  });
+
+  it("tells a paired device its transcription readiness and keeps read-aloud on the computer", () => {
+    const configured = {
+      transcription: { providerInstanceId: compatibleId as never, modelId: "whisper-1" as never },
+      synthesis: {
+        providerInstanceId: compatibleId as never,
+        modelId: "gpt-4o-mini-tts" as never,
+        voice: "alloy" as never,
+      },
+    };
+    const status = pairedDeviceSpeechStatusOf(configured, instances);
+    expect(status.transcription).toEqual(speechStatusOf(configured, instances).transcription);
+    expect(status.synthesis).toEqual({
+      status: "unavailable",
+      reason: "Read-aloud is available only on the computer itself.",
+      settingsTarget: VOICE_SYNTHESIS_TARGET,
+    });
+    expect(pairedDeviceSpeechStatusOf({}, instances).transcription).toEqual({
+      status: "unconfigured",
+      settingsTarget: VOICE_TRANSCRIPTION_TARGET,
+    });
+  });
+});
+
+describe("paired device transcription budget", () => {
+  const start = Date.parse("2026-10-26T09:00:00.000Z");
+
+  it("admits a device's clips up to the budget and refuses the next until the oldest ages out", () => {
+    let recent: ReadonlyArray<number> = [];
+    for (let index = 0; index < REMOTE_TRANSCRIPTION_BUDGET.maximum; index += 1) {
+      const admission = admitRemoteTranscription({ recent, now: start + index * 1_000 });
+      expect(admission.kind).toBe("admit");
+      recent = admission.recent;
+    }
+    const refused = admitRemoteTranscription({ recent, now: start + 60_000 });
+    expect(refused).toEqual({
+      kind: "over-budget",
+      recent,
+      retryAfterMs: REMOTE_TRANSCRIPTION_BUDGET.windowMs - 60_000,
+    });
+
+    const later = admitRemoteTranscription({
+      recent,
+      now: start + REMOTE_TRANSCRIPTION_BUDGET.windowMs,
+    });
+    expect(later.kind).toBe("admit");
+    expect(later.recent).toHaveLength(REMOTE_TRANSCRIPTION_BUDGET.maximum);
   });
 });

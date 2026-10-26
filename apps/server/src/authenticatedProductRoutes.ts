@@ -181,6 +181,15 @@ export function classifyProductAction(request: Request): string | undefined {
     }
     return undefined;
   }
+  if (path.startsWith("/api/speech/")) {
+    // A paired device reads whether dictation is ready and sends a clip; the
+    // route holds it to its own budget. Read-aloud is the computer's own and
+    // is classified so, never forwarded.
+    if (method === "GET" && path === "/api/speech/status") return "settings.read-non-secret";
+    if (method === "POST" && path === "/api/speech/transcriptions") return "speech.transcribe";
+    if (method === "POST" && path === "/api/speech/synthesis") return "speech.synthesize";
+    return undefined;
+  }
   if (path === "/api/diagnostics/export") {
     return method === "POST" ? "diagnostics.export" : undefined;
   }
