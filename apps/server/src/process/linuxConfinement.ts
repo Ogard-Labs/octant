@@ -375,7 +375,12 @@ export function buildBubblewrapLaunch(
         `Linux confinement additional deny ${kind} path "${path}" must be absolute.`,
       );
     }
-    const normalized = normalize(path);
+    for (const target of denyTargetsInCapsule(normalize(path), mounts)) {
+      bindDenyTarget(target, kind);
+    }
+  }
+
+  function bindDenyTarget(normalized: string, kind: "read" | "write"): void {
     // Write denials only matter on writable mounts. Read denials must also
     // cover read-only binds: a `--ro-bind` of a parent still exposes the
     // denied child unless we overlay it.
@@ -399,15 +404,21 @@ export function buildBubblewrapLaunch(
     // mountpoint, and a read-only bind of an empty directory would block that.
     // Create a fresh tmpfs at the deny path instead; it is remounted read-only
     // after the child binds are applied, leaving the child writable.
-    if (isDirectoryForDeny(path)) {
+    if (isDirectoryForDeny(normalized)) {
       addMount("tmpfs", "", normalized);
       return;
     }
 
-    const source = createEmptySourceForPath(path);
-    if (source !== undefined) {
-      addMount("ro-bind", source, normalized);
+    // Without its cover a denied file stays readable, so a launch that cannot
+    // make one is refused rather than started with the file exposed.
+    const source = createEmptySourceForPath(normalized);
+    if (source === undefined) {
+      throw new ProcessConfinementError(
+        "invalid-configuration",
+        `Linux confinement deny ${kind} path "${normalized}" could not be overlaid.`,
+      );
     }
+    addMount("ro-bind", source, normalized);
   }
 
   for (const path of input.additionalDenyWritePaths ?? []) {
@@ -509,14 +520,56 @@ function hostSecretPaths(): ReadonlyArray<string> {
     .map((name) => join("/etc/ssh", name));
   // Bubblewrap would have to create a missing path's mount point inside the
   // read-only `/etc` bind, which fails the launch; a missing path hides
-  // nothing anyway. A symlinked one is covered at its target: Bubblewrap
-  // follows an absolute link from outside the new root, so measured on bwrap
-  // 0.9.0 a host key linked to another volume failed every launch. A target
-  // under no bound path is unreachable from the capsule and needs no cover.
-  return [...HOST_SECRET_PATHS, ...sshHostKeys].flatMap((path) => {
-    const target = safeRealpathSync(path);
-    return target === undefined ? [] : [target];
+  // nothing anyway. A linked one is covered at its target, like every other
+  // denial (see `denyTargetsInCapsule`).
+  return [...HOST_SECRET_PATHS, ...sshHostKeys].filter((path) => pathExists(path));
+}
+
+/**
+ * Where the capsule reaches what a host deny path names.
+ *
+ * Bubblewrap follows an absolute link at a mount point from outside the new
+ * root: measured on bwrap 0.9.0, a denied `.claude/skills` or host key linked
+ * to another folder refused the whole launch with "Can't create file at".
+ * A path that passes through a link inside bound content is therefore covered
+ * at its target instead, found through the mount that exposes it. Binds keep
+ * the path the launch names and take their resolved folder as the source, so
+ * the target is mapped back from that source rather than used as a host path:
+ * a bound root named through a link still has its files denied under the name
+ * the capsule sees. A target no mount exposes is unreachable and needs no
+ * cover. A missing path keeps its name so it stays hidden if created later,
+ * and a dangling link names nothing to hide.
+ */
+function denyTargetsInCapsule(
+  path: string,
+  mounts: ReadonlyMap<string, Mount>,
+): ReadonlyArray<string> {
+  if (!pathExists(path)) return [path];
+  const resolved = safeRealpathSync(path);
+  if (resolved === undefined) return [];
+  if (resolved === path) return [path];
+  // Above every bind the capsule holds only the folders Bubblewrap made for
+  // its mount points, so a link there on the host is no link in the capsule.
+  const exposing = mountExposing(path, mounts);
+  if (exposing === undefined || exposing.kind === "tmpfs" || exposing.kind === "tmpfs-rw") {
+    return [path];
+  }
+  return [...mounts.values()].flatMap((mount) => {
+    if (mount.kind !== "bind" && mount.kind !== "ro-bind") return [];
+    if (resolved !== mount.source && !resolved.startsWith(`${mount.source}${sep}`)) return [];
+    const target = join(mount.target, relative(mount.source, resolved));
+    // A deeper mount over the same place shows something else there.
+    return mountExposing(target, mounts) === mount ? [target] : [];
   });
+}
+
+function mountExposing(path: string, mounts: ReadonlyMap<string, Mount>): Mount | undefined {
+  let deepest: Mount | undefined;
+  for (const mount of mounts.values()) {
+    if (path !== mount.target && !path.startsWith(`${mount.target}${sep}`)) continue;
+    if (deepest === undefined || depth(mount.target) > depth(deepest.target)) deepest = mount;
+  }
+  return deepest;
 }
 
 interface Mount {
@@ -659,22 +712,39 @@ function isDirectoryForDeny(path: string): boolean {
   }
 }
 
-const emptySourcePaths = new Map<string, string>();
-
 function createEmptySourceForPath(path: string): string | undefined {
-  const cached = emptySourcePaths.get(path);
-  if (cached !== undefined) return cached;
-
   try {
     const stats = lstatSync(path);
-    if (stats.isFile() || stats.isSymbolicLink()) {
-      const source = mkdtempSync(join(tmpdir(), "octant-deny-"));
-      const file = join(source, "file");
-      writeFileSync(file, "");
-      emptySourcePaths.set(path, file);
-      return file;
-    }
+    if (!stats.isFile() && !stats.isSymbolicLink()) return undefined;
+  } catch {
     return undefined;
+  }
+  return emptyDenySource();
+}
+
+let reusedEmptyDenySource: string | undefined;
+
+/**
+ * The empty file every denied file is covered with. It lives under the host
+ * temp directory for the server's lifetime, where a cleaner such as
+ * systemd-tmpfiles may delete it; Bubblewrap then refused every later launch
+ * with "Can't find source path" until the server restarted. So it is checked
+ * before each use and made again when it is gone or no longer empty.
+ */
+function emptyDenySource(): string | undefined {
+  if (reusedEmptyDenySource !== undefined) {
+    try {
+      const stats = lstatSync(reusedEmptyDenySource);
+      if (stats.isFile() && stats.size === 0) return reusedEmptyDenySource;
+    } catch {
+      // Removed since the last launch; make another below.
+    }
+  }
+  try {
+    const file = join(mkdtempSync(join(tmpdir(), "octant-deny-")), "file");
+    writeFileSync(file, "");
+    reusedEmptyDenySource = file;
+    return file;
   } catch {
     return undefined;
   }
