@@ -2460,9 +2460,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   auth variables (existing installs authenticate that way). Extra
   assigned homes strip those variables so they cannot share the
   host key, and strip `CODEX_SQLITE_HOME` so their thread state
-  database is not the host's. The AWS profile and file variables
-  stay for every account: they choose among the AWS identities of
-  the one operating-system user and hold no login of their own. An
+  database is not the host's. No account receives the AWS profile
+  or shared-config variables (`AWS_PROFILE`, `AWS_CONFIG_FILE`,
+  `AWS_SHARED_CREDENTIALS_FILE`); a Bedrock sign-in follows the
+  rule under the confinement matrix in
+  [security and authority](#security-and-authority). An
   explicit API-key instance still receives only the
   broker-resolved key. Each Codex account has its own
   long-lived app-server and never shares that process with another
@@ -4263,8 +4265,9 @@ the model at another size.
   model's view with only the note in its place, while a summary keeps the
   task, decisions and open work in view at the cost of one tool-less
   request, so a long session survives an overflow more often than a
-  single ladder step lets it. When the ladder still cuts exchanges, the note tells the lead that its task list and, in
-  Work and Code, the files on disk still reflect that work, and the journal keeps the full
+  single ladder step lets it. When the ladder still cuts exchanges, the note tells the lead that its task list (and,
+  in Work and Code, the files on disk; a Chat thread has no folder) still
+  reflects that work, and the journal keeps the full
   conversation for people, replay, and export. A lead in any mode can also
   read a cut exchange back: it is offered `journal-lookup`, a read-only
   harness read of its own `native-harness-transcript`. The note then names the journal
@@ -4273,7 +4276,7 @@ the model at another size.
   cannot fetch; the numbering is the journal's, so a compaction summary
   (requested, restored on resume, or made automatically part-way through the
   running turn) or an earlier cut does not shift it. A lookup takes `from` (and an optional
-  `count`, at most 20) and nothing else: it cannot name a thread or a session.
+  `count`, at most 20, and `offset`) and nothing else: it cannot name a thread or a session.
   The host reads the conversation of the session the thread's running turn
   recorded in its own journal (a Chat thread's newest attempt, which a
   regenerated earlier turn may hold rather than the tail; a Work thread's
@@ -4288,10 +4291,18 @@ the model at another size.
   and export but is not reachable from the tool. Rationale: the rebuilt
   session began from the host's planned history of those turns, and reaching
   an older session would need a handle the call cannot name. A result is bounded (32k
-  characters in all, a long text or payload clipped with a marker saying how
-  much was left out) and says the next number when more follows. The turn's
+  characters in all, each text or payload at most 8k, less when one message
+  carries many) and says the next number when more follows. A longer text or
+  payload is clipped with a marker saying how much was left out and where to
+  read on, and its message carries `nextOffset`: the same `from` with that
+  `offset` returns the next part of message `from`'s text and every payload
+  (later messages start at their beginning), so all of a long message,
+  such as a rebuilt session's first message carrying the planned history,
+  is readable in bounded parts. An offset at or past the end of every text
+  and payload of that message refuses as `journal-offset-past-end`. The turn's
   resolved credential values are redacted from it exactly as a fork's copy
-  redacts them, plain and JSON-escaped; nothing but the conversation's own
+  redacts them, plain and JSON-escaped, before a message is split into parts,
+  so a value straddling two parts never leaves a piece at a time; nothing but the conversation's own
   messages leaves, so no approval or other journal record rides along. A
   Code lead is not offered the tool without that secret list; Chat and Work
   turns resolve no credential values, so theirs is empty. The read is
@@ -4340,8 +4351,10 @@ the model at another size.
   asked, the host refuses a turn offering tools to a model without a Verify
   tools record on the instance, so a driver's own verdict cannot hand tools
   to an unverified model. The host wraps the transport in its
-  retry policy (below), registers that retrying endpoint in the
-  `NativeHarnessEndpointRegistry` with the driver's `admitTurn`, wires lead
+  retry policy (below), dropping any `retrying` event the driver streams
+  itself because retry notices are the host's, registers that retrying
+  endpoint in the `NativeHarnessEndpointRegistry` with the driver's
+  `admitTurn`, wires lead
   fallback and the shared transcript store, keeps the instance's session
   count, and keeps what each attempt teaches about the model's context window
   ([Context and usage accounting](#context-and-usage-accounting)).
@@ -4548,8 +4561,13 @@ the model at another size.
   `verifiedToolModelIds` on the observed state, which the journal persists with
   the catalog and a configuration change clears; a model that answers in text
   leaves it out, and a transport failure (authentication, timeout) is reported
-  rather than recorded as "unsupported". Admission, the AgentRun transport
-  check, and the Chat preflight read that set per model, so verifying one model
+  rather than recorded as "unsupported". Only this host-run command writes the
+  record: the provider runtime registry keeps it apart from each observation and
+  drops any `verifiedToolModelIds` a driver's probe or observation reports, so
+  a driver that misreports cannot widen tool admission. A probe after a restart
+  restores the record from a catalog that no configuration change invalidated.
+  Admission, the AgentRun transport check, the harness endpoint port, and the
+  Chat preflight read that set per model, so verifying one model
   never offers tools to its siblings; the only tool an unverified model is
   admitted with is that echo. A tool call in a real turn widens nothing either:
   the provider-level `appManagedTools` flag of an OpenAI-compatible,
@@ -6444,6 +6462,31 @@ mechanisms are:
   change that, and nothing requires it. Claude's unwrapped postures rest on
   the runtime's own sandbox for the same reason: its sign-in and tools need
   reach that a deny-default profile would have to re-grant.
+  Codex's `read-only` sandbox reads the whole disk, so `~/.aws`, `~/.ssh`,
+  and every other file under `HOME` is reachable from a Codex command in
+  every posture. Octant therefore gives the Codex runtime no reusable cloud
+  credential the person did not configure for that account. The environment
+  Octant launches it with carries no AWS profile, shared-config location, or
+  IAM key (Codex still loads the account home's own `.env`, which is that
+  account's configuration), and an Amazon Bedrock sign-in is traced in
+  Codex's own order (`auth_source` in codex-rs
+  `model-provider/src/amazon_bedrock/auth.rs`, rust-v0.162.1): the provider's
+  `auth` command, `aws.credential_export`, `aws.profile`, a key or access
+  keys stored in the account's Codex home, `AWS_BEARER_TOKEN_BEDROCK`, then
+  the AWS SDK default chain. A credential export, a profile, and the default
+  chain are refused: each reads the AWS shared config or hands the runtime
+  general-purpose AWS keys, whether or not a profile variable names them.
+  The probe reports `incompatible` with the reason and the recovery (a
+  Bedrock API key), and acquiring a session fails the same way, so a caller
+  that did not probe cannot start a thread on it either. A token command, a
+  sign-in stored in the account's Codex home, and the bearer token are the
+  person's configuration for that account and are admitted. Codex reports
+  the stored sign-in only as `usesCodexManagedCredentials`, and Octant never
+  reads Codex's credential store, so stored access keys count as that
+  account's own sign-in just as a stored Bedrock key does. An AWS profile
+  was the documented Bedrock route until 2026-10-26; nothing kept its files
+  from the commands, and admitting it again needs Codex wrapped or its
+  sandbox's readable roots narrowed.
   `providerProcessConfinement.test.ts` refuses a new module that launches
   without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work

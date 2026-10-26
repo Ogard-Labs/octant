@@ -166,7 +166,15 @@ function hostedTransport(
             attempt: async (attempt) => {
               let response: HarnessEndpointResponse;
               try {
-                response = await session.send(request, attempt);
+                // The host announces its own retries; a notice the driver
+                // streams would report a retry the host never ran, or report
+                // one twice.
+                response = await session.send(request, {
+                  signal: attempt.signal,
+                  onEvent: (event) => {
+                    if (event.kind !== "retrying") attempt.onEvent(event);
+                  },
+                });
               } catch (error) {
                 const refusal = decodedFailure(error);
                 if (refusal !== undefined) learn({ kind: "refused", failure: refusal });

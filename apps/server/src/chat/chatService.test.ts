@@ -291,6 +291,8 @@ function openFixture(options?: {
         readonly execute: () => Promise<{ readonly result: unknown }>;
       }
     | undefined;
+  /** The registry the driver probes into, which holds the host's Verify tools record. */
+  readonly providerRuntimeRegistry?: ProviderRuntimeRegistry;
   readonly resolveExtensionSelectionContext?: (input: {
     readonly phase: "send" | "replay" | "resume" | "provider-handoff";
     readonly thread: ChatThread;
@@ -714,6 +716,9 @@ function openFixture(options?: {
     ...(options?.resolveExtensionSelectionContext === undefined
       ? {}
       : { resolveExtensionSelectionContext: options.resolveExtensionSelectionContext }),
+    ...(options?.providerRuntimeRegistry === undefined
+      ? {}
+      : { providerRuntimeRegistry: options.providerRuntimeRegistry }),
     ...(options?.gatherMultiModelRuntimeFacts === undefined
       ? {}
       : { gatherMultiModelRuntimeFacts: options.gatherMultiModelRuntimeFacts }),
@@ -1274,6 +1279,48 @@ describe("ChatService", () => {
     });
     expect(fakeDriver.sentTurns[1]?.tools.map(({ name }) => name)).not.toContain("octant_canvas");
     expect(JSON.stringify(fakeDriver.sentTurns[1]?.context)).not.toContain("octant_canvas");
+  });
+
+  it("offers Octant's tools only to a model the host verified, not one the driver's probe claims", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000014");
+    const claimed = probeFixture({
+      capabilities: { ...probeFixture().capabilities, appManagedTools: "unsupported" },
+      verifiedToolModelIds: [decodeProviderModelId("model-a")],
+    });
+    const canvasTool = () => ({
+      definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+      execute: async () => ({ result: {} }),
+    });
+    const toolsSent = async (providerRuntimeRegistry?: ProviderRuntimeRegistry) => {
+      const { service, fakeDriver } = openFixture({
+        probe: claimed,
+        resolveAppManagedTools: canvasTool,
+        ...(providerRuntimeRegistry === undefined ? {} : { providerRuntimeRegistry }),
+      });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Claimed tools",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Write the memo",
+        },
+        { windowId: window },
+      );
+      return fakeDriver.sentTurns[0]?.tools.map(({ name }) => name);
+    };
+
+    expect(await toolsSent()).not.toContain("octant_canvas");
+
+    const verified = new ProviderRuntimeRegistry();
+    verified.setObservedState(claimed);
+    verified.setVerifiedToolModels(claimed.instanceId, [decodeProviderModelId("model-a")]);
+    expect(await toolsSent(verified)).toContain("octant_canvas");
   });
 
   it("registers a refusal-only Computer tool when the send carries no @Computer selection", async () => {
@@ -3773,10 +3820,10 @@ describe("ChatService", () => {
     const observed = await Effect.runPromise(
       Effect.scoped(driver.probe({ instanceId: decodeProviderInstanceId(ids.provider) })),
     );
-    runtimeRegistry.setObservedState({
-      ...observed,
-      verifiedToolModelIds: observed.models.map((model) => model.id),
-    });
+    runtimeRegistry.setVerifiedToolModels(
+      observed.instanceId,
+      observed.models.map((model) => model.id),
+    );
     const snapshot = authoritativeExtensionSnapshot();
     const activation = new ExtensionActivationService({
       policy: {
@@ -3815,7 +3862,11 @@ describe("ChatService", () => {
         execute: async () => ({ result: { status: "built" } }),
       },
     });
-    const { service } = openFixture({ driver, resolveExtensionSelectionContext });
+    const { service } = openFixture({
+      driver,
+      resolveExtensionSelectionContext,
+      providerRuntimeRegistry: runtimeRegistry,
+    });
     const created = await service.execute({
       kind: "create-chat-thread",
       hostId: "local",

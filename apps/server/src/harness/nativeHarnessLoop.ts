@@ -85,7 +85,8 @@ function workStillReflected(mode: OctantMode | undefined): string {
 /**
  * The note in front of a cut. It names message numbers only when the lead is
  * offered `journal-lookup` and every number it names is already journaled, so
- * the model is never handed a handle it cannot fetch.
+ * the model is never handed a handle it cannot fetch. A Chat thread has no
+ * folder, so its note does not point the lead at files it cannot reach.
  */
 function omittedHistoryNote(
   mode: OctantMode | undefined,
@@ -1588,7 +1589,8 @@ export function sortToolDefinitionsByName(
  *
  * `journalNumberOf` gives a message's number in the journal. When the request
  * offers `journal-lookup`, the note names the journaled messages before the
- * first one kept, which is every message a cut can have left out.
+ * first one kept, which is every message a cut can have left out. `mode` is
+ * the session's; without it the note claims no files on disk.
  */
 export function fitRequest(
   endpoint: Pick<NativeHarnessTransportSession, "fits">,

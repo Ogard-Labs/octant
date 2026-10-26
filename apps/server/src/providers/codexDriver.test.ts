@@ -10,6 +10,7 @@ import {
   decodeProviderModelId,
   decodeProviderSessionId,
   type ProviderExecutionPolicy,
+  type ProviderProbeResult,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { Effect, Exit, Fiber, Scope, Stream } from "effect";
@@ -758,88 +759,6 @@ describe("Codex driver probe and runtime lifecycle", () => {
         ),
       );
       expect(exportedProbe.readiness).toBe("unauthenticated");
-
-      // The built-in Bedrock provider's own credential is on the allowlist,
-      // so a host that exports it reports ready.
-      writeFileSync(join(codexHome, "config.toml"), 'model_provider = "amazon-bedrock"\n');
-      const present = fixture({
-        account: {
-          account: { type: "apiKey" as const },
-          requiresOpenaiAuth: false,
-        },
-      });
-      const presentProbe = await Effect.runPromise(
-        Effect.scoped(
-          makeCodexDriver(
-            present.options({
-              environment: {
-                CODEX_HOME: codexHome,
-                AWS_BEARER_TOKEN_BEDROCK: "bedrock-token",
-              },
-            }),
-          ).probe({ instanceId }),
-        ),
-      );
-      expect(presentProbe.readiness).toBe("ready");
-
-      const profile = fixture({
-        account: {
-          account: { type: "apiKey" as const },
-          requiresOpenaiAuth: false,
-        },
-      });
-      const profileProbe = await Effect.runPromise(
-        Effect.scoped(
-          makeCodexDriver(
-            profile.options({
-              environment: { CODEX_HOME: codexHome, AWS_PROFILE: "work" },
-            }),
-          ).probe({ instanceId }),
-        ),
-      );
-      expect(profileProbe.readiness).toBe("ready");
-
-      const emptyBearer = fixture({
-        account: {
-          account: { type: "apiKey" as const },
-          requiresOpenaiAuth: false,
-        },
-      });
-      const emptyBearerProbe = await Effect.runPromise(
-        Effect.scoped(
-          makeCodexDriver(
-            emptyBearer.options({
-              environment: { CODEX_HOME: codexHome, AWS_BEARER_TOKEN_BEDROCK: "" },
-            }),
-          ).probe({ instanceId }),
-        ),
-      );
-      expect(emptyBearerProbe.readiness).toBe("unauthenticated");
-      expect(emptyBearerProbe.message).toContain("AWS profile");
-
-      const staticKeys = fixture({
-        account: {
-          account: { type: "apiKey" as const },
-          requiresOpenaiAuth: false,
-        },
-      });
-      const staticKeysProbe = await Effect.runPromise(
-        Effect.scoped(
-          makeCodexDriver(
-            staticKeys.options({
-              environment: {
-                CODEX_HOME: codexHome,
-                AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
-                AWS_SECRET_ACCESS_KEY: "secret",
-                AWS_REGION: "us-east-1",
-              },
-            }),
-          ).probe({ instanceId }),
-        ),
-      );
-      expect(staticKeysProbe.readiness).toBe("unauthenticated");
-      expect(staticKeysProbe.message).toContain("does not pass static AWS IAM keys");
-      expect(staticKeysProbe.message).not.toContain("secret");
     } finally {
       rmSync(codexHome, { recursive: true, force: true });
     }
@@ -854,6 +773,129 @@ describe("Codex driver probe and runtime lifecycle", () => {
     );
     expect(String(exit)).toContain("protocol");
     expect(bounded.calls.filter(({ method }) => method === "model/list")).toHaveLength(10);
+  });
+
+  it("refuses a Bedrock sign-in that reaches the AWS profile or shared config and admits an instance-scoped one", async () => {
+    const bedrock = (usesCodexManagedCredentials = false) => ({
+      account: { type: "amazonBedrock" as const, usesCodexManagedCredentials },
+      requiresOpenaiAuth: false,
+    });
+    const effectiveConfig = (aws?: Readonly<Record<string, unknown>>, auth?: unknown) => ({
+      config: {
+        model_provider: "amazon-bedrock",
+        model_providers: {
+          "amazon-bedrock": {
+            ...(aws === undefined ? {} : { aws }),
+            ...(auth === undefined ? {} : { auth }),
+          },
+        },
+      },
+    });
+    const probe = async (
+      input: Parameters<typeof fixture>[0],
+      environment: NodeJS.ProcessEnv,
+    ): Promise<ProviderProbeResult> =>
+      Effect.runPromise(
+        Effect.scoped(
+          makeCodexDriver(fixture(input).options({ environment })).probe({ instanceId }),
+        ),
+      );
+    const bearer = { AWS_BEARER_TOKEN_BEDROCK: "bedrock-token", AWS_REGION: "us-east-1" };
+
+    // With no Codex-managed key and no bearer token, Codex falls through to
+    // the AWS SDK's default chain, which reads `~/.aws` through `HOME` whether
+    // or not a profile variable names it.
+    for (const environment of [
+      { AWS_PROFILE: "work", AWS_REGION: "us-east-1" },
+      { AWS_SHARED_CREDENTIALS_FILE: "/Users/test/.aws/credentials" },
+      { HOME: "/Users/test" },
+      { AWS_ACCESS_KEY_ID: "AKIAEXAMPLE", AWS_SECRET_ACCESS_KEY: "secret-sentinel" },
+      { AWS_BEARER_TOKEN_BEDROCK: " " },
+    ]) {
+      const refused = await probe(
+        { account: bedrock(), configRead: async () => effectiveConfig() },
+        environment,
+      );
+      expect(refused.readiness, JSON.stringify(environment)).toBe("incompatible");
+      expect(refused.message).toContain("AWS_BEARER_TOKEN_BEDROCK");
+      expect(refused.message).not.toContain("secret-sentinel");
+    }
+
+    // A profile or a credential export in the config outranks the bearer
+    // token in Codex's own order, so exporting the token does not help.
+    const profile = await probe(
+      { account: bedrock(), configRead: async () => effectiveConfig({ profile: "work" }) },
+      bearer,
+    );
+    expect(profile.readiness).toBe("incompatible");
+    expect(profile.message).toContain("aws.profile");
+    const credentialExport = await probe(
+      {
+        account: bedrock(),
+        configRead: async () =>
+          effectiveConfig({ credential_export: { command: "aws", args: ["configure"] } }),
+      },
+      bearer,
+    );
+    expect(credentialExport.readiness).toBe("incompatible");
+    expect(credentialExport.message).toContain("aws.credential_export");
+
+    // What the person configured for this account alone still works.
+    expect(
+      (await probe({ account: bedrock(), configRead: async () => effectiveConfig() }, bearer))
+        .readiness,
+    ).toBe("ready");
+    expect(
+      (await probe({ account: bedrock(true), configRead: async () => effectiveConfig() }, {}))
+        .readiness,
+    ).toBe("ready");
+    expect(
+      (
+        await probe(
+          {
+            account: bedrock(),
+            configRead: async () =>
+              effectiveConfig({ region: "us-east-1" }, { command: "bedrock-token" }),
+          },
+          {},
+        )
+      ).readiness,
+    ).toBe("ready");
+
+    // A runtime older than the Bedrock account report is recognised from its
+    // config and held to the same rule.
+    const codexHome = mkdtempSync(join(tmpdir(), "octant-codex-home-"));
+    try {
+      writeFileSync(join(codexHome, "config.toml"), 'model_provider = "amazon-bedrock"\n');
+      const older = {
+        account: { account: { type: "apiKey" as const }, requiresOpenaiAuth: false },
+      };
+      expect((await probe(older, { CODEX_HOME: codexHome, AWS_PROFILE: "work" })).readiness).toBe(
+        "incompatible",
+      );
+      expect((await probe(older, { CODEX_HOME: codexHome, ...bearer })).readiness).toBe("ready");
+    } finally {
+      rmSync(codexHome, { recursive: true, force: true });
+    }
+
+    // Every session acquisition holds the same line, so a caller that never
+    // probed cannot start a thread on a refused sign-in either.
+    const unprobed = fixture({
+      account: bedrock(),
+      configRead: async () => effectiveConfig({ profile: "work" }),
+    });
+    const scope = await Effect.runPromise(Scope.make());
+    const acquired = await Effect.runPromise(
+      Effect.either(
+        makeCodexDriver(unprobed.options({ environment: bearer }))
+          .acquire({ instanceId, projectRoot })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      ),
+    );
+    await Effect.runPromise(Scope.close(scope, Exit.void));
+    expect(acquired._tag).toBe("Left");
+    if (acquired._tag === "Left") expect(acquired.left.category).toBe("incompatible");
+    expect(unprobed.calls.some(({ method }) => method === "thread/start")).toBe(false);
   });
 
   it("shares one concurrent runtime per instance, isolates instances, and idles for 30 seconds", async () => {
@@ -1138,6 +1180,7 @@ describe("Codex thread and turn lifecycle", () => {
       }),
     );
     expect(f.calls.map(({ method }) => method)).toEqual([
+      "account/read",
       "subscribe",
       "skills/list",
       "thread/start",
@@ -1369,6 +1412,7 @@ describe("Codex thread and turn lifecycle", () => {
     await startSession(acquired.connection);
     await Effect.runPromise(acquired.connection.stop(sessionId));
     expect(f.calls.map(({ method }) => method)).toEqual([
+      "account/read",
       "subscribe",
       "skills/list",
       "thread/start",

@@ -536,8 +536,8 @@ describe("Ollama Verify tools", () => {
     );
     expect(result.appManagedTools).toBe("unsupported");
 
-    const probed = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
-    fixture.registry.setObservedState({ ...probed, verifiedToolModelIds: [modelId] });
+    await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    fixture.registry.setVerifiedToolModels(instanceId, [modelId]);
     await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
     expect(fixture.registry.observedState(instanceId)?.verifiedToolModelIds).toEqual([modelId]);
   });

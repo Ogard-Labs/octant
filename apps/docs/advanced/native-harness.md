@@ -168,7 +168,10 @@ summary is not asked about files, and a Chat model is not told to look for
 any. Only when there is nothing earlier to summarize, the summary fails, or
 the running turn outgrows the window again, are whole earlier exchanges left
 out, with a note to the model that names the saved messages it can read back
-with `journal-lookup`. The saved conversation keeps everything.
+with `journal-lookup`. The note points the model at its task list and, in Work
+and Code, at the files on disk. A saved message too long for one read, such as
+the history a restarted conversation begins with, comes back in parts the
+model reads one after another. The saved conversation keeps everything.
 
 Forking a Code thread on a harness model gives the fork the model's own
 memory up to the reply you forked from — every message, tool call, and result

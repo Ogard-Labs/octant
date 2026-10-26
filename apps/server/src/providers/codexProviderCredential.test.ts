@@ -2,7 +2,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { codexActiveModelProvider, codexProviderCredential } from "./codexProviderCredential";
+import {
+  codexActiveModelProvider,
+  codexBedrockSignIn,
+  codexConfiguresBedrock,
+  codexProviderCredential,
+} from "./codexProviderCredential";
 
 describe("codexActiveModelProvider", () => {
   it("names the selected provider and its declared env_key", () => {
@@ -50,47 +55,17 @@ describe("codexProviderCredential", () => {
     }
   });
 
-  it("treats the built-in Bedrock provider's credential as present only when exported", () => {
+  it("leaves both built-in Bedrock providers to the sign-in trace", () => {
     const home = mkdtempSync(join(tmpdir(), "octant-codex-home-"));
-    writeFileSync(join(home, "config.toml"), 'model_provider = "amazon-bedrock"\n');
     try {
-      expect(codexProviderCredential({ CODEX_HOME: home })).toEqual({
-        envKey: "AWS_BEARER_TOKEN_BEDROCK",
-        present: false,
-      });
-      expect(
-        codexProviderCredential({ CODEX_HOME: home, AWS_BEARER_TOKEN_BEDROCK: "token" }),
-      ).toEqual({ envKey: "AWS_BEARER_TOKEN_BEDROCK", present: true });
-      expect(codexProviderCredential({ CODEX_HOME: home, AWS_BEARER_TOKEN_BEDROCK: "" })).toEqual({
-        envKey: "AWS_BEARER_TOKEN_BEDROCK",
-        present: false,
-      });
-      expect(codexProviderCredential({ CODEX_HOME: home, AWS_PROFILE: "work" })).toEqual({
-        envKey: "AWS_BEARER_TOKEN_BEDROCK",
-        present: true,
-      });
-      expect(codexProviderCredential({ CODEX_HOME: home, AWS_PROFILE: "  " })).toEqual({
-        envKey: "AWS_BEARER_TOKEN_BEDROCK",
-        present: false,
-      });
-      expect(codexProviderCredential({ CODEX_HOME: home, AWS_REGION: "us-east-1" })).toEqual({
-        envKey: "AWS_BEARER_TOKEN_BEDROCK",
-        present: false,
-      });
-      expect(
-        codexProviderCredential({
-          CODEX_HOME: home,
-          AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
-          AWS_SECRET_ACCESS_KEY: "secret",
-        }),
-      ).toEqual({ envKey: "AWS_BEARER_TOKEN_BEDROCK", present: false, withheldStaticKeys: true });
-      expect(
-        codexProviderCredential({
-          CODEX_HOME: home,
-          AWS_ACCESS_KEY_ID: "AKIAEXAMPLE",
-          AWS_PROFILE: "work",
-        }),
-      ).toEqual({ envKey: "AWS_BEARER_TOKEN_BEDROCK", present: true });
+      for (const id of ["amazon-bedrock", "amazon-bedrock-runtime"]) {
+        writeFileSync(join(home, "config.toml"), `model_provider = "${id}"\n`);
+        const environment = { CODEX_HOME: home, AWS_BEARER_TOKEN_BEDROCK: "token" };
+        expect(codexProviderCredential(environment)).toBeUndefined();
+        expect(codexConfiguresBedrock(environment)).toBe(true);
+      }
+      writeFileSync(join(home, "config.toml"), 'model_provider = "openai"\n');
+      expect(codexConfiguresBedrock({ CODEX_HOME: home })).toBe(false);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -124,6 +99,52 @@ describe("codexProviderCredential", () => {
       expect(codexProviderCredential({ CODEX_HOME: home })).toBeUndefined();
     } finally {
       rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("codexBedrockSignIn", () => {
+  const signIn = (
+    providerConfig: unknown,
+    environment: NodeJS.ProcessEnv = {},
+    usesCodexManagedCredentials = false,
+  ) => codexBedrockSignIn({ providerConfig, usesCodexManagedCredentials, environment });
+
+  it("follows Codex's own order, so a profile outranks a stored key or a bearer token", () => {
+    const bearer = { AWS_BEARER_TOKEN_BEDROCK: "token" };
+    expect(signIn({ auth: { command: "token" }, aws: { profile: "work" } })).toEqual({
+      status: "instance-scoped",
+      source: "auth-command",
+    });
+    expect(signIn({ aws: { credential_export: { command: "aws" }, profile: "work" } })).toEqual({
+      status: "refused",
+      source: "credential-export",
+    });
+    expect(signIn({ aws: { profile: "work" } }, bearer, true)).toEqual({
+      status: "refused",
+      source: "aws-profile",
+    });
+    expect(signIn({ aws: { region: "us-east-1" } }, bearer, true)).toEqual({
+      status: "instance-scoped",
+      source: "codex-managed",
+    });
+    expect(signIn(undefined, bearer)).toEqual({
+      status: "instance-scoped",
+      source: "bearer-token",
+    });
+  });
+
+  it("refuses the AWS default chain, which exported IAM keys and profile variables only feed", () => {
+    for (const environment of [
+      {},
+      { AWS_BEARER_TOKEN_BEDROCK: "  " },
+      { AWS_PROFILE: "work", AWS_CONFIG_FILE: "/Users/test/.aws/config" },
+      { AWS_ACCESS_KEY_ID: "AKIAEXAMPLE", AWS_SECRET_ACCESS_KEY: "secret" },
+    ]) {
+      expect(signIn({ aws: { region: "us-east-1" } }, environment)).toEqual({
+        status: "refused",
+        source: "aws-default-chain",
+      });
     }
   });
 });
