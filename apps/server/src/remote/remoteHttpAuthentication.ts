@@ -1195,11 +1195,14 @@ async function authenticateRequest(
     commandId = commandIdHeader;
   }
 
-  const body = await readBoundedBody(
-    request,
-    safe ? 0 : relay ? (route?.maxBodyBytes ?? 0) : MAX_AUTHENTICATED_BODY_BYTES,
-    safe ? 400 : 413,
-  );
+  // A relay and an attachment upload carry their own route's budget; every
+  // other product body keeps the default one.
+  const bodyBudget = relay
+    ? (route?.maxBodyBytes ?? 0)
+    : route?.uploadsAttachment === true
+      ? (route.maxBodyBytes ?? MAX_AUTHENTICATED_BODY_BYTES)
+      : MAX_AUTHENTICATED_BODY_BYTES;
+  const body = await readBoundedBody(request, safe ? 0 : bodyBudget, safe ? 400 : 413);
   if (safe && body.byteLength > 0) throw new RemoteHttpAuthFailure(400, "invalid");
   if (!safe && !relay) {
     const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();

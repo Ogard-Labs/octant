@@ -19,8 +19,22 @@ describe("pending attachments", () => {
 
 describe("model option for a thread", () => {
   const options: ReadonlyArray<MobileModelOption> = [
-    { id: "x", providerInstanceId: "p1", modelId: "m1", label: "One", detail: "" },
-    { id: "y", providerInstanceId: "p1", modelId: "m2", label: "Two", detail: "" },
+    {
+      id: "x",
+      providerInstanceId: "p1",
+      modelId: "m1",
+      label: "One",
+      detail: "",
+      attachmentModalities: [],
+    },
+    {
+      id: "y",
+      providerInstanceId: "p1",
+      modelId: "m2",
+      label: "Two",
+      detail: "",
+      attachmentModalities: [],
+    },
   ];
 
   it("selects the option matching the thread's provider and model once the list arrives", () => {

@@ -17,7 +17,9 @@ not redesign it.
 
 **Status.** Accepted 2026-10-26; slice 1 (the host keeps push registrations
 and drops them with the device) and slice 2 (the host builds sealed, redacted
-thread notifications) are implemented; slices 3 to 9 are not started. The
+thread notifications) are implemented; slice 3 (camera and file capture) is
+implemented and verified in the container, and its physical-device camera pass
+is a maintainer gate; slices 4 to 9 are not started. The
 maintainer authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26. That
 authorizes design, planning, and implementation of the slices below that need
@@ -85,7 +87,7 @@ These rules hold for every phase and are not reopened by any slice:
 | Push policy       | `packages/domain/src/pushNotificationPolicy.ts` builds display text under [decision M2](#maintainer-decisions) (kind and computer label; a thread title or Automation name only for a phone that opted in) and owns per-kind preferences, deduplication keys, the per-device rate limit, and urgency                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Push on the host  | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a registration per `{hostId, deviceId}` in the owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), as [What the host keeps](#what-the-host-keeps) describes: it survives a restart and is cleared with the device. Ordinary threads in every mode (`threadNotificationDeliveryService.ts`) and Automation runs (`automationNotificationDeliveryService.ts`) seal each notification to the phone (`pushNotificationSealing.ts`) as [Sealing](#sealing) and [Sending](#sending) describe, and hand the envelope to `createUnavailablePushDeliveryTransport`, which never sends, until slice 7 |
 | Push on the phone | `notificationPermissionPort.ts` is the unavailable stub; `PushNotificationsPanel.tsx` offers only clearing a registered token; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| Capture           | Chat threads attach a photo-library image (`apps/mobile/src/inbox/thread/pickImage.ts`) through `POST /api/chat/attachments` (`uploadMobileChatAttachment` in `packages/client-runtime/src/mobileInboxClient.ts`). The camera is used only by the pairing scanner and its permission string says so. The host strips no image metadata                                                                                                                                                                                                                                                                                                                                                                                         |
+| Capture           | Chat, Work, and Code threads attach a camera photo, a library image, or a document-picker file (`apps/mobile/src/inbox/thread/pickAttachment.ts`, `useThreadAttachments.ts`) through each mode's own attachment route (`packages/client-runtime/src/mobileAttachmentClient.ts`), offered only for media the thread's model takes. The listener admits those routes for a paired device (`remoteRoutePolicy.ts`), and the host removes image metadata from every paired upload before a route sees it (`apps/server/src/attachments/imageMetadataRemoval.ts`, applied in `authenticatedProductRoutes.ts`). The camera and photo-library permission strings name both uses; the physical-device camera pass is a maintainer gate |
 | Voice             | Host speech routes (`/api/speech/*`) require window authority and are not admitted for paired devices; the phone composer shows a disabled microphone (`apps/mobile/src/ui/FloatingComposer.tsx`); `app.config.ts` disables the microphone permission                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Hardening ports   | Screenshot privacy and device integrity are unavailable stubs (`screenshotPrivacyPort.ts`, `deviceIntegrityPort.ts`) disclosed in Settings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
@@ -319,6 +321,49 @@ sender holding it. The sender is a minimal Octant push gateway
   from every image a paired device uploads before it is stored or sent to a
   provider, and keeps the existing type sniffing and size bounds. The phone
   keeps no copy beyond the upload.
+
+#### Capture rules
+
+- The listener admits each mode's attachment upload route for a paired device:
+  `POST /api/chat/attachments`, and `PUT /api/work/attachments` and
+  `PUT /api/code/attachments`, each only for the media types that mode takes
+  (Chat: text, PNG, JPEG, WebP, GIF, PDF; Work and Code: the four image
+  types) and with that mode's identity headers. Staging a Work image is the
+  Work turn action and a Code image the Code turn action; the route still
+  checks the thread's own authority. No other product route takes an image.
+- A paired upload is at most 10 MiB in every mode, the Work and Code bound,
+  even though Chat at the host takes 25 MiB: the listener holds the whole body
+  to check the device's proof before forwarding it, so the bound is what a
+  phone photo needs. The phone refuses a larger file before sending it.
+- Metadata removal runs once, where a paired device's request enters the
+  product routes (after its proof and action are checked, before any route
+  sees the body), for every request whose media type is an image. Each format
+  keeps an allow-list of what draws the picture and its colour: JPEG keeps
+  JFIF's density (never its thumbnail, a picture of the original before any
+  crop), the ICC profile, Adobe's colour transform, and EXIF's orientation
+  alone, rewritten on its own so a photo stored sideways is not shown
+  sideways, and drops every other APPn segment and comment; PNG keeps its
+  image, colour, scale, and animation chunks and drops text, EXIF, time, and
+  every unknown ancillary chunk; WebP
+  drops EXIF and XMP and clears the header flags that named them; GIF drops
+  comments and every application block but looping. Bytes after the image's
+  end are dropped, since some cameras append metadata there. An image whose
+  bytes are not the type it names, a type the host cannot clean (HEIC, say),
+  or one whose structure cannot be walked to its end is refused with 415,
+  never stored partly cleaned. The signed body is what the device sent; what
+  the route stores is the cleaned image.
+- The phone offers a source only when the thread's mode route and the model
+  its next turn runs on both take the media: the provider must report native
+  attachments supported and the model must declare the modality (image, or
+  document for Chat's text and PDF). A model the host does not list as ready
+  is offered nothing. The camera and the library are offered when an image
+  is; the document picker is limited to the accepted types. The library asks
+  the system for a compatible JPEG rather than HEIC, and a file whose type
+  neither the picker nor its name gives is not guessed into one.
+- Picking asks for that source's permission only on the person's tap.
+  Attachments upload as soon as they are picked, under the thread's authority,
+  and the turn carries only their ids. The copy the camera or picker left in
+  the app's cache is deleted when the upload ends, either way.
 
 ### Voice
 

@@ -1,5 +1,13 @@
 import { CANVAS_DESIGN_PAGE_PATH } from "@octant/contracts/canvas";
-import { REMOTE_SERVER_PROXY_RELAYED, REMOTE_SERVER_PROXY_RELAYED_HEADER } from "@octant/contracts";
+import {
+  CHAT_ATTACHMENT_MEDIA_TYPES,
+  CODE_ATTACHMENT_MEDIA_TYPES,
+  MAX_CODE_ATTACHMENT_BYTES,
+  MAX_WORK_ATTACHMENT_BYTES,
+  REMOTE_SERVER_PROXY_RELAYED,
+  REMOTE_SERVER_PROXY_RELAYED_HEADER,
+  WORK_ATTACHMENT_MEDIA_TYPES,
+} from "@octant/contracts";
 import { CANVAS_DESIGN_PAGE_POLICY } from "./canvas/canvasDesignPage";
 import { withAdmissionRelease } from "./remote/remoteAdmissionPolicy";
 
@@ -27,6 +35,16 @@ export const REMOTE_SERVER_PROXY_RELAY_MAX_BODY_BYTES = 8 * 1_024 * 1_024;
  * 8 MiB each before any proof was checked.
  */
 const UNAUTHENTICATED_SERVER_PROXY_BODY_BYTES = 4_096;
+/**
+ * The largest attachment a paired device uploads, in every mode: the Work and
+ * Code bound, below Chat's local one. The listener holds the whole body to
+ * check its proof before forwarding it, so the bound is the one a phone photo
+ * needs rather than the largest file a person at the host may attach.
+ */
+export const REMOTE_ATTACHMENT_UPLOAD_MAX_BODY_BYTES = Math.min(
+  MAX_WORK_ATTACHMENT_BYTES,
+  MAX_CODE_ATTACHMENT_BYTES,
+);
 const UNAUTHENTICATED_SERVER_PROXY_PER_SOURCE = 4;
 
 const REMOTE_REQUEST_HEADERS = [
@@ -324,6 +342,29 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes: ["application/json"] as const,
     maxBodyBytes: 4_096,
   },
+  // Each mode's own attachment route, under that thread's authority, for the
+  // media types that mode takes. Matched before the mode's prefix, which keeps
+  // JSON bodies within the listener's default budget.
+  ...(
+    [
+      ["/api/chat/attachments", "POST", "chat", CHAT_ATTACHMENT_MEDIA_TYPES],
+      ["/api/work/attachments", "PUT", "work", WORK_ATTACHMENT_MEDIA_TYPES],
+      ["/api/code/attachments", "PUT", "code", CODE_ATTACHMENT_MEDIA_TYPES],
+    ] as const
+  ).map(([path, method, mode, mediaTypes]) => ({
+    kind: "exact" as const,
+    path,
+    methods: [method],
+    allowedRequestHeaders: [
+      ...REMOTE_REQUEST_HEADERS,
+      `x-octant-${mode}-thread-id`,
+      `x-octant-${mode}-attachment-id`,
+      `x-octant-${mode}-display-name`,
+    ],
+    allowedContentTypes: mediaTypes,
+    maxBodyBytes: REMOTE_ATTACHMENT_UPLOAD_MAX_BODY_BYTES,
+    uploadsAttachment: true as const,
+  })),
   {
     kind: "exact" as const,
     path: "/api/providers/bootstrap",
@@ -404,6 +445,7 @@ const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [
     allowedContentTypes:
       "allowedContentTypes" in match ? match.allowedContentTypes : REMOTE_CONTENT_TYPES,
     ...("maxBodyBytes" in match ? { maxBodyBytes: match.maxBodyBytes } : {}),
+    ...("uploadsAttachment" in match ? { uploadsAttachment: match.uploadsAttachment } : {}),
     allowQuery: match.kind === "prefix",
   };
 });
@@ -446,6 +488,12 @@ export interface RemoteRouteDefinition {
    * and budget.
    */
   readonly relaysDevServer?: true;
+  /**
+   * Set only on a mode's attachment upload route. Its body budget is its own,
+   * above the listener's default, so a phone photo fits; its media types are
+   * still the route's own.
+   */
+  readonly uploadsAttachment?: true;
 }
 
 export type RemoteRouteResponse = Response | undefined;
@@ -768,7 +816,8 @@ function inspectRequest(
   if (route === undefined || !routeAllowsQuery(route, url)) return reject(404, facts);
   if (!route.methods.includes(method as RemoteHttpMethod)) return reject(405, facts);
   const bodyLimit =
-    route.relaysDevServer === true && route.maxBodyBytes !== undefined
+    (route.relaysDevServer === true || route.uploadsAttachment === true) &&
+    route.maxBodyBytes !== undefined
       ? route.maxBodyBytes
       : Math.min(route.maxBodyBytes ?? defaultMaxBodyBytes, defaultMaxBodyBytes);
   if (
@@ -859,6 +908,8 @@ function validateRoutes(
       (surface === "server-proxy") !== pathMatchesPrefix(route.match.path, SERVER_PROXY_PREFIX) ||
       (route.relaysDevServer === true &&
         (surface !== "server-proxy" || route.maxBodyBytes === undefined)) ||
+      (route.uploadsAttachment === true &&
+        (surface !== "authenticated-product" || route.maxBodyBytes === undefined)) ||
       isLocalOnlyMatch(route.match)
     ) {
       throw new Error("Remote route definition is invalid or local-only.");

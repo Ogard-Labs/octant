@@ -7,6 +7,7 @@ import {
 } from "@octant/client-runtime";
 import { runLoad, runMutation, sendThenReload } from "./runMutation";
 import type { RefreshOptions, ThreadHookInput } from "./threadTypes";
+import { useThreadAttachments } from "./useThreadAttachments";
 
 export function useCodeThread(input: ThreadHookInput) {
   const { transport, target, guard, ui, gate, prompt, setPrompt } = input;
@@ -15,10 +16,15 @@ export function useCodeThread(input: ThreadHookInput) {
   const enabled = target?.mode === "code";
   const [policy, setPolicy] = useState<string | undefined>();
   const [conversation, setConversation] = useState<MobileCodeConversation | undefined>();
+  const [threadModel, setThreadModel] = useState<
+    { readonly providerInstanceId: string; readonly modelId: string } | undefined
+  >();
+  const attachments = useThreadAttachments("code", input);
 
   useEffect(() => {
     setPolicy(undefined);
     setConversation(undefined);
+    setThreadModel(undefined);
   }, [identity]);
 
   const refresh = useCallback(
@@ -39,6 +45,10 @@ export function useCodeThread(input: ThreadHookInput) {
           ]),
         onLoaded: ([thread, loaded]) => {
           setPolicy(thread.executionPolicy);
+          setThreadModel({
+            providerInstanceId: String(thread.providerInstanceId),
+            modelId: String(thread.modelId),
+          });
           setConversation(loaded);
         },
         onFailed: () => {
@@ -62,9 +72,17 @@ export function useCodeThread(input: ThreadHookInput) {
       failure: "Follow-up failed.",
       run: () =>
         sendThenReload({
-          send: () => sendMobileCodeTurn({ transport, threadId, prompt }),
+          send: () =>
+            sendMobileCodeTurn({
+              transport,
+              threadId,
+              prompt,
+              attachmentIds: attachments.pending.map((attachment) => attachment.id),
+            }),
           onSent: () => {
-            if (guard.isSelected(identity)) setPrompt("");
+            if (!guard.isSelected(identity)) return;
+            setPrompt("");
+            attachments.sent();
           },
           reload: () => loadMobileCodeConversation(transport, threadId),
         }),
@@ -82,5 +100,8 @@ export function useCodeThread(input: ThreadHookInput) {
     live: (turns ?? []).some((turn) => turn.status === "waiting"),
     refresh,
     sendFollowUp,
+    threadModel,
+    pendingAttachments: attachments.pending,
+    attach: attachments.attach,
   };
 }

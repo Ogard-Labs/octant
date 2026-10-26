@@ -1,5 +1,4 @@
 import {
-  ChatAttachment,
   type ChatEventFrame,
   type ChatThread,
   type ChatThreadId,
@@ -614,42 +613,6 @@ export async function* subscribeMobileChatEvents(input: {
       throw new MobileInboxFailure("unavailable", error.message);
     }
     throw error;
-  }
-}
-
-/** Upload a Chat attachment (image/pdf/text) to the host. */
-export async function uploadMobileChatAttachment(input: {
-  readonly transport: MobileRemoteTransport;
-  readonly threadId: string;
-  readonly attachmentId: string;
-  readonly displayName: string;
-  readonly mediaType: string;
-  readonly bytes: Uint8Array;
-}): Promise<ChatAttachment> {
-  const response = await input.transport.authenticatedFetch({
-    method: "POST",
-    path: "/api/chat/attachments",
-    body: input.bytes,
-    contentType: input.mediaType,
-    headers: {
-      "x-octant-chat-thread-id": input.threadId,
-      "x-octant-chat-attachment-id": input.attachmentId,
-      "x-octant-chat-display-name": encodeURIComponent(input.displayName),
-    },
-  });
-  if (!response.ok) {
-    throw new MobileInboxFailure(
-      response.status === 403 ? "rejected" : "unavailable",
-      "Could not upload the attachment to the host.",
-    );
-  }
-  try {
-    return decodeHostAnswer(ChatAttachment)(await response.json());
-  } catch {
-    throw new MobileInboxFailure(
-      "unavailable",
-      "Attachment upload returned an invalid response from the host.",
-    );
   }
 }
 

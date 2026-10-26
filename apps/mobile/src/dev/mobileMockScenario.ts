@@ -941,6 +941,37 @@ function createMockTransport(input: {
         workThreads.unshift(thread);
         return Response.json({ kind: "thread-created", thread });
       }
+      const attachmentMode =
+        request.method === "POST" && request.path === "/api/chat/attachments"
+          ? "chat"
+          : request.method === "PUT" && request.path === "/api/work/attachments"
+            ? "work"
+            : request.method === "PUT" && request.path === "/api/code/attachments"
+              ? "code"
+              : undefined;
+      if (attachmentMode !== undefined) {
+        // The mock keeps no bytes: it answers with what the host would record.
+        const header = (name: string) => request.headers?.[`x-octant-${attachmentMode}-${name}`];
+        const displayName = decodeURIComponent(header("display-name") ?? "attachment");
+        const byteLength = request.body instanceof Uint8Array ? request.body.byteLength : 1;
+        const fields = {
+          displayName,
+          mediaType: request.contentType ?? "image/jpeg",
+          byteLength,
+          digest: "0".repeat(64),
+        };
+        return Response.json(
+          attachmentMode === "chat"
+            ? {
+                ...fields,
+                id: header("attachment-id"),
+                threadId: header("thread-id"),
+                status: "finalized",
+                createdAt: NOW,
+              }
+            : { ...fields, attachmentId: header("attachment-id") },
+        );
+      }
       return new Response("Mock route not found", { status: 404 });
     },
   };
