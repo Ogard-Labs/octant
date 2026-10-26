@@ -151,6 +151,11 @@ is dismissing waits for the active transition; backgrounding invalidates it.
 - Lock and unlock the vault; exercise passcode fallback and cancel paths.
 - Read Chat, Work, and Code threads and send only mutations the host advertises
   as remotely available.
+- Attach a camera photo, a library photo, and a document-picker file to a
+  Chat, a Work, and a Code thread; grant and then deny the camera and the
+  photo library and confirm the permission text names both camera uses.
+  Confirm the photo the host stored carries no location or camera model, and
+  that a thread whose model takes no images offers no camera.
 - Confirm local-host-required actions remain unavailable on the phone.
 - Background the app, let the session age, return, and verify reconnect/replay
   without duplicate turns or queued offline mutations.

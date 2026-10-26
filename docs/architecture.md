@@ -217,7 +217,11 @@ phone creates Chat, Work, and Code threads, reads their transcripts, and sends
 follow-up turns under each thread's own authority (`start-work-thread-turn`
 with the thread's binding; `start-provider-turn` on the thread's checkout).
 Approvals, folder binding, file edits, and shell remain host-only and the
-composer says so. Native startup supplies WebCrypto for the shared pairing and
+composer says so. A person may attach a camera photo, a library image, or a
+file from the system document picker to a thread, through that mode's own
+attachment route and only for media the thread's model takes; the host removes
+image metadata from every paired upload
+([Mobile maturity: capture](design/mobile-maturity.md#capture)). Native startup supplies WebCrypto for the shared pairing and
 request-proof clients; keys persist in platform secure storage. Native remote
 fetch sends the proof-bound session cookie explicitly and disables the shared
 cookie jar to prevent duplicate or stale cookies. Browser cookie ownership is
@@ -7622,7 +7626,8 @@ mechanisms are:
       after the host rate-limits the check), and keeps the claim through a
       transient failure. The scanner takes only text that
       starts `octant-pair-1.` and ignores any other QR code; the camera
-      permission names that one use. Every request to an origin whose
+      permission names both its uses, this scan and a photo attached to a
+      thread. Every request to an origin whose
       pairing record holds a pin, the pairing flow's included, goes through
       the client runtime's exchange fetch over an in-tree native module
       (`apps/mobile/modules/octant-pinned-tls`), never the platform `fetch`;
@@ -8020,7 +8025,8 @@ mechanisms are:
     place in the device's proxy budget until its response ends; closing the
     grant closes the upstream socket and cuts the response before the call
     that closed it returns. `OPTIONS` is not relayed. The listener admits
-    bodies up to the relay's 8 MiB; every other route keeps its own budget.
+    bodies up to the relay's 8 MiB, and up to 10 MiB on each mode's
+    attachment upload route; every other route keeps its own budget.
   - **WebSockets.** The relay route is the only one that switches a
     connection: a signed `GET` asking to upgrade to `websocket` takes the same
     checks as any relayed request, then the host opens a WebSocket to the
