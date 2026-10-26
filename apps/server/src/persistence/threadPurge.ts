@@ -383,8 +383,12 @@ function collectOwnedAggregates(
     add("canvas-outside-content", canvasId);
   }
   followLinkedAggregates(connection, keys, add, "agent-run", RUN_LINK_PATHS);
-  for (const sessionId of providerSessionsStartedBy(connection, keys)) {
+  for (const sessionId of [
+    ...providerSessionsStartedBy(connection, keys),
+    ...childRunSessions(connection, mode, threadId),
+  ]) {
     add(NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE, sessionId);
+    add(OLLAMA_SESSION_HISTORY_AGGREGATE_TYPE, sessionId);
     for (const match of aggregatesMatching(connection, ["$.sessionId"], sessionId)) {
       add(match.aggregateType, match.aggregateId);
     }
@@ -475,6 +479,47 @@ function aggregatesMatching(
     readonly aggregate_id: string;
   }>;
   return rows.map((row) => ({ aggregateType: row.aggregate_type, aggregateId: row.aggregate_id }));
+}
+
+/**
+ * Ollama keeps its own conversation history per provider session, journaled
+ * like a harness transcript and just as silent about the thread.
+ */
+const OLLAMA_SESSION_HISTORY_AGGREGATE_TYPE = "ollama-session-history";
+
+/**
+ * A child run's provider session is recorded only in its private session
+ * record, kept under the parent thread in the run content store, never in a
+ * journaled event; a child on a harness or Ollama endpoint journals its
+ * conversation under that session. The record is read here, before the
+ * purge deletes it with the rest of the thread's run content.
+ */
+function childRunSessions(
+  connection: SqliteConnection,
+  mode: OctantMode,
+  threadId: string,
+): ReadonlyArray<string> {
+  const rows = connection
+    .prepare(
+      `SELECT body_text FROM agent_run_content_store
+       WHERE subject_type = ? AND subject_id = ? AND content_kind = 'managed-session'`,
+    )
+    .all(THREAD_AGGREGATE_TYPE_BY_MODE[mode], threadId) as ReadonlyArray<{
+    readonly body_text: string;
+  }>;
+  const sessions: string[] = [];
+  for (const row of rows) {
+    let record: unknown;
+    try {
+      record = JSON.parse(row.body_text);
+    } catch {
+      continue;
+    }
+    if (typeof record !== "object" || record === null || !("sessionId" in record)) continue;
+    const { sessionId } = record;
+    if (typeof sessionId === "string" && sessionId.length > 0) sessions.push(sessionId);
+  }
+  return sessions;
 }
 
 /** The thread records that name the provider sessions its turns ran in. */

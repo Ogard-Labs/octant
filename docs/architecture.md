@@ -2109,10 +2109,11 @@ flowchart LR
   canvases authored in that thread (including their comments, shares,
   refreshes, actions, and mirrored files), agent-run session and content
   stores, harness sessions, the Octant Harness transcript (with its
-  compaction summaries) of every provider session the thread's own Chat
-  attempts, Work turns, or Code operations first recorded (a transcript is
-  keyed by that provider session, not by the harness session record, and a
-  session a Chat branch copied from its source stays with the source), and a
+  compaction summaries) and Ollama session history of every provider session
+  the thread's own Chat attempts, Work turns, or Code operations first
+  recorded or its child runs' session records name (each is keyed by that
+  provider session, not by the harness session record, and a session a Chat
+  branch copied from its source stays with the source), and a
   managed worktree only when no other
   thread still references it, and only at a path inside that repository's
   managed worktree directory: a receipt that names any other path, or one
