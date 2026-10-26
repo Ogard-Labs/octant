@@ -155,7 +155,7 @@ starts.
   [apple-devices-distribution.md](apple-devices-distribution.md).
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:
-  [enterprise-provider-identity.md](enterprise-provider-identity.md).
+  [Enterprise provider identity](design/enterprise-provider-identity.md).
 - **Remote SSH development environments** and **live guest sharing** — each
   waits on the foundation named in its own design note.
 
