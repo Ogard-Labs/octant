@@ -11,8 +11,8 @@ export type NativeHarnessEndpoint = ProviderHarnessEndpoint;
  * The direct endpoints this host runs, by provider instance. A lead whose
  * model keeps failing may continue on a model of a different instance; the
  * registry is how that instance's transport is found without the loop
- * knowing any driver. A driver registers itself when it is built and
- * replaces its entry when it is rebuilt.
+ * knowing any driver. `runOnNativeHarness` registers a driver's endpoint
+ * when the driver is built and replaces the entry when it is rebuilt.
  */
 export class NativeHarnessEndpointRegistry {
   readonly #endpoints = new Map<string, NativeHarnessEndpoint>();
@@ -26,7 +26,7 @@ export class NativeHarnessEndpointRegistry {
   }
 }
 
-/** What the server hands a direct-endpoint driver so its harness can retry and fall back. */
+/** What the server hands the harness that runs a direct endpoint so it can retry, fall back, and learn. */
 export interface NativeHarnessEndpointHooks {
   readonly endpoints?: NativeHarnessEndpointRegistry;
   readonly leadFallback?: NativeHarnessLeadFallback;
