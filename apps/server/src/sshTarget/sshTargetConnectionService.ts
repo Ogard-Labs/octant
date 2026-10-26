@@ -40,6 +40,7 @@ import { childProcessEnvironment } from "../childProcessEnvironment";
 import { encodeExecutorFrame, ExecutorFrameReader } from "./executorFrames";
 import {
   SYSTEM_SSH_CLIENT,
+  sshClientEnvironment,
   sshExecutorSessionArguments,
   sshHostKeyProbeArguments,
 } from "./sshClientArguments";
@@ -81,7 +82,10 @@ export interface SshTargetConnectionServiceOptions {
   readonly buildVersion: string;
   /** The OpenSSH client to run. Defaults to the system client. */
   readonly sshExecutable?: string;
-  /** The environment the client inherits, stripped of Octant's own secrets. */
+  /**
+   * The environment the client inherits, stripped of Octant's own secrets.
+   * Defaults to the minimal client environment, never the whole server one.
+   */
   readonly environment?: NodeJS.ProcessEnv;
   readonly now?: () => number;
   readonly helloTimeoutMs?: number;
@@ -163,7 +167,9 @@ export class SshTargetConnectionService {
     this.#registry = options.registry;
     this.#buildVersion = options.buildVersion;
     this.#sshExecutable = options.sshExecutable ?? SYSTEM_SSH_CLIENT;
-    this.#environment = childProcessEnvironment(options.environment ?? process.env);
+    this.#environment = childProcessEnvironment(
+      options.environment ?? sshClientEnvironment(process.env),
+    );
     this.#now = options.now ?? Date.now;
     this.#helloTimeoutMs = options.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
     this.#attestationTimeoutMs = options.attestationTimeoutMs ?? ATTESTATION_TIMEOUT_MS;

@@ -177,9 +177,12 @@ fail-closed direction:
 
 One SSH connection per target, owned by a host service in `apps/server`. The host
 runs the system OpenSSH client with a fixed argument list. Nothing a thread,
-model, or remote produces reaches its arguments or environment. Options given on
-the command line take precedence over the person's SSH configuration, and these
-are always set:
+model, or remote produces reaches its arguments or environment. The client
+inherits only `HOME`, `USER`, `LOGNAME`, `PATH`, `SSH_AUTH_SOCK`, `TMPDIR` and the
+locale, never the server's whole environment: a person's `SendEnv` pattern would
+otherwise forward provider keys exported in their shell to any target whose
+`sshd` accepts them. Options given on the command line take precedence over the
+person's SSH configuration, and these are always set:
 
 | Option                                                | Why                                                             |
 | ----------------------------------------------------- | --------------------------------------------------------------- |

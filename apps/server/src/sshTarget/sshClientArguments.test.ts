@@ -1,7 +1,11 @@
 import { Schema } from "effect";
 import { describe, expect, it } from "vitest";
 import { SshDestination, SshExecutorPath } from "@octant/contracts/ssh-target";
-import { sshExecutorSessionArguments, sshHostKeyProbeArguments } from "./sshClientArguments";
+import {
+  sshClientEnvironment,
+  sshExecutorSessionArguments,
+  sshHostKeyProbeArguments,
+} from "./sshClientArguments";
 
 const destination = Schema.decodeUnknownSync(SshDestination)("build@devbox.example");
 const executorPath = Schema.decodeUnknownSync(SshExecutorPath)("/opt/octant/bin/octant");
@@ -112,5 +116,28 @@ describe("SSH client arguments", () => {
     ]) {
       expect(() => sshHostKeyProbeArguments({ destination, knownHostsFile })).toThrow();
     }
+  });
+});
+
+describe("sshClientEnvironment", () => {
+  it("hands the client only what it needs, so a SendEnv pattern cannot carry provider keys to a target", () => {
+    expect(
+      sshClientEnvironment({
+        HOME: "/Users/person",
+        PATH: "/usr/bin:/bin",
+        SSH_AUTH_SOCK: "/tmp/agent.sock",
+        LANG: "en_US.UTF-8",
+        ANTHROPIC_API_KEY: "sk-ant-secret",
+        OPENAI_API_KEY: "sk-secret",
+        AWS_SECRET_ACCESS_KEY: "aws-secret",
+        GITHUB_TOKEN: "ghp_secret",
+        OCTANT_DESKTOP_BRIDGE_SECRET: "bridge",
+      }),
+    ).toEqual({
+      HOME: "/Users/person",
+      PATH: "/usr/bin:/bin",
+      SSH_AUTH_SOCK: "/tmp/agent.sock",
+      LANG: "en_US.UTF-8",
+    });
   });
 });

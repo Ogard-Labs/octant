@@ -18,6 +18,35 @@ import type { SshDestination, SshExecutorPath } from "@octant/contracts/ssh-targ
 export const SYSTEM_SSH_CLIENT = "/usr/bin/ssh";
 
 /**
+ * The only variables the OpenSSH client inherits. A person's `SendEnv *` (or a
+ * broad pattern) would otherwise forward whatever the server process holds,
+ * provider keys exported in their shell included, to any target whose `sshd`
+ * accepts it. The client needs its home for configuration and identities, the
+ * agent socket for agent authentication, a search path for proxy commands, and
+ * the locale; nothing else.
+ */
+const SSH_CLIENT_ENVIRONMENT = [
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "PATH",
+  "SSH_AUTH_SOCK",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+] as const;
+
+export function sshClientEnvironment(inheritedEnvironment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const name of SSH_CLIENT_ENVIRONMENT) {
+    const value = inheritedEnvironment[name];
+    if (value !== undefined) environment[name] = value;
+  }
+  return environment;
+}
+
+/**
  * Options both lists set. Each keeps the target from reaching this machine or
  * the person's identity, or keeps a configured behavior from running here.
  */
