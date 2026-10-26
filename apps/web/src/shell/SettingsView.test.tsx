@@ -191,18 +191,19 @@ describe("SettingsView", () => {
     expect(screen.queryByRole("slider", { name: "Sidebar width" })).not.toBeInTheDocument();
   });
 
-  it("keeps the active section in the Settings breadcrumb", () => {
+  it("opens a page on one compact heading, with no breadcrumb and no section index under four sections", () => {
     renderSettings();
+    navigateTo("Sidebar");
 
-    expect(screen.getByRole("navigation", { name: "Settings breadcrumb" })).toHaveTextContent(
-      /Settings\s*\/\s*General/,
-    );
-
-    navigateTo("Appearance");
-
-    expect(screen.getByRole("navigation", { name: "Settings breadcrumb" })).toHaveTextContent(
-      /Settings\s*\/\s*Appearance/,
-    );
+    // The rail already names the page, so nothing above the heading repeats it.
+    expect(screen.queryByRole("navigation", { name: /breadcrumb/i })).toBeNull();
+    const heading = screen.getByRole("heading", { level: 1, name: "Sidebar" });
+    const header = heading.closest("header");
+    expect(header?.querySelector("svg")).toBeNull();
+    expect(header?.querySelectorAll("p")).toHaveLength(1);
+    // Sidebar has three sections: too few for an index to save any scrolling.
+    expect(document.querySelectorAll(".settings-card-section")).toHaveLength(3);
+    expect(screen.queryByRole("navigation", { name: "On this page" })).toBeNull();
   });
 
   it("resets the Settings content scroll when navigating between sections", () => {
@@ -440,15 +441,12 @@ describe("SettingsView", () => {
 
     await user.click(await screen.findByRole("link", { name: /^Team gateway,/ }));
 
-    const breadcrumb = screen.getByRole("navigation", { name: "Settings breadcrumb" });
-    expect(within(breadcrumb).getByText("Team gateway")).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("heading", { level: 1, name: "Team gateway" })).toBeVisible();
     expect(screen.queryByRole("heading", { level: 1, name: "Octant Harness" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Back to Octant Harness" }));
     expect(screen.getByRole("heading", { level: 1, name: "Octant Harness" })).toBeVisible();
     await waitFor(() => expect(screen.getByRole("link", { name: /^Team gateway,/ })).toHaveFocus());
-    expect(within(breadcrumb).queryByText("Team gateway")).toBeNull();
   });
 
   it("saves a model's context window from Octant Harness › Model endpoints", async () => {
@@ -550,11 +548,7 @@ describe("SettingsView", () => {
 
     fireEvent.click(await screen.findByRole("link", { name: /^Codex CLI, / }));
     expect(screen.getByRole("heading", { level: 1, name: "Codex CLI" })).toBeDefined();
-    expect(
-      within(screen.getByRole("navigation", { name: "Settings breadcrumb" })).getByText(
-        "Codex CLI",
-      ),
-    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Back to Provider catalog" })).toBeDefined();
     // The page's own look on this host runs once when it opens; browsing the
     // catalog and opening a driver's setup start no other.
     expect(discoveryController.scan).toHaveBeenCalledTimes(1);
@@ -1716,15 +1710,10 @@ describe("SettingsView", () => {
     expect(screen.queryByText(/357\.89/)).toBeNull();
   });
 
-  it("names the page with an icon tile and its own heading, and says Saved after a change", async () => {
+  it("names the page with its own heading, and says Saved after a change", async () => {
     const user = userEvent.setup();
     const { props } = renderSettings();
 
-    const header = screen.getByRole("heading", { level: 1, name: "General" }).closest("header")!;
-    const tile = header.querySelector(".settings-view__header-tile");
-    expect(tile).toHaveAttribute("aria-hidden", "true");
-    expect(tile?.querySelector("svg")).not.toBeNull();
-    // The tile is decoration: nothing else carries the page's name as a heading.
     expect(screen.getAllByRole("heading", { name: "General" })).toHaveLength(1);
 
     expect(screen.queryByText("Saved")).toBeNull();
@@ -1742,7 +1731,7 @@ describe("SettingsView", () => {
     await waitFor(() => expect(screen.queryByText("Saved")).toBeNull());
   });
 
-  it("links to each section from an On this page row on a page with three or more", async () => {
+  it("links to each section from an On this page row on a page with four or more", async () => {
     const user = userEvent.setup();
     renderSettings();
 
