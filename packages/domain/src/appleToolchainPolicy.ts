@@ -248,7 +248,8 @@ export interface AppleDeviceExecutionScope {
   readonly approvalValid: boolean;
   /**
    * Who answered that approval, from the host's receipt. A lease, an
-   * uninstall, and an upload count only when a person at the Mac answered.
+   * uninstall, and a distribution step count only when a person at the Mac
+   * answered.
    */
   readonly approvedBy?: EventActor;
 }
@@ -373,10 +374,10 @@ export function evaluateAppleDeviceRequest(
   if (actor.kind === "remote-device" && request.kind !== "discover" && request.kind !== "status") {
     return deviceDenied("local-person-required");
   }
+  // The thread's agent may ask for a distribution step when the person asks
+  // in chat; like a lease, it runs only on a local person's confirmation below.
   if (
-    (request.kind === "uninstall" ||
-      DISTRIBUTION_KINDS.has(request.kind) ||
-      request.fromThreadId !== undefined) &&
+    (request.kind === "uninstall" || request.fromThreadId !== undefined) &&
     actor.kind !== "local-user"
   ) {
     return deviceDenied("person-required");

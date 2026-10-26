@@ -855,7 +855,7 @@ describe("evaluateAppleDeviceRequest", () => {
       }
     });
 
-    it("uploads, submits for App Review, and releases only when a person at the Mac asks and confirms, never in Plan and never for an agent", () => {
+    it("uploads, submits for App Review, and releases only on a local person's confirmation, never in Plan", () => {
       for (const kind of distributionKinds) {
         const asked = deviceRequest(kind, { requestedBy: person, approval: approved });
         expect(
@@ -873,14 +873,46 @@ describe("evaluateAppleDeviceRequest", () => {
           expect(
             evaluateAppleDeviceRequest(asked, approvedScope(posture), distributing, nothingHeld),
           ).toEqual(allowed);
+        }
+      }
+    });
+
+    it("lets the thread's agent ask for a distribution step that runs only once a person at the Mac confirms it", () => {
+      for (const kind of distributionKinds) {
+        const askedByAgent = deviceRequest(kind, { approval: approved });
+        expect(
+          evaluateAppleDeviceRequest(
+            askedByAgent,
+            approvedScope("plan"),
+            distributing,
+            nothingHeld,
+          ),
+        ).toEqual(denied("read-only-policy"));
+        for (const posture of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
           expect(
             evaluateAppleDeviceRequest(
-              deviceRequest(kind, { approval: approved }),
+              deviceRequest(kind),
+              scope(posture),
+              distributing,
+              nothingHeld,
+            ),
+          ).toEqual(denied("confirmation-required"));
+          expect(
+            evaluateAppleDeviceRequest(
+              askedByAgent,
               approvedScope(posture),
               distributing,
               nothingHeld,
             ),
-          ).toEqual(denied("person-required"));
+          ).toEqual(allowed);
+          expect(
+            evaluateAppleDeviceRequest(
+              askedByAgent,
+              approvedScope(posture, remotePerson),
+              distributing,
+              nothingHeld,
+            ),
+          ).toEqual(denied("local-person-required"));
         }
       }
     });

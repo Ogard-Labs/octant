@@ -180,9 +180,10 @@ access covers neither the device lease nor any distribution step.
   other apps. Octant stops and reads only the process it launched, never one by
   name (`process-not-owned`).
 - Every device request names who asked (`requestedBy`). An agent acting for a
-  different thread is refused (`thread-mismatch`), and `uninstall`, a
-  distribution step, or
-  a lease move asked by anyone but a person is refused (`person-required`).
+  different thread is refused (`thread-mismatch`), and `uninstall` or a lease
+  move asked by anyone but a person is refused (`person-required`). A
+  distribution step the thread's agent asks for runs only on a local person's
+  confirmation, like a lease.
 - A provisioning update is refused by name under every posture
   (`provisioning-updates-not-offered`), and a device request has no field that
   could carry `-allowProvisioningUpdates`.
