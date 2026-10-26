@@ -4093,7 +4093,10 @@ native harness in `apps/server/src/harness`:
   input for one of its models. It has no `acquire`: `runOnNativeHarness` turns
   it into a `ProviderDriver` whose connections the host builds with
   `createNativeHarnessConnection`, refusing a connection with no product mode,
-  and whose conversations are host-owned. The host wraps the transport in its
+  and whose conversations are host-owned. Before the driver's `admitTurn` is
+  asked, the host refuses a turn offering tools to a model without a Verify
+  tools record on the instance, so a driver's own verdict cannot hand tools
+  to an unverified model. The host wraps the transport in its
   retry policy (below), registers that retrying endpoint in the
   `NativeHarnessEndpointRegistry` with the driver's `admitTurn`, wires lead
   fallback and the shared transcript store, and keeps the instance's session

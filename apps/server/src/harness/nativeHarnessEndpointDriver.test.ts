@@ -14,6 +14,7 @@ import type {
 } from "@octant/provider-sdk/harness-endpoint";
 import { Effect, Exit, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
+import { honestDirectEndpointCapabilities } from "../providers/directEndpointSubscriptionOAuth";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { runOnNativeHarness } from "./nativeHarnessEndpointDriver";
 import { NativeHarnessEndpointRegistry } from "./nativeHarnessEndpointRegistry";
@@ -30,9 +31,13 @@ const readTool: ProviderToolDefinition = {
 
 /**
  * A third-party-shaped driver: it supplies only an endpoint through the
- * provider-sdk port, answers from a script, and admits tools for no model.
+ * provider-sdk port, answers from a script, and admits tools for no model
+ * unless told to admit every turn.
  */
-function portDriver(script: Array<HarnessEndpointResponse | ProviderFailure>): {
+function portDriver(
+  script: Array<HarnessEndpointResponse | ProviderFailure>,
+  options: { readonly admitsEveryTurn?: boolean } = {},
+): {
   readonly driver: HarnessEndpointDriver;
   readonly requests: HarnessEndpointRequest[];
 } {
@@ -55,7 +60,7 @@ function portDriver(script: Array<HarnessEndpointResponse | ProviderFailure>): {
           release: () => undefined,
         }),
         admitTurn: (turn) =>
-          turn.tools.length === 0
+          options.admitsEveryTurn === true || turn.tools.length === 0
             ? undefined
             : { category: "invalid-configuration", message: "This model's tools are unverified." },
       },
@@ -66,15 +71,31 @@ function portDriver(script: Array<HarnessEndpointResponse | ProviderFailure>): {
 function host(
   transcripts: MemoryNativeHarnessTranscriptStore,
   endpoints = new NativeHarnessEndpointRegistry(),
+  runtimeRegistry = new ProviderRuntimeRegistry(),
 ) {
   return {
     instanceId,
-    runtimeRegistry: new ProviderRuntimeRegistry(),
+    runtimeRegistry,
     transcripts,
     harness: { endpoints, retry: { sleep: async () => undefined, random: () => 0.5 } },
     clock: () => "2026-10-26T09:00:00.000Z",
     correlationId: () => "80000000-0000-4000-8000-000000000a03",
   };
+}
+
+/** The host's record that a person ran Verify tools on the model. */
+function verifiedToolsOn(model: ProviderModelId): ProviderRuntimeRegistry {
+  const runtimeRegistry = new ProviderRuntimeRegistry();
+  runtimeRegistry.setObservedState({
+    instanceId,
+    readiness: "ready",
+    processState: "stopped",
+    models: [],
+    capabilities: honestDirectEndpointCapabilities,
+    verifiedToolModelIds: [model],
+    observedAt: "2026-10-26T09:00:00.000Z",
+  });
+  return runtimeRegistry;
 }
 
 function runTurn(
@@ -132,7 +153,10 @@ describe("native harness endpoint port", () => {
   it("refuses a turn the driver does not admit before any request is sent or recorded", async () => {
     const { driver, requests } = portDriver([{ text: "unused", toolCalls: [] }]);
     const transcripts = new MemoryNativeHarnessTranscriptStore();
-    const composed = runOnNativeHarness(driver, host(transcripts));
+    const composed = runOnNativeHarness(
+      driver,
+      host(transcripts, new NativeHarnessEndpointRegistry(), verifiedToolsOn(modelId)),
+    );
 
     const exit = await Effect.runPromiseExit(
       Effect.scoped(
@@ -150,6 +174,28 @@ describe("native harness endpoint port", () => {
     expect(transcripts.load(sessionId)?.messages).toEqual([]);
   });
 
+  it("refuses tools for a model the host holds no Verify tools record for even when the driver admits every turn", async () => {
+    const { driver, requests } = portDriver([{ text: "unused", toolCalls: [] }], {
+      admitsEveryTurn: true,
+    });
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const composed = runOnNativeHarness(driver, host(transcripts));
+
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* composed.acquire({ instanceId, projectRoot, mode: "work" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+          return yield* runTurn(connection, [readTool]);
+        }),
+      ),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    expect(JSON.stringify(exit)).toContain("App-managed tools are unsupported.");
+    expect(requests).toHaveLength(0);
+  });
+
   it("registers the endpoint so another instance's lead can fall back onto it with the same retries", async () => {
     const { driver, requests } = portDriver([
       { category: "rate-limited", message: "Slow down." },
@@ -165,7 +211,7 @@ describe("native harness endpoint port", () => {
         modelId,
       ),
     ).toMatchObject({
-      category: "invalid-configuration",
+      category: "unsupported",
     });
     const session = await registered?.open(modelId);
     const response = await session?.send(

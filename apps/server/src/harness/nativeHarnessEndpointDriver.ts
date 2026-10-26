@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
-import type { ProviderFailure, ProviderInstanceId } from "@octant/contracts";
+import type { ProviderFailure, ProviderInstanceId, ProviderModelId } from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type {
   HarnessEndpointDriver,
@@ -45,7 +45,11 @@ export function runOnNativeHarness(
   const correlationId = host.correlationId ?? randomUUID;
   const transcripts = host.transcripts ?? new MemoryNativeHarnessTranscriptStore();
   const transport = retryingTransport(harnessEndpoint, host.harness?.retry);
+  // The host refuses tools for a model it holds no Verify tools record for
+  // before the driver is asked, so a driver whose own verdict admits every
+  // turn still cannot hand Octant's tools to an unverified model.
   const admitTurn: HarnessEndpointDriver["harnessEndpoint"]["admitTurn"] = (turn, modelId) =>
+    refusesUnverifiedTools(host, turn.tools.length, modelId) ??
     harnessEndpoint.admitTurn(turn, modelId);
   // Registered retrying, so a lead that falls back onto this endpoint gets the
   // same recovery its own sessions do.
@@ -121,6 +125,25 @@ function retryingTransport(
       };
     },
   };
+}
+
+/**
+ * Tools go only to a model a person verified on this instance. The record is
+ * per model, as for every direct endpoint, so one verified model never
+ * unlocks tools for its siblings.
+ */
+function refusesUnverifiedTools(
+  host: NativeHarnessEndpointHost,
+  toolCount: number,
+  modelId: ProviderModelId,
+): ProviderFailure | undefined {
+  if (toolCount === 0) return undefined;
+  const verified = host.runtimeRegistry
+    .observedState(host.instanceId)
+    ?.verifiedToolModelIds?.some((candidate) => String(candidate) === String(modelId));
+  return verified === true
+    ? undefined
+    : failure("unsupported", "App-managed tools are unsupported.");
 }
 
 function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
