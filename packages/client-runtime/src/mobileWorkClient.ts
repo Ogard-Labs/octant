@@ -146,6 +146,8 @@ export async function sendMobileWorkTurn(input: {
   readonly transport: MobileRemoteTransport;
   readonly thread: WorkThread;
   readonly prompt: string;
+  /** Images already staged for this thread with `uploadMobileWorkAttachment`. */
+  readonly attachmentIds?: ReadonlyArray<string>;
 }): Promise<WorkTurnState> {
   const prompt = input.prompt.trim();
   if (prompt.length === 0) {
@@ -174,6 +176,9 @@ export async function sendMobileWorkTurn(input: {
         providerInstanceId: input.thread.providerInstanceId,
         modelId: input.thread.modelId,
       },
+      ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
+        ? {}
+        : { attachmentIds: [...input.attachmentIds] }),
     });
   } catch {
     throw new MobileInboxFailure("unavailable", "The Work turn could not be prepared.");

@@ -1,4 +1,8 @@
-import { ProviderRegistrySnapshot, decodeHostAnswer } from "@octant/contracts";
+import {
+  ProviderRegistrySnapshot,
+  decodeHostAnswer,
+  type ProviderInputModality,
+} from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
 
 export interface MobileModelOption {
@@ -7,6 +11,11 @@ export interface MobileModelOption {
   readonly modelId: string;
   readonly label: string;
   readonly detail: string;
+  /**
+   * What the model takes as a native attachment: its declared input
+   * modalities when its provider takes native attachments, and none otherwise.
+   */
+  readonly attachmentModalities: ReadonlyArray<ProviderInputModality>;
 }
 
 const OPTION_SEPARATOR = "::";
@@ -50,6 +59,8 @@ export function normalizeMobileModelOptions(
         modelId: String(model.id),
         label: model.displayName,
         detail: instance.displayName,
+        attachmentModalities:
+          observation.capabilities.nativeAttachments === "supported" ? model.inputModalities : [],
       });
     }
   }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelMobileChatWorkItem,
   completeMobileChatFollowUp,
@@ -10,17 +10,14 @@ import {
   loadMobileChatThread,
   retryMobileChatTurn,
   sendMobileChatTurn,
-  uploadMobileChatAttachment,
   type MobileModelOption,
 } from "@octant/client-runtime";
 import type { ChatThreadView, ThreadFollowUp, ThreadWorkItem } from "@octant/contracts";
-import { MOBILE_COPY } from "../../copy";
 import { runChatEventLoop } from "./chatEventLoop";
-import { readUriBytes } from "./imageBytes";
-import { modelOptionForThread, pendingAttachmentsReducer } from "./pendingAttachments";
-import { pickImage } from "./pickImage";
+import { modelOptionForThread } from "./pendingAttachments";
 import { runLoad, runMutation, sendThenReload } from "./runMutation";
 import type { RefreshOptions, ThreadHookInput } from "./threadTypes";
+import { useThreadAttachments } from "./useThreadAttachments";
 
 export function useChatThread(
   input: ThreadHookInput & { readonly modelOptions: ReadonlyArray<MobileModelOption> },
@@ -37,7 +34,8 @@ export function useChatThread(
   viewRef.current = view;
   const [pendingPrompt, setPendingPrompt] = useState<string | undefined>();
   const [pendingFailure, setPendingFailure] = useState<string | undefined>();
-  const [pendingAttachments, dispatchAttachments] = useReducer(pendingAttachmentsReducer, []);
+  const attachments = useThreadAttachments("chat", input);
+  const pendingAttachments = attachments.pending;
   const [modelOptionId, setModelOptionId] = useState<string | undefined>();
   const [reconnecting, setReconnecting] = useState(false);
   const hasView = view !== undefined;
@@ -51,7 +49,6 @@ export function useChatThread(
     setPendingFailure(undefined);
     setModelOptionId(undefined);
     setReconnecting(false);
-    dispatchAttachments({ type: "thread-changed" });
   }, [identity]);
 
   // Matching the thread's model is its own step, not part of the reload: a
@@ -125,56 +122,6 @@ export function useChatThread(
     });
   };
 
-  const attach = async () => {
-    if (!enabled || transport === undefined || view === undefined || identity === undefined) return;
-    if (!gate.allowProductMutations) {
-      ui.setError(gate.message);
-      return;
-    }
-    const picking = await guard.guarded(identity, pickImage);
-    if (picking.status === "stale") return;
-    if (picking.status === "failed") {
-      ui.setError(MOBILE_COPY.attachFailed);
-      return;
-    }
-    const picked = picking.value;
-    if (picked.status === "denied") ui.setError(MOBILE_COPY.attachPermissionDenied);
-    else if (picked.status === "unsupported") ui.setError(MOBILE_COPY.attachFailed);
-    if (picked.status !== "picked") return;
-    setPendingFailure(undefined);
-    setPendingPrompt(prompt.trim());
-    await runMutation({
-      guard,
-      identity,
-      gate,
-      ui,
-      failure: MOBILE_COPY.attachFailed,
-      run: async () => {
-        const read = await readUriBytes(picked.uri);
-        if (read.status === "unreadable") return undefined;
-        const attachmentId = globalThis.crypto.randomUUID();
-        return uploadMobileChatAttachment({
-          transport,
-          threadId: String(view.thread.id),
-          attachmentId,
-          displayName: picked.fileName ?? `image-${attachmentId.slice(0, 8)}.jpg`,
-          mediaType: picked.mediaType,
-          bytes: read.bytes,
-        });
-      },
-      onDone: (uploaded) => {
-        if (uploaded === undefined) {
-          ui.setError(MOBILE_COPY.attachFailed);
-          return;
-        }
-        dispatchAttachments({
-          type: "uploaded",
-          attachment: { id: String(uploaded.id), displayName: uploaded.displayName },
-        });
-      },
-    });
-  };
-
   const send = async () => {
     if (!enabled || transport === undefined || view === undefined || identity === undefined) return;
     const decoded =
@@ -207,7 +154,7 @@ export function useChatThread(
           onSent: () => {
             if (!guard.isSelected(identity)) return;
             setPrompt("");
-            dispatchAttachments({ type: "sent" });
+            attachments.sent();
           },
           reload: () => loadMobileChatThread(transport, view.thread.id),
         }),
@@ -296,7 +243,7 @@ export function useChatThread(
     setModelOptionId,
     reconnecting,
     refresh,
-    attach,
+    attach: attachments.attach,
     send,
     stop,
     retry,

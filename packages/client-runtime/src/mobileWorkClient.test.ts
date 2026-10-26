@@ -319,4 +319,18 @@ describe("mobile work follow-through", () => {
       sendMobileWorkTurn({ transport: port, thread: loaded, prompt: "   " }),
     ).rejects.toMatchObject({ category: "unavailable" });
   });
+
+  it("sends the photos staged for the thread with its follow-up", async () => {
+    const started: Array<Record<string, unknown>> = [];
+    const port = transport([], started);
+    const loaded = await loadMobileWorkThread(port, threadId);
+    const photoId = "00000000-0000-4000-8000-000000000401";
+    await sendMobileWorkTurn({
+      transport: port,
+      thread: loaded,
+      prompt: "What is on this whiteboard?",
+      attachmentIds: [photoId],
+    });
+    expect(started[0]).toMatchObject({ attachmentIds: [photoId] });
+  });
 });

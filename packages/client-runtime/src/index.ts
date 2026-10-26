@@ -85,6 +85,7 @@ export * from "./threadExportClient";
 export * from "./validationEvidenceClient";
 export * from "./expoSecureDeviceKeyStore";
 export * from "./mobileInboxClient";
+export * from "./mobileAttachmentClient";
 export * from "./mobileThreadSurfaceClient";
 export * from "./mobileChatAttempt";
 export * from "./chatNdjsonStream";

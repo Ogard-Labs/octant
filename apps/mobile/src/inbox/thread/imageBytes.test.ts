@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readUriBytes } from "./imageBytes";
+import { acceptedMediaType, defaultAttachmentName, readUriBytes } from "./imageBytes";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -17,5 +17,31 @@ describe("read uri bytes", () => {
       status: "ok",
       bytes: new Uint8Array([1, 2, 3]),
     });
+  });
+});
+
+describe("the media type a picked file uploads as", () => {
+  const images = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+
+  it("uses the type the picker reported when the thread takes it", () => {
+    expect(acceptedMediaType({ reported: "image/png", name: "x.jpg", accepted: images })).toBe(
+      "image/png",
+    );
+    expect(
+      acceptedMediaType({ reported: "application/pdf", name: "x.pdf", accepted: images }),
+    ).toBeUndefined();
+  });
+
+  it("falls back to the name's extension, but never guesses a type the name does not imply", () => {
+    expect(acceptedMediaType({ reported: undefined, name: "IMG_1.JPG", accepted: images })).toBe(
+      "image/jpeg",
+    );
+    expect(
+      acceptedMediaType({ reported: null, name: "IMG_2.HEIC", accepted: images }),
+    ).toBeUndefined();
+  });
+
+  it("names an unnamed camera photo by its type", () => {
+    expect(defaultAttachmentName("image/jpeg", "0123456789abcdef")).toBe("photo-01234567.jpg");
   });
 });

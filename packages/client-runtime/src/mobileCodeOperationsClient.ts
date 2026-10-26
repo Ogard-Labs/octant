@@ -12,7 +12,9 @@ import {
   CodeConversationWindow,
   CodeEvidenceBatchResponse,
   CodeEvidenceReference,
+  decodeCodeAttachmentId,
   decodeHostAnswer,
+  type CodeAttachmentId,
 } from "@octant/contracts";
 import { MobileInboxFailure, type MobileRemoteTransport } from "./mobileInboxClient";
 
@@ -243,10 +245,20 @@ async function readNewestCodeTurns(
  * thread's; the phone asks for nothing wider, and approvals the turn raises
  * stay on the host.
  */
+function stagedCodeAttachmentIds(ids: ReadonlyArray<string>): ReadonlyArray<CodeAttachmentId> {
+  try {
+    return ids.map((id) => decodeCodeAttachmentId(id));
+  } catch {
+    throw new MobileInboxFailure("rejected", "An attachment could not be sent with this turn.");
+  }
+}
+
 export async function sendMobileCodeTurn(input: {
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;
   readonly prompt: string;
+  /** Images already staged for this thread with `uploadMobileCodeAttachment`. */
+  readonly attachmentIds?: ReadonlyArray<string>;
 }): Promise<Extract<CodeOperationResult, { readonly kind: "provider-turn-state" }>> {
   const prompt = input.prompt.trim();
   if (prompt.length === 0) {
@@ -280,6 +292,11 @@ export async function sendMobileCodeTurn(input: {
       { readonly kind: "start-provider-turn" }
     >["sessionId"],
     prompt: evidence,
+    ...(input.attachmentIds === undefined || input.attachmentIds.length === 0
+      ? {}
+      : {
+          attachmentIds: stagedCodeAttachmentIds(input.attachmentIds),
+        }),
   });
   if (started.kind !== "provider-turn-state") {
     throw new MobileInboxFailure("unavailable", "The host did not start the Code turn.");

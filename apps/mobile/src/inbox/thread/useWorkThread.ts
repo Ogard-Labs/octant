@@ -7,6 +7,7 @@ import {
 import type { WorkThread, WorkTurnState } from "@octant/contracts";
 import { runLoad, runMutation } from "./runMutation";
 import type { RefreshOptions, ThreadHookInput } from "./threadTypes";
+import { useThreadAttachments } from "./useThreadAttachments";
 import { workFollowUpTarget } from "./workFollowUpTarget";
 
 export function useWorkThread(input: ThreadHookInput) {
@@ -16,6 +17,7 @@ export function useWorkThread(input: ThreadHookInput) {
   const enabled = target?.mode === "work";
   const [thread, setThread] = useState<WorkThread | undefined>();
   const [turns, setTurns] = useState<ReadonlyArray<WorkTurnState> | undefined>();
+  const attachments = useThreadAttachments("work", input);
 
   useEffect(() => {
     setThread(undefined);
@@ -66,10 +68,17 @@ export function useWorkThread(input: ThreadHookInput) {
       gate,
       ui,
       failure: "Follow-up failed.",
-      run: () => sendMobileWorkTurn({ transport, thread: followUp.thread, prompt }),
+      run: () =>
+        sendMobileWorkTurn({
+          transport,
+          thread: followUp.thread,
+          prompt,
+          attachmentIds: attachments.pending.map((attachment) => attachment.id),
+        }),
       onDone: (turn) => {
         setTurns((current) => [...(current ?? []), turn]);
         setPrompt("");
+        attachments.sent();
       },
     });
   };
@@ -83,5 +92,7 @@ export function useWorkThread(input: ThreadHookInput) {
     ),
     refresh,
     sendFollowUp,
+    pendingAttachments: attachments.pending,
+    attach: attachments.attach,
   };
 }
