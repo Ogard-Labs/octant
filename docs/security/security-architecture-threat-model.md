@@ -524,8 +524,8 @@ guidance instead.
 
 ### Consumer subscription OAuth delta (0111)
 
-Design only for directory and cloud-IAM, which stay a different note
-([`enterprise-provider-identity.md`](../enterprise-provider-identity.md)).
+Directory and cloud-IAM identity have their own threat controls (E1–E8) in
+[Enterprise provider identity](../design/enterprise-provider-identity.md#threat-model).
 Host-driven `subscription-oauth` plumbing runs in the credential broker:
 generic PKCE and device-code runners, broker-stored refresh, and a terms
 acknowledgment gate. Direct endpoint drivers refresh through that host

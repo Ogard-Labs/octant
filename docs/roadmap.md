@@ -162,7 +162,7 @@ authority, privacy, and release boundaries.
   [Apple physical devices and distribution](design/apple-devices.md).
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:
-  [enterprise-provider-identity.md](enterprise-provider-identity.md).
+  [Enterprise provider identity](design/enterprise-provider-identity.md).
 - **Disposable Linux desktops for headless hosts** — short-lived desktops a
   headless host can drive.
 - **Remote SSH development environments**.
