@@ -6614,7 +6614,10 @@ mechanisms are:
   bwrap 0.9.0, an absolute or dangling link at a mount point refused the
   whole Full-access launch. A link to a missing file exists, and the runtime
   could write that file through it, so its target is covered too, and
-  Bubblewrap leaves an empty folder there.
+  Bubblewrap leaves an empty folder there, with any missing folders above it.
+  A missing target this host user could not create is skipped, because the
+  runtime cannot write it either, and a target inside another denied folder
+  is already hidden by that folder's cover.
 
   | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                                                                                                                                                                               |
   | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

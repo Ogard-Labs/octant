@@ -90,7 +90,8 @@ export function buildLinuxAllowDefaultDenyLaunch(
   // at a mount point refused the whole launch with "Can't mount tmpfs on
   // /newroot/...", and a dangling one, absolute or relative, did too.
   const hostRoot = new Map<string, Mount>([["/", { kind: "bind", source: "/", target: "/" }]]);
-  const covered = new Set<string>();
+  // Each target keeps the first deny path that named it, for the refusal.
+  const targets = new Map<string, string>();
   for (const path of input.denyPaths) {
     if (!isAbsolute(path)) {
       throw new ProcessConfinementError(
@@ -107,21 +108,33 @@ export function buildLinuxAllowDefaultDenyLaunch(
     // an empty folder there.
     if (!pathExists(path)) continue;
     for (const target of denyTargetsInCapsule(normalize(path), hostRoot)) {
-      if (covered.has(target)) continue;
-      covered.add(target);
-      if (isDirectoryForDeny(target)) {
-        args.push("--tmpfs", target, "--remount-ro", target);
-        continue;
-      }
-      const source = createEmptySourceForPath(target);
-      if (source === undefined) {
-        throw new ProcessConfinementError(
-          "invalid-configuration",
-          `Linux Full access deny path "${path}" could not be overlaid.`,
-        );
-      }
-      args.push("--ro-bind", source, target);
+      // Bubblewrap makes a missing target with its missing parents, as this
+      // host user: measured on bwrap 0.9.0, a dangling link into a folder the
+      // user cannot write refused the whole launch with "Can't mkdir". The
+      // capsule could not write the file through that link either.
+      if (!pathExists(target) && !canCreateOnHost(target)) continue;
+      if (!targets.has(target)) targets.set(target, path);
     }
+  }
+  const folders = [...targets.keys()].filter((target) => isDirectoryForDeny(target));
+  for (const [target, path] of targets) {
+    // A link can name a path inside another denied folder. That folder's
+    // read-only tmpfs already hides it, and measured on bwrap 0.9.0 a cover
+    // placed after it refused the launch with "Can't create file at ...:
+    // Read-only file system".
+    if (folders.some((folder) => folder !== target && isSameOrInside(target, folder))) continue;
+    if (folders.includes(target)) {
+      args.push("--tmpfs", target, "--remount-ro", target);
+      continue;
+    }
+    const source = createEmptySourceForPath(target);
+    if (source === undefined) {
+      throw new ProcessConfinementError(
+        "invalid-configuration",
+        `Linux Full access deny path "${path}" could not be overlaid.`,
+      );
+    }
+    args.push("--ro-bind", source, target);
   }
   args.push("--chdir", input.cwd, "--", input.executable, ...input.args);
   return { command: bwrapPath, args };
@@ -789,6 +802,23 @@ function pathExists(path: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Whether this host user could make a missing `path` and its missing parents. */
+function canCreateOnHost(path: string): boolean {
+  let folder = dirname(path);
+  for (;;) {
+    try {
+      if (!statSync(folder).isDirectory()) return false;
+      accessSync(folder, constants.W_OK);
+      return true;
+    } catch (error) {
+      if (!isMissingPath(error)) return false;
+    }
+    const parent = dirname(folder);
+    if (parent === folder) return false;
+    folder = parent;
   }
 }
 
