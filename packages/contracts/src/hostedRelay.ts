@@ -199,22 +199,74 @@ export const RelayFrameV1 = Schema.Union(
 export type RelayFrameV1 = typeof RelayFrameV1.Type;
 
 /**
- * A canonical HTTPS origin: lowercase name or bracketed IPv6 address, an
- * optional non-default port without a leading zero, and nothing else. Judged
- * by pattern rather than `URL`, because the phone's JavaScript engine ships a
- * `URL` that does not canonicalize.
+ * A canonical HTTPS origin: lowercase name, dotted-decimal IPv4 address, or
+ * bracketed IPv6 address in its shortest form, an optional non-default port
+ * without a leading zero, and nothing else. Judged by pattern rather than
+ * `URL`, because the phone's JavaScript engine ships a `URL` that does not
+ * canonicalize.
  */
 const RELAY_ORIGIN_SHAPE =
-  /^https:\/\/(\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::([1-9][0-9]{0,4}))?$/;
+  /^https:\/\/(?:\[([0-9a-f:]+)\]|([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?))(?::([1-9][0-9]{0,4}))?$/;
 const RelayOrigin = Schema.String.pipe(
   Schema.maxLength(300),
   Schema.filter((value) => {
     const shape = RELAY_ORIGIN_SHAPE.exec(value);
     if (shape === null) return false;
-    const port = shape[2];
+    const [, ipv6, name, port] = shape;
+    if (ipv6 !== undefined && !isShortestIpv6(ipv6)) return false;
+    if (name !== undefined && !isCanonicalName(name)) return false;
     return port === undefined || (Number(port) <= 65_535 && port !== "443");
   }),
 );
+
+const IPV4_OCTET = "(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])";
+const DOTTED_DECIMAL_IPV4 = new RegExp(`^${IPV4_OCTET}(?:\\.${IPV4_OCTET}){3}$`);
+
+/**
+ * A URL parser reads a name whose last label is a number as an IPv4 address
+ * and rewrites it (`127.1` and `0x7f.0.0.1` both become `127.0.0.1`), so such
+ * a name is canonical only as four decimal octets.
+ */
+function isCanonicalName(name: string): boolean {
+  const lastLabel = name.slice(name.lastIndexOf(".") + 1);
+  const endsInNumber = /^(?:[0-9]+|0x[0-9a-f]*)$/.test(lastLabel);
+  return !endsInNumber || DOTTED_DECIMAL_IPV4.test(name);
+}
+
+/**
+ * Whether an IPv6 address is written as a URL serializer writes it: eight
+ * groups without leading zeros, the first longest run of two or more zero
+ * groups compressed to `::`, and no dotted IPv4 tail.
+ */
+function isShortestIpv6(address: string): boolean {
+  const halves = address.split("::");
+  if (halves.length > 2) return false;
+  const groupsOf = (part: string | undefined) =>
+    part === undefined || part === "" ? [] : part.split(":");
+  const head = groupsOf(halves[0]);
+  const tail = groupsOf(halves[1]);
+  const written = [...head, ...tail];
+  if (!written.every((group) => /^(?:0|[1-9a-f][0-9a-f]{0,3})$/.test(group))) return false;
+  const omitted = 8 - written.length;
+  if (halves.length === 1 ? omitted !== 0 : omitted < 1) return false;
+  const groups = [...head, ...Array.from({ length: omitted }, () => "0"), ...tail];
+
+  let compressAt = -1;
+  let compressLength = 1;
+  for (let start = 0; start < 8; start += 1) {
+    let end = start;
+    while (groups[end] === "0") end += 1;
+    if (end - start > compressLength) {
+      compressAt = start;
+      compressLength = end - start;
+    }
+  }
+  const shortest =
+    compressAt === -1
+      ? groups.join(":")
+      : `${groups.slice(0, compressAt).join(":")}::${groups.slice(compressAt + compressLength).join(":")}`;
+  return shortest === address;
+}
 
 /** `sha256-` plus the unpadded base64url SHA-256 of the relay certificate's public key. */
 const RelayPin = Schema.String.pipe(Schema.pattern(/^sha256-[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/));

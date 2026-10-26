@@ -101,6 +101,17 @@ describe("hosted relay grant contract", () => {
         routeId,
       }),
     ).toBe(true);
+    for (const relayOrigin of [
+      "https://127.0.0.1:8443",
+      "https://[::1]:8443",
+      "https://[::]",
+      "https://[2001:db8::1:0:0:1]",
+      "https://[1:0:0:2::3]",
+      "https://[1:2:3:4:5:6:7:8]",
+      "https://0x7f.relay.example",
+    ]) {
+      expect(decodes(decodeRelayGrantV1, { relayOrigin, routeId }), relayOrigin).toBe(true);
+    }
   });
 
   it("refuses a grant that carries a key or any field beyond where to knock", () => {
@@ -123,6 +134,17 @@ describe("hosted relay grant contract", () => {
       "https://Relay.Example.org",
       "https://relay.example.org:0",
       "https://relay.example.org:65536",
+      // A URL parser rewrites each of these to another spelling of the same address.
+      "https://127.1",
+      "https://0x7f.0.0.1",
+      "https://2130706433",
+      "https://010.0.0.1",
+      "https://[0:0::1]",
+      "https://[::ffff:1.2.3.4]",
+      "https://[1:0:0:0:0:0:0:1]",
+      "https://[0001::1]",
+      "https://[1:0::2:0:0:0:3]",
+      "https://[1]",
     ]) {
       expect(decodes(decodeRelayGrantV1, { relayOrigin, routeId }), relayOrigin).toBe(false);
     }

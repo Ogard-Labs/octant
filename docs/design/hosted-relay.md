@@ -186,15 +186,20 @@ refuse.
   signature over `octant.relay-route-registration.v1`, the challenge, and the
   route id, each on its own line. The relay registers the route only when the
   key derives the route id and the signature verifies. A key in any other
-  algorithm is refused rather than negotiated.
+  algorithm is refused rather than negotiated. `route-unregister` carries no
+  proof, so a control connection may unregister only a route it registered;
+  any other is refused as `route-unavailable`, so a route id alone neither
+  cuts a host off nor confirms the route exists.
 - **Refusals.** `route-unavailable` (an unknown route and an offline host
   alike), `stream-unavailable`, `challenge-unavailable`, `proof-refused`,
   `route-limit`, `rate-limited`, and `frame-refused`. Only a refusal on the
   control connection names a route id.
-- **Grant.** `relayOrigin` is one canonical HTTPS origin: a lowercase name or
-  bracketed IPv6 address and an optional port other than 443, with no path,
-  credentials, or trailing slash. `relayPin` is a `sha256-` pin in the
-  listener pin's form. Any other field is refused.
+- **Grant.** `relayOrigin` is one canonical HTTPS origin: a lowercase name, a
+  dotted-decimal IPv4 address, or a bracketed IPv6 address in its shortest
+  form, and an optional port other than 443, with no path, credentials, or
+  trailing slash. A spelling a URL parser would rewrite, such as `127.1`, is
+  refused. `relayPin` is a `sha256-` pin in the listener pin's form. Any other
+  field is refused.
 
 Rationale: a 2-byte prefix covers the 4 KiB bound, and printable ASCII is
 all any field can hold, so refusing early on either costs nothing.
