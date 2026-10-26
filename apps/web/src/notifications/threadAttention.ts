@@ -3,7 +3,8 @@
  *
  * The renderer already knows every attention signal it renders in the sidebar;
  * this model turns that into the two native surfaces the desktop shell owns —
- * a one-shot banner per newly raised signal, and a standing dock badge count.
+ * a one-shot banner per newly raised signal, and a standing dock badge count
+ * of the threads that need the person.
  */
 
 export type ThreadAttentionReason =
@@ -46,6 +47,15 @@ export interface ThreadAttentionOutcome {
 
 export const EMPTY_THREAD_ATTENTION: ReadonlySet<string> = new Set<string>();
 
+/**
+ * The Inbox, its count tile and the dock badge hold what needs the person. A
+ * finished turn is announced once and listed under To review, so it never
+ * counts here.
+ */
+export function needsThePerson(signal: ThreadAttentionSignal): boolean {
+  return signal.reason !== "turn-finished";
+}
+
 function signalKey(signal: ThreadAttentionSignal): string {
   return `${signal.threadId}:${signal.reason}`;
 }
@@ -70,7 +80,7 @@ export function evaluateThreadAttention(
     if (nextRaised.has(key)) continue;
     nextRaised.add(key);
     if (isWatched(signal, input)) continue;
-    badgedThreads.add(signal.threadId);
+    if (needsThePerson(signal)) badgedThreads.add(signal.threadId);
     if (!raised.has(key)) announce.push(signal);
   }
   for (const threadId of input.waitingThreadIds ?? []) {

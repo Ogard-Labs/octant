@@ -455,7 +455,8 @@ probe (every 2 s while a window is visible, 10 s otherwise). Every row names its
 
 Each row's tooltip names its source ("read from the journal", "read from the
 live session"). The menu bar raises no notifications; banners and the dock badge
-stay with the renderer's attention signals. Windows report only which thread
+stay with the renderer's attention signals. The dock badge counts the threads
+that need the person (as the Inbox does), never a finished turn. Windows report only which thread
 they show, which clears that thread's done row and tells the shell the window
 can open a thread it is asked for. The read is local-window only, like pending
 requests. Titles never enter the public health response or redacted
