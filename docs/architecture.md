@@ -2519,7 +2519,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. Outside drivers need their own design before the schema admits
   them; third-party provider-driver plugins are parked until after the
-  technical preview. The catalog repeats installed and trusted from the activation context
+  technical preview, and their design is
+  [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -6006,7 +6007,9 @@ A direct-endpoint provider driver supplies a transport through the provider-sdk
 harness endpoint port; the harness loop, endpoint registry, lead fallback, and
 retries stay host-owned. The OpenAI-compatible, Anthropic-compatible, and Azure
 AI Foundry drivers still wire those host modules directly and are queued to move
-onto the port ([Native harness](#native-harness)).
+onto the port ([Native harness](#native-harness)). Admitting outside (non-bundled) drivers in
+that harness-endpoint shape is designed, not built, in
+[Outside provider drivers](design/outside-provider-drivers.md).
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
