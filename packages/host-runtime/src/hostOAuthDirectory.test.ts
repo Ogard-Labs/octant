@@ -7,6 +7,7 @@ import {
   AUDIENCE,
   BINDING,
   CLIENT_ID,
+  DEVICE_VERIFICATION_URI,
   DIRECTORY_HOST,
   ENDPOINT_ORIGIN,
   OTHER_TENANT_ID,
@@ -142,7 +143,13 @@ describe("directory sign-in dialect", () => {
     ["its own authorize URL", { authorizationEndpoint: "https://idp.example/authorize" }],
     ["its own token URL", { tokenEndpoint: "https://idp.example/token" }],
     ["its own scopes", { scopes: ["https://management.azure.com/.default"] }],
-    ["the device-code flow", { flow: "device-code" as const }],
+    [
+      "its own device authorization URL",
+      {
+        flow: "device-code" as const,
+        deviceAuthorizationEndpoint: "https://idp.example/devicecode",
+      },
+    ],
   ])("refuses a descriptor that names %s before any listener or request", async (_, change) => {
     const fake = await fakeDirectory();
     const runtime = runtimeFor(memoryStore(), fake);
@@ -403,6 +410,184 @@ describe("directory sign-in dialect", () => {
   });
 });
 
+describe("directory device-code sign-in", () => {
+  function deviceRuntimeFor(store: CredentialStore, fake: FakeDirectory): HostOAuthRuntime {
+    // The directory asks for a poll every five seconds; the test polls at once.
+    const runtime = createHostOAuthRuntime({
+      store,
+      fetch: fake.fetch,
+      timeoutMs: 5_000,
+      sleep: () => new Promise((resolve) => setTimeout(resolve, 1)),
+    });
+    open.push(runtime);
+    return runtime;
+  }
+
+  async function beginDevice(runtime: HostOAuthRuntime) {
+    const started = await runtime.begin({
+      descriptor: directoryDescriptor({ flow: "device-code" }),
+      actorId: randomUUID(),
+      termsAcknowledgedAt: "2026-10-26T09:00:00.000Z",
+    });
+    if (started.kind !== "awaiting-consent" || started.flow !== "device-code") {
+      throw new Error(`expected a device-code attempt, got ${started.kind}`);
+    }
+    return started;
+  }
+
+  it("signs in on another device with a code from the tenant's own authority, opening no listener", async () => {
+    const fake = await fakeDirectory();
+    const store = memoryStore();
+    const runtime = deviceRuntimeFor(store, fake);
+
+    const started = await beginDevice(runtime);
+
+    // The person is shown the directory's own page and code, and nothing else
+    // the directory wrote: not its free-text message, never the device code.
+    expect(Object.keys(started).sort()).toEqual([
+      "attemptId",
+      "descriptorId",
+      "expiresAt",
+      "flow",
+      "kind",
+      "userCode",
+      "verificationUri",
+    ]);
+    expect(started.verificationUri).toBe(DEVICE_VERIFICATION_URI);
+    expect(fake.deviceRequests()).toEqual([
+      { client_id: CLIENT_ID, scope: `${AUDIENCE}/.default openid profile offline_access` },
+    ]);
+    // Until the person enters the code, the directory answers "pending".
+    const deadline = Date.now() + 2_000;
+    while (fake.tokenRequests().length < 2 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(runtime.status(started.attemptId)).toMatchObject({ kind: "awaiting-consent" });
+
+    fake.settleDeviceCode(started.userCode, "approved");
+    const settled = await waitForSettled(runtime, started.attemptId);
+
+    expect(settled).toMatchObject({ kind: "signed-in", accountLabel: ACCOUNT_LABEL });
+    const polls = fake.tokenRequests();
+    expect(polls.length).toBeGreaterThan(0);
+    for (const poll of polls) {
+      expect(Object.keys(poll).sort()).toEqual(["client_id", "device_code", "grant_type"]);
+      expect(poll.grant_type).toBe("urn:ietf:params:oauth:grant-type:device_code");
+    }
+    expect(new Set(fake.hostsContacted())).toEqual(new Set([DIRECTORY_HOST]));
+    const [stored] = [...store.values.values()];
+    expect(JSON.parse(stored ?? "{}")).toMatchObject({
+      dialect: "directory-oidc",
+      tenantId: TENANT_ID,
+      clientId: CLIENT_ID,
+      audience: AUDIENCE,
+      endpointOrigin: ENDPOINT_ORIGIN,
+      accountLabel: ACCOUNT_LABEL,
+    });
+    if (settled.kind !== "signed-in") throw new Error("expected a sign-in");
+    expect(await runtime.access(settled.credentialRef, BINDING)).toMatchObject({
+      kind: "granted",
+    });
+    expect(await runtime.access(settled.credentialRef)).toEqual({ kind: "binding-mismatch" });
+  });
+
+  it.each([
+    ["declines", "declined", "denied"],
+    ["lets the code run out", "expired", "timeout"],
+  ] as const)(
+    "ends the attempt when the person %s, and stores nothing",
+    async (_, outcome, reason) => {
+      const fake = await fakeDirectory();
+      const store = memoryStore();
+      const runtime = deviceRuntimeFor(store, fake);
+      const started = await beginDevice(runtime);
+
+      fake.settleDeviceCode(started.userCode, outcome);
+
+      expect(await waitForSettled(runtime, started.attemptId)).toMatchObject({
+        kind: "refused",
+        reason,
+      });
+      expect(store.values.size).toBe(0);
+    },
+  );
+
+  it.each<[string, FakeIdTokenFlaw]>([
+    ["names another tenant in tid", "other-tenant"],
+    ["was issued to another client", "other-audience"],
+    ["has expired", "expired"],
+    ["is signed with a key the tenant does not publish", "unpublished-key"],
+    ["is missing", "missing"],
+  ])("refuses a device-code sign-in whose identity token %s", async (_, flaw) => {
+    const fake = await fakeDirectory();
+    fake.flawExchangeIdToken(flaw);
+    const store = memoryStore();
+    const runtime = deviceRuntimeFor(store, fake);
+    const started = await beginDevice(runtime);
+
+    fake.settleDeviceCode(started.userCode, "approved");
+
+    expect(await waitForSettled(runtime, started.attemptId)).toMatchObject({
+      kind: "refused",
+      reason: "exchange-refused",
+    });
+    expect(store.values.size).toBe(0);
+  });
+
+  it("refuses a device-code sign-in whose echoed scope leaves the audience", async () => {
+    const fake = await fakeDirectory();
+    fake.echoExchangeScope("https://management.azure.com/user_impersonation");
+    const store = memoryStore();
+    const runtime = deviceRuntimeFor(store, fake);
+    const started = await beginDevice(runtime);
+
+    fake.settleDeviceCode(started.userCode, "approved");
+
+    expect(await waitForSettled(runtime, started.attemptId)).toMatchObject({
+      kind: "refused",
+      reason: "exchange-refused",
+    });
+    expect(store.values.size).toBe(0);
+  });
+
+  it.each([
+    ["a look-alike host", "https://microsoft.com.example.net/devicelogin"],
+    ["plain http", "http://microsoft.com/devicelogin"],
+    ["a page with credentials", "https://user@microsoft.com/devicelogin"],
+    ["another port", "https://microsoft.com:8443/devicelogin"],
+  ])("shows no code when the directory names %s as the page to enter it", async (_, page) => {
+    const fake = await fakeDirectory();
+    fake.answerDeviceAuthorizationWith({ kind: "code", verificationUri: page });
+    const runtime = deviceRuntimeFor(memoryStore(), fake);
+
+    const started = await runtime.begin({
+      descriptor: directoryDescriptor({ flow: "device-code" }),
+      actorId: randomUUID(),
+      termsAcknowledgedAt: "2026-10-26T09:00:00.000Z",
+    });
+
+    expect(started).toEqual({ kind: "refused", reason: "exchange-refused" });
+    expect(fake.tokenRequests()).toEqual([]);
+  });
+
+  it.each([
+    ["refuses the app registration", 400, "exchange-refused"],
+    ["is down", 503, "unavailable"],
+  ] as const)("refuses to begin when the directory %s", async (_, status, reason) => {
+    const fake = await fakeDirectory();
+    fake.answerDeviceAuthorizationWith({ kind: "error", status, error: "invalid_client" });
+    const runtime = deviceRuntimeFor(memoryStore(), fake);
+
+    const started = await runtime.begin({
+      descriptor: directoryDescriptor({ flow: "device-code" }),
+      actorId: randomUUID(),
+      termsAcknowledgedAt: "2026-10-26T09:00:00.000Z",
+    });
+
+    expect(started).toEqual({ kind: "refused", reason });
+  });
+});
+
 describe("credential broker with a directory grant", () => {
   async function brokerWithGrant(): Promise<{
     readonly broker: CredentialBroker;
@@ -511,6 +696,14 @@ describe("credential broker with a directory grant", () => {
             descriptor: directoryDescriptor(),
           },
         ],
+        [
+          "/v1/oauth/begin",
+          {
+            actorId: randomUUID(),
+            termsAcknowledgedAt: "2026-10-26T09:00:00.000Z",
+            descriptor: directoryDescriptor({ flow: "device-code" }),
+          },
+        ],
         ["/v1/oauth/refresh", { credentialRef }],
         ["/v1/oauth/access", { credentialRef, binding: BINDING }],
         ["/v1/oauth/revoke", { credentialRef }],
@@ -526,8 +719,54 @@ describe("credential broker with a directory grant", () => {
       expect(store.values.has(credentialRef)).toBe(true);
       expect(fake.tokenRequests()).toHaveLength(requestsBefore);
       expect(fake.authorizeRequests()).toHaveLength(attemptsBefore);
+      expect(fake.deviceRequests()).toEqual([]);
     },
   );
+
+  it("signs in with a device code through the broker's routes, answering only the page and code", async () => {
+    const fake = await fakeDirectory();
+    const store = memoryStore();
+    const broker = await startCredentialBroker(store, undefined, {
+      fetch: fake.fetch,
+      timeoutMs: 5_000,
+      sleep: () => new Promise((resolve) => setTimeout(resolve, 1)),
+    });
+    open.push(broker);
+
+    const begun: unknown = await (
+      await brokerPost(broker, "/v1/oauth/begin", {
+        actorId: randomUUID(),
+        termsAcknowledgedAt: "2026-10-26T09:00:00.000Z",
+        descriptor: directoryDescriptor({ flow: "device-code" }),
+      })
+    ).json();
+    if (!isRecord(begun) || typeof begun.userCode !== "string") {
+      throw new Error("expected a device-code attempt");
+    }
+    expect(Object.keys(begun).sort()).toEqual([
+      "attemptId",
+      "descriptorId",
+      "expiresAt",
+      "flow",
+      "kind",
+      "userCode",
+      "verificationUri",
+    ]);
+    fake.settleDeviceCode(begun.userCode, "approved");
+    const deadline = Date.now() + 3_000;
+    let status: unknown;
+    do {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      status = await (
+        await brokerPost(broker, "/v1/oauth/status", { attemptId: begun.attemptId })
+      ).json();
+    } while (isRecord(status) && status.kind === "awaiting-consent" && Date.now() < deadline);
+
+    expect(status).toMatchObject({ kind: "signed-in", accountLabel: ACCOUNT_LABEL });
+    // Neither answer carries the device code or any token the directory issued.
+    const answered = JSON.stringify([begun, status]);
+    for (const secret of fake.issued()) expect(answered.includes(secret)).toBe(false);
+  });
 });
 
 async function brokerPost(
