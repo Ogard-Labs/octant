@@ -10,6 +10,7 @@ import {
   type FakeDirectory,
   type FakeRefreshAnswer,
 } from "./fakeDirectory.test-support";
+import { issuerDescriptor, startFakeIssuer } from "./fakeIssuer.test-support";
 
 /**
  * Directory sign-in secret-absence harness.
@@ -155,6 +156,65 @@ describe("Directory sign-in secret-absence harness", () => {
       expect(form).not.toHaveProperty("client_secret");
       expect(form).not.toHaveProperty("client_assertion");
       expect(form).not.toHaveProperty("client_assertion_type");
+    }
+  });
+
+  it("keeps an organization issuer's tokens, codes, and verifiers out of every broker answer and the console", async () => {
+    const consoleOutput: unknown[] = [];
+    for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        consoleOutput.push(args);
+      });
+    }
+    const fake = await startFakeIssuer();
+    open.push(fake);
+    const broker = await startCredentialBroker(memoryStore(), undefined, {
+      fetch: fake.fetch,
+      timeoutMs: 5_000,
+    });
+    open.push(broker);
+    const answers: string[] = [];
+    const answer = async (path: string, body: unknown) => {
+      const text = await (await post(broker, path, body)).text();
+      answers.push(text);
+      return JSON.parse(text) as Record<string, unknown>;
+    };
+
+    const started = await answer("/v1/oauth/begin", {
+      actorId: randomUUID(),
+      termsAcknowledgedAt: "2026-10-26T09:00:00.000Z",
+      descriptor: issuerDescriptor(),
+    });
+    if (typeof started.authorizationUrl !== "string") throw new Error("expected an attempt");
+    await fake.consent(started.authorizationUrl);
+    const status = await answer("/v1/oauth/status", { attemptId: started.attemptId });
+    const credentialRef = status.credentialRef;
+    if (typeof credentialRef !== "string") throw new Error("expected a sign-in");
+    for (const reply of [
+      { kind: "tokens", idToken: "same-subject" },
+      { kind: "status", status: 503 },
+      { kind: "error", error: "interaction_required" },
+    ] as const) {
+      fake.answerRefreshWith(reply);
+      await answer("/v1/oauth/refresh", { credentialRef });
+    }
+    await answer("/v1/oauth/access", { credentialRef });
+    await answer("/v1/credentials/resolve", { providerInstanceId: credentialRef });
+    // The issuer's error text names the refresh token: no answer repeats it.
+    fake.answerRefreshWith({ kind: "error", error: "invalid_grant" });
+    await answer("/v1/oauth/refresh", { credentialRef });
+    await answer("/v1/oauth/revoke", { credentialRef });
+
+    const verifiers = fake
+      .tokenRequests()
+      .flatMap((form) => (form.code_verifier === undefined ? [] : [form.code_verifier]));
+    const material = [...fake.issued(), ...verifiers];
+    expect(material.length).toBeGreaterThan(6);
+    const surfaces = [...answers, JSON.stringify(consoleOutput)].join("\n");
+    for (const secret of material) {
+      expect(surfaces.includes(secret), "an answer or the console carries issuer material").toBe(
+        false,
+      );
     }
   });
 });
