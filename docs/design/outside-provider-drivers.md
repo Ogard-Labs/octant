@@ -12,15 +12,14 @@ and credentials and confinement
 
 **Delivery state.** Accepted 2026-10-26. Slice 1 (outside family identity) is
 built: the reserved kind, the instance arm with its driver reference, the
-`outside-endpoint` host runtime, the capability matrix column, and the
-provider projection migration that admits the family. Nothing admits an
-outside driver yet, so an outside instance reports `driver-not-admitted` with
-no models and runs no turn; slices 2 and 3 are next. The maintainer authorized
-this scope as post-preview work and accepted the
-[maintainer decisions](#maintainer-decisions) below on 2026-10-26; the release
-boundary in `AGENTS.md` and the architecture is updated separately. Today only
-bundled drivers are admitted. Slices and their evidence are tracked in Linear;
-this file states the rules they implement.
+`outside-endpoint` host runtime, and the capability matrix column. Nothing
+admits an outside driver yet, so an outside instance reports
+`driver-not-admitted` with no models and runs no turn; slices 2 and 3 are
+next. The maintainer authorized this scope as post-preview work and accepted
+the [maintainer decisions](#maintainer-decisions) below on 2026-10-26; the
+release boundary in `AGENTS.md` and the architecture is updated separately.
+Today only bundled drivers are admitted. Slices and their evidence are tracked
+in Linear; this file states the rules they implement.
 
 ## Outcome
 
@@ -114,8 +113,8 @@ digest }`. The set of outside drivers is data, held by the package store.
   address, key placement, and listed model ids join it in that same change.
   No command creates or reconfigures an outside instance before then, so no
   journaled instance can lack them. The provider projection's `driver_kind`
-  constraint admits the family (migration 84) so that replay of such an
-  instance never fails.
+  column keeps only a non-empty check and leaves the vocabulary to the
+  instance schema, so replay of such an instance needs no migration of its own.
 - **The matrix column's source.** An outside package ships no capability block
   Octant reads, so `providerFeatureMatrix.test.ts` holds the column to the
   bundled harness endpoints' static blocks, which are its ceiling, until the

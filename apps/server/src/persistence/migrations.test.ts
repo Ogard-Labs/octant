@@ -892,7 +892,13 @@ describe("applyMigrations", () => {
       insert("existing-image-provider", "openai-image");
       expect(() => insert("outside-provider", "outside-harness-endpoint")).toThrow();
 
-      expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
+      expect(
+        applyMigrations(
+          connection,
+          MIGRATIONS.filter((migration) => migration.version <= 85),
+          clock,
+        ),
+      ).toEqual({
         currentVersion: 85,
         appliedVersions: [85],
       });
