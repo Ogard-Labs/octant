@@ -46,11 +46,16 @@ const HOST_PROTOCOL_VERSIONS: ReadonlySet<string> = new Set(["harness-endpoint/1
 const HOST_ASSIGNED_MANIFEST_FIELDS = ["extensionId", "packageId", "digest", "source"] as const;
 const HOST_ASSIGNED_PROVENANCE_FIELDS = ["reviewed", "reviewedAt"] as const;
 
-/** npm lifecycle scripts that run when a package or its dependents are installed. */
+/**
+ * npm lifecycle scripts that run when a package or its dependents are
+ * installed. `prepublish` is deprecated but npm still runs it on a plain
+ * `npm install`.
+ */
 const INSTALL_LIFECYCLE_SCRIPTS = [
   "preinstall",
   "install",
   "postinstall",
+  "prepublish",
   "preprepare",
   "prepare",
   "postprepare",
@@ -174,7 +179,9 @@ function packageFilesRefusal(
   if (files.some((entry) => entry.executable === true)) return "ships-executable";
   if (files.some(isNativeCode)) return "ships-native-code";
   for (const file of files) {
-    const name = file.path.split("/").pop() ?? "";
+    // macOS volumes are case-insensitive by default, so `Package.json` there is
+    // the file npm reads as `package.json`.
+    const name = (file.path.split("/").pop() ?? "").toLowerCase();
     // npm runs node-gyp for a package with a binding.gyp even without a script.
     if (name === "binding.gyp") return "ships-install-script";
     if (name !== "package.json") continue;
@@ -192,7 +199,8 @@ function packageFilesRefusal(
 
 /**
  * Native code by name (Node addons and shared libraries) or by content (the
- * Mach-O, universal, ELF, and PE headers), since a name proves nothing.
+ * Mach-O, 32- and 64-bit universal, ELF, and PE headers), since a name proves
+ * nothing.
  */
 function isNativeCode(entry: ExtensionArchiveEntry): boolean {
   if (/\.(node|dylib|dll|exe)$/i.test(entry.path) || /\.so(\.\d+)*$/i.test(entry.path)) {
@@ -213,6 +221,8 @@ const NATIVE_MAGIC: ReadonlySet<string> = new Set([
   "cffaedfe",
   "cafebabe",
   "bebafeca",
+  "cafebabf",
+  "bfbafeca",
   "7f454c46",
 ]);
 

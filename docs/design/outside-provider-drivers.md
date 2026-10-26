@@ -310,7 +310,8 @@ takes the fail-closed option.
   permission, native code (a `.node`, `.dylib`, `.so`, `.dll`, or `.exe`
   name, or a Mach-O, universal, ELF, or PE header under any name, since a
   name proves nothing), or an install script (an install lifecycle script or
-  `gypfile` in any `package.json`, or a `binding.gyp`). The entry module must
+  `gypfile` in any `package.json`, or a `binding.gyp`, either name matched in
+  any letter case, as a case-insensitive macOS volume reads it). The entry module must
   exist and must not be executable; the package inspector holds every
   provider-driver entry to that.
 - **Refusal copy.** The extension API answers each refusal reason with fixed

@@ -85,12 +85,14 @@ function driverDocument(manifest: Record<string, unknown> = {}, document = {}) {
 async function writeDriverFolder(
   options: {
     readonly document?: unknown;
-    readonly files?: Readonly<Record<string, { readonly content: string; readonly mode?: number }>>;
+    readonly files?: Readonly<
+      Record<string, { readonly content: string | Uint8Array; readonly mode?: number }>
+    >;
   } = {},
 ): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "octant-outside-driver-"));
   directories.push(root);
-  const files: Record<string, { readonly content: string; readonly mode?: number }> = {
+  const files: Record<string, { readonly content: string | Uint8Array; readonly mode?: number }> = {
     "octant-provider-driver.json": {
       content: JSON.stringify(options.document ?? driverDocument()),
     },
@@ -221,6 +223,35 @@ describe("outside provider driver inspection from a local folder", () => {
       "This provider driver ships native code; a provider driver is JavaScript modules and data only.",
     ],
     [
+      "a 64-bit universal binary under an innocent name",
+      {
+        files: { "dist/data.bin": { content: Uint8Array.of(0xca, 0xfe, 0xba, 0xbf, 0, 0, 0, 2) } },
+      },
+      "This provider driver ships native code; a provider driver is JavaScript modules and data only.",
+    ],
+    [
+      "an install script npm still runs on a plain install",
+      {
+        files: {
+          "package.json": {
+            content: JSON.stringify({ name: "x", scripts: { prepublish: "node setup.js" } }),
+          },
+        },
+      },
+      "This provider driver has an install script; Octant runs no install step for a provider driver.",
+    ],
+    [
+      "an install script in a package description named in another case",
+      {
+        files: {
+          "lib/Package.json": {
+            content: JSON.stringify({ name: "x", scripts: { postinstall: "node setup.js" } }),
+          },
+        },
+      },
+      "This provider driver has an install script; Octant runs no install step for a provider driver.",
+    ],
+    [
       "an install script",
       {
         files: {
@@ -336,7 +367,8 @@ describe("outside provider driver inspection from a local folder", () => {
 describe("an installed outside provider driver", () => {
   async function installed() {
     const context = await setup();
-    const inspected = await context.inspect(await writeDriverFolder());
+    const root = await writeDriverFolder();
+    const inspected = await context.inspect(root);
     if (inspected.kind !== "package-inspected") throw new Error("expected an inspected driver");
     const entry = inspected.preview.entry;
     const result = await context.api.execute({
@@ -347,7 +379,7 @@ describe("an installed outside provider driver", () => {
       digest: entry.digest,
     });
     if (result.kind !== "extension-state-updated") throw new Error("expected an install");
-    return { ...context, entry };
+    return { ...context, root, entry };
   }
 
   function driverState(snapshot: ExtensionSnapshot) {
@@ -416,6 +448,55 @@ describe("an installed outside provider driver", () => {
     expect(
       driverState(context.lifecycle.snapshot()).components.map((c) => c.effectiveState),
     ).toEqual(blocked);
+  });
+
+  it("is quarantined again and loses its trust when an update or a rollback selects another version", async () => {
+    const context = await installed();
+    const extensionId = context.entry.extensionId;
+    const version = () => driverState(context.lifecycle.snapshot()).stateVersion;
+    const trust = () =>
+      context.api.execute({
+        kind: "set-source-trust",
+        commandVersion: 1 as never,
+        extensionId,
+        expectedStateVersion: version(),
+        trusted: true,
+      });
+    await trust();
+    await writeFile(
+      join(context.root, "octant-provider-driver.json"),
+      JSON.stringify(driverDocument({ version: "0.2.0" })),
+    );
+    const updated = await context.inspect(context.root);
+    if (updated.kind !== "package-inspected") throw new Error("expected an inspected update");
+    expect(updated.preview.entry.extensionId).toBe(extensionId);
+    const update = await context.api.execute({
+      kind: "update-package",
+      extensionId,
+      packageId: updated.preview.entry.packageId,
+      version: updated.preview.entry.version,
+      digest: updated.preview.entry.digest,
+    });
+    expect(update.kind).toBe("extension-state-updated");
+    expect(driverState(context.lifecycle.snapshot()).activation).toMatchObject({
+      quarantined: true,
+      trusted: false,
+    });
+    await trust();
+    const rollback = await context.api.execute({
+      kind: "rollback-package",
+      extensionId,
+      packageId: context.entry.packageId,
+      version: context.entry.version,
+      digest: context.entry.digest,
+    });
+    expect(rollback.kind).toBe("extension-state-updated");
+    const state = driverState(context.lifecycle.snapshot());
+    expect(state.version).toBe("0.1.0");
+    expect(state.activation).toMatchObject({ quarantined: true, trusted: false });
+    expect(state.components.map((component) => component.effectiveState)).toEqual([
+      { kind: "blocked", reason: "quarantined" },
+    ]);
   });
 
   it("is never selected by a structured reference or a mention, which change nothing", async () => {
