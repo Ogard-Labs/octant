@@ -352,15 +352,54 @@ export const AnthropicCompatibleProviderConfiguration = Schema.Struct({
 }).annotations(strict);
 export type AnthropicCompatibleProviderConfiguration =
   typeof AnthropicCompatibleProviderConfiguration.Type;
-export const AzureFoundryAuthentication = Schema.Literal("api-key");
+/**
+ * A directory tenant or application (client) id, in the lowercase GUID form a
+ * directory issues. A multi-tenant alias (`common`, `organizations`) or a
+ * domain name is refused: it would let an account from any tenant answer the
+ * sign-in, and the binding compares these values exactly.
+ */
+const DirectoryGuid = Schema.String.pipe(
+  Schema.pattern(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
+);
+export const DirectoryTenantId = DirectoryGuid.pipe(Schema.brand("DirectoryTenantId"));
+export type DirectoryTenantId = typeof DirectoryTenantId.Type;
+export const DirectoryClientId = DirectoryGuid.pipe(Schema.brand("DirectoryClientId"));
+export type DirectoryClientId = typeof DirectoryClientId.Type;
+/**
+ * The organization's own directory binding for a host-driven sign-in. Neither
+ * value is secret: the client is a public client the organization registered
+ * in its own tenant, so no client secret exists to store.
+ */
+export const DirectoryBinding = Schema.Struct({
+  tenantId: DirectoryTenantId,
+  clientId: DirectoryClientId,
+}).annotations(strict);
+export type DirectoryBinding = typeof DirectoryBinding.Type;
+
+export const AzureFoundryAuthentication = Schema.Literal("api-key", "directory-oauth");
 export type AzureFoundryAuthentication = typeof AzureFoundryAuthentication.Type;
-export const AzureFoundryProviderConfiguration = Schema.Struct({
+const AzureFoundryConfigurationFields = {
   kind: Schema.Literal("azure-foundry-openai-http"),
   baseUrl: Schema.NonEmptyTrimmedString,
-  authentication: AzureFoundryAuthentication,
   protocol: OpenAiCompatibleProtocol,
   manualModelIds: UniqueManualModelIds,
-}).annotations(strict);
+};
+/**
+ * `directory-oauth` signs in with the organization's directory instead of a
+ * key and carries the tenant and client it binds to; an API-key instance
+ * carries no directory binding.
+ */
+export const AzureFoundryProviderConfiguration = Schema.Union(
+  Schema.Struct({
+    ...AzureFoundryConfigurationFields,
+    authentication: Schema.Literal("api-key"),
+  }).annotations(strict),
+  Schema.Struct({
+    ...AzureFoundryConfigurationFields,
+    authentication: Schema.Literal("directory-oauth"),
+    directory: DirectoryBinding,
+  }).annotations(strict),
+);
 export type AzureFoundryProviderConfiguration = typeof AzureFoundryProviderConfiguration.Type;
 
 /**
@@ -2256,6 +2295,8 @@ export type ProviderRuntimeEvent = typeof ProviderRuntimeEvent.Type;
 
 export const decodeProviderInstanceId = Schema.decodeUnknownSync(ProviderInstanceId);
 export const decodeProviderSessionId = Schema.decodeUnknownSync(ProviderSessionId);
+export const decodeDirectoryTenantId = Schema.decodeUnknownSync(DirectoryTenantId);
+export const decodeDirectoryClientId = Schema.decodeUnknownSync(DirectoryClientId);
 export const decodeProviderModelId = Schema.decodeUnknownSync(ProviderModelId);
 export const decodeProviderDriverKind = Schema.decodeUnknownSync(ProviderDriverKind);
 export const decodeProviderInstance = Schema.decodeUnknownSync(ProviderInstance);
