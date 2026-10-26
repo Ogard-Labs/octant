@@ -578,8 +578,9 @@ the conformance suite over the real launch port. Its desktop tests need
   the size, and the SHA-256, never the contents.
   `DesktopArtifactRefusalReason` names why a file is not read: `no-root`,
   `path-invalid`, `path-absolute`, `path-escapes-root`, `path-in-git`,
-  `path-symlink`, `not-found`, `not-a-file`, `too-large`, and
-  `changed-while-read`. Authority refusals stay the lease's own closed set.
+  `path-symlink`, `not-found`, `not-a-file`, `too-large`,
+  `changed-while-read`, `path-unverifiable`, and `transfer-in-progress`.
+  Authority refusals stay the lease's own closed set.
 - **Policy.** `decideDesktopArtifactPath` and `decideDesktopArtifactTransfer`
   in `packages/domain/src/desktopLeasePolicy.ts`.
 - **Seam.** `DesktopLaunchPort.deliver` writes one file into a running
@@ -596,11 +597,15 @@ Rules this slice resolved:
 - **Read once, before asking.** The host reads and hashes the file before
   anyone is asked. Those bytes are what the person approves, what the journal
   records, and what the driver receives; a file changed while a person decides
-  is not re-read. After the answer the host checks the lease's authority
-  again, and a changed provider, posture, or root refuses `declined`.
-- **Size limit 128 MiB.** The host holds the bytes from the read to delivery,
-  so the bound is a memory bound. An Electron AppImage fits; a larger file
-  refuses `too-large`.
+  is not re-read. After the answer, in the lease's order, the host checks the
+  lease's authority again, and a changed provider, posture, or root refuses
+  `declined`.
+- **Size limit 128 MiB, one transfer per lease.** The host holds the bytes
+  from the read to delivery, so the bound is a memory bound. An Electron
+  AppImage fits; a larger file refuses `too-large`. A transfer can wait on a
+  person indefinitely, so a lease holds one transfer at a time and a second
+  refuses `transfer-in-progress`; the bytes held are then bounded by the lease
+  caps rather than by how many calls arrive at once.
 - **Nothing is followed.** A symlink refuses at any component, even one whose
   target is inside the root, and any `..` refuses, even one that lands back
   inside. `.git` matches without case, because a case-insensitive volume opens
@@ -609,6 +614,16 @@ Rules this slice resolved:
   non-blocking, must be the object the walk saw, and is read for exactly its
   size plus one probe byte; a handle whose size, modification, or change time
   moved during the read refuses `changed-while-read`.
+- **The open handle names where it landed.** Every path check and the open
+  resolve the path afresh, and no-follow guards only the last component. An
+  agent flipping an ancestor directory between a real directory and a link to
+  a host folder won that race about once in two hundred reads before this
+  rule: the walk's last step and the open reached the host file while the
+  checks between them saw the checkout. So the path the kernel gives the open
+  handle (`/proc/self/fd`) must be the walked path, or the read refuses
+  `changed-while-read`. Node has no such query on macOS, so a read there
+  refuses `path-unverifiable`; no desktop provider runs on macOS yet, and one
+  that does needs a handle-path check there first.
 - **Hard links are accepted.** A file with more than one name is sent. Only
   something that already reaches a file can link it into the checkout, and it
   could as well copy it there; Cargo links its build outputs, so refusing
@@ -639,7 +654,10 @@ Evidence: `desktopLeaseService.test.ts` covers the journaled path, size, and
 hash, every path refusal, Plan, approval-gated asking, the cloud ask, the
 approved bytes winning over a file changed during the answer, and authority
 changes during the answer. `desktopArtifactRead.test.ts` covers files that
-grow or shrink during the read. Under real Bubblewrap,
+grow or shrink during the read, an ancestor swapped for a link between the
+checks and the open, and the platform that cannot name the open file;
+`desktopLeaseService.test.ts` also covers a second transfer while one waits,
+and a root change while the transfer waits in the lease's order. Under real Bubblewrap,
 `hostLocalDesktopProcess.test.ts` shows the delivered file is read-only
 inside the capsule and cannot be removed, that the port refuses names that
 leave the inbox and leases with no running desktop, and that a transfer

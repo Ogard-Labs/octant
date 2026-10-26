@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { constants, type Stats } from "node:fs";
-import { lstat, open, realpath } from "node:fs/promises";
+import { lstat, open, readlink, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { DesktopArtifactRefusal } from "@octant/contracts";
 import { decideDesktopArtifactPath } from "@octant/domain";
@@ -12,9 +12,10 @@ import { decideDesktopArtifactPath } from "@octant/domain";
  * chose inside a directory an agent can write. So nothing is followed: every
  * component is `lstat`ed and a symlink anywhere refuses, the canonical path
  * must be the root joined with exactly those components, and the file is
- * opened without following a link and must be the object the walk saw. Every
- * fact that decides whether to send it (regular file, same object, size) and
- * the bytes themselves come from that one handle. The read takes exactly the
+ * opened without following a link and must be the object the walk saw, at the
+ * walked path as the kernel names the open handle. Every fact that decides
+ * whether to send it (regular file, same object, size) and the bytes
+ * themselves come from that one handle. The read takes exactly the
  * size the handle reported, asks for one byte more, and checks the handle
  * again afterwards, so a file that grows, shrinks, or is rewritten during the
  * read is refused rather than sent half old and half new.
@@ -30,6 +31,8 @@ export interface DesktopArtifactFile {
     position: number,
   ) => Promise<{ readonly bytesRead: number }>;
   readonly close: () => Promise<void>;
+  /** Where the open object lives now, as the kernel names it; undefined where the platform cannot say. */
+  readonly location: () => Promise<string | undefined>;
 }
 
 export interface DesktopArtifactReadRequest {
@@ -75,6 +78,30 @@ function unchanged(before: Stats, after: Stats): boolean {
   );
 }
 
+/**
+ * Each path check and the open resolve the path afresh, and `O_NOFOLLOW`
+ * guards only the last component. An agent flipping an ancestor directory
+ * between a real directory and a link to a host folder won that race about one
+ * read in two hundred: the walk's last step and the open reached the host
+ * file, and the checks between them saw the checkout. Only the open handle
+ * itself can say where the file it reached lives. Linux names it under
+ * `/proc/self/fd`; Node has no such query on macOS, so a read there refuses
+ * `path-unverifiable`.
+ */
+export async function openDesktopArtifactFile(
+  path: string,
+  flags: number,
+): Promise<DesktopArtifactFile> {
+  const handle = await open(path, flags);
+  return {
+    stat: () => handle.stat(),
+    read: (buffer, offset, length, position) => handle.read(buffer, offset, length, position),
+    close: () => handle.close(),
+    location: async () =>
+      process.platform === "linux" ? readlink(`/proc/self/fd/${handle.fd}`) : undefined,
+  };
+}
+
 export async function readDesktopArtifact(
   request: DesktopArtifactReadRequest,
 ): Promise<DesktopArtifactReadResult> {
@@ -113,9 +140,7 @@ export async function readDesktopArtifact(
     return refused("changed-while-read");
   }
 
-  const openFile =
-    request.openFile ??
-    ((path: string, flags: number): Promise<DesktopArtifactFile> => open(path, flags));
+  const openFile = request.openFile ?? openDesktopArtifactFile;
   let file: DesktopArtifactFile;
   try {
     // Non-blocking, so a FIFO swapped in after the walk cannot hold the open.
@@ -128,6 +153,9 @@ export async function readDesktopArtifact(
     if (!before.isFile() || before.dev !== seen.dev || before.ino !== seen.ino) {
       return refused("changed-while-read");
     }
+    const location = await file.location();
+    if (location === undefined) return refused("path-unverifiable");
+    if (location !== walked) return refused("changed-while-read");
     if (before.size > request.maximumBytes) return refused("too-large");
     const bytes = new Uint8Array(before.size);
     let filled = 0;

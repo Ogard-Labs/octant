@@ -235,6 +235,8 @@ export const DesktopArtifactRefusalReason = Schema.Literal(
   "not-a-file",
   "too-large",
   "changed-while-read",
+  "path-unverifiable",
+  "transfer-in-progress",
 );
 export type DesktopArtifactRefusalReason = typeof DesktopArtifactRefusalReason.Type;
 

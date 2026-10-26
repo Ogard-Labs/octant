@@ -298,6 +298,8 @@ export function createDesktopLeaseService(
   const live = new Map<string, LiveLease>();
   const orphans = new Map<string, Orphan>();
   const serial = new Map<string, Promise<unknown>>();
+  /** Leases with a transfer between its read and its delivery. */
+  const transferring = new Set<string>();
   let reconciliation: Promise<DesktopLeaseReconciliation> | undefined;
   let sweeping: Promise<void> | undefined;
   let sweepAgain = false;
@@ -860,11 +862,27 @@ export function createDesktopLeaseService(
    * The file is read and hashed once, before anyone is asked, and those bytes
    * are what the person approves, what the journal records, and what the
    * driver receives; a file changed while a person decides is not re-read.
-   * Authority, posture, provider, and root are checked again after the answer.
-   * The send itself runs in the lease's order and is bounded like a teardown
-   * call, so a driver that never answers cannot hold a release behind it.
+   * Authority, posture, provider, and root are checked again after the answer,
+   * in the lease's order. The send itself runs there too and is bounded like a
+   * teardown call, so a driver that never answers cannot hold a release behind
+   * it. A lease holds one transfer's bytes at a time: each waits on a person
+   * for as long as they take, so otherwise concurrent calls would each hold up
+   * to the size limit.
    */
   const transfer: DesktopLeaseService["transfer"] = async (caller) => {
+    const key = String(caller.leaseId);
+    if (transferring.has(key)) return { status: "refused", reason: "transfer-in-progress" };
+    transferring.add(key);
+    try {
+      return await transferHeld(caller);
+    } finally {
+      transferring.delete(key);
+    }
+  };
+
+  async function transferHeld(
+    caller: Parameters<DesktopLeaseService["transfer"]>[0],
+  ): Promise<DesktopLeaseTransferResult> {
     const first = admitOperating(caller);
     if (first.status === "refused") return first;
     const gate = decideDesktopArtifactTransfer({
@@ -895,8 +913,8 @@ export function createDesktopLeaseService(
         .catch(() => "declined" as const);
       if (answer !== "approved") return refused("declined");
     }
-    const rootNow = await options.threadRoot(owner).catch(() => undefined);
     return inOrder(caller.leaseId, async (): Promise<DesktopLeaseTransferResult> => {
+      const rootNow = await options.threadRoot(owner).catch(() => undefined);
       const admitted = admitOperating(caller);
       if (admitted.status === "refused") return admitted;
       // An answer given for one provider, posture, or checkout never covers another.
@@ -933,7 +951,7 @@ export function createDesktopLeaseService(
         ? { status: "delivered", artifact }
         : { status: "not-delivered", artifact };
     });
-  };
+  }
 
   const release: DesktopLeaseService["release"] = async (caller) => {
     const record = projection.get(caller.leaseId);

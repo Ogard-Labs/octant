@@ -82,7 +82,7 @@ interface HostState {
   readonly asked: Array<string>;
   readonly askedTransfers: Array<DesktopTransferConfirmation>;
   /** Runs while a person is deciding on a transfer. */
-  whileDeciding: () => void;
+  whileDeciding: () => void | Promise<void>;
   readonly roots: Map<string, string>;
   readonly threads: Map<string, { active: boolean; executionPolicy: ProviderExecutionPolicy }>;
   readonly recipes: Map<string, DesktopRecipe>;
@@ -128,7 +128,7 @@ function serviceOver(connection: SqliteConnection, state: HostState): DesktopLea
     threadRoot: async (owner) => state.roots.get(String(owner.threadId)),
     confirmTransfer: async (request) => {
       state.askedTransfers.push(request);
-      state.whileDeciding();
+      await state.whileDeciding();
       return state.answer;
     },
     systemActor: system,
@@ -765,7 +765,9 @@ function sentEvents(connection: SqliteConnection) {
   ).map((row) => ({ actor: row.actor_kind, payload: JSON.parse(row.payload_json) as unknown }));
 }
 
-describe("desktop artifact transfer", () => {
+// Only Linux names the file an open handle reached; elsewhere every read
+// refuses `path-unverifiable`, which the artifact read's own suite covers.
+describe.runIf(process.platform === "linux")("desktop artifact transfer", () => {
   it("sends one checkout-relative file and journals its path, size, and SHA-256 before delivery", async () => {
     const fake = createFakeDesktopProvider();
     let journaledFirst = false;
@@ -947,8 +949,9 @@ describe("desktop artifact transfer", () => {
     const leaseId = await acquired(service, threadA);
     const fromAgent = { owner: code(threadA), actor: agentOf(threadA), leaseId, path: "app.bin" };
 
-    state.whileDeciding = () =>
+    state.whileDeciding = () => {
       state.threads.set(threadA, { active: true, executionPolicy: "full-access" });
+    };
     await expect(service.transfer(fromAgent)).resolves.toEqual({
       status: "refused",
       reason: "declined",
@@ -962,6 +965,68 @@ describe("desktop artifact transfer", () => {
       reason: "lease-ended",
     });
     expect(backend.calls()).not.toContain("deliver");
+  });
+
+  it("holds one transfer's bytes per lease at a time, so concurrent transfers cannot multiply them", async () => {
+    const { service, state, backend, checkout } = host({ executionPolicy: "approval-gated" });
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    const leaseId = await acquired(service, threadA);
+    const fromAgent = { owner: code(threadA), actor: agentOf(threadA), leaseId, path: "app.bin" };
+    let answer: () => void = () => undefined;
+    const asking = new Promise<void>((asked) => {
+      state.whileDeciding = () =>
+        new Promise<void>((resolve) => {
+          answer = resolve;
+          asked();
+        });
+    });
+
+    const first = service.transfer(fromAgent);
+    await asking;
+    await expect(service.transfer(fromAgent)).resolves.toEqual({
+      status: "refused",
+      reason: "transfer-in-progress",
+    });
+    expect(state.askedTransfers).toHaveLength(1);
+    answer();
+    await expect(first).resolves.toMatchObject({ status: "delivered" });
+
+    state.whileDeciding = () => undefined;
+    await expect(service.transfer(fromAgent)).resolves.toMatchObject({ status: "delivered" });
+    expect(backend.delivered()).toHaveLength(2);
+  });
+
+  it("refuses when the thread's root changes while the transfer waits behind another lease change", async () => {
+    const fake = createFakeDesktopProvider();
+    const harness = host({
+      executionPolicy: "approval-gated",
+      providers: [
+        {
+          provider: {
+            ...fake.provider,
+            // The extension holds the lease's order while the thread moves to another root.
+            extend: async (handle, expiresAt) => {
+              await new Promise((resolve) => setTimeout(resolve, 20));
+              harness.state.roots.set(threadA, join(harness.checkout, "elsewhere"));
+              return fake.provider.extend(handle, expiresAt);
+            },
+          },
+        },
+      ],
+    });
+    const { service, state, checkout } = harness;
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    const leaseId = await acquired(service, threadA);
+    let extending: Promise<unknown> = Promise.resolve();
+    state.whileDeciding = () => {
+      extending = service.extend({ owner: code(threadA), actor: person, leaseId, byMinutes: 30 });
+    };
+
+    await expect(
+      service.transfer({ owner: code(threadA), actor: agentOf(threadA), leaseId, path: "app.bin" }),
+    ).resolves.toEqual({ status: "refused", reason: "declined" });
+    await expect(extending).resolves.toMatchObject({ status: "extended" });
+    expect(fake.backend.calls()).not.toContain("deliver");
   });
 
   it("refuses another thread's transfer, a system transfer, and one with no root", async () => {
