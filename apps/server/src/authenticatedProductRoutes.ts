@@ -1,4 +1,5 @@
 import { authorizePrincipalAction } from "@octant/domain";
+import { removeImageMetadata } from "./attachments/imageMetadataRemoval";
 import type { ClientPrincipal } from "./clientPrincipal";
 import {
   bindPrincipalRouteContext,
@@ -44,7 +45,9 @@ export function createAuthenticatedProductDispatch(
       ...(handoff.abortSignal === undefined ? {} : { abortSignal: handoff.abortSignal }),
     });
     bindPrincipalRouteContext(handoff.request, context);
-    const internalRequest = makeLoopbackDispatchRequest(handoff.request);
+    const cleaned = await withoutImageMetadata(handoff.request, handoff.principal);
+    if (cleaned.status === "refused") return refusedImageResponse();
+    const internalRequest = makeLoopbackDispatchRequest(cleaned.request);
     bindPrincipalRouteContext(internalRequest, context);
     return options.dispatch(internalRequest, context);
   };
@@ -68,6 +71,8 @@ export function classifyProductAction(request: Request): string | undefined {
   }
   if (path.startsWith("/api/work/")) {
     if (method === "POST" && path === "/api/work/board") return "project.overview.read";
+    // Staging a picture is the first half of sending the thread a turn.
+    if (method === "PUT" && path === "/api/work/attachments") return "work.update-document";
     if (method === "POST") return "work.update-document";
     if (method === "GET" || method === "HEAD") return "project.overview.read";
     return undefined;
@@ -78,6 +83,7 @@ export function classifyProductAction(request: Request): string | undefined {
       return "project.overview.read";
     }
     if (method === "PUT" && path === "/api/code/evidence") return "code.plan-turn";
+    if (method === "PUT" && path === "/api/code/attachments") return "code.plan-turn";
     if (method === "POST" && path.includes("/threads")) return "code.create-thread";
     // Local servers is a catalogued authority of its own, so it must not
     // ride in on the Code turn action. Admission is granted at the surface's
@@ -311,11 +317,59 @@ function unauthorizedResponse(): Response {
 }
 
 /**
+ * A paired device's image reaches no route with its EXIF, XMP, IPTC, or
+ * comments: a phone camera writes GPS coordinates and the device model into
+ * every photo, and pickers differ in what they remove, so the host removes them
+ * here, once, for every route that admits an image. The device's signed body
+ * was checked before this; what the route stores is the cleaned image. An image
+ * the host cannot read to its end, or whose bytes are not the type it names, is
+ * refused rather than passed on.
+ */
+async function withoutImageMetadata(
+  request: Request,
+  principal: ClientPrincipal,
+): Promise<
+  { readonly status: "kept"; readonly request: Request } | { readonly status: "refused" }
+> {
+  const mediaType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+  if (principal.kind !== "remote-device" || !mediaType?.startsWith("image/")) {
+    return { status: "kept", request };
+  }
+  const removal = removeImageMetadata(new Uint8Array(await request.arrayBuffer()), mediaType);
+  if (removal.status === "refused") return { status: "refused" };
+  const headers = new Headers(request.headers);
+  headers.set("content-length", String(removal.bytes.byteLength));
+  return {
+    status: "kept",
+    request: new Request(request.url, {
+      method: request.method,
+      headers,
+      body: removal.bytes,
+      signal: request.signal,
+    }),
+  };
+}
+
+function refusedImageResponse(): Response {
+  return Response.json(
+    { category: "invalid", message: "The image could not be read, so it was not attached." },
+    {
+      status: 415,
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "application/json; charset=utf-8",
+      },
+    },
+  );
+}
+
+/**
  * Existing product handlers deliberately reject non-loopback origins. Remote
  * authentication has already proved the configured remote origin, so dispatch
  * a loopback-shaped internal request while retaining the remote principal in
  * the bound context. The original request URL/headers never reach a product
- * handler and the signed path/query/body remain unchanged.
+ * handler and the signed path/query remain unchanged, as does the body apart
+ * from an image's metadata.
  */
 function makeLoopbackDispatchRequest(request: Request): Request {
   const source = new URL(request.url);

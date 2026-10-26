@@ -230,6 +230,94 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).toHaveBeenCalledOnce();
   });
 
+  it("hands each mode's attachment route a paired device's photo without its location or camera", async () => {
+    const photo = Uint8Array.from([
+      0xff,
+      0xd8,
+      0xff,
+      0xe1,
+      0x00,
+      0x16,
+      ...Buffer.from("Exif\0\0GPSLatitude 59", "latin1"),
+      0xff,
+      0xda,
+      0x00,
+      0x08,
+      1,
+      1,
+      0,
+      0,
+      0x3f,
+      0,
+      0x42,
+      0xff,
+      0xd9,
+    ]);
+    for (const [path, method, action] of [
+      ["/api/chat/attachments", "POST", "chat.send-turn"],
+      ["/api/work/attachments", "PUT", "work.update-document"],
+      ["/api/code/attachments", "PUT", "code.plan-turn"],
+    ] as const) {
+      expect(classifyProductAction(new Request(`https://octant.example${path}`, { method }))).toBe(
+        action,
+      );
+      let received: Uint8Array | undefined;
+      const dispatch = vi.fn(async (request: Request) => {
+        received = new Uint8Array(await request.arrayBuffer());
+        return Response.json({ ok: true });
+      });
+      const product = createAuthenticatedProductDispatch({ dispatch });
+      const request = new Request(`https://octant.example${path}`, {
+        method,
+        headers: {
+          host: "octant.example",
+          origin: "https://octant.example",
+          "content-type": "image/jpeg",
+          "content-length": String(photo.byteLength),
+        },
+        body: photo,
+      });
+
+      const response = await product({
+        request,
+        principal,
+        requestFacts: { method, canonicalPathQuery: path, bodyDigest: "d" },
+      });
+
+      expect(response?.status).toBe(200);
+      expect(received).toBeDefined();
+      expect(Buffer.from(received ?? []).includes(Buffer.from("GPSLatitude"))).toBe(false);
+      expect([...(received?.subarray(-3) ?? [])]).toEqual([0x42, 0xff, 0xd9]);
+    }
+  });
+
+  it("refuses a paired device's image the host cannot clean before the route sees it", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+    const request = new Request("https://octant.example/api/chat/attachments", {
+      method: "POST",
+      headers: {
+        host: "octant.example",
+        origin: "https://octant.example",
+        "content-type": "image/png",
+      },
+      body: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
+    });
+
+    const response = await product({
+      request,
+      principal,
+      requestFacts: {
+        method: "POST",
+        canonicalPathQuery: "/api/chat/attachments",
+        bodyDigest: "d",
+      },
+    });
+
+    expect(response?.status).toBe(415);
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("classifies a Canvas share read as a read and leaves minting and revoking denied", () => {
     expect(
       classifyProductAction(

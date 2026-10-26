@@ -798,6 +798,53 @@ describe("remote route policy", () => {
     expect(grants.status).toBe(415);
   });
 
+  it("gives each mode's attachment upload its own body budget and only the media that mode takes", async () => {
+    const { route, authenticatedProduct } = handler();
+    const upload = async (path: string, method: string, contentType: string, body: BodyInit) => {
+      const response = await route(
+        request(path, {
+          method,
+          headers: { origin, "sec-fetch-site": "same-origin", "content-type": contentType },
+          body,
+        }),
+      );
+      // Reading the answer releases its request slot.
+      await response.arrayBuffer();
+      return response;
+    };
+    const photo = new Uint8Array(1_024);
+
+    expect((await upload("/api/chat/attachments", "POST", "image/jpeg", photo)).status).toBe(200);
+    expect((await upload("/api/chat/attachments", "POST", "application/pdf", photo)).status).toBe(
+      200,
+    );
+    expect((await upload("/api/work/attachments", "PUT", "image/png", photo)).status).toBe(200);
+    expect((await upload("/api/code/attachments", "PUT", "image/webp", photo)).status).toBe(200);
+    expect(authenticatedProduct).toHaveBeenCalledTimes(4);
+
+    // Work and Code take images only, and no other product route takes an image.
+    expect((await upload("/api/work/attachments", "PUT", "application/pdf", photo)).status).toBe(
+      415,
+    );
+    expect((await upload("/api/code/attachments", "PUT", "text/plain", photo)).status).toBe(415);
+    expect((await upload("/api/chat/commands", "POST", "image/jpeg", "{}")).status).toBe(415);
+    expect((await upload("/api/work/turns", "PUT", "image/jpeg", "{}")).status).toBe(405);
+    expect(authenticatedProduct).toHaveBeenCalledTimes(4);
+
+    const tooLarge = await route(
+      request("/api/chat/attachments", {
+        method: "POST",
+        headers: {
+          origin,
+          "sec-fetch-site": "same-origin",
+          "content-type": "image/jpeg",
+          "content-length": String(10 * 1_024 * 1_024 + 1),
+        },
+      }),
+    );
+    expect(tooLarge.status).toBe(413);
+  });
+
   it("counts proxy requests apart from every other surface's", () => {
     const routes = policy({ maxConcurrentRequests: 1, maxConcurrentServerProxyRequests: 1 });
     const product = routes.acquire("authenticated-product");

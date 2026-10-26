@@ -707,6 +707,46 @@ describe("remote HTTP authentication boundary", () => {
     connection.close();
   });
 
+  it("takes an attachment upload above the default body bound and within the route's own", async () => {
+    const { auth, privateKey, dispatched, connection } = setup({ withDispatch: true });
+    const { session } = await issueSessionOverHttp(auth, privateKey);
+    const route: RemoteRouteDefinition = {
+      id: "product-api-chat-attachments",
+      match: { kind: "exact", path: "/api/chat/attachments" },
+      surface: "authenticated-product",
+      methods: ["POST"],
+      allowedContentTypes: ["image/jpeg"],
+      maxBodyBytes: 4 * 1_048_576,
+      uploadsAttachment: true,
+    };
+    const photo = await auth.handleAuthenticated(
+      productRequest(session, privateKey, {
+        target: "/api/chat/attachments",
+        body: "x".repeat(2 * 1_048_576),
+        contentType: "image/jpeg",
+        nonce: "nonce_photo_upload_12345",
+      }),
+      transport,
+      route,
+    );
+    expect(photo.status).toBe(200);
+    expect(dispatched[0]?.bodyText).toHaveLength(2 * 1_048_576);
+
+    const oversized = await auth.handleAuthenticated(
+      productRequest(session, privateKey, {
+        target: "/api/chat/attachments",
+        body: "x".repeat(4 * 1_048_576 + 1),
+        contentType: "image/jpeg",
+        nonce: "nonce_photo_oversized_12",
+      }),
+      transport,
+      route,
+    );
+    expect(oversized.status).toBe(413);
+    expect(dispatched).toHaveLength(1);
+    connection.close();
+  });
+
   it("requires exact fetch metadata and a declared content type on every unsafe method", async () => {
     const { auth, privateKey, dispatched, connection } = setup({ withDispatch: true });
     const { session } = await issueSessionOverHttp(auth, privateKey);
