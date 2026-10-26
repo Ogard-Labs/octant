@@ -1,6 +1,9 @@
+import { createHash } from "node:crypto";
 import {
   MAX_SKILL_PREVIEW_INSTRUCTIONS_LENGTH,
   type ExtensionPackageReviewComponent,
+  type ExtensionPackageReviewLanguageServer,
+  decodeExtensionPackageReviewLanguageServer,
   ExtensionCommand,
   ExtensionCommandResult,
   ExtensionCatalogEntry,
@@ -21,6 +24,10 @@ import {
   type ExtensionLifecycleService,
 } from "./extensionLifecycleService";
 import { MarketplaceFetchesDisabledError } from "./marketplaceHttps";
+import {
+  LanguageServerPackageRefusedError,
+  languageServerPackageRefusalMessage,
+} from "./languageServerPackage";
 import { StandaloneSkillService } from "./standaloneSkillService";
 
 export interface ExtensionPackageResolverPort {
@@ -197,6 +204,9 @@ export class ExtensionApiService {
       if (error instanceof MarketplaceFetchesDisabledError) {
         return failure("blocked", error.message);
       }
+      if (error instanceof LanguageServerPackageRefusedError) {
+        return failure("invalid", languageServerPackageRefusalMessage(error.reason));
+      }
       if (
         error instanceof ExtensionInspectionError ||
         error instanceof CodexPluginIngestionError ||
@@ -301,12 +311,17 @@ function previewFor(inspection: InspectedExtensionPackage) {
           component.kind === "skill-instructions"
             ? previewComponentInstructions(inspection, component.id)
             : undefined;
+        const languageServer =
+          component.languageServer === undefined
+            ? undefined
+            : previewLanguageServer(inspection, component.id, component.languageServer);
         return {
           id: component.id,
           kind: component.kind,
           displayName: component.displayName,
           declaredCapabilities: component.declaredCapabilities,
           ...(instructions === undefined ? {} : { instructions }),
+          ...(languageServer === undefined ? {} : { languageServer }),
         } satisfies ExtensionPackageReviewComponent;
       }),
     },
@@ -334,6 +349,32 @@ function previewComponentInstructions(
     throw new Error("Skill instructions are unavailable for review.");
   }
   return instructions;
+}
+
+/**
+ * What a person reviews before trusting a language server: the binary the host
+ * would start, by its path in the package, and that file's own digest, so it
+ * can be checked against the digest its author publishes.
+ */
+function previewLanguageServer(
+  inspection: InspectedExtensionPackage,
+  componentId: string,
+  declaration: Pick<ExtensionPackageReviewLanguageServer, "languages" | "launchClass">,
+): ExtensionPackageReviewLanguageServer {
+  const binary = inspection.entryPoints[componentId];
+  const file =
+    binary === undefined
+      ? undefined
+      : inspection.files.find((candidate) => candidate.path === binary);
+  if (binary === undefined || file === undefined) {
+    throw new Error("Language server binary is unavailable for review.");
+  }
+  return decodeExtensionPackageReviewLanguageServer({
+    languages: declaration.languages,
+    launchClass: declaration.launchClass,
+    binary,
+    binaryDigest: `sha256:${createHash("sha256").update(file.content).digest("hex")}`,
+  });
 }
 
 function unsupportedCommand(): ExtensionCommandResult {
