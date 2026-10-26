@@ -6545,9 +6545,24 @@ mechanisms are:
   `/etc/ssl/private`, and `/etc/ssh/ssh_host_*_key` are covered like read
   denials when they exist, a symlinked one at its target. `/sys` still shows the host's interface names;
   narrowing it to the cgroup and CPU trees needs measurement against real
-  runtimes first. The synthetic root is read-only, deny paths are
-  covered by empty read-only tmpfs mounts, and a launch carrying Seatbelt
-  `extraRules` is refused as `incompatible`.
+  runtimes first. The synthetic root is read-only, denied folders are
+  covered by empty read-only tmpfs mounts and denied files by an empty
+  read-only file, and a launch carrying Seatbelt `extraRules` is refused as
+  `incompatible`. A deny path that passes through a link inside bound content
+  is covered at its target, both where the capsule reaches by following the
+  link inside the capsule and at the file the host resolves it to, under
+  every name a bind gives that target, and skipped when no bind exposes it:
+  Bubblewrap follows an absolute link at a mount point from outside the new
+  root, and measured on bwrap 0.9.0 a linked deny path refused the whole
+  launch. Bound roots keep the path the launch names, so a file under a root
+  named through a link is still denied under that name. A link to a missing
+  path is denied where a writable bind would hold its target, like any
+  missing deny path, so the capsule cannot write the file through the link;
+  elsewhere the capsule cannot create the target, and the link is skipped.
+  The empty file lives under the host temp directory, where a cleaner such as
+  systemd-tmpfiles may remove it, so each launch checks it and makes another
+  when it is gone or when anyone but the server could change it; a launch
+  that cannot cover a denied file is refused.
   Plan and Chat also load a seccomp filter that denies process-creating
   fork/clone (while allowing `clone` with `CLONE_THREAD` for pthreads) and
   `execveat` after start, because Bubblewrap cannot block the first `execve`

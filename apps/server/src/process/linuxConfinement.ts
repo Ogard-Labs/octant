@@ -6,6 +6,7 @@ import {
   lstatSync,
   mkdtempSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   statSync,
   writeFileSync,
@@ -375,7 +376,12 @@ export function buildBubblewrapLaunch(
         `Linux confinement additional deny ${kind} path "${path}" must be absolute.`,
       );
     }
-    const normalized = normalize(path);
+    for (const target of denyTargetsInCapsule(normalize(path), mounts)) {
+      bindDenyTarget(target, kind);
+    }
+  }
+
+  function bindDenyTarget(normalized: string, kind: "read" | "write"): void {
     // Write denials only matter on writable mounts. Read denials must also
     // cover read-only binds: a `--ro-bind` of a parent still exposes the
     // denied child unless we overlay it.
@@ -399,15 +405,21 @@ export function buildBubblewrapLaunch(
     // mountpoint, and a read-only bind of an empty directory would block that.
     // Create a fresh tmpfs at the deny path instead; it is remounted read-only
     // after the child binds are applied, leaving the child writable.
-    if (isDirectoryForDeny(path)) {
+    if (isDirectoryForDeny(normalized)) {
       addMount("tmpfs", "", normalized);
       return;
     }
 
-    const source = createEmptySourceForPath(path);
-    if (source !== undefined) {
-      addMount("ro-bind", source, normalized);
+    // Without its cover a denied file stays readable, so a launch that cannot
+    // make one is refused rather than started with the file exposed.
+    const source = createEmptySourceForPath(normalized);
+    if (source === undefined) {
+      throw new ProcessConfinementError(
+        "invalid-configuration",
+        `Linux confinement deny ${kind} path "${normalized}" could not be overlaid.`,
+      );
     }
+    addMount("ro-bind", source, normalized);
   }
 
   for (const path of input.additionalDenyWritePaths ?? []) {
@@ -509,14 +521,127 @@ function hostSecretPaths(): ReadonlyArray<string> {
     .map((name) => join("/etc/ssh", name));
   // Bubblewrap would have to create a missing path's mount point inside the
   // read-only `/etc` bind, which fails the launch; a missing path hides
-  // nothing anyway. A symlinked one is covered at its target: Bubblewrap
-  // follows an absolute link from outside the new root, so measured on bwrap
-  // 0.9.0 a host key linked to another volume failed every launch. A target
-  // under no bound path is unreachable from the capsule and needs no cover.
-  return [...HOST_SECRET_PATHS, ...sshHostKeys].flatMap((path) => {
-    const target = safeRealpathSync(path);
-    return target === undefined ? [] : [target];
+  // nothing anyway. A linked one is covered at its target, like every other
+  // denial (see `denyTargetsInCapsule`).
+  return [...HOST_SECRET_PATHS, ...sshHostKeys].filter((path) => pathExists(path));
+}
+
+/**
+ * Where the capsule reaches what a host deny path names.
+ *
+ * Bubblewrap follows an absolute link at a mount point from outside the new
+ * root: measured on bwrap 0.9.0, a denied `.claude/skills` or host key linked
+ * to another folder refused the whole launch with "Can't create file at".
+ * A path that passes through a link inside bound content is therefore covered
+ * at its target instead: both where the capsule reaches through the link
+ * (see `resolveInCapsule`) and the file the host resolves it to, each under
+ * every name a bind gives it. A target no bind exposes is unreachable and
+ * needs no cover. A missing path keeps its name so it stays hidden if created
+ * later. So does a missing one reached through a link when a writable bind
+ * would hold it: measured on bwrap 0.9.0, skipping a dangling `.mcp.json` link
+ * let the capsule write the file it pointed to, through the link, past the
+ * write denial. Elsewhere the capsule cannot create it, and it is skipped.
+ */
+function denyTargetsInCapsule(
+  path: string,
+  mounts: ReadonlyMap<string, Mount>,
+): ReadonlyArray<string> {
+  const resolved = resolveInCapsule(path, mounts);
+  if (resolved.kind !== "looped" && !resolved.throughLink) return [path];
+  if (resolved.kind === "missing") {
+    return mountExposing(resolved.path, mounts)?.kind === "bind" ? [resolved.path] : [];
+  }
+  // What the capsule reaches through the link, and the file the host means by
+  // the path, each under every name a bind gives it.
+  const reached =
+    resolved.kind === "present" ? hostPathInCapsule(resolved.path, mounts) : undefined;
+  const meant = safeRealpathSync(path);
+  return [
+    ...new Set(
+      [reached, meant].flatMap((hostPath) =>
+        hostPath === undefined ? [] : namesInCapsule(hostPath, mounts),
+      ),
+    ),
+  ];
+}
+
+function namesInCapsule(
+  hostPath: string,
+  mounts: ReadonlyMap<string, Mount>,
+): ReadonlyArray<string> {
+  return [...mounts.values()].flatMap((mount) => {
+    if (mount.kind !== "bind" && mount.kind !== "ro-bind") return [];
+    if (hostPath !== mount.source && !hostPath.startsWith(`${mount.source}${sep}`)) return [];
+    const target = join(mount.target, relative(mount.source, hostPath));
+    // A deeper mount over the same place shows something else there.
+    return mountExposing(target, mounts) === mount ? [target] : [];
   });
+}
+
+type CapsuleResolution =
+  | { readonly kind: "present" | "missing"; readonly path: string; readonly throughLink: boolean }
+  | { readonly kind: "looped" };
+
+/**
+ * Follows a path one component at a time as the capsule would. A host
+ * `realpath` is not enough: a relative `../shared/token` inside a bound root
+ * named through a link climbs out of the root's capsule name, not out of the
+ * folder it resolves to on the host, so the two can reach different files.
+ * Above every bind, and inside a tmpfs, the capsule holds only folders
+ * Bubblewrap made, so a link the host has there is no link in the capsule.
+ */
+function resolveInCapsule(path: string, mounts: ReadonlyMap<string, Mount>): CapsuleResolution {
+  let pending = path.split(sep).filter((part) => part.length > 0);
+  let current: string = sep;
+  let throughLink = false;
+  let linksFollowed = 0;
+  for (;;) {
+    const [part, ...rest] = pending;
+    if (part === undefined) return { kind: "present", path: current, throughLink };
+    pending = rest;
+    if (part === ".") continue;
+    if (part === "..") {
+      current = dirname(current);
+      continue;
+    }
+    const next = join(current, part);
+    const host = hostPathInCapsule(next, mounts);
+    if (host === undefined) {
+      current = next;
+      continue;
+    }
+    let link: string | undefined;
+    try {
+      link = lstatSync(host).isSymbolicLink() ? readlinkSync(host) : undefined;
+    } catch {
+      return { kind: "missing", path: join(next, ...pending), throughLink };
+    }
+    if (link === undefined) {
+      current = next;
+      continue;
+    }
+    // The kernel's own limit; past it the capsule cannot open the path either.
+    linksFollowed += 1;
+    if (linksFollowed > 40) return { kind: "looped" };
+    throughLink = true;
+    if (isAbsolute(link)) current = sep;
+    pending = [...link.split(sep).filter((part) => part.length > 0), ...pending];
+  }
+}
+
+function hostPathInCapsule(path: string, mounts: ReadonlyMap<string, Mount>): string | undefined {
+  const mount = mountExposing(path, mounts);
+  if (mount === undefined || (mount.kind !== "bind" && mount.kind !== "ro-bind")) return undefined;
+  return join(mount.source, relative(mount.target, path));
+}
+
+function mountExposing(path: string, mounts: ReadonlyMap<string, Mount>): Mount | undefined {
+  let deepest: Mount | undefined;
+  for (const mount of mounts.values()) {
+    if (path !== mount.target && !path.startsWith(`${mount.target}${sep}`)) continue;
+    if (deepest === undefined || depth(mount.target) > depth(deepest.target)) deepest = mount;
+  }
+  return deepest;
 }
 
 interface Mount {
@@ -659,22 +784,56 @@ function isDirectoryForDeny(path: string): boolean {
   }
 }
 
-const emptySourcePaths = new Map<string, string>();
-
 function createEmptySourceForPath(path: string): string | undefined {
-  const cached = emptySourcePaths.get(path);
-  if (cached !== undefined) return cached;
-
   try {
     const stats = lstatSync(path);
-    if (stats.isFile() || stats.isSymbolicLink()) {
-      const source = mkdtempSync(join(tmpdir(), "octant-deny-"));
-      const file = join(source, "file");
-      writeFileSync(file, "");
-      emptySourcePaths.set(path, file);
-      return file;
-    }
+    if (!stats.isFile() && !stats.isSymbolicLink()) return undefined;
+  } catch {
     return undefined;
+  }
+  return emptyDenySource();
+}
+
+let reusedEmptyDenySource: string | undefined;
+
+/**
+ * The empty file every denied file is covered with. It lives under the host
+ * temp directory for the server's lifetime, where a cleaner such as
+ * systemd-tmpfiles may delete it; Bubblewrap then refused every later launch
+ * with "Can't find source path" until the server restarted. So it is checked
+ * before each use and made again when it is gone or no longer empty. Its
+ * name is public in every Bubblewrap command line, so once a cleaner removes
+ * it another local user can make a folder of that name in the shared temp
+ * directory; measured on bwrap 0.9.0, a cover reused from such a folder
+ * showed what that user wrote into it after the check. It is reused only
+ * while this server alone can change it.
+ */
+function emptyDenySource(): string | undefined {
+  if (reusedEmptyDenySource !== undefined) {
+    try {
+      const folder = lstatSync(dirname(reusedEmptyDenySource));
+      const stats = lstatSync(reusedEmptyDenySource);
+      const owner = process.getuid?.();
+      if (
+        folder.isDirectory() &&
+        folder.uid === owner &&
+        (folder.mode & 0o022) === 0 &&
+        stats.isFile() &&
+        stats.uid === owner &&
+        (stats.mode & 0o022) === 0 &&
+        stats.size === 0
+      ) {
+        return reusedEmptyDenySource;
+      }
+    } catch {
+      // Removed since the last launch; make another below.
+    }
+  }
+  try {
+    const file = join(mkdtempSync(join(tmpdir(), "octant-deny-")), "file");
+    writeFileSync(file, "", { mode: 0o600 });
+    reusedEmptyDenySource = file;
+    return file;
   } catch {
     return undefined;
   }
