@@ -11,9 +11,12 @@ provider SDK seam, and who may change credentials
 Add endpoint flow.
 
 Status: authorized post-preview scope, and its decisions accepted by the
-maintainer, on 2026-10-26; slice 1 is starting, and nothing is built yet.
-Nothing here changes what ships today. Each slice below lands with its own
-implementation, tests, and the edits to this file that record what it built.
+maintainer, on 2026-10-26. Slice 1a (the seam and its conformance) is built;
+slices 1b and 1c are next. Nothing here changes what ships today: no broker
+dialect or driver speaks `directory-oauth` yet: provider policy refuses to
+configure an instance with it, and one read from storage is `incompatible`.
+Each slice below lands with its own implementation, tests, and the edits to
+this file that record what it built.
 
 ## Outcome
 
@@ -27,17 +30,18 @@ and never falls back to another authentication.
 
 ## What exists today
 
-| Piece                     | Where                                                                                                                                                                                      | What it gives this design                                                                                                                                                                                                                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Credential broker         | [`credentialBroker.ts`](../../packages/host-runtime/src/credentialBroker.ts)                                                                                                               | Loopback service with a closed route set and a bearer token; the server reaches it only through `OCTANT_CREDENTIAL_BROKER_*`, which every child environment loses                                                                                                                                          |
-| Host OAuth runner         | [`hostOAuth.ts`](../../packages/host-runtime/src/hostOAuth.ts)                                                                                                                             | Descriptor-driven PKCE and device-code flows, single-flight refresh with rotation safety, typed sign-in-again, JWKS-validated identity tokens (ChatGPT plan dialect), issuer revocation; `/v1/credentials/resolve` refuses grant material (`isHostOAuthGrantMaterial`)                                     |
-| `subscription-oauth` kind | [`subscriptionOAuth.ts`](../../packages/provider-sdk/src/subscriptionOAuth.ts), [`directEndpointSubscriptionOAuth.ts`](../../apps/server/src/providers/directEndpointSubscriptionOAuth.ts) | A credential pointer (`credentialRef`, `descriptorId`, `accountLabel`), per-request `access`/`refresh` through the host, origin re-check before any bearer is released, readiness mapping, and a conformance runner that never reports the token                                                           |
-| Harness endpoint port     | [`harnessEndpoint.ts`](../../packages/provider-sdk/src/harnessEndpoint.ts), [`harnessEndpointConformance.ts`](../../packages/provider-sdk/src/harnessEndpointConformance.ts)               | The seam a direct endpoint now uses: a driver supplies `open`/`send` and `admitTurn`; the host owns the loop, journal, retries, and registry. Ollama is its first driver; the Azure AI Foundry driver still wires host modules and is queued to move ([Native harness](../architecture.md#native-harness)) |
-| Azure AI Foundry driver   | [`azureFoundryDriver.ts`](../../apps/server/src/providers/azureFoundryDriver.ts), `AzureFoundryProviderConfiguration` in [`providers.ts`](../../packages/contracts/src/providers.ts)       | `authentication: "api-key"` only, sent in the `api-key` header                                                                                                                                                                                                                                             |
-| Bedrock through API keys  | [`bedrockMantleSmoke.integration.test.ts`](../../apps/server/src/providers/bedrockMantleSmoke.integration.test.ts), [`codexProcess.ts`](../../apps/server/src/providers/codexProcess.ts)   | Bedrock's OpenAI-compatible endpoint works as an ordinary `openai-compatible` instance with a Bedrock API key. Codex's own Bedrock provider reads the person's AWS profile in its delegated posture; static `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` never cross into it                                |
-| Secret absence            | [`directProviderSecretAbsence.test.ts`](../../apps/server/src/providers/directProviderSecretAbsence.test.ts)                                                                               | The pattern for proving a credential reaches no event, failure, diagnostic, or journal record                                                                                                                                                                                                              |
+| Piece                     | Where                                                                                                                                                                                                                                                       | What it gives this design                                                                                                                                                                                                                                                                   |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Credential broker         | [`credentialBroker.ts`](../../packages/host-runtime/src/credentialBroker.ts)                                                                                                                                                                                | Loopback service with a closed route set and a bearer token; the server reaches it only through `OCTANT_CREDENTIAL_BROKER_*`, which every child environment loses                                                                                                                           |
+| Host OAuth runner         | [`hostOAuth.ts`](../../packages/host-runtime/src/hostOAuth.ts)                                                                                                                                                                                              | Descriptor-driven PKCE and device-code flows, single-flight refresh with rotation safety, typed sign-in-again, JWKS-validated identity tokens (ChatGPT plan dialect), issuer revocation; `/v1/credentials/resolve` refuses grant material (`isHostOAuthGrantMaterial`)                      |
+| `subscription-oauth` kind | [`subscriptionOAuth.ts`](../../packages/provider-sdk/src/subscriptionOAuth.ts), [`directEndpointSubscriptionOAuth.ts`](../../apps/server/src/providers/directEndpointSubscriptionOAuth.ts)                                                                  | A credential pointer (`credentialRef`, `descriptorId`, `accountLabel`), per-request `access`/`refresh` through the host, origin re-check before any bearer is released, readiness mapping, and a conformance runner that never reports the token                                            |
+| Harness endpoint port     | [`harnessEndpoint.ts`](../../packages/provider-sdk/src/harnessEndpoint.ts), [`harnessEndpointConformance.ts`](../../packages/provider-sdk/src/harnessEndpointConformance.ts)                                                                                | The seam a direct endpoint now uses: a driver supplies `open`/`send` and `admitTurn`; the host owns the loop, journal, retries, and registry. Ollama, OpenAI-compatible, Anthropic-compatible, and Azure AI Foundry drivers run on it ([Native harness](../architecture.md#native-harness)) |
+| Azure AI Foundry driver   | [`azureFoundryDriver.ts`](../../apps/server/src/providers/azureFoundryDriver.ts), `AzureFoundryProviderConfiguration` in [`providers.ts`](../../packages/contracts/src/providers.ts)                                                                        | `authentication: "api-key"` only, sent in the `api-key` header                                                                                                                                                                                                                              |
+| Bedrock through API keys  | [`bedrockMantleSmoke.integration.test.ts`](../../apps/server/src/providers/bedrockMantleSmoke.integration.test.ts), [`codexProcess.ts`](../../apps/server/src/providers/codexProcess.ts)                                                                    | Bedrock's OpenAI-compatible endpoint works as an ordinary `openai-compatible` instance with a Bedrock API key. Codex's own Bedrock provider reads the person's AWS profile in its delegated posture; static `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` never cross into it                 |
+| `directory-oauth` seam    | [`directoryOAuth.ts`](../../packages/provider-sdk/src/directoryOAuth.ts), [`directoryOAuthConformance.ts`](../../packages/provider-sdk/src/directoryOAuthConformance.ts), `DirectoryBinding` in [`providers.ts`](../../packages/contracts/src/providers.ts) | Slice 1a: the pointer, `DirectoryOAuthHost`, per-request resolve with the binding checks, the one-renewal 401 rule, fixed failure sentences, and `runDirectoryOAuthConformance` against an in-memory fake directory and endpoint                                                            |
+| Secret absence            | [`directProviderSecretAbsence.test.ts`](../../apps/server/src/providers/directProviderSecretAbsence.test.ts)                                                                                                                                                | The pattern for proving a credential reaches no event, failure, diagnostic, or journal record                                                                                                                                                                                               |
 
-Nothing today speaks a directory tenant or signs a cloud request.
+Nothing today signs in to a directory tenant or signs a cloud request.
 
 ## Decisions already settled
 
@@ -107,7 +111,7 @@ dialect and a binding, not a second store or a second refresh path.
 | ------------------------------------------ | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `/v1/oauth/begin`                          | Server, for a local principal             | Dialect `directory-oidc`. The descriptor carries a tenant id (a GUID, never `common` or `organizations`), a client id, and an audience from a closed list; the broker builds the authority URLs from a closed issuer host, so configuration cannot name an arbitrary IdP                                                                                                                                   |
 | `/v1/oauth/status`                         | Server                                    | Unchanged; on success the grant records the validated tenant, client, audience, the endpoint origin it was signed in for, and an account label                                                                                                                                                                                                                                                             |
-| `/v1/oauth/access`                         | Server driver, per request                | Takes a required `binding` (tenant, audience, endpoint origin) for a directory grant and refuses (`binding-mismatch`) when it differs from the grant; returns the access token and expiry only                                                                                                                                                                                                             |
+| `/v1/oauth/access`                         | Server driver, per request                | Takes a required `binding` (tenant, client, audience, endpoint origin) for a directory grant and refuses (`binding-mismatch`) when it differs from the grant; returns the access token and expiry only                                                                                                                                                                                                     |
 | `/v1/oauth/refresh`                        | Server driver, when access is near expiry | Unchanged single-flight refresh; directory error codes map to sign-in-again reasons                                                                                                                                                                                                                                                                                                                        |
 | `/v1/oauth/revoke`                         | Server, for a local principal             | Deletes the local grant. The directory offers no client-side refresh-token revocation, so sign-out is local and Settings says so                                                                                                                                                                                                                                                                           |
 | `/v1/credentials/resolve`                  | —                                         | Refuses directory and cloud grant material, as it already refuses subscription grants                                                                                                                                                                                                                                                                                                                      |
@@ -115,15 +119,18 @@ dialect and a binding, not a second store or a second refresh path.
 
 The server-side client grows the binding argument and nothing else; drivers
 see a provider-sdk port, `DirectoryOAuthHost`, shaped like
-`SubscriptionOAuthHost` with the binding on `access`.
+`SubscriptionOAuthHost` with the binding on `access`. Its `sign-in-again`
+reasons add `interaction-required`, and `access` adds `binding-mismatch`. A
+grant the broker no longer holds reads `sign-in-again` (`expired`), as a
+subscription grant does.
 
 ## Tenant, audience, and endpoint binding
 
 A `directory-oauth` instance records three facts in its configuration, none
-secret: the tenant id, the client id, and the endpoint's base URL. The audience
-is not configurable: each driver kind names the one resource its endpoint
-accepts. The binding is checked at four points, and each failure is
-`incompatible` without a model request:
+secret: the tenant id, the client id (as `directory: { tenantId, clientId }`),
+and the endpoint's base URL. The audience is not configurable: each driver kind
+names the one resource its endpoint accepts. The binding is checked at four
+points, and each failure is `incompatible` without a model request:
 
 1. **Sign-in.** The broker requests only the kind's audience and validates the
    identity token against the tenant's published keys: signature, issuer
@@ -147,6 +154,28 @@ accepts. The binding is checked at four points, and each failure is
 Endpoint hosts are a closed suffix list per kind, so a typo or a crafted
 address cannot send a directory bearer elsewhere.
 
+Rules slice 1a resolved, each the stricter reading of the text above:
+
+- **GUID form.** Tenant and client ids are lowercase GUIDs, compared exactly.
+  The contract refuses `common`, `organizations`, `consumers`, a domain name,
+  and an uppercase GUID, so two spellings of one tenant can never disagree at
+  a binding check; Settings lowercases what the person pastes (slice 1c).
+- **Client id in the binding.** `access` carries the client id beside tenant,
+  audience, and origin, because editing the client id must also drop the
+  grant's usability (point 2).
+- **No fallback.** A stored credential that is not a well-formed
+  `directory-oauth` pointer, such as an API key left from an earlier
+  configuration, reads `unauthenticated` (`missing`); the driver never sends
+  it. A pointer with an unknown field, a non-https or path-bearing origin, or
+  an audience with a query is not read at all.
+- **Host list form.** A suffix starts with a dot and matches only a subdomain;
+  the base URL must be https without embedded credentials.
+- **Until the driver exists.** Provider policy refuses to create or change an
+  Azure AI Foundry instance to `directory-oauth`, and the driver refuses to
+  build for one read from storage, so such an instance reads `incompatible`
+  and no stored key is sent in place of the sign-in. Slice 1c replaces both
+  refusals with the directory transport.
+
 ## Expiry, refresh, and revocation
 
 - **Per-request resolution.** The bearer is resolved for each `send`, never once
@@ -162,8 +191,11 @@ address cannot send a directory bearer elsewhere.
 - **Mid-turn expiry.** A 401 on a send after a usable token makes the
   transport force one refresh and resend once inside that attempt; renewing a
   credential is the transport's own business, while the port's one-attempt rule
-  governs outage retries. A second 401 fails the turn as `unauthenticated`,
-  which the host does not retry as an outage.
+  governs outage retries. A second 401 fails the turn as `unauthenticated`
+  (`revoked`), which the host does not retry as an outage: the endpoint refused
+  a token the directory had just issued, so only a new sign-in can change the
+  answer. The driver keeps no grant state, so the broker's grant stays as it
+  was.
 - **Revocation.** Sign out deletes the local grant; removing the instance and
   the host credential purge do the same. An administrator's revocation reaches
   Octant at the next refresh, so an issued access token can stay valid at the
@@ -194,6 +226,15 @@ A provider-sdk `runDirectoryOAuthConformance` (and later
 `runCloudIamConformance`) proves these against a fake directory and a fake
 endpoint, reporting outcomes and never the token. Every direct-endpoint driver
 that declares the kind also passes `runHarnessEndpointConformance`.
+
+The runner proves the driver-facing rows: a driver supplies its audience, two
+base URLs on its host list, and a factory that builds it against the runner's
+fake broker, endpoint, and clock. The fake broker keeps the real broker's
+rules (binding re-check, single-flight refresh, which refusals drop the
+grant), so "grant kept" is proved by the driver recovering without a new
+sign-in and "grant dropped" by its staying unauthenticated. The raw-resolve and
+remote-principal rows concern the broker and the server, not a driver; slice
+1b proves them against the broker.
 
 | Case                                                                                                      | Expected                                                                       |
 | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
@@ -259,22 +300,26 @@ Each slice is reviewable alone and targets `main` unless it says it stacks.
 **Slice 1: Microsoft Entra ID sign-in for Azure AI Foundry.** A native stack of
 three layers:
 
-- **1a. Seam and conformance.** `directory-oauth` in contracts
+- **1a. Seam and conformance.** Built. `directory-oauth` in contracts
   (`AzureFoundryAuthentication` gains it; the configuration gains the tenant and
   client ids) and in provider-sdk (`DirectoryOAuthHost`, the pointer, resolve,
   readiness, `runDirectoryOAuthConformance`); the port's `open` doc comment says
   credentials resolve per send. _Acceptance:_ every conformance case for
   `directory-oauth` passes against fakes. _Verification:_ focused provider-sdk
-  and contract tests, typecheck of consumers.
+  and contract tests, typecheck of consumers. _Evidence:_ a reference driver
+  written only against the seam passes every driver-facing case, and drivers
+  that bind to the pointer instead of their configuration, give up on a 401,
+  or echo the bearer in a failure each fail the runner; the contract refuses
+  multi-tenant aliases and secrets; provider policy and the Foundry driver
+  refuse a `directory-oauth` configuration until 1c.
 - **1b. Broker dialect.** `directory-oidc` in the host OAuth runner: closed
   issuer host, tenant-specific authority, identity-token validation, binding on
   `access`, error-code mapping, local revoke. _Acceptance:_ a fake directory
   drives sign-in, refresh, every sign-in-again reason, and binding refusal;
   raw resolve refuses the grant; remote negatives refuse. _Verification:_
   host-runtime tests.
-- **1c. Foundry driver and Settings.** The Foundry driver on the harness
-  endpoint port (moving it onto the port first if that queued move has not
-  landed, as its own layer) sends the bearer per request, probes with it, and
+- **1c. Foundry driver and Settings.** The Foundry driver, already on the
+  harness endpoint port, sends the bearer per request, probes with it, and
   redacts it; Add endpoint offers Sign in beside the key with tenant and client
   id fields; [Providers and model endpoints](model-endpoints.md), architecture,
   and the user guide are updated. _Acceptance:_ a Foundry instance signed in

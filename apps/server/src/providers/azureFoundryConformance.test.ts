@@ -1,4 +1,6 @@
 import {
+  decodeDirectoryClientId,
+  decodeDirectoryTenantId,
   decodeProviderInstanceId,
   decodeProviderSessionId,
   decodeProviderToolDefinition,
@@ -14,6 +16,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeAzureFoundryDriver } from "./azureFoundryDriver";
+import { ProviderDriverConfigurationError } from "./providerDriverFactory";
 import {
   recordProviderChatConformanceEvidence,
   recordProviderConformanceEvidence,
@@ -161,6 +164,36 @@ describe("Azure AI Foundry provider conformance", () => {
     const init = fetch.mock.calls[0]?.[1];
     expect(init?.headers).toMatchObject({ "api-key": "fixture-secret" });
     expect(JSON.stringify(init?.headers)).not.toMatch(/authorization/i);
+  });
+
+  it("reads a directory sign-in instance as incompatible and never sends a stored key in its place", () => {
+    const resolve = vi.fn(async () => "fixture-secret");
+    const fetch = vi.fn<CompatibleFetch>(async () => Response.json({ data: [{ id: modelId }] }));
+    let refusal: unknown;
+    try {
+      makeAzureFoundryDriver({
+        instanceId,
+        configuration: {
+          ...configuration("responses"),
+          authentication: "directory-oauth",
+          directory: {
+            tenantId: decodeDirectoryTenantId("6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f"),
+            clientId: decodeDirectoryClientId("0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d"),
+          },
+        },
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        credentialResolver: { has: async () => true, resolve },
+        fetch,
+      });
+    } catch (error) {
+      refusal = error;
+    }
+
+    // The provider service reads a driver configuration refusal as
+    // `incompatible` readiness, as it does for any other unbuildable driver.
+    expect(refusal).toBeInstanceOf(ProviderDriverConfigurationError);
+    expect(resolve).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("keeps Connection Check non-generating and reports tool support as unsupported by default", async () => {
