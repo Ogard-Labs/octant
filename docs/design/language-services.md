@@ -15,8 +15,9 @@ post-preview work on 2026-10-26, when parked backlog work was unlocked. That
 authorizes the design and the slices below; the release-boundary statement in
 `AGENTS.md` and the architecture is updated separately. The maintainer
 accepted this design and its [decisions](#maintainer-decisions) on 2026-10-26.
-**Slice 1 (seam and policy) is built; nothing launches a language server
-yet.** Slice 2 is next. Monaco editing and the explicit
+**Slices 1 (seam and policy) and 2 (companion and the bundled TypeScript
+server) are built: the host serves diagnostics and definitions, and no editor
+calls it yet.** Slice 3 is next. Monaco editing and the explicit
 external-editor handoff stay the primary Code editing paths and are unchanged
 by every slice.
 
@@ -64,9 +65,18 @@ behind its own approval and confinement rules.
   the `language-server` kind and its `languageServer` declaration;
   `packages/plugin-host/src/activation.ts` admits it in Code only;
   `packages/domain/src/languageServerLaunchPolicy.ts` decides a launch;
-  `packages/contracts/src/codeLanguage.ts` holds the read and refusal
-  contracts; and `code.language.read` is remote-approvable in
-  `remoteAccessPolicy.ts`. No server module uses them yet.
+  `packages/contracts/src/codeLanguage.ts` holds the read, document, and
+  refusal contracts; and `code.language.read` is remote-approvable in
+  `remoteAccessPolicy.ts`.
+- **Companion (slice 2).** `apps/server/src/code/codeLanguageService.ts`
+  authorizes each request and runs one server per checkout and component;
+  `languageServerProcess.ts` launches it confined and keeps its receipt;
+  `languageServerConnection.ts` holds the protocol; and
+  `languageServerResults.ts` turns answers into Octant contracts.
+  `packages/plugin-host/src/bundledLanguageServers.ts` declares the bundled
+  TypeScript server, and `wiring/codeTooling.ts` resolves its binary from the
+  pinned `typescript` package. `POST /api/code/language/documents` and
+  `POST /api/code/language/read` serve them; no client calls either yet.
 - **Network levels.** `apps/server/src/process/threadEgressPolicy.ts` resolves
   `none`, `provider-endpoints-only`, and `unrestricted`. The
   [harness tool egress rules](../architecture.md#harness-tool-egress-rules)
@@ -197,8 +207,89 @@ restrictive one was taken.
   included, runs before the launch decision is consulted. A refused read never
   starts a server, so a paired device can start a `static` server only for a
   thread it already reaches (D4).
-- **Not yet wired.** No server module uses the policy or the read contracts
-  until slice 2. The module wiring check lists both as islands until then.
+
+### Companion rules
+
+Slice 2 settled these details, taking the more restrictive option where the
+design left a choice open.
+
+- **Open documents.** The editor opens a document with
+  `POST /api/code/language/documents` (`open`), naming a checkout-relative path
+  and its current text. The host confines the path, derives the file reference
+  the editor's other Code surfaces use, and sends `didOpen`. `change` and
+  `close` name that reference. A read names only the reference, and a
+  reference this thread has not opened on this checkout is refused as
+  `file-outside-thread`. Reason: a read must never name a path, and the host
+  cannot turn a file reference back into one. Two threads on one checkout
+  share one server document; it closes when the last of them closes it. A
+  document whose text would not fit a 4 MiB frame is answered `too-large` and
+  not sent.
+- **Which language a file is.** Octant's own table maps file extensions to
+  languages (`.ts`, `.mts`, `.cts`, `.tsx`, `.js`, `.mjs`, `.cjs`, `.jsx`).
+  Repository configuration never changes it, so it never picks a server.
+- **Refusal order.** `no-reach` comes first, and a thread that does not exist
+  reads the same, so a refusal never says which threads a host has. Then
+  `thread-inactive` (archived, waiting, interrupted, or completed: only an
+  active thread may read, as only it may save), `checkout-mismatch`,
+  `checkout-unavailable`. A change or read then needs a document this thread
+  opened (`file-outside-thread`). The path is contained again on every open
+  and read, symlinks resolved, and must be a regular file
+  (`path-outside-checkout`). Then `no-language-server`, the launch refusals,
+  and last `confinement-unavailable`. Nothing is launched until all of them
+  pass.
+- **No repository tooling yet.** There is no approval store for language
+  servers until slice 6, so the launch decision is asked with no approval on
+  record and a `repo-tooling` server never starts. A launch class this host
+  cannot confine is refused as `confinement-unavailable`, never run as
+  `static`.
+- **Registrations.** A server's `client/registerCapability` is accepted only
+  when every method in it is one Octant sends; otherwise the whole request is
+  refused. TypeScript's request for configuration-change notices is refused
+  this way and the server carries on. `workspace/didChangeWatchedFiles` is
+  sent only after the server registered for it, with each changed path from
+  the checkout's file watch.
+- **Answers that are not results.** A request the server answers with an error
+  is reported as `timed-out`, as one it did not answer in time is: no result
+  arrived, and retrying is the remedy. A connection that ends mid-request reads
+  as `crashed`. A server that does not offer pulled diagnostics is read from
+  what it last pushed, and reads as `starting` until it pushes something.
+- **Crash budget and retry.** Two restarts a minute, as the extension
+  supervisor allows. A restart reopens every document still held. Past the
+  budget the server stays `crashed` for reads until the editor opens a
+  document again, which is the retry. A frame over the cap or one that is not
+  a frame counts as a crash.
+- **Idle.** A document no request has touched for ten minutes is closed, so a
+  window that vanished without closing its documents cannot keep a server
+  alive. A server with no open document stops ten minutes after it was last
+  used.
+- **Lifecycle stops.** Each committed `code-thread` or `code-checkout` event
+  runs the stop check at once, and a timed check runs every minute. A server
+  stops when its checkout is unavailable, when no active thread is left on its
+  checkout, or when its component is no longer effective (drained with
+  `shutdown` and `exit` first). Host shutdown stops every server.
+- **Launch.** The checkout is the read-only bound root, the component's install
+  is a read root, and its cache is the only write root; the cache parent is
+  denied so no server reads a sibling's cache. Network is `none`, exec is the
+  server's own binary only, and Linux loads the no-fork filter. Seatbelt also
+  gets the broad system read every other confined launch uses, because a
+  binary cannot start without the system libraries, while the home folder and
+  the private system paths stay denied. The environment holds only `HOME` and
+  `TMPDIR` (the cache) and a minimal `PATH`.
+- **Cache bound.** A cache past 512 MB is cleared before the server's next
+  start. A cache holds nothing a server cannot rebuild, so clearing all of it
+  is the simplest eviction that keeps the bound.
+- **Receipts.** Each server's process group is recorded before the server is
+  used, under its own supervisor name. A server whose receipt cannot be
+  written does not run. The host reaps last run's servers at startup, before
+  it starts any.
+- **Remote.** `POST /api/code/language/documents` and
+  `POST /api/code/language/read` are both `code.language.read`: syncing the
+  editor's text feeds a read and writes nothing. A paired device with Code
+  reach may start a `static` server through them.
+- **Not built yet.** The Settings switch and its `turned-off` refusal (slice
+  3), the bounded `window/logMessage` log and the lifecycle counts under
+  Diagnostics, and removing a cache when its checkout is removed or its
+  component uninstalled.
 
 ### Authority
 
@@ -381,6 +472,21 @@ accounts or hardware.
    - _Verify:_ server integration tests. macOS Seatbelt evidence needs a Mac:
      either the slice adds this test to the existing `macos-15` CI job, or a
      maintainer runs it.
+   - _State:_ built. On Linux the bundled `tsc --lsp --stdio` 7.0.2 answers the
+     two-file fixture's type error and cross-file definition under Bubblewrap
+     with the network unshared, the no-fork and no-exec filter loaded, and the
+     checkout bound read-only, in a Plan thread
+     (`codeLanguageServiceProcess.test.ts`). A hostile fake server covers
+     `applyEdit`, `executeCommand`, and `showDocument` (method-not-found, the
+     checkout unchanged), host paths in messages, outside-checkout and
+     symlinked definitions, an oversize frame, a missed deadline with its
+     `$/cancelRequest`, the crash budget and retry, idle and archive stops, and
+     a restarted host reaping receipts. Archived and completed threads, a
+     checkout mismatch or unavailable checkout, a symlink escape, a device
+     without reach, another platform, and a missing `bwrap` are refused before
+     anything launches. The `macos-15` CI job runs the same test for Seatbelt
+     evidence; it has not yet run on a Mac. The rules are under
+     [Companion rules](#companion-rules).
 3. **Editor wiring.** Container: yes.
    - Monaco shows the companion's diagnostics as markers. Definition (F12 or
      Cmd-click) opens an in-checkout target through the ordinary file-open
