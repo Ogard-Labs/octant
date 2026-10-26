@@ -1625,8 +1625,12 @@ export class ProviderService implements ProviderServiceApi {
         const current = this.#runtime.observedState(instanceId);
         if (current === undefined) {
           // The observation was cleared while the verification was in flight.
-          // The verification result is lost, but we avoid overwriting a cleared
-          // state with a stale snapshot.
+          // A "supported" result is lost rather than written over a cleared
+          // state, but an "unsupported" one still leaves the catalogue, or the
+          // next probe would restore the model's tools from it.
+          if (result.appManagedTools === "unsupported") {
+            this.#forgetPersistedToolVerification(instanceId, modelId);
+          }
           return result.appManagedTools;
         }
         const priorVerified = current.verifiedToolModelIds ?? [];

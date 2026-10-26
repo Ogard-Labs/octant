@@ -4547,9 +4547,9 @@ the model at another size.
   a driver that misreports cannot widen tool admission, and the registry view a
   driver is given has no writer for it. An "unsupported" result also removes the
   model from the persisted record when the current observation is a failed check
-  with no catalog to persist, so the next successful check cannot restore it. A
-  probe or a Chat turn after a restart restores the record from a catalog that
-  no configuration change invalidated.
+  with no catalog to persist, or was cleared during the run, so the next
+  successful check cannot restore it. A probe or a Chat turn after a restart
+  restores the record from a catalog that no configuration change invalidated.
   Admission, the AgentRun transport check, the harness endpoint port, and the
   Chat preflight read that set per model, so verifying one model
   never offers tools to its siblings; the only tool an unverified model is
