@@ -23,6 +23,11 @@ import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:f
 import { decodeDesktopHostTag, type DesktopHostTag } from "@octant/contracts";
 import { defaultShellSettings } from "@octant/domain";
 import { createDesktopLeaseService } from "../computerUse/desktopLeaseService";
+import { createHostLocalDesktopLaunch } from "../computerUse/hostLocalDesktopLaunch";
+import {
+  createHostLocalDesktopProvider,
+  HOST_LOCAL_DESKTOP_PROGRAMS,
+} from "../plugins/hostLocalDesktop/hostLocalDesktopProvider";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { withToolFamilyHelp } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
@@ -202,18 +207,45 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     queueMicrotask(syncComputerUseSettings),
   );
   syncComputerUseSettings();
-  // No desktop provider is registered and no Project stores a recipe yet, so
-  // every lease command refuses as a value; the service still reconciles and
-  // sweeps so a lease journaled by any later build is torn down on start.
-  // Callers bring their own authority when the Desktop pane and the agent's
-  // lease binding arrive, so until then no caller may open a thread here.
+  // No Project stores a recipe yet, so every lease command refuses as a
+  // value; the service still reconciles and sweeps so a lease journaled by any
+  // later build is torn down on start. Callers bring their own authority when
+  // the Desktop pane and the agent's lease binding arrive, so until then no
+  // caller may open a thread here.
+  //
+  // On Linux the bundled host-local driver is always loaded, so teardown and
+  // restart reconciliation can reap its desktops even after the programs it
+  // needs were removed; it is offered for leasing only when its readiness
+  // reported ready as the host started.
+  const desktopLeaseDirectory = join(persistence.dataDirectory, "desktop-leases");
+  const desktopHostTag = readOrMintDesktopHostTag(desktopLeaseDirectory);
+  const hostLocalDesktopLaunch =
+    process.platform === "linux"
+      ? createHostLocalDesktopLaunch({
+          directory: desktopLeaseDirectory,
+          hostTag: desktopHostTag,
+          platform: process.platform,
+          provisioning: (leaseId) =>
+            persistence.desktopLeaseProjection.get(leaseId)?.lease.state === "provisioning",
+        })
+      : undefined;
+  const hostLocalDesktops =
+    hostLocalDesktopLaunch === undefined
+      ? []
+      : [
+          {
+            provider: createHostLocalDesktopProvider(hostLocalDesktopLaunch),
+            effective:
+              hostLocalDesktopLaunch.readiness(HOST_LOCAL_DESKTOP_PROGRAMS).status === "ready",
+          },
+        ];
   const desktopLeases = createDesktopLeaseService({
     journal: persistence.journal,
     projection: persistence.desktopLeaseProjection,
-    hostTag: readOrMintDesktopHostTag(join(persistence.dataDirectory, "desktop-leases")),
+    hostTag: desktopHostTag,
     platform: process.platform,
     hasScreen: computerUseDesktop !== undefined || options.computerUseAdapter !== undefined,
-    providers: () => [],
+    providers: () => hostLocalDesktops,
     recipe: () => undefined,
     thread: (owner) => {
       const current =

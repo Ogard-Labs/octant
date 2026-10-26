@@ -5854,8 +5854,9 @@ same. This holds in Chat, Work, and Code.
   transfer, and verified lease teardown are post-preview design, accepted on
   2026-10-26, in
   [Disposable desktops](design/disposable-desktops.md). The lease contract,
-  the `desktop-provider` seam with its conformance suite, and the host lease
-  service are built; no desktop provider, recipe storage, transfer, agent
+  the `desktop-provider` seam with its conformance suite, the host lease
+  service, and the host-local provider (a virtual X display in a dedicated
+  Bubblewrap launch, Linux only) are built; no recipe storage, transfer, agent
   binding, or Desktop pane is, so every lease command refuses as a value.
 
 **Canvas export.** A destination plugin contributes an export target through

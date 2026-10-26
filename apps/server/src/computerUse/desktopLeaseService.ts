@@ -683,12 +683,20 @@ export function createDesktopLeaseService(
       delete entry.acquiring;
       if (result.status !== "acquired") {
         live.delete(String(leaseId));
+        // A lease ended while the provider was creating it records its cause
+        // and who asked, as a teardown would; a driver that honours the
+        // cancellation otherwise leaves only "cancelled" behind.
+        const pending = entry.pendingEnd;
         // Only Octant-authored text reaches the journal, never the driver's reason.
         const lease = transition(
           leaseId,
           result.status === "refused" ? "refused" : "failed",
           caller.actor,
-          { detail: ACQUIRE_FAILURE_DETAIL[result.status] },
+          {
+            detail: ACQUIRE_FAILURE_DETAIL[result.status],
+            ...(pending === undefined ? {} : { endReason: pending.reason }),
+            ...(pending?.requestedBy === undefined ? {} : { requestedBy: pending.requestedBy }),
+          },
         );
         await reapStray(teardownPortOf(provider), leaseId);
         return { status: "not-acquired", lease };

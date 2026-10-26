@@ -374,6 +374,47 @@ describe("desktop lease service", () => {
     expect(fake.backend.desktops()).toEqual([]);
   });
 
+  it("records who ended a lease and why when its provider stops creating it", async () => {
+    const fake = createFakeDesktopProvider();
+    const honouring: DesktopProvider = {
+      ...fake.provider,
+      acquire: (request) =>
+        new Promise((resolve) => {
+          request.signal.addEventListener("abort", () => resolve({ status: "cancelled" }), {
+            once: true,
+          });
+        }),
+    };
+    const { service, connection } = host({ providers: [{ provider: honouring }] });
+    const pending = service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const [record] = connection
+      .prepare("SELECT aggregate_id FROM event_journal WHERE event_name = ?")
+      .all("desktop.lease-requested@1") as Array<{ aggregate_id: string }>;
+    const leaseId = decodeDesktopLeaseId(record?.aggregate_id);
+    await expect(
+      service.release({ owner: code(threadA), actor: person, leaseId }),
+    ).resolves.toMatchObject({
+      status: "releasing",
+    });
+    const result = await pending;
+
+    expect(result.status === "not-acquired" ? result.lease : undefined).toMatchObject({
+      state: "failed",
+      endReason: "released",
+    });
+    const last = connection
+      .prepare(
+        "SELECT payload_json FROM event_journal WHERE aggregate_id = ? ORDER BY aggregate_version DESC LIMIT 1",
+      )
+      .get(String(leaseId)) as { payload_json: string };
+    expect(JSON.parse(last.payload_json)).toMatchObject({
+      to: "failed",
+      endReason: "released",
+      requestedBy: { kind: "local-user" },
+    });
+  });
+
   it("still destroys after recipe removal while the retained driver refuses acquire and control", async () => {
     const { service, state, backend } = host();
     const leaseId = await acquired(service, threadA);
