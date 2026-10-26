@@ -203,10 +203,14 @@ async function measureArm(input: {
         );
       }
       for (let turn = first; turn < last; turn += 1) {
+        // The turn runners pass `resumed` whenever the session already has a
+        // recorded resume cursor, which every turn after the first does, even
+        // on the native session the first turn opened.
         const context =
           input.arm === "full"
             ? STANDING
-            : ledger.forTurn({ sessionId: input.sessionId, resumed, context: STANDING }).context;
+            : ledger.forTurn({ sessionId: input.sessionId, resumed: turn > 0, context: STANDING })
+                .context;
         figures.push({
           arm: input.arm,
           turn: turn + 1,
