@@ -927,7 +927,7 @@ describe("applyMigrations", () => {
 
       expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
         currentVersion: 86,
-        appliedVersions: [85],
+        appliedVersions: [85, 86],
       });
       expect(
         connection
@@ -1286,7 +1286,7 @@ it("preserves child content and its purge index when adding generation evidence"
       .all();
     expect(applyMigrations(connection, MIGRATIONS, clock)).toEqual({
       currentVersion: 86,
-      appliedVersions: [71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85],
+      appliedVersions: [71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86],
     });
     expect(
       connection.prepare("SELECT * FROM agent_run_content_store ORDER BY content_id").all(),
