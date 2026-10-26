@@ -229,6 +229,31 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
   const busy = props.busy || props.status !== "ready";
   const showDetectionGroups = props.showDetectionGroups === true && !reordering;
 
+  // Only the first row that needs attention opens by itself, in the order the
+  // page shows them. When every broken row opened its own details, two of them
+  // filled several screens before the person reached a healthy provider.
+  const displayed = showDetectionGroups
+    ? [...groups.configured, ...groups.detected, ...groups.notFound, ...groups.other].map(
+        (row) => row.instance,
+      )
+    : ordered;
+  const attentionId = displayed.find((instance) => {
+    const readiness =
+      props.probingIds.has(instance.id) || props.updatingIds?.has(instance.id) === true
+        ? "checking"
+        : presentationObserved.get(instance.id)?.readiness;
+    return (
+      readiness === "unauthenticated" ||
+      (props.onUseScannedBinary !== undefined &&
+        scannedBinaryOffer(
+          instance,
+          props.discoverySnapshot,
+          readiness,
+          isDetectedLocally(instance, props.discoverySnapshot),
+        ) !== undefined)
+    );
+  })?.id;
+
   function renderProviderRow(instance: ProviderInstance, index: number) {
     return (
       <ProviderRow
@@ -243,6 +268,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           : { usageLimitsClient: props.usageLimitsClient })}
         instance={instance}
         key={instance.id}
+        needsAttention={attentionId !== undefined && String(attentionId) === String(instance.id)}
         {...(props.onAddAccount === undefined ? {} : { onAddAccount: props.onAddAccount })}
         {...(props.discoverySnapshot === undefined
           ? {}
@@ -348,40 +374,42 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           // Surfaces with no detection story keep one list; reorder mode must
           // show the real stored order the grips edit. Rows still keep
           // binary-backed providers fail-closed.
-          <div className="provlist">
+          <div className="provlist setgroup">
             {ordered.map((instance, index) => renderProviderRow(instance, index))}
           </div>
         ) : (
-          <div className="provider-list__groups">
+          // Each group's list is a direct child of its section so it takes the
+          // Settings grouped-row surface, the same as every other row list.
+          <>
             {groups.configured.length === 0 ? (
               <p className="settings-section-line">No providers are switched on yet.</p>
             ) : (
-              <div className="provlist">
+              <div className="provlist setgroup">
                 {groups.configured.map(({ instance, index }) => renderProviderRow(instance, index))}
               </div>
             )}
             {groups.detected.length === 0 ? null : (
               <SettingsSection title="Detected on this host">
-                <div className="provlist">
+                <div className="provlist setgroup">
                   {groups.detected.map(({ instance, index }) => renderProviderRow(instance, index))}
                 </div>
               </SettingsSection>
             )}
             {groups.notFound.length === 0 ? null : (
               <SettingsSection title="Supported, not detected">
-                <div className="provlist">
+                <div className="provlist setgroup">
                   {groups.notFound.map(({ instance, index }) => renderProviderRow(instance, index))}
                 </div>
               </SettingsSection>
             )}
             {groups.other.length === 0 ? null : (
               <SettingsSection title="Other providers">
-                <div className="provlist">
+                <div className="provlist setgroup">
                   {groups.other.map(({ instance, index }) => renderProviderRow(instance, index))}
                 </div>
               </SettingsSection>
             )}
-          </div>
+          </>
         )}
         {props.createForm === undefined ? null : (
           <div className="provider-settings__foot">{props.createForm}</div>
@@ -558,6 +586,8 @@ interface ProviderRowProps {
   readonly extraCodexAccount: boolean;
   readonly usageLimitsClient?: ProviderSettingsViewProps["usageLimitsClient"];
   readonly instance: ProviderInstance;
+  /** The one row the list opens by itself: a sign-in or a found binary is waiting. */
+  readonly needsAttention: boolean;
   readonly observed?: ProviderObservedState;
   readonly discoverySnapshot?: DiscoverySnapshot;
   readonly busy: boolean;
@@ -607,9 +637,7 @@ interface ProviderRowProps {
 
 function ProviderRow(props: ProviderRowProps) {
   const [configurationOpen, setConfigurationOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(
-    () => !props.probing && props.observed?.readiness === "unauthenticated",
-  );
+  const [detailsOpen, setDetailsOpen] = useState(props.needsAttention);
   const [renameSaved, setRenameSaved] = useState(false);
   const [locating, setLocating] = useState(false);
   const [located, setLocated] = useState<Exclude<LocateBinaryOutcome, { kind: "cancelled" }>>();
@@ -633,9 +661,10 @@ function ProviderRow(props: ProviderRowProps) {
   const disabled = props.busy || props.probing || props.updating;
   const readiness = props.updating || props.probing ? "checking" : props.observed?.readiness;
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(() => readiness !== "ready");
+  // A row that comes to need attention opens; collapsing it afterwards sticks.
   useEffect(() => {
-    if (readiness === "unauthenticated") setDetailsOpen(true);
-  }, [readiness]);
+    if (props.needsAttention) setDetailsOpen(true);
+  }, [props.needsAttention]);
   useEffect(() => {
     if (!renameSaved) return;
     const timeout = window.setTimeout(() => setRenameSaved(false), 2500);
@@ -667,12 +696,6 @@ function ProviderRow(props: ProviderRowProps) {
     props.onUseScannedBinary === undefined
       ? undefined
       : scannedBinaryOffer(props.instance, props.discoverySnapshot, readiness, detectedLocally);
-  const scannedOfferPath = scannedOffer?.path;
-  // The offer is the way out of a broken card, so the details that hold it open
-  // when it first appears; collapsing them afterwards sticks.
-  useEffect(() => {
-    if (scannedOfferPath !== undefined) setDetailsOpen(true);
-  }, [scannedOfferPath]);
   const isCli = props.instance.driverKind === "opencode";
   const isCodex = props.instance.driverKind === "codex";
   const isClaude = props.instance.driverKind === "claude";
@@ -789,7 +812,7 @@ function ProviderRow(props: ProviderRowProps) {
         </span>
       ) : null}
       <span className="icon-mark">
-        <ProviderGlyph displayName={name} driverKind={props.instance.driverKind} size={24} />
+        <ProviderGlyph displayName={name} driverKind={props.instance.driverKind} size={20} />
       </span>
       <span className="prov-main">
         <span className="prov-name oct-row-label">
@@ -804,32 +827,33 @@ function ProviderRow(props: ProviderRowProps) {
             </span>
           ) : null}
         </span>
-        {meta === name ? null : <span className="prov-meta oct-meta">{meta}</span>}
+        {/* One status line under the name: state, model count, maker and runtime. */}
+        <span className="prov-observation">
+          <span className="prov-status">
+            <span
+              className="prov-state"
+              data-tone={readinessTone(props.instance.enabled ? readiness : undefined)}
+            >
+              {!props.instance.enabled
+                ? "Off"
+                : props.updating
+                  ? "Updating"
+                  : readiness === undefined
+                    ? "Not checked"
+                    : providerRowReadinessLabel(readiness, props.observed?.models.length ?? 0)}
+            </span>
+          </span>
+          <span className="prov-models oct-meta">
+            {props.observed === undefined ||
+            (props.observed.models.length === 0 && props.observed.readiness !== "ready")
+              ? null
+              : `${props.observed.models.length} ${props.observed.models.length === 1 ? "model" : "models"}`}
+          </span>
+          {meta === name ? null : <span className="prov-meta oct-meta">{meta}</span>}
+        </span>
         {scanSilence === undefined ? null : (
           <span className="prov-meta provider-settings__scan-note">{scanSilence}</span>
         )}
-      </span>
-      <span className="prov-observation">
-        <span className="prov-models oct-meta">
-          {props.observed === undefined ||
-          (props.observed.models.length === 0 && props.observed.readiness !== "ready")
-            ? null
-            : `${props.observed.models.length} ${props.observed.models.length === 1 ? "model" : "models"}`}
-        </span>
-        <span className="prov-status">
-          <span
-            className="prov-state"
-            data-tone={readinessTone(props.instance.enabled ? readiness : undefined)}
-          >
-            {!props.instance.enabled
-              ? "Off"
-              : props.updating
-                ? "Updating"
-                : readiness === undefined
-                  ? "Not checked"
-                  : providerRowReadinessLabel(readiness, props.observed?.models.length ?? 0)}
-          </span>
-        </span>
       </span>
       <span className="prov-actions">
         <OctantButton

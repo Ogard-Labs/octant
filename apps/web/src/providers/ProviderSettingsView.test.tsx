@@ -227,7 +227,7 @@ describe("ProviderSettingsView", () => {
     renderProviderSettings(<ProviderSettingsView {...fixture({ instance: cliNamedProvider() })} />);
 
     const row = screen.getByRole("article", { name: "Codex CLI" });
-    expect(row.querySelector(".prov-main > .prov-meta")).toBeNull();
+    expect(row.querySelector(".prov-observation > .prov-meta")).toBeNull();
   });
 
   it("keeps a stable feedback slot while provider status changes", () => {
@@ -3460,15 +3460,22 @@ describe("ProviderSettingsView", () => {
     expect(screen.queryByRole("heading", { name: "Other providers" })).toBeNull();
   });
 
-  it("sets each detection group in its own Settings section, in cards two to a row", () => {
+  it("lists each provider group as one grouped list, a row per provider that expands in place", async () => {
+    const user = userEvent.setup();
     const absent = {
       ...kiloProvider(),
       enabled: false,
       id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000095"),
     };
+    const detectedCodex = {
+      ...codexProvider(),
+      enabled: false,
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000096"),
+    };
     renderProviderSettings(
       <ProviderSettingsView
         {...fixture({
+          observed: observation(),
           discoverySnapshot: discoverySnapshot({
             candidates: [codexCandidate()],
             searchedDirectories: [
@@ -3477,30 +3484,109 @@ describe("ProviderSettingsView", () => {
             ],
           }),
         })}
-        instances={[absent, { ...codexProvider(), enabled: false }]}
+        instances={[provider(), detectedCodex, absent]}
       />,
     );
 
-    const detected = screen.getByRole("region", { name: "Detected on this host" });
-    expect(detected).toHaveClass("settings-card-section--open");
-    expect(within(detected).getByRole("article", { name: "Codex local" })).toBeVisible();
+    const groups = [
+      { region: screen.getByRole("region", { name: "Providers" }), rows: ["Existing CLI"] },
+      {
+        region: screen.getByRole("region", { name: "Detected on this host" }),
+        rows: ["Codex local"],
+      },
+      {
+        region: screen.getByRole("region", { name: "Supported, not detected" }),
+        rows: ["Kilo local"],
+      },
+    ];
+    for (const group of groups) {
+      // One grouped surface per group, holding that group's rows and no other's.
+      const lists = group.region.querySelectorAll(":scope > .provlist");
+      expect(lists).toHaveLength(1);
+      const list = lists[0];
+      if (!(list instanceof HTMLElement)) throw new Error("Expected a provider list");
+      expect(list).toHaveClass("setgroup");
+      const rows = within(list).getAllByRole("article");
+      expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual(group.rows);
+      for (const row of rows) {
+        const name = row.getAttribute("aria-label") ?? "";
+        expect(within(row).getByText(name)).toBeVisible();
+        expect(row.querySelector(".prov-state")?.textContent).toMatch(/\S/);
+        expect(within(row).getByRole("switch", { name: `Enable ${name}` })).toBeInTheDocument();
+      }
+    }
+
+    const row = screen.getByRole("article", { name: "Existing CLI" });
+    const disclosure = within(row).getByRole("button", { name: "Details for Existing CLI" });
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    disclosure.focus();
+    await user.keyboard("{Enter}");
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    const details = document.getElementById(disclosure.getAttribute("aria-controls") ?? "");
+    expect(details).not.toBeNull();
+    expect(row).toContainElement(details);
     expect(
-      within(screen.getByRole("region", { name: "Supported, not detected" })).getByRole("article", {
-        name: "Kilo local",
-      }),
+      within(row).getByRole("button", { name: "Check connection for Existing CLI" }),
     ).toBeVisible();
 
     const styles = readFileSync(resolve(process.cwd(), "src/styles/settings.css"), "utf8").replace(
       /\s+/g,
       " ",
     );
+    // Rows share one surface: no two-up card grid, no per-row card, no logo tile.
+    expect(styles).not.toMatch(/\.provlist \{[^}]*grid-template-columns: repeat\(2/);
     expect(styles).toMatch(
-      /\.settings-view \.provlist \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/,
+      /\.settings-view \.provlist > \.provrow > \.icon-mark \{ grid-area: icon; width: 20px; height: 20px;/,
     );
-    expect(styles).toMatch(
-      /@media \(max-width: 900px\) \{ \.settings-view \.provlist \{ grid-template-columns: minmax\(0, 1fr\); \}/,
+  });
+
+  it("opens only the first provider that needs attention, and none when every provider is fine", () => {
+    const second = {
+      ...codexProvider(),
+      id: decodeProviderInstanceId("80000000-0000-4000-8000-000000000097"),
+    };
+    const unauthenticated = (instanceId: ProviderInstance["id"]) => ({
+      ...observation({ readiness: "unauthenticated" }),
+      instanceId,
+    });
+    const view = renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture()}
+        instances={[provider(), second]}
+        observedByInstance={
+          new Map([
+            [id, unauthenticated(id)],
+            [second.id, unauthenticated(second.id)],
+          ])
+        }
+      />,
     );
-    expect(styles).toMatch(/> \.icon-mark \{ grid-area: tile; width: 48px; height: 48px;/);
+
+    expect(screen.getByRole("button", { name: "Details for Existing CLI" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Details for Codex local" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    view.unmount();
+    renderProviderSettings(
+      <ProviderSettingsView
+        {...fixture()}
+        instances={[provider(), second]}
+        observedByInstance={
+          new Map([
+            [id, observation()],
+            [second.id, { ...observation(), instanceId: second.id }],
+          ])
+        }
+      />,
+    );
+    for (const disclosure of screen.getAllByRole("button", { name: /^Details for / })) {
+      expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    }
   });
 
   it("keeps the state dot neutral by default and lets only Vivid colour it", () => {

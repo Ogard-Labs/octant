@@ -1519,7 +1519,7 @@ function ProviderCatalogSection(props: {
             {...(onLocateBinary === undefined ? {} : { onLocateBinary })}
             {...(onUseScannedBinary === undefined ? {} : { onUseScannedBinary })}
             discoverySnapshot={discoveryController?.snapshot}
-            heading="Its provider card"
+            heading="Its provider"
             instances={[instance]}
             note="The same card as on Providers & Models: sign-in, Locate binary, and what its last check found."
             showAgentEligibleModels={false}
