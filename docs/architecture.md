@@ -2318,6 +2318,12 @@ flowchart LR
   resuming, or remove and resubmit the message with the new settings. Local
   authenticated windows share the queue; paired remote queue commands remain
   unavailable until dispatch can revalidate the originating device's grants.
+  A committed queue change or terminal turn event wakes only its thread's
+  dispatcher. Response text and unrelated journal writes do not scan other
+  queues. One coalesced recovery pass per second catches runtime state that
+  settles after its event and retries retained-content cleanup; it reads
+  queue identities without decoding their full state. Per-thread ordering
+  and current-authority checks still precede admission.
   Queuing a future message is distinct from steering a running turn; steering
   remains subject to the active runtime's actual capability.
 

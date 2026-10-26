@@ -13,6 +13,7 @@ import {
   decodeChatDeleted,
   decodeThreadRetentionThreadPurged,
   decodeThreadMessageQueuePayload,
+  decodeThreadMessageQueueScope,
   decodeThreadMessageQueueSnapshot,
   type ThreadMessageQueueCommand,
   type EventActor,
@@ -63,6 +64,9 @@ const QueueChanged = Schema.Struct({
 const decodeState = Schema.decodeUnknownSync(QueueState);
 const decodeChanged = Schema.decodeUnknownSync(QueueChanged);
 const jsonRow = Schema.decodeUnknownSync(Schema.Struct({ value: Schema.String }));
+const scopeRow = Schema.decodeUnknownSync(
+  Schema.Struct({ mode: Schema.String, thread_id: MentionableThreadId }),
+);
 export const THREAD_MESSAGE_QUEUE_SQL = `
 CREATE TABLE thread_message_queue_projection (
   queue_id TEXT PRIMARY KEY, mode TEXT NOT NULL, thread_id TEXT NOT NULL,
@@ -220,12 +224,16 @@ export class ThreadMessageQueuePersistence {
   }
   scopes(): ReadonlyArray<ThreadMessageQueueScope> {
     return this.#connection
-      .prepare(`SELECT queue.state_json AS value FROM thread_message_queue_projection AS queue
-        WHERE json_array_length(queue.state_json, '$.items') > 0
-           OR EXISTS (SELECT 1 FROM thread_message_queue_content AS content
-                      WHERE content.queue_id = queue.queue_id)`)
+      .prepare(`SELECT queue.mode, queue.thread_id
+      FROM thread_message_queue_projection AS queue
+      WHERE json_array_length(queue.state_json, '$.items') > 0
+         OR EXISTS (SELECT 1 FROM thread_message_queue_content AS content
+                    WHERE content.queue_id = queue.queue_id)`)
       .all()
-      .map((row) => decodeState(JSON.parse(jsonRow(row).value)).scope);
+      .map((row) => {
+        const value = scopeRow(row);
+        return decodeThreadMessageQueueScope({ mode: value.mode, threadId: value.thread_id });
+      });
   }
   identity(
     messageId: string,
