@@ -116,7 +116,8 @@ Hardening in progress for the preview:
   - Per-thread isolation on a Linux Station is not built: Code threads on a
     Linux host run under the same Bubblewrap confinement as every other
     confined process. Station provisioning, Devices and Machines navigation,
-    and E2B Disposable Desktops remain separate follow-up deliveries.
+    and [disposable desktops](design/disposable-desktops.md) remain separate
+    follow-up deliveries.
 - **Canvas artifacts** — provider-neutral interactive reports, dashboards, and
   agent controls with journaled lifecycle; sharing only after secure local use.
 - **Native agent harness** — Octant-owned agent loop for direct and local

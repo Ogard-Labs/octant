@@ -5715,6 +5715,9 @@ same. This holds in Chat, Work, and Code.
   observe/execute/cleanup. A host with no destination reports the capability
   absent and refuses actions as a value rather than throwing. See
   [decisions/0053-computer-use-destinations.md](decisions/0053-computer-use-destinations.md).
+  Thread-leased disposable Linux desktops, their provider seam, artifact
+  transfer, and verified lease teardown are approved post-preview design in
+  [Disposable desktops](design/disposable-desktops.md).
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host
