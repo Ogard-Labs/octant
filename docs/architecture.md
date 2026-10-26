@@ -4242,13 +4242,20 @@ native harness in `apps/server/src/harness`:
   are unchanged. Residual risk: a short plain-word query can still carry a few
   words, but only to the endpoint the person chose. Revisit if a default
   hosted third-party search provider ships. A tool the thread was not offered
-  refuses as `tool-unavailable` without reaching policy or a person. The harness has no
-  per-host network rules, rule expiry, or learn mode yet: a tool process gets the
-  thread's OS-level `none` or `allow`. The approved design for them, with its pure
-  decision, event schemas, host proxy, grants, and learn mode built but no command routed through the proxy yet, is
-  [Harness tool egress rules](#harness-tool-egress-rules). `nativeHarnessEgress.hostile.test.ts` holds the
-  adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
-  Seatbelt and shows only the networked one reaching a loopback listener.
+  refuses as `tool-unavailable` without reaching policy or a person. A harness
+  `bash` or `goal-check` command on an approval-gated or auto-accept-edits Code
+  thread runs on the `proxied` OS level: the OS rules deny it direct egress and
+  open only its launch's loopback proxy, its environment names that proxy, and
+  the host proxy decides each outside connection by the thread's and Project's
+  per-host rules, with expiry and learn-mode proposals a person confirms. A
+  launch whose proxy or start record is missing never runs its command. Full
+  access keeps `allow`, and Plan, Work, Chat, and a child without network
+  authority keep `none`. [Harness tool egress rules](#harness-tool-egress-rules)
+  owns the design. `nativeHarnessEgress.hostile.test.ts` holds the
+  adversarial proofs, including its `commands on proxied network` probes under
+  real Seatbelt or `bwrap`; `nativeHarnessShell.test.ts` runs the `none` and
+  `allow` shells under real Seatbelt and shows only the networked one reaching
+  a loopback listener.
 - **Tool verification.** A routine Check connection runs no generating
   request, so an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
   endpoint offers a model Octant's tools only after a person proved that model
@@ -4984,9 +4991,17 @@ where it was or narrows it:
   product capsule hosted by the Electron runtime had only loopback, relayed to
   the host proxy, and refused direct connects, host loopback ports and name
   lookups.
-- _Accepted limit._ x64 Linux and the packaged AppImage's in-capsule forwarder
-  are unverified until there is an x64 Linux host or a CI job with bubblewrap
-  and a signed feed.
+- _x64 Linux probes._ They ran on 2026-10-25 on x64 Ubuntu 24.04 with
+  bubblewrap 0.9.0 and Node 22.22, all 11 cases, none skipped. The first run
+  failed one case: a Node 22 forwarder answers the `NODE_USE_ENV_PROXY=1` it
+  inherits for the command with an experimental-feature warning on stderr,
+  which is the command's stderr, so every proxied command's output carried it.
+  The forwarder now runs with `--no-warnings`; its own refusals are written
+  directly and still reach the output, and the command's environment is
+  unchanged.
+- _Accepted limit._ The packaged AppImage's in-capsule forwarder (Electron as
+  Node) is unverified until there is a CI job with bubblewrap and a signed
+  feed.
 - _The tainted thread's command confirmation._ When a lead's `bash` or
   `goal-check` on a tainted Code thread will run on `proxied`, its single-use
   approval lists the hosts the thread's live thread and Project rules name,

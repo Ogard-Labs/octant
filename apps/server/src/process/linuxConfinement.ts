@@ -424,9 +424,15 @@ export function buildBubblewrapLaunch(
     if (process.versions.electron !== undefined) {
       args.push("--setenv", "ELECTRON_RUN_AS_NODE", "1");
     }
+    // The forwarder inherits the command's `NODE_USE_ENV_PROXY=1`, and a Node
+    // 22 runtime answers that at startup with an experimental-feature warning
+    // on stderr, which is the command's stderr: every proxied command's output
+    // then carried it. The forwarder writes its own refusals directly, so it
+    // needs no runtime warnings at all; the command's environment is unchanged.
     args.push(
       "--",
       forwarder.runtime,
+      "--no-warnings",
       forwarder.script,
       proxied.endpoint.path,
       String(LINUX_EGRESS_FORWARDER_PORT),
