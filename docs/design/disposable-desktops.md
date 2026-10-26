@@ -128,12 +128,23 @@ is a journal event carrying the lease id, thread, provider, and the acting
 
 ### Authority
 
-- The server checks every lease command against the thread's current authority
-  before any provider call: the thread is active, the caller may open it, the
-  mode is Work or Code, the Project has a recipe, and the provider's plugin is
-  installed, trusted, enabled, and effective. Each failure is a named refusal
-  (`no-provider-configured`, `provider-disabled`, `not-leasable-mode`,
-  `lease-limit`, `leased-by-another-thread`, `lease-ended`).
+- The server checks every lease command except teardown against the thread's
+  current authority before any provider call: the thread is active, the caller
+  may open it, the mode is Work or Code, the Project has a recipe, and the
+  provider's plugin is installed, trusted, enabled, and effective. Each failure
+  is a named refusal (`no-provider-configured`, `provider-disabled`,
+  `not-leasable-mode`, `lease-limit`, `leased-by-another-thread`,
+  `lease-ended`).
+- **Teardown** is the one path those revocations do not close. Release and
+  verification of an existing lease run on a host-owned path, as `system`,
+  that needs only the lease id; it stays authorized after the thread is
+  archived or deleted, the recipe or its credential is removed, or the
+  provider's plugin is disabled or loses trust, because those are exactly the
+  events that end a lease. It can call only `release`, `verifyGone`, and
+  `listOwned`; it never acquires, extends, transfers, reads the screen, or
+  sends input. A person's Release or Retry, and an agent's release of its own
+  thread's lease, ask the host to run it. (Refusing teardown when authority is
+  revoked would leave a billed desktop running with no way to stop it.)
 - **Acquiring** is an effect. Plan refuses it. Approval-gated and
   auto-accept-edits ask in the thread. Full access proceeds for a host-local
   provider. For a provider that bills the person, the rule is open as
@@ -197,8 +208,11 @@ is a journal event carrying the lease id, thread, provider, and the acting
   recipe or its credential is removed, when the provider plugin is disabled, or
   when computer use is turned off. Ending always destroys the desktop.
 - Every lease has a hard expiry. A person may extend it up to the recipe
-  maximum; an agent cannot extend a lease. Idle release applies when no tab is
-  open and neither operator has acted.
+  maximum; an agent cannot extend a lease. The host asks the driver to move the
+  provider-side expiry first and accepts the extension only when the driver
+  confirms the new expiry; otherwise the extension is refused, the original
+  expiry stands, and the lease ends on time. Idle release applies when no tab
+  is open and neither operator has acted.
 - **Journal before create.** The host journals `requested` with a host-minted
   lease id before calling the provider, and the driver tags the resource with
   that id and the host's identity. A crash between the provider call and the
@@ -207,6 +221,15 @@ is a journal event carrying the lease id, thread, provider, and the acting
   the provider's own timeout to the lease expiry plus a short margin, so a host
   that never comes back still stops paying. A billed provider that cannot set
   one is refused by the seam's conformance suite.
+- **Teardown outlives revocation.** The `requested` event records the
+  provider and the recipe's credential reference, never the material. When a
+  lease is not yet `released`, removing its recipe or credential, or disabling
+  the provider plugin, ends the lease and keeps the driver loaded and the
+  credential held in the host store for the teardown path only: neither can
+  serve an acquire or any operating command, and neither contributes anything
+  to a thread. The host drops the driver binding and deletes the credential
+  only after verified release; until then Settings shows the removal as waiting
+  on release.
 - **Restart.** On start, before admitting any new lease, the host destroys every
   lease the journal does not show as `released`, and every tagged resource its
   driver lists that has no live lease. Host-local desktops are reaped through
@@ -235,6 +258,7 @@ translation to its provider.
 | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `status`                                      | Whether the provider can be used on this host now (binaries present, credential readable); performs no work |
 | `acquire(leaseId, recipe, expiresAt, signal)` | Creates one tagged desktop with provider-side expiry; returns an opaque handle                              |
+| `extend(handle, expiresAt)`                   | Moves the provider-side expiry; succeeds only with the expiry the provider now reports                      |
 | `screen(handle)`                              | A bounded frame source and an input sink (pointer, key, text, scroll) for the host's stream                 |
 | `control(handle, command)`                    | The `octant_computer` commands it supports; unsupported ones refuse `unsupported`                           |
 | `deliver(handle, name, bytes)`                | Writes one read-only file to the inbox                                                                      |
@@ -246,7 +270,8 @@ launch port for a host-local provider, and an authenticated HTTPS call port for 
 cloud provider. A conformance suite, modelled on
 `packages/provider-sdk/src/imageGenerationConformance.ts`, proves that a driver
 stops when cancelled, tags what it creates, sets provider-side expiry when it
-bills, reports absence only when absent, and refuses rather than degrades an
+bills, reports an extension only when the provider confirms the new expiry,
+reports absence only when absent, and refuses rather than degrades an
 unsupported command. The desktop's agent-facing commands are the existing
 `octant_computer` set; a host-local desktop without an accessibility tree
 returns observations with a screenshot and no elements, so it is usable only by
@@ -255,17 +280,18 @@ and `move-cursor` to the command set is its own contract change.
 
 ## Threat model
 
-| Risk                                                  | Mitigation                                                                                                                         |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| A leaked cloud desktop bills silently                 | Journal-before-create, tagged resources, mandatory provider-side expiry, restart reconciliation, verified release, visible failure |
-| The app under test or an injected agent reads secrets | No checkout, home, keyring, session bus, SSH agent, or `OCTANT_*` in the desktop; cloud key never leaves the host                  |
-| The desktop reaches the host                          | Own network namespace with no host loopback; standard streams are the only channel; bounded parsing of everything returned         |
-| Kernel escape from a host-local desktop               | Same Bubblewrap boundary Code tool launches already rely on; a VM-backed provider is the stronger boundary                         |
-| Transfer used to exfiltrate                           | One named file, refused outside the root or under `.git`, hash journaled, the person sees it; cloud transfers always ask           |
-| Desktop content steers the agent                      | Results taint the thread; standing approvals stop; sensitive-field protection and per-app approval unchanged                       |
-| Another thread or a stale tab takes over a screen     | Leases are thread-bound; a restored tab shows unavailable and never rebinds                                                        |
-| A stream token or provider URL leaks to a client      | The host terminates the provider stream; renderers get only the host's authorized channel                                          |
-| A host-local desktop exhausts the host                | Host-wide lease cap, per-thread cap of two, hard expiry, idle release                                                              |
+| Risk                                                     | Mitigation                                                                                                                                                                                                                                      |
+| -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A leaked cloud desktop bills silently                    | Journal-before-create, tagged resources, mandatory provider-side expiry, restart reconciliation, verified release, visible failure; a teardown-only path with its retained driver and credential survives thread, recipe, and plugin revocation |
+| A person-extended lease dies at the old provider timeout | An extension is accepted only after the driver confirms the new provider-side expiry; otherwise it is refused and the original expiry stands                                                                                                    |
+| The app under test or an injected agent reads secrets    | No checkout, home, keyring, session bus, SSH agent, or `OCTANT_*` in the desktop; cloud key never leaves the host                                                                                                                               |
+| The desktop reaches the host                             | Own network namespace with no host loopback; standard streams are the only channel; bounded parsing of everything returned                                                                                                                      |
+| Kernel escape from a host-local desktop                  | Same Bubblewrap boundary Code tool launches already rely on; a VM-backed provider is the stronger boundary                                                                                                                                      |
+| Transfer used to exfiltrate                              | One named file, refused outside the root or under `.git`, hash journaled, the person sees it; cloud transfers always ask                                                                                                                        |
+| Desktop content steers the agent                         | Results taint the thread; standing approvals stop; sensitive-field protection and per-app approval unchanged                                                                                                                                    |
+| Another thread or a stale tab takes over a screen        | Leases are thread-bound; a restored tab shows unavailable and never rebinds                                                                                                                                                                     |
+| A stream token or provider URL leaks to a client         | The host terminates the provider stream; renderers get only the host's authorized channel                                                                                                                                                       |
+| A host-local desktop exhausts the host                   | Host-wide lease cap, per-thread cap of two, hard expiry, idle release                                                                                                                                                                           |
 
 ## Maintainer decisions
 
@@ -303,19 +329,23 @@ Each slice is one reviewable PR that updates this specification's delivery
 state. "Container" means an agent can implement and verify it in a Linux
 container with no account or hardware.
 
-1. **Lease contract and host lease service** (container). Lease schemas,
-   events, refusals, and the `desktop-provider` seam types; the host service
-   for acquire, release, expiry, idle, thread end, restart reconciliation, and
-   verified release; destination reporting that names leasable providers; a
-   test-only in-memory driver and the conformance suite. No real provider, no
-   UI. _Accepts when_ a host with no provider reports the capability absent and
-   refuses every lease command as a value; a second thread is refused
-   `leased-by-another-thread`; expiry and thread archive destroy and verify; a
-   restart destroys every unreleased lease and every orphaned tagged resource
-   before admitting a new one; an unverified release stays `release-failed`
-   and blocks new leases on that provider; `computerUseRuntime.test.ts` and
-   `computerUseToolService.test.ts` pass unchanged. _Verify:_ focused contracts
-   and server tests, typecheck consuming packages.
+1. **Lease contract and host lease service** (container). Lease schemas, events,
+   refusals, and the `desktop-provider` seam types; the host service for
+   acquire, release, extension, expiry, idle, thread end, restart
+   reconciliation, verified release, and the teardown-only path; destination
+   reporting that names leasable providers; a test-only in-memory driver and the
+   conformance suite. No real provider, no UI. _Accepts when_ a host with no
+   provider reports the capability absent and refuses every lease command as a
+   value; a second thread is refused `leased-by-another-thread`; expiry and
+   thread archive destroy and verify; recipe removal and plugin disable still
+   destroy and verify while the retained driver refuses acquire and control; an
+   extension the driver does not confirm is refused and the original expiry
+   stands; a restart destroys every unreleased lease and every orphaned tagged
+   resource before admitting a new one; an unverified release stays
+   `release-failed` and blocks new leases on that provider;
+   `computerUseRuntime.test.ts` and `computerUseToolService.test.ts` pass
+   unchanged. _Verify:_ focused contracts and server tests, typecheck consuming
+   packages.
 2. **Host-local provider** (container with `bwrap` and a virtual X server
    installed; needs decisions 1 and 5). Readiness detection, the dedicated
    Bubblewrap launch, the standard-stream screen channel, receipts.
@@ -342,10 +372,10 @@ container with no account or hardware.
    tab never reconnects. _Verify:_ component tests and rendered QA at each state.
 6. **Cloud provider driver** (needs decisions 1 and 2, a maintainer-owned
    account, an API key, and billing authority). Bundled driver through the seam,
-   declared hosts, provider-side expiry, tag reconciliation. _Accepts when_ the
-   conformance suite passes against a recorded transport, and a maintainer-run
-   smoke acquires, drives, releases, and confirms at the provider that nothing
-   remains, including after a forced host kill.
+   declared hosts, provider-side expiry and its extension, tag reconciliation.
+   _Accepts when_ the conformance suite passes against a recorded transport, and
+   a maintainer-run smoke acquires, drives, releases, and confirms at the
+   provider that nothing remains, including after a forced host kill.
 
 Later, each with its own design note here: a forwarded Local server port,
 accessibility element trees for host-local desktops, `drag` and `move-cursor`,
