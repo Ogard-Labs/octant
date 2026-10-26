@@ -253,12 +253,16 @@ export const NativeHarnessContextRemainingArguments = Schema.Struct({}).annotati
  * A read of the lead's own conversation as the journal holds it. `from` is a
  * message number the context-cut note names; nothing names a thread or a
  * session, so the read can only reach the conversation the call came from.
+ * `offset` resumes inside message `from`, at the character a clipped part of
+ * its text or payloads says to read on from; later messages start at their
+ * beginning.
  */
 export const NativeHarnessJournalLookupArguments = Schema.Struct({
   from: NonNegativeInt,
   count: Schema.optional(
     PositiveInt.pipe(Schema.lessThanOrEqualTo(MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_MESSAGES)),
   ),
+  offset: Schema.optional(NonNegativeInt),
 }).annotations(strict);
 export type NativeHarnessJournalLookupArguments = typeof NativeHarnessJournalLookupArguments.Type;
 
@@ -527,12 +531,13 @@ export const NATIVE_HARNESS_TOOL_DEFINITIONS: ReadonlyArray<ProviderToolDefiniti
   {
     name: "journal-lookup",
     description:
-      "Re-read earlier messages of this conversation that were left out to fit the context window. Pass a message number the note names as from; results are capped and say where to continue.",
+      "Re-read earlier messages of this conversation that were left out to fit the context window. Pass a message number the note names as from; results are capped and say where to continue. A long message comes back in parts: pass its number as from and the nextOffset it gave as offset to read the next part.",
     inputSchema: {
       type: "object",
       properties: {
         from: { type: "integer", minimum: 0 },
         count: { type: "integer", minimum: 1, maximum: MAX_NATIVE_HARNESS_JOURNAL_LOOKUP_MESSAGES },
+        offset: { type: "integer", minimum: 0 },
       },
       required: ["from"],
     },

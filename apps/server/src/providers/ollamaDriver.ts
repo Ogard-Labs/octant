@@ -40,7 +40,12 @@ import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 export interface OllamaDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly configuration: OllamaProviderConfiguration;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  /**
+   * What the driver reads and reports about its instance. The Verify tools
+   * record is the host's, so a driver behind the endpoint port holds no way to
+   * write it.
+   */
+  readonly runtimeRegistry: Pick<ProviderRuntimeRegistry, "observedState" | "setObservedState">;
   readonly fetch?: OllamaFetch;
   readonly limits?: Partial<OllamaHttpLimits>;
   readonly clock?: () => string;
@@ -83,10 +88,7 @@ export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointD
         try: async () => {
           const observed = await probeOllama(endpoint);
           const observedAt = clock() as UtcTimestamp;
-          // A person's tool verification outlives routine probes, which run
-          // no generating request of their own.
           const prior = options.runtimeRegistry.observedState(instanceId);
-          const priorVerified = prior?.verifiedToolModelIds;
           const result = decodeProviderProbeResult({
             instanceId,
             readiness: observed.readiness,
@@ -96,7 +98,6 @@ export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointD
             // sends, so it outlives the probe every turn runs first.
             models: carryModelContextWindowFacts(observed.models, prior?.models),
             capabilities: observed.capabilities,
-            ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
             ...(observed.models.length === 0
               ? { message: "Ollama is reachable but has no installed models." }
               : {}),

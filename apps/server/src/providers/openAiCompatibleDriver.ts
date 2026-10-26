@@ -208,12 +208,11 @@ export function makeOpenAiCompatibleDriver(
               // first listed model while setting the provider-level
               // appManagedTools flag, enabling tools for unverified models.
               // Tool support is gated on per-model verification instead: a
-              // person's "Verify tools" request records the model in
-              // verifiedToolModelIds, which outlives this probe. The
+              // person's "Verify tools" request records the model in the
+              // host's verifiedToolModelIds, which outlives this probe. The
               // provider-level flag stays "unsupported" so one verified model
               // never unlocks tools for the other models of the profile.
               const prior = options.runtimeRegistry.observedState(instanceId);
-              const priorVerified = prior?.verifiedToolModelIds;
               const probe = decodeProviderObservedState({
                 instanceId,
                 readiness: result.readiness,
@@ -223,7 +222,6 @@ export function makeOpenAiCompatibleDriver(
                 // person's override, outlive the probe a Chat turn runs first.
                 models: carryModelContextWindowFacts(result.models, prior?.models),
                 capabilities: initialCapabilities,
-                ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
                 ...(result.failure === undefined ? {} : { message: result.failure.message }),
                 lastSuccessfulProbeAt: observedAt,
                 observedAt,
@@ -530,9 +528,6 @@ function recordObservedTurn(
       usage: result.usage === undefined ? "unavailable" : "supported",
     },
     ...(current?.message === undefined ? {} : { message: current.message }),
-    ...(current?.verifiedToolModelIds === undefined
-      ? {}
-      : { verifiedToolModelIds: current.verifiedToolModelIds }),
     ...(current?.lastSuccessfulProbeAt === undefined
       ? {}
       : { lastSuccessfulProbeAt: current.lastSuccessfulProbeAt }),

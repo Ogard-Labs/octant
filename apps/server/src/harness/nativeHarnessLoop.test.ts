@@ -881,6 +881,7 @@ describe("fitting a request to the endpoint", () => {
       "second question",
     ]);
     expect(note).toContain("Messages 0 to 1 are kept in the journal");
+    expect(note).toContain("the files on disk");
     const lookup = createThreadJournalLookup({
       mode: "code",
       transcripts,
@@ -941,6 +942,13 @@ describe("fitting a request to the endpoint", () => {
       const cut = requests[1]?.history ?? [];
       expect(cut.map((message) => message.text).slice(1)).toEqual(["second question"]);
       expect(cut[0]?.text).toContain("Messages 0 to 1 are kept in the journal");
+      // A Chat thread has no folder, so its note names only the task list and the lookup.
+      if (mode === "chat") {
+        expect(cut[0]?.text).toContain("Your task list still reflects that work.");
+        expect(cut[0]?.text).not.toContain("disk");
+      } else {
+        expect(cut[0]?.text).toContain("the files on disk");
+      }
       const lookup = createThreadJournalLookup({
         mode,
         transcripts,

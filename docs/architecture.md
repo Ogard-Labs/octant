@@ -4254,8 +4254,9 @@ the model at another size.
   model's view with only the note in its place, while a summary keeps the
   task, decisions and open work in view at the cost of one tool-less
   request, so a long Code session survives an overflow more often than a
-  single ladder step lets it. When the ladder still cuts exchanges, the note tells the lead that its task list and the
-  files on disk still reflect that work, and the journal keeps the full
+  single ladder step lets it. When the ladder still cuts exchanges, the note tells the lead that its task list (and,
+  in Work and Code, the files on disk; a Chat thread has no folder) still
+  reflects that work, and the journal keeps the full
   conversation for people, replay, and export. A lead in any mode can also
   read a cut exchange back: it is offered `journal-lookup`, a read-only
   harness read of its own `native-harness-transcript`. The note then names the journal
@@ -4264,7 +4265,7 @@ the model at another size.
   cannot fetch; the numbering is the journal's, so a compaction summary
   (requested, restored on resume, or made automatically part-way through the
   running turn) or an earlier cut does not shift it. A lookup takes `from` (and an optional
-  `count`, at most 20) and nothing else: it cannot name a thread or a session.
+  `count`, at most 20, and `offset`) and nothing else: it cannot name a thread or a session.
   The host reads the conversation of the session the thread's running turn
   recorded in its own journal (a Chat thread's newest attempt, which a
   regenerated earlier turn may hold rather than the tail; a Work thread's
@@ -4279,10 +4280,18 @@ the model at another size.
   and export but is not reachable from the tool. Rationale: the rebuilt
   session began from the host's planned history of those turns, and reaching
   an older session would need a handle the call cannot name. A result is bounded (32k
-  characters in all, a long text or payload clipped with a marker saying how
-  much was left out) and says the next number when more follows. The turn's
+  characters in all, each text or payload at most 8k, less when one message
+  carries many) and says the next number when more follows. A longer text or
+  payload is clipped with a marker saying how much was left out and where to
+  read on, and its message carries `nextOffset`: the same `from` with that
+  `offset` returns the next part of message `from`'s text and every payload
+  (later messages start at their beginning), so all of a long message,
+  such as a rebuilt session's first message carrying the planned history,
+  is readable in bounded parts. An offset at or past the end of every text
+  and payload of that message refuses as `journal-offset-past-end`. The turn's
   resolved credential values are redacted from it exactly as a fork's copy
-  redacts them, plain and JSON-escaped; nothing but the conversation's own
+  redacts them, plain and JSON-escaped, before a message is split into parts,
+  so a value straddling two parts never leaves a piece at a time; nothing but the conversation's own
   messages leaves, so no approval or other journal record rides along. A
   Code lead is not offered the tool without that secret list; Chat and Work
   turns resolve no credential values, so theirs is empty. The read is
@@ -4331,8 +4340,10 @@ the model at another size.
   asked, the host refuses a turn offering tools to a model without a Verify
   tools record on the instance, so a driver's own verdict cannot hand tools
   to an unverified model. The host wraps the transport in its
-  retry policy (below), registers that retrying endpoint in the
-  `NativeHarnessEndpointRegistry` with the driver's `admitTurn`, wires lead
+  retry policy (below), dropping any `retrying` event the driver streams
+  itself because retry notices are the host's, registers that retrying
+  endpoint in the `NativeHarnessEndpointRegistry` with the driver's
+  `admitTurn`, wires lead
   fallback and the shared transcript store, keeps the instance's session
   count, and keeps what each attempt teaches about the model's context window
   ([Context and usage accounting](#context-and-usage-accounting)).
@@ -4539,8 +4550,13 @@ the model at another size.
   `verifiedToolModelIds` on the observed state, which the journal persists with
   the catalog and a configuration change clears; a model that answers in text
   leaves it out, and a transport failure (authentication, timeout) is reported
-  rather than recorded as "unsupported". Admission, the AgentRun transport
-  check, and the Chat preflight read that set per model, so verifying one model
+  rather than recorded as "unsupported". Only this host-run command writes the
+  record: the provider runtime registry keeps it apart from each observation and
+  drops any `verifiedToolModelIds` a driver's probe or observation reports, so
+  a driver that misreports cannot widen tool admission. A probe after a restart
+  restores the record from a catalog that no configuration change invalidated.
+  Admission, the AgentRun transport check, the harness endpoint port, and the
+  Chat preflight read that set per model, so verifying one model
   never offers tools to its siblings; an unverified model is admitted with no
   tool, the echo included, since Verify tools sends it outside any session. A
   tool call in a real turn widens nothing either:
