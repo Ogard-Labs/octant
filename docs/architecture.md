@@ -632,8 +632,13 @@ slice by slice, in
 [Apple physical devices and distribution](design/apple-devices.md). The host
 already discovers paired iPhones and iPads through `devicectl`, keeps the
 UDID, serial number, and ECID to itself, and holds a lease only after a person
-at the Mac confirms it; `/api/apple/devices` is readable by a paired device and
-`/api/apple/device-leases` is local-only.
+at the Mac confirms it. Inside a lease it builds the thread's app unsigned,
+signs it for development in a host-owned step with the person's own keychain
+identity for the team (never `-allowProvisioningUpdates`), installs only that
+product, launches it under a console session it holds, and stops only that
+session; each effect follows the thread's posture like a Simulator effect.
+`/api/apple/devices` is readable by a paired device, and
+`/api/apple/device-leases` and `/api/apple/device-actions` are local-only.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -6974,6 +6979,16 @@ mechanisms are:
   reads its product from the same directory without write access; XCTest
   results also land inside it. Simulator captures remain isolated in their own
   private directory and are writable only by the capture launch.
+  A physical device build follows the same rule with signing off. Its
+  signing step is a separate pair of host-owned launches, `security
+find-identity` and `codesign`, through a port with no network; `codesign`
+  may write only the one app bundle it signs and read only the private
+  directory holding that signature's entitlements, which every other Apple
+  launch is denied, as `devicectl`'s answer directory is. A device install
+  reads its product without write access. None of these launches carries a
+  keychain or CoreDevice grant yet: each one the maintainer's device smoke
+  shows a launch needs is measured then and added to this list, never to the
+  shared profile.
 
 - **Provider capability matrix ("degraded on").** Claude Code and Codex are the
   first-class providers: the two subscription coding runtimes the product is

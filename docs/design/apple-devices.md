@@ -10,8 +10,10 @@ extends ([Architecture: device transport and evidence](../architecture.md#device
 [Device workbench](device-workbench.md) owns the Simulator and emulator panes.
 
 **Status: accepted 2026-10-26; slices 1 (contracts and policy) and 2
-(discovery, identity, and lease on the host) are built, and slice 3 is
-next.** The maintainer
+(discovery, identity, and lease on the host) are built, slice 3
+(development-signed build, install, launch, terminate, and console logs) is
+built and waits on its native smoke on a Mac with a paired device, and slice 4
+is next.** The maintainer
 authorized this scope as post-preview work and accepted the decisions below on
 2026-10-26. That authorizes this design and its slices; it does not by itself
 authorize spending, creating developer accounts,
@@ -49,15 +51,20 @@ TestFlight track for its mobile client is a separate operator runbook
   [`devicectl.ts`](../../apps/server/src/apple/devicectl.ts)), keeps their
   Octant ids in the Apple runtime store, and holds leases in memory
   ([`appleDeviceLeases.ts`](../../apps/server/src/apple/appleDeviceLeases.ts)).
-  `POST /api/apple/devices` answers `discover` and `status`, and
-  `POST /api/apple/device-leases` starts and releases a lease
+  `POST /api/apple/devices` answers `discover` and `status`,
+  `POST /api/apple/device-leases` starts and releases a lease, and the
+  local-only `POST /api/apple/device-actions` builds, runs, installs,
+  launches, terminates, and reads the console of the thread's own app on a
+  leased device
   ([`appleDeviceRoutes.ts`](../../apps/server/src/appleDeviceRoutes.ts)); every
-  request is decided by `evaluateAppleDeviceRequest`. Nothing builds,
-  installs, launches, or captures on a device yet, no pane calls the routes,
-  and `octant_apple` has no device operation.
-- Every build passes `CODE_SIGNING_ALLOWED=NO`
+  request is decided by `evaluateAppleDeviceRequest`. A device build signs
+  with the person's own keychain identity in a host-owned step
+  ([`appleSigning.ts`](../../apps/server/src/apple/appleSigning.ts) and the
+  pure `chooseAppleDevelopmentSigning`). Nothing captures a device's screen
+  yet, no pane calls the routes, and `octant_apple` has no device operation.
+- Every build passes `CODE_SIGNING_ALLOWED=NO`, Simulator and device alike
   ([`appleToolchainService.ts`](../../apps/server/src/apple/appleToolchainService.ts),
-  `xcodebuildArguments`), so no signing identity is ever touched, and
+  `xcodebuildArguments`), so no build launch touches a signing identity, and
   `archive` is accepted by policy but recorded `unavailable` without running.
 - Per-operation posture is pure policy in
   [`appleToolchainPolicy.ts`](../../packages/domain/src/appleToolchainPolicy.ts)
@@ -246,6 +253,35 @@ access covers neither the device lease nor any distribution step.
 - `logs` is the console output of the process Octant launched
   (`devicectl device process launch --console`). Device-wide system logs carry
   other apps' and the person's data and are not offered.
+- A launch is that console session: the host holds it for at most an hour and
+  keeps the latest 1 MiB of its output. The launch counts once the session has
+  stayed attached for ten seconds; a session that ends sooner is judged by its
+  exit. `terminate` interrupts the session the host started, which ends the
+  app, so nothing is stopped by name or process number. A lease that ends, for
+  any reason, interrupts the thread's sessions on that device. _Reason:_ the
+  console is only readable while `devicectl` stays attached, and stopping
+  through it keeps the host's reach to exactly the process it started.
+- `logs` keeps the console output as host-private evidence by reference; only
+  its size enters the journal, since an app's own prints can carry the
+  person's data and the journal reaches the provider.
+- The host checks the lease again just before it installs or launches: a
+  `run`'s build can outlast the lease it started under, and a device whose
+  lease has ended is not touched.
+- What a thread built, installed, and launched is held in host memory, bound
+  to the thread and its checkout. A host restart forgets it, so the thread
+  builds and installs again; that is the safe direction to forget in.
+- `devicectl`'s own messages are never kept: an install or launch failure
+  records only CoreDevice's error domain and code. Build output and an app's
+  console are kept with every token shaped like a UDID, UUID, or ECID
+  replaced. _Reason:_ CoreDevice errors can name the device by UDID, serial
+  number, or ECID, and a serial number has no shape a filter could find.
+- Each device operation's evidence is journaled like the Simulator's, as a
+  validation plan, record, and report under an `apple-device-<kind>` step.
+- Device effects go through the local-only `/api/apple/device-actions` route.
+  Under an approval-gated posture each needs a one-use `apple-device-action`
+  approval bound to exactly that request and the thread's checkout, worded
+  with the device, the project or app, and for a build the team; Full access
+  needs none and Plan refuses before anything is asked.
 - A physical device has no input channel and no live view: Octant has no
   supported way to inject touches into real hardware. **Allow input** does not
   apply, and the pane shows the latest screenshot evidence.
@@ -265,6 +301,35 @@ access covers neither the device lease nor any distribution step.
   `test` rule: each grant is the weakest spelling that cleared a measured fatal
   refusal, listed in the architecture beside that rule, never added to the
   shared profile.
+- The host chooses the signature by team from the identities `security
+find-identity -v -p codesigning` lists and the profiles Xcode installed in
+  `~/Library/Developer/Xcode/UserData/Provisioning Profiles` and
+  `~/Library/MobileDevice/Provisioning Profiles`. A usable profile is the
+  team's, for iOS, development (`get-task-allow`), not for every device,
+  unexpired, and its app ID covers the bundle. The profile that names the app
+  wins over a wildcard, a longer wildcard over a shorter one, then the latest
+  expiry, then the profile's UUID; the identity is the first in keychain
+  order the profile admits. _Reason:_ the same keychain and profiles always
+  sign alike, and nothing is chosen that Xcode would not.
+- The host reads a profile's property list out of its CMS envelope without
+  verifying the envelope. _Reason:_ the device verifies the profile embedded
+  in the app at install and refuses an altered one, and verifying here would
+  need another keychain-reaching launch.
+- Signing is chosen before the build runs. When it cannot be, the build is
+  recorded failed with the step the person takes in Xcode (no identity, no
+  profile for the app, or no identity the profile admits); a keychain listing
+  that cannot be read is a failure, never an empty keychain.
+- The signing step signs only the app the build settings declare, and only
+  when it is a real directory inside that build's own derived data, not a
+  link a build script planted. It embeds the chosen profile, signs nested
+  frameworks and libraries, then signs the app with the profile's
+  entitlements, the app ID narrowed to the bundle, `--timestamp=none`, and
+  `--generate-entitlement-der`, under a launch with no network. An app that
+  carries extensions, a Watch app, or an App Clip is not signed. _Reason:_
+  each of those needs a provisioning profile of its own, which this host
+  does not choose yet.
+- `security` and `codesign` output is never kept: it names the identity, and
+  with it the person. The evidence records the team and fingerprint only.
 
 ### Distribution
 
@@ -331,7 +396,8 @@ access covers neither the device lease nor any distribution step.
   Connect key, upload, submission, and release are local-only, never
   remote-approvable.
 - The private listener forwards `POST /api/apple/devices` (admitted as a
-  Project read) and never `/api/apple/device-leases`, which is local-only. Each
+  Project read) and never `/api/apple/device-leases` or
+  `/api/apple/device-actions`, which are local-only. Each
   route takes only its own kinds, and refuses a request whose `requestedBy` is
   not the person behind the asking window: `local-user` for a local window, the
   paired device's own `remote-device` for a paired device.
@@ -447,7 +513,7 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    _State:_ built from `devicectl` fixtures; the `AppleDeviceService`,
    `AppleDeviceLeases`, `Apple device routes`, and `devicectl answers` suites,
    the remote route and classification tests, and the booted-server route test
-   are its evidence. Nothing journals a device. Still open: the maintainer's
+   are its evidence. Discovery and leases journal nothing. Still open: the maintainer's
    discovery smoke on a Mac with a paired device, which also confirms the
    `devicectl` JSON and help shapes the fixtures assume. `devicectl` launches
    carry no extra confinement grant yet; any CoreDevice lookup the smoke shows
@@ -460,6 +526,25 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    evidence; a foreign bundle id and path are refused. _Verify:_ server tests
    with fixtures, plus a native smoke on a Mac with a paired device (maintainer
    hardware).
+   _State:_ built from fixtures: the `AppleDeviceEvidence` contract and the
+   `apple-device-action` approval, `chooseAppleDevelopmentSigning` in domain,
+   and on the host the device build, signing step, install, console session,
+   terminate, and logs in `AppleDeviceService`, the local-only
+   `/api/apple/device-actions` route, and journaled evidence. Its evidence is
+   the `AppleDeviceService` tests of the thread's own app on a leased device,
+   the route, remote, and product-dispatch negatives, the booted-server route
+   test, and the Code runtime's device-build approval test; they cover the
+   fixture app run on a device from an approval-gated thread and a foreign
+   product path, product reference, and bundle id refused. Still open, on a
+   Mac with a paired, unlocked device in Developer Mode and a development
+   profile for `app.octant.simulatorfixture` that Xcode installed for the
+   maintainer's team: `OCTANT_APPLE_TEAM_ID=<team> bun run smoke:apple-device`
+   ([`smoke-apple-device.ts`](../../scripts/smoke-apple-device.ts)), which
+   confirms the `devicectl` install and console shapes the fixtures assume and
+   that interrupting the console session ends the app. The `security`,
+   `codesign`, and `devicectl` launches carry no keychain or CoreDevice grant
+   yet; each one that smoke shows a launch needs is measured then and listed
+   beside the Apple `test` rule in the architecture.
 4. **Device pane and screenshots** (container for UI; hardware for the
    capture). Destination picker, lease confirmation, setup checklist rows
    (paired, trusted, Developer Mode, team), latest-screenshot pane, screenshot
