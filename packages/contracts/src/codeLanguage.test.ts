@@ -70,6 +70,7 @@ describe("Code language read contracts", () => {
       diagnostic({ severity: "fatal" }),
       diagnostic({ message: "x".repeat(MAX_CODE_LANGUAGE_DIAGNOSTIC_MESSAGE_LENGTH + 1) }),
       diagnostic({ source: "" }),
+      diagnostic({ source: "/opt/tools/bin/server" }),
       diagnostic({ range: { start: { line: 5, character: 0 }, end: { line: 4, character: 0 } } }),
       diagnostic({ code: 2322 }),
     ]) {

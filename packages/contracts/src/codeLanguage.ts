@@ -7,9 +7,12 @@ import { CodeCheckoutId, CodeFileId, CodeRelativePath, CodeThreadId } from "./co
  * the thread's checkout. Canonical: docs/design/language-services.md.
  *
  * These are Octant's own shapes. Language Server Protocol payloads stop at
- * the server's adapter, so a renderer never sees a URI, an absolute path, or
- * a protocol field it did not ask for. Results are ephemeral reads, never
- * journaled.
+ * the server's adapter, so a renderer never sees a URI or a protocol field it
+ * did not ask for. Every structured path is checkout-relative. A diagnostic
+ * message is the server's free text and can name a host path (TypeScript's
+ * "Cannot read file '/Users/…/tsconfig.base.json'"), so the adapter rewrites
+ * those before building a result; the schema cannot. Results are ephemeral
+ * reads, never journaled.
  */
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
@@ -64,8 +67,11 @@ export const CodeLanguageDiagnostic = Schema.Struct({
   range: CodeLanguageRange,
   severity: CodeLanguageDiagnosticSeverity,
   message: Schema.String.pipe(Schema.maxLength(MAX_CODE_LANGUAGE_DIAGNOSTIC_MESSAGE_LENGTH)),
-  /** The label the server gives its diagnostics, such as `typescript`. */
-  source: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64)),
+  /**
+   * The label the server gives its diagnostics, such as `typescript`. A label
+   * is a name, never a location, so a path separator is refused.
+   */
+  source: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(64), Schema.pattern(/^[^/\\]+$/)),
 }).annotations(strict);
 export type CodeLanguageDiagnostic = typeof CodeLanguageDiagnostic.Type;
 

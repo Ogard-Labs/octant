@@ -177,7 +177,8 @@ restrictive one was taken.
   checkout, and file reference, never a path. Diagnostics and definitions use
   zero-based lines and UTF-16 character offsets. A result is diagnostics (at
   most 1,000, with a `truncated` flag; messages at most 2,048 characters;
-  source labels at most 64), definition targets (at most 64), `unavailable`
+  source labels at most 64 and holding no path separator), definition
+  targets (at most 64), `unavailable`
   (`starting`, `crashed`, `timed-out`: states to wait out or retry), or
   `refused` with one reason. The refusal reasons are `thread-inactive`,
   `checkout-unavailable`, `checkout-mismatch`, `file-outside-thread`,
@@ -186,6 +187,16 @@ restrictive one was taken.
   refusals unchanged. An installed component that is not effective reads as
   `no-language-server`, so a read never shows which disabled or unreviewed
   components exist.
+- **Host paths in message text.** Structured paths are checkout-relative by
+  schema, but a diagnostic message is the server's free text and can name a
+  host path, such as a `tsconfig` it could not read outside the checkout. The
+  adapter rewrites every absolute path or `file:` URI in a message: one inside
+  the checkout becomes checkout-relative, and any other becomes
+  `<outside checkout>`. The schema cannot enforce this, so slice 2 tests it.
+- **Read before start.** Every authority check of a read, `no-reach`
+  included, runs before the launch decision is consulted. A refused read never
+  starts a server, so a paired device can start a `static` server only for a
+  thread it already reaches (D4).
 - **Not yet wired.** No server module uses the policy or the read contracts
   until slice 2. The module wiring check lists both as islands until then.
 
@@ -362,7 +373,8 @@ accounts or hardware.
      cross-file definition through the real binary under Bubblewrap with the
      network unshared, the no-fork filter loaded, and the checkout read-only.
    - _Negatives:_ an archived thread, a checkout mismatch, a path escape
-     through a symlink, an outside-checkout definition, a server `applyEdit`,
+     through a symlink, an outside-checkout definition, a diagnostic message
+     naming a host path outside the checkout, a server `applyEdit`,
      an oversize frame, the crash budget, missing `bwrap`, another platform,
      and a device without reach are each refused or contained. A restarted
      host reaps receipts.
