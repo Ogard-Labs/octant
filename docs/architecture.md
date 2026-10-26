@@ -3456,7 +3456,11 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   because a checkpoint past the head is the same kind of corruption.
 - Octant Harness appends `native-harness-transcript-compacted@1` to
   `native-harness-transcript`: the summary, how many of the transcript's turns
-  it stands for, and how many turns had run when it was made. It summarizes
+  it stands for, and how many turns ran before the first turn that reads it
+  (every turn so far for a requested compaction, which the next turn reads;
+  all but the running turn for one made mid-turn, which that turn reads
+  itself, so the record allows a summary of every turn before its first
+  reader; older records keep decoding). It summarizes
   the turns before the latest one, as many of the oldest as fit one request to
   the session's own endpoint with no tools, and nothing is journaled unless the
   summary came back. Earlier messages stay in the aggregate; resume and replay
@@ -3469,8 +3473,10 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   earlier summary carried) instead of trusting the model to restate it. The
   same compaction runs automatically mid-turn when a Code request would
   otherwise lose whole exchanges (see the native harness loop). A fork copies the latest compaction
-  made before the turn it was forked at, rewritten for the fork's folder and
-  secrets like the messages, so the fork reads what its source read then. Only
+  its source had read by the turn it was forked at, including one made
+  part-way through that turn, rewritten for the fork's folder and secrets like
+  the messages, so the fork reads what its source read then and never a summary
+  of a turn it does not contain. Only
   a Code connection offers `compact`: Chat and Work send the host's planned
   history.
 - The thread's timeline shows a compaction divider from the completed event.
@@ -4075,7 +4081,11 @@ native harness in `apps/server/src/harness`:
   may differ), and never summarizes the running turn's own prompt or steps,
   even when a steering note opened a later boundary; when there is nothing
   before the running turn, or the summary does not come back, the ladder
-  continues as before. The summary request's usage joins the turn's total and
+  continues as before. The summary's text and reasoning never reach the
+  turn's events, but its streaming is forwarded as content-free `liveness`
+  (at most once every five seconds), because the Code turn runner interrupts
+  a turn that is silent for its inactivity window and a summary over a long
+  session can stream for longer. The summary request's usage joins the turn's total and
   cost (an endpoint retry of it leaves the turn's estimated cost unknown, as
   for any request), and the turn runner journals the compaction as an automatic receipt
   and reports the turn's later usage as `compacted`, the same as a

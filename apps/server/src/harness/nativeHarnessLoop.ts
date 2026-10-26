@@ -88,6 +88,8 @@ const COMPACTION_INSTRUCTION = [
 const TASK_LIST_LEAD = "Your task list as you last wrote it with todo-write in those turns:";
 /** How much of one message's text or one tool payload a compaction request carries. */
 const COMPACTION_ITEM_CHARACTERS = 4_000;
+/** At most one liveness event per interval while a mid-turn summary streams. */
+const SUMMARY_LIVENESS_INTERVAL_MS = 5_000;
 
 /**
  * How many steps in one turn may come back with a malformed tool call before
@@ -832,12 +834,24 @@ export function createNativeHarnessConnection(
       }
       let response: NativeHarnessResponse;
       let retried = false;
+      let livenessAt: number | undefined;
       try {
-        // The summary is not a reply: nothing it streams reaches the session's events.
+        // The summary is not a reply: none of its text or reasoning reaches the
+        // session's events. Mid-turn, though, the turn runner interrupts a turn
+        // that goes quiet for its inactivity window, and a summary over a long
+        // session can stream for longer than that, so its activity is forwarded
+        // as content-free liveness, at most once per interval like an adapter's.
         response = await state.endpoint.send(chosen.request, {
           signal,
           onEvent: (event) => {
             if (event.kind === "retrying") retried = true;
+            if (keepFrom === undefined) return;
+            const now = Date.parse(options.clock());
+            if (livenessAt !== undefined && now - livenessAt < SUMMARY_LIVENESS_INTERVAL_MS) {
+              return;
+            }
+            livenessAt = now;
+            emit(state, { kind: "liveness" });
           },
         });
       } catch {
@@ -863,7 +877,12 @@ export function createNativeHarnessConnection(
         summary:
           taskList === undefined ? summarized : `${summarized}\n\n${TASK_LIST_LEAD}\n${taskList}`,
         turns: hidden + chosen.turns,
-        afterTurns: hidden + starts.length,
+        // The turns run before the first one that reads the summary: every
+        // visible turn for a requested compaction, which the next turn reads,
+        // but not the running turn when it compacts mid-turn, since that turn
+        // reads the summary itself. A fork through the running turn then
+        // carries the summary that turn actually read.
+        afterTurns: hidden + (keepFrom === undefined ? starts.length : latest),
       };
       try {
         options.transcripts.compact(state.transcriptId, compaction);

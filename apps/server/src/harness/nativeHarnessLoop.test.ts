@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
+  type CodeConversationTurn,
+  type CodeThread,
   type ProviderFailure,
   type ProviderModelId,
   type ProviderResumeCursor,
@@ -18,6 +20,7 @@ import { Persistence, makePersistenceLive } from "../persistence/persistenceServ
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { buildUsageDashboard } from "../usageDashboardModel";
+import { seedCodeForkHarnessSession } from "./nativeHarnessFork";
 import { createNativeHarnessConnection, fitRequest } from "./nativeHarnessLoop";
 import {
   JournalNativeHarnessTranscriptStore,
@@ -29,6 +32,7 @@ import type {
   NativeHarnessLeadFallback,
   NativeHarnessRequest,
   NativeHarnessResponse,
+  NativeHarnessStreamEvent,
   NativeHarnessTransport,
   NativeHarnessTransportSession,
 } from "./nativeHarnessTransport";
@@ -1903,7 +1907,9 @@ describe("compacting an Octant Harness session", () => {
     const runLongSession = async (input: {
       readonly refuses: (request: NativeHarnessRequest) => boolean;
       readonly fits?: (request: NativeHarnessRequest) => boolean;
-      readonly summarize?: () => Promise<NativeHarnessResponse>;
+      readonly summarize?: (
+        onEvent: (event: NativeHarnessStreamEvent) => void,
+      ) => Promise<NativeHarnessResponse>;
       readonly thirdTurn?: ReadonlyArray<NativeHarnessResponse>;
     }) => {
       const transcripts = new MemoryNativeHarnessTranscriptStore();
@@ -1923,10 +1929,10 @@ describe("compacting an Octant Harness session", () => {
       const transport: NativeHarnessTransport = {
         open: async () => ({
           fits: input.fits ?? (() => true),
-          send: async (request) => {
+          send: async (request, stream) => {
             requests.push(request);
             if (request.tools.length === 0) {
-              if (input.summarize !== undefined) return await input.summarize();
+              if (input.summarize !== undefined) return await input.summarize(stream.onEvent);
               return {
                 text: "Planned the parser fix and chose the queue design.",
                 toolCalls: [],
@@ -2000,14 +2006,73 @@ describe("compacting an Octant Harness session", () => {
         `${summaryLead(2)}\n\nPlanned the parser fix and chose the queue design.\n\nYour task list as you last wrote it with todo-write in those turns:\n${taskList}`,
         "third",
       ]);
+      // The third turn read the summary itself, so it was made after two turns.
       expect(run.transcripts.load(sessionId)?.compactions).toMatchObject([
-        { turns: 2, afterTurns: 3 },
+        { turns: 2, afterTurns: 2 },
       ]);
       // The turn paid for its summary request, so its closing total says so.
       expect(run.events.filter((event) => event.kind === "usage").at(-1)).toMatchObject({
         inputTokens: 600,
         outputTokens: 60,
       });
+    });
+
+    it("keeps the turn alive while a summary streams without showing the summary's text", async () => {
+      const run = await runLongSession({
+        refuses: (request) => {
+          const texts = request.history.map((message) => message.text);
+          return texts.includes("first") && texts.includes("third");
+        },
+        summarize: async (onEvent) => {
+          onEvent({ kind: "reasoning-delta", text: "Weighing what to keep." });
+          onEvent({ kind: "text-delta", text: "Planned the parser fix." });
+          return { text: "Planned the parser fix.", toolCalls: [] };
+        },
+      });
+
+      expect(run.events.at(-1)?.kind).toBe("completed");
+      expect(run.events.filter((event) => event.kind === "liveness").length).toBeGreaterThan(0);
+      const shown = run.events.flatMap((event) =>
+        event.kind === "text-delta" || event.kind === "reasoning-delta" ? [event.text] : [],
+      );
+      expect(shown).not.toContain("Weighing what to keep.");
+      expect(shown).not.toContain("Planned the parser fix.");
+    });
+
+    it("hands a fork through the compacted turn the summary that turn read", async () => {
+      const run = await runLongSession({
+        refuses: (request) => {
+          const texts = request.history.map((message) => message.text);
+          return texts.includes("first") && texts.includes("third");
+        },
+      });
+      const turns = ["op-1", "op-2", "op-3"].map((operationId) => ({
+        operationId,
+        sessionId: "asked",
+        status: "completed",
+      })) as never as ReadonlyArray<CodeConversationTurn>;
+      const fork = decodeProviderSessionId("80000000-0000-4000-8000-000000000903");
+
+      await seedCodeForkHarnessSession(
+        {
+          transcripts: run.transcripts,
+          harnessDriverKind: () => "anthropic-compatible",
+          sourceTurns: () => turns,
+          sourceConversations: () =>
+            new Map(turns.map((turn) => [String(turn.operationId), String(sessionId)])),
+        },
+        {
+          fork: { providerInstanceId: instanceId, modelId } as never as CodeThread,
+          origin: { threadId: "source-thread", throughOperationId: "op-3" } as never,
+          sessionId: fork,
+          checkoutRoot: "/tmp/octant-harness-fork",
+          secrets: [],
+        },
+      );
+
+      expect(run.transcripts.load(fork)?.compactions).toEqual(
+        run.transcripts.load(sessionId)?.compactions,
+      );
     });
 
     it("summarizes earlier turns instead of leaving them out when the estimate says they no longer fit", async () => {

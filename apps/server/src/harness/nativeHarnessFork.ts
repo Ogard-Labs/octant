@@ -200,9 +200,10 @@ export async function seedCodeForkHarnessSession(
   for (const message of prefix.messages) {
     deps.transcripts.append(input.sessionId, rewriteForFork(message, rewrite));
   }
-  // The fork reads what its source read after the turn it was forked at: the
-  // latest compaction made before that turn ran, if any. One made later was
-  // not part of that conversation yet.
+  // The fork reads what its source read by the turn it was forked at: the
+  // latest compaction first read by that turn or an earlier one, including
+  // one made part-way through it. One made later was not part of that
+  // conversation yet.
   const compaction = transcript.compactions.findLast(
     (candidate) => candidate.afterTurns < prefix.turns,
   );
