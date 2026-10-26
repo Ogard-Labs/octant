@@ -59,6 +59,7 @@ import {
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { heldTurnContext } from "../providers/heldTurnContext";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import {
   countsTowardTurnEventBudget,
@@ -1597,11 +1598,21 @@ export class ChatTurnRunner {
           }
           timing = startTurnMetrics(clock());
           promptSent = true;
+          // A runtime that keeps its own conversation already holds the
+          // standing context an earlier completed turn of this session carried.
+          const context =
+            input.driver.conversationOwnership === "provider"
+              ? heldTurnContext.forTurn({
+                  sessionId: input.attempt.providerSessionId,
+                  resumed: input.resumeCursor !== undefined,
+                  context: input.context,
+                }).context
+              : (input.context ?? []);
           yield* connection
             .send({
               sessionId: input.attempt.providerSessionId,
               prompt: input.prompt,
-              context: [...(input.context ?? [])],
+              context: [...context],
               attachments: [...input.attachments],
               tools: [
                 ...(input.researchEnabled ? researchToolsForRoute(input.researchRoute) : []),

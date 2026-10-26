@@ -1,6 +1,7 @@
 import type { ProviderFailure, ProviderRuntimeEvent } from "@octant/contracts";
 import type { ProviderConnection } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Scope, Stream } from "effect";
+import { heldTurnContext } from "./heldTurnContext";
 
 export interface SubscribeThenSendInput<A, E, R, SendError, SendR> {
   readonly connection: Pick<ProviderConnection, "subscribe">;
@@ -21,13 +22,21 @@ export interface SubscribeThenSendInput<A, E, R, SendError, SendR> {
  * forking a consumer and yielding lets the forked fiber start but never waits
  * for it to reach the stream, which left the order to the scheduler. Every turn
  * runner and one-shot completion needs this, so it lives here once.
+ *
+ * The same events also tell the held-context record how the turn ended, so a
+ * session's standing context counts as held only after a turn that carried it
+ * completed, and stops counting once the runtime compacts the session.
  */
 export function subscribeThenSend<A, E, R, SendError, SendR>(
   input: SubscribeThenSendInput<A, E, R, SendError, SendR>,
 ): Effect.Effect<Fiber.RuntimeFiber<A, E>, SendError, R | SendR | Scope.Scope> {
   return Effect.gen(function* () {
     const events = yield* input.connection.subscribe;
-    const consumer = yield* Effect.forkScoped(input.consume(events));
+    const consumer = yield* Effect.forkScoped(
+      input.consume(
+        events.pipe(Stream.tap((event) => Effect.sync(() => heldTurnContext.observe(event)))),
+      ),
+    );
     yield* input.send;
     return consumer;
   });
