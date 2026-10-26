@@ -181,8 +181,10 @@ next step.
 
 **Language services.** Code editor language services and, later, a debugger
 run as confined children the server launches per checkout, under the
-[Language services](design/language-services.md) design accepted on 2026-10-26;
-none is built yet.
+[Language services](design/language-services.md) design accepted on 2026-10-26.
+Only its seam is built: the `language-server` component kind, the pure launch
+policy, the read contracts, and the remote-approvable `code.language.read`
+action. Nothing launches a language server yet.
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
@@ -5543,7 +5545,7 @@ proofs that suite already holds:
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
 `ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`, `replica-store`,
-`desktop-provider`), composer addressing
+`desktop-provider`, `language-server` (Code only)), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
