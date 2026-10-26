@@ -15,7 +15,9 @@ remote client (pairing, inbox, approvals, thread screen, appearance) stays as
 architecture describes it; this specification adds to that client and does
 not redesign it.
 
-**Status.** Accepted 2026-10-26; slice 1 is starting. The maintainer
+**Status.** Accepted 2026-10-26; slice 1 (the host keeps push registrations
+and drops them with the device) is implemented; slices 2 to 9 are not
+started. The maintainer
 authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26. That
 authorizes design, planning, and implementation of the slices below that need
@@ -75,17 +77,17 @@ These rules hold for every phase and are not reopened by any slice:
 
 ## Exists today
 
-| Area              | Current state                                                                                                                                                                                                                                                                                                                                                                   |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| iOS distribution  | Internal TestFlight through EAS (`apps/mobile/eas.json`, `.github/workflows/mobile-testflight.yml`); App ID enables no optional capability                                                                                                                                                                                                                                      |
-| Android           | `app.config.ts` names package `app.octant.mobile`; pinned TLS has an Android implementation (`apps/mobile/modules/octant-pinned-tls/android`). No Android build profile, workflow, or device acceptance                                                                                                                                                                         |
-| Push contracts    | `packages/contracts/src/remotePushNotifications.ts`: token registration, receipts, and a redacted payload (kind, host, thread, title ≤ 80 B, body ≤ 120 B)                                                                                                                                                                                                                      |
-| Push policy       | `packages/domain/src/pushNotificationPolicy.ts` builds redacted payloads; it puts the thread title in the notification title                                                                                                                                                                                                                                                    |
-| Push on the host  | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a token per `{hostId, deviceId}` in memory (`apps/server/src/remote/pushNotificationTokenStore.ts`): lost on restart and not cleared on revoke. Only Automation runs deliver (`automationNotificationDeliveryService.ts`), through `createUnavailablePushDeliveryTransport`, which never sends |
-| Push on the phone | `notificationPermissionPort.ts` is the unavailable stub; `PushNotificationsPanel.tsx` offers only clearing a registered token; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`                                                                                                                                                                      |
-| Capture           | Chat threads attach a photo-library image (`apps/mobile/src/inbox/thread/pickImage.ts`) through `POST /api/chat/attachments` (`uploadMobileChatAttachment` in `packages/client-runtime/src/mobileInboxClient.ts`). The camera is used only by the pairing scanner and its permission string says so. The host strips no image metadata                                          |
-| Voice             | Host speech routes (`/api/speech/*`) require window authority and are not admitted for paired devices; the phone composer shows a disabled microphone (`apps/mobile/src/ui/FloatingComposer.tsx`); `app.config.ts` disables the microphone permission                                                                                                                           |
-| Hardening ports   | Screenshot privacy and device integrity are unavailable stubs (`screenshotPrivacyPort.ts`, `deviceIntegrityPort.ts`) disclosed in Settings                                                                                                                                                                                                                                      |
+| Area              | Current state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| iOS distribution  | Internal TestFlight through EAS (`apps/mobile/eas.json`, `.github/workflows/mobile-testflight.yml`); App ID enables no optional capability                                                                                                                                                                                                                                                                                                                                                    |
+| Android           | `app.config.ts` names package `app.octant.mobile`; pinned TLS has an Android implementation (`apps/mobile/modules/octant-pinned-tls/android`). No Android build profile, workflow, or device acceptance                                                                                                                                                                                                                                                                                       |
+| Push contracts    | `packages/contracts/src/remotePushNotifications.ts`: token registration, receipts, and a redacted payload (kind, host, thread, title ≤ 80 B, body ≤ 120 B)                                                                                                                                                                                                                                                                                                                                    |
+| Push policy       | `packages/domain/src/pushNotificationPolicy.ts` builds redacted payloads; it puts the thread title in the notification title                                                                                                                                                                                                                                                                                                                                                                  |
+| Push on the host  | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a token per `{hostId, deviceId}` in the owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), as [What the host keeps](#what-the-host-keeps) describes: it survives a restart and is cleared with the device. Only Automation runs deliver (`automationNotificationDeliveryService.ts`), through `createUnavailablePushDeliveryTransport`, which never sends |
+| Push on the phone | `notificationPermissionPort.ts` is the unavailable stub; `PushNotificationsPanel.tsx` offers only clearing a registered token; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`                                                                                                                                                                                                                                                                                    |
+| Capture           | Chat threads attach a photo-library image (`apps/mobile/src/inbox/thread/pickImage.ts`) through `POST /api/chat/attachments` (`uploadMobileChatAttachment` in `packages/client-runtime/src/mobileInboxClient.ts`). The camera is used only by the pairing scanner and its permission string says so. The host strips no image metadata                                                                                                                                                        |
+| Voice             | Host speech routes (`/api/speech/*`) require window authority and are not admitted for paired devices; the phone composer shows a disabled microphone (`apps/mobile/src/ui/FloatingComposer.tsx`); `app.config.ts` disables the microphone permission                                                                                                                                                                                                                                         |
+| Hardening ports   | Screenshot privacy and device integrity are unavailable stubs (`screenshotPrivacyPort.ts`, `deviceIntegrityPort.ts`) disclosed in Settings                                                                                                                                                                                                                                                                                                                                                    |
 
 ## Phase B (Android): internal builds of the same client
 
@@ -139,6 +141,31 @@ These rules hold for every phase and are not reopened by any slice:
   id, outcome, time). It records no capability, token, key, or notification
   text. Capabilities and tokens never appear in logs, responses, diagnostics,
   or receipts.
+- The record lives in `remote/push-registrations.json` (directory `0700`, file
+  `0600`), written by an atomic rename, and is one of the named `remote/`
+  files that removing all local data deletes. Each device's registration is
+  one journal aggregate (`remote-push-registration`, keyed by device id) with
+  `remote.push-registration-recorded@1` (change `added` or `changed`, with the
+  platform) and `remote.push-registration-cleared@1` (with the reason). A
+  repeat of the current registration or of a clear journals nothing. A file
+  that cannot be read back exactly holds no registrations, so the host
+  delivers nothing until each phone registers again.
+- Which credential changes clear a registration: a sign-out, and every loss
+  of standing (a revoke by the host or by the device, `pairing-abandoned`,
+  credential expiry, host key recovery). A key rotation keeps it, and so does
+  a listener stop, which is how a restart ends sessions. A reason the host
+  does not name clears it as a revoke, so a new way to lose standing cannot
+  leave a phone receiving notifications. When the remote gateway is enabled,
+  any registration whose device is not active is cleared
+  (`device-without-standing`), because the clear runs after the revoke
+  commits and a host stopped between the two would otherwise keep it.
+- A clear removes the token before journaling it, so a failed append still
+  leaves it gone and is reported (a revoke's receipt counts it as a failed
+  hook, and a retry clears again). A registration writes the file inside the
+  journal's transaction and restores the previous file if the append fails,
+  so no token is kept that the journal does not record. The registration
+  route checks the device's session again after reading the body, so a
+  registration cannot land after a concurrent revoke or sign-out cleared it.
 
 ### What leaves the host
 
