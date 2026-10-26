@@ -204,6 +204,15 @@ export function buildBubblewrapLaunch(
   args.push("--cap-drop", "ALL");
 
   args.push("--proc", "/proc", "--dev", "/dev");
+  // Bubblewrap covers `/proc/sys` only when it can open the directory for
+  // writing, which procfs never allows, so its own cover never applies. A
+  // root host's capsule runs as the host's uid 0, and the kernel lets uid 0
+  // write most sysctls by their owner bits alone: measured on bwrap 0.9.0
+  // with every capability dropped, the capsule still wrote
+  // `kernel.core_pattern`, which runs a program as host root on the next
+  // crash. Sysctl values follow the reader's namespaces, not the procfs
+  // mount, so binding the host's tree changes nothing a workload reads.
+  args.push("--ro-bind", "/proc/sys", "/proc/sys");
 
   if (input.networkEgress === "allow" && existsSync("/run/systemd/resolve")) {
     args.push("--ro-bind", "/run/systemd/resolve", "/run/systemd/resolve");
@@ -500,8 +509,14 @@ function hostSecretPaths(): ReadonlyArray<string> {
     .map((name) => join("/etc/ssh", name));
   // Bubblewrap would have to create a missing path's mount point inside the
   // read-only `/etc` bind, which fails the launch; a missing path hides
-  // nothing anyway.
-  return [...HOST_SECRET_PATHS, ...sshHostKeys].filter(pathExists);
+  // nothing anyway. A symlinked one is covered at its target: Bubblewrap
+  // follows an absolute link from outside the new root, so measured on bwrap
+  // 0.9.0 a host key linked to another volume failed every launch. A target
+  // under no bound path is unreachable from the capsule and needs no cover.
+  return [...HOST_SECRET_PATHS, ...sshHostKeys].flatMap((path) => {
+    const target = safeRealpathSync(path);
+    return target === undefined ? [] : [target];
+  });
 }
 
 interface Mount {

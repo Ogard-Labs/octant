@@ -92,7 +92,8 @@ preserve its data until cleanup is explicitly authorized.
   shell instead. Bubblewrap 0.2.0 or later is needed; an older one refuses
   the launch. A confined command has no root privileges even when Octant
   runs as root: it cannot write a file only root's privileges would let it
-  write, such as another user's file in the Project.
+  write, such as another user's file in the Project. A Full access thread
+  keeps root's privileges.
 - **`lsof`.** Running services and Local servers use it to find the servers
   your projects started. A stock Ubuntu install lacks it; without it the card
   says Octant could not check this computer for local servers.

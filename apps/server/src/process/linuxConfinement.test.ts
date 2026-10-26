@@ -529,6 +529,35 @@ describe("Linux Bubblewrap confinement", () => {
   );
 
   it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "keeps the host kernel's settings read-only while a confined process can still read them",
+    () => {
+      const { boundRoot, temporaryDirectory } = fixture();
+      // `kernel.core_pattern` names a program the host runs as root when any
+      // process dumps core, so a writable one is a way out of the capsule.
+      const launch = buildBubblewrapLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          [
+            "for key in kernel/core_pattern vm/swappiness; do",
+            '  test -w "/proc/sys/$key" && echo "writable $key"',
+            "done",
+            "test -r /proc/sys/kernel/pid_max && echo readable",
+            "exit 0",
+          ].join("\n"),
+        ],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim().split("\n")).toEqual(["readable"]);
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
     "hides the host's password hashes and private keys while the rest of /etc stays readable",
     () => {
       const { boundRoot, temporaryDirectory } = fixture();

@@ -6433,8 +6433,21 @@ mechanisms are:
   another user's file in the bound root. `--cap-drop` arrived in bubblewrap
   0.2.0; an older one exits on the unknown option before starting the
   command, so the launch fails closed rather than running with capabilities.
+  Dropping capabilities does not stop uid 0 writing sysctls by their owner
+  bits, and Bubblewrap's own `/proc/sys` cover never applies, so the capsule
+  binds `/proc/sys` read-only: measured on bwrap 0.9.0, a root capsule without
+  capabilities still wrote `kernel.core_pattern`, which runs a program as host
+  root on the next crash. A capsule cannot regain capabilities through a
+  nested user namespace: its inherited mounts stay locked, and mapping the
+  host's uid 0 needs a capability it no longer has.
   Full access's deny-only host-root bind keeps the host's own authority and
-  does not drop them. The capsule binds `/etc` and `/sys` read-only because
+  does not drop them. On a root host its extension and host-auth denials are
+  therefore not a boundary: the runtime is host root and shares the host's
+  process namespace, so it can read a denied file through another process's
+  `/proc/<pid>/root`. Measured on bwrap 0.9.0, that worked with no
+  capabilities at all, and dropping `CAP_SYS_ADMIN` stopped only `umount`;
+  hiding host processes would take away what Full access grants. The capsule
+  binds `/etc` and `/sys` read-only because
   workloads read them: resolver and `nsswitch` files, TLS roots, `passwd`,
   the dynamic linker cache, `alternatives` links, and login shell startup
   files from `/etc`; cgroup limits and CPU topology from `/sys`, which
@@ -6442,7 +6455,7 @@ mechanisms are:
   credentials under `/etc` through their owner bits, so `/etc/shadow`,
   `/etc/gshadow`, their `-` backups, `/etc/security/opasswd`,
   `/etc/ssl/private`, and `/etc/ssh/ssh_host_*_key` are covered like read
-  denials when they exist. `/sys` still shows the host's interface names;
+  denials when they exist, a symlinked one at its target. `/sys` still shows the host's interface names;
   narrowing it to the cgroup and CPU trees needs measurement against real
   runtimes first. The synthetic root is read-only, deny paths are
   covered by empty read-only tmpfs mounts, and a launch carrying Seatbelt
