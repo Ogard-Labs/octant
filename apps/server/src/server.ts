@@ -61,6 +61,7 @@ import { wireContext } from "./wiring/context";
 import { wireWorkFiles } from "./wiring/workFiles";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
+import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
@@ -694,6 +695,7 @@ export function startOctantServer(
       windowAuthorityStore,
     });
     const {
+      chatHiddenThreadIds,
       chatRoutes,
       chatService,
       codeThreadMentionDirectory,
@@ -922,6 +924,9 @@ export function startOctantServer(
       automationRoutes,
       automationScheduler,
       completedThreadArchiveSweep,
+      hasPushStanding,
+      pushComputerLabel,
+      pushDeliveryTransport,
       pushNotificationTokenStore,
     } = wireAutomation({
       capacityScheduler,
@@ -935,6 +940,15 @@ export function startOctantServer(
       workThreadService,
       workThreadServiceWithWorkflows,
       workTurnService,
+    });
+    yield* wireThreadNotifications({
+      chatHiddenThreadIds,
+      hasPushStanding,
+      persistence,
+      pushComputerLabel,
+      pushDeliveryTransport,
+      pushNotificationTokenStore,
+      workThreadProjection,
     });
     const {
       fleetActivityRoutes,

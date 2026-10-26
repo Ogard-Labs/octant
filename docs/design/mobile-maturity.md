@@ -16,9 +16,9 @@ architecture describes it; this specification adds to that client and does
 not redesign it.
 
 **Status.** Accepted 2026-10-26; slice 1 (the host keeps push registrations
-and drops them with the device) is implemented; slices 2 to 9 are not
-started. The maintainer
-authorized this scope as post-preview work and accepted the
+and drops them with the device) and slice 2 (the host builds sealed, redacted
+thread notifications) are implemented; slices 3 to 9 are not started. The
+maintainer authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26. That
 authorizes design, planning, and implementation of the slices below that need
 no new account, spend, hosted service, store submission, or widened authority;
@@ -77,17 +77,17 @@ These rules hold for every phase and are not reopened by any slice:
 
 ## Exists today
 
-| Area              | Current state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| iOS distribution  | Internal TestFlight through EAS (`apps/mobile/eas.json`, `.github/workflows/mobile-testflight.yml`); App ID enables no optional capability                                                                                                                                                                                                                                                                                                                                                    |
-| Android           | `app.config.ts` names package `app.octant.mobile`; pinned TLS has an Android implementation (`apps/mobile/modules/octant-pinned-tls/android`). No Android build profile, workflow, or device acceptance                                                                                                                                                                                                                                                                                       |
-| Push contracts    | `packages/contracts/src/remotePushNotifications.ts`: token registration, receipts, and a redacted payload (kind, host, thread, title ≤ 80 B, body ≤ 120 B)                                                                                                                                                                                                                                                                                                                                    |
-| Push policy       | `packages/domain/src/pushNotificationPolicy.ts` builds redacted payloads; it puts the thread title in the notification title                                                                                                                                                                                                                                                                                                                                                                  |
-| Push on the host  | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a token per `{hostId, deviceId}` in the owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), as [What the host keeps](#what-the-host-keeps) describes: it survives a restart and is cleared with the device. Only Automation runs deliver (`automationNotificationDeliveryService.ts`), through `createUnavailablePushDeliveryTransport`, which never sends |
-| Push on the phone | `notificationPermissionPort.ts` is the unavailable stub; `PushNotificationsPanel.tsx` offers only clearing a registered token; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`                                                                                                                                                                                                                                                                                    |
-| Capture           | Chat threads attach a photo-library image (`apps/mobile/src/inbox/thread/pickImage.ts`) through `POST /api/chat/attachments` (`uploadMobileChatAttachment` in `packages/client-runtime/src/mobileInboxClient.ts`). The camera is used only by the pairing scanner and its permission string says so. The host strips no image metadata                                                                                                                                                        |
-| Voice             | Host speech routes (`/api/speech/*`) require window authority and are not admitted for paired devices; the phone composer shows a disabled microphone (`apps/mobile/src/ui/FloatingComposer.tsx`); `app.config.ts` disables the microphone permission                                                                                                                                                                                                                                         |
-| Hardening ports   | Screenshot privacy and device integrity are unavailable stubs (`screenshotPrivacyPort.ts`, `deviceIntegrityPort.ts`) disclosed in Settings                                                                                                                                                                                                                                                                                                                                                    |
+| Area              | Current state                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| iOS distribution  | Internal TestFlight through EAS (`apps/mobile/eas.json`, `.github/workflows/mobile-testflight.yml`); App ID enables no optional capability                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Android           | `app.config.ts` names package `app.octant.mobile`; pinned TLS has an Android implementation (`apps/mobile/modules/octant-pinned-tls/android`). No Android build profile, workflow, or device acceptance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Push contracts    | `packages/contracts/src/remotePushNotifications.ts`: registration (token, the phone's notification public key, per-kind preferences and the thread-title opt-in), its receipts, the sealed content (kind, host, thread, mode, title ≤ 80 B, body ≤ 120 B), the delivery envelope, and the journaled delivery receipt                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Push policy       | `packages/domain/src/pushNotificationPolicy.ts` builds display text under [decision M2](#maintainer-decisions) (kind and computer label; a thread title or Automation name only for a phone that opted in) and owns per-kind preferences, deduplication keys, the per-device rate limit, and urgency                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Push on the host  | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a registration per `{hostId, deviceId}` in the owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), as [What the host keeps](#what-the-host-keeps) describes: it survives a restart and is cleared with the device. Ordinary threads in every mode (`threadNotificationDeliveryService.ts`) and Automation runs (`automationNotificationDeliveryService.ts`) seal each notification to the phone (`pushNotificationSealing.ts`) as [Sealing](#sealing) and [Sending](#sending) describe, and hand the envelope to `createUnavailablePushDeliveryTransport`, which never sends, until slice 7 |
+| Push on the phone | `notificationPermissionPort.ts` is the unavailable stub; `PushNotificationsPanel.tsx` offers only clearing a registered token; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Capture           | Chat threads attach a photo-library image (`apps/mobile/src/inbox/thread/pickImage.ts`) through `POST /api/chat/attachments` (`uploadMobileChatAttachment` in `packages/client-runtime/src/mobileInboxClient.ts`). The camera is used only by the pairing scanner and its permission string says so. The host strips no image metadata                                                                                                                                                                                                                                                                                                                                                                                         |
+| Voice             | Host speech routes (`/api/speech/*`) require window authority and are not admitted for paired devices; the phone composer shows a disabled microphone (`apps/mobile/src/ui/FloatingComposer.tsx`); `app.config.ts` disables the microphone permission                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Hardening ports   | Screenshot privacy and device integrity are unavailable stubs (`screenshotPrivacyPort.ts`, `deviceIntegrityPort.ts`) disclosed in Settings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ## Phase B (Android): internal builds of the same client
 
@@ -131,7 +131,8 @@ These rules hold for every phase and are not reopened by any slice:
 ### What the host keeps
 
 - The destination record (device id, platform, delivery capability, the
-  phone's notification public key, preferences, updated time) is kept
+  phone's notification public key, preferences, the collapse key the host
+  makes for it, updated time) is kept
   owner-only under the data directory, beside the device inventory, outside
   the journal and every export. It survives a restart and is deleted when the
   device is revoked, revokes itself, signs out, or is removed as
@@ -194,6 +195,38 @@ A notification has two layers:
 - On revoke, sign-out, or host removal the phone removes delivered
   notifications for that host and forgets its notification key.
 
+#### Sealing
+
+- The registration carries the phone's raw X25519 public key for this host
+  (43 unpadded base64url characters) and its preferences: approval needed,
+  waiting, failed, completed, and thread titles, which the phone sends off
+  until the person turns them on. A registration without them is refused. A
+  change to either is journaled as `changed`, and keeps the destination's
+  collapse key.
+- The envelope (`RemotePushEnvelopeV1`) is the placeholder alert; a collapse
+  id of 22 unpadded base64url characters, the first 16 bytes of HMAC-SHA256
+  over the thread id (the run id for an Automation run without a thread)
+  under a random 32-byte key the host makes per registration and keeps beside
+  it; an urgency, `high` for approval needed and waiting and `normal`
+  otherwise; and the sealed content as `encapsulatedKey` and `ciphertext`
+  (content and tag), both unpadded base64url.
+- Sealing is single-shot HPKE (sequence 0) with empty associated data and the
+  UTF-8 info `octant-push-v1\n<hostId>\n<deviceId>`, where the host id is the
+  one the phone paired with. The plaintext is the sealed content as JSON,
+  padded with trailing spaces to 2 KiB so the ciphertext's length names no
+  kind or title. The
+  host builds it with `node:crypto` alone and checks it against the published
+  RFC 9180 vector for this suite. Content over 2 KiB, or a key that is not a
+  usable X25519 public key (a low-order point included), is refused and
+  journaled as a failure, never sent in another form.
+- The display text is the kind ("Approval needed", "Waiting for you", "Thread
+  failed", "Thread completed") and "On" the computer's label, the name the
+  listener's hello shows. Only for a phone that opted in does ": " and the
+  thread title follow the kind. A title the scrubber flags as a secret or a
+  path is left out whole. Automation runs follow the same rule, with the
+  automation's name where a thread title would be, and show no failure
+  message.
+
 ### When the host sends
 
 - Ordinary threads in every mode notify on the four kinds above, observed from
@@ -205,6 +238,43 @@ A notification has two layers:
   notification to a device whose authority could not read that thread.
 - Delivery failure never changes thread, run, or approval state. A delivery
   path that refuses a destination as gone clears it.
+
+#### Sending
+
+- The lifecycle facts are: a Chat `chat.attempt-updated@1` whose outcome is
+  completed, failed, or waiting; a Work `work.turn-updated@1` with the same
+  statuses and a `work.request-recorded@1` that requests an approval (approval
+  needed) or an answer (waiting); a Code `code.runtime-work-updated@1` for a
+  provider turn with the same states and a `code.operation-event-recorded@1`
+  that requests an approval or an answer; and the harness's
+  `native-harness-approval-asked@1` and `native-harness-question-asked@1` in
+  any mode. Interrupted and cancelled turns notify nothing. The run is the
+  attempt or turn for a lifecycle fact, and the request itself (the Work
+  request, the Code approval or question, the harness ask) for one that asks
+  the person, since one turn can ask several.
+- Every registration in the host's file is the host's own, under the listener
+  host id the phone paired with; the host's local id names none of them. So
+  delivery reads them all and seals each under its own host id. A device
+  receives a notification only while its record under that host id is active
+  and unexpired. That is asked for every notification, immediately before its
+  send, not only when the gateway starts, so a revoke or sign-out that lands
+  first stops it. The device must also want the kind, and a paired device must
+  be able to read the thread: it exists, is not being deleted, is not a Side
+  Chat or assistant lane, and its mode is on. A device's preferences filter
+  Automation runs too.
+- Each notification to one device is one journal aggregate
+  (`remote-push-delivery`) holding one `remote.push-delivery-recorded@1`: host
+  id, device id, thread id, kind, outcome (`delivered`, `failed`,
+  `rate-limited`, `destination-gone`), a failure-category slug, and the time. A
+  fact whose receipt already exists sends nothing, so a repeat after a restart
+  stays silent. Ordinary-thread notifications are tried once.
+- A device receives at most six notifications in any sixty seconds; the rest
+  are journaled `rate-limited` and not sent later. A burst of threads ending
+  together reaches the phone as its first few, and the thread list shows the
+  rest; a later send would be stale.
+- While the transport is unavailable, ordinary threads seal, send, and journal
+  nothing. The transport is unavailable while the Notifications setting is
+  off, and always until slice 7. Automation runs keep their existing receipts.
 
 ### Delivery path
 

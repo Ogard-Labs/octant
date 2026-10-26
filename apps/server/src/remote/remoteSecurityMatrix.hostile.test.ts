@@ -1211,6 +1211,16 @@ describe("hostile remote-access security matrix (in-memory gateway)", () => {
 // ═══════════════════════════════════════════════════════════════════════
 
 const PUSH_TOKEN_PATH = "/api/remote/auth/push-token";
+// The phone's notification public key for this host: a key, so it is held
+// only in the registration file like the token.
+const PUSH_NOTIFICATION_KEY = "PUSHKEYCANARY0123456789abcdefghijklmnopqrst";
+const PUSH_PREFERENCES = {
+  approvalNeeded: true,
+  waiting: true,
+  failure: true,
+  completion: true,
+  threadTitles: false,
+};
 let pushNonce = 0;
 
 function nextNonce(): string {
@@ -1227,7 +1237,12 @@ async function putPushToken(
   return callAuthenticated(harness, session, {
     method: "PUT",
     path: PUSH_TOKEN_PATH,
-    body: JSON.stringify({ platform: "ios", token }),
+    body: JSON.stringify({
+      platform: "ios",
+      token,
+      notificationPublicKey: PUSH_NOTIFICATION_KEY,
+      preferences: PUSH_PREFERENCES,
+    }),
     nonce: nextNonce(),
     ...overrides,
   });
@@ -1430,6 +1445,8 @@ describe("push registrations follow the paired device (in-memory gateway)", () =
           body: JSON.stringify({
             platform: "ios",
             token,
+            notificationPublicKey: PUSH_NOTIFICATION_KEY,
+            preferences: PUSH_PREFERENCES,
             deviceId: "99999999-9999-4999-8999-999999999999",
           }),
         }),
@@ -1719,10 +1736,20 @@ describe("secret non-leakage across URLs, stores, logs, SQLite, exports", () => 
       expect(cleared.json()).toMatchObject({ result: "cleared" });
       expect((await putPushToken(scanningHarness, session, kept)).status).toBe(200);
 
-      const secrets = [first, changed, hostile, kept].map((value) => ({
-        name: `push token ${value}`,
-        value,
-      }));
+      const registrationFile = join(harness.directory, PUSH_REGISTRATIONS_FILE);
+      const collapseKey = harness.pushRegistrations.get({
+        hostId,
+        deviceId: session.deviceId,
+      })?.collapseKey;
+      expect(collapseKey).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      const secrets = [
+        ...[first, changed, hostile, kept].map((value) => ({
+          name: `push token ${value}`,
+          value,
+        })),
+        { name: "notification key", value: PUSH_NOTIFICATION_KEY },
+        { name: "collapse key", value: collapseKey ?? "" },
+      ];
       const violations: string[] = [];
       for (const body of responseBodies)
         violations.push(...scanForSecrets("response body", body, secrets));
@@ -1731,7 +1758,6 @@ describe("secret non-leakage across URLs, stores, logs, SQLite, exports", () => 
       // Every file the host keeps, the SQLite store and its write-ahead log
       // included, is scanned. Exports, the journal, and the audit trail are
       // all read from that store, so a token absent here is absent there.
-      const registrationFile = join(harness.directory, PUSH_REGISTRATIONS_FILE);
       const scanned: string[] = [];
       const scan = (directory: string): void => {
         for (const entry of readdirSync(directory, { withFileTypes: true })) {

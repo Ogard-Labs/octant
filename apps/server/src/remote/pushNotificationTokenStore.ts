@@ -1,12 +1,15 @@
 // The host's push registrations.
 //
 // A paired device that turns notifications on registers a delivery token with
-// the host. The token is a send right to that phone, so the host keeps it in
-// one place only: an owner-only file under the data directory's `remote/`
-// folder, beside the listener's identity key and the device inventory, outside
-// the journal and every export. No route answers with it and nothing logs it.
-// The journal records that a device's registration was added, changed, or
-// cleared, with the device and why, never the token.
+// the host, with the public half of the notification key it made for this
+// host and its own preferences. The token is a send right to that phone, so
+// the host keeps it in one place only: an owner-only file under the data
+// directory's `remote/` folder, beside the listener's identity key and the
+// device inventory, outside the journal and every export. The notification
+// key and the collapse key the host makes for the destination live beside it.
+// No route answers with any of them and nothing logs them. The journal records
+// that a device's registration was added, changed, or cleared, with the device
+// and why, never the token or a key.
 //
 // A registration survives a restart. It goes when the device clears it, when
 // the device's session signs out, and when the device loses its standing
@@ -14,12 +17,15 @@
 // standing when the remote gateway starts is cleared then, so a revoke that
 // committed just before a crash cannot leave one behind.
 
+import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Schema } from "effect";
 import {
   REMOTE_PUSH_REGISTRATION_EVENT_NAMES,
+  RemotePushNotificationPublicKey,
   RemotePushPlatform,
+  RemotePushPreferencesV1,
   decodeRemotePushRegistrationClearedV1,
   decodeRemotePushRegistrationRecordedV1,
   type RemotePushRegistrationClearReason,
@@ -39,6 +45,11 @@ export interface PushTokenRecord {
   readonly deviceId: string;
   readonly platform: RemotePushPlatform;
   readonly token: string;
+  /** The phone's X25519 notification public key for this host. */
+  readonly notificationPublicKey: string;
+  readonly preferences: RemotePushPreferencesV1;
+  /** The host's own key for this destination's collapse ids, base64url. */
+  readonly collapseKey: string;
   readonly updatedAt: string;
 }
 
@@ -49,6 +60,8 @@ export interface PushNotificationTokenStore {
     readonly deviceId: string;
     readonly platform: RemotePushPlatform;
     readonly token: string;
+    readonly notificationPublicKey: string;
+    readonly preferences: RemotePushPreferencesV1;
     readonly now: string;
   }) => Pick<RemotePushTokenReceiptV1, "result">;
   readonly clear: (input: {
@@ -68,10 +81,13 @@ export interface PushNotificationTokenStore {
   }) => PushTokenRecord | undefined;
   readonly listDeviceIdsForHost: (hostId: string) => ReadonlyArray<string>;
   /**
-   * Host-internal destination listing for delivery. Callers must never serialize
-   * tokens onto notification payloads, receipts, or client responses.
+   * Host-internal destination listing for delivery. Every registration in this
+   * data directory belongs to this host, under the listener host id the phone
+   * paired with, so delivery lists them all and seals each under its own host
+   * id. Callers must never serialize tokens or keys onto notification payloads,
+   * receipts, or client responses.
    */
-  readonly listDestinationsForHost: (hostId: string) => ReadonlyArray<PushTokenRecord>;
+  readonly listDestinations: () => ReadonlyArray<PushTokenRecord>;
 }
 
 export interface PushNotificationTokenStoreOptions {
@@ -107,11 +123,39 @@ export function pushRegistrationClearReasonFor(
   }
 }
 
+/**
+ * Whether a registered device may be sent a notification now: its paired
+ * record under the same host id is active and its credential has not passed
+ * its expiry. Asked for every notification, not only when the gateway starts,
+ * so a revoke or expiry stops delivery even before its clear lands.
+ */
+export function pushDestinationStands(
+  devices: ReadonlyArray<{
+    readonly host_id: string;
+    readonly device_id: string;
+    readonly state: string;
+    readonly expires_at: string;
+  }>,
+  destination: { readonly hostId: string; readonly deviceId: string; readonly now: string },
+): boolean {
+  const now = Date.parse(destination.now);
+  return devices.some(
+    (device) =>
+      device.host_id === destination.hostId &&
+      device.device_id === destination.deviceId &&
+      device.state === "active" &&
+      Date.parse(device.expires_at) > now,
+  );
+}
+
 const StoredRegistration = Schema.Struct({
   hostId: Schema.NonEmptyTrimmedString,
   deviceId: Schema.NonEmptyTrimmedString,
   platform: RemotePushPlatform,
   token: Schema.NonEmptyString,
+  notificationPublicKey: RemotePushNotificationPublicKey,
+  preferences: RemotePushPreferencesV1,
+  collapseKey: Schema.String.pipe(Schema.pattern(/^[A-Za-z0-9_-]{43}$/)),
   updatedAt: Schema.NonEmptyTrimmedString,
 }).annotations({ parseOptions: { onExcessProperty: "error" } });
 const StoredRegistrations = Schema.Struct({
@@ -121,6 +165,16 @@ const decodeStoredRegistrations = Schema.decodeUnknownSync(Schema.parseJson(Stor
 
 function keyOf(hostId: string, deviceId: string): string {
   return `${hostId}\0${deviceId}`;
+}
+
+function samePreferences(left: RemotePushPreferencesV1, right: RemotePushPreferencesV1): boolean {
+  return (
+    left.approvalNeeded === right.approvalNeeded &&
+    left.waiting === right.waiting &&
+    left.failure === right.failure &&
+    left.completion === right.completion &&
+    left.threadTitles === right.threadTitles
+  );
 }
 
 export function createPushNotificationTokenStore(
@@ -218,7 +272,9 @@ export function createPushNotificationTokenStore(
       if (
         existing !== undefined &&
         existing.token === input.token &&
-        existing.platform === input.platform
+        existing.platform === input.platform &&
+        existing.notificationPublicKey === input.notificationPublicKey &&
+        samePreferences(existing.preferences, input.preferences)
       ) {
         return { result: "already-registered" as const };
       }
@@ -234,6 +290,11 @@ export function createPushNotificationTokenStore(
         deviceId: input.deviceId,
         platform: input.platform,
         token: input.token,
+        notificationPublicKey: input.notificationPublicKey,
+        preferences: input.preferences,
+        // A changed registration keeps its collapse key, so a notification
+        // still replaces the one it updates on the phone.
+        collapseKey: existing?.collapseKey ?? randomBytes(32).toString("base64url"),
         updatedAt: input.now,
       };
       const next = new Map(records);
@@ -279,8 +340,8 @@ export function createPushNotificationTokenStore(
         .filter((record) => record.hostId === hostId)
         .map((record) => record.deviceId);
     },
-    listDestinationsForHost(hostId) {
-      return [...records.values()].filter((record) => record.hostId === hostId);
+    listDestinations() {
+      return [...records.values()];
     },
   };
 }

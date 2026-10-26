@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  admitRemotePushByRate,
   buildRedactedAutomationPushNotification,
   buildRedactedPushNotification,
   automationNotificationKindForLifecycle,
   isAutomationNotificationKindEnabled,
+  REMOTE_PUSH_RATE_LIMIT,
+  remotePushDedupeKey,
+  remotePushPreferenceAllows,
+  remotePushUrgency,
 } from "./pushNotificationPolicy";
 import {
   admitAutomationNotification,
@@ -31,30 +36,79 @@ const prefs = (overrides: Partial<AutomationNotificationPreferences> = {}) =>
     ...overrides,
   }) as AutomationNotificationPreferences;
 
+const encoder = new TextEncoder();
+
 describe("buildRedactedPushNotification", () => {
-  it("uses generic copy for kinds without leaking raw detail", () => {
+  it("shows only the kind and the computer's label unless the phone opted in to thread names", () => {
     const payload = buildRedactedPushNotification({
       kind: "approval-needed",
       hostId,
       threadId,
       mode: "code",
-      threadTitle: "Ship merge",
+      computerLabel: "Studio Mac",
+      threadTitle: "Acme incident 4411 rollback",
+      threadTitles: false,
     });
-    expect(payload.title).toContain("Ship merge");
-    expect(payload.body).toContain("desktop host");
-    expect(JSON.stringify(payload)).not.toContain("ghp_");
-  });
-
-  it("scrubs secrets and absolute paths from raw detail", () => {
-    const secret = buildRedactedPushNotification({
-      kind: "failure",
+    expect(payload).toEqual({
+      kind: "approval-needed",
       hostId,
       threadId,
-      rawDetail: "Provider rejected ghp_exampletoken123 with /Users/example/secret.ts",
+      mode: "code",
+      title: "Approval needed",
+      body: "On Studio Mac",
     });
-    expect(secret.body).toBe("Details available on the host.");
-    expect(secret.body).not.toContain("ghp_");
-    expect(secret.body).not.toContain("/Users/");
+    expect(JSON.stringify(payload)).not.toContain("Acme");
+  });
+
+  it("adds the thread title only for a phone that opted in", () => {
+    const payload = buildRedactedPushNotification({
+      kind: "completion",
+      hostId,
+      threadId,
+      mode: "work",
+      computerLabel: "Studio Mac",
+      threadTitle: "Quarterly plan",
+      threadTitles: true,
+    });
+    expect(payload.title).toBe("Thread completed: Quarterly plan");
+    expect(payload.body).toBe("On Studio Mac");
+  });
+
+  it("keeps a title that looks like a secret or a path off the lock screen even when titles are on", () => {
+    for (const threadTitle of [
+      "Rotate ghp_exampletoken123",
+      "Fix /Users/example/secret.ts",
+      "password reset for prod",
+    ]) {
+      const payload = buildRedactedPushNotification({
+        kind: "failure",
+        hostId,
+        threadId,
+        mode: "chat",
+        computerLabel: "Studio Mac",
+        threadTitle,
+        threadTitles: true,
+      });
+      expect(payload.title).toBe("Thread failed");
+      expect(JSON.stringify(payload)).not.toContain("ghp_");
+      expect(JSON.stringify(payload)).not.toContain("/Users/");
+      expect(JSON.stringify(payload)).not.toContain("password");
+    }
+  });
+
+  it("stays within the payload's byte bounds for long or multibyte titles and labels", () => {
+    const payload = buildRedactedPushNotification({
+      kind: "waiting",
+      hostId,
+      threadId,
+      mode: "chat",
+      computerLabel: "Ü".repeat(200),
+      threadTitle: "日本語のスレッド".repeat(30),
+      threadTitles: true,
+    });
+    expect(encoder.encode(payload.title).byteLength).toBeLessThanOrEqual(80);
+    expect(encoder.encode(payload.body).byteLength).toBeLessThanOrEqual(120);
+    expect(payload.title.startsWith("Waiting for you: 日本語")).toBe(true);
   });
 });
 
@@ -67,6 +121,8 @@ describe("buildRedactedAutomationPushNotification", () => {
       automationRunId: runId as never,
       mode: "code",
       displayName: "Nightly review",
+      computerLabel: "Studio Mac",
+      threadTitles: true,
     });
     expect(payload.navigation).toEqual({
       surface: "automation-center",
@@ -74,25 +130,73 @@ describe("buildRedactedAutomationPushNotification", () => {
       runId,
     });
     expect(payload.threadId).toBeUndefined();
-    expect(payload.title).toContain("Nightly review");
+    expect(payload.title).toBe("Automation failed: Nightly review");
+    expect(payload.body).toBe("On Studio Mac");
   });
 
-  it("scrubs hostile secrets, paths, prompts, and authority-like detail", () => {
+  it("names the automation only for a phone that opted in to titles", () => {
     const payload = buildRedactedAutomationPushNotification({
       kind: "waiting",
       hostId,
       automationId: automationId as never,
       automationRunId: runId as never,
       threadId: threadId as never,
-      rawDetail:
-        "Waiting on approval receipt authz-deadbeef for prompt: delete /Users/example/secrets with ghp_leak",
+      displayName: "Customer Acme sync",
+      computerLabel: "Studio Mac",
+      threadTitles: false,
     });
-    expect(payload.body).toBe("Details available on the host.");
-    const serialized = JSON.stringify(payload);
-    expect(serialized).not.toContain("ghp_");
-    expect(serialized).not.toContain("/Users/");
-    expect(serialized).not.toContain("authz-deadbeef");
-    expect(serialized).not.toContain("delete");
+    expect(payload.title).toBe("Automation waiting");
+    expect(JSON.stringify(payload)).not.toContain("Acme");
+  });
+});
+
+describe("remote push delivery policy", () => {
+  const preferences = {
+    approvalNeeded: true,
+    waiting: false,
+    failure: true,
+    completion: false,
+    threadTitles: false,
+  };
+
+  it("asks the phone's own preference for each kind", () => {
+    expect(remotePushPreferenceAllows(preferences, "approval-needed")).toBe(true);
+    expect(remotePushPreferenceAllows(preferences, "waiting")).toBe(false);
+    expect(remotePushPreferenceAllows(preferences, "failure")).toBe(true);
+    expect(remotePushPreferenceAllows(preferences, "completion")).toBe(false);
+  });
+
+  it("deduplicates per thread, kind, and run", () => {
+    const key = remotePushDedupeKey({ threadId, kind: "completion", runId: "run-1" });
+    expect(key).toBe(remotePushDedupeKey({ threadId, kind: "completion", runId: "run-1" }));
+    expect(key).not.toBe(remotePushDedupeKey({ threadId, kind: "completion", runId: "run-2" }));
+    expect(key).not.toBe(remotePushDedupeKey({ threadId, kind: "failure", runId: "run-1" }));
+  });
+
+  it("refuses a device's sends beyond the limit inside the window and admits again once it passes", () => {
+    let recent: ReadonlyArray<number> = [];
+    const start = 1_000_000;
+    for (let index = 0; index < REMOTE_PUSH_RATE_LIMIT.maximum; index += 1) {
+      const admitted = admitRemotePushByRate({ recent, now: start + index });
+      expect(admitted.kind).toBe("admit");
+      recent = admitted.recent;
+    }
+    const refused = admitRemotePushByRate({ recent, now: start + 10 });
+    expect(refused.kind).toBe("rate-limited");
+    expect(refused.recent).toHaveLength(REMOTE_PUSH_RATE_LIMIT.maximum);
+    const later = admitRemotePushByRate({
+      recent: refused.recent,
+      now: start + REMOTE_PUSH_RATE_LIMIT.windowMs + REMOTE_PUSH_RATE_LIMIT.maximum,
+    });
+    expect(later.kind).toBe("admit");
+    expect(later.recent).toHaveLength(1);
+  });
+
+  it("sends what waits on the person at high urgency and the rest at normal", () => {
+    expect(remotePushUrgency("approval-needed")).toBe("high");
+    expect(remotePushUrgency("waiting")).toBe("high");
+    expect(remotePushUrgency("failure")).toBe("normal");
+    expect(remotePushUrgency("completion")).toBe("normal");
   });
 });
 
