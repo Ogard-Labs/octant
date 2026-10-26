@@ -513,16 +513,30 @@ function hasCapabilityExpansion(
   const oldCapabilities = new Set(previous.declaredCapabilities);
   if (next.declaredCapabilities.some((capability) => !oldCapabilities.has(capability))) return true;
   const oldComponents = new Map(previous.components.map((component) => [component.id, component]));
-  return next.components.some((component) => {
-    const prior = oldComponents.get(component.id);
-    return (
-      prior === undefined ||
-      prior.kind !== component.kind ||
-      component.declaredCapabilities.some(
-        (capability) => !prior.declaredCapabilities.includes(capability),
-      )
-    );
-  });
+  return next.components.some((component) =>
+    componentWidened(oldComponents.get(component.id), component),
+  );
+}
+
+/**
+ * Whether an updated component may do more than the one a person reviewed.
+ * A language server's launch class is part of its grant: moving to
+ * `repo-tooling` lets it write the checkout, run tooling, and reach the
+ * network with the same kind and the same declared capabilities.
+ */
+function componentWidened(
+  prior: ExtensionPackageManifest["components"][number] | undefined,
+  component: ExtensionPackageManifest["components"][number],
+): boolean {
+  return (
+    prior === undefined ||
+    prior.kind !== component.kind ||
+    component.declaredCapabilities.some(
+      (capability) => !prior.declaredCapabilities.includes(capability),
+    ) ||
+    (component.languageServer?.launchClass === "repo-tooling" &&
+      prior.languageServer?.launchClass !== "repo-tooling")
+  );
 }
 
 function preserveUnchangedComponentDesired(
@@ -535,16 +549,7 @@ function preserveUnchangedComponentDesired(
   );
   return Object.fromEntries(
     next.components.flatMap((component) => {
-      const prior = previousComponents.get(component.id);
-      if (
-        prior === undefined ||
-        prior.kind !== component.kind ||
-        component.declaredCapabilities.some(
-          (capability) => !prior.declaredCapabilities.includes(capability),
-        )
-      ) {
-        return [];
-      }
+      if (componentWidened(previousComponents.get(component.id), component)) return [];
       const value = desired[component.id];
       return value === undefined ? [] : [[component.id, value]];
     }),

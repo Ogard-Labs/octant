@@ -281,6 +281,7 @@ export const ExtensionComponentKind = Schema.Literal(
   "provider-driver",
   "replica-store",
   "desktop-provider",
+  "language-server",
 );
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
 export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
@@ -288,6 +289,30 @@ export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
   Schema.pattern(/^[a-z0-9][a-z0-9-]{0,63}$/),
 );
 export type ExtensionSkillName = typeof ExtensionSkillName.Type;
+
+/**
+ * How a language server is confined. `static` reads the checkout and writes
+ * only its own cache, execs nothing but its own binary, and has no network.
+ * `repo-tooling` may run the repository's own tooling, so it is approved,
+ * refused in Plan, and confined as a terminal is. The class is the whole
+ * grant: a server that declares `static` and needs more fails rather than
+ * getting more. Canonical: docs/design/language-services.md § Launch classes.
+ */
+export const ExtensionLanguageServerClass = Schema.Literal("static", "repo-tooling");
+export type ExtensionLanguageServerClass = typeof ExtensionLanguageServerClass.Type;
+
+/** A Language Server Protocol language identifier, such as `typescript`. */
+export const ExtensionLanguageId = Schema.String.pipe(
+  Schema.pattern(/^[a-z][a-z0-9-]{0,63}$/),
+  Schema.brand("ExtensionLanguageId"),
+);
+export type ExtensionLanguageId = typeof ExtensionLanguageId.Type;
+
+export const ExtensionLanguageServerDeclaration = Schema.Struct({
+  languages: Schema.Array(ExtensionLanguageId).pipe(Schema.minItems(1), Schema.maxItems(32)),
+  launchClass: ExtensionLanguageServerClass,
+}).annotations(strict);
+export type ExtensionLanguageServerDeclaration = typeof ExtensionLanguageServerDeclaration.Type;
 
 export const ExtensionComponent = Schema.Struct({
   id: ExtensionComponentId,
@@ -300,6 +325,8 @@ export const ExtensionComponent = Schema.Struct({
   contentReference: Schema.optional(opaqueReference),
   skillName: Schema.optional(ExtensionSkillName),
   parentComponentId: Schema.optional(ExtensionComponentId),
+  /** Present exactly when `kind` is `language-server`. */
+  languageServer: Schema.optional(ExtensionLanguageServerDeclaration),
 }).annotations(strict);
 export type ExtensionComponent = typeof ExtensionComponent.Type;
 
@@ -313,6 +340,7 @@ const executableKinds = new Set<ExtensionComponentKind>([
   "integration",
   "provider-driver",
   "desktop-provider",
+  "language-server",
 ]);
 const mcpChildKinds = new Set<ExtensionComponentKind>(["mcp-tool", "mcp-prompt", "mcp-resource"]);
 
@@ -488,6 +516,9 @@ export const ExtensionPackageManifest = Schema.Struct({
           return false;
         }
         if (component.kind !== "skill-instructions" && component.skillName !== undefined) {
+          return false;
+        }
+        if ((component.kind === "language-server") !== (component.languageServer !== undefined)) {
           return false;
         }
         if (mcpChild !== (component.parentComponentId !== undefined)) return false;

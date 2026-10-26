@@ -43,6 +43,8 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "apple-development-adapter",
     "board",
     "integration",
+    // Code only: Work has no developer environment and Chat has no folder.
+    "language-server",
     ...rendererKinds,
     ...providerDriverKind,
     ...desktopProviderKind,

@@ -50,6 +50,9 @@ describe("effective extension activation", () => {
     ["chat", "desktop-provider", ["computer-use"], false],
     ["work", "desktop-provider", ["computer-use"], true],
     ["code", "desktop-provider", ["computer-use"], true],
+    ["chat", "language-server", [], false],
+    ["work", "language-server", [], false],
+    ["code", "language-server", [], true],
   ] as const)(
     "maps %s %s mode safety from component kind and capabilities",
     (mode, kind, declaredCapabilities, expected) => {
