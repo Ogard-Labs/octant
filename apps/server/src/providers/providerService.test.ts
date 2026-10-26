@@ -4706,6 +4706,48 @@ describe("ProviderService", () => {
       expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds).toEqual([]);
     });
 
+    it("forgets a model whose Verify tools run found no tool support even when a check failed during the run", async () => {
+      const model = decodeProviderModelId("model-1");
+      let runtime: ProviderRuntimeRegistry | undefined;
+      const fixture = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        initialCatalog: decodeProviderCatalogSnapshot({
+          ...persistedCatalog(),
+          verifiedToolModelIds: [model],
+        }),
+        driver: vi.fn((instance: ProviderInstance) => ({
+          kind: instance.driverKind,
+          probe: () => Effect.die("unused"),
+          acquire: () => Effect.die("unused"),
+          // A check that fails while the run is in flight leaves an
+          // observation with no models, which is no catalogue to persist.
+          verifyToolCapability: () =>
+            Effect.sync(() => {
+              runtime?.setObservedState(
+                observation({ readiness: "unavailable", processState: "stopped", models: [] }),
+              );
+              return { instanceId, modelId: model, appManagedTools: "unsupported" as const };
+            }),
+        })) as never,
+      });
+      runtime = fixture.runtime;
+      await fixture.service.probe(windowId, instanceId);
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String)).toEqual([
+        "model-1",
+      ]);
+
+      await fixture.service.execute(windowId, {
+        kind: "verify-model-tools",
+        instanceId,
+        modelId: model,
+      });
+
+      expect(fixture.catalogs()[0]?.verifiedToolModelIds ?? []).toEqual([]);
+      const probed = await fixture.service.probe(windowId, instanceId);
+      expect(probed.verifiedToolModelIds ?? []).toEqual([]);
+    });
+
     it("offers no tools to a model a driver's own probe claims verified until a host Verify tools run succeeds", async () => {
       const model = decodeProviderModelId("model-1");
       const claimed = observation({ instanceId, verifiedToolModelIds: [model] });

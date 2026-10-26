@@ -45,7 +45,7 @@ import {
   type AnthropicTurnResult,
 } from "./anthropicMessages";
 import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
 
 const initialCapabilities: ProviderCapabilities = {
@@ -77,7 +77,7 @@ const initialCapabilities: ProviderCapabilities = {
 export interface AnthropicCompatibleDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly configuration: AnthropicCompatibleProviderConfiguration;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: AnthropicCompatibleFetch;
   readonly clock?: () => string;

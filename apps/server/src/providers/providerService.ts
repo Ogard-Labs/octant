@@ -1640,6 +1640,9 @@ export class ProviderService implements ProviderServiceApi {
         // Without this, verifiedToolModelIds disappears after restart and users
         // must rerun the generating verification before Chat research works.
         if (updated !== undefined) this.#persistCatalog(updated);
+        if (result.appManagedTools === "unsupported") {
+          this.#forgetPersistedToolVerification(instanceId, modelId);
+        }
         return result.appManagedTools;
       } catch (error) {
         // Map the raw ProviderFailure (401, 403, 429, unsupported protocol,
@@ -1844,6 +1847,33 @@ export class ProviderService implements ProviderServiceApi {
       events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
     });
     const authoritative = this.#persistence.readProviderCatalog(observed.instanceId);
+    if (authoritative?.version !== snapshot.version) throw this.#unavailable();
+  }
+
+  /**
+   * Removes a model from the persisted Verify tools record whatever the
+   * current observation is. A check that failed during the run leaves an
+   * observation with no models, which `#persistCatalog` will not write over
+   * the catalogue; the catalogue then kept the model verified, and the next
+   * successful check restored it.
+   */
+  #forgetPersistedToolVerification(instanceId: ProviderInstanceId, modelId: ProviderModelId): void {
+    const current = this.#persistence.readProviderCatalog?.(instanceId);
+    const verified = current?.verifiedToolModelIds;
+    if (current === undefined || verified === undefined) return;
+    if (!verified.some((id) => String(id) === String(modelId))) return;
+    const snapshot = decodeProviderCatalogSnapshot({
+      ...current,
+      version: current.version + 1,
+      verifiedToolModelIds: verified.filter((id) => String(id) !== String(modelId)),
+      updatedAt: this.#clock(),
+    });
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "provider-catalog", aggregateId: instanceId },
+      expectedVersion: current.version,
+      events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
+    });
+    const authoritative = this.#persistence.readProviderCatalog?.(instanceId);
     if (authoritative?.version !== snapshot.version) throw this.#unavailable();
   }
 
