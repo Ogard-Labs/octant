@@ -9,13 +9,14 @@ builds on: [modes and checkout binding](../architecture.md#modes-chat-work-and-c
 [persistence](../architecture.md#persistence), and
 [security and authority](../architecture.md#security-and-authority).
 
-**Delivery state.** Approved design, not built. Remote SSH environments are
-authorized post-preview work as of 2026-10-26, when the maintainer unlocked the
-parked backlog. That authorizes this design and its delivery slices; it does not
-change the [Current Release Boundary](../architecture.md#current-release-boundary),
-which a separate change updates. Nothing below exists in code today. The open
-choices are under [Maintainer decisions](#maintainer-decisions), each with the
-default this design assumes.
+**Delivery state.** Accepted 2026-10-26; implementation is starting with the
+first code slice (slice 2), since slice 1 is this specification. Remote SSH
+environments are authorized post-preview work as of 2026-10-26, when the
+maintainer unlocked the parked backlog and accepted the
+[maintainer decisions](#maintainer-decisions) below. That authorizes this design
+and its delivery slices; it does not change the
+[Current Release Boundary](../architecture.md#current-release-boundary), which a
+separate change updates. Nothing below exists in code today.
 
 ## Outcome
 
@@ -179,7 +180,8 @@ the SSH target. This host refuses `executor-version-mismatch` unless the executo
 reports exactly this host's build version and protocol version, and the executor
 verifies its own install the way the headless server already does before it
 answers. The refusal names the install command for the matching version.
-Delivery by upload is a [maintainer decision](#maintainer-decisions).
+Octant does not upload the executor
+([decision 1](#maintainer-decisions)).
 
 The executor runs as the logged-in remote user, never root: a session whose
 remote user is uid 0 is refused `remote-root-user`, because a root executor's
@@ -275,8 +277,8 @@ wraps it, because only then can the canaries speak for it:
   other users on the target.
 - **Runtimes on their own sandbox** (Codex in every posture, Claude outside
   Plan). Refused `runtime-not-attestable`, because Octant cannot verify that the
-  runtime's own sandbox works on the target's kernel. See
-  [Maintainer decisions](#maintainer-decisions).
+  runtime's own sandbox works on the target's kernel
+  ([decision 2](#maintainer-decisions)).
 
 A driver that does not declare remote support reports the capability unsupported
 for remote-bound Projects. Nothing falls back to running the provider locally
@@ -350,7 +352,7 @@ This host owns the connection and every process on the target.
 | Credentials        | Stay on this host; target uses its own          | Each host's own                                              | None                              |
 | Network path       | The person's SSH reach, outbound from this host | HTTPS listener on the remote, paired device keys             | An Octant-operated service        |
 | Remote needs       | SSH login, the headless install, confinement    | Listener, certificate, pairing                               | Not applicable                    |
-| Status             | This design                                     | Built, under 0059                                            | Not in scope; no evidence of need |
+| Status             | This design, accepted 2026-10-26                | Built, under 0059                                            | Not in scope; no evidence of need |
 
 Choose a paired host when the other machine should own its threads, keep working
 while this Mac sleeps, or be reached from a phone. Choose an SSH target when the
@@ -380,40 +382,42 @@ relay could front.
 
 ## Maintainer decisions
 
-Each item names the default this design assumes until the maintainer chooses.
+The maintainer accepted these on 2026-10-26. Each states the rule; the
+alternatives considered and the reason for the choice follow it.
 
-1. **Executor delivery.** (a) The person installs the headless Octant of the
-   matching version on the target, and Octant prints the command; (b) Octant
-   uploads its own executor bundle over the session into a versioned directory and
-   checks its digest. **Default (a):** it reuses the existing headless artifact,
-   adds no Linux payload to the macOS app, and keeps Octant from installing
-   software on someone else's machine unasked. (b) can follow without changing
+1. **Executor delivery.** The person installs the headless Octant of the
+   matching version on the target, and Octant prints the command. This reuses
+   the existing headless artifact, adds no Linux payload to the macOS app, and
+   keeps Octant from installing software on someone else's machine unasked.
+   Deferred: Octant uploading its own executor bundle over the session into a
+   versioned directory and checking its digest; it can follow without changing
    the protocol.
-2. **Runtimes on their own sandbox** (Codex, Claude outside Plan). (a) Refuse
-   them on targets until a runtime-specific attestation exists; (b) accept the
-   runtime's own readiness report; (c) wrap them in Octant's sandbox on targets
-   only. **Default (a):** it is the only option that satisfies "refuses when
-   confinement cannot be proven equivalent". (c) risks breaking their sign-in and
-   tools, and (b) proves nothing Octant checked.
-3. **Agent forwarding.** (a) Never; (b) per-target opt-in with a warning.
-   **Default (a).** A Git push from the target uses the target's own credentials.
-   A brokered push from this host, if wanted, is its own design.
-4. **Provider credentials on a target.** (a) Never sent; (b) an API key injected
-   per launch over the session. **Default (a):** (b) puts the key in reach of the
+2. **Runtimes on their own sandbox** (Codex, Claude outside Plan). Refused on
+   targets until a runtime-specific attestation exists. This is the only option
+   that satisfies "refuses when confinement cannot be proven equivalent".
+   Rejected: accepting the runtime's own readiness report, which proves nothing
+   Octant checked; and wrapping them in Octant's sandbox on targets only, which
+   risks breaking their sign-in and tools.
+3. **Agent forwarding.** Never. A Git push from the target uses the target's
+   own credentials. Rejected: a per-target opt-in with a warning. A brokered
+   push from this host, if wanted, is its own design.
+4. **Provider credentials on a target.** Never sent. Rejected: an API key
+   injected per launch over the session, which puts the key in reach of the
    target's administrator and of any process that escapes.
-5. **Disconnect behavior.** (a) The executor and its processes die with the
-   session; (b) they survive a bounded grace period for reattachment.
-   **Default (a):** it never leaves work running unseen. (b) needs its own
-   reattachment authentication and is a later change if dogfood asks for it.
-6. **SSH configuration.** (a) Honor the person's SSH configuration with Octant's
-   overrides above; (b) use only an Octant-written configuration. **Default (a):**
-   aliases, jump hosts, and hardware keys work as the person set them up.
-7. **Version skew.** (a) Exact build match; (b) a compatible protocol range.
-   **Default (a)** until the protocol has a second version.
-8. **Remote preview ports.** (a) Out of scope: the agent Browser reaches the
-   target's dev servers only at addresses this Mac can already open; (b) forward
-   chosen ports through an authenticated host proxy. **Default (a)** for the
-   first delivery.
+5. **Disconnect behavior.** The executor and its processes die with the
+   session, so work never runs unseen. Rejected for now: surviving a bounded
+   grace period for reattachment, which needs its own reattachment
+   authentication and is a later change if dogfood asks for it.
+6. **SSH configuration.** Octant honors the person's SSH configuration with
+   Octant's overrides above, so aliases, jump hosts, and hardware keys work as
+   the person set them up. Rejected: an Octant-written configuration only.
+7. **Version skew.** The executor must match this host's build exactly.
+   Rejected until the protocol has a second version: a compatible protocol
+   range.
+8. **Remote preview ports.** Out of scope for the first delivery: the agent
+   Browser reaches the target's dev servers only at addresses this Mac can
+   already open. Deferred: forwarding chosen ports through an authenticated host
+   proxy.
 
 ## Delivery plan
 
@@ -421,8 +425,8 @@ Each slice is one reviewable change with its own evidence. "Container" means an
 agent can implement and verify it in a Linux container with OpenSSH installed and
 `sshd` on loopback as the target; no account, hardware, or maintainer action.
 
-1. **This specification.** Accepted when the maintainer approves it and the
-   decisions above, or replaces their defaults. Docs checks only.
+1. **This specification.** Accepted by the maintainer on 2026-10-26 with every
+   decision above as written. Docs checks only.
 2. **Admission policy and contracts.** Container. SSH target, attestation facts,
    and the admission decision as contracts and a pure domain policy. Accepted when
    focused domain tests show admission refuses for every unproven fact and
