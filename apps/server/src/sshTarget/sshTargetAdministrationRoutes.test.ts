@@ -9,8 +9,9 @@ import {
   SSH_TARGET_ROUTES,
   createSshTargetAdministrationRouteHandler,
 } from "./sshTargetAdministrationRoutes";
+import { SshRemoteProjectService } from "./sshRemoteProjectService";
 import { SshTargetConnectionService } from "./sshTargetConnectionService";
-import { SshTargetRegistry } from "./sshTargetRegistry";
+import { openSshTargetTestStore } from "./sshTargetStore.test-support";
 
 const windowId = decodeWindowId("33333333-3333-4333-8333-333333333333");
 const capability = "A".repeat(43);
@@ -18,6 +19,7 @@ const secret = "desktop-secret";
 const HOST_KEY = "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 
 let directory: string;
+const openConnections: Array<{ close(): void }> = [];
 
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "octant-ssh-routes-"));
@@ -38,24 +40,35 @@ exit 255
 });
 
 afterEach(() => {
+  for (const connection of openConnections.splice(0)) connection.close();
   rmSync(directory, { recursive: true, force: true });
 });
 
 function setup() {
   const authority = new WindowAuthorityStore();
   authority.register({ windowId, capability, now: Date.now() });
+  const opened = openSshTargetTestStore(directory);
+  openConnections.push(opened.connection);
   const connections = new SshTargetConnectionService({
-    registry: new SshTargetRegistry(join(directory, "data")),
+    store: opened.store,
     buildVersion: "0.9.0",
     sshExecutable: join(directory, "ssh"),
     environment: { PATH: "/usr/bin:/bin" },
   });
+  const projects = new SshRemoteProjectService({
+    store: opened.store,
+    connections,
+    uuid: () => "55555555-5555-4555-8555-555555555555",
+    clock: () => new Date().toISOString(),
+  });
   return {
     connections,
+    projects,
     handle: createSshTargetAdministrationRouteHandler({
       desktopBridgeSecret: secret,
       windowAuthorityStore: authority,
       connections,
+      projects,
     }),
   };
 }
@@ -127,7 +140,7 @@ describe("SSH target administration routes", () => {
     const unconfigured = createSshTargetAdministrationRouteHandler({
       desktopBridgeSecret: undefined,
       windowAuthorityStore: new WindowAuthorityStore(),
-      connections: setup().connections,
+      ...setup(),
     });
     expect((await unconfigured(post(SSH_TARGET_ROUTES.hostKey, body)))?.status).toBe(503);
 
@@ -149,6 +162,58 @@ describe("SSH target administration routes", () => {
       expect(decision).toMatchObject({ kind: "reject", facts: { surface: "local-only" } });
     }
     expect(existsSync(join(directory, "ssh-ran"))).toBe(false);
+  });
+
+  it("refuses to bind a remote root on a target with no attested connection, and binds nothing", async () => {
+    const { handle } = setup();
+    const probed = await handle(post(SSH_TARGET_ROUTES.hostKey, { destination: "devbox" }));
+    const probe = (await probed?.json()) as { probeId: string; fingerprint: string };
+    const registered = await handle(
+      post(SSH_TARGET_ROUTES.register, {
+        probeId: probe.probeId,
+        fingerprint: probe.fingerprint,
+        executorPath: "/opt/octant/bin/octant",
+      }),
+    );
+    if (registered === undefined) throw new Error("the route did not answer");
+    const { target } = (await registered.json()) as { target: { id: string } };
+
+    const bound = await handle(
+      post(SSH_TARGET_ROUTES.bind, {
+        targetId: target.id,
+        remoteRoot: "/home/build/app",
+        name: "App",
+      }),
+    );
+    expect(bound?.status).toBe(409);
+    expect(await bound?.json()).toEqual({
+      status: "refused",
+      reason: "not-admitted",
+      decision: { status: "refused", reason: "target-unreachable" },
+    });
+    const listed = await handle(
+      new Request(`http://127.0.0.1${SSH_TARGET_ROUTES.projects}`, {
+        headers: { "x-octant-desktop-secret": secret, "x-octant-window-capability": capability },
+      }),
+    );
+    expect(await listed?.json()).toEqual({ projects: [] });
+
+    // A read names a Project; one this host never bound is not found.
+    const read = await handle(
+      post(SSH_TARGET_ROUTES.gitStatus, { projectId: "66666666-6666-4666-8666-666666666666" }),
+    );
+    expect(read?.status).toBe(404);
+    // A path that climbs out of the root never reaches the service.
+    expect(
+      (
+        await handle(
+          post(SSH_TARGET_ROUTES.file, {
+            projectId: "66666666-6666-4666-8666-666666666666",
+            path: "../.ssh/id_ed25519",
+          }),
+        )
+      )?.status,
+    ).toBe(400);
   });
 
   it("refuses a destination the SSH client could read as an option before running the client", async () => {

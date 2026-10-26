@@ -2,9 +2,9 @@ import { Schema } from "effect";
 import type { SshExecutorIdentityFacts } from "@octant/contracts/ssh-target";
 import {
   SshExecutorHostFrame,
-  type SshExecutorAttestRequest,
-  type SshExecutorAttestedReply,
   type SshExecutorFrame,
+  type SshExecutorReply,
+  type SshExecutorRequest,
 } from "@octant/contracts/ssh-executor-protocol";
 import { encodeExecutorFrame, ExecutorFrameReader, executorPreamble } from "./executorFrames";
 
@@ -22,7 +22,8 @@ export interface SshExecutorSessionOptions {
   readonly input: AsyncIterable<Uint8Array | string>;
   readonly write: (bytes: Uint8Array) => void;
   readonly identity: SshExecutorIdentityFacts;
-  readonly attest: (request: SshExecutorAttestRequest) => Promise<SshExecutorAttestedReply>;
+  /** Answers one request: the attestation, or a read of a bound root. */
+  readonly answer: (request: SshExecutorRequest) => Promise<SshExecutorReply>;
 }
 
 export type SshExecutorSessionEnd = "input-closed" | "protocol-violated";
@@ -34,7 +35,15 @@ export async function serveSshExecutor(
 ): Promise<SshExecutorSessionEnd> {
   const send = (frame: SshExecutorFrame) => {
     const encoded = encodeExecutorFrame(frame);
-    if (encoded.status === "encoded") options.write(encoded.bytes);
+    if (encoded.status === "encoded") {
+      options.write(encoded.bytes);
+      return;
+    }
+    // A reply past the frame bound, such as a diff of control characters
+    // whose JSON escapes outgrew it, is answered as too large instead.
+    if (frame.type === "reply") {
+      send({ type: "reply", id: frame.id, reply: { kind: "refused", reason: "too-large" } });
+    }
   };
   options.write(executorPreamble());
   send({ type: "hello", identity: options.identity });
@@ -55,10 +64,10 @@ export async function serveSshExecutor(
         continue;
       }
       busy = true;
-      // An attestation that fails sends no reply; the host stops waiting for
-      // it and ends the connection, which is the honest outcome.
+      // A request that fails sends no reply; the host stops waiting for it
+      // and ends the connection, which is the honest outcome.
       void options
-        .attest(request)
+        .answer(request)
         .then(
           (reply) => send({ type: "reply", id, reply }),
           () => undefined,

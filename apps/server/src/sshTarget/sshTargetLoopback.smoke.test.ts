@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   chownSync,
@@ -8,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer, connect } from "node:net";
@@ -17,13 +19,19 @@ import { fileURLToPath } from "node:url";
 import { Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resolveReportedHostVersion } from "@octant/host-runtime";
+import { decodeCodeRelativePath } from "@octant/contracts/code";
+import { decodeUtcTimestamp } from "@octant/contracts/events";
+import { decodeProjectId } from "@octant/contracts/projects";
 import {
   SshDestination,
   SshExecutorPath,
+  SshRemotePath,
   type SshTargetStatus,
 } from "@octant/contracts/ssh-target";
+import { SshRemoteProjectService } from "./sshRemoteProjectService";
 import { SshTargetConnectionService } from "./sshTargetConnectionService";
-import { SshTargetRegistry } from "./sshTargetRegistry";
+import type { SshTargetStore } from "./sshTargetStore";
+import { openSshTargetTestStore } from "./sshTargetStore.test-support";
 
 /**
  * End-to-end evidence for remote SSH targets: the system OpenSSH client, a
@@ -56,11 +64,14 @@ const runnable =
 const executorEntry = fileURLToPath(new URL("./executorMain.ts", import.meta.url));
 const destination = Schema.decodeUnknownSync(SshDestination)("127.0.0.1");
 const executorPath = Schema.decodeUnknownSync(SshExecutorPath);
+const remotePath = Schema.decodeUnknownSync(SshRemotePath);
 const developmentBuild = resolveReportedHostVersion({});
 
 let root = "";
 let sshd: ChildProcess | undefined;
 let sshdPort = 0;
+let store: SshTargetStore | undefined;
+let closeStore = () => {};
 
 function run(command: string, args: ReadonlyArray<string>): void {
   const result = spawnSync(command, [...args], { stdio: "pipe", encoding: "utf8" });
@@ -146,10 +157,14 @@ function asNobody(bwrapReplacement?: string): string {
   return `${environment}\nexec unshare --mount --propagation private -- /bin/sh -c 'mount --bind ${bwrapReplacement} ${BWRAP} && exec ${executor}'`;
 }
 
+function openedStore(): SshTargetStore {
+  if (store === undefined) throw new Error("the store opens before the tests");
+  return store;
+}
+
 function service(buildVersion = developmentBuild) {
   return new SshTargetConnectionService({
-    // A data directory with a space, as macOS's Application Support is.
-    registry: new SshTargetRegistry(join(root, "Application Support")),
+    store: openedStore(),
     buildVersion,
     sshExecutable: join(root, "ssh"),
     environment: { PATH: "/usr/bin:/bin" },
@@ -169,6 +184,46 @@ async function register(
   });
   if (registered.status !== "ok") throw new Error(`registration refused: ${registered.reason}`);
   return registered.value;
+}
+
+function projectsOn(connections: SshTargetConnectionService): SshRemoteProjectService {
+  return new SshRemoteProjectService({
+    store: openedStore(),
+    connections,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+  });
+}
+
+/**
+ * A checkout the target's user owns, with a committed file changed since, an
+ * untracked one, and a link that leads out of it to a file beside it.
+ */
+function remoteCheckout(): string {
+  const checkout = join(root, "remote-app");
+  mkdirSync(join(checkout, "src"), { recursive: true });
+  writeFileSync(join(checkout, "README.md"), "hello\n");
+  writeFileSync(join(checkout, "src", "main.ts"), "export {};\n");
+  const git = (...args: ReadonlyArray<string>) =>
+    run("git", [
+      "-C",
+      checkout,
+      "-c",
+      "user.name=Octant",
+      "-c",
+      "user.email=octant@example.invalid",
+      ...args,
+    ]);
+  git("init", "-q", "--initial-branch=main");
+  git("add", ".");
+  git("commit", "-q", "-m", "initial");
+  writeFileSync(join(checkout, "README.md"), "hello\nchanged on the target\n");
+  writeFileSync(join(checkout, "new.txt"), "untracked\n");
+  writeFileSync(join(root, "outside-secret"), "not the checkout's\n");
+  symlinkSync(join(root, "outside-secret"), join(checkout, "escape"));
+  symlinkSync(checkout, join(root, "remote-link"));
+  run("chown", ["-R", `${String(NOBODY)}:${String(NOBODY)}`, checkout]);
+  return checkout;
 }
 
 function reasons(status: SshTargetStatus): ReadonlyArray<string> {
@@ -226,12 +281,17 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       `--outfile=${join(root, "executor", "executor.mjs")}`,
     ]);
     chmodSync(join(root, "executor", "executor.mjs"), 0o644);
+    // A data directory with a space, as macOS's Application Support is.
+    const opened = openSshTargetTestStore(root, join(root, "Application Support"));
+    store = opened.store;
+    closeStore = () => opened.connection.close();
     startSshd(join(root, "host-key"));
     await waitForPort(sshdPort);
   }, 120_000);
 
   afterAll(async () => {
     await stopSshd();
+    closeStore();
     if (root !== "") rmSync(root, { recursive: true, force: true });
   });
 
@@ -361,4 +421,205 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       await waitForPort(sshdPort);
     }
   }, 180_000);
+
+  it("binds a remote root on an attested target and reads its files, Git status, and diff from the target", async () => {
+    const checkout = remoteCheckout();
+    const connections = service();
+    const status = await register(connections, target("project-reads", asNobody()));
+    expect(reasons(status)).toEqual(["admitted", "admitted", "admitted"]);
+    const projects = projectsOn(connections);
+
+    // The journal records the folder the executor resolved, not the link.
+    const bound = await projects.bind({
+      targetId: status.target.id,
+      remoteRoot: remotePath(join(root, "remote-link")),
+      name: "Remote app",
+    });
+    expect(bound).toMatchObject({ status: "ok", value: { remoteRoot: checkout } });
+    if (bound.status !== "ok") return;
+    const projectId = bound.value.id;
+    expect(projects.list().map((project) => project.id)).toContain(projectId);
+
+    const listed = await projects.listDirectory({ projectId });
+    expect(listed).toMatchObject({ status: "ok", value: { truncated: false } });
+    if (listed.status !== "ok") return;
+    expect(listed.value.entries).toEqual([
+      { kind: "file", path: "new.txt", byteLength: 10 },
+      { kind: "file", path: "README.md", byteLength: 28 },
+      { kind: "directory", path: "src" },
+    ]);
+    expect(
+      await projects.listDirectory({ projectId, directory: decodeCodeRelativePath("src") }),
+    ).toMatchObject({
+      status: "ok",
+      value: { entries: [{ kind: "file", path: "src/main.ts" }] },
+    });
+
+    const read = await projects.readFile({ projectId, path: decodeCodeRelativePath("README.md") });
+    expect(read.status === "ok" && Buffer.from(read.value.contentBase64, "base64").toString()).toBe(
+      "hello\nchanged on the target\n",
+    );
+    // The link leads out of the root; the executor refuses it on the target.
+    expect(await projects.readFile({ projectId, path: decodeCodeRelativePath("escape") })).toEqual({
+      status: "refused",
+      reason: "outside-root",
+    });
+
+    const gitStatus = await projects.gitStatus({ projectId });
+    expect(gitStatus).toMatchObject({
+      status: "ok",
+      value: { head: { kind: "branch", name: "main" }, truncated: false },
+    });
+    if (gitStatus.status === "ok") {
+      expect(gitStatus.value.entries).toEqual(
+        expect.arrayContaining([
+          { path: "README.md", index: " ", worktree: "M" },
+          { path: "new.txt", index: "?", worktree: "?" },
+        ]),
+      );
+    }
+    const diff = await projects.gitDiff({ projectId, path: decodeCodeRelativePath("README.md") });
+    expect(diff.status === "ok" && diff.value.text).toContain("+changed on the target");
+
+    // A folder that holds the remote user's ~/.ssh is never bound.
+    expect(
+      await projects.bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(root),
+        name: "All",
+      }),
+    ).toEqual({ status: "refused", reason: "root-not-confinable" });
+
+    // With its session gone, the Project reads nothing until it attests again.
+    connections.close();
+    expect(await projects.gitStatus({ projectId })).toEqual({
+      status: "refused",
+      reason: "not-admitted",
+      decision: { status: "refused", reason: "target-unreachable" },
+    });
+    connections.remove(status.target.id);
+    expect(await projects.listDirectory({ projectId })).toEqual({
+      status: "refused",
+      reason: "not-admitted",
+      decision: { status: "refused", reason: "target-removed" },
+    });
+  }, 180_000);
+
+  it("runs no program a hostile checkout's Git configuration names when it reads status and diff", async () => {
+    const checkout = join(root, "hostile-app");
+    mkdirSync(checkout);
+    const git = (...args: ReadonlyArray<string>) =>
+      run("git", [
+        "-C",
+        checkout,
+        "-c",
+        "user.name=O",
+        "-c",
+        "user.email=o@example.invalid",
+        ...args,
+      ]);
+    git("init", "-q", "--initial-branch=main");
+    writeFileSync(join(checkout, "notes.txt"), "kept\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "initial");
+    // Each program lives in the root, which the confined Git can read, and
+    // prints what a diff would show if it ran.
+    const program = join(checkout, "hostile.sh");
+    writeFileSync(program, "#!/bin/sh\ncat\necho HOSTILE-PROGRAM-RAN\n", { mode: 0o755 });
+    writeFileSync(join(checkout, ".gitattributes"), "* filter=hostile diff=hostile\n");
+    const included = join(checkout, "included.config");
+    writeFileSync(included, `[core]\n\tpager = ${program}\n`);
+    writeFileSync(
+      join(checkout, ".git", "config"),
+      [
+        "[core]",
+        "\trepositoryformatversion = 0",
+        "\tbare = false",
+        `\tfsmonitor = ${program}`,
+        `\tpager = ${program}`,
+        `\thooksPath = ${checkout}`,
+        `\tsshCommand = ${program}`,
+        "[diff]",
+        `\texternal = ${program}`,
+        '[diff "hostile"]',
+        `\tcommand = ${program}`,
+        `\ttextconv = ${program}`,
+        '[filter "hostile"]',
+        `\tclean = ${program}`,
+        `\tsmudge = ${program}`,
+        "[pager]",
+        `\tdiff = ${program}`,
+        `\tstatus = ${program}`,
+        "[include]",
+        `\tpath = ${included}`,
+        '[includeIf "gitdir:/"]',
+        `\tpath = ${included}`,
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(checkout, "notes.txt"), "kept\nchanged\n");
+    run("chown", ["-R", `${String(NOBODY)}:${String(NOBODY)}`, checkout]);
+
+    const connections = service();
+    const status = await register(connections, target("hostile-reads", asNobody()));
+    expect(reasons(status)).toEqual(["admitted", "admitted", "admitted"]);
+    const projects = projectsOn(connections);
+    const bound = await projects.bind({
+      targetId: status.target.id,
+      remoteRoot: remotePath(checkout),
+      name: "Hostile",
+    });
+    if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+    const projectId = bound.value.id;
+    try {
+      const gitStatus = await projects.gitStatus({ projectId });
+      expect(gitStatus).toMatchObject({ status: "ok", value: { head: { name: "main" } } });
+      expect(JSON.stringify(gitStatus)).not.toContain("HOSTILE-PROGRAM-RAN");
+      for (const path of [undefined, decodeCodeRelativePath("notes.txt")]) {
+        const diff = await projects.gitDiff({ projectId, ...(path === undefined ? {} : { path }) });
+        expect(diff.status === "ok" && diff.value.text).toContain("+changed");
+        expect(JSON.stringify(diff)).not.toContain("HOSTILE-PROGRAM-RAN");
+      }
+    } finally {
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 180_000);
+
+  it("refuses to bind or read a remote root on a target whose canary escaped", async () => {
+    const connections = service();
+    const status = await register(
+      connections,
+      target("fake-bwrap-project", asNobody(join(root, "bwrap-confines-nothing"))),
+    );
+    const projects = projectsOn(connections);
+    const bound = await projects.bind({
+      targetId: status.target.id,
+      remoteRoot: remotePath(join(root, "remote-app")),
+      name: "Remote app",
+    });
+    expect(bound).toMatchObject({
+      status: "refused",
+      reason: "not-admitted",
+      decision: { reason: "confinement-canary-escaped" },
+    });
+    // A Project bound while the target attested reads nothing once it does not.
+    const projectId = decodeProjectId(randomUUID());
+    openedStore().bindProject({
+      id: projectId,
+      name: "Bound earlier",
+      targetId: status.target.id,
+      remoteRoot: remotePath(join(root, "remote-app")),
+      boundAt: decodeUtcTimestamp(new Date().toISOString()),
+    });
+    expect(
+      await projects.readFile({ projectId, path: decodeCodeRelativePath("README.md") }),
+    ).toMatchObject({
+      status: "refused",
+      reason: "not-admitted",
+      decision: { reason: "confinement-canary-escaped" },
+    });
+    connections.close();
+    connections.remove(status.target.id);
+  }, 120_000);
 });

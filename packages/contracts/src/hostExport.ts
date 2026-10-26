@@ -13,6 +13,8 @@ import { UtcTimestamp } from "./events";
 import { HostId } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId, ProjectMemoryView } from "./projects";
+import { SshTargetId, SshTargetPostureAdmission } from "./sshTarget";
+import { SshAttestationFactsDigest } from "./sshTargetEvents";
 import { ThreadExportBundle } from "./threadExport";
 import { ThreadPurgeTombstone, ThreadRetentionWindowEntry } from "./threadRetention";
 
@@ -76,6 +78,27 @@ export const HostExportSettingsSummary = Schema.Struct({
   streamReplies: Schema.optional(Schema.Boolean),
 }).annotations(strict);
 export type HostExportSettingsSummary = typeof HostExportSettingsSummary.Type;
+
+/**
+ * One SSH target this host holds, without its destination, host key, or
+ * executor path: the destination names a machine and a remote user as a
+ * Project root names a folder, and the key is key material. What remains is
+ * when it was registered, which Projects are bound to its folders, and what
+ * this host decided from its last attestation.
+ */
+export const HostExportSshTarget = Schema.Struct({
+  targetId: SshTargetId,
+  registeredAt: UtcTimestamp,
+  projectIds: Schema.Array(ProjectId),
+  lastAttestation: Schema.optional(
+    Schema.Struct({
+      attestedAt: UtcTimestamp,
+      factsDigest: SshAttestationFactsDigest,
+      admission: Schema.Array(SshTargetPostureAdmission).pipe(Schema.maxItems(8)),
+    }).annotations(strict),
+  ),
+}).annotations(strict);
+export type HostExportSshTarget = typeof HostExportSshTarget.Type;
 
 /**
  * One usage export row: reference ids, token counts, quality, and the
@@ -147,6 +170,10 @@ export const HostExportPage = Schema.Union(
     settings: HostExportSettingsSummary,
   }).annotations(strict),
   Schema.Struct({
+    kind: Schema.Literal("ssh-targets"),
+    sshTargets: pageItems(HostExportSshTarget),
+  }).annotations(strict),
+  Schema.Struct({
     kind: Schema.Literal("usage"),
     usage: pageItems(HostExportUsageRow),
   }).annotations(strict),
@@ -184,6 +211,7 @@ export const HostExportBundle = Schema.Struct({
   projectMemory: Schema.Array(HostExportProjectMemory),
   canvases: Schema.Array(HostExportCanvas),
   settings: HostExportSettingsSummary,
+  sshTargets: Schema.Array(HostExportSshTarget),
   usage: Schema.Array(HostExportUsageRow),
   retention: Schema.Struct({
     windows: Schema.Array(ThreadRetentionWindowEntry),
@@ -199,3 +227,4 @@ export const decodeHostExportSettingsSummary = Schema.decodeUnknownSync(HostExpo
 export const decodeHostExportProject = Schema.decodeUnknownSync(HostExportProject);
 export const decodeHostExportCanvas = Schema.decodeUnknownSync(HostExportCanvas);
 export const decodeHostExportUsageRow = Schema.decodeUnknownSync(HostExportUsageRow);
+export const decodeHostExportSshTarget = Schema.decodeUnknownSync(HostExportSshTarget);

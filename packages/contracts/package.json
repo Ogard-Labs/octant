@@ -107,6 +107,8 @@
     "./tool-egress": "./src/toolEgress.ts",
     "./ssh-target": "./src/sshTarget.ts",
     "./ssh-executor-protocol": "./src/sshExecutorProtocol.ts",
+    "./ssh-remote-project": "./src/sshRemoteProject.ts",
+    "./ssh-target-events": "./src/sshTargetEvents.ts",
     "./usage-rpc": "./src/usageRpc.ts",
     "./spend-ceiling": "./src/spendCeiling.ts",
     "./apple-toolchain": "./src/appleToolchain.ts",

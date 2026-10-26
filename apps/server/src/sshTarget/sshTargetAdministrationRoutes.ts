@@ -7,8 +7,17 @@ import {
   SshTargetRequest,
   type SshTargetList,
 } from "@octant/contracts/ssh-target";
+import {
+  SshRemoteDirectoryRequest,
+  SshRemoteFileRequest,
+  SshRemoteGitDiffRequest,
+  SshRemoteGitStatusRequest,
+  SshRemoteProjectBindRequest,
+  type SshRemoteProjectList,
+} from "@octant/contracts/ssh-remote-project";
 import { isLoopbackHostname } from "../shellRoutes";
 import { WindowAuthorityError, type WindowAuthorityStore } from "../windowAuthorityStore";
+import type { SshRemoteProjectResult, SshRemoteProjectService } from "./sshRemoteProjectService";
 import type {
   SshTargetAdministrationResult,
   SshTargetConnectionService,
@@ -24,6 +33,10 @@ import type {
  * bridge secret and a window capability, with no Origin header. A paired
  * device never reaches them, because the remote gateway keeps every
  * `/api/desktop` path local and holds no bridge secret to present.
+ *
+ * Binding a remote root is local in the same way. The reads of a bound root
+ * sit here too until remote-bound Projects join the product routes with their
+ * threads: until then no paired device can reach a target's files at all.
  */
 
 const DEFAULT_BODY_LIMIT = 16 * 1_024;
@@ -35,6 +48,12 @@ export const SSH_TARGET_ROUTES = {
   repin: "/api/desktop/ssh-targets/repin",
   connect: "/api/desktop/ssh-targets/connect",
   remove: "/api/desktop/ssh-targets/remove",
+  projects: "/api/desktop/ssh-targets/projects",
+  bind: "/api/desktop/ssh-targets/projects/bind",
+  files: "/api/desktop/ssh-targets/projects/files",
+  file: "/api/desktop/ssh-targets/projects/file",
+  gitStatus: "/api/desktop/ssh-targets/projects/git-status",
+  gitDiff: "/api/desktop/ssh-targets/projects/git-diff",
 } as const;
 
 type RouteValue = (typeof SSH_TARGET_ROUTES)[keyof typeof SSH_TARGET_ROUTES];
@@ -44,6 +63,7 @@ export interface SshTargetAdministrationRouteOptions {
   readonly desktopBridgeSecret: string | undefined;
   readonly windowAuthorityStore: WindowAuthorityStore;
   readonly connections: SshTargetConnectionService;
+  readonly projects: SshRemoteProjectService;
   readonly maxRequestBodySize?: number;
   readonly now?: () => number;
 }
@@ -78,10 +98,15 @@ export function createSshTargetAdministrationRouteHandler(
     }
     if (url.search !== "") return failure("invalid", 400);
 
-    const { connections } = options;
+    const { connections, projects } = options;
     if (route === SSH_TARGET_ROUTES.list) {
       if (request.method !== "GET") return failure("invalid", 405);
       const list: SshTargetList = { targets: connections.list() };
+      return Response.json(list);
+    }
+    if (route === SSH_TARGET_ROUTES.projects) {
+      if (request.method !== "GET") return failure("invalid", 405);
+      const list: SshRemoteProjectList = { projects: projects.list() };
       return Response.json(list);
     }
     if (request.method !== "POST") return failure("invalid", 405);
@@ -112,6 +137,31 @@ export function createSshTargetAdministrationRouteHandler(
         if (decoded._tag === "Left") return failure("invalid", 400);
         return answer(await connections.connect(decoded.right.targetId));
       }
+      case SSH_TARGET_ROUTES.bind: {
+        const decoded = Schema.decodeUnknownEither(SshRemoteProjectBindRequest)(body.value);
+        if (decoded._tag === "Left") return failure("invalid", 400);
+        return answerProject(await projects.bind(decoded.right));
+      }
+      case SSH_TARGET_ROUTES.files: {
+        const decoded = Schema.decodeUnknownEither(SshRemoteDirectoryRequest)(body.value);
+        if (decoded._tag === "Left") return failure("invalid", 400);
+        return answerProject(await projects.listDirectory(decoded.right));
+      }
+      case SSH_TARGET_ROUTES.file: {
+        const decoded = Schema.decodeUnknownEither(SshRemoteFileRequest)(body.value);
+        if (decoded._tag === "Left") return failure("invalid", 400);
+        return answerProject(await projects.readFile(decoded.right));
+      }
+      case SSH_TARGET_ROUTES.gitStatus: {
+        const decoded = Schema.decodeUnknownEither(SshRemoteGitStatusRequest)(body.value);
+        if (decoded._tag === "Left") return failure("invalid", 400);
+        return answerProject(await projects.gitStatus(decoded.right));
+      }
+      case SSH_TARGET_ROUTES.gitDiff: {
+        const decoded = Schema.decodeUnknownEither(SshRemoteGitDiffRequest)(body.value);
+        if (decoded._tag === "Left") return failure("invalid", 400);
+        return answerProject(await projects.gitDiff(decoded.right));
+      }
       case SSH_TARGET_ROUTES.remove: {
         const decoded = Schema.decodeUnknownEither(SshTargetRequest)(body.value);
         if (decoded._tag === "Left") return failure("invalid", 400);
@@ -129,6 +179,12 @@ function answer<T>(result: SshTargetAdministrationResult<T>): Response {
   return result.status === "ok"
     ? Response.json(result.value)
     : Response.json(result, { status: result.reason === "unknown-target" ? 404 : 409 });
+}
+
+function answerProject<T>(result: SshRemoteProjectResult<T>): Response {
+  return result.status === "ok"
+    ? Response.json(result.value)
+    : Response.json(result, { status: result.reason === "unknown-project" ? 404 : 409 });
 }
 
 async function readJson(

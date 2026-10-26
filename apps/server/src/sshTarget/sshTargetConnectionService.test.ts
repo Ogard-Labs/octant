@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { SshDestination, SshExecutorPath } from "@octant/contracts/ssh-target";
+import { SshDestination, SshExecutorPath, SshRemotePath } from "@octant/contracts/ssh-target";
 import { SSH_EXECUTOR_PREAMBLE } from "@octant/contracts/ssh-executor-protocol";
 import { SSH_CANARY_PROBES_BY_POSTURE } from "@octant/domain/ssh-target-admission-policy";
+import { SshRemoteProjectService } from "./sshRemoteProjectService";
 import { SshTargetConnectionService } from "./sshTargetConnectionService";
-import { SshTargetRegistry } from "./sshTargetRegistry";
+import type { SshTargetStore } from "./sshTargetStore";
+import { openSshTargetTestStore } from "./sshTargetStore.test-support";
 
 /**
  * The connection service against a stand-in for the OpenSSH client: a script
@@ -56,14 +58,34 @@ process.stdout.write("Welcome to devbox\n");
 process.stdout.write(${JSON.stringify(SSH_EXECUTOR_PREAMBLE)});
 process.stdout.write(frame({ type: "hello", identity: JSON.parse(process.env.FAKE_IDENTITY) }));
 if (mode === "exits-after-introduction") process.exit(1);
+const answer = (request) => {
+  switch (request.kind) {
+    case "attest":
+      return { kind: "attested", remoteUser: "build", facts: JSON.parse(process.env.FAKE_FACTS) };
+    case "resolve-root":
+      return { kind: "root-resolved", root: "/srv/app" };
+    case "list-directory":
+      return request.root === "/srv/app"
+        ? { kind: "directory-listed", listing: { entries: [{ kind: "file", path: "README.md", byteLength: 6 }], truncated: false } }
+        : { kind: "refused", reason: "root-moved" };
+    case "git-status":
+      return { kind: "git-status", status: { head: { kind: "unborn", name: "main" }, entries: [{ path: "README.md", index: "?", worktree: "?" }], truncated: false } };
+    default:
+      return { kind: "refused", reason: "read-failed" };
+  }
+};
 let buffered = Buffer.alloc(0);
 process.stdin.on("data", (chunk) => {
   buffered = Buffer.concat([buffered, chunk]);
-  if (buffered.length < 4 || buffered.length < 4 + buffered.readUInt32BE(0)) return;
-  const request = JSON.parse(buffered.subarray(4, 4 + buffered.readUInt32BE(0)).toString());
-  fs.writeFileSync(process.env.FAKE_SSH_REQUEST, JSON.stringify(request));
-  const facts = JSON.parse(process.env.FAKE_FACTS);
-  process.stdout.write(frame({ type: "reply", id: request.id, reply: { kind: "attested", remoteUser: "build", facts } }));
+  while (buffered.length >= 4 && buffered.length >= 4 + buffered.readUInt32BE(0)) {
+    const length = buffered.readUInt32BE(0);
+    const request = JSON.parse(buffered.subarray(4, 4 + length).toString());
+    buffered = buffered.subarray(4 + length);
+    if (request.request.kind === "attest") fs.writeFileSync(process.env.FAKE_SSH_REQUEST, JSON.stringify(request));
+    fs.appendFileSync(process.env.FAKE_SSH_REQUEST + ".log", request.request.kind + "\n");
+    const outOfTurn = mode === "answers-out-of-turn" && request.request.kind !== "attest";
+    process.stdout.write(frame({ type: "reply", id: request.id + (outOfTurn ? 1 : 0), reply: answer(request.request) }));
+  }
 });
 process.stdin.on("end", () => process.exit(0));
 `;
@@ -89,21 +111,27 @@ function passingFacts() {
 }
 
 let directory: string;
-let registry: SshTargetRegistry;
+let registry: SshTargetStore;
+let closeStore: () => void;
 
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "octant-ssh-service-"));
-  registry = new SshTargetRegistry(join(directory, "data"));
+  const opened = openSshTargetTestStore(directory);
+  registry = opened.store;
+  closeStore = () => opened.connection.close();
   writeFileSync(join(directory, "ssh"), `#!${process.execPath}\n${FAKE_SSH}`, { mode: 0o700 });
 });
 
 afterEach(() => {
+  closeStore();
   rmSync(directory, { recursive: true, force: true });
 });
 
-function service(overrides: { readonly mode?: string; readonly identity?: object } = {}) {
+function service(
+  overrides: { readonly mode?: string; readonly identity?: object; readonly facts?: object } = {},
+) {
   return new SshTargetConnectionService({
-    registry,
+    store: registry,
     buildVersion: BUILD,
     sshExecutable: join(directory, "ssh"),
     environment: {
@@ -113,7 +141,7 @@ function service(overrides: { readonly mode?: string; readonly identity?: object
       FAKE_HOST_KEY: HOST_KEY,
       FAKE_SSH_MODE: overrides.mode ?? "executor",
       FAKE_IDENTITY: JSON.stringify(overrides.identity ?? passingFacts().identity),
-      FAKE_FACTS: JSON.stringify(passingFacts()),
+      FAKE_FACTS: JSON.stringify(overrides.facts ?? passingFacts()),
       OCTANT_DESKTOP_BRIDGE_SECRET: "never-forwarded",
     },
   });
@@ -230,7 +258,6 @@ describe("SSH target connection service", () => {
         expect(entry.decision).toEqual({ status: "refused", reason });
       }
       connections.close();
-      rmSync(join(directory, "data"), { recursive: true, force: true });
     }
   });
 
@@ -260,6 +287,115 @@ describe("SSH target connection service", () => {
         subject: { kind: "file-operation" },
       }),
     ).toEqual({ status: "refused", reason: "target-removed" });
+  });
+
+  it("binds a remote root and reads through the attested session, and on an unattested target refuses both before any frame", async () => {
+    const remoteRoot = Schema.decodeUnknownSync(SshRemotePath)("/home/build/app");
+    const requests = () =>
+      readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
+
+    const connections = service();
+    const projects = new SshRemoteProjectService({
+      store: registry,
+      connections,
+      uuid: () => "55555555-5555-4555-8555-555555555555",
+      clock: () => "2026-10-26T10:00:00.000Z",
+    });
+    const status = await registered(connections);
+    const bound = await projects.bind({ targetId: status.target.id, remoteRoot, name: "App" });
+    // The journal keeps the folder the executor resolved.
+    expect(bound).toMatchObject({ status: "ok", value: { remoteRoot: "/srv/app" } });
+    if (bound.status !== "ok") return;
+    const projectId = bound.value.id;
+    expect(await projects.listDirectory({ projectId })).toEqual({
+      status: "ok",
+      value: { entries: [{ kind: "file", path: "README.md", byteLength: 6 }], truncated: false },
+    });
+    expect(await projects.gitStatus({ projectId })).toMatchObject({
+      status: "ok",
+      value: { head: { kind: "unborn", name: "main" } },
+    });
+    expect(requests()).toEqual(["attest", "resolve-root", "list-directory", "git-status"]);
+
+    // The session ends: its attestation goes with it, and no read is sent.
+    connections.close();
+    expect(await projects.gitStatus({ projectId })).toEqual({
+      status: "refused",
+      reason: "not-admitted",
+      decision: { status: "refused", reason: "target-unreachable" },
+    });
+    expect(requests()).toHaveLength(4);
+
+    // A target whose Plan canary proved nothing is connected but not attested
+    // for reads: binding and reading refuse with the probe that did not report.
+    const facts = passingFacts();
+    const inconclusive = {
+      ...facts,
+      canaries: facts.canaries.map((entry) =>
+        entry.posture === "plan"
+          ? {
+              ...entry,
+              results: entry.results.map((result) =>
+                result.probe === "write-inside-root"
+                  ? { ...result, outcome: "inconclusive" }
+                  : result,
+              ),
+            }
+          : entry,
+      ),
+    };
+    const unattested = service({ facts: inconclusive });
+    const unattestedProjects = new SshRemoteProjectService({
+      store: registry,
+      connections: unattested,
+      uuid: () => "66666666-6666-4666-8666-666666666666",
+      clock: () => "2026-10-26T10:00:00.000Z",
+    });
+    const reconnected = await unattested.connect(status.target.id);
+    expect(reconnected).toMatchObject({ status: "ok", value: { connection: "connected" } });
+    const refusal = {
+      status: "refused",
+      reason: "not-admitted",
+      decision: {
+        status: "refused",
+        reason: "not-attested",
+        posture: "plan",
+        probe: "write-inside-root",
+      },
+    };
+    expect(
+      await unattestedProjects.bind({ targetId: status.target.id, remoteRoot, name: "Again" }),
+    ).toEqual(refusal);
+    expect(await unattestedProjects.listDirectory({ projectId })).toEqual(refusal);
+    expect(await unattestedProjects.gitStatus({ projectId })).toEqual(refusal);
+    expect(requests()).toEqual([
+      "attest",
+      "resolve-root",
+      "list-directory",
+      "git-status",
+      "attest",
+    ]);
+    expect(unattestedProjects.list().map((project) => project.id)).toEqual([projectId]);
+    unattested.close();
+  });
+
+  it("ends the session when the executor answers a read out of turn, and reads nothing after it", async () => {
+    const connections = service({ mode: "answers-out-of-turn" });
+    const projects = new SshRemoteProjectService({
+      store: registry,
+      connections,
+      uuid: () => "77777777-7777-4777-8777-777777777777",
+      clock: () => "2026-10-26T10:00:00.000Z",
+    });
+    const status = await registered(connections);
+    expect(status.connection).toBe("connected");
+    const remoteRoot = Schema.decodeUnknownSync(SshRemotePath)("/home/build/app");
+    expect(await projects.bind({ targetId: status.target.id, remoteRoot, name: "App" })).toEqual({
+      status: "refused",
+      reason: "executor-unavailable",
+    });
+    expect(projects.list()).toEqual([]);
+    expect(connections.list()[0]?.connection).toBe("unreachable");
   });
 
   it("re-pins only with a key read from the target's own destination", async () => {

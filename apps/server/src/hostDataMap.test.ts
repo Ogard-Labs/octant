@@ -64,6 +64,10 @@ describe("composeHostDataMap", () => {
       name: "Computer use driver",
       location: { kind: "known", path: `${dataDirectory}/computer-use` },
     });
+    expect(decoded.host.caches).toContainEqual({
+      name: "SSH target host-key pins",
+      location: { kind: "known", path: `${dataDirectory}/ssh-targets` },
+    });
     // Every directory the confirmed purge sweep reaches outside the journal
     // must be visible in the map, so the map cannot under-state erasure.
     expect(decoded.host.caches).toContainEqual({
@@ -103,6 +107,7 @@ describe("composeHostDataMap", () => {
       "provider-calls",
       "update-checks",
       "marketplace-fetches",
+      "ssh-target-connections",
     ]);
     expect(JSON.stringify(decoded)).not.toMatch(/sk-|password|secret|token/i);
     expect(decoded.projects.kind).toBe("known");

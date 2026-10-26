@@ -51,7 +51,7 @@ const MAX_PROBE_OUTPUT_BYTES = 4_096;
  * network, so the writing postures' probe that connects around the forwarder
  * proves that no connection leaves the capsule at all.
  */
-function postureGrants(
+export function postureGrants(
   posture: SshConfinedPosture,
 ): Pick<
   ProcessConfinementPrepareInput,

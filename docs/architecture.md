@@ -764,8 +764,10 @@ actions continue to report unavailable for plain folders.
 
 A Code Project bound to a folder on a machine this host reaches over SSH is a
 design accepted on 2026-10-26. Its admission policy, the executor, the SSH
-transport, host-key pinning from a local window or the local CLI, and Linux
-confinement attestation are built; no Project can bind a remote root yet. Its
+transport, host-key pinning from a local window or the local CLI, Linux
+confinement attestation, and binding a remote root with Files, Git status,
+and diff reads through the executor are built; threads cannot run there yet.
+SSH targets, their attestation digests, and remote bindings are journaled. Its
 admission, confinement attestation,
 transport, and how it differs from a paired host are owned by
 [Remote SSH environments](design/remote-ssh-environments.md).
@@ -2211,7 +2213,8 @@ flowchart LR
   can also take one `octant.host-export/1` cut of what this host holds: a thread bundle for
   every thread of every mode, Projects, Project memory, every Canvas (one a
   Chat thread owns outside every Project names no Project), a
-  non-secret settings summary, usage export rows, and retention windows
+  non-secret settings summary, SSH targets without their destination, host
+  key, or executor path, usage export rows, and retention windows
   with purge tombstones. That call is a host-control read on the loopback
   route chain. A remote principal and a paired device are refused, and the
   remote forward list does not carry the path. The same forbidden-key walk

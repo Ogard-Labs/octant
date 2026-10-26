@@ -16,7 +16,7 @@ const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
 
 /** True when the text holds no C0 control character and no DEL. */
-function holdsNoControlCharacter(value: string): boolean {
+export function holdsNoControlCharacter(value: string): boolean {
   for (const character of value) {
     const code = character.charCodeAt(0);
     if (code <= 0x1f || code === 0x7f) return false;
