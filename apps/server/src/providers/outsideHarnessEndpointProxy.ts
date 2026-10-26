@@ -508,10 +508,22 @@ function makeBroker(input: {
         "The provider driver asked for an address outside the configured endpoint.",
       );
     }
+    // The key may go in `authorization` or a header of the service's own, but
+    // never in one the driver may not set: `proxy-authorization` is addressed
+    // to a proxy rather than the origin (Bun hands it to an HTTP proxy), and
+    // `host` or `cookie` put the key where intermediaries route and log.
+    const keyHeader = params.auth?.header.toLowerCase();
+    if (
+      keyHeader !== undefined &&
+      keyHeader !== "authorization" &&
+      REFUSED_REQUEST_HEADERS.has(keyHeader)
+    ) {
+      throw failure("unauthorized", "The provider driver may not set that header.");
+    }
     const headers = new Headers();
     for (const [name, value] of params.headers ?? []) {
       const lowered = name.toLowerCase();
-      if (REFUSED_REQUEST_HEADERS.has(lowered) || lowered === params.auth?.header.toLowerCase()) {
+      if (REFUSED_REQUEST_HEADERS.has(lowered) || lowered === keyHeader) {
         throw failure("unauthorized", "The provider driver may not set that header.");
       }
       headers.append(name, value);
@@ -563,7 +575,15 @@ function makeBroker(input: {
       response.body?.cancel().catch(() => undefined);
       throw failure("invalid-configuration", "The configured endpoint returned a redirect.");
     }
-    await reportKeyRejection(lease, response);
+    // Reporting a refusal reads the start of its body, which the connection
+    // deadline no longer covers; a body that never arrives would otherwise hold
+    // this call, and one of the instance's slots, until the driver stops.
+    const stalled = setTimeout(abort, input.limits.httpIdleTimeoutMs);
+    try {
+      await reportKeyRejection(lease, response);
+    } finally {
+      clearTimeout(stalled);
+    }
     return response;
   };
 }
@@ -584,7 +604,13 @@ function isConfiguredOrigin(url: string, origin: string): boolean {
   } catch {
     return false;
   }
-  return target.username === "" && target.password === "" && target.origin === origin;
+  // `origin` alone would accept `blob:https://configured.example/…`, whose
+  // origin is the configured one although it is no request to it.
+  return (
+    target.username === "" &&
+    target.password === "" &&
+    `${target.protocol}//${target.host}` === origin
+  );
 }
 
 // ── the driver ─────────────────────────────────────────────────────────────

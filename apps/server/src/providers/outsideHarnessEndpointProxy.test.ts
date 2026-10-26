@@ -77,6 +77,7 @@ function harness(
     readonly messageBytes?: number;
     readonly httpResponseBytes?: number;
     readonly httpConnectionTimeoutMs?: number;
+    readonly httpIdleTimeoutMs?: number;
   } = {},
 ) {
   const channel = makeInMemoryOutsideDriverChannel();
@@ -103,6 +104,9 @@ function harness(
       ...(options.httpConnectionTimeoutMs === undefined
         ? {}
         : { httpConnectionTimeoutMs: options.httpConnectionTimeoutMs }),
+      ...(options.httpIdleTimeoutMs === undefined
+        ? {}
+        : { httpIdleTimeoutMs: options.httpIdleTimeoutMs }),
     },
     clock: () => now,
   });
@@ -401,15 +405,16 @@ describe("outside harness endpoint proxy", () => {
     ["a line that is not JSON", (_params, context) => context.writeRaw(`${HOSTILE}`)],
     [
       "a line over the size cap",
-      (_params, context) =>
-        context.writeRaw(
-          JSON.stringify({ jsonrpc: "2.0", method: "session/event", params: "x".repeat(5_000) }),
-        ),
+      (_params, context) => context.emit({ kind: "text-delta", text: "x".repeat(5_000) }),
     ],
     [
       "an answer to a call the host never made",
       (_params, context) =>
         context.writeRaw(JSON.stringify({ jsonrpc: "2.0", id: 999, result: { text: "" } })),
+    ],
+    [
+      "an answer with neither a result nor an error",
+      (_params, context) => context.writeRaw(JSON.stringify({ jsonrpc: "2.0", id: context.id })),
     ],
     [
       "a method the protocol does not have",
@@ -569,6 +574,7 @@ describe("outside driver brokered requests", () => {
     ["another port", "https://models.example.test:8443/v1/chat"],
     ["credentials in the address", "https://user:pass@models.example.test/v1/chat"],
     ["an address that does not parse", "not a url"],
+    ["a blob address minted on the configured origin", "blob:https://models.example.test/v1/chat"],
   ])("refuses a request to %s before it reads any key", async (_name, target) => {
     const keys = credentials({ [String(instanceA)]: "KEY-A" });
     const fetch = vi.fn<OutsideDriverFetch>(async () => new Response("ok"));
@@ -605,6 +611,28 @@ describe("outside driver brokered requests", () => {
     expect(call.seen()?.error).toMatchObject({ data: { category: "unauthorized" } });
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it.each(["host", "Proxy-Authorization", "cookie"])(
+    "refuses to put the key in the %s header, which the driver may not set",
+    async (header) => {
+      const keys = credentials({ [String(instanceA)]: "KEY-A" });
+      const fetch = vi.fn<OutsideDriverFetch>(async () => new Response("ok"));
+      const call = sendThrough((context) =>
+        context.http({ url: `${baseUrl}chat`, method: "GET", auth: { header } }),
+      );
+      const { probe, proxy } = harness(
+        { "session/send": call.handler },
+        { fetch, credentialResolver: keys.resolver },
+      );
+      await probe();
+      const session = await proxy.harnessEndpoint.open(modelId);
+      await session.send(request(), { signal: new AbortController().signal, onEvent: () => {} });
+
+      expect(call.seen()?.error).toMatchObject({ data: { category: "unauthorized" } });
+      expect(keys.lease).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    },
+  );
 
   it("follows no redirect, so the key never reaches the redirect target", async () => {
     const keys = credentials({ [String(instanceA)]: "KEY-A" });
@@ -663,6 +691,31 @@ describe("outside driver brokered requests", () => {
 
     expect(keys.reportRejected).toHaveBeenCalledWith(expect.objectContaining({ status: 401 }));
     expect(call.seen()).toMatchObject({ status: 401, end: { outcome: "complete" } });
+  });
+
+  it("answers the driver when a refused key's response stalls before its body", async () => {
+    const keys = credentials({ [String(instanceA)]: "KEY-A" });
+    const fetch = vi.fn<OutsideDriverFetch>(async (_url, init) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          init.signal?.addEventListener("abort", () => controller.error(new Error("aborted")));
+        },
+      });
+      return new Response(body, { status: 401 });
+    });
+    const call = sendThrough((context) =>
+      context.http({ url: `${baseUrl}chat`, method: "GET", auth: { header: "authorization" } }),
+    );
+    const { probe, proxy } = harness(
+      { "session/send": call.handler },
+      { fetch, credentialResolver: keys.resolver, httpIdleTimeoutMs: 50 },
+    );
+    await probe();
+    const session = await proxy.harnessEndpoint.open(modelId);
+    await session.send(request(), { signal: new AbortController().signal, onEvent: () => {} });
+
+    expect(keys.reportRejected).toHaveBeenCalledWith(expect.objectContaining({ status: 401 }));
+    expect(call.seen()).toMatchObject({ status: 401, end: { outcome: "failed" } });
   });
 
   it("keeps streaming a response that outlasts the connection deadline", async () => {

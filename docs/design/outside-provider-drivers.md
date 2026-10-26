@@ -286,14 +286,17 @@ takes the fail-closed option.
 - **The brokered call.** `GET` or `POST`; headers as name and value pairs with
   no line breaks; bodies as UTF-8 text both ways, since the services a driver
   translates speak text. The driver may not set `authorization`,
-  `proxy-authorization`, `cookie`, `host`, or the header it asks the key in;
-  the reply withholds that header, `authorization`, `proxy-authorization`, and
+  `proxy-authorization`, `cookie`, `host`, or the header it asks the key in,
+  and may not ask the key in `proxy-authorization`, `cookie`, or `host`; the
+  URL's own scheme, host, and port must be the configured origin's, so a
+  `blob:` address minted on that origin is refused. The reply withholds that header, `authorization`, `proxy-authorization`, and
   `set-cookie`. No redirect is followed, even on the same origin, because a
   redirect could only carry the key somewhere the person did not enter. An
   instance has at most eight brokered calls in flight.
 - **Bounds.** A driver line is at most 4 MiB. `initialize`, `probe`, and
   `session/open` get 30 seconds and `session/send` ten minutes; a brokered call
-  gets 10 seconds to connect, 120 seconds between response chunks, and 16 MiB
+  gets 10 seconds to connect, 120 seconds between response chunks (including
+  the start of a refused key's body the host reads to report it), and 16 MiB
   of response.
 - **The channel.** The proxy reads and writes lines through a channel
   interface; slice 3 runs it in memory, and slice 4 attaches the confined

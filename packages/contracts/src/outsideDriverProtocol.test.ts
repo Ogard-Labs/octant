@@ -45,6 +45,7 @@ describe("outside driver wire protocol", () => {
   it.each([
     ["a method the protocol does not have", { jsonrpc: "2.0", method: "host/exec", params: {} }],
     ["another JSON-RPC version", { jsonrpc: "1.0", id: 1, result: {} }],
+    ["an answer with neither a result nor an error", { jsonrpc: "2.0", id: 1 }],
     [
       "a retry announcement",
       {

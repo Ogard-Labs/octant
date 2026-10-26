@@ -303,11 +303,14 @@ export type OutsideDriverHttpRequestParams = typeof OutsideDriverHttpRequestPara
  * answers; anything else stops the driver.
  */
 export const OutsideDriverToHostMessage = Schema.Union(
+  // `exact`, because a missing key reads as `undefined`, which `Unknown`
+  // accepts: without it a bare `{ jsonrpc, id }` decodes as an answer that has
+  // neither a result nor an error.
   Schema.Struct({
     jsonrpc: JsonRpcVersion,
     id: OutsideDriverMessageId,
     result: Schema.Unknown,
-  }).annotations(strict),
+  }).annotations({ parseOptions: { onExcessProperty: "error", exact: true } }),
   Schema.Struct({
     jsonrpc: JsonRpcVersion,
     id: OutsideDriverMessageId,
