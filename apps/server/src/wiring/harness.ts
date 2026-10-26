@@ -17,6 +17,7 @@ import { ThreadWorkService } from "../chat/threadWorkService";
 import { codeTurnExecutionPolicyReader } from "../code/codeTurnExecutionPolicy";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { nativeHarnessRecoveryBlockers } from "../harness/nativeHarnessRecovery";
+import { newestChatAttemptSession } from "../harness/nativeHarnessJournalLookup";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { createNativeHarnessAuthority } from "../harness/nativeHarnessAuthority";
 import {
@@ -97,7 +98,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
     | "nativeHarnessSessions"
   > &
   Pick<WorkRequestStateWiring, "runningWorkTurnAccess"> &
-  Pick<FoundationsWiring, "codeBoardEventStore" | "workThreadProjection"> &
+  Pick<FoundationsWiring, "codeBoardEventStore" | "workThreadProjection" | "workTurnProjection"> &
   Pick<WorkspaceWiring, "projectService">;
 
 export function wireHarness(deps: HarnessDependencies) {
@@ -131,6 +132,7 @@ export function wireHarness(deps: HarnessDependencies) {
     turnMetrics,
     windowAuthorityStore,
     workThreadProjection,
+    workTurnProjection,
   } = deps;
 
   const researchRouter = new ResearchRouter({
@@ -548,9 +550,20 @@ export function wireHarness(deps: HarnessDependencies) {
       }
     },
     contextHarness,
-    codeJournal: {
+    journal: {
       transcripts: nativeHarnessTranscripts,
-      latestSession: (threadId) => codeBoardEventStore.latestProviderSession(threadId),
+      latestChatSession: (threadId) =>
+        newestChatAttemptSession(persistence.readChatThreadView(threadId)?.turns ?? []),
+      latestWorkSession: (threadId) => {
+        const latest = workTurnProjection.latestForThread(threadId);
+        return latest === undefined
+          ? undefined
+          : {
+              providerInstanceId: latest.authority.providerInstanceId,
+              resumeCursor: latest.resumeCursor,
+            };
+      },
+      latestCodeSession: (threadId) => codeBoardEventStore.latestProviderSession(threadId),
     },
     hostId: deriveToolHostId(providerDataDirectory),
     readThreadTaint: (threadId) =>
