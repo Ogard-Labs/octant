@@ -54,7 +54,7 @@ describe("SSH client arguments", () => {
     expect(
       sshExecutorSessionArguments({
         destination,
-        knownHostsFile: "/data/ssh-targets/t/known_hosts",
+        knownHostsFile: "/Users/a/Library/Application Support/Octant/ssh-targets/t/known_hosts",
         executorPath,
       }),
     ).toEqual([
@@ -63,7 +63,7 @@ describe("SSH client arguments", () => {
       "-o",
       "StrictHostKeyChecking=yes",
       "-o",
-      "UserKnownHostsFile=/data/ssh-targets/t/known_hosts",
+      'UserKnownHostsFile="/Users/a/Library/Application Support/Octant/ssh-targets/t/known_hosts"',
       "-o",
       "ServerAliveInterval=15",
       "-o",
@@ -78,7 +78,7 @@ describe("SSH client arguments", () => {
 
   it("reads a destination's host key without logging in, running a command, or trusting the key", () => {
     expect(
-      sshHostKeyProbeArguments({ destination, knownHostsFile: "/data/probe/known_hosts" }),
+      sshHostKeyProbeArguments({ destination, knownHostsFile: "/data/100%h/probe/known_hosts" }),
     ).toEqual([
       "-T",
       "-N",
@@ -86,7 +86,7 @@ describe("SSH client arguments", () => {
       "-o",
       "StrictHostKeyChecking=accept-new",
       "-o",
-      "UserKnownHostsFile=/data/probe/known_hosts",
+      'UserKnownHostsFile="/data/100%%h/probe/known_hosts"',
       "-o",
       "PreferredAuthentications=publickey",
       "-o",
@@ -102,5 +102,15 @@ describe("SSH client arguments", () => {
       "--",
       "build@devbox.example",
     ]);
+  });
+
+  it("refuses a known-hosts path OpenSSH could not read back as one file", () => {
+    for (const knownHostsFile of [
+      '/data/a"b/known_hosts',
+      "/data/a\\b/known_hosts",
+      "/data/a\nb",
+    ]) {
+      expect(() => sshHostKeyProbeArguments({ destination, knownHostsFile })).toThrow();
+    }
   });
 });

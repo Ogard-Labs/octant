@@ -27,7 +27,7 @@ beforeEach(() => {
     join(directory, "ssh"),
     `#!/bin/sh
 for argument in "$@"; do
-  case "$argument" in UserKnownHostsFile=*) known="\${argument#UserKnownHostsFile=}" ;; esac
+  case "$argument" in UserKnownHostsFile=*) known="\${argument#UserKnownHostsFile=}"; known="\${known#?}"; known="\${known%?}" ;; esac
 done
 touch "${directory}/ssh-ran"
 case " $* " in *" -N "*) printf 'devbox ssh-ed25519 ${HOST_KEY}\\n' > "$known" ;; esac

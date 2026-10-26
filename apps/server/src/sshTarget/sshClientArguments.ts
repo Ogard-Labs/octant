@@ -55,6 +55,24 @@ const SHARED_OPTIONS = [
   "LogLevel=ERROR",
 ] as const;
 
+/**
+ * A file path as the value of a `-o` option. OpenSSH splits a known-hosts
+ * option's value on whitespace into several files and expands `%` tokens in
+ * it. Unquoted, the macOS data directory (`~/Library/Application Support`)
+ * named `~/Library/Application` as a known-hosts file of its own: the probe
+ * wrote every key it read into it, confirmed or not, and every session then
+ * trusted those keys beside the pin. Quoting keeps the path one file and `%%`
+ * keeps a percent sign literal. OpenSSH cannot be relied on to read a quote or
+ * backslash inside a quoted value the same way across versions, so a path
+ * holding one is refused rather than guessed at.
+ */
+function sshOptionPath(path: string): string {
+  if (/["\\\p{Cc}]/u.test(path)) {
+    throw new Error("An SSH option path may not hold a quote, backslash, or control character.");
+  }
+  return `"${path.replaceAll("%", "%%")}"`;
+}
+
 export interface SshExecutorSessionArgumentsInput {
   readonly destination: SshDestination;
   /** This target's own owner-only known-hosts file, holding only its pinned key. */
@@ -76,7 +94,7 @@ export function sshExecutorSessionArguments(
     "-o",
     "StrictHostKeyChecking=yes",
     "-o",
-    `UserKnownHostsFile=${input.knownHostsFile}`,
+    `UserKnownHostsFile=${sshOptionPath(input.knownHostsFile)}`,
     // A session that stops answering is lost, not left waiting.
     "-o",
     "ServerAliveInterval=15",
@@ -112,7 +130,7 @@ export function sshHostKeyProbeArguments(
     "-o",
     "StrictHostKeyChecking=accept-new",
     "-o",
-    `UserKnownHostsFile=${input.knownHostsFile}`,
+    `UserKnownHostsFile=${sshOptionPath(input.knownHostsFile)}`,
     "-o",
     "PreferredAuthentications=publickey",
     "-o",

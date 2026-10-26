@@ -27,7 +27,7 @@ const fs = require("node:fs");
 const args = process.argv.slice(2);
 fs.writeFileSync(process.env.FAKE_SSH_ARGS, JSON.stringify(args));
 fs.writeFileSync(process.env.FAKE_SSH_ARGS + ".secret", String(process.env.OCTANT_DESKTOP_BRIDGE_SECRET));
-const option = (name) => args.find((value) => value.startsWith(name + "="))?.slice(name.length + 1);
+const option = (name) => JSON.parse(args.find((value) => value.startsWith(name + "="))?.slice(name.length + 1));
 if (args.includes("-N")) {
   fs.writeFileSync(option("UserKnownHostsFile"), "devbox.example ssh-ed25519 " + process.env.FAKE_HOST_KEY + "\n");
   process.stderr.write("build@devbox.example: Permission denied (publickey).\n");
@@ -55,6 +55,7 @@ const frame = (value) => {
 process.stdout.write("Welcome to devbox\n");
 process.stdout.write(${JSON.stringify(SSH_EXECUTOR_PREAMBLE)});
 process.stdout.write(frame({ type: "hello", identity: JSON.parse(process.env.FAKE_IDENTITY) }));
+if (mode === "exits-after-introduction") process.exit(1);
 let buffered = Buffer.alloc(0);
 process.stdin.on("data", (chunk) => {
   buffered = Buffer.concat([buffered, chunk]);
@@ -170,7 +171,7 @@ describe("SSH target connection service", () => {
       "executor",
       "--stdio",
     ]);
-    expect(args).toContain(`UserKnownHostsFile=${pin}`);
+    expect(args).toContain(`UserKnownHostsFile="${pin}"`);
     expect(readFileSync(join(directory, "args.json.secret"), "utf8")).toBe("undefined");
     const request = JSON.parse(readFileSync(join(directory, "request.json"), "utf8"));
     expect(request.request.postures).toEqual([
@@ -204,11 +205,12 @@ describe("SSH target connection service", () => {
     expect(registry.list()).toEqual([]);
   });
 
-  it("names the refusal for a changed host key, a missing executor, and an executor of another build", async () => {
+  it("names the refusal for a changed host key, a missing executor, an executor of another build, and a session lost mid-attestation", async () => {
     const cases = [
       ["host-key-changed", {}, "host-key-changed"],
       ["executor-missing", {}, "executor-missing"],
       ["not-an-executor", {}, "executor-version-mismatch"],
+      ["exits-after-introduction", {}, "target-unreachable"],
       [
         "executor",
         { buildVersion: "0.8.9", protocolVersion: 1, installVerified: true },
@@ -223,7 +225,7 @@ describe("SSH target connection service", () => {
     for (const [mode, identity, reason] of cases) {
       const connections = service({ mode, ...(mode === "executor" ? { identity } : {}) });
       const status = await registered(connections);
-      expect(status.connection).toBe(reason);
+      expect(status.connection).toBe(reason === "target-unreachable" ? "unreachable" : reason);
       for (const entry of status.admission) {
         expect(entry.decision).toEqual({ status: "refused", reason });
       }

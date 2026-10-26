@@ -45,8 +45,9 @@ design is built around.
 ## Terms
 
 - **SSH target.** A remote machine this host has registered: an SSH destination
-  (as the person would type it after `ssh`), a pinned host key, the remote user it
-  logged in as, its platform, and the path of the executor on it. An SSH target is
+  (as the person would type it after `ssh`), a pinned host key, and the path of
+  the executor on it. The remote user and platform are facts each connection
+  attests, not part of the registration. An SSH target is
   not a host, a Machine, or a paired device. It has no journal, identity key,
   listener, or credential store of Octant's.
 - **Executor.** A small Octant process on the SSH target, started by this host
@@ -200,8 +201,14 @@ master, checked under other rules, from carrying the session;
 `ForwardX11Trusted=no` and `Tunnel=no` close the remaining forwarding paths;
 `EscapeChar=none` keeps frame bytes from controlling the client; and
 `ServerAliveInterval=15` with `ServerAliveCountMax=3` turns a silent session
-into a lost one. `apps/server/src/sshTarget/sshClientArguments.ts` holds the
-list, and its test pins it. The remote command is the executor path followed by
+into a lost one. The known-hosts path is quoted, with `%` doubled, because
+OpenSSH splits that option's value on whitespace into several files and expands
+`%` tokens in it: unquoted, a data directory under macOS's `Application
+Support` named `~/Library/Application` as a second known-hosts file, which the
+probe wrote every key it read into and every session then trusted. A path
+holding a quote, backslash, or control character is refused.
+`apps/server/src/sshTarget/sshClientArguments.ts` holds the list, and its test
+pins it. The remote command is the executor path followed by
 the fixed words `executor --stdio`, and the executor path is an absolute path
 whose segments hold only letters, digits, `.`, `_`, `+`, and `-`, so the
 target's login shell passes it through unchanged.
@@ -245,7 +252,8 @@ paragraph above leaves open:
   within a minute (or no attestation within three) reads as `target-unreachable`.
   Any other exit before an introduction means the program at the executor path
   is not an executor this host can speak to, and reads as
-  `executor-version-mismatch`.
+  `executor-version-mismatch`. An exit after a matching introduction is a lost
+  session and reads as `target-unreachable`.
 - **When it connects.** Slice 3 connects on registration, re-pin, and an
   explicit connect, and a connection that ends is held as `target-unreachable`
   with no attestation. Reconnecting on its own, with bounded backoff, arrives
@@ -377,9 +385,13 @@ rules settle what the tables above leave open, each in the fail-closed direction
   connection, the attestation's connection, identity, platform, user, any escape,
   the backend, and the requested posture's canaries.
 
-**What attestation proves, and what it does not.** It proves that this
-connection's executor is the matching Octant build and that confinement held
-against the canaries on that kernel, under a non-root user. It does not prove
+**What attestation proves, and what it does not.** Every fact is the executor's
+own report, because this host cannot inspect the target. Reported by an
+unaltered executor, it shows that this connection's executor is the matching
+Octant build and that confinement held against the canaries on that kernel,
+under a non-root user. An executor altered by the remote user or root can report
+anything, including a passing attestation; attestation does not detect that,
+which is why altering the executor is outside the threat model below. It does not prove
 anything against the remote's root or kernel, exactly as local confinement proves
 nothing against this Mac's root. A remote administrator can read the remote root
 and alter the executor; the person's choice of target is the trust in that

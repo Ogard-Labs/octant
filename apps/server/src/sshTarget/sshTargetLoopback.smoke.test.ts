@@ -148,7 +148,8 @@ function asNobody(bwrapReplacement?: string): string {
 
 function service(buildVersion = developmentBuild) {
   return new SshTargetConnectionService({
-    registry: new SshTargetRegistry(join(root, "data")),
+    // A data directory with a space, as macOS's Application Support is.
+    registry: new SshTargetRegistry(join(root, "Application Support")),
     buildVersion,
     sshExecutable: join(root, "ssh"),
     environment: { PATH: "/usr/bin:/bin" },

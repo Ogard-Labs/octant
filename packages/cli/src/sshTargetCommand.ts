@@ -149,6 +149,11 @@ export async function runSshTargetCliCommand(input: RunSshTargetCliCommandInput)
   }
   const { fingerprint } = probe;
   input.stdout.write(`${destination} presented ${probe.hostKey.algorithm} key ${fingerprint}\n`);
+  // The design has registration say what the pin and attestation do not
+  // prove, rather than call the target verified.
+  input.stdout.write(
+    "The pin proves only that later sessions reach this key. Whoever administers the target can read its files and alter the executor there, whose attestation is its own report.\n",
+  );
   const confirmed = await confirmFingerprint(input, fingerprint, command.fingerprint);
   if (!confirmed) return 1;
 

@@ -494,7 +494,12 @@ export class SshTargetConnectionService {
       });
       child.stdin.on("error", () => undefined);
       child.once("error", () => finish({ state: "unreachable" }));
-      child.once("close", (code) => finish({ state: lostStateFromExit(code, stderr) }));
+      // Once a matching executor has introduced itself, the key held and the
+      // program is the right one, so an exit before its reply is a lost
+      // session, not a reason to reinstall.
+      child.once("close", (code) =>
+        finish({ state: introduced ? "unreachable" : lostStateFromExit(code, stderr) }),
+      );
     });
   }
 }

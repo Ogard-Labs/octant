@@ -75,6 +75,7 @@ describe("octant ssh-target", () => {
       await declined.run(["add", "build@devbox"], { executor: "/opt/octant/bin/octant" }),
     ).toBe(1);
     expect(declined.out.join("")).toContain(fingerprint);
+    expect(declined.out.join("")).toContain("Whoever administers the target");
     expect(declined.sent.map((request) => request.path)).toEqual([
       "/api/desktop/ssh-targets/host-key",
     ]);
