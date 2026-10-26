@@ -2808,9 +2808,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   historical record remains Proposed. Enterprise directory sign-in and
   cloud-IAM request signing (`directory-oauth`, `cloud-iam`) are an accepted
   design (2026-10-26) in [Enterprise provider identity](design/enterprise-provider-identity.md).
-  Only the `directory-oauth` contract and provider-sdk seam exist; no broker
-  dialect or driver speaks it, so provider policy refuses to configure such an
-  instance and one read from storage reads `incompatible`.
+  The `directory-oauth` contract, provider-sdk seam, and the broker's
+  `directory-oidc` dialect exist; no server path begins a directory sign-in
+  and no driver speaks the kind, so provider policy refuses to configure such
+  an instance and one read from storage reads `incompatible`.
   Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
