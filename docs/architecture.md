@@ -3732,7 +3732,7 @@ prompt is therefore built to be appended, never rewritten:
   256 most recently changed sessions. A resumed session's first turn after a
   restart therefore sends only what is new, as the runtime's own history
   survived the restart too. Every change that drops a holding (a fresh start, a
-  compaction) is written synchronously before the next turn is sent, and a write
+  failed restatement, a compaction) is written synchronously before the next turn is sent, and a write
   that fails removes the file; a missing, unreadable, or malformed file holds
   nothing, which costs one extra copy, never a missing one.
 - **What the journal and meter say.** The Chat and Work context plans still list

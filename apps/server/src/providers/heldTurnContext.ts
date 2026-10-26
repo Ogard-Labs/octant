@@ -203,7 +203,11 @@ export class HeldTurnContext {
       // A failed restatement may still be in the runtime's history (Claude
       // reports usage before its failed result), where it supersedes blocks the
       // record would otherwise call held; holding nothing forces a full send.
-      this.#sessions.set(key, { held: session.restates === true ? new Set() : session.held });
+      if (session.restates !== true) this.#sessions.set(key, { held: session.held });
+      else {
+        this.#sessions.set(key, { held: new Set() });
+        if (session.held.size > 0) this.#persist();
+      }
     }
   }
 

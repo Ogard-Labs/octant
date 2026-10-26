@@ -192,6 +192,21 @@ describe("HeldTurnContext kept on disk", () => {
     expect(completeTurn(restarted(path), true, [instructions]).context).toEqual([instructions]);
   });
 
+  it("sends everything after a restart that followed a failed restatement", () => {
+    const path = storePath();
+    const before = restarted(path);
+    const skill = { kind: "instructions", text: "Review as a skeptic." } as const;
+    completeTurn(before, false, [instructions, skill]);
+    before.forTurn({ sessionId, resumed: true, context: [instructions] });
+    before.observe(keptUsage);
+    before.observe({ ...fields, kind: "interrupted", message: "The turn was stopped." });
+
+    expect(completeTurn(restarted(path), true, [instructions, skill]).context).toEqual([
+      instructions,
+      skill,
+    ]);
+  });
+
   it("holds nothing when the record on disk is unreadable", () => {
     const path = storePath();
     completeTurn(restarted(path), false, [instructions]);
