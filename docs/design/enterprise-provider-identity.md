@@ -10,9 +10,10 @@ provider SDK seam, and who may change credentials
 [Providers and model endpoints](model-endpoints.md) owns the Settings rows and
 Add endpoint flow.
 
-Status: authorized post-preview scope as of 2026-10-26; design for review, not
-yet built. Nothing here changes what ships today. Each slice below lands with its
-own implementation, tests, and the edits to this file that record what it built.
+Status: authorized post-preview scope, and its decisions accepted by the
+maintainer, on 2026-10-26; slice 1 is starting, and nothing is built yet.
+Nothing here changes what ships today. Each slice below lands with its own
+implementation, tests, and the edits to this file that record what it built.
 
 ## Outcome
 
@@ -216,38 +217,39 @@ that declares the kind also passes `runHarnessEndpointConformance`.
 
 ## Maintainer decisions
 
-Each has a recommended default; slice 1 needs only 1–3.
+The maintainer accepted these on 2026-10-26. Each states the rule; the
+alternatives considered and the reason for the choice follow it. Slice 1
+depends only on 1–3.
 
-1. **Directory client registration.** (a) The organization registers a public
-   client in its own tenant and enters its client id beside the tenant id; (b)
-   Octant publishes a verified multi-tenant client that tenants consent to.
-   **Recommend (a)** for slice 1: no Octant account, no third-party contact, and
-   the tenant administrator controls consent. (b) is a later maintainer action
-   (creating and verifying a publisher registration). Reusing another product's
-   first-party client id is refused under the originality rule.
-2. **Sign-in flow.** (a) Authorization code with PKCE on a loopback redirect
-   only; (b) also device code. **Recommend (a)** on the desktop, with device
-   code as a per-instance opt-in for a host without the desktop app in a later
-   slice: many tenants block device code by policy and it is the easier flow to
-   phish.
-3. **Continuous access evaluation.** (a) Do not request it, keeping ordinary
-   hour-long tokens and no claims challenges; (b) request it and handle claims
-   challenges as `interaction-required`. **Recommend (a)** for slice 1; revisit
-   when a tenant requires it.
-4. **First cloud-IAM source identity.** (a) The cloud's single-sign-on device
-   authorization, held in the broker; (b) long-lived access keys stored in the
-   broker; (c) reading the person's cloud profile files. **Recommend (a)**.
-   Long-lived keys are reusable identity material the broker would hold
-   indefinitely and the existing Bedrock API-key path already covers static
-   credentials; (c) makes Octant read another tool's credential store.
-5. **Google Vertex.** Its bearer is valid across the whole cloud account, so it
-   may never reach the server. (a) A broker-side relay that attaches the token
-   and forwards only to the bound host; (b) defer. **Recommend (b)** until an
-   organization needs it; (a) is the only acceptable shape when it does.
-6. **Spawning runtimes on enterprise identity.** (a) A host loopback relay that a
-   child calls with a per-session capability useless outside the host; (b) not
-   supported, so those runtimes keep their own delegated login. **Recommend
-   (b)** for this workstream; (a) needs its own design because the child can
+1. **Directory client registration.** The organization registers a public
+   client in its own tenant and enters its client id beside the tenant id. This
+   needs no Octant account and no third-party contact, and the tenant
+   administrator controls consent. Deferred: an Octant-published, verified
+   multi-tenant client that tenants consent to; it needs a separate maintainer
+   action (creating and verifying a publisher registration). Reusing another
+   product's first-party client id is refused under the originality rule.
+2. **Sign-in flow.** The desktop signs in with the authorization code flow and
+   PKCE on a loopback redirect only. Device code is a per-instance opt-in for a
+   host without the desktop app, in a later slice (slice 2), never the default:
+   many tenants block it by policy, and it is the easier flow to phish.
+3. **Continuous access evaluation.** Octant does not request it, keeping
+   ordinary hour-long tokens and no claims challenges. Rejected for slice 1:
+   requesting it and handling claims challenges as `interaction-required`.
+   Revisit when a tenant requires it.
+4. **First cloud-IAM source identity.** The cloud's single-sign-on device
+   authorization, held in the broker. Rejected: long-lived access keys stored
+   in the broker, which are reusable identity material the broker would hold
+   indefinitely and which the existing Bedrock API-key path already covers as
+   static credentials; and reading the person's cloud profile files, which
+   makes Octant read another tool's credential store.
+5. **Google Vertex.** Deferred until an organization needs it. Its bearer is
+   valid across the whole cloud account, so it may never reach the server;
+   when it is built, the only acceptable shape is a broker-side relay that
+   attaches the token and forwards only to the bound host.
+6. **Spawning runtimes on enterprise identity.** Not supported in this
+   workstream: those runtimes keep their own delegated login. Rejected for now:
+   a host loopback relay that a child calls with a per-session capability
+   useless outside the host. It needs its own design, because the child can
    still spend through the relay for the session.
 
 ## Delivery slices
@@ -291,8 +293,8 @@ validation; and the tenant binding is explicit in the identity token. Bedrock
 needs a new wire transport and a signer, and Vertex needs a relay, so either
 would be several slices before the first sign-in.
 
-**Slice 2: device-code sign-in for hosts without the desktop app** (if decision
-2 allows). `octant provider sign-in` on the host, opt-in per instance.
+**Slice 2: device-code sign-in for hosts without the desktop app**
+(decision 2). `octant provider sign-in` on the host, opt-in per instance.
 _Acceptance:_ a headless host signs in with device code against a fake
 directory; remote principals cannot start it. Linux container capable.
 
@@ -310,7 +312,7 @@ the broker builds every canonical request from request fields; the server
 process never holds a key. Linux container capable against fakes;
 a real smoke needs an AWS organization and billed Bedrock access.
 
-**Later, by decision:** Google Vertex through a broker relay (decision 5);
+**Later, each needing its own maintainer decision:** Google Vertex through a broker relay (decision 5);
 spawning runtimes on enterprise identity (decision 6); an Octant-published
 directory client (decision 1b).
 

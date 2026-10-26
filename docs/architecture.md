@@ -2755,8 +2755,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   error codes map to user-facing states. The effective
   authority rule is in [security and authority](#security-and-authority); the
   historical record remains Proposed. Enterprise directory sign-in and
-  cloud-IAM request signing (`directory-oauth`, `cloud-iam`) are designed, not
-  built, in [Enterprise provider identity](design/enterprise-provider-identity.md).
+  cloud-IAM request signing (`directory-oauth`, `cloud-iam`) are an accepted
+  design (2026-10-26), not yet built, in [Enterprise provider identity](design/enterprise-provider-identity.md).
   Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
