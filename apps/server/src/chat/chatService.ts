@@ -428,6 +428,37 @@ function dispatchedProviderContext(
   return blocks.flatMap(({ entryId, block }) => (sent.has(String(entryId)) ? [block] : []));
 }
 
+/**
+ * Whether the plan leaves out any of the earlier conversation it was offered,
+ * to fit or because it was cut. A summarized message is carried by its
+ * summary and does not count.
+ */
+function conversationLeftOut(context: ChatTurnContextPlan): boolean {
+  const conversation = new Set(context.conversationMaterial.map((item) => String(item.entryId)));
+  return context.snapshot.next.plan.entries.some(
+    (entry) =>
+      conversation.has(String(entry.entryId)) &&
+      (entry.state === "omitted" || entry.state === "truncated"),
+  );
+}
+
+/**
+ * The plan as sent to a continued session: the planned earlier conversation
+ * stays in the plan, which still accounts for it, and is left out of the send
+ * because the session already holds it. A continued session is never handed a
+ * conversation over, so every planned conversation block is one it holds.
+ */
+function withoutHeldConversation(context: ChatTurnContextPlan): ChatTurnContextPlan {
+  const held = new Set(context.conversationMaterial.map((item) => String(item.entryId)));
+  return {
+    ...context,
+    providerContext: dispatchedProviderContext(
+      context.providerBlocks.filter((item) => !held.has(String(item.entryId))),
+      context.snapshot.next.plan,
+    ),
+  };
+}
+
 export interface ChatAttachmentUploadInput {
   readonly threadId: ChatThreadId;
   readonly attachmentId: ChatAttachmentId;
@@ -3807,7 +3838,7 @@ export class ChatService {
           "This Chat task's native session cannot be recovered under the selected provider and model. Its history has been preserved.",
       });
     }
-    const nativeSession = sessionDecision.kind === "continue-session" ? previous : undefined;
+    let nativeSession = sessionDecision.kind === "continue-session" ? previous : undefined;
     const handoff =
       sessionDecision.kind === "new-session-with-handoff"
         ? this.#selectConversationHandoff(thread, threadView, sessionDecision.reason, {
@@ -3904,34 +3935,54 @@ export class ChatService {
       executionContext,
       tools?.definitions.some((definition) => definition.name === "octant_thread_message") === true,
     );
-    const context = this.#planContext(
-      thread,
-      prompt,
-      currentRef,
-      attachmentIds,
-      previewSelections,
-      canvasSelections,
-      resolvedExtensions.entries,
-      providerFacts.modelLimitObservations,
-      providerFacts.serviceLimits,
-      researchRoute,
-      // A continued session already holds the conversation; sending it
-      // again would duplicate every earlier message inside the session.
-      nativeConversation || sessionDecision.kind === "continue-session" ? [] : historyTurns,
-      sideChatSourceContext,
-      threadMentionContexts,
-      handoff?.blocks,
-      offersCanvasTool(tools?.definitions),
-    );
-    const maintained =
-      nativeConversation || sessionDecision.kind === "continue-session"
-        ? context
-        : await this.#compactDroppedConversation(thread, context, driver, providerInstanceId);
+    // A continued harness session already holds the conversation, but it is
+    // still planned in full: the plan is what admission and capacity size the
+    // request by (the session sends its transcript again with every request),
+    // what a requested compaction summarizes from, and what decides whether
+    // the conversation still fits. Only the send leaves it out.
+    const planWith = (sideChatContext: string | undefined) =>
+      this.#planContext(
+        thread,
+        prompt,
+        currentRef,
+        attachmentIds,
+        previewSelections,
+        canvasSelections,
+        resolvedExtensions.entries,
+        providerFacts.modelLimitObservations,
+        providerFacts.serviceLimits,
+        researchRoute,
+        nativeConversation ? [] : historyTurns,
+        sideChatContext,
+        threadMentionContexts,
+        handoff?.blocks,
+        offersCanvasTool(tools?.definitions),
+      );
+    let context = planWith(sideChatSourceContext);
+    // A plan that leaves earlier conversation out to fit cannot be met by the
+    // continued session, which would carry all of it and drop older exchanges
+    // on its own without a summary. The host rebuilds the history in a fresh
+    // session instead and compacts what it drops, as for any host-planned turn.
+    if (resumableHost && nativeSession !== undefined && conversationLeftOut(context)) {
+      nativeSession = undefined;
+      // The fresh session never saw the sidecar source the continued one held.
+      if (sideChatSource !== undefined && sideChatSourceContext !== sideChatSource) {
+        context = planWith(
+          this.#sideChatSourceForTurn(thread.id, sideChatSource, { reusable: false, previous }),
+        );
+      }
+    }
+    const maintained = nativeConversation
+      ? context
+      : await this.#compactDroppedConversation(thread, context, driver, providerInstanceId);
     return {
       executionThread: thread,
       ...(nativeSession === undefined ? {} : { nativeSession }),
       ...(handoff === undefined ? {} : { handoff: handoff.record }),
-      context: maintained,
+      context:
+        resumableHost && nativeSession !== undefined
+          ? withoutHeldConversation(maintained)
+          : maintained,
       attachments,
       researchRoute,
       serviceLimits: providerFacts.serviceLimits,

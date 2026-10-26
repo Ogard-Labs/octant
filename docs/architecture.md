@@ -3873,11 +3873,20 @@ messages, tool calls and results. It continues only the same provider instance
 and model (in Work also the same folder binding), after a turn that completed,
 was cancelled, or was cut off by a restart, with a recorded resume cursor, and
 with no host compaction completed since that turn, because the session would
-never read the summary. Anything else (the first turn, a failed or parked
-turn, a retry, an edit, a branch, an earlier turn regenerated or resumed
-after the previous turn ran, another provider or model) rebuilds the
-history on the host in a fresh session, as before, and the next message
-continues that one. Resuming never widens a thread: the harness refuses a
+never read the summary. The host still plans the whole conversation for a
+continued turn and only leaves its blocks out of the send: the plan is what
+spend admission and capacity size the request by (the session sends its
+transcript again with every request), what the context meter shows, and what
+a requested compaction selects from, so a long continued conversation stays
+compactable. When that plan has to leave earlier conversation out to fit, the
+turn does not continue either: the host rebuilds the history in a fresh
+session from that plan (Chat also compacts what it dropped, as for any
+host-planned turn), so what the model reads is what the plan journals rather
+than whatever the session's own window fitting kept. Anything else (the
+first turn, a failed or parked turn, a retry, an edit, a branch, an earlier
+turn regenerated or resumed after the previous turn ran, another provider or
+model) rebuilds the history on the host in a fresh session, as before, and the
+next message continues that one. Resuming never widens a thread: the harness refuses a
 transcript opened for another endpoint, folder, or mode as `stale-resume`, and
 each turn offers only the tools its own mode allows, so a Chat thread gains no
 tools by continuing. A provider that keeps its conversation in a session of its own continues that
