@@ -234,12 +234,15 @@ revocable Expo token; Apple certificates, profiles, and the App Store Connect
 key stay in EAS's credential service. The App ID enables no optional Apple
 capability (push, associated domains, Sign in with Apple, iCloud), testers are
 maintainer-controlled App Store Connect users, and external groups, public
-links, and store listing stay closed until public store distribution, an
-authorized post-preview track, has its own specification and a separate
-maintainer action for submission ([mobile store note](mobile-store-v1-hold.md)).
-A build counts only after the
+links, and store listing stay closed until
+[public store distribution](design/mobile-maturity.md#phase-e-public-store-distribution),
+an authorized post-preview track, opens with a separate maintainer action for
+submission. A build counts only after the
 device pass in the [TestFlight runbook](mobile-testflight.md), not when EAS or
-Apple finishes processing it.
+Apple finishes processing it. Android builds, push notifications, capture and
+voice input, and store distribution extend this client under
+[Mobile maturity](design/mobile-maturity.md), which grants the phone no
+authority beyond what the host grants.
 
 **Local client context.** The local trust class is "holds a secret only the
 host's OS user can read", not "is on loopback". Loopback plus an admitted
