@@ -52,6 +52,8 @@ const PRODUCT_PROBES = [
   },
   { path: "/api/code/evidence", method: "PUT" },
   { path: "/api/code/local-servers/commands", method: "POST" },
+  { path: "/api/code/language/read", method: "POST" },
+  { path: "/api/code/language/documents", method: "POST" },
   { path: "/api/providers/bootstrap", method: "GET" },
   { path: "/api/github/authentication", method: "GET" },
   { path: "/api/github/authentication/commands", method: "POST" },

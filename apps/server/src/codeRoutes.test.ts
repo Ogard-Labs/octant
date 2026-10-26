@@ -337,6 +337,92 @@ describe("Code routes", () => {
     expect(response?.status).toBe(503);
   });
 
+  it("carries language documents and reads with the window and caller the host proved", async () => {
+    const fileId = "00000000-0000-4000-8000-000000000931";
+    const syncDocument = vi.fn(async () => ({ status: "refused", reason: "no-reach" }));
+    const read = vi.fn(async () => ({ status: "unavailable", reason: "starting" }));
+    const route = routeFixture({}, undefined, undefined, [], { syncDocument, read });
+    const post = (path: string, body: unknown) =>
+      request(path, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const open = {
+      kind: "open",
+      threadId,
+      checkoutId,
+      path: "src/file.ts",
+      text: "export const a = 1;\n",
+    };
+    const diagnostics = { kind: "diagnostics", threadId, checkoutId, fileId };
+
+    const opened = await route(post("/api/code/language/documents", open));
+    expect(opened?.status).toBe(200);
+    await expect(opened?.json()).resolves.toEqual({ status: "refused", reason: "no-reach" });
+    expect(syncDocument).toHaveBeenCalledWith(
+      { scopeId: windowId, principal: "local-window" },
+      open,
+    );
+    const answered = await route(post("/api/code/language/read", diagnostics));
+    await expect(answered?.json()).resolves.toEqual({ status: "unavailable", reason: "starting" });
+    expect(read).toHaveBeenCalledWith(
+      { scopeId: windowId, principal: "local-window" },
+      diagnostics,
+    );
+
+    // A caller cannot name the window, open by a host path, or read by path.
+    expect((await route(post("/api/code/language/documents", { ...open, windowId })))?.status).toBe(
+      400,
+    );
+    expect(
+      (await route(post("/api/code/language/documents", { ...open, path: "/etc/passwd" })))?.status,
+    ).toBe(400);
+    expect(
+      (await route(post("/api/code/language/read", { ...diagnostics, path: "src/file.ts" })))
+        ?.status,
+    ).toBe(400);
+    expect(syncDocument).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledOnce();
+
+    // The remote gateway shares this chain; the service is told a device asks.
+    const remoteDeviceId = "00000000-0000-4000-8000-000000000932";
+    const remoteRequest = post("/api/code/language/read", diagnostics);
+    bindPrincipalRouteContext(remoteRequest, {
+      principal: createRemoteDevicePrincipal({
+        hostId: "local" as never,
+        deviceId: remoteDeviceId as never,
+        credentialGeneration: 1,
+        origin: "https://octant.invalid",
+        protocolVersion: 1,
+        capabilityDigest: "b".repeat(64),
+        sessionId: "00000000-0000-4000-8000-000000000933" as never,
+      }),
+      scopeId: remoteDeviceId as never,
+    });
+    await route(remoteRequest);
+    expect(read).toHaveBeenLastCalledWith(
+      { scopeId: remoteDeviceId, principal: "remote-device" },
+      diagnostics,
+    );
+  });
+
+  it("reports language services unavailable on a host without them", async () => {
+    const response = await routeFixture()(
+      request("/api/code/language/read", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "diagnostics",
+          threadId,
+          checkoutId,
+          fileId: "00000000-0000-4000-8000-000000000931",
+        }),
+      }),
+    );
+    expect(response?.status).toBe(503);
+  });
+
   it("inspects a terminal through a non-journaling authenticated route", async () => {
     const inspectTerminal = vi.fn(async () => ({
       terminalId: "00000000-0000-4000-8000-000000000911",
@@ -1825,6 +1911,10 @@ function routeFixture(
     readonly windowId: ReturnType<typeof decodeWindowId>;
     readonly capability: string;
   }> = [],
+  language?: {
+    readonly syncDocument: (...args: never[]) => unknown;
+    readonly read: (...args: never[]) => unknown;
+  },
 ) {
   const store = new WindowAuthorityStore();
   store.register({ windowId, capability, now: 0 });
@@ -1851,5 +1941,6 @@ function routeFixture(
     now: () => 1,
     ...(maxJsonBodySize === undefined ? {} : { maxJsonBodySize }),
     ...(projectTerminals === undefined ? {} : { projectTerminals: projectTerminals as never }),
+    ...(language === undefined ? {} : { language: language as never }),
   });
 }

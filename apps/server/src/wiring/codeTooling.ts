@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { existsSync, realpathSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
-import { resolve } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
 import {
   decodeCodeCheckoutId,
   decodeCodeFileId,
@@ -9,7 +11,16 @@ import {
   decodeWindowId,
 } from "@octant/contracts";
 import { Effect } from "effect";
+import type { LanguageServerHostPlatform } from "@octant/domain";
+import {
+  BUNDLED_TYPESCRIPT_LANGUAGE_SERVER,
+  BUNDLED_TYPESCRIPT_LANGUAGE_SERVER_ENTRY_POINT,
+  bundledLanguageServerComponent,
+  resolveBundledLanguageServerActivation,
+} from "@octant/plugin-host/language-servers";
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
+import { CodeLanguageService, type CodeLanguageServerComponent } from "../code/codeLanguageService";
+import { LanguageServerProcessPort } from "../code/languageServerProcess";
 import {
   createCodeCheckoutOpenRouteHandler,
   createCodeExternalEditorRouteHandler,
@@ -43,16 +54,21 @@ import type { CodeWiring } from "./code";
 import type { CodeRuntimeWiring } from "./codeRuntime";
 
 export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence"> &
-  Pick<AuthorityWiring, "windowAuthorityStore"> &
+  Pick<AuthorityWiring, "codeSessionAuthority" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
-  Pick<CodeWiring, "canAccessCodeProject" | "codeWorkingDirectoryProbePath" | "roots"> &
+  Pick<
+    CodeWiring,
+    "canAccessCodeProject" | "codeFileWatch" | "codeWorkingDirectoryProbePath" | "roots"
+  > &
   Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService" | "terminalProcessPort">;
 
 export function wireCodeTooling(deps: CodeToolingDependencies) {
   const {
     canAccessCodeProject,
+    codeFileWatch,
     codeOperationRuntime,
+    codeSessionAuthority,
     codeWorkingDirectoryProbePath,
     managedWorktreeReceipts,
     options,
@@ -111,9 +127,50 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
       }
     });
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeProjectTerminalAuthority));
+    // Language services: confined language servers started on demand for a
+    // Code checkout (docs/design/language-services.md). The bundled
+    // TypeScript server is the only component today; it is on by default and
+    // reads as unavailable on an install that has no binary for this host.
+    const languageServerProcesses = new LanguageServerProcessPort({
+      receiptDirectory: join(persistence.dataDirectory, "code", "language-server-receipts"),
+    });
+    const languageService = new CodeLanguageService({
+      authority: {
+        readThread: persistence.readCodeThread,
+        readThreads: persistence.readCodeThreads,
+        readCheckout: persistence.readCodeCheckout,
+        canAccessProject: canAccessCodeProject,
+        effectiveThread: (scopeId, thread) => codeSessionAuthority.effectiveThread(scopeId, thread),
+        resolveRoot: (scopeId, thread, checkout, relativePath) =>
+          roots.resolve(scopeId, thread, checkout, relativePath),
+      },
+      components: bundledLanguageServerComponents(resolveBundledTypeScriptServerBinary()),
+      processes: languageServerProcesses,
+      platform: languageServerHostPlatform(process.platform),
+      cacheRoot: join(persistence.dataDirectory, "code", "language-server-cache"),
+      watcher: codeFileWatch,
+    });
+    // A previous run's servers are ended before this run starts any.
+    yield* Effect.promise(() => languageServerProcesses.reconcile().catch(() => undefined));
+    languageService.startSweeping();
+    // An archived or completed thread, or a checkout that went away, stops its
+    // server at once rather than at the next timed sweep.
+    const unsubscribeLanguageServerAuthority = persistence.journal.subscribeCommitted((append) => {
+      if (
+        append.events.some(
+          (event) =>
+            event.aggregateType === "code-thread" || event.aggregateType === "code-checkout",
+        )
+      ) {
+        void languageService.sweep().catch(() => undefined);
+      }
+    });
+    yield* Effect.addFinalizer(() => Effect.sync(unsubscribeLanguageServerAuthority));
+    yield* Effect.addFinalizer(() => Effect.promise(() => languageService.close()));
     const codeRoutes = createCodeRouteHandler({
       service: routeCodeService,
       ...(projectTerminals === undefined ? {} : { projectTerminals }),
+      language: languageService,
       windowAuthorityStore,
       maxJsonBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       maxFileBodySize: MAX_CODE_FILE_BODY_SIZE,
@@ -296,3 +353,62 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
 }
 
 export type CodeToolingWiring = Effect.Effect.Success<ReturnType<typeof wireCodeTooling>>;
+
+/**
+ * The bundled TypeScript server's binary for this host, from the pinned
+ * `typescript` package's per-platform native package. Absent when this
+ * install has none, which reads as the component being unavailable.
+ */
+function resolveBundledTypeScriptServerBinary(): string | undefined {
+  try {
+    const manifest = createRequire(import.meta.url).resolve(
+      `@typescript/typescript-${process.platform}-${process.arch}/package.json`,
+    );
+    const binary = join(dirname(manifest), "lib", "tsc");
+    return existsSync(binary) ? realpathSync(binary) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The bundled language servers effective in Code, read on every request so a
+ * component that stops being effective stops contributing at once.
+ */
+function bundledLanguageServerComponents(
+  typeScriptBinary: string | undefined,
+): () => ReadonlyArray<CodeLanguageServerComponent> {
+  const bundled = bundledLanguageServerComponent(BUNDLED_TYPESCRIPT_LANGUAGE_SERVER);
+  return () => {
+    const activation = resolveBundledLanguageServerActivation(
+      BUNDLED_TYPESCRIPT_LANGUAGE_SERVER,
+      "code",
+      { unavailable: typeScriptBinary === undefined },
+    );
+    if (
+      activation.kind !== "effective" ||
+      typeScriptBinary === undefined ||
+      bundled.entryPoint !== BUNDLED_TYPESCRIPT_LANGUAGE_SERVER_ENTRY_POINT
+    ) {
+      return [];
+    }
+    return [
+      {
+        componentKey: `${bundled.manifest.extensionId}:${bundled.component.id}`,
+        languages: bundled.languageServer.languages,
+        launchClass: bundled.languageServer.launchClass,
+        executable: typeScriptBinary,
+        args: ["--lsp", "--stdio"],
+        installRoot: dirname(typeScriptBinary),
+        sourceLabel: "typescript",
+      },
+    ];
+  };
+}
+
+function languageServerHostPlatform(platform: NodeJS.Platform): LanguageServerHostPlatform {
+  if (platform === "darwin") return "macos";
+  if (platform === "linux") return "linux";
+  if (platform === "win32") return "windows";
+  return "other";
+}

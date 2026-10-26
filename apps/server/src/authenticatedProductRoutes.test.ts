@@ -97,6 +97,12 @@ describe("authenticated product route dispatch", () => {
         new Request("https://octant.example/api/code/local-servers/commands", { method: "POST" }),
       ),
     ).toBe("code.local-servers.list");
+    // Language reads, and the open documents they read, are their own action.
+    for (const path of ["/api/code/language/read", "/api/code/language/documents"]) {
+      expect(
+        classifyProductAction(new Request(`https://octant.example${path}`, { method: "POST" })),
+      ).toBe("code.language.read");
+    }
     expect(
       classifyProductAction(
         new Request("https://octant.example/api/providers/commands", { method: "POST" }),
