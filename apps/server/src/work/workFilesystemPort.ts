@@ -166,8 +166,13 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
   openFile: async (path) => {
     // O_NOFOLLOW refuses a final component that is a symlink. It says nothing
     // about the ancestors, which is why the caller must still have run the
-    // containment sequence — this only closes the window after it.
-    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // containment sequence — this only closes the window after it. O_NONBLOCK
+    // keeps a FIFO swapped in after that sequence from holding the open until a
+    // writer appears; the caller's isFile check on the handle then refuses it.
+    const handle = await open(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
     return {
       stat: async () => {
         const info = await handle.stat({ bigint: true });
