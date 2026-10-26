@@ -9,7 +9,8 @@ person asks for it. Architecture owns the device authority rules this
 extends ([Architecture: device transport and evidence](../architecture.md#device-transport-and-evidence));
 [Device workbench](device-workbench.md) owns the Simulator and emulator panes.
 
-**Status: accepted 2026-10-26; slice 1 is starting.** The maintainer
+**Status: accepted 2026-10-26; slice 1 (contracts and policy) is built, and
+slice 2 is next.** The maintainer
 authorized this scope as post-preview work and accepted the decisions below on
 2026-10-26. That authorizes this design and its slices; it does not by itself
 authorize spending, creating developer accounts,
@@ -34,8 +35,14 @@ TestFlight track for its mobile client is a separate operator runbook
 
 - `octant_apple` and the workbench drive Simulators and the local Mac only.
   Destinations are `AppleSimulatorRecord`s
-  ([`appleToolchain.ts`](../../packages/contracts/src/appleToolchain.ts));
-  there is no physical-device record, id, or action.
+  ([`appleToolchain.ts`](../../packages/contracts/src/appleToolchain.ts)).
+- The device contracts (`AppleDeviceId`, `AppleDeviceRecord`,
+  `AppleDeviceRequest`, `AppleDeviceLease`, and the refusal reasons) and the
+  pure `evaluateAppleDeviceRequest` in
+  [`appleToolchainPolicy.ts`](../../packages/domain/src/appleToolchainPolicy.ts)
+  decide every row of the authority table below and every refusal named in
+  these rules. No host code calls them yet: there is no device discovery,
+  lease store, route, or tool operation.
 - Every build passes `CODE_SIGNING_ALLOWED=NO`
   ([`appleToolchainService.ts`](../../apps/server/src/apple/appleToolchainService.ts),
   `xcodebuildArguments`), so no signing identity is ever touched, and
@@ -79,8 +86,9 @@ access covers neither the device lease nor any distribution step.
 - Physical devices and distribution run only on a macOS host with Xcode
   selected and its licence accepted. On Linux and Windows, discovery reports no
   device layer (`toolchain-unavailable`), every device or distribution request
-  is refused before a process starts, and the tool family stays omitted. No
-  cloud Mac, remote build service, or third-party device library stands in.
+  is refused with that reason before a process starts, and the tool family
+  stays omitted. No cloud Mac, remote build service, or third-party device
+  library stands in.
 - Everything here is host-local: the device is paired with that Mac, the
   signing identity is in that Mac's login keychain, and the upload runs from
   that Mac. A remote client observes evidence the host already produced, under
@@ -95,7 +103,13 @@ access covers neither the device lease nor any distribution step.
 - The host lists paired devices, wired and network alike, with
   `xcrun devicectl list devices --json-output <host-private file>`, and probes
   which device operations the selected Xcode offers. An operation the probe does not
-  find is reported unavailable for that host, never approximated.
+  find is reported unavailable for that host (`operation-unavailable`), never
+  approximated. The probe covers listing, install, launch, terminate,
+  uninstall, screenshot, and console logs; `run` needs install and launch, and
+  `build` needs none because it does not touch the device.
+- Only iPhone and iPad are destinations (`platform: "ios"`); other paired
+  hardware is left out of the list. The outcome names those two, and widening
+  the record later is additive.
 - Each device gets a host-minted `AppleDeviceId`, mapped to the CoreDevice
   identifier in the host's Apple runtime store. The UDID, serial number, and
   ECID stay on the host: they never enter the journal, provider context,
@@ -120,7 +134,20 @@ access covers neither the device lease nor any distribution step.
 - Another thread's request for a leased device is refused (`destination-leased`)
   and names no other thread to the agent. Only a local person may move a lease,
   through a confirmation that names the holding thread.
-- `discover` and `status` need no lease. Every other device operation does.
+- A move carries the holding thread it names (`fromThreadId`). If the lease
+  ended or changed hands after the person was shown it, the move is refused
+  (`lease-changed`), so a device is never taken from a thread the person did
+  not see.
+- A lease, an `uninstall`, and an upload count as confirmed only when the
+  host's receipt says a local person answered; an answer from a paired device
+  is refused (`local-person-required`).
+- A lease may start on a device in any state but `unavailable`; each
+  operation inside it checks the state again. A phone that locks itself is the
+  ordinary case, and the lease grants nothing those checks do not still gate.
+  Asking again for a lease the thread already holds needs no new confirmation.
+- `discover` and `status` need no lease. Every other device operation does,
+  and a lease left on the thread's earlier checkout does not count
+  (`lease-required`).
 
 ### Per-operation authority
 
@@ -145,9 +172,23 @@ access covers neither the device lease nor any distribution step.
   expiry, lost lease, or thread gone stale or into Plan refuses the call.
 - `install` takes only the product an Octant build or run produced in that
   thread's private derived-data directory; any other path or archive is refused
-  (`invalid-artifact`). `launch` and `terminate` take only the bundle identifier
-  Octant installed for that thread, so a thread cannot open or stop the
-  person's other apps. Octant stops only the process it launched, never by name.
+  (`invalid-artifact`). `launch`, `terminate`, and `uninstall` take only the
+  bundle identifier Octant installed for that thread on that device
+  (`foreign-bundle`), so a thread cannot open, stop, or remove the person's
+  other apps. Octant stops and reads only the process it launched, never one by
+  name (`process-not-owned`).
+- Every device request names who asked (`requestedBy`). An agent acting for a
+  different thread is refused (`thread-mismatch`), and `uninstall`, upload, or
+  a lease move asked by anyone but a person is refused (`person-required`).
+- A provisioning update is refused by name under every posture
+  (`provisioning-updates-not-offered`), and a device request has no field that
+  could carry `-allowProvisioningUpdates`.
+- `build` needs the lease but not a connected device: it signs for the device
+  without touching it.
+- Every refusal that needs nobody's answer (host, remote, person, posture,
+  tooling, device, lease, state, ownership) is decided before an approval or
+  confirmation is asked for, so nobody is asked to approve a call that would
+  then be refused.
 - `logs` is the console output of the process Octant launched
   (`devicectl device process launch --console`). Device-wide system logs carry
   other apps' and the person's data and are not offered.
@@ -220,8 +261,12 @@ access covers neither the device lease nor any distribution step.
 ### Remote clients
 
 - A paired device may read device status and evidence of a thread it can open.
+  It may start `discover` and `status` only: a new screenshot or console read
+  is refused (`local-person-required`), since a remote client observes
+  evidence the host already produced.
 - Device install, launch, terminate, and uninstall from a `remote-device`
-  person are refused: remote clients observe only (decision 4).
+  person are refused: remote clients observe only (decision 4). So is every
+  other device or distribution request from one, `release-device` included.
 - Starting or moving a lease, signing setup, provisioning updates, the App Store
   Connect key, upload, submission, and release are local-only, never
   remote-approvable.
@@ -320,6 +365,11 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    leases, person-only kinds, and non-macOS refusal. _Accept:_ every row of the
    authority table and every refusal is a focused domain test; consumers
    typecheck. _Verify:_ contract and domain tests, `bun run typecheck`.
+   _State:_ built. The contracts live in `appleToolchain.ts` and the policy in
+   `appleToolchainPolicy.ts`, beside the Simulator's, whose identity checks
+   they share; their tests are the `Apple physical device contracts` and
+   `evaluateAppleDeviceRequest` suites there. Nothing on the host calls the
+   policy until slice 2.
 2. **Discovery, identity, and lease on the host** (container for code;
    hardware for acceptance). `devicectl` listing parsed from fixtures,
    host-minted ids in the Apple runtime store, in-memory lease with

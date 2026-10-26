@@ -1,11 +1,20 @@
 import type {
   AppleBuildEvidence,
   AppleBuildRequest,
+  AppleBundleIdentifier,
+  AppleDeviceId,
+  AppleDeviceLease,
+  AppleDeviceRecord,
+  AppleDeviceRefusalReason,
+  AppleDeviceRequest,
+  AppleDeviceToolingOperation,
+  AppleEvidenceReference,
   ApplePlatform,
   AppleRuntimeSnapshot,
   AppleSimulatorRecord,
   AppleSimulatorRequest,
   AppleToolchainDiscovery,
+  EventActor,
   ToolActionAuthority,
 } from "@octant/contracts";
 import type { CodeCheckoutId, CodeThreadId, ProviderExecutionPolicy } from "@octant/contracts";
@@ -188,17 +197,8 @@ function evaluateScope(
   sideEffect: boolean,
   coveredByGrant = false,
 ): AppleToolchainPolicyDecision {
-  if (request.authority.extension.kind !== "core") {
-    return { kind: "denied", reason: "core-capability-required" };
-  }
-  if (request.authority.mode !== "code") return { kind: "denied", reason: "code-mode-required" };
-  if (!sameToolActionAuthority(request.authority, scope.authority)) {
-    return { kind: "denied", reason: "authority-mismatch" };
-  }
-  if (request.threadId !== scope.threadId) return { kind: "denied", reason: "thread-mismatch" };
-  if (request.checkoutId !== scope.checkoutId) {
-    return { kind: "denied", reason: "checkout-mismatch" };
-  }
+  const identity = evaluateIdentity(request, scope);
+  if (identity.kind === "denied") return identity;
   if (sideEffect && scope.executionPolicy === "plan") {
     return { kind: "denied", reason: "read-only-policy" };
   }
@@ -212,6 +212,286 @@ function evaluateScope(
   }
   if (request.approval.kind === "denied") return { kind: "denied", reason: "approval-denied" };
   return { kind: "allowed" };
+}
+
+function evaluateIdentity(
+  request: Pick<
+    AppleBuildRequest | AppleSimulatorRequest | AppleDeviceRequest,
+    "authority" | "checkoutId" | "threadId"
+  >,
+  scope: Pick<AppleExecutionScope, "authority" | "checkoutId" | "threadId">,
+): AppleDevicePolicyDecision {
+  if (request.authority.extension.kind !== "core") {
+    return { kind: "denied", reason: "core-capability-required" };
+  }
+  if (request.authority.mode !== "code") return { kind: "denied", reason: "code-mode-required" };
+  if (!sameToolActionAuthority(request.authority, scope.authority)) {
+    return { kind: "denied", reason: "authority-mismatch" };
+  }
+  if (request.threadId !== scope.threadId) return { kind: "denied", reason: "thread-mismatch" };
+  if (request.checkoutId !== scope.checkoutId) {
+    return { kind: "denied", reason: "checkout-mismatch" };
+  }
+  return { kind: "allowed" };
+}
+
+export type AppleDevicePolicyDecision =
+  | { readonly kind: "allowed" }
+  | { readonly kind: "denied"; readonly reason: AppleDeviceRefusalReason };
+
+export interface AppleDeviceExecutionScope {
+  readonly authority: ToolActionAuthority;
+  readonly threadId: CodeThreadId;
+  readonly checkoutId: CodeCheckoutId;
+  readonly executionPolicy: ProviderExecutionPolicy;
+  /** The host validated this request's one-use approval receipt. */
+  readonly approvalValid: boolean;
+  /**
+   * Who answered that approval, from the host's receipt. A lease, an
+   * uninstall, and an upload count only when a person at the Mac answered.
+   */
+  readonly approvedBy?: EventActor;
+}
+
+/** What the host knows about its device layer when the request arrives. */
+export interface AppleDeviceHost {
+  /** Only a macOS host lends a device layer; nothing stands in for one. */
+  readonly macos: boolean;
+  readonly toolchain: Pick<AppleToolchainDiscovery, "available">;
+  readonly tooling: ReadonlyArray<AppleDeviceToolingOperation>;
+  readonly devices: ReadonlyArray<AppleDeviceRecord>;
+  readonly leases: ReadonlyArray<AppleDeviceLease>;
+}
+
+export interface AppleDeviceBundle {
+  readonly deviceId: AppleDeviceId;
+  readonly bundleIdentifier: AppleBundleIdentifier;
+}
+
+/** What this thread's own work produced, installed, and launched, as the host recorded it. */
+export interface AppleDeviceThreadHoldings {
+  readonly builtProducts: ReadonlyArray<AppleEvidenceReference>;
+  readonly installed: ReadonlyArray<AppleDeviceBundle>;
+  readonly launched: ReadonlyArray<AppleDeviceBundle>;
+}
+
+type AppleDeviceKind = AppleDeviceRequest["kind"];
+
+const DEVICE_TOOLING: Readonly<
+  Record<AppleDeviceKind, ReadonlyArray<AppleDeviceToolingOperation>>
+> = {
+  discover: ["list-devices"],
+  status: ["list-devices"],
+  "use-device": [],
+  "release-device": [],
+  screenshot: ["screenshot"],
+  logs: ["console-logs"],
+  build: [],
+  run: ["install-app", "launch-app"],
+  install: ["install-app"],
+  launch: ["launch-app"],
+  terminate: ["terminate-process"],
+  uninstall: ["uninstall-app"],
+  "provisioning-update": [],
+  upload: [],
+};
+
+// Effects a thread's posture decides, one approval per request.
+const DEVICE_EFFECT_KINDS: ReadonlySet<AppleDeviceKind> = new Set([
+  "build",
+  "run",
+  "install",
+  "launch",
+  "terminate",
+]);
+
+// Operations that reach the device itself and so need it able to answer.
+// A build signs for the device but does not touch it.
+const DEVICE_REACHING_KINDS: ReadonlySet<AppleDeviceKind> = new Set([
+  "screenshot",
+  "logs",
+  "run",
+  "install",
+  "launch",
+  "terminate",
+  "uninstall",
+]);
+
+const deviceAllowed: AppleDevicePolicyDecision = { kind: "allowed" };
+const deviceDenied = (reason: AppleDeviceRefusalReason): AppleDevicePolicyDecision => ({
+  kind: "denied",
+  reason,
+});
+
+/**
+ * Authority for a physical Apple device, distribution included
+ * (docs/design/apple-devices.md). A Simulator grant, the thread's Full
+ * access, and a device lease never stand in for one another: a lease starts,
+ * moves, and an uninstall or upload runs only on a confirmation a person at
+ * the Mac answered, under every posture. Every check that can refuse without
+ * asking runs first, so nobody is asked to approve a call that would then be
+ * refused.
+ */
+export function evaluateAppleDeviceRequest(
+  request: AppleDeviceRequest,
+  scope: AppleDeviceExecutionScope,
+  host: AppleDeviceHost,
+  holdings: AppleDeviceThreadHoldings,
+): AppleDevicePolicyDecision {
+  const identity = evaluateIdentity(request, scope);
+  if (identity.kind === "denied") return identity;
+  const actor = request.requestedBy;
+  if (actor.kind === "agent" && String(actor.threadId) !== String(request.threadId)) {
+    return deviceDenied("thread-mismatch");
+  }
+  if (!host.macos || !host.toolchain.available) return deviceDenied("toolchain-unavailable");
+  // Octant never passes -allowProvisioningUpdates: it mutates the person's
+  // developer account, so no posture, actor, or approval reaches it.
+  if (request.kind === "provisioning-update") {
+    return deviceDenied("provisioning-updates-not-offered");
+  }
+  // Remote clients observe only; widening later is cheaper than narrowing.
+  if (actor.kind === "remote-device" && request.kind !== "discover" && request.kind !== "status") {
+    return deviceDenied("local-person-required");
+  }
+  if (
+    (request.kind === "uninstall" ||
+      request.kind === "upload" ||
+      request.fromThreadId !== undefined) &&
+    actor.kind !== "local-user"
+  ) {
+    return deviceDenied("person-required");
+  }
+  if (
+    scope.executionPolicy === "plan" &&
+    (DEVICE_EFFECT_KINDS.has(request.kind) ||
+      request.kind === "uninstall" ||
+      request.kind === "upload")
+  ) {
+    return deviceDenied("read-only-policy");
+  }
+  if (request.approval.kind === "denied") return deviceDenied("approval-denied");
+  if (DEVICE_TOOLING[request.kind].some((operation) => !host.tooling.includes(operation))) {
+    return deviceDenied("operation-unavailable");
+  }
+  if (request.kind === "upload") return confirmedByLocalPerson(request, scope);
+  if (request.kind === "discover") return deviceAllowed;
+
+  const device = host.devices.find(
+    (candidate) => String(candidate.deviceId) === String(request.deviceId),
+  );
+  if (device === undefined) return deviceDenied("invalid-destination");
+  if (request.kind === "status") return deviceAllowed;
+  const lease = host.leases.find(
+    (candidate) => String(candidate.deviceId) === String(device.deviceId),
+  );
+  if (request.kind === "use-device") return evaluateLeaseStart(request, scope, device, lease);
+
+  if (lease === undefined || !leaseBelongsTo(lease, request)) {
+    // Another thread's lease is refused without naming that thread.
+    return deviceDenied(
+      lease !== undefined && String(lease.threadId) !== String(request.threadId)
+        ? "destination-leased"
+        : "lease-required",
+    );
+  }
+  if (request.kind === "release-device") return deviceAllowed;
+  if (DEVICE_REACHING_KINDS.has(request.kind) && device.state !== "connected") {
+    return deviceDenied(device.state);
+  }
+  const owned = evaluateThreadOwnership(request, holdings);
+  if (owned.kind === "denied") return owned;
+  if (request.kind === "uninstall") return confirmedByLocalPerson(request, scope);
+  if (
+    DEVICE_EFFECT_KINDS.has(request.kind) &&
+    decidesCodeEffectsByApproval(scope.executionPolicy) &&
+    (request.approval.kind !== "approved" || !scope.approvalValid)
+  ) {
+    return deviceDenied("approval-required");
+  }
+  return deviceAllowed;
+}
+
+function leaseBelongsTo(
+  lease: AppleDeviceLease,
+  request: Pick<AppleDeviceRequest, "threadId" | "checkoutId">,
+): boolean {
+  return (
+    String(lease.threadId) === String(request.threadId) &&
+    String(lease.checkoutId) === String(request.checkoutId)
+  );
+}
+
+function evaluateLeaseStart(
+  request: AppleDeviceRequest,
+  scope: AppleDeviceExecutionScope,
+  device: AppleDeviceRecord,
+  lease: AppleDeviceLease | undefined,
+): AppleDevicePolicyDecision {
+  if (device.state === "unavailable") return deviceDenied("unavailable");
+  if (request.fromThreadId !== undefined) {
+    // The person confirmed moving the lease from the thread they were shown;
+    // if it changed hands since, that confirmation no longer describes it.
+    if (
+      lease === undefined ||
+      String(lease.threadId) !== String(request.fromThreadId) ||
+      String(lease.threadId) === String(request.threadId)
+    ) {
+      return deviceDenied("lease-changed");
+    }
+    return confirmedByLocalPerson(request, scope);
+  }
+  if (lease !== undefined) {
+    return leaseBelongsTo(lease, request) ? deviceAllowed : deviceDenied("destination-leased");
+  }
+  return confirmedByLocalPerson(request, scope);
+}
+
+function evaluateThreadOwnership(
+  request: AppleDeviceRequest,
+  holdings: AppleDeviceThreadHoldings,
+): AppleDevicePolicyDecision {
+  if (request.kind === "install") {
+    const artifact = request.artifact;
+    return artifact !== undefined && holdings.builtProducts.includes(artifact)
+      ? deviceAllowed
+      : deviceDenied("invalid-artifact");
+  }
+  if (
+    request.kind !== "launch" &&
+    request.kind !== "terminate" &&
+    request.kind !== "uninstall" &&
+    request.kind !== "logs"
+  ) {
+    return deviceAllowed;
+  }
+  const sameBundle = (held: AppleDeviceBundle) =>
+    String(held.deviceId) === String(request.deviceId) &&
+    held.bundleIdentifier === request.bundleIdentifier;
+  if (!holdings.installed.some(sameBundle)) return deviceDenied("foreign-bundle");
+  // Octant stops and reads only the process it launched, never one by name.
+  if (
+    (request.kind === "terminate" || request.kind === "logs") &&
+    !holdings.launched.some(sameBundle)
+  ) {
+    return deviceDenied("process-not-owned");
+  }
+  return deviceAllowed;
+}
+
+function confirmedByLocalPerson(
+  request: Pick<AppleDeviceRequest, "approval">,
+  scope: AppleDeviceExecutionScope,
+): AppleDevicePolicyDecision {
+  if (
+    request.approval.kind !== "approved" ||
+    !scope.approvalValid ||
+    scope.approvedBy === undefined
+  ) {
+    return deviceDenied("confirmation-required");
+  }
+  if (scope.approvedBy.kind !== "local-user") return deviceDenied("local-person-required");
+  return deviceAllowed;
 }
 
 export function canUseSimulator(simulator: AppleSimulatorRecord, platform: ApplePlatform): boolean {
