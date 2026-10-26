@@ -603,7 +603,8 @@ and landscape for a person who asked; it is an effect confirmed on its own
 delivery, keyboard layouts, and the managed streaming tools are specified in
 [Device workbench](design/device-workbench.md). Physical Apple devices,
 their person-confirmed leases and signing custody, and person-confirmed upload
-to App Store Connect are the approved, unimplemented design in
+to App Store Connect are the design accepted on 2026-10-26, being implemented
+from its first slice, in
 [Apple physical devices and distribution](design/apple-devices.md).
 
 On an approval-gated thread, **Allow input** is the confirmation that opens

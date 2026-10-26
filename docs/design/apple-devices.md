@@ -8,9 +8,10 @@ Connect for TestFlight. Architecture owns the device authority rules this
 extends ([Architecture: device transport and evidence](../architecture.md#device-transport-and-evidence));
 [Device workbench](device-workbench.md) owns the Simulator and emulator panes.
 
-**Status: approved design, not implemented.** The maintainer authorized this
-scope as post-preview work on 2026-10-26. That authorizes this design and its
-slices; it does not by itself authorize spending, creating developer accounts,
+**Status: accepted 2026-10-26; slice 1 is starting.** The maintainer
+authorized this scope as post-preview work and accepted the decisions below on
+2026-10-26. That authorizes this design and its slices; it does not by itself
+authorize spending, creating developer accounts,
 signing or uploading a real build, or changing the first-release boundary,
 which stays Simulator and local macOS on Apple Silicon. Octant's own internal
 TestFlight track for its mobile client is a separate operator runbook
@@ -122,17 +123,17 @@ access covers neither the device lease nor an upload.
 
 ### Per-operation authority
 
-| Operation                             | Kind                           | Plan    | Approval-gated, auto-accept edits | Full access            |
-| ------------------------------------- | ------------------------------ | ------- | --------------------------------- | ---------------------- |
-| `discover`, `status`                  | Read                           | Runs    | Runs                              | Runs                   |
-| `use-device` (start lease)            | Person confirmation            | Asks    | Asks                              | Asks                   |
-| `release-device`                      | Ends own lease                 | Runs    | Runs                              | Runs                   |
-| `screenshot`, `logs` (own process)    | Read inside lease              | Runs    | Runs                              | Runs                   |
-| `build` signed for development, `run` | Effect                         | Refuses | Asks per request                  | Runs                   |
-| `install`, `launch`, `terminate`      | Effect                         | Refuses | Asks per request                  | Runs                   |
-| `uninstall`                           | Person-only effect (data loss) | Refuses | Person asks, confirmed            | Person asks, confirmed |
-| Provisioning update                   | Person-only account mutation   | Refuses | See decision 3                    | See decision 3         |
-| Upload to App Store Connect           | Distribution, person-only      | Refuses | Person asks, confirmed            | Person asks, confirmed |
+| Operation                             | Kind                           | Plan    | Approval-gated, auto-accept edits | Full access              |
+| ------------------------------------- | ------------------------------ | ------- | --------------------------------- | ------------------------ |
+| `discover`, `status`                  | Read                           | Runs    | Runs                              | Runs                     |
+| `use-device` (start lease)            | Person confirmation            | Asks    | Asks                              | Asks                     |
+| `release-device`                      | Ends own lease                 | Runs    | Runs                              | Runs                     |
+| `screenshot`, `logs` (own process)    | Read inside lease              | Runs    | Runs                              | Runs                     |
+| `build` signed for development, `run` | Effect                         | Refuses | Asks per request                  | Runs                     |
+| `install`, `launch`, `terminate`      | Effect                         | Refuses | Asks per request                  | Runs                     |
+| `uninstall`                           | Person-only effect (data loss) | Refuses | Person asks, confirmed            | Person asks, confirmed   |
+| Provisioning update                   | Person-only account mutation   | Refuses | Not offered (decision 3)          | Not offered (decision 3) |
+| Upload to App Store Connect           | Distribution, person-only      | Refuses | Person asks, confirmed            | Person asks, confirmed   |
 
 - For `use-device`, "Asks" is the lease confirmation above. For effects it is
   the existing mechanism: an `approval-requested` turn event whose
@@ -195,25 +196,25 @@ access covers neither the device lease nor an upload.
 
 - A paired device may read device status and evidence of a thread it can open.
 - Device install, launch, terminate, and uninstall from a `remote-device`
-  person follow decision 4.
+  person are refused: remote clients observe only (decision 4).
 - Starting or moving a lease, signing setup, provisioning updates, the App Store
   Connect key, and upload are local-only, never remote-approvable.
 
 ## Threat model
 
-| Threat                                                                          | Rule that answers it                                                                                            |
-| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| An agent or project build script exfiltrates a signing private key              | No export path; Octant never reads key material; signing runs in a confined launch with no network (decision 2) |
-| A Run Script phase uses the keychain grant to sign something else as the person | Signing is a host-owned step after the build, on the host-chosen bundle only (decision 2, recommended)          |
-| Prompt injection uploads or submits an app                                      | No agent operation; local-only route; per-build person confirmation under every posture                         |
-| A thread drives a personal phone it was not given                               | Person-confirmed lease per thread; `destination-leased`; Full access does not start a lease                     |
-| A thread opens or kills the person's other apps                                 | `launch` and `terminate` only the bundle Octant installed for that thread; process ownership                    |
-| Screenshots or logs leak personal data to a provider                            | Reads only inside a person-confirmed lease; console of own process only; evidence by reference                  |
-| Silent developer-account changes (new profiles, registered devices)             | No `-allowProvisioningUpdates` by default (decision 3); Octant never registers devices or creates certificates  |
-| Device identifiers tracked across journal, providers, or remotes                | Host-minted `AppleDeviceId`; UDID, serial, ECID stay host-local                                                 |
-| The App Store Connect key leaks during upload                                   | Broker storage; per-launch `0600` file denied to other launches; removed after; never journaled                 |
-| A remote principal escalates                                                    | Lease, signing, provisioning, key, and upload are local-only; remote never mints local receipts                 |
-| A non-macOS host pretends                                                       | Refused before any process; family omitted; no cloud Mac                                                        |
+| Threat                                                                          | Rule that answers it                                                                                                 |
+| ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| An agent or project build script exfiltrates a signing private key              | No export path; Octant never reads key material; signing runs in a confined launch with no network (decision 2)      |
+| A Run Script phase uses the keychain grant to sign something else as the person | Signing is a host-owned step after the build, on the host-chosen bundle only (decision 2)                            |
+| Prompt injection uploads or submits an app                                      | No agent operation; local-only route; per-build person confirmation under every posture                              |
+| A thread drives a personal phone it was not given                               | Person-confirmed lease per thread; `destination-leased`; Full access does not start a lease                          |
+| A thread opens or kills the person's other apps                                 | `launch` and `terminate` only the bundle Octant installed for that thread; process ownership                         |
+| Screenshots or logs leak personal data to a provider                            | Reads only inside a person-confirmed lease; console of own process only; evidence by reference                       |
+| Silent developer-account changes (new profiles, registered devices)             | Octant never passes `-allowProvisioningUpdates` (decision 3); Octant never registers devices or creates certificates |
+| Device identifiers tracked across journal, providers, or remotes                | Host-minted `AppleDeviceId`; UDID, serial, ECID stay host-local                                                      |
+| The App Store Connect key leaks during upload                                   | Broker storage; per-launch `0600` file denied to other launches; removed after; never journaled                      |
+| A remote principal escalates                                                    | Lease, signing, provisioning, key, and upload are local-only; remote never mints local receipts                      |
+| A non-macOS host pretends                                                       | Refused before any process; family omitted; no cloud Mac                                                             |
 
 ## Settled by current specifications
 
@@ -238,36 +239,41 @@ access covers neither the device lease nor an upload.
 
 ## Maintainer decisions
 
-1. **Signing custody.** (a) Use the person's existing keychain identities and
-   Xcode profiles by team ID, Octant holding no key material; (b) import a
-   `.p12` into the broker; (c) leave signing to an external tool.
-   **Recommended: (a).** It keeps keys where macOS already guards them and adds
-   no new secret store.
-2. **Where signing runs.** (a) Build unsigned under the ordinary profile, then a
-   host-owned `codesign` step (no project scripts, no network) signs the
-   host-chosen bundle with the profile's entitlements; (b) let `xcodebuild` sign
-   inside the build with a per-launch keychain grant, so Run Script phases share
-   it. **Recommended: (a)**, with (b) only if measurement shows (a) cannot
-   produce an installable app for a real project; that fallback needs its own
-   approval.
-3. **Provisioning updates.** (a) Never: the person fixes provisioning in Xcode;
-   (b) a person-only, per-run confirmed `-allowProvisioningUpdates`; (c) agent
-   with approval. **Recommended: (a) for the first slices**, revisit (b) after
-   real use; never (c), since it mutates the developer account.
-4. **Remote device effects.** (a) Install, launch, and terminate from a paired
-   device's person under the same approval as the Simulator; (b) observation
-   only from remote. **Recommended: (b) first.** The person holding the phone
-   is usually at the Mac, and widening later is cheaper than narrowing.
-5. **Screenshots on hardware.** (a) Only through the selected Xcode's own
-   device tooling, unavailable where it offers none; (b) add a third-party
-   device library. **Recommended: (a).** No new dependency; the capability
-   probe reports it honestly.
-6. **Distribution scope.** (a) Upload a build to App Store Connect only;
-   (b) also submit for App Review or add testers. **Recommended: (a).** Store
-   submission is the person's act and stays out of Octant.
-7. **Distribution timing.** Distribution slices need an explicit maintainer
-   request and a change to the Current Release Boundary in their own PR before
-   they start. **Recommended:** keep that gate; device slices do not wait on it.
+The maintainer accepted these on 2026-10-26. Each states the rule; the
+alternatives considered and the reason for the choice follow it.
+
+1. **Signing custody.** Octant uses the person's existing keychain identities
+   and Xcode profiles, selected by team ID, and holds no key material.
+   Rejected: importing a `.p12` into the broker, and leaving signing to an
+   external tool. The chosen rule keeps keys where macOS already guards them
+   and adds no new secret store.
+2. **Where signing runs.** Octant builds unsigned under the ordinary profile,
+   then a host-owned `codesign` step (no project scripts, no network) signs the
+   host-chosen bundle with the profile's entitlements. Rejected for now: letting
+   `xcodebuild` sign inside the build with a per-launch keychain grant, which
+   Run Script phases would share. That fallback is considered only if
+   measurement shows the host-owned step cannot produce an installable app for
+   a real project, and it needs its own maintainer approval.
+3. **Provisioning updates.** Octant never passes `-allowProvisioningUpdates`;
+   the person fixes provisioning in Xcode. A person-only, per-run confirmed
+   `-allowProvisioningUpdates` may be revisited after real use, as its own
+   change to this specification. An agent operation, even with approval, is
+   never offered, because it mutates the developer account.
+4. **Remote device effects.** Remote clients observe only; install, launch,
+   and terminate start from a local person or the thread's agent. Rejected for
+   now: the same effects from a paired device's person under the Simulator's
+   approval. The person holding the phone is usually at the Mac, and widening
+   later is cheaper than narrowing.
+5. **Screenshots on hardware.** Screenshots come only from the selected Xcode's
+   own device tooling and are reported unavailable where it offers none.
+   Rejected: a third-party device library. No new dependency is added, and the
+   capability probe reports the gap honestly.
+6. **Distribution scope.** Octant uploads a build to App Store Connect and does
+   nothing further. Rejected: submitting for App Review or adding testers.
+   Store submission is the person's act and stays out of Octant.
+7. **Distribution timing.** Distribution slices (6 and 7 below) start only
+   after an explicit maintainer request and a change to the Current Release
+   Boundary in their own PR. That gate stays; device slices do not wait on it.
 
 ## Delivery plan
 
