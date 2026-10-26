@@ -1354,6 +1354,28 @@ export const ProviderRuntimeIntegration = Schema.Struct({
 }).annotations(strict);
 export type ProviderRuntimeIntegration = typeof ProviderRuntimeIntegration.Type;
 
+/**
+ * Why a host-driven sign-in reads `unauthenticated`, so Settings can tell a
+ * sign-in that ended from one the organization wants repeated in person, or
+ * from an account with no role on the endpoint.
+ */
+export const ProviderUnauthenticatedReason = Schema.Literal(
+  "missing",
+  "expired",
+  "revoked",
+  "interaction-required",
+  "not-authorized",
+);
+export type ProviderUnauthenticatedReason = typeof ProviderUnauthenticatedReason.Type;
+
+/** The directory binding a probe checked before it asked for a token. None of it is secret. */
+export const ProviderObservedDirectoryBinding = Schema.Struct({
+  tenantId: DirectoryTenantId,
+  clientId: DirectoryClientId,
+  endpointOrigin: Schema.NonEmptyTrimmedString,
+}).annotations(strict);
+export type ProviderObservedDirectoryBinding = typeof ProviderObservedDirectoryBinding.Type;
+
 export const ProviderObservedState = Schema.Struct({
   instanceId: ProviderInstanceId,
   readiness: ProviderReadiness,
@@ -1361,6 +1383,10 @@ export const ProviderObservedState = Schema.Struct({
   detectedVersion: Schema.optional(Schema.NonEmptyTrimmedString),
   observedProtocol: Schema.optional(OpenAiCompatibleProtocol),
   credentialStatus: Schema.optional(ProviderCredentialStatus),
+  /** Present only with `unauthenticated` readiness, when the driver knows why. */
+  unauthenticatedReason: Schema.optional(ProviderUnauthenticatedReason),
+  /** Present only for a directory sign-in: the binding its probe checked. */
+  directoryBinding: Schema.optional(ProviderObservedDirectoryBinding),
   models: Schema.Array(ProviderModel),
   capabilities: ProviderCapabilities,
   // Models a person explicitly verified for tool support through the
