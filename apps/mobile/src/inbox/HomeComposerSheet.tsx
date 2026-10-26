@@ -4,7 +4,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { radii, space, typography, useTheme } from "../../design-system";
 import { MOBILE_COPY } from "../copy";
 import { BottomSheet } from "../ui/BottomSheet";
+import { ComposerVoiceButton } from "../ui/ComposerVoiceButton";
 import { IconButton, type MobileIconName } from "../ui/IconButton";
+import type { ComposerVoice } from "../voice/useVoiceDictation";
 import type { MobileCreateMode } from "./createModePresentation";
 
 const MOBILE_CREATE_MODES: ReadonlyArray<{
@@ -41,6 +43,8 @@ export function HomeComposerSheet(props: {
   readonly onSubmit: () => void;
   readonly placementDisabledReason?: string | undefined;
   readonly onRefreshHost?: (() => void) | undefined;
+  /** Dictation through the host; absent while the host is not ready for it. */
+  readonly voice?: ComposerVoice | undefined;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(
@@ -232,6 +236,13 @@ export function HomeComposerSheet(props: {
           {props.error}
         </Text>
       )}
+      {/* The sheet is a modal over the floating composer, so a dictation
+          refusal (microphone denied, allowance used) must be said here too. */}
+      {props.voice?.notice === undefined ? null : (
+        <Text style={styles.placementReason} testID="mobile-home-composer-voice-notice">
+          {props.voice.notice}
+        </Text>
+      )}
 
       <View style={styles.toolbar}>
         <IconButton accessibilityLabel="Attachments unavailable" disabled name="add" size={38} />
@@ -247,12 +258,7 @@ export function HomeComposerSheet(props: {
           </Text>
           <Ionicons color={colors.textSecondary} name="chevron-down" size={16} />
         </Pressable>
-        <IconButton
-          accessibilityLabel="Voice input unavailable"
-          disabled
-          name="mic-outline"
-          size={38}
-        />
+        {props.voice === undefined ? null : <ComposerVoiceButton size={38} voice={props.voice} />}
         <IconButton
           accessibilityLabel={props.busy === true ? "Creating" : "Send"}
           disabled={!canSubmit}

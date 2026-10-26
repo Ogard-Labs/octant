@@ -27,6 +27,8 @@ import { FloatingComposer } from "../ui/FloatingComposer";
 import { IconButton } from "../ui/IconButton";
 import { ModelPickerSheet } from "../ui/ModelPickerSheet";
 import { modelOptionForThread } from "./thread/pendingAttachments";
+import { useVoiceDictation } from "../voice/useVoiceDictation";
+import { appendTranscript } from "../voice/voiceDictation";
 import { createSelectedThreadGuard } from "./thread/selectedThreadGuard";
 import { ThreadTranscript } from "./thread/ThreadTranscript";
 import type { ThreadHookInput, ThreadTarget, ThreadUi } from "./thread/threadTypes";
@@ -187,6 +189,18 @@ export function ThreadScreen(props: ThreadScreenProps) {
     mode === "code" || mode === "work" ? mobileThreadComposerCopy(mode) : undefined;
   const sendFollowUp = () => void (mode === "work" ? work : code).sendFollowUp();
   const liveBusy = busy || chat.activeAttempt !== undefined;
+  const composerEditable =
+    mode === "chat"
+      ? staleGate.allowProductMutations && chat.activeAttempt === undefined
+      : staleGate.allowProductMutations &&
+        !workTurnLive &&
+        !codeTurnLive &&
+        (mode === "code" || work.thread !== undefined);
+  const appendToDraft = useCallback(
+    (text: string) => setPrompt((draft) => appendTranscript(draft, text)),
+    [],
+  );
+  const voice = useVoiceDictation({ transport, editable: composerEditable, appendToDraft });
 
   const styles = useMemo(
     () =>
@@ -367,7 +381,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
                 ? chatAttemptStatusLabel(chat.activeAttempt.outcome)
                 : MOBILE_COPY.working
             }
-            editable={staleGate.allowProductMutations && chat.activeAttempt === undefined}
+            editable={composerEditable}
             modelLabel={modelLabel}
             onChangeText={setPrompt}
             onPressModel={() => setModelOpen(true)}
@@ -379,18 +393,14 @@ export function ThreadScreen(props: ThreadScreenProps) {
             placeholder={MOBILE_COPY.composerFollowUp}
             testID="mobile-thread-composer"
             value={prompt}
+            voice={voice}
           />
         </>
       ) : (
         <FloatingComposer
           busy={busy || workTurnLive || codeTurnLive}
           busyLabel={MOBILE_COPY.turnRunning}
-          editable={
-            staleGate.allowProductMutations &&
-            !workTurnLive &&
-            !codeTurnLive &&
-            (selected.mode === "code" || work.thread !== undefined)
-          }
+          editable={composerEditable}
           footerHint={followUpComposerCopy?.footerHint}
           modelLabel={
             selected.mode === "work" && work.thread !== undefined
@@ -403,6 +413,7 @@ export function ThreadScreen(props: ThreadScreenProps) {
           placeholder={followUpComposerCopy?.placeholder ?? MOBILE_COPY.composerFollowUp}
           testID="mobile-thread-composer"
           value={prompt}
+          voice={voice}
         />
       )}
       <AttachSourceSheet

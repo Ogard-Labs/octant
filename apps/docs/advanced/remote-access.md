@@ -262,6 +262,22 @@ embedded details before it keeps the image or sends it to a provider. A file
 whose contents are not the image type it claims, or a format it cannot clean,
 such as HEIC, is refused rather than kept with its details.
 
+## Dictating from the phone
+
+When the computer has a transcription endpoint in **Settings → Voice**, the
+phone's message box shows a microphone. Tap it to record (the first time, the
+phone asks for the microphone) and tap the red stop control to finish; a clip
+stops on its own after one minute. The computer transcribes the clip with its
+own Voice endpoint and the words are added to your message, which you still
+send yourself. Leaving the app while recording drops the clip unsent. The
+recording is deleted from the phone after every clip and is never stored on
+the computer.
+
+Each phone may send thirty clips an hour, one at a time; after that the
+phone says when it can dictate again. Reading replies aloud stays on the
+computer. Without a transcription endpoint, or while the computer is
+unreachable, the phone shows no microphone.
+
 ## Device management
 
 The host can rename or revoke devices, revoke all devices, and rotate host

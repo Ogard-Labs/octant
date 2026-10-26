@@ -286,6 +286,28 @@ const DEFAULT_AUTHENTICATED_SERVICE_ROUTES: readonly RemoteRouteDefinition[] = [
     maxBodyBytes: 8_192,
     maxResponseBytes: 4_096,
   },
+  // Dictation from a paired device: its voice status and its clip, as the same
+  // multipart upload the desktop sends. Read-aloud (`/api/speech/synthesis`)
+  // is not listed, so the listener never forwards it.
+  {
+    id: "speech-status",
+    match: { kind: "exact", path: "/api/speech/status" },
+    surface: "authenticated-product",
+    methods: ["GET"],
+    allowQuery: false,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    maxResponseBytes: 4_096,
+  },
+  {
+    id: "speech-transcriptions",
+    match: { kind: "exact", path: "/api/speech/transcriptions" },
+    surface: "authenticated-product",
+    methods: ["POST"],
+    allowQuery: false,
+    allowedRequestHeaders: REMOTE_REQUEST_HEADERS,
+    allowedContentTypes: ["multipart/form-data"],
+    maxBodyBytes: DEFAULT_BODY_BYTES,
+  },
 ];
 
 const DEFAULT_AUTHENTICATED_ROUTE_MATCHES = [

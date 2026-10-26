@@ -2719,9 +2719,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   transcription is `ready`; the clip is recorded by the browser's own encoder,
   the transcript is appended to the draft, and the person still sends. Navigator
   can read replies aloud through the configured synthesis endpoint, or with the
-  operating system's voices when none is set. The mobile composer shows a
-  disabled microphone labelled unavailable; phone voice input is planned under
-  the same decision and not wired.
+  operating system's voices when none is set. A paired device reaches status
+  and transcription only: the listener forwards those two routes
+  (`speech.transcribe` is remote-approvable) and never synthesis
+  (`speech.synthesize` stays with the host), and the route holds each device
+  to its own clip bound and budget. The phone composers show a microphone only
+  while the host reports transcription `ready` and append the transcript to
+  the draft; the rules are in
+  [Mobile maturity](design/mobile-maturity.md#voice).
   The ACP drivers share one
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;

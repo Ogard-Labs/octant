@@ -99,7 +99,10 @@ describe("sealed push notifications", () => {
       body: "A paired computer has an update",
     });
     expect(sealed.envelope.urgency).toBe("high");
-    const wire = JSON.stringify(sealed.envelope);
+    // Only the visible fields are searched: random base64url can spell any short word.
+    const { sealed: opaque, ...visible } = sealed.envelope;
+    expect(Object.keys(opaque).sort()).toEqual(["ciphertext", "encapsulatedKey"]);
+    const wire = JSON.stringify(visible);
     for (const revealing of [hostId, deviceId, threadId, "Acme", "Studio", "approval", "code"]) {
       expect(wire).not.toContain(revealing);
     }

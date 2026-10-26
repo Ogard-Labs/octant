@@ -11,6 +11,12 @@ const CAMERA_PERMISSION =
 const PHOTO_LIBRARY_PERMISSION =
   "Octant uses your photo library to attach a photo you choose to a thread, and to set a local app background.";
 
+// Every plugin that can declare the microphone names the same single use:
+// one of them left at `false` would remove the iOS string, or block the
+// Android permission, that dictation needs.
+const DICTATION_MICROPHONE_PERMISSION =
+  "Octant uses the microphone only while you record a message to dictate. Your paired computer turns it into text, and the recording is not kept.";
+
 const config: ExpoConfig = {
   name: "Octant",
   slug: "octant-mobile",
@@ -56,15 +62,26 @@ const config: ExpoConfig = {
       {
         photosPermission: PHOTO_LIBRARY_PERMISSION,
         cameraPermission: CAMERA_PERMISSION,
-        microphonePermission: false,
+        microphonePermission: DICTATION_MICROPHONE_PERMISSION,
       },
     ],
     [
       "expo-camera",
       {
         cameraPermission: CAMERA_PERMISSION,
-        microphonePermission: false,
+        microphonePermission: DICTATION_MICROPHONE_PERMISSION,
         recordAudioAndroid: false,
+      },
+    ],
+    // Dictation records in the foreground only: no background audio mode on
+    // iOS and no foreground service on Android.
+    [
+      "expo-audio",
+      {
+        microphonePermission: DICTATION_MICROPHONE_PERMISSION,
+        recordAudioAndroid: true,
+        enableBackgroundRecording: false,
+        enableBackgroundPlayback: false,
       },
     ],
   ],
