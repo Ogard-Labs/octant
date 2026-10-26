@@ -484,9 +484,7 @@ function ModelsSection(props: ModelEndpointDetailProps & { readonly disabled: bo
                         />
                       ) : null}
                     </span>
-                    {/* Ollama reports its own windows; the HTTP endpoints take an override. */}
-                    {props.onModelContextWindowChange === undefined ||
-                    instance.driverKind === "ollama" ? null : (
+                    {props.onModelContextWindowChange === undefined ? null : (
                       <ModelContextWindowField
                         disabled={props.disabled}
                         model={model}

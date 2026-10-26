@@ -5,6 +5,7 @@ import {
   existsSync,
   lstatSync,
   mkdtempSync,
+  readdirSync,
   realpathSync,
   statSync,
   writeFileSync,
@@ -193,8 +194,25 @@ export function buildBubblewrapLaunch(
     args.push("--new-session");
   }
   args.push("--die-with-parent");
+  // Bubblewrap keeps every capability when it is started by uid 0. Measured on
+  // bwrap 0.9.0 as root: the capsule could `mount -o remount,bind,rw` a
+  // read-only bind and write through it, and `umount` a deny overlay to read
+  // what it hid, so a root host's capsule was no boundary at all. Unprivileged
+  // Bubblewrap already drops them; this makes both cases the same. A bwrap
+  // older than 0.2.0 has no `--cap-drop` and exits on the unknown option
+  // before starting the command, so the launch fails closed.
+  args.push("--cap-drop", "ALL");
 
   args.push("--proc", "/proc", "--dev", "/dev");
+  // Bubblewrap covers `/proc/sys` only when it can open the directory for
+  // writing, which procfs never allows, so its own cover never applies. A
+  // root host's capsule runs as the host's uid 0, and the kernel lets uid 0
+  // write most sysctls by their owner bits alone: measured on bwrap 0.9.0
+  // with every capability dropped, the capsule still wrote
+  // `kernel.core_pattern`, which runs a program as host root on the next
+  // crash. Sysctl values follow the reader's namespaces, not the procfs
+  // mount, so binding the host's tree changes nothing a workload reads.
+  args.push("--ro-bind", "/proc/sys", "/proc/sys");
 
   if (input.networkEgress === "allow" && existsSync("/run/systemd/resolve")) {
     args.push("--ro-bind", "/run/systemd/resolve", "/run/systemd/resolve");
@@ -399,6 +417,9 @@ export function buildBubblewrapLaunch(
   for (const path of input.additionalDenyReadPaths ?? []) {
     bindAdditionalDenyPath(path, "read");
   }
+  for (const path of hostSecretPaths()) {
+    bindAdditionalDenyPath(path, "read");
+  }
 
   const sorted = [...mounts.values()].sort(
     (left, right) => depth(left.target) - depth(right.target),
@@ -458,6 +479,44 @@ export function buildBubblewrapLaunch(
   }
 
   return { command: bwrapPath, args };
+}
+
+/**
+ * Credentials under the bound `/etc` that no confined workload reads. Their
+ * owner bits let a root host's capsule read them even without capabilities,
+ * so each is covered like a read denial. The rest of `/etc` stays bound:
+ * resolvers, TLS roots, `passwd`, the dynamic linker cache, `alternatives`
+ * links, and login shell startup files are all read from it.
+ */
+const HOST_SECRET_PATHS: ReadonlyArray<string> = [
+  "/etc/shadow",
+  "/etc/shadow-",
+  "/etc/gshadow",
+  "/etc/gshadow-",
+  "/etc/security/opasswd",
+  "/etc/ssl/private",
+];
+
+function hostSecretPaths(): ReadonlyArray<string> {
+  let sshEntries: ReadonlyArray<string> = [];
+  try {
+    sshEntries = readdirSync("/etc/ssh");
+  } catch {
+    // No SSH server configuration on this host.
+  }
+  const sshHostKeys = sshEntries
+    .filter((name) => /^ssh_host_.+_key$/.test(name))
+    .map((name) => join("/etc/ssh", name));
+  // Bubblewrap would have to create a missing path's mount point inside the
+  // read-only `/etc` bind, which fails the launch; a missing path hides
+  // nothing anyway. A symlinked one is covered at its target: Bubblewrap
+  // follows an absolute link from outside the new root, so measured on bwrap
+  // 0.9.0 a host key linked to another volume failed every launch. A target
+  // under no bound path is unreachable from the capsule and needs no cover.
+  return [...HOST_SECRET_PATHS, ...sshHostKeys].flatMap((path) => {
+    const target = safeRealpathSync(path);
+    return target === undefined ? [] : [target];
+  });
 }
 
 interface Mount {

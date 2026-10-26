@@ -10,10 +10,12 @@ import type {
   ProviderObservedState,
 } from "@octant/contracts";
 import { ProviderRuntimeIntegrationFacts } from "./ProviderRuntimeIntegrationFacts";
+import { acpAgentProfile, type AcpAgentProviderInstance } from "@octant/contracts";
 import {
   canLocateRuntimeBinary,
   claudeAccountUsesAssignedDirectory,
   codexAccountUsesAssignedDirectory,
+  isAcpAgentInstance,
   isImageProfileDriverKind,
   modelCanTakeDelegatedWork,
   supportsProviderCliUpdate,
@@ -31,31 +33,22 @@ import { SettingRow, SettingsSection } from "../settings/primitives";
 import { ProviderUsageLimitsPanel } from "../usage/ProviderUsageLimitsPanel";
 import { ProviderGlyph } from "./ProviderGlyph";
 import {
+  AcpAgentConfigurationForm,
   AnthropicConfigurationForm,
   BflImageConfigurationForm,
   ClaudeConfigurationForm,
   CodexConfigurationForm,
-  DevinConfigurationForm,
   FoundryConfigurationForm,
   GeminiImageConfigurationForm,
-  GrokConfigurationForm,
-  GlmConfigurationForm,
-  GeminiConfigurationForm,
-  CopilotConfigurationForm,
-  ClineConfigurationForm,
-  QwenConfigurationForm,
-  FxConfigurationForm,
-  GooseConfigurationForm,
   HttpConfigurationForm,
   IdeogramImageConfigurationForm,
   OpenAiImageConfigurationForm,
-  KiloConfigurationForm,
   OhMyPiConfigurationForm,
   OllamaConfigurationForm,
   PiConfigurationForm,
   SubscriptionEndpointSignIn,
-  VibeConfigurationForm,
 } from "./ProviderSettingsConfiguration";
+import { acpAuthenticationFact } from "./configuration/AcpConfigurationForms";
 import { credentialStatusLabel, useCredentialStatus } from "./ProviderSettingsCredentials";
 import { ProviderApiKeyEditor, acceptsApiKeyPool } from "./ProviderApiKeyEditor";
 import {
@@ -91,20 +84,10 @@ export type ProviderSettingsListProps = Pick<
   | "usageLimitsClient"
   | "onChangeClaudeConfiguration"
   | "onChangeCodexConfiguration"
-  | "onChangeDevinConfiguration"
-  | "onChangeKiloConfiguration"
+  | "onChangeAcpAgentConfiguration"
   | "onChangePiConfiguration"
   | "onChangeOhMyPiConfiguration"
   | "onChangeOllamaConfiguration"
-  | "onChangeMistralVibeConfiguration"
-  | "onChangeGrokConfiguration"
-  | "onChangeGooseConfiguration"
-  | "onChangeGlmConfiguration"
-  | "onChangeGeminiConfiguration"
-  | "onChangeCopilotConfiguration"
-  | "onChangeClineConfiguration"
-  | "onChangeQwenConfiguration"
-  | "onChangeFxConfiguration"
   | "onChangeOpenAiCompatibleConfiguration"
   | "onChangeAnthropicCompatibleConfiguration"
   | "onChangeAzureFoundryConfiguration"
@@ -274,17 +257,7 @@ export function ProviderSettingsList(props: ProviderSettingsListProps) {
           : { onUseScannedBinary: props.onUseScannedBinary })}
         onChangeClaudeConfiguration={props.onChangeClaudeConfiguration}
         onChangeCodexConfiguration={props.onChangeCodexConfiguration}
-        onChangeMistralVibeConfiguration={props.onChangeMistralVibeConfiguration}
-        onChangeGrokConfiguration={props.onChangeGrokConfiguration}
-        onChangeGooseConfiguration={props.onChangeGooseConfiguration}
-        onChangeGlmConfiguration={props.onChangeGlmConfiguration}
-        onChangeGeminiConfiguration={props.onChangeGeminiConfiguration}
-        onChangeCopilotConfiguration={props.onChangeCopilotConfiguration}
-        onChangeClineConfiguration={props.onChangeClineConfiguration}
-        onChangeQwenConfiguration={props.onChangeQwenConfiguration}
-        onChangeFxConfiguration={props.onChangeFxConfiguration}
-        onChangeDevinConfiguration={props.onChangeDevinConfiguration}
-        onChangeKiloConfiguration={props.onChangeKiloConfiguration}
+        onChangeAcpAgentConfiguration={props.onChangeAcpAgentConfiguration}
         onChangePiConfiguration={props.onChangePiConfiguration}
         onChangeOhMyPiConfiguration={props.onChangeOhMyPiConfiguration}
         onChangeOllamaConfiguration={props.onChangeOllamaConfiguration}
@@ -602,20 +575,10 @@ interface ProviderRowProps {
   readonly onUseScannedBinary?: ProviderSettingsViewProps["onUseScannedBinary"];
   readonly onChangeClaudeConfiguration: ProviderSettingsViewProps["onChangeClaudeConfiguration"];
   readonly onChangeCodexConfiguration: ProviderSettingsViewProps["onChangeCodexConfiguration"];
-  readonly onChangeDevinConfiguration: ProviderSettingsViewProps["onChangeDevinConfiguration"];
-  readonly onChangeKiloConfiguration: ProviderSettingsViewProps["onChangeKiloConfiguration"];
+  readonly onChangeAcpAgentConfiguration: ProviderSettingsViewProps["onChangeAcpAgentConfiguration"];
   readonly onChangePiConfiguration: ProviderSettingsViewProps["onChangePiConfiguration"];
   readonly onChangeOhMyPiConfiguration: ProviderSettingsViewProps["onChangeOhMyPiConfiguration"];
   readonly onChangeOllamaConfiguration: ProviderSettingsViewProps["onChangeOllamaConfiguration"];
-  readonly onChangeMistralVibeConfiguration: ProviderSettingsViewProps["onChangeMistralVibeConfiguration"];
-  readonly onChangeGrokConfiguration: ProviderSettingsViewProps["onChangeGrokConfiguration"];
-  readonly onChangeGooseConfiguration: ProviderSettingsViewProps["onChangeGooseConfiguration"];
-  readonly onChangeGlmConfiguration: ProviderSettingsViewProps["onChangeGlmConfiguration"];
-  readonly onChangeGeminiConfiguration: ProviderSettingsViewProps["onChangeGeminiConfiguration"];
-  readonly onChangeCopilotConfiguration: ProviderSettingsViewProps["onChangeCopilotConfiguration"];
-  readonly onChangeClineConfiguration: ProviderSettingsViewProps["onChangeClineConfiguration"];
-  readonly onChangeQwenConfiguration: ProviderSettingsViewProps["onChangeQwenConfiguration"];
-  readonly onChangeFxConfiguration: ProviderSettingsViewProps["onChangeFxConfiguration"];
   readonly onChangeOpenAiCompatibleConfiguration: ProviderSettingsViewProps["onChangeOpenAiCompatibleConfiguration"];
   readonly onChangeAnthropicCompatibleConfiguration: ProviderSettingsViewProps["onChangeAnthropicCompatibleConfiguration"];
   readonly onChangeAzureFoundryConfiguration: ProviderSettingsViewProps["onChangeAzureFoundryConfiguration"];
@@ -710,21 +673,12 @@ function ProviderRow(props: ProviderRowProps) {
   useEffect(() => {
     if (scannedOfferPath !== undefined) setDetailsOpen(true);
   }, [scannedOfferPath]);
-  const isCli =
-    props.instance.driverKind === "opencode" || props.instance.driverKind === "kimi-code";
+  const isCli = props.instance.driverKind === "opencode";
   const isCodex = props.instance.driverKind === "codex";
   const isClaude = props.instance.driverKind === "claude";
-  const isVibe = props.instance.driverKind === "mistral-vibe";
-  const isGrok = props.instance.driverKind === "grok";
-  const isGoose = props.instance.driverKind === "goose";
-  const isGlm = props.instance.driverKind === "glm";
-  const isGemini = props.instance.driverKind === "gemini";
-  const isCopilot = props.instance.driverKind === "copilot";
-  const isCline = props.instance.driverKind === "cline";
-  const isQwen = props.instance.driverKind === "qwen";
-  const isFx = props.instance.driverKind === "fx";
-  const isDevin = props.instance.driverKind === "devin";
-  const isKilo = props.instance.driverKind === "kilo";
+  const acpInstance: AcpAgentProviderInstance | undefined = isAcpAgentInstance(props.instance)
+    ? props.instance
+    : undefined;
   const isPi = props.instance.driverKind === "pi";
   const isOhMyPi = props.instance.driverKind === "oh-my-pi";
   const isOllama = props.instance.driverKind === "ollama";
@@ -741,8 +695,8 @@ function ProviderRow(props: ProviderRowProps) {
     isAnthropicHttp ||
     isFoundry ||
     isImageProfile ||
-    ((isClaude || isVibe || isGrok || isGlm || isGemini || isCline || isQwen) &&
-      props.instance.configuration.authentication === "api-key");
+    (isClaude && props.instance.configuration.authentication === "api-key") ||
+    acpInstance?.configuration.authentication === "api-key";
   const browserClaudeKeySetup = isClaude && usesCredential && !props.credentialManagementAvailable;
   const credential = useCredentialStatus(props, !usesCredential);
   const setupGuidance = guidance(
@@ -759,16 +713,7 @@ function ProviderRow(props: ProviderRowProps) {
   const providerTags = props.instance.dataTags ?? [];
   const runtimeLabel = isClaude
     ? "Agent SDK"
-    : isVibe ||
-        isGrok ||
-        isGoose ||
-        isGlm ||
-        isGemini ||
-        isCopilot ||
-        isCline ||
-        isQwen ||
-        isDevin ||
-        isKilo
+    : acpInstance !== undefined
       ? "ACP"
       : isPi || isOhMyPi
         ? "RPC"
@@ -1208,85 +1153,13 @@ function ProviderRow(props: ProviderRowProps) {
                   key={`codex:${props.instance.version}`}
                   onChange={props.onChangeCodexConfiguration}
                 />
-              ) : isVibe ? (
-                <VibeConfigurationForm
-                  credential={credential}
+              ) : acpInstance !== undefined ? (
+                <AcpAgentConfigurationForm
                   credentialManagementAvailable={props.credentialManagementAvailable}
                   disabled={disabled}
-                  instance={props.instance}
-                  key={`vibe:${props.instance.version}`}
-                  onChange={props.onChangeMistralVibeConfiguration}
-                />
-              ) : isGrok ? (
-                <GrokConfigurationForm
-                  credential={credential}
-                  credentialManagementAvailable={props.credentialManagementAvailable}
-                  disabled={disabled}
-                  instance={props.instance}
-                  key={`grok:${props.instance.version}`}
-                  onChange={props.onChangeGrokConfiguration}
-                />
-              ) : isGoose ? (
-                <GooseConfigurationForm
-                  disabled={disabled}
-                  instance={props.instance}
-                  key={`goose:${props.instance.version}`}
-                  onChange={props.onChangeGooseConfiguration}
-                />
-              ) : isGlm ? (
-                <GlmConfigurationForm
-                  credential={credential}
-                  credentialManagementAvailable={props.credentialManagementAvailable}
-                  disabled={disabled}
-                  instance={props.instance}
-                  key={`glm:${props.instance.version}`}
-                  onChange={props.onChangeGlmConfiguration}
-                />
-              ) : isGemini ? (
-                <GeminiConfigurationForm
-                  credentialManagementAvailable={props.credentialManagementAvailable}
-                  disabled={disabled}
-                  instance={props.instance}
-                  key={`gemini:${props.instance.version}`}
-                  onChange={props.onChangeGeminiConfiguration}
-                />
-              ) : isCopilot ? (
-                <CopilotConfigurationForm
-                  disabled={disabled}
-                  instance={props.instance}
-                  key={`copilot:${props.instance.version}`}
-                  onChange={props.onChangeCopilotConfiguration}
-                />
-              ) : isCline ? (
-                <ClineConfigurationForm
-                  credentialManagementAvailable={props.credentialManagementAvailable}
-                  disabled={disabled}
-                  instance={props.instance}
-                  key={`cline:${props.instance.version}`}
-                  onChange={props.onChangeClineConfiguration}
-                />
-              ) : isQwen ? (
-                <QwenConfigurationForm
-                  credentialManagementAvailable={props.credentialManagementAvailable}
-                  disabled={disabled}
-                  instance={props.instance}
-                  key={`qwen:${props.instance.version}`}
-                  onChange={props.onChangeQwenConfiguration}
-                />
-              ) : isFx ? (
-                <FxConfigurationForm
-                  credentialManagementAvailable={props.credentialManagementAvailable}
-                  disabled={disabled}
-                  instance={props.instance}
-                  key={`fx:${props.instance.version}`}
-                  onChange={props.onChangeFxConfiguration}
-                />
-              ) : isDevin ? (
-                <DevinConfigurationForm
-                  disabled={disabled}
-                  instance={props.instance}
-                  key={`devin:${props.instance.version}`}
-                  onChange={props.onChangeDevinConfiguration}
+                  instance={acpInstance}
+                  key={`${acpInstance.driverKind}:${acpInstance.version}`}
+                  onChange={props.onChangeAcpAgentConfiguration}
                 />
               ) : isPi ? (
                 <PiConfigurationForm
@@ -1301,13 +1174,6 @@ function ProviderRow(props: ProviderRowProps) {
                   instance={props.instance}
                   key={`oh-my-pi:${props.instance.version}`}
                   onChange={props.onChangeOhMyPiConfiguration}
-                />
-              ) : isKilo ? (
-                <KiloConfigurationForm
-                  disabled={disabled}
-                  instance={props.instance}
-                  key={`kilo:${props.instance.version}`}
-                  onChange={props.onChangeKiloConfiguration}
                 />
               ) : isOllama ? (
                 <OllamaConfigurationForm
@@ -1472,7 +1338,7 @@ function ProviderRow(props: ProviderRowProps) {
                             </span>
                           </span>
                           {props.onModelContextWindowChange === undefined ||
-                          (!isHttp && !isAnthropicHttp && !isFoundry) ? null : (
+                          (!isHttp && !isAnthropicHttp && !isFoundry && !isOllama) ? null : (
                             <ModelContextWindowField
                               disabled={disabled}
                               model={model}
@@ -1652,64 +1518,11 @@ function ProviderRow(props: ProviderRowProps) {
                     )}
                   </div>
                 )}
-                {!isVibe ? null : (
-                  <div className="provider-card__facts provider-card__facts--vibe">
-                    <span>
-                      Authentication:{" "}
-                      {props.instance.configuration.authentication === "api-key"
-                        ? "Mistral API key"
-                        : "Mistral subscription"}
-                    </span>
-                  </div>
-                )}
-                {!isGrok ? null : (
-                  <div className="provider-card__facts provider-card__facts--grok">
-                    <span>
-                      Authentication:{" "}
-                      {props.instance.configuration.authentication === "api-key"
-                        ? "xAI API key"
-                        : "xAI subscription"}
-                    </span>
-                  </div>
-                )}
-                {!isGoose ? null : (
-                  <div className="provider-card__facts provider-card__facts--goose">
-                    <span>Authentication: provider-owned Goose credentials</span>
-                  </div>
-                )}
-                {!isGlm ? null : (
-                  <div className="provider-card__facts provider-card__facts--glm">
-                    <span>Authentication: Z.AI API key</span>
-                  </div>
-                )}
-                {!isGemini ? null : (
-                  <div className="provider-card__facts provider-card__facts--gemini">
-                    <span>Authentication: Gemini API key</span>
-                  </div>
-                )}
-                {!isCopilot ? null : (
-                  <div className="provider-card__facts provider-card__facts--copilot">
-                    <span>Authentication: provider-owned GitHub Copilot credentials</span>
-                  </div>
-                )}
-                {!isCline ? null : (
-                  <div className="provider-card__facts provider-card__facts--cline">
-                    <span>Authentication: Cline API key</span>
-                  </div>
-                )}
-                {!isQwen ? null : (
-                  <div className="provider-card__facts provider-card__facts--qwen">
-                    <span>Authentication: OpenAI-compatible API key</span>
-                  </div>
-                )}
-                {!isFx ? null : (
-                  <div className="provider-card__facts provider-card__facts--fx">
-                    <span>Authentication: Vercel AI Gateway API key</span>
-                  </div>
-                )}
-                {!isDevin ? null : (
-                  <div className="provider-card__facts provider-card__facts--devin">
-                    <span>Authentication: Devin subscription</span>
+                {acpInstance === undefined ? null : (
+                  <div
+                    className={`provider-card__facts provider-card__facts--${acpInstance.driverKind}`}
+                  >
+                    <span>Authentication: {acpAuthenticationFact(acpInstance)}</span>
                   </div>
                 )}
                 {!isPi ? null : (
@@ -1721,11 +1534,6 @@ function ProviderRow(props: ProviderRowProps) {
                   <div className="provider-card__facts provider-card__facts--oh-my-pi">
                     <span>Authentication: provider-owned Oh My Pi credentials</span>
                     <span>Supported version: {props.instance.configuration.supportedVersion}</span>
-                  </div>
-                )}
-                {!isKilo ? null : (
-                  <div className="provider-card__facts provider-card__facts--kilo">
-                    <span>Authentication: provider-owned Kilo credentials</span>
                   </div>
                 )}
                 {!isOllama ? null : (
@@ -1772,18 +1580,8 @@ function ProviderRow(props: ProviderRowProps) {
                   </div>
                 )}
                 {props.instance.driverKind === "codex" ||
-                props.instance.driverKind === "kimi-code" ||
                 isClaude ||
-                isVibe ||
-                isGrok ||
-                isGoose ||
-                isGlm ||
-                isGemini ||
-                isCopilot ||
-                isCline ||
-                isQwen ||
-                isDevin ||
-                isKilo ||
+                acpInstance !== undefined ||
                 isPi ||
                 isOhMyPi ? (
                   <p className="provider-card__authority-note">
@@ -2077,55 +1875,25 @@ function authenticationGuidance(instance: ProviderInstance): string {
   ) {
     return "Sign in above, then check the connection again.";
   }
+  if (isAcpAgentInstance(instance)) {
+    const profile = acpAgentProfile(instance.driverKind);
+    return instance.configuration.authentication === "api-key"
+      ? `Add or replace the ${profile.apiKeyLabel ?? "API key"} in the Octant host, then check the connection again.`
+      : profile.signInGuidance;
+  }
   switch (instance.driverKind) {
     case "codex":
       return "Run codex login in your terminal, then check the connection again.";
     case "opencode":
       return "Authenticate with OpenCode, then check the connection again.";
-    case "kimi-code":
-      return "Run kimi login in your terminal, then check the connection again.";
-    case "devin":
-      return "Run devin auth login in your terminal, then check the connection again.";
     case "pi":
       return "Authenticate with the official Pi CLI, then check the connection again.";
     case "oh-my-pi":
       return "Install and authenticate Oh My Pi (`omp`), then check the connection again. Octant treats Oh My Pi as distinct from Pi.";
-    case "kilo":
-      return "Run kilo auth login in your terminal, then check the connection again.";
     case "claude":
       return instance.configuration.authentication === "api-key"
         ? "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again."
         : "Authenticate with the official Claude Code app or CLI, then check the connection again.";
-    case "mistral-vibe":
-      return instance.configuration.authentication === "api-key"
-        ? "Add or replace the Mistral API key in the Octant host, then check the connection again."
-        : "Run the provider-owned Vibe CLI login in your terminal, then check the connection again.";
-    case "grok":
-      return instance.configuration.authentication === "api-key"
-        ? "Add or replace the xAI API key in the Octant host, then check the connection again."
-        : "Run grok login in your terminal (or grok login --device-auth on a headless host), then check the connection again.";
-    case "goose":
-      return "Run `goose configure` in your terminal, then check the connection again.";
-    case "glm":
-      return instance.configuration.authentication === "api-key"
-        ? "Add or replace the Z.AI API key in the Octant host, then check the connection again."
-        : "Run the provider-owned GLM Agent CLI login in your terminal, then check the connection again.";
-    case "gemini":
-      return instance.configuration.authentication === "api-key"
-        ? "Add or replace the Gemini API key in the Octant host, then check the connection again."
-        : "Run Gemini CLI in your terminal and complete its provider-owned login, then check the connection again.";
-    case "copilot":
-      return "Run `copilot login` in your terminal, then check the connection again.";
-    case "cline":
-      return instance.configuration.authentication === "api-key"
-        ? "Add or replace the Cline API key in the Octant host, then check the connection again."
-        : "Run `cline auth` in your terminal, then check the connection again.";
-    case "qwen":
-      return instance.configuration.authentication === "api-key"
-        ? "Add or replace the OpenAI-compatible API key in the Octant host, then check the connection again."
-        : "Run the provider-owned Qwen CLI login in your terminal, then check the connection again.";
-    case "fx":
-      return "Add or replace the Vercel AI Gateway API key in the Octant host, then check the connection again.";
     case "anthropic-compatible":
       return "Add or replace the Anthropic API key in the Octant host. It remains write-only and is stored in Keychain, then check the connection again.";
     case "azure-foundry":

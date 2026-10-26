@@ -1,5 +1,10 @@
 import {
+  acpAgentConfigurationKind,
+  acpAgentCreateCommandKind,
+  acpAgentProfile,
   decodeProviderInstanceId,
+  isAcpAgentKind,
+  type CreateAcpAgentProviderCommand,
   type DiscoveryCandidate,
   type ProviderRegistryCommand,
 } from "@octant/contracts";
@@ -8,30 +13,20 @@ type DiscoveryCreateCandidate = Pick<
   DiscoveryCandidate,
   "driverKind" | "displayName" | "binaryPath"
 >;
-type DiscoveryCreateCommand = Extract<
-  ProviderRegistryCommand,
-  {
-    kind:
-      | "create-codex-provider"
-      | "create-opencode-provider"
-      | "create-kimi-code-provider"
-      | "create-claude-provider"
-      | "create-mistral-vibe-provider"
-      | "create-grok-provider"
-      | "create-goose-provider"
-      | "create-glm-provider"
-      | "create-gemini-provider"
-      | "create-copilot-provider"
-      | "create-cline-provider"
-      | "create-qwen-provider"
-      | "create-fx-provider"
-      | "create-devin-provider"
-      | "create-kilo-provider"
-      | "create-pi-provider"
-      | "create-oh-my-pi-provider"
-      | "create-ollama-provider";
-  }
->;
+type DiscoveryCreateCommand =
+  | CreateAcpAgentProviderCommand
+  | Extract<
+      ProviderRegistryCommand,
+      {
+        kind:
+          | "create-codex-provider"
+          | "create-opencode-provider"
+          | "create-claude-provider"
+          | "create-pi-provider"
+          | "create-oh-my-pi-provider"
+          | "create-ollama-provider";
+      }
+    >;
 
 export function createProviderFromDiscoveryCandidate(
   candidate: DiscoveryCreateCandidate,
@@ -43,6 +38,27 @@ export function createProviderFromDiscoveryCandidate(
   const instanceId = decodeProviderInstanceId(crypto.randomUUID());
   const expectedVersion = 0 as DiscoveryCreateCommand["expectedVersion"];
 
+  if (isAcpAgentKind(candidate.driverKind)) {
+    // Discovery proves only that the binary is present, so it registers the
+    // profile's first posture: the agent's own login wherever the profile
+    // offers one.
+    const authentication = acpAgentProfile(candidate.driverKind).authentication[0];
+    return {
+      instanceId,
+      command: {
+        kind: acpAgentCreateCommandKind(candidate.driverKind),
+        instanceId,
+        expectedVersion,
+        displayName: candidate.displayName,
+        configuration: {
+          kind: acpAgentConfigurationKind(candidate.driverKind),
+          binaryPath: candidate.binaryPath,
+          ...(authentication === undefined ? {} : { authentication }),
+        },
+        enabled: options.enabled,
+      },
+    };
+  }
   switch (candidate.driverKind) {
     case "codex":
       return {
@@ -68,18 +84,6 @@ export function createProviderFromDiscoveryCandidate(
           enabled: options.enabled,
         },
       };
-    case "kimi-code":
-      return {
-        instanceId,
-        command: {
-          kind: "create-kimi-code-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          binaryPath: candidate.binaryPath,
-          enabled: options.enabled,
-        },
-      };
     case "claude":
       return {
         instanceId,
@@ -92,179 +96,6 @@ export function createProviderFromDiscoveryCandidate(
             kind: "claude-agent-sdk",
             binaryPath: candidate.binaryPath,
             authentication: "subscription",
-          },
-          enabled: options.enabled,
-        },
-      };
-    case "mistral-vibe":
-      return {
-        instanceId,
-        command: {
-          kind: "create-mistral-vibe-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          configuration: {
-            kind: "mistral-vibe-acp",
-            binaryPath: candidate.binaryPath,
-            authentication: "subscription",
-          },
-          enabled: options.enabled,
-        },
-      };
-    case "grok":
-      return {
-        instanceId,
-        command: {
-          kind: "create-grok-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          configuration: {
-            kind: "grok-acp",
-            binaryPath: candidate.binaryPath,
-            authentication: "subscription",
-          },
-          enabled: options.enabled,
-        },
-      };
-    case "goose":
-      return {
-        instanceId,
-        command: {
-          kind: "create-goose-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          configuration: {
-            kind: "goose-acp",
-            binaryPath: candidate.binaryPath,
-          },
-          enabled: options.enabled,
-        },
-      };
-    case "glm":
-      return {
-        instanceId,
-        command: {
-          kind: "create-glm-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          configuration: {
-            kind: "glm-acp",
-            binaryPath: candidate.binaryPath,
-            authentication: "provider-owned",
-          },
-          enabled: options.enabled,
-        },
-      };
-    case "gemini":
-      return {
-        instanceId,
-        command: {
-          kind: "create-gemini-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          configuration: {
-            kind: "gemini-acp",
-            binaryPath: candidate.binaryPath,
-            authentication: "provider-owned",
-          },
-          enabled: options.enabled,
-        },
-      };
-    case "copilot":
-      return {
-        instanceId,
-        command: {
-          kind: "create-copilot-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          configuration: {
-            kind: "copilot-acp",
-            binaryPath: candidate.binaryPath,
-          },
-          enabled: options.enabled,
-        },
-      };
-    case "cline":
-      return {
-        instanceId,
-        command: {
-          kind: "create-cline-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          configuration: {
-            kind: "cline-acp",
-            binaryPath: candidate.binaryPath,
-            authentication: "provider-owned",
-          },
-          enabled: options.enabled,
-        },
-      };
-    case "qwen":
-      return {
-        instanceId,
-        command: {
-          kind: "create-qwen-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          configuration: {
-            kind: "qwen-acp",
-            binaryPath: candidate.binaryPath,
-            authentication: "provider-owned",
-          },
-          enabled: options.enabled,
-        },
-      };
-    case "fx":
-      return {
-        instanceId,
-        command: {
-          kind: "create-fx-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          configuration: {
-            kind: "fx-acp",
-            binaryPath: candidate.binaryPath,
-            authentication: "api-key",
-          },
-          enabled: options.enabled,
-        },
-      };
-    case "devin":
-      return {
-        instanceId,
-        command: {
-          kind: "create-devin-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          configuration: {
-            kind: "devin-acp",
-            binaryPath: candidate.binaryPath,
-            authentication: "subscription",
-          },
-          enabled: options.enabled,
-        },
-      };
-    case "kilo":
-      return {
-        instanceId,
-        command: {
-          kind: "create-kilo-provider",
-          instanceId,
-          expectedVersion,
-          displayName: candidate.displayName,
-          configuration: {
-            kind: "kilo-acp",
-            binaryPath: candidate.binaryPath,
           },
           enabled: options.enabled,
         },

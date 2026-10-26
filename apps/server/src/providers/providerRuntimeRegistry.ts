@@ -50,14 +50,21 @@ export interface ProviderRuntimeAcquireOptions<T> {
   ) => Promise<ProviderRuntimeResource<T>>;
 }
 
+/**
+ * The registry as a provider driver holds it. The Verify tools record is the
+ * host's: a driver that could write it would admit Octant's tools for a model
+ * no person verified, so the record's writer is left out.
+ */
+export type ProviderDriverRuntimeRegistry = Omit<ProviderRuntimeRegistry, "setVerifiedToolModels">;
+
 export function trackProviderProcess<
   T extends { readonly pid: number; readonly exited: Promise<void> },
 >(
-  registry: ProviderRuntimeRegistry,
+  registry: ProviderDriverRuntimeRegistry,
   instanceId: ProviderInstanceId,
   process: T,
 ): Effect.Effect<T, ProviderFailure> {
-  if (typeof (registry as Partial<ProviderRuntimeRegistry>).trackProcess !== "function") {
+  if (typeof (registry as Partial<ProviderDriverRuntimeRegistry>).trackProcess !== "function") {
     return Effect.succeed(process);
   }
   return Effect.tryPromise({

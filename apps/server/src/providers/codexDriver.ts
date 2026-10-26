@@ -79,7 +79,10 @@ import {
 } from "./codexProtocol";
 import { CodexRpcClientFailure } from "./codexRpcClient";
 import { modelEvidenceFromObservedState } from "./providerContextFacts";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type {
+  ProviderDriverRuntimeRegistry,
+  ProviderRuntimeRegistry,
+} from "./providerRuntimeRegistry";
 import { rateLimitWindowId } from "./rateLimitWindowIdentity";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
@@ -362,7 +365,7 @@ export interface CodexDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
   readonly process: CodexProcessPort;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly clientFactory?: (connection: CodexAppServerConnection) => CodexClientPort;
   readonly permissionPersistence?: () => PermissionPersistence;
   readonly idleLeaseMs?: number;

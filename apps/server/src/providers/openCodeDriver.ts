@@ -35,7 +35,10 @@ import {
   type OpenCodeManagedToolsBridge,
 } from "./openCodeManagedTools";
 import type { OpenCodeProcessPort, OpenCodeServerConnection } from "./openCodeProcess";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type {
+  ProviderDriverRuntimeRegistry,
+  ProviderRuntimeRegistry,
+} from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
 export interface OpenCodeSessionRecord {
@@ -88,7 +91,7 @@ export interface OpenCodeDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly binaryPath: string;
   readonly process: OpenCodeProcessPort;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly clientFactory?: (
     server: OpenCodeServerConnection,
     projectRoot: string,

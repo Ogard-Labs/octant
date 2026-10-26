@@ -195,6 +195,7 @@ function runSummaryTurn(
       sessionId: options.sessionId,
       modelId: request.modelId,
       executionPolicy: "approval-gated",
+      singleUse: true,
     });
 
     const events = yield* subscribeThenSend({

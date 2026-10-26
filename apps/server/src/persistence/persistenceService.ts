@@ -62,6 +62,7 @@ import {
 } from "./migrationErrors";
 import { MIGRATIONS } from "./migrations";
 import { compactSupersededCheckoutObservations } from "./journalCompaction";
+import { sweepUnrecordedSessionData } from "./unrecordedSessionSweep";
 import {
   CheckpointAheadOfJournal,
   ProjectionQuarantined,
@@ -379,6 +380,17 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
     if (compaction.eventsRemoved > 0) {
       console.warn(
         `Octant journal compaction removed ${compaction.eventsRemoved} superseded checkout observation(s) across ${compaction.checkoutsCompacted} checkout(s).`,
+      );
+    }
+    // Before any service can start a provider session, so no live session
+    // can still be waiting to journal its record.
+    const sessionSweep = sweepUnrecordedSessionData(connection);
+    if (
+      sessionSweep.status === "swept" &&
+      sessionSweep.resumeIdentitiesRemoved + sessionSweep.transcriptsRemoved > 0
+    ) {
+      console.warn(
+        `Octant removed ${sessionSweep.resumeIdentitiesRemoved} Claude resume identit(ies) and ${sessionSweep.transcriptsRemoved} Octant Harness transcript(s) that no thread or child run records.`,
       );
     }
     reconcileCodeRestart({ connection, journal, reconciledAt: clock() });

@@ -397,6 +397,16 @@ describe("Ollama provider driver", () => {
       outcome: "completed",
       numCtx: [65536],
     });
+    // Ollama loads no more than the trained window, so a larger setting is
+    // held to it rather than measured against room the model never has.
+    expect(await turn(trained, tokens(131072 - 1024), 262144)).toEqual({
+      outcome: "completed",
+      numCtx: [131072],
+    });
+    expect(await turn(trained, tokens(131072 + 1024), 262144)).toEqual({
+      outcome: "The provider request exceeded the configured size limit.",
+      numCtx: [],
+    });
   });
 
   it("never declares usage unsupported because one response carried no counts", async () => {

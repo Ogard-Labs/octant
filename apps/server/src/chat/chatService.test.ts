@@ -28,6 +28,7 @@ import {
   decodeContextPlan,
   decodeContextSubjectRef,
   decodeContextSummaryId,
+  decodeProviderCatalogSnapshot,
   decodeProviderInstanceId,
   decodeProviderModelId,
   decodeProviderSessionId,
@@ -43,6 +44,7 @@ import {
   type ContextSummaryId,
   type GlobalSequence,
   type OpenAiCompatibleProviderConfiguration,
+  type ProviderCatalogSnapshot,
   type ProviderInstanceId,
   type ProviderProbeResult,
   type ProviderContextBlock,
@@ -293,6 +295,8 @@ function openFixture(options?: {
     | undefined;
   /** The registry the driver probes into, which holds the host's Verify tools record. */
   readonly providerRuntimeRegistry?: ProviderRuntimeRegistry;
+  /** The provider's persisted catalogue, which outlives the registry across a restart. */
+  readonly providerCatalog?: ProviderCatalogSnapshot;
   readonly resolveExtensionSelectionContext?: (input: {
     readonly phase: "send" | "replay" | "resume" | "provider-handoff";
     readonly thread: ChatThread;
@@ -444,6 +448,14 @@ function openFixture(options?: {
       };
     },
     readProviderInstances: () => [],
+    ...(options?.providerCatalog === undefined
+      ? {}
+      : {
+          readProviderCatalog: (instanceId: ProviderInstanceId) =>
+            String(instanceId) === String(options.providerCatalog?.instanceId)
+              ? options.providerCatalog
+              : undefined,
+        }),
     readProviderDefaults: () => ({
       defaultProviderInstanceId: ids.provider,
       version: 1 as AggregateVersion,
@@ -1321,6 +1333,68 @@ describe("ChatService", () => {
     verified.setObservedState(claimed);
     verified.setVerifiedToolModels(claimed.instanceId, [decodeProviderModelId("model-a")]);
     expect(await toolsSent(verified)).toContain("octant_canvas");
+  });
+
+  it("restores a model's Verify tools record from the catalogue after a restart, never from an invalidated one", async () => {
+    const window = decodeWindowId("84000000-0000-4000-8000-000000000015");
+    const unclaimed = probeFixture({
+      capabilities: { ...probeFixture().capabilities, appManagedTools: "unsupported" },
+    });
+    const catalog = (invalidated: boolean) =>
+      decodeProviderCatalogSnapshot({
+        instanceId: unclaimed.instanceId,
+        version: 2,
+        models: unclaimed.models,
+        manualModelOrder: [],
+        verifiedToolModelIds: ["model-a"],
+        invalidated,
+        ...(invalidated
+          ? { invalidatedAt: now, invalidationReason: "The endpoint address changed." }
+          : {}),
+        updatedAt: now,
+      });
+    // A fresh registry is what a restart leaves: no Verify tools record.
+    const afterRestart = async (providerCatalog: ProviderCatalogSnapshot) => {
+      const providerRuntimeRegistry = new ProviderRuntimeRegistry();
+      const { service, fakeDriver } = openFixture({
+        probe: unclaimed,
+        providerCatalog,
+        providerRuntimeRegistry,
+        resolveAppManagedTools: () => ({
+          definitions: [{ name: "octant_canvas", inputSchema: { type: "object" } }],
+          execute: async () => ({ result: {} }),
+        }),
+      });
+      const created = await service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "After restart",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      await service.execute(
+        {
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Write the memo",
+        },
+        { windowId: window },
+      );
+      return {
+        tools: fakeDriver.sentTurns[0]?.tools.map(({ name }) => name),
+        record: providerRuntimeRegistry
+          .observedState(unclaimed.instanceId)
+          ?.verifiedToolModelIds?.map(String),
+      };
+    };
+
+    const restored = await afterRestart(catalog(false));
+    expect(restored.tools).toContain("octant_canvas");
+    expect(restored.record).toEqual(["model-a"]);
+
+    const invalidated = await afterRestart(catalog(true));
+    expect(invalidated.tools).not.toContain("octant_canvas");
+    expect(invalidated.record ?? []).toEqual([]);
   });
 
   it("registers a refusal-only Computer tool when the send carries no @Computer selection", async () => {

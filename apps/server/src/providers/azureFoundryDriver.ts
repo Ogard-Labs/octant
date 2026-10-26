@@ -13,12 +13,12 @@ import {
   type OpenAiCompatibleDriverProfile,
 } from "./openAiCompatibleDriver";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 
 export interface AzureFoundryDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly configuration: AzureFoundryProviderConfiguration;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
   readonly clock?: () => string;

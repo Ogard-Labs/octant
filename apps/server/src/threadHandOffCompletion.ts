@@ -96,6 +96,7 @@ function runCompletion(
       sessionId: input.sessionId,
       modelId: input.modelId,
       executionPolicy: "plan",
+      singleUse: true,
     });
     const events = yield* subscribeThenSend({
       connection,

@@ -160,18 +160,18 @@ done, and the model is told to check before repeating it. Octant never
 re-runs an interrupted call by itself.
 
 When a long conversation no longer fits the model's window, older tool
-results are left out of the request first. In Code, Octant then summarizes the
-earlier turns for the model, carrying its latest task list along, and the
-thread shows a compaction divider and the context meter marks the session
-compacted. Only when there is nothing earlier to summarize, the summary
-fails, or the running turn outgrows the window again, are whole earlier
-exchanges left out, with a note to the model that names the saved messages
-it can read back with `journal-lookup`. The note points the model at its task
-list and, in Work and Code, at the files on disk; a Chat thread has no folder,
-so its note names only the task list and the lookup. A saved message too long
-for one read, such as the history a restarted conversation begins with, comes
-back in parts the model reads one after another. The saved conversation keeps
-everything.
+results are left out of the request first. In Chat, Work, and Code alike,
+Octant then summarizes the earlier turns for the model with the same model and
+no tools, carrying its latest task list along, and the thread shows a
+compaction divider and the context meter marks the session compacted. A Chat
+summary is not asked about files, and a Chat model is not told to look for
+any. Only when there is nothing earlier to summarize, the summary fails, or
+the running turn outgrows the window again, are whole earlier exchanges left
+out, with a note to the model that names the saved messages it can read back
+with `journal-lookup`. The note points the model at its task list and, in Work
+and Code, at the files on disk. A saved message too long for one read, such as
+the history a restarted conversation begins with, comes back in parts the
+model reads one after another. The saved conversation keeps everything.
 
 Forking a Code thread on a harness model gives the fork the model's own
 memory up to the reply you forked from — every message, tool call, and result
@@ -525,7 +525,9 @@ table.
   to start a Chat or Work thread's conversation afresh (after a compaction, a
   retry, edit, or regenerated reply, or a change of model or provider), the
   earlier one is not read
-  back, and the new one already began from the thread's history. Only Code
-  summarizes earlier turns before it cuts them. An endpoint that never reports the model's window,
+  back, and the new one already began from the thread's history. Every mode
+  summarizes earlier turns of a continued conversation before it cuts them;
+  the history a fresh conversation begins with was already planned and
+  compacted, so the turn that carries it does not summarize it again. An endpoint that never reports the model's window,
   such as some Azure AI Foundry deployments, gives the lead no figure: the tool
   says the context is unavailable instead of reporting room against an estimate.

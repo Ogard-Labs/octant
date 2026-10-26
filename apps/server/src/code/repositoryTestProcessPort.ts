@@ -582,9 +582,12 @@ export class RepositoryTestProcessPort {
         throw new Error("Artifact symlink escapes checkout.");
 
       const readLimit = Math.min(input.maximumBytes + 1, MAX_REPOSITORY_TEST_ARTIFACT_BYTES + 1);
+      // O_NONBLOCK keeps a FIFO under the artifact name from holding the open
+      // until a writer appears; the isFile check below then refuses it.
       const handle = await open(
         candidate,
-        constants.O_RDONLY | (this.#platform === "win32" ? 0 : constants.O_NOFOLLOW),
+        constants.O_RDONLY |
+          (this.#platform === "win32" ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK),
       );
       try {
         const metadata = await handle.stat();
