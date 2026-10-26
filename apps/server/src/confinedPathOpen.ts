@@ -1,3 +1,4 @@
+import type { BigIntStats } from "node:fs";
 import { constants, open, readlink, type FileHandle } from "node:fs/promises";
 
 const darwinNoFollowAny = 0x20000000;
@@ -53,6 +54,25 @@ export async function openConfinedPath(
     throw new Error("the opened object is not at the confined path");
   }
   return handle;
+}
+
+/**
+ * The metadata of the object at a canonical path, read from a proved open.
+ *
+ * A path `stat` resolves the ancestors afresh just as an open does, so a swap
+ * after `realpath` let it report a host object's kind and size; listings carry
+ * that size to the renderer without ever opening the file. Reading it from the
+ * handle `openConfinedPath` proved keeps the identity and every reported fact
+ * on the object at the canonical path. O_NONBLOCK keeps a FIFO from holding the
+ * open; an entry the host cannot open at all is refused like any failed open.
+ */
+export async function statConfinedPath(canonicalPath: string): Promise<BigIntStats> {
+  const handle = await openConfinedPath(canonicalPath, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    return await handle.stat({ bigint: true });
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
 }
 
 /**

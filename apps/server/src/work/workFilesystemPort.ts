@@ -14,7 +14,7 @@ import {
   type FileHandle,
 } from "node:fs/promises";
 import type { Dir } from "node:fs";
-import { confinedEnumerationPath, openConfinedPath } from "../confinedPathOpen";
+import { confinedEnumerationPath, openConfinedPath, statConfinedPath } from "../confinedPathOpen";
 
 /**
  * Filesystem metadata for a Work-confined path. The port exposes only the
@@ -162,7 +162,9 @@ const toStat = (info: LiveStat): WorkFileStat => ({
 export const liveWorkFilesystem: WorkFilesystemPort = {
   realpath: nodeRealpath,
   lstat: async (path) => toStat(await lstat(path, { bigint: true })),
-  stat: async (path) => toStat(await stat(path, { bigint: true })),
+  // Only ever called on a canonical path, and the identity it reports is what
+  // every later open is compared against, so it comes from a proved open too.
+  stat: async (path) => toStat(await statConfinedPath(path)),
   readlink,
   openFile: async (path) => {
     // The caller must still have run the containment sequence; the open then

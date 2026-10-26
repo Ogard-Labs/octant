@@ -1,5 +1,5 @@
 import { constants, lstat, opendir, readlink, realpath, stat } from "node:fs/promises";
-import { confinedEnumerationPath, openConfinedPath } from "../confinedPathOpen";
+import { confinedEnumerationPath, openConfinedPath, statConfinedPath } from "../confinedPathOpen";
 
 /**
  * Filesystem facts the confined Code surfaces need.
@@ -133,7 +133,9 @@ const toStat = (info: LiveStat): CodeDirectoryStat => ({
 const livePathPort: CodePathPort = {
   realpath,
   lstat: async (path) => toStat(await lstat(path, { bigint: true })),
-  stat: async (path) => toStat(await stat(path, { bigint: true })),
+  // Only ever called on a canonical path, and the identity it reports is what
+  // every later open is compared against, so it comes from a proved open too.
+  stat: async (path) => toStat(await statConfinedPath(path)),
   readlink,
 };
 

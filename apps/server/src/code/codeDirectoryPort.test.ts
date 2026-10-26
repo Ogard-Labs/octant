@@ -189,6 +189,22 @@ describe("an ancestor swapped for a link to a host folder during confinement", (
     expect(read.status).toBe("refused");
   });
 
+  // A listing reports each child's kind and size from the identity `stat`, so
+  // a `stat` that followed the swapped ancestor put a host file's size in the
+  // Files panel even though no byte of it was read.
+  it.each(confinementSteps.filter((step) => step !== "open"))(
+    "never resolves a host object's metadata when the swap lands before %s",
+    async (step) => {
+      const checkout = await swappableCheckout();
+      const resolved = await resolveContainedPath(
+        swappingBefore(step, checkout),
+        checkout.root,
+        join(checkout.root, "dist", "app", "app.bin"),
+      );
+      expect(resolved).toBeUndefined();
+    },
+  );
+
   it.each(confinementSteps)(
     "refuses a directory listing when the swap lands before %s",
     async (step) => {

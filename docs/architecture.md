@@ -7024,7 +7024,10 @@ mechanisms are:
   (`/proc/self/fd/N`) must equal it. On macOS the open carries `O_NOFOLLOW_ANY`
   (macOS 11+, so every supported Apple Silicon host), and the kernel refuses a
   link in any component; a canonical path holds none. Any other platform
-  refuses the open. Canvas refresh opens its source through the same open, so
+  refuses the open. The identity `stat` itself is read from such an open,
+  because listings report its kind and size without opening the file: a path
+  `stat` after the swap put a host file's size in the Files panel. An entry
+  the host process cannot open is therefore not listed. Canvas refresh opens its source through the same open, so
   a link anywhere in that path refuses it too. A Linux listing enumerates the held directory through
   `/proc/self/fd/N`; a macOS listing resolves the path once more, so every name
   it yields is re-resolved and a name present in both the root and the
