@@ -272,13 +272,14 @@ export class AppleDeviceService {
       this.#settle(false, [], []);
       return "refreshed";
     }
-    const offered = await this.#probe(developerDirectory, signal);
+    const { offered, answered } = await this.#probe(developerDirectory, signal);
     const tooling = DEVICECTL_PROBES.flatMap((probe) =>
       probe.operation !== "lock-state" && offered.has(probe.operation) ? [probe.operation] : [],
     );
     if (!offered.has("list-devices")) {
       this.#settle(true, tooling, []);
-      return "refreshed";
+      // A probe that did not finish cannot show the listing is not offered.
+      return answered ? "refreshed" : "unreadable";
     }
     const listing = parseDevicectlDeviceList(await this.#readJson(["list", "devices"], signal));
     if (listing.kind === "unreadable") {
@@ -350,10 +351,13 @@ export class AppleDeviceService {
   async #probe(
     developerDirectory: string,
     signal: AbortSignal | undefined,
-  ): Promise<ReadonlySet<string>> {
-    if (this.#tooling?.developerDirectory === developerDirectory) return this.#tooling.offered;
+  ): Promise<{ readonly offered: ReadonlySet<string>; readonly answered: boolean }> {
+    if (this.#tooling?.developerDirectory === developerDirectory) {
+      return { offered: this.#tooling.offered, answered: true };
+    }
     const offered = new Set<string>();
     const helps = new Map<string, { readonly exitCode: number | null; readonly output: string }>();
+    let answered = true;
     for (const probe of DEVICECTL_PROBES) {
       const key = probe.subcommand.join(" ");
       let help = helps.get(key);
@@ -362,6 +366,7 @@ export class AppleDeviceService {
           ["xcrun", "devicectl", ...probe.subcommand, "--help"],
           signal,
         );
+        if (result.termination !== "exited") answered = false;
         help = {
           exitCode: result.termination === "exited" ? result.exitCode : null,
           output: `${text(result.stdout)}\n${text(result.stderr)}`,
@@ -370,8 +375,11 @@ export class AppleDeviceService {
       }
       if (devicectlOffers(probe, help)) offered.add(probe.operation);
     }
-    this.#tooling = { developerDirectory, offered };
-    return offered;
+    // A help that timed out, was cancelled, or never started says nothing
+    // about the selected Xcode. Keeping that answer would report its
+    // operations missing, and its listing empty, until the host restarts.
+    if (answered) this.#tooling = { developerDirectory, offered };
+    return { offered, answered };
   }
 
   /**

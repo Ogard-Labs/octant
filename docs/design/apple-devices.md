@@ -144,7 +144,9 @@ access covers neither the device lease nor any distribution step.
   usage line names that exact subcommand; console logs also need `--console`
   in `device process launch`'s help. _Reason:_ an argument parser that does
   not know a subcommand can print its parent's help and exit cleanly, which
-  must not read as the operation being offered.
+  must not read as the operation being offered. A probe whose help timed out,
+  was cancelled, or did not start is not kept, and runs again on the next
+  discovery; if it left the listing unanswered, that discovery fails.
 - A listing the host cannot read is a failure, never an empty list, so a
   broken `devicectl` does not look like unplugged devices. `devicectl` writes
   its JSON to a `0700` directory in the host's data directory that every other

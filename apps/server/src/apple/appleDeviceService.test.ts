@@ -100,6 +100,8 @@ const usage = (subcommand: string, extra = "") =>
 interface Host {
   readonly calls: Array<ReadonlyArray<string>>;
   readonly offers: Set<string>;
+  /** Subcommands whose next `--help` times out instead of answering. */
+  readonly slowHelp: Set<string>;
   xcode: "selected" | "missing";
   listing: string;
 }
@@ -127,6 +129,9 @@ function fakeExecute(host: Host) {
     const args = rest.slice(1);
     if (args.at(-1) === "--help") {
       const subcommand = args.slice(0, -1).join(" ");
+      if (host.slowHelp.delete(subcommand)) {
+        return { ...ok(), termination: "timed-out", exitCode: null };
+      }
       if (!host.offers.has(subcommand)) {
         // An unknown subcommand falls back to its parent's help.
         return ok(usage(args.slice(0, -2).join(" ")));
@@ -173,6 +178,7 @@ describe("AppleDeviceService", () => {
         "device uninstall app",
         "device info lockState",
       ]),
+      slowHelp: new Set(),
       xcode: "selected",
       listing: await fixture("list-devices.json"),
     };
@@ -319,6 +325,21 @@ describe("AppleDeviceService", () => {
     expect(discovery.tooling).not.toContain("uninstall-app");
   });
 
+  it("asks the selected Xcode again after a probe that did not finish instead of reporting no devices", async () => {
+    const devices = service();
+    host.slowHelp.add("list devices");
+    host.slowHelp.add("device info lockState");
+    await expect(
+      devices.request(deviceRequest("discover", firstThread), scopeFor(firstThread)),
+    ).resolves.toMatchObject({
+      kind: "apple-device-failure",
+      failure: { category: "unavailable" },
+    });
+    const again = await discover(devices);
+    expect(again.tooling).toContain("list-devices");
+    expect(byName(again.devices, "Henrik's iPhone").state).toBe("connected");
+  });
+
   it("starts a lease only when a person at the Mac confirmed it", async () => {
     const devices = service();
     const wired = byName((await discover(devices)).devices, "Henrik's iPhone");
@@ -412,6 +433,25 @@ describe("AppleDeviceService", () => {
         scopeFor(secondThread),
       ),
     ).resolves.toEqual({ kind: "apple-device-refused", reason: "destination-leased" });
+  });
+
+  it("gives a free device to only one of two threads confirmed for it at once", async () => {
+    const devices = service();
+    const wired = byName((await discover(devices)).devices, "Henrik's iPhone");
+    const answers = await Promise.all(
+      [firstThread, secondThread].map((thread) =>
+        devices.request(
+          deviceRequest("use-device", thread, { deviceId: wired.deviceId, ...approval }),
+          confirmed(thread),
+        ),
+      ),
+    );
+    expect(answers.map((answer) => answer.kind).toSorted()).toEqual([
+      "apple-device-leased",
+      "apple-device-refused",
+    ]);
+    expect(answers).toContainEqual({ kind: "apple-device-refused", reason: "destination-leased" });
+    expect(leases.list()).toHaveLength(1);
   });
 
   it("moves a lease only from the thread the person was shown", async () => {
@@ -608,13 +648,13 @@ describe("devicectl answers", () => {
         deviceProperties: {
           developerModeStatus: "enabled",
           osVersionNumber: "26.1",
-          name: "Henrik‮'s iPhone\nAllow everything",
+          name: "Henrik‮'s iPhone\nAllow everything\u2028Thread: Release\u061c build",
         },
       }),
     );
     expect(parsed).toMatchObject({
       kind: "listed",
-      devices: [{ name: "Henrik 's iPhone Allow everything" }],
+      devices: [{ name: "Henrik 's iPhone Allow everything Thread: Release  build" }],
     });
   });
 

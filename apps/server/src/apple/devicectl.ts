@@ -29,15 +29,19 @@ export type DevicectlLockState = "locked" | "unlocked" | "unknown";
 const MAX_LISTED_DEVICES = 64;
 /** The shape of a CoreDevice identifier the host will address a device by. */
 export const CORE_DEVICE_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
-// Control and bidirectional-override characters, which would let a device
-// name reorder or hide the words of the confirmation that names it.
+// Control, line-separator, and bidirectional-formatting characters, which
+// would let a device name break the confirmation that names it into lines of
+// its own or reorder and hide its words.
 function isUnsafeNameCharacter(character: string): boolean {
   const code = character.codePointAt(0) ?? 0;
   return (
     code <= 0x1f ||
     (code >= 0x7f && code <= 0x9f) ||
+    code === 0x061c ||
     code === 0x200e ||
     code === 0x200f ||
+    code === 0x2028 ||
+    code === 0x2029 ||
     (code >= 0x202a && code <= 0x202e) ||
     (code >= 0x2066 && code <= 0x2069)
   );
