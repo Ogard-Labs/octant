@@ -2553,7 +2553,9 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. Outside drivers need their own design before the schema admits
   them; third-party provider-driver plugins are an authorized post-preview
-  track that the schema refuses until that design is documented. The catalog repeats installed and trusted from the activation context
+  track whose design is
+  [Outside provider drivers](design/outside-provider-drivers.md), and the
+  schema refuses them until its slices land. The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -6173,7 +6175,9 @@ feature is already an independently packaged plugin:
 A direct-endpoint provider driver supplies a transport through the provider-sdk
 harness endpoint port; the harness loop, endpoint registry, lead fallback,
 retries, and context-window memory stay host-owned
-([Native harness](#native-harness)).
+([Native harness](#native-harness)). Admitting outside (non-bundled) drivers in
+that harness-endpoint shape is a design accepted on 2026-10-26, not yet
+built, in [Outside provider drivers](design/outside-provider-drivers.md).
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
