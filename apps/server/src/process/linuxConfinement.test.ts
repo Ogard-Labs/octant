@@ -134,6 +134,76 @@ describe("Linux Full access extension denials", () => {
       ),
     ).toThrow(/could not be overlaid/);
   });
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "hides a linked file or folder at its target and still starts the command",
+    () => {
+      const { root, boundRoot } = fixture();
+      const shared = join(root, "shared");
+      mkdirSync(join(shared, "skills"), { recursive: true });
+      mkdirSync(join(shared, "agents"));
+      writeFileSync(join(shared, "mcp.json"), "hidden");
+      writeFileSync(join(shared, "settings.json"), "hidden");
+      writeFileSync(join(shared, "skills", "SKILL.md"), "hidden");
+      writeFileSync(join(shared, "agents", "SKILL.md"), "hidden");
+      // Absolute links refused the whole launch with "Can't mount tmpfs on
+      // /newroot/..." before the command started; relative ones are covered
+      // the same way so both forms behave alike.
+      symlinkSync(join(shared, "mcp.json"), join(boundRoot, ".mcp.json"));
+      symlinkSync(join(shared, "skills"), join(boundRoot, "skills"));
+      symlinkSync("../shared/settings.json", join(boundRoot, "settings.json"));
+      symlinkSync("../shared/agents", join(boundRoot, ".agents"));
+      const denied = [".mcp.json", "skills", "settings.json", ".agents"].map((name) =>
+        join(boundRoot, name),
+      );
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          'for path in "$@"; do cat "$path" "$path/SKILL.md"; done; echo end',
+          "sh",
+          ...denied,
+        ],
+        cwd: boundRoot,
+        denyPaths: denied,
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      // The command's own refusals stay on stderr; only Bubblewrap's would
+      // mean the launch never started.
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "keeps a denied link to a missing file from being written through",
+    () => {
+      const { root, boundRoot } = fixture();
+      const shared = join(root, "shared");
+      mkdirSync(shared);
+      const absolute = join(boundRoot, ".mcp.json");
+      const relative = join(boundRoot, "settings.json");
+      symlinkSync(join(shared, "mcp.json"), absolute);
+      symlinkSync("../shared/settings.json", relative);
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          'for path in "$@"; do { echo planted > "$path"; } && echo written; done; echo end',
+          "sh",
+          absolute,
+          relative,
+        ],
+        cwd: boundRoot,
+        denyPaths: [absolute, relative],
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
 });
 
 describe("Linux Bubblewrap confinement", () => {

@@ -84,6 +84,13 @@ export function buildLinuxAllowDefaultDenyLaunch(
     "/",
     "/",
   ];
+  // Every host path keeps its own name under the host-root bind, so a linked
+  // deny path is covered at its target exactly as the restricted capsule does
+  // (see `denyTargetsInCapsule`): measured on bwrap 0.9.0, an absolute link
+  // at a mount point refused the whole launch with "Can't mount tmpfs on
+  // /newroot/...", and a dangling one, absolute or relative, did too.
+  const hostRoot = new Map<string, Mount>([["/", { kind: "bind", source: "/", target: "/" }]]);
+  const covered = new Set<string>();
   for (const path of input.denyPaths) {
     if (!isAbsolute(path)) {
       throw new ProcessConfinementError(
@@ -91,24 +98,30 @@ export function buildLinuxAllowDefaultDenyLaunch(
         `Linux Full access deny path "${path}" must be absolute.`,
       );
     }
-    const normalized = normalize(path);
     // The host root is bound writable here, so Bubblewrap would create a
     // missing mount point in the person's real folder and leave an empty
     // `.claude/skills` or `.agents` behind in their Project. A path that does
-    // not exist holds nothing for a runtime to load when it starts.
+    // not exist holds nothing for a runtime to load when it starts. A dangling
+    // link does exist: the capsule could write the file it names through it
+    // and load what it wrote, so its target is covered, and Bubblewrap leaves
+    // an empty folder there.
     if (!pathExists(path)) continue;
-    if (isDirectoryForDeny(path)) {
-      args.push("--tmpfs", normalized, "--remount-ro", normalized);
-      continue;
+    for (const target of denyTargetsInCapsule(normalize(path), hostRoot)) {
+      if (covered.has(target)) continue;
+      covered.add(target);
+      if (isDirectoryForDeny(target)) {
+        args.push("--tmpfs", target, "--remount-ro", target);
+        continue;
+      }
+      const source = createEmptySourceForPath(target);
+      if (source === undefined) {
+        throw new ProcessConfinementError(
+          "invalid-configuration",
+          `Linux Full access deny path "${path}" could not be overlaid.`,
+        );
+      }
+      args.push("--ro-bind", source, target);
     }
-    const source = createEmptySourceForPath(path);
-    if (source === undefined) {
-      throw new ProcessConfinementError(
-        "invalid-configuration",
-        `Linux Full access deny path "${path}" could not be overlaid.`,
-      );
-    }
-    args.push("--ro-bind", source, normalized);
   }
   args.push("--chdir", input.cwd, "--", input.executable, ...input.args);
   return { command: bwrapPath, args };
@@ -571,7 +584,7 @@ function namesInCapsule(
 ): ReadonlyArray<string> {
   return [...mounts.values()].flatMap((mount) => {
     if (mount.kind !== "bind" && mount.kind !== "ro-bind") return [];
-    if (hostPath !== mount.source && !hostPath.startsWith(`${mount.source}${sep}`)) return [];
+    if (!isSameOrInside(hostPath, mount.source)) return [];
     const target = join(mount.target, relative(mount.source, hostPath));
     // A deeper mount over the same place shows something else there.
     return mountExposing(target, mounts) === mount ? [target] : [];
@@ -638,7 +651,7 @@ function hostPathInCapsule(path: string, mounts: ReadonlyMap<string, Mount>): st
 function mountExposing(path: string, mounts: ReadonlyMap<string, Mount>): Mount | undefined {
   let deepest: Mount | undefined;
   for (const mount of mounts.values()) {
-    if (path !== mount.target && !path.startsWith(`${mount.target}${sep}`)) continue;
+    if (!isSameOrInside(path, mount.target)) continue;
     if (deepest === undefined || depth(mount.target) > depth(deepest.target)) deepest = mount;
   }
   return deepest;
@@ -737,6 +750,11 @@ function wrapLinuxLaunchWithSeccomp(
 function isSharedHostTemporaryRoot(path: string): boolean {
   const normalized = normalize(path);
   return normalized === "/tmp" || normalized === "/var/tmp";
+}
+
+/** The host-root bind's folder is `/`, which ends in the separator already. */
+function isSameOrInside(path: string, folder: string): boolean {
+  return path === folder || path.startsWith(folder.endsWith(sep) ? folder : `${folder}${sep}`);
 }
 
 function depth(path: string): number {

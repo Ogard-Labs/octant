@@ -6609,7 +6609,12 @@ mechanisms are:
   that denies only those paths (`makeAcpConfinementLive`). That wrapper
   confines nothing else. On Linux a deny path that does not exist is skipped,
   because Bubblewrap would create it in the person's own Project (see
-  [Extensions and skills](#extensions-and-skills)).
+  [Extensions and skills](#extensions-and-skills)). A linked deny path is
+  covered at its target, as in the restricted capsule above: measured on
+  bwrap 0.9.0, an absolute or dangling link at a mount point refused the
+  whole Full-access launch. A link to a missing file exists, and the runtime
+  could write that file through it, so its target is covered too, and
+  Bubblewrap leaves an empty folder there.
 
   | Runtime (module)                                                          | Plan                            | Approval-gated, auto-accept-edits                   | OS egress below Full access                      | Plan's read-only enforced by                                                                                                                                                                                                               |
   | ------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
