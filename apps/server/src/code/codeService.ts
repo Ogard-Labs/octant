@@ -1617,6 +1617,12 @@ export class CodeService {
             : { externalEditor: command.externalEditor }),
           requireGitRepository: command.requireGitRepository ?? current.requireGitRepository,
           defaultDiffLayout: command.defaultDiffLayout ?? current.defaultDiffLayout,
+          ...((command.bundledLanguageServer ?? current.bundledLanguageServer) === undefined
+            ? {}
+            : {
+                bundledLanguageServer:
+                  command.bundledLanguageServer ?? current.bundledLanguageServer,
+              }),
           version: command.expectedVersion + 1,
           updatedAt: decodeTimestamp(this.#clock()),
         });

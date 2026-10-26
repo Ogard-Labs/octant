@@ -135,6 +135,7 @@ interface Harness {
     threads: CodeThread[];
     checkout: CodeCheckoutIdentity;
     reach: boolean;
+    turnedOff: boolean;
   };
   open(
     path: string,
@@ -160,6 +161,7 @@ function harness(input: {
     threads: [] as CodeThread[],
     checkout: plainCheckout(),
     reach: true,
+    turnedOff: false,
   };
   state.threads = [state.thread];
   let launches = 0;
@@ -182,7 +184,8 @@ function harness(input: {
         rootIdentity: { device: "1", inode: "1" },
       }),
     },
-    components: () => [input.component],
+    components: () => (state.turnedOff ? [] : [input.component]),
+    turnedOffComponents: () => (state.turnedOff ? [input.component] : []),
     processes: {
       launch: (launch) => {
         launches += 1;
@@ -458,6 +461,28 @@ describe("Code language service authority", () => {
       reason: "unsupported-platform",
     });
     expect(other.test.launches()).toBe(0);
+  });
+
+  it("answers turned-off once the person turns the server off, and stops the one running", async () => {
+    const { test, paths } = fake();
+    const fileId = syncedFileId(await test.open("b.ts"));
+    expect(test.launches()).toBe(1);
+
+    test.state.turnedOff = true;
+    await test.service.sweep();
+    expect(await test.diagnostics(fileId)).toEqual({
+      status: "refused",
+      reason: "file-outside-thread",
+    });
+    expect(await test.open("b.ts")).toEqual({ status: "refused", reason: "turned-off" });
+    // A language no component declares is still not a switch the person holds.
+    writeFileSync(join(paths.checkout, "tool.py"), "print(1)\n");
+    expect(await test.open("tool.py")).toEqual({ status: "refused", reason: "no-language-server" });
+    expect(test.launches()).toBe(1);
+
+    test.state.turnedOff = false;
+    expect((await test.open("b.ts")).status).toBe("synced");
+    expect(test.launches()).toBe(2);
   });
 
   it("refuses a missing Bubblewrap as unavailable confinement and starts nothing", async () => {

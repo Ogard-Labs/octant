@@ -119,6 +119,12 @@ export interface CodeLanguageServiceOptions {
   readonly authority: CodeLanguageAuthority;
   /** The `language-server` components effective in Code right now. */
   readonly components: () => ReadonlyArray<CodeLanguageServerComponent>;
+  /**
+   * Components that would serve Code but that the person turned off in
+   * Settings › Code. They contribute nothing; a file only they would read is
+   * answered `turned-off` so the editor can say where the switch is.
+   */
+  readonly turnedOffComponents?: () => ReadonlyArray<CodeLanguageServerComponent>;
   readonly processes: {
     readonly launch: (input: LanguageServerLaunchInput) => Promise<LanguageServerLaunchOutcome>;
   };
@@ -202,6 +208,7 @@ type Served =
 export class CodeLanguageService {
   readonly #authority: CodeLanguageAuthority;
   readonly #components: () => ReadonlyArray<CodeLanguageServerComponent>;
+  readonly #turnedOffComponents: () => ReadonlyArray<CodeLanguageServerComponent>;
   readonly #processes: CodeLanguageServiceOptions["processes"];
   readonly #platform: LanguageServerHostPlatform;
   readonly #cacheRoot: string;
@@ -220,6 +227,7 @@ export class CodeLanguageService {
   constructor(options: CodeLanguageServiceOptions) {
     this.#authority = options.authority;
     this.#components = options.components;
+    this.#turnedOffComponents = options.turnedOffComponents ?? (() => []);
     this.#processes = options.processes;
     this.#platform = options.platform;
     this.#cacheRoot = options.cacheRoot;
@@ -529,7 +537,12 @@ export class CodeLanguageService {
       languageId === undefined
         ? undefined
         : this.#components().find((candidate) => candidate.languages.includes(languageId));
-    if (component === undefined) return { status: "refused", reason: "no-language-server" };
+    if (component === undefined) {
+      const turnedOff =
+        languageId !== undefined &&
+        this.#turnedOffComponents().some((candidate) => candidate.languages.includes(languageId));
+      return { status: "refused", reason: turnedOff ? "turned-off" : "no-language-server" };
+    }
     const decision = decideLanguageServerLaunch({
       launchClass: component.launchClass,
       posture: authorized.thread.executionPolicy,
