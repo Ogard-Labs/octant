@@ -601,7 +601,10 @@ address (Allow input never covers it), and evidence keeps only the origin. **Rot
 and landscape for a person who asked; it is an effect confirmed on its own
 (Allow input never covers it). Pane states, discovery, capture, input
 delivery, keyboard layouts, and the managed streaming tools are specified in
-[Device workbench](design/device-workbench.md).
+[Device workbench](design/device-workbench.md). Physical Apple devices,
+their person-confirmed leases and signing custody, and person-confirmed upload
+to App Store Connect are the approved, unimplemented design in
+[Apple physical devices and distribution](design/apple-devices.md).
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
