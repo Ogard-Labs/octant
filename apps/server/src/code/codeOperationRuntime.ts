@@ -67,6 +67,7 @@ import type {
   ProviderDriver,
   ProviderSessionResume,
 } from "@octant/provider-sdk/driver";
+import { acquireProviderConnection } from "@octant/provider-sdk/process-placement";
 import type { Journal } from "../persistence/journal";
 import { GhPullRequestPort, createGhCommandPort, type GhDeliveryTarget } from "./ghPullRequestPort";
 import { GitMutationPort } from "./gitMutationPort";
@@ -3792,7 +3793,7 @@ class RuntimeTurnController implements CodeOperationTurnPort {
                   category: "unauthorized",
                   message: "Provider authority mismatch.",
                 });
-              return active.driver.acquire(acquireInput).pipe(
+              return acquireProviderConnection(active.driver, acquireInput).pipe(
                 Effect.tap((connection) =>
                   Effect.sync(() => {
                     active.connection = connection;

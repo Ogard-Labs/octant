@@ -47,6 +47,7 @@ import {
   type SshAdmissionSubject,
   type SshTargetConnection,
 } from "@octant/domain/ssh-target-admission-policy";
+import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { childProcessEnvironment } from "../childProcessEnvironment";
 import type { ToolEgressProxyEndpoint } from "../harness/nativeHarnessEgressProxy";
 import { ExecutorChannel, type ExecutorRequestOptions } from "./executorChannel";
@@ -242,6 +243,34 @@ export class SshTargetConnectionService {
       posture: request.posture,
       permissionPersistence: request.permissionPersistence,
       subject: request.subject,
+    });
+  }
+
+  /**
+   * Whether a driver's runtime may be placed on the target in this posture
+   * now. Its declaration is all this host reads of the driver: one without
+   * it, or without this posture, or whose app tools would listen on the
+   * target's loopback, is refused `runtime-not-attestable` before anything
+   * about the connection is asked.
+   */
+  admitProviderRuntime(
+    targetId: SshTargetId,
+    driver: Pick<ProviderDriver, "remotePlacement">,
+    admission: Omit<SshTargetAdmissionRequest, "subject">,
+  ): SshAdmissionDecision {
+    const support = driver.remotePlacement;
+    return this.admit(targetId, {
+      ...admission,
+      subject: {
+        kind: "provider-runtime",
+        // On a target the executor's port wraps every placed launch, so the
+        // runtime is Octant-wrapped exactly in the postures its driver
+        // declares; the others are where it rests on its own sandbox.
+        octantWrapsInPosture:
+          support?.postures.some((posture) => posture === admission.posture) === true,
+        remotePlacement: support === undefined ? "undeclared" : "declared",
+        appToolTransportListensOnLoopback: support?.appToolTransport === "loopback-listener",
+      },
     });
   }
 
