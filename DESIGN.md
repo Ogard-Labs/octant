@@ -1479,25 +1479,32 @@ with the current selection in the row and the searchable catalog in a bounded
 popup. Unconfigured defaults say Choose model.
 
 Operational settings use progressive disclosure. Provider and skill lists lead
-with compact readiness counts. A provider is a row card on the Settings kit:
-a 48px rounded logo tile (the licensed bundled mark, or a monogram when there is
-none, never an approximation of a brand mark), the name in the row-label role,
-the maker and runtime in meta ink, a state line, and the details chevron and
-enable switch at the trailing edge. On Providers & Models, cards sit two to a
-row, one to a row under 900px, and a card whose details are open takes the
-whole row. The state line
+with compact readiness counts. On Providers & Models each provider group is
+one aligned list on the Settings grouped-row surface, one row per provider,
+rows divided by the surface's inset hairline and never filled. A row holds a
+20px provider mark with no tile (the licensed bundled mark, or a monogram when
+there is none, never an approximation of a brand mark), the name in the
+row-label role, one status line in secondary ink (state, model count, maker
+and runtime), and the details chevron and enable switch at the trailing edge.
+The chevron is the row's disclosure (`aria-expanded`): the details expand in
+place inside the row, under a hairline, and keep every control and fact. The
+page opens at most one row by itself, the first that needs attention (a
+sign-in, or a binary the scan found for a broken runtime), and none when no
+provider does. A card per provider, two to a row, made the boxes the loudest
+thing on the page, and one open card among nine shut ones ran to about eight
+screens. The state line
 reads from a dot that carries the state without colour: a filled ink dot is
 ready, a ring in ink needs setup or a sign-in, a muted ring is off or not
 checked, and a failure keeps its red role. Only under Vivid does ready turn the
 palette's green and setup the palette's orange. The detected, supported-but-not-
 detected, and other groups are Settings sections; the readiness summary is the
 label's description. Ordering controls appear only in an explicit Reorder mode.
-A runtime installed in an unusual location is fixed from its own card rather
-than a manual form: the card's details carry an outlined "Locate binary…"
+A runtime installed in an unusual location is fixed from its own row rather
+than a manual form: the row's details carry an outlined "Locate binary…"
 action beside Check connection, shown only where the desktop's file picker
 exists and only for a runtime whose version probe the host can run. Its
 answer is one quiet line under the actions (the version the host read), or a
-warning box saying why the host refused the file. A card whose saved binary is
+warning box saying why the host refused the file. A row whose saved binary is
 missing or incompatible, while the latest scan found that runtime elsewhere,
 adds a second outlined action, "Use the one found at ~/.local/bin/claude
 (2.1.306)", that gives the same answer without the picker; see
@@ -2153,7 +2160,7 @@ When adding or touching UI:
 Background refresh preserves already loaded controls and active drafts. Use the
 initial loading view only before a surface has data. Provider and theme feedback
 occupy bounded, scrollable status slots; a changed status must not push the form
-below it. A provider card's state line keeps its own grid area and shows Checking during probes.
+below it. A provider row's status line keeps its place under the name and shows Checking during probes.
 Last observed model facts are presentation only and never authorize selection
 or execution. Saved Chat/Code revisions reconcile untouched fields without
 remounting the form. Keep deliberate section expansion, text growth, and manual
