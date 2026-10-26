@@ -7,9 +7,9 @@ import { CanvasView } from "./CanvasView";
 import { canvasFixture, unsafeLinkFixture } from "./test-fixtures";
 
 describe("CanvasView safe first-party renderer", () => {
-  it("renders the validated title and its first-party blocks", () => {
+  it("renders the validated title and its first-party blocks", async () => {
     render(<CanvasView input={canvasFixture} />);
-    expect(screen.getByRole("heading", { name: "Signed Q3 report" })).toBeVisible();
+    expect(await screen.findByRole("heading", { name: "Signed Q3 report" })).toBeVisible();
     expect(screen.getByRole("heading", { name: "Q3 Overview" })).toBeVisible();
   });
 

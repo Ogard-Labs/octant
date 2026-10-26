@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import { CanvasDocument, type CanvasDocumentComments } from "./CanvasDocument";
+import { lazy, Suspense, useMemo } from "react";
+import type { CanvasDocumentComments } from "./CanvasDocument";
 import type { CanvasActionRuntime } from "./canvasActionRuntime";
 import type { DiagramBoardLayoutRuntime } from "./blocks/DiagramBoard";
 import type { PlanTaskRuntime } from "./blocks/PlanBlock";
@@ -7,6 +7,10 @@ import type { DesignAssetRuntime } from "./blocks/designDocument";
 import type { DesignRunRuntime } from "./blocks/designRunningFrame";
 import { decodeCanvasForRender } from "./canvasRuntime";
 import { OctantAlert } from "../ui/base/OctantAlert";
+
+const CanvasDocument = lazy(() =>
+  import("./CanvasDocument").then((module) => ({ default: module.CanvasDocument })),
+);
 
 export interface CanvasViewProps {
   readonly input: unknown;
@@ -47,15 +51,23 @@ export function CanvasView({
     );
   }
   return (
-    <CanvasDocument
-      definition={gate.definition}
-      {...(actionRuntime === undefined ? {} : { actionRuntime })}
-      {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
-      {...(planRuntime === undefined ? {} : { planRuntime })}
-      {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
-      {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
-      {...(comments === undefined ? {} : { comments })}
-      {...(placement === undefined ? {} : { placement })}
-    />
+    <Suspense
+      fallback={
+        <p className="canvas-view__loading" role="status">
+          Opening canvas…
+        </p>
+      }
+    >
+      <CanvasDocument
+        definition={gate.definition}
+        {...(actionRuntime === undefined ? {} : { actionRuntime })}
+        {...(layoutRuntime === undefined ? {} : { layoutRuntime })}
+        {...(planRuntime === undefined ? {} : { planRuntime })}
+        {...(designAssetRuntime === undefined ? {} : { designAssetRuntime })}
+        {...(designRunRuntime === undefined ? {} : { designRunRuntime })}
+        {...(comments === undefined ? {} : { comments })}
+        {...(placement === undefined ? {} : { placement })}
+      />
+    </Suspense>
   );
 }
