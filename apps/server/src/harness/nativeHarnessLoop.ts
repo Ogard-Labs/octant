@@ -69,17 +69,32 @@ const NOT_RUN_RESULT_JSON = JSON.stringify({
   note: "This call was not run: the turn stopped after repeated malformed tool calls.",
 });
 const OMITTED_HISTORY_NOTE =
-  "Earlier messages of this session were left out to fit the context window. Your task list and the files on disk still reflect that work.";
+  "Earlier messages of this session were left out to fit the context window.";
+
+/**
+ * What still carries the work a summary or a cut took out of view. A Chat
+ * session has no folder, so its lead is pointed at its task list only:
+ * naming files on disk would send it after something it cannot reach.
+ */
+function workStillReflected(mode: OctantMode | undefined): string {
+  return mode === "chat" || mode === undefined
+    ? "Your task list still reflects that work."
+    : "Your task list and the files on disk still reflect that work.";
+}
 
 /**
  * The note in front of a cut. It names message numbers only when the lead is
  * offered `journal-lookup` and every number it names is already journaled, so
  * the model is never handed a handle it cannot fetch.
  */
-function omittedHistoryNote(journaledBefore: number | undefined): string {
+function omittedHistoryNote(
+  mode: OctantMode | undefined,
+  journaledBefore: number | undefined,
+): string {
+  const note = `${OMITTED_HISTORY_NOTE} ${workStillReflected(mode)}`;
   return journaledBefore === undefined || journaledBefore < 1
-    ? OMITTED_HISTORY_NOTE
-    : `${OMITTED_HISTORY_NOTE} Messages 0 to ${journaledBefore - 1} are kept in the journal: call journal-lookup with one of those numbers as from to re-read them.`;
+    ? note
+    : `${note} Messages 0 to ${journaledBefore - 1} are kept in the journal: call journal-lookup with one of those numbers as from to re-read them.`;
 }
 
 /**
@@ -494,7 +509,7 @@ export function createNativeHarnessConnection(
         const refit = fitRequest(
           state.fallback.endpoint,
           { ...request, modelId: state.fallback.target.modelId },
-          { journalNumberOf: journalNumberIn(state) },
+          { journalNumberOf: journalNumberIn(state), mode: options.mode },
         );
         if (refit === undefined) {
           throw failure(
@@ -535,6 +550,7 @@ export function createNativeHarnessConnection(
               : fitRequest(state.fallback?.endpoint ?? state.endpoint, current, {
                   reduceOnce: true,
                   journalNumberOf: journalNumberIn(state),
+                  mode: options.mode,
                 });
             if (refit !== undefined) {
               state.pricingBoundariesKnown = false;
@@ -571,7 +587,7 @@ export function createNativeHarnessConnection(
           const moved = fitRequest(
             outcome.endpoint,
             { ...current, modelId: outcome.target.modelId },
-            { journalNumberOf: journalNumberIn(state) },
+            { journalNumberOf: journalNumberIn(state), mode: options.mode },
           );
           if (moved === undefined) {
             outcome.endpoint.release();
@@ -1041,7 +1057,7 @@ export function createNativeHarnessConnection(
           history,
           tools: sortToolDefinitionsByName(state.tools),
         },
-        { journalNumberOf: journalNumberIn(state) },
+        { journalNumberOf: journalNumberIn(state), mode: options.mode },
       );
 
     return {
@@ -1423,15 +1439,9 @@ function compactionSummaryMessage(
     compaction.turns === 1
       ? "The first turn of this session was summarized and is"
       : `The first ${compaction.turns} turns of this session were summarized and are`;
-  // A Chat lead has no folder, so pointing it at files on disk would send it
-  // looking for something it cannot reach; the cut note says the same.
-  const reflected =
-    mode === "chat"
-      ? "Your task list still reflects that work."
-      : "Your task list and the files on disk still reflect that work.";
   return {
     role: "user",
-    text: `${replaced} no longer shown in full. ${reflected} Summary:\n\n${compaction.summary}`,
+    text: `${replaced} no longer shown in full. ${workStillReflected(mode)} Summary:\n\n${compaction.summary}`,
   };
 }
 
@@ -1586,6 +1596,8 @@ export function fitRequest(
   options?: {
     readonly reduceOnce?: boolean | undefined;
     readonly journalNumberOf?: ((message: NativeHarnessMessage) => number | undefined) | undefined;
+    /** The session's mode; absent, the note points at no folder. */
+    readonly mode?: OctantMode | undefined;
   },
 ): NativeHarnessRequest | undefined {
   if (options?.reduceOnce !== true && endpoint.fits(request)) return request;
@@ -1617,6 +1629,7 @@ export function fitRequest(
     start = next;
     const kept = history[start];
     const note = omittedHistoryNote(
+      options?.mode,
       lookupOffered && kept !== undefined ? options?.journalNumberOf?.(kept) : undefined,
     );
     // Cutting only an earlier note and putting the same note back changes nothing.

@@ -4263,8 +4263,8 @@ the model at another size.
   model's view with only the note in its place, while a summary keeps the
   task, decisions and open work in view at the cost of one tool-less
   request, so a long session survives an overflow more often than a
-  single ladder step lets it. When the ladder still cuts exchanges, the note tells the lead that its task list and the
-  files on disk still reflect that work, and the journal keeps the full
+  single ladder step lets it. When the ladder still cuts exchanges, the note tells the lead that its task list and, in
+  Work and Code, the files on disk still reflect that work, and the journal keeps the full
   conversation for people, replay, and export. A lead in any mode can also
   read a cut exchange back: it is offered `journal-lookup`, a read-only
   harness read of its own `native-harness-transcript`. The note then names the journal

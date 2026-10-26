@@ -2512,6 +2512,9 @@ describe("compacting an Octant Harness session", () => {
         expect(thirdTurnSteps).toHaveLength(3);
         for (const step of thirdTurnSteps) {
           expect(step.history[0]?.text).toContain("left out to fit");
+          // A Chat lead has no folder, so the cut does not point it at one.
+          if (mode === "chat") expect(step.history[0]?.text).not.toContain("files on disk");
+          else expect(step.history[0]?.text).toContain("files on disk");
         }
       },
     );
