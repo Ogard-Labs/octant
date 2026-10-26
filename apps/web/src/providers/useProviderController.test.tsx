@@ -1467,6 +1467,87 @@ describe("useProviderController", () => {
     },
   );
 
+  it.each([
+    { label: "GLM Agent", driverKind: "glm" as const },
+    { label: "Gemini CLI", driverKind: "gemini" as const },
+    { label: "Cline", driverKind: "cline" as const },
+    { label: "Qwen Code", driverKind: "qwen" as const },
+  ])(
+    "removes the $label key it stored when the switch to API-key authentication is refused",
+    async ({ driverKind }) => {
+      const calls: string[] = [];
+      const binaryPath = `/Users/example/.local/bin/${driverKind}`;
+      const kind = `${driverKind}-acp` as const;
+      const api = client(
+        snapshot([
+          dualAuthCliProvider({
+            driverKind,
+            displayName: "Agent local",
+            configuration: { kind, binaryPath, authentication: "provider-owned" },
+          }),
+        ]),
+      );
+      vi.mocked(api.execute).mockImplementation(async () => {
+        calls.push("provider.update");
+        throw new Error("private registry diagnostic");
+      });
+      const host = credentialHost(calls);
+      const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+      await waitFor(() => expect(result.current.status).toBe("ready"));
+
+      await act(async () => {
+        await expect(
+          result.current.changeAcpAgentConfiguration(
+            id,
+            { kind, binaryPath, authentication: "api-key" },
+            transientCredential("private-value", calls),
+          ),
+        ).resolves.toBe(false);
+      });
+
+      expect(calls).toEqual([
+        "credential.set",
+        "provider.update",
+        "credential.clear",
+        "field.clear",
+      ]);
+      expect(result.current.instances[0]?.configuration).toMatchObject({
+        authentication: "provider-owned",
+      });
+    },
+  );
+
+  it("leaves an fx configuration unchanged when its new key cannot be stored", async () => {
+    const configuration = {
+      kind: "fx-acp",
+      binaryPath: "/Users/example/.local/bin/fx",
+      authentication: "api-key",
+    } as const;
+    const api = client(
+      snapshot([dualAuthCliProvider({ driverKind: "fx", displayName: "fx local", configuration })]),
+    );
+    const host = credentialHost();
+    vi.mocked(host.addProviderApiKey).mockRejectedValue(new Error("store locked"));
+    const { result } = renderHook(() => useProviderController({ client: api, hostBridge: host }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.changeAcpAgentConfiguration(
+          id,
+          { ...configuration, binaryPath: "/opt/homebrew/bin/fx" },
+          transientCredential("private-value"),
+        ),
+      ).resolves.toBe(false);
+    });
+
+    expect(api.execute).not.toHaveBeenCalled();
+    expect(host.clearProviderCredential).not.toHaveBeenCalled();
+    expect(result.current.message).toBe(
+      "The provider credential could not be stored, so the configuration was unchanged.",
+    );
+  });
+
   it("creates Claude API-key configuration before write-only credential storage", async () => {
     const calls: string[] = [];
     const api = client();
@@ -3373,7 +3454,7 @@ function kiloProvider(patch: Partial<ProviderInstance> = {}): AcpAgentProviderIn
 
 function dualAuthCliProvider(input: {
   readonly id?: ProviderInstance["id"];
-  readonly driverKind: "glm" | "gemini" | "cline" | "qwen";
+  readonly driverKind: "glm" | "gemini" | "cline" | "qwen" | "fx";
   readonly displayName: string;
   readonly configuration: AcpAgentConfiguration;
 }): ProviderInstance {
