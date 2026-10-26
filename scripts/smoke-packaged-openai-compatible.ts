@@ -118,6 +118,8 @@ export function compatibleProviderCommands(
   ] as const;
 }
 
+// The endpoint runs on the host's harness, which refuses a session that names
+// no product mode, so each smoke turn is a Chat turn.
 export function compatibleSmokeTurnRequests(modelId: string, uuid: () => string = randomUUID) {
   return (["responses", "chat-completions"] as const).flatMap((protocol) => [
     {
@@ -125,6 +127,7 @@ export function compatibleSmokeTurnRequests(modelId: string, uuid: () => string 
       action: "complete" as const,
       sessionId: uuid(),
       modelId,
+      mode: "chat" as const,
       prompt: "Reply in at least four short streamed chunks and include exactly: octant-smoke",
     },
     {
@@ -132,6 +135,7 @@ export function compatibleSmokeTurnRequests(modelId: string, uuid: () => string 
       action: "cancel-after-output" as const,
       sessionId: uuid(),
       modelId,
+      mode: "chat" as const,
       prompt: "Produce a detailed streamed response with at least 2000 words.",
     },
   ]);

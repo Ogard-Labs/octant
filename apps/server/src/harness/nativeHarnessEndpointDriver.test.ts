@@ -223,6 +223,79 @@ describe("native harness endpoint port", () => {
     expect(requests).toHaveLength(2);
   });
 
+  it("keeps what a port endpoint's requests teach about its model's window and the model it served", async () => {
+    const { driver } = portDriver([
+      {
+        category: "provider-failed",
+        message:
+          "This model's maximum context length is 2048 tokens. However, your messages resulted in 3100 tokens.",
+      },
+      {
+        text: "Fits now.",
+        toolCalls: [],
+        usage: { inputTokens: 2_000, outputTokens: 500 },
+        servedModelId: "served-model-2026-10-01",
+      },
+    ]);
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState({
+      instanceId,
+      readiness: "ready",
+      processState: "stopped",
+      models: [
+        {
+          id: modelId,
+          displayName: "Port model",
+          source: "manual",
+          verification: "unverified",
+          reasoning: "unavailable",
+          inputModalities: ["text"],
+          options: [],
+        },
+      ],
+      capabilities: honestDirectEndpointCapabilities,
+      observedAt: "2026-10-26T09:00:00.000Z",
+    });
+    const remembered: unknown[] = [];
+    const endpoints = new NativeHarnessEndpointRegistry();
+    runOnNativeHarness(driver, {
+      ...host(new MemoryNativeHarnessTranscriptStore(), endpoints, runtimeRegistry),
+      harness: {
+        endpoints,
+        retry: { sleep: async () => undefined, random: () => 0.5 },
+        contextWindows: { remember: (...lesson) => remembered.push(lesson) },
+      },
+    });
+    const session = await endpoints.get(instanceId)?.open(modelId);
+    const request: HarnessEndpointRequest = {
+      sessionId,
+      modelId,
+      system: undefined,
+      history: [{ role: "user", text: "go" }],
+      tools: [],
+    };
+    const stream = { signal: new AbortController().signal, onEvent: () => undefined };
+
+    await expect(session?.send(request, stream)).rejects.toMatchObject({
+      category: "provider-failed",
+    });
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]?.learnedContextWindow).toBe(2_048);
+
+    await session?.send(request, stream);
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject({
+      learnedContextWindow: 2_500,
+      servedModelId: "served-model-2026-10-01",
+    });
+    expect(remembered).toEqual([
+      [instanceId, modelId, { learnedContextWindow: 2_048 }],
+      [
+        instanceId,
+        modelId,
+        { servedModelId: "served-model-2026-10-01", learnedContextWindow: 2_500 },
+      ],
+    ]);
+  });
+
   it("refuses a connection without a product mode", async () => {
     const composed = runOnNativeHarness(
       portDriver([]).driver,

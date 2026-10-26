@@ -22,7 +22,8 @@ import type { ProviderConnection, ProviderSessionCompaction } from "@octant/prov
 import { estimateTurnCostUsd } from "@octant/domain/turn-metrics-display";
 import { renderProviderTurnPrompt } from "@octant/provider-sdk/chat-conformance";
 import { Effect, PubSub, Stream, type Scope } from "effect";
-import { isContextOverflowFailure, isEndpointRetriesExhausted } from "../providers/endpointRetry";
+import { isContextOverflowFailure } from "../providers/contextOverflowRefusal";
+import { isEndpointRetriesExhausted } from "../providers/endpointRetry";
 import type { ObservedRateLimitBucket } from "../providers/rateLimitHeaders";
 import { nativeHarnessToolGuide } from "./nativeHarnessInstructions";
 import type {

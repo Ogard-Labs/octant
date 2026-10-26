@@ -49,6 +49,7 @@ import {
   startOctantServer,
 } from "./server";
 import { ProviderRuntimeRegistry } from "./providers/providerRuntimeRegistry";
+import { NativeHarnessEndpointRegistry } from "./harness/nativeHarnessEndpointRegistry";
 import type { ClaudeAgentSdkPort } from "./providers/claudeAgentSdkPort";
 import type { ClaudeProcessPort } from "./providers/claudeProcess";
 import type { AcpProcessPort } from "./providers/acpProcess";
@@ -320,7 +321,7 @@ describe("startOctantServer", () => {
     expect(pathIsProjectConfined(canonicalRoot, join(canonicalRoot, "future.txt"))).toBe(true);
   });
 
-  it("dispatches HTTP providers without starting an OpenCode process", () => {
+  it("dispatches HTTP providers onto the host's harness without starting an OpenCode process", () => {
     const instance = decodeProviderInstance({
       id: "80000000-0000-4000-8000-000000000401",
       displayName: "Private gateway",
@@ -340,6 +341,7 @@ describe("startOctantServer", () => {
     });
 
     const fetch = vi.fn(async () => Response.json({ data: [] }));
+    const endpoints = new NativeHarnessEndpointRegistry();
     const driver = makeConfiguredProviderDriver(instance, {
       openCodeProcess: { start: () => Effect.die("must not start OpenCode") },
       codexProcess: { start: () => Effect.die("must not start Codex") },
@@ -347,8 +349,13 @@ describe("startOctantServer", () => {
       permissionPersistence: () => "current-session",
       credentialResolver: { has: async () => true, resolve: async () => "private-key" },
       fetch,
+      nativeHarness: { endpoints },
     });
     expect(driver.kind).toBe("openai-compatible");
+    // A Chat or Work follow-up continues the journaled harness session, and
+    // another instance's lead can fall back onto this endpoint.
+    expect(driver.conversationOwnership).toBe("host-resumable");
+    expect(endpoints.get(instance.id)).toBeDefined();
     expect(fetch).not.toHaveBeenCalled();
   });
 

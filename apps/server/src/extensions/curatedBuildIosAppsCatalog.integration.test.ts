@@ -28,6 +28,7 @@ import {
   type CapabilityActiveScope,
   type CapabilityCatalogEntry,
 } from "../context/capabilityCatalog";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeOpenAiCompatibleDriver } from "../providers/openAiCompatibleDriver";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { CodexPluginPackageResolver } from "./codexPluginResolver";
@@ -372,15 +373,23 @@ describe("curated Build iOS Apps through the provider-neutral extension path", (
       protocol: "chat-completions",
       manualModelIds: [modelId],
     };
-    const driver = makeOpenAiCompatibleDriver({
-      instanceId: providerInstanceId,
-      configuration,
-      runtimeRegistry,
-      credentialResolver: { has: async () => true, resolve: async () => "private-key" },
-      fetch,
-      clock: () => "2026-07-30T00:00:00.000Z",
-      correlationId: () => "91000000-0000-4000-8000-000000000103",
-    });
+    const driver = runOnNativeHarness(
+      makeOpenAiCompatibleDriver({
+        instanceId: providerInstanceId,
+        configuration,
+        runtimeRegistry,
+        credentialResolver: { has: async () => true, resolve: async () => "private-key" },
+        fetch,
+        clock: () => "2026-07-30T00:00:00.000Z",
+      }),
+      {
+        instanceId: providerInstanceId,
+        runtimeRegistry,
+        conversationOwnership: "host-resumable",
+        clock: () => "2026-07-30T00:00:00.000Z",
+        correlationId: () => "91000000-0000-4000-8000-000000000103",
+      },
+    );
     const observed = await Effect.runPromise(
       Effect.scoped(driver.probe({ instanceId: providerInstanceId })),
     );
@@ -395,6 +404,7 @@ describe("curated Build iOS Apps through the provider-neutral extension path", (
           const connection = yield* driver.acquire({
             instanceId: providerInstanceId,
             projectRoot: "/tmp/octant-generic-provider",
+            mode: "chat",
           });
           yield* connection.start({
             sessionId: providerSessionId,

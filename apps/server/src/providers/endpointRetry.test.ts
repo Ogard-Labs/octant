@@ -2,12 +2,14 @@ import type { ProviderFailure } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import type { NativeHarnessResponse } from "../harness/nativeHarnessTransport";
 import {
-  DEFAULT_ENDPOINT_RETRY_POLICY,
   contextOverflowFromBody,
   contextWindowFromRefusal,
+  isContextOverflowFailure,
+} from "./contextOverflowRefusal";
+import {
+  DEFAULT_ENDPOINT_RETRY_POLICY,
   endpointRetryDelayMs,
   endpointRetryReason,
-  isContextOverflowFailure,
   isEndpointRetriesExhausted,
   sendWithEndpointRetry,
 } from "./endpointRetry";

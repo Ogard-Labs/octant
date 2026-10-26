@@ -12,6 +12,7 @@ import {
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeAnthropicCompatibleDriver } from "./anthropicCompatibleDriver";
 import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import { capabilityEchoToolDefinition } from "./openAiToolEncoding";
@@ -43,25 +44,26 @@ describe("native harness prompt cache across a tool turn", () => {
       const model = required("OCTANT_OPENAI_COMPATIBLE_MODEL") as ProviderModelId;
       const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000701");
       const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000702");
-      const driver = makeOpenAiCompatibleDriver({
-        instanceId,
-        configuration: {
-          kind: "openai-compatible-http",
-          baseUrl,
-          authentication: "bearer",
-          protocol: "responses",
-          manualModelIds: [model],
+      const runtimeRegistry = new ProviderRuntimeRegistry();
+      const driver = runOnNativeHarness(
+        makeOpenAiCompatibleDriver({
+          instanceId,
+          configuration: {
+            kind: "openai-compatible-http",
+            baseUrl,
+            authentication: "bearer",
+            protocol: "responses",
+            manualModelIds: [model],
+          },
+          runtimeRegistry,
+          credentialResolver: { has: async () => true, resolve: async () => apiKey },
+        }),
+        {
+          instanceId,
+          runtimeRegistry,
         },
-        runtimeRegistry: new ProviderRuntimeRegistry(),
-        credentialResolver: { has: async () => true, resolve: async () => apiKey },
-      });
-      // The OpenAI-compatible driver gates tools on a verified model; a real
-      // verification turn flips that before the cache turn is admitted.
-      if (driver.verifyToolCapability !== undefined) {
-        await Effect.runPromise(
-          Effect.scoped(driver.verifyToolCapability({ instanceId, modelId: model })),
-        );
-      }
+      );
+      await verifyTools(driver, runtimeRegistry, instanceId, model);
       const events = await runThreeStepToolTurn({ driver, instanceId, sessionId, modelId: model });
       assertCacheWarm(events);
     },
@@ -75,24 +77,57 @@ describe("native harness prompt cache across a tool turn", () => {
       const model = required("OCTANT_ANTHROPIC_COMPATIBLE_MODEL") as ProviderModelId;
       const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000703");
       const sessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000704");
-      const driver = makeAnthropicCompatibleDriver({
-        instanceId,
-        configuration: {
-          kind: "anthropic-compatible-http",
-          baseUrl,
-          authentication: "api-key",
-          protocol: "messages",
-          protocolVersion: "2023-06-01",
-          manualModelIds: [model],
+      const runtimeRegistry = new ProviderRuntimeRegistry();
+      const driver = runOnNativeHarness(
+        makeAnthropicCompatibleDriver({
+          instanceId,
+          configuration: {
+            kind: "anthropic-compatible-http",
+            baseUrl,
+            authentication: "api-key",
+            protocol: "messages",
+            protocolVersion: "2023-06-01",
+            manualModelIds: [model],
+          },
+          runtimeRegistry,
+          credentialResolver: { has: async () => true, resolve: async () => apiKey },
+        }),
+        {
+          instanceId,
+          runtimeRegistry,
         },
-        runtimeRegistry: new ProviderRuntimeRegistry(),
-        credentialResolver: { has: async () => true, resolve: async () => apiKey },
-      });
+      );
+      await verifyTools(driver, runtimeRegistry, instanceId, model);
       const events = await runThreeStepToolTurn({ driver, instanceId, sessionId, modelId: model });
       assertCacheWarm(events);
     },
   );
 });
+
+/**
+ * Runs a person's Verify tools on the model and records the result as the
+ * provider service does: the host offers tools, the echo included, only to a
+ * verified model.
+ */
+async function verifyTools(
+  driver: ProviderDriver,
+  runtimeRegistry: ProviderRuntimeRegistry,
+  instanceId: ProviderInstanceId,
+  modelId: ProviderModelId,
+): Promise<void> {
+  await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+  const verification =
+    driver.verifyToolCapability === undefined
+      ? undefined
+      : await Effect.runPromise(
+          Effect.scoped(driver.verifyToolCapability({ instanceId, modelId })),
+        );
+  const observed = runtimeRegistry.observedState(instanceId);
+  if (verification?.appManagedTools !== "supported" || observed === undefined) {
+    throw new Error("The model did not verify for app-managed tools.");
+  }
+  runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+}
 
 function required(name: string): string {
   const value = process.env[name];
@@ -121,6 +156,7 @@ async function runThreeStepToolTurn(input: {
           const connection = yield* input.driver.acquire({
             instanceId: input.instanceId,
             projectRoot,
+            mode: "chat",
           });
           yield* connection.start({
             sessionId: input.sessionId,
