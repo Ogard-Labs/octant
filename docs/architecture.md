@@ -3514,11 +3514,14 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   build requests from the summary and the turns after it, and a later
   compaction supersedes an earlier one. The model reads the summary behind a
   line saying how many of the session's first turns it stands for and that
-  they are no longer shown in full. Because the lead keeps its task list only
+  they are no longer shown in full, then that its task list and, in Work and
+  Code, the files on disk still reflect that work. A Chat session, which has
+  no folder, is told only of its task list and is not asked by its summary
+  request for files or changes. Because the lead keeps its task list only
   through `todo-write` calls, the summary carries the arguments of the latest
   successful `todo-write` in the summarized turns verbatim (or the list the
   earlier summary carried) instead of trusting the model to restate it. The
-  same compaction runs automatically mid-turn when a Code request would
+  same compaction runs automatically mid-turn when a request in any mode would
   otherwise lose whole exchanges (see the native harness loop). A fork copies the latest compaction
   its source had read by the turn it was forked at, including one made
   part-way through that turn, rewritten for the fork's folder and secrets like
@@ -4244,11 +4247,19 @@ the model at another size.
   (an Ollama vision model) is admitted such a turn. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
-  alone does not fit. On a Code connection, before any whole exchange is left
-  out, the loop first compacts: it summarizes the turns before the running
-  turn exactly as the connection's `compact` does (below), journals the
-  marker, emits `context-compacted` with `trigger: "automatic"`, and rebuilds
-  the request from the summary and the turns after it. It sends at most one
+  alone does not fit. On a Chat, Work, or Code connection, before any whole
+  exchange is left out, the loop first compacts: it summarizes the turns before
+  the running turn exactly as a Code connection's `compact` does (below),
+  journals the marker, emits `context-compacted` with `trigger: "automatic"`,
+  and rebuilds the request from the summary and the turns after it. Every
+  mode's session continues its journaled conversation, so every mode
+  summarizes the same way: on the session's own endpoint, provider and model,
+  with no tools, so a Chat summary request has no file, shell, or network
+  reach. A fresh Chat or Work session carries the host's planned history,
+  which the host already compacted when it dropped any, inside its first
+  message; that is the running turn and is never summarized, and a continued
+  session whose plan would leave conversation out is rebuilt fresh by the host
+  instead, so one overflow is never summarized by both. It sends at most one
   summary request per turn, so a summary that failed is not paid for again on
   every later step, and only on the lead's own model (a fallback model's window
   may differ), and never summarizes the running turn's own prompt or steps,
@@ -4256,8 +4267,8 @@ the model at another size.
   before the running turn, or the summary does not come back, the ladder
   continues as before. The summary's text and reasoning never reach the
   turn's events, but its streaming is forwarded as content-free `liveness`
-  (at most once every five seconds), because the Code turn runner interrupts
-  a turn that is silent for its inactivity window and a summary over a long
+  (at most once every five seconds), because the Chat, Work, and Code turn
+  runners interrupt a turn that is silent for its inactivity window and a summary over a long
   session can stream for longer. The summary request's usage joins the turn's total and
   cost (an endpoint retry of it leaves the turn's estimated cost unknown, as
   for any request), and the turn runner journals the compaction as an automatic receipt
@@ -4265,7 +4276,7 @@ the model at another size.
   first-class runtime's own. Rationale: a cut exchange is gone from the
   model's view with only the note in its place, while a summary keeps the
   task, decisions and open work in view at the cost of one tool-less
-  request, so a long Code session survives an overflow more often than a
+  request, so a long session survives an overflow more often than a
   single ladder step lets it. When the ladder still cuts exchanges, the note tells the lead that its task list (and,
   in Work and Code, the files on disk; a Chat thread has no folder) still
   reflects that work, and the journal keeps the full
@@ -4312,7 +4323,7 @@ the model at another size.
   being a lead, is not offered it. When the endpoint still rejects a request as too large,
   the loop recognises the refusal as a filled context window (OpenAI's
   `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
-  413 shape from an OpenAI-compatible host). A Code connection that has not
+  413 shape from an OpenAI-compatible host). A connection that has not
   yet tried to compact for that request, nor sent a summary request earlier in
   the turn, summarizes earlier turns as above
   and sends the rebuilt request; otherwise, or when that request is refused

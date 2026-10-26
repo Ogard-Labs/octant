@@ -131,13 +131,20 @@ function sendAndCollect(
 const isTerminal = (event: ProviderRuntimeEvent) =>
   event.kind === "completed" || event.kind === "failed" || event.kind === "interrupted";
 
-/** How the model is told that a compaction summary stands for the session's first turns. */
-const summaryLead = (turns: number) =>
+/**
+ * How the model is told that a compaction summary stands for the session's
+ * first turns. A Chat lead has no folder, so it is not pointed at one.
+ */
+const summaryLead = (turns: number, mode: "chat" | "work" | "code" = "code") =>
   `${
     turns === 1
       ? "The first turn of this session was summarized and is"
       : `The first ${turns} turns of this session were summarized and are`
-  } no longer shown in full; the files on disk still reflect that work. Summary:`;
+  } no longer shown in full. ${
+    mode === "chat"
+      ? "Your task list still reflects that work."
+      : "Your task list and the files on disk still reflect that work."
+  } Summary:`;
 
 describe("native harness loop", () => {
   it.each([
@@ -2107,6 +2114,7 @@ describe("compacting an Octant Harness session", () => {
       ) => Promise<NativeHarnessResponse>;
       readonly thirdTurn?: ReadonlyArray<NativeHarnessResponse>;
       readonly offered?: ReadonlyArray<ProviderToolDefinition>;
+      readonly mode?: "chat" | "work" | "code";
     }) => {
       const transcripts = new MemoryNativeHarnessTranscriptStore();
       const requests: NativeHarnessRequest[] = [];
@@ -2149,7 +2157,7 @@ describe("compacting an Octant Harness session", () => {
       const events = await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
-            const connection = yield* connect(transport, transcripts);
+            const connection = yield* connect(transport, transcripts, undefined, input.mode);
             yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
             const seen: ProviderRuntimeEvent[] = [];
             const answered = new Set<string>();
@@ -2187,10 +2195,51 @@ describe("compacting an Octant Harness session", () => {
       return { events, requests, refusals: () => refusals, transcripts };
     };
 
-    it("summarizes earlier turns after an overflow refusal and continues without a second refusal", async () => {
-      // The real window refuses any request that still carries the first turn
-      // beside the third, although the endpoint's estimate admitted it.
+    it.each(["code", "chat", "work"] as const)(
+      "summarizes earlier turns of a %s session after an overflow refusal and continues without a second refusal",
+      async (mode) => {
+        // The real window refuses any request that still carries the first turn
+        // beside the third, although the endpoint's estimate admitted it.
+        const run = await runLongSession({
+          mode,
+          refuses: (request) => {
+            const texts = request.history.map((message) => message.text);
+            return texts.includes("first") && texts.includes("third");
+          },
+        });
+
+        expect(run.events.at(-1)?.kind).toBe("completed");
+        expect(run.refusals()).toBe(1);
+        expect(run.events.filter((event) => event.kind === "context-compacted")).toMatchObject([
+          { trigger: "automatic" },
+        ]);
+        // The summary went to the session's own model with no tool to call.
+        expect(
+          run.requests
+            .filter((request) => request.tools.length === 0)
+            .map((request) => [String(request.sessionId), String(request.modelId)]),
+        ).toEqual([[String(sessionId), String(modelId)]]);
+        const continued = run.requests.at(-1);
+        expect(continued?.history.map((message) => message.text)).toEqual([
+          `${summaryLead(2, mode)}\n\nPlanned the parser fix and chose the queue design.\n\nYour task list as you last wrote it with todo-write in those turns:\n${taskList}`,
+          "third",
+        ]);
+        // The third turn read the summary itself, so it was made after two turns.
+        expect(run.transcripts.load(sessionId)?.compactions).toMatchObject([
+          { turns: 2, afterTurns: 2 },
+        ]);
+        // The turn paid for its summary request, so its closing total says so.
+        expect(run.events.filter((event) => event.kind === "usage").at(-1)).toMatchObject({
+          inputTokens: 600,
+          outputTokens: 60,
+        });
+      },
+    );
+
+    it("asks a Chat summary for nothing on disk and never points the Chat lead at files", async () => {
       const run = await runLongSession({
+        mode: "chat",
+        offered: [tool("journal-lookup"), tool("todo-write")],
         refuses: (request) => {
           const texts = request.history.map((message) => message.text);
           return texts.includes("first") && texts.includes("third");
@@ -2198,47 +2247,138 @@ describe("compacting an Octant Harness session", () => {
       });
 
       expect(run.events.at(-1)?.kind).toBe("completed");
-      expect(run.refusals()).toBe(1);
-      expect(run.events.filter((event) => event.kind === "context-compacted")).toMatchObject([
-        { trigger: "automatic" },
-      ]);
-      const continued = run.requests.at(-1);
-      expect(continued?.history.map((message) => message.text)).toEqual([
-        `${summaryLead(2)}\n\nPlanned the parser fix and chose the queue design.\n\nYour task list as you last wrote it with todo-write in those turns:\n${taskList}`,
-        "third",
-      ]);
-      // The third turn read the summary itself, so it was made after two turns.
-      expect(run.transcripts.load(sessionId)?.compactions).toMatchObject([
-        { turns: 2, afterTurns: 2 },
-      ]);
-      // The turn paid for its summary request, so its closing total says so.
-      expect(run.events.filter((event) => event.kind === "usage").at(-1)).toMatchObject({
-        inputTokens: 600,
-        outputTokens: 60,
-      });
+      const summary = run.requests.filter((request) => request.tools.length === 0);
+      expect(summary).toHaveLength(1);
+      expect(summary[0]?.system).not.toMatch(/file|coding/i);
+      const sent = run.requests.filter((request) => request.tools.length > 0);
+      for (const request of sent) {
+        expect(request.history[0]?.text).not.toContain("files on disk");
+      }
     });
 
-    it("keeps the turn alive while a summary streams without showing the summary's text", async () => {
+    it("keeps a Code summary request asking for the files a coding session changed", async () => {
       const run = await runLongSession({
         refuses: (request) => {
           const texts = request.history.map((message) => message.text);
           return texts.includes("first") && texts.includes("third");
         },
-        summarize: async (onEvent) => {
-          onEvent({ kind: "reasoning-delta", text: "Weighing what to keep." });
-          onEvent({ kind: "text-delta", text: "Planned the parser fix." });
-          return { text: "Planned the parser fix.", toolCalls: [] };
-        },
       });
 
-      expect(run.events.at(-1)?.kind).toBe("completed");
-      expect(run.events.filter((event) => event.kind === "liveness").length).toBeGreaterThan(0);
-      const shown = run.events.flatMap((event) =>
-        event.kind === "text-delta" || event.kind === "reasoning-delta" ? [event.text] : [],
-      );
-      expect(shown).not.toContain("Weighing what to keep.");
-      expect(shown).not.toContain("Planned the parser fix.");
+      const summary = run.requests.filter((request) => request.tools.length === 0);
+      expect(summary[0]?.system).toContain("coding session");
+      expect(summary[0]?.system).toContain("files and identifiers");
     });
+
+    it.each(["chat", "work"] as const)(
+      "resumes a %s session from the summary its overflowing turn wrote",
+      async (mode) => {
+        const run = await runLongSession({
+          mode,
+          refuses: (request) => {
+            const texts = request.history.map((message) => message.text);
+            return texts.includes("first") && texts.includes("third");
+          },
+        });
+        const { transport, requests } = scriptedTransport([{ text: "answer 4", toolCalls: [] }]);
+
+        const events = await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* connect(transport, run.transcripts, undefined, mode);
+              yield* connection.resume({
+                sessionId,
+                resumeCursor: { driverKind: "openai-compatible", value: String(sessionId) },
+                executionPolicy: "approval-gated",
+              });
+              return yield* sendAndCollect(connection, "fourth", isTerminal, [], []);
+            }),
+          ),
+        );
+
+        expect(events.at(-1)?.kind).toBe("completed");
+        expect(requests[0]?.history.map((message) => message.text)).toEqual([
+          `${summaryLead(2, mode)}\n\nPlanned the parser fix and chose the queue design.\n\nYour task list as you last wrote it with todo-write in those turns:\n${taskList}`,
+          "third",
+          "answer 3",
+          "fourth",
+        ]);
+      },
+    );
+
+    it.each(["chat", "work"] as const)(
+      "does not summarize the host's planned history when a fresh %s session's only turn overflows",
+      async (mode) => {
+        const requests: NativeHarnessRequest[] = [];
+        const transport: NativeHarnessTransport = {
+          open: async () => ({
+            fits: () => true,
+            send: async (request) => {
+              requests.push(request);
+              throw overflow;
+            },
+            release: () => undefined,
+          }),
+        };
+
+        const events = await Effect.runPromise(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const connection = yield* connect(
+                transport,
+                new MemoryNativeHarnessTranscriptStore(),
+                undefined,
+                mode,
+              );
+              yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+              // The host hands a fresh session the thread's earlier
+              // conversation, already planned and compacted, inside its
+              // first message.
+              return yield* sendAndCollect(
+                connection,
+                "third",
+                isTerminal,
+                [
+                  { kind: "conversation-summary", text: "The host summarized the first turn." },
+                  { kind: "user-message", text: "second" },
+                  { kind: "assistant-message", text: "answer 2" },
+                ],
+                offered,
+              );
+            }),
+          ),
+        );
+
+        expect(events.at(-1)?.kind).toBe("failed");
+        expect(events.some((event) => event.kind === "context-compacted")).toBe(false);
+        expect(requests.every((request) => request.tools.length > 0)).toBe(true);
+      },
+    );
+
+    it.each(["code", "chat", "work"] as const)(
+      "keeps a %s turn alive while a summary streams without showing the summary's text",
+      async (mode) => {
+        const run = await runLongSession({
+          mode,
+          refuses: (request) => {
+            const texts = request.history.map((message) => message.text);
+            return texts.includes("first") && texts.includes("third");
+          },
+          summarize: async (onEvent) => {
+            onEvent({ kind: "reasoning-delta", text: "Weighing what to keep." });
+            onEvent({ kind: "text-delta", text: "Planned the parser fix." });
+            return { text: "Planned the parser fix.", toolCalls: [] };
+          },
+        });
+
+        expect(run.events.at(-1)?.kind).toBe("completed");
+        expect(run.events.filter((event) => event.kind === "liveness").length).toBeGreaterThan(0);
+        const shown = run.events.flatMap((event) =>
+          event.kind === "text-delta" || event.kind === "reasoning-delta" ? [event.text] : [],
+        );
+        expect(shown).not.toContain("Weighing what to keep.");
+        expect(shown).not.toContain("Planned the parser fix.");
+      },
+    );
 
     it("hands a fork through the compacted turn the summary that turn read", async () => {
       const run = await runLongSession({
@@ -2276,125 +2416,140 @@ describe("compacting an Octant Harness session", () => {
       );
     });
 
-    it("summarizes earlier turns instead of leaving them out when the estimate says they no longer fit", async () => {
-      const run = await runLongSession({
-        refuses: () => false,
-        fits: (request) => {
-          const texts = request.history.map((message) => message.text);
-          return !(texts.includes("first") && texts.includes("third"));
-        },
-      });
-
-      expect(run.events.at(-1)?.kind).toBe("completed");
-      expect(run.events.some((event) => event.kind === "context-compacted")).toBe(true);
-      const sent = run.requests.filter((request) => request.tools.length > 0);
-      expect(
-        sent.some((request) => request.history[0]?.text.includes("left out to fit") === true),
-      ).toBe(false);
-      expect(sent.at(-1)?.history[0]?.text).toContain(taskList);
-    });
-
-    it("numbers a cut by the journal after the running turn compacted, so journal-lookup reads the cut turn back", async () => {
-      const run = await runLongSession({
-        refuses: () => false,
-        fits: (request) => {
-          const texts = request.history.map((message) => message.text);
-          // One summary request holds the first turn only, so the second stays.
-          if (request.tools.length === 0)
-            return !JSON.stringify(request.history).includes("second");
-          if (texts.includes("first") && texts.includes("third")) return false;
-          // The third turn's tool step no longer fits beside the second turn.
-          return !(
-            texts.includes("second") &&
-            texts.includes("third") &&
-            request.history.some((message) => message.toolResults !== undefined)
-          );
-        },
-        thirdTurn: [
-          {
-            text: "",
-            toolCalls: [{ toolCallId: "look-1", toolName: "read", argumentsJson: "{}" }],
+    it.each(["code", "chat", "work"] as const)(
+      "summarizes earlier turns of a %s session instead of leaving them out when the estimate says they no longer fit",
+      async (mode) => {
+        const run = await runLongSession({
+          mode,
+          refuses: () => false,
+          fits: (request) => {
+            const texts = request.history.map((message) => message.text);
+            return !(texts.includes("first") && texts.includes("third"));
           },
-          { text: "answer 3", toolCalls: [] },
-        ],
-        offered: [...withLookup, tool("todo-write")],
-      });
+        });
 
-      expect(run.events.at(-1)?.kind).toBe("completed");
-      expect(run.events.filter((event) => event.kind === "context-compacted")).toMatchObject([
-        { trigger: "automatic" },
-      ]);
-      expect(run.transcripts.load(sessionId)?.compactions).toMatchObject([
-        { turns: 1, afterTurns: 2 },
-      ]);
-      const thirdTurnSteps = run.requests.filter(
-        (request) =>
-          request.tools.length > 0 && request.history.some((message) => message.text === "third"),
-      );
-      // The turn opened on the summary, not behind a cut.
-      expect(thirdTurnSteps[0]?.history[0]?.text).toContain(summaryLead(1));
-      // The journal holds the first turn (0 to 3), second (4) and answer 2 (5),
-      // then third (6): the cut after the summary still names journal numbers.
-      const cut = thirdTurnSteps[1]?.history ?? [];
-      expect(cut[0]?.text).toContain("Messages 0 to 5 are kept in the journal");
-      expect(cut[1]?.text).toBe("third");
-      const lookup = createThreadJournalLookup({
-        mode: "code",
-        transcripts: run.transcripts,
-        latestSession: () => ({
+        expect(run.events.at(-1)?.kind).toBe("completed");
+        expect(run.events.some((event) => event.kind === "context-compacted")).toBe(true);
+        const sent = run.requests.filter((request) => request.tools.length > 0);
+        expect(
+          sent.some((request) => request.history[0]?.text.includes("left out to fit") === true),
+        ).toBe(false);
+        expect(sent.at(-1)?.history[0]?.text).toContain(taskList);
+      },
+    );
+
+    it.each(["code", "chat", "work"] as const)(
+      "numbers a cut in a %s session by the journal after the running turn compacted, so journal-lookup reads the cut turn back",
+      async (mode) => {
+        const run = await runLongSession({
+          mode,
+          refuses: () => false,
+          fits: (request) => {
+            const texts = request.history.map((message) => message.text);
+            // One summary request holds the first turn only, so the second stays.
+            if (request.tools.length === 0)
+              return !JSON.stringify(request.history).includes("second");
+            if (texts.includes("first") && texts.includes("third")) return false;
+            // The third turn's tool step no longer fits beside the second turn.
+            return !(
+              texts.includes("second") &&
+              texts.includes("third") &&
+              request.history.some((message) => message.toolResults !== undefined)
+            );
+          },
+          thirdTurn: [
+            {
+              text: "",
+              toolCalls: [{ toolCallId: "look-1", toolName: "read", argumentsJson: "{}" }],
+            },
+            { text: "answer 3", toolCalls: [] },
+          ],
+          offered: [...withLookup, tool("todo-write")],
+        });
+
+        expect(run.events.at(-1)?.kind).toBe("completed");
+        expect(run.events.filter((event) => event.kind === "context-compacted")).toMatchObject([
+          { trigger: "automatic" },
+        ]);
+        expect(run.transcripts.load(sessionId)?.compactions).toMatchObject([
+          { turns: 1, afterTurns: 2 },
+        ]);
+        const thirdTurnSteps = run.requests.filter(
+          (request) =>
+            request.tools.length > 0 && request.history.some((message) => message.text === "third"),
+        );
+        // The turn opened on the summary, not behind a cut.
+        expect(thirdTurnSteps[0]?.history[0]?.text).toContain(summaryLead(1, mode));
+        // The journal holds the first turn (0 to 3), second (4) and answer 2 (5),
+        // then third (6): the cut after the summary still names journal numbers.
+        const cut = thirdTurnSteps[1]?.history ?? [];
+        expect(cut[0]?.text).toContain("Messages 0 to 5 are kept in the journal");
+        expect(cut[1]?.text).toBe("third");
+        const lookup = createThreadJournalLookup({
+          mode,
+          transcripts: run.transcripts,
+          latestSession: () => ({
+            providerInstanceId: instanceId,
+            resumeCursor: { driverKind: "openai-compatible", value: String(sessionId) },
+          }),
           providerInstanceId: instanceId,
-          resumeCursor: { driverKind: "openai-compatible", value: String(sessionId) },
-        }),
-        providerInstanceId: instanceId,
-        secrets: [],
-      });
-      expect(lookup({ from: 4, count: 2 })).toMatchObject({
-        status: "found",
-        messages: [
-          { number: 4, role: "user", text: "second" },
-          { number: 5, role: "assistant", text: "answer 2" },
-        ],
-      });
-    });
+          secrets: [],
+        });
+        expect(lookup({ from: 4, count: 2 })).toMatchObject({
+          status: "found",
+          messages: [
+            { number: 4, role: "user", text: "second" },
+            { number: 5, role: "assistant", text: "answer 2" },
+          ],
+        });
+      },
+    );
 
-    it("falls back to leaving earlier exchanges out when the summary fails, and does not pay for it again on later steps", async () => {
-      let summaries = 0;
-      const run = await runLongSession({
-        refuses: () => false,
-        fits: (request) => {
-          const texts = request.history.map((message) => message.text);
-          return !(texts.includes("first") && texts.includes("third"));
-        },
-        summarize: async () => {
-          summaries += 1;
-          throw { category: "provider-failed", message: "The summary request failed." };
-        },
-        thirdTurn: [
-          {
-            text: "",
-            toolCalls: [{ toolCallId: "look-1", toolName: "read", argumentsJson: "{}" }],
+    it.each(["code", "chat", "work"] as const)(
+      "falls back to leaving earlier exchanges of a %s session out when the summary fails, and does not pay for it again on later steps",
+      async (mode) => {
+        let summaries = 0;
+        const run = await runLongSession({
+          mode,
+          refuses: () => false,
+          fits: (request) => {
+            const texts = request.history.map((message) => message.text);
+            return !(texts.includes("first") && texts.includes("third"));
           },
-          {
-            text: "",
-            toolCalls: [{ toolCallId: "look-2", toolName: "read", argumentsJson: "{}" }],
+          summarize: async () => {
+            summaries += 1;
+            throw { category: "provider-failed", message: "The summary request failed." };
           },
-          { text: "answer 3", toolCalls: [] },
-        ],
-      });
+          thirdTurn: [
+            {
+              text: "",
+              toolCalls: [{ toolCallId: "look-1", toolName: "read", argumentsJson: "{}" }],
+            },
+            {
+              text: "",
+              toolCalls: [{ toolCallId: "look-2", toolName: "read", argumentsJson: "{}" }],
+            },
+            { text: "answer 3", toolCalls: [] },
+          ],
+        });
 
-      expect(run.events.at(-1)?.kind).toBe("completed");
-      expect(summaries).toBe(1);
-      expect(run.events.some((event) => event.kind === "context-compacted")).toBe(false);
-      expect(run.transcripts.load(sessionId)?.compactions).toEqual([]);
-      const thirdTurnSteps = run.requests.filter(
-        (request) =>
-          request.tools.length > 0 && request.history.some((message) => message.text === "third"),
-      );
-      expect(thirdTurnSteps).toHaveLength(3);
-      for (const step of thirdTurnSteps) {
-        expect(step.history[0]?.text).toContain("left out to fit");
-      }
-    });
+        expect(run.events.at(-1)?.kind).toBe("completed");
+        expect(summaries).toBe(1);
+        expect(run.events.some((event) => event.kind === "context-compacted")).toBe(false);
+        expect(run.transcripts.load(sessionId)?.compactions).toEqual([]);
+        const thirdTurnSteps = run.requests.filter(
+          (request) =>
+            request.tools.length > 0 && request.history.some((message) => message.text === "third"),
+        );
+        expect(thirdTurnSteps).toHaveLength(3);
+        for (const step of thirdTurnSteps) {
+          expect(step.history[0]?.text).toContain("left out to fit");
+          // A Chat lead has no folder, so the cut does not point it at one.
+          if (mode === "chat") expect(step.history[0]?.text).not.toContain("files on disk");
+          else expect(step.history[0]?.text).toContain("files on disk");
+        }
+      },
+    );
   });
 
   it("offers no compaction on a Chat or Work connection, whose history the host plans", async () => {
