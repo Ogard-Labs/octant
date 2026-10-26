@@ -178,8 +178,14 @@ it instead of imitating it.
   by Ollama without a word: the `num_ctx` in the model's Modelfile when it
   sets one, else the model's own window up to 32,768 tokens (a larger window
   costs memory whether or not the conversation uses it), else 4,096 tokens
-  when Ollama reports no window. To give a model more, create a variant
-  with a larger `num_ctx` (`PARAMETER num_ctx 65536` in a Modelfile).
+  when Ollama reports no window. To give a model more, type a larger window
+  into its **Context window** box: open your Ollama endpoint under
+  **Settings → Octant Harness → Model endpoints**, and the box sits beside
+  each model. A variant with a larger `num_ctx` (`PARAMETER num_ctx 65536` in
+  a Modelfile) works too. Octant asks Ollama for the window you type, up to
+  the window the model was trained for: Ollama never loads more, so a larger
+  number is saved as that window. Ollama sets aside memory for the whole
+  window when it loads the model, so choose what your conversations need.
 - **Model endpoints** (OpenAI-compatible, Anthropic-compatible, Azure AI
   Foundry) run Octant Harness. They show reasoning and usage only once a reply
   carries them, and Octant tools reach only models you verified.

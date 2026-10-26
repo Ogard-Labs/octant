@@ -14,6 +14,7 @@ import type {
   HarnessEndpointRequest,
   HarnessEndpointTransport,
 } from "@octant/provider-sdk/harness-endpoint";
+import { effectiveContextWindowOverride } from "@octant/domain/model-context-window";
 import { Effect } from "effect";
 import {
   buildOllamaChatBody,
@@ -231,15 +232,20 @@ function ollamaTransport(
  * The one window a request to this model is both measured against and sent
  * with as `num_ctx`. Ollama cuts a prompt longer than the window it loaded
  * without an error, which can drop the harness's instructions and tools, so
- * the two must never differ: a person's own window for the model, else the
- * one the probe settled from Ollama's report, else the small window Octant
- * assumes when Ollama reports none.
+ * the two must never differ: a person's own window for the model, held to
+ * the trained window Ollama would clamp it to, else the one the probe
+ * settled from Ollama's report, else the small window Octant assumes when
+ * Ollama reports none. The planner and the meter hold the person's window
+ * to the trained one by the same rule.
  */
 function requestContextWindow(options: OllamaDriverOptions, modelId: string): number {
   const model = options.runtimeRegistry
     .observedState(options.instanceId)
     ?.models.find((candidate) => String(candidate.id) === modelId);
-  return model?.contextWindowOverride ?? model?.contextLimit ?? OLLAMA_UNKNOWN_CONTEXT_WINDOW;
+  if (model === undefined) return OLLAMA_UNKNOWN_CONTEXT_WINDOW;
+  return (
+    effectiveContextWindowOverride(model) ?? model.contextLimit ?? OLLAMA_UNKNOWN_CONTEXT_WINDOW
+  );
 }
 
 /** Whether a request fits the endpoint and the window it is sent with, measured as it would be sent. */
