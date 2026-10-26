@@ -23,6 +23,7 @@ import type { OhMyPiDriverOptions } from "./ohMyPiDriver";
 import type { OllamaDriverOptions } from "./ollamaDriver";
 import type { OpenAiCompatibleDriverOptions } from "./openAiCompatibleDriver";
 import type { OpenCodeDriverOptions } from "./openCodeDriver";
+import type { OutsideHarnessEndpointProxyOptions } from "./outsideHarnessEndpointProxy";
 import type { PiDriverOptions } from "./piDriver";
 import type { OpenCodeProcessPort } from "./openCodeProcess";
 import type { OllamaFetch } from "./ollamaEndpoint";
@@ -94,6 +95,9 @@ describe("driver runtime registries", () => {
     );
     expectTypeOf<PiDriverOptions["runtimeRegistry"]>().not.toHaveProperty("setVerifiedToolModels");
     expectTypeOf<OhMyPiDriverOptions["runtimeRegistry"]>().not.toHaveProperty(
+      "setVerifiedToolModels",
+    );
+    expectTypeOf<OutsideHarnessEndpointProxyOptions["runtimeRegistry"]>().not.toHaveProperty(
       "setVerifiedToolModels",
     );
   });

@@ -325,7 +325,7 @@ describe("outside harness endpoint proxy", () => {
   it("admits tools only for a model the host's own record verified, and never a person's attachments", async () => {
     const { probe, proxy, registry } = harness();
     const observed = await probe();
-    registry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+    registry.setVerifiedToolModels(instanceA, [modelId]);
 
     expect(proxy.harnessEndpoint.admitTurn(toolTurn, modelId)).toBeUndefined();
     expect(modelCanTakeDelegatedWork("outside-harness-endpoint", observed, modelId)).toBe(false);
@@ -352,8 +352,9 @@ describe("outside harness endpoint proxy", () => {
     expect(proxy.harnessEndpoint.admitTurn(withAttachment, modelId)).toMatchObject({
       category: "unsupported",
     });
-    // A later probe keeps the host's record and adds nothing to it.
-    expect((await probe()).verifiedToolModelIds).toEqual([modelId]);
+    // A later probe claims no tool reach of its own, and the host's record outlives it.
+    expect((await probe()).verifiedToolModelIds).toBeUndefined();
+    expect(registry.observedState(instanceA)?.verifiedToolModelIds).toEqual([modelId]);
   });
 
   it("offers only the models the person listed, named as the person wrote them", async () => {

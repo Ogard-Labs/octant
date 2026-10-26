@@ -39,7 +39,7 @@ import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
 import { clampOutsideDriverCapabilities } from "./outsideDriverCeiling";
 import { acquireProviderCredential, reportKeyRejection } from "./providerApiKeyPool";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 
 /**
  * The host side of an outside provider driver: a `HarnessEndpointDriver` whose
@@ -101,7 +101,7 @@ export interface OutsideHarnessEndpointProxyOptions {
   readonly baseUrl: string;
   /** The models the person listed; the instance offers no other. */
   readonly modelIds: ReadonlyArray<ProviderModelId>;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: OutsideDriverFetch;
   readonly limits?: Partial<OutsideDriverLimits>;
@@ -743,10 +743,6 @@ export function makeOutsideHarnessEndpointProxy(
       processState: "stopped",
       models: carryModelContextWindowFacts(models, prior?.models),
       capabilities: clampOutsideDriverCapabilities(claims, shownBefore()),
-      // Tool reach is the host's record alone; a probe never adds to it.
-      ...(prior?.verifiedToolModelIds === undefined
-        ? {}
-        : { verifiedToolModelIds: prior.verifiedToolModelIds }),
       ...(models.length > 0
         ? {}
         : {
