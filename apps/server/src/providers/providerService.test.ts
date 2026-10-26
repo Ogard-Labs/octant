@@ -5596,4 +5596,39 @@ describe("a stored provider key and the base URL it was entered for", () => {
     } as never);
     expect(clearProviderCredential).toHaveBeenCalledTimes(6);
   });
+
+  it("keeps an Azure AI Foundry organization sign-in when its removal is refused for active sessions", async () => {
+    const clearProviderCredential = vi.fn(async () => undefined);
+    const fixture = serviceFixture({
+      instances: [
+        httpProvider({
+          driverKind: "azure-foundry",
+          configuration: {
+            kind: "azure-foundry-openai-http",
+            baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+            authentication: "directory-oauth",
+            directory: {
+              tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+            },
+            protocol: "auto",
+            manualModelIds: ["deployment-a"],
+          },
+        }),
+      ],
+      clearProviderCredential,
+    });
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: "Stop active sessions before removing this provider." },
+    });
+    expect(clearProviderCredential).not.toHaveBeenCalled();
+  });
 });

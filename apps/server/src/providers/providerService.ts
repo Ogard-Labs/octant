@@ -824,19 +824,21 @@ export class ProviderService implements ProviderServiceApi {
           if (command.kind === "remove-provider") {
             this.#refuseVacatingImplicitClaudeOwner(instances, current);
             this.#refuseVacatingImplicitCodexOwner(instances, current);
+            const removed = removeProvider(current, {
+              activeSessionCount: this.#runtime.activeSessionCount(current.id),
+              updatedAt,
+            });
             // An organization sign-in's grant lives in the broker under a
             // reference only this instance names; removing the instance
             // without it would leave a live refresh token nobody can sign out.
+            // It is forgotten only once the removal is allowed, so a removal
+            // refused for active sessions keeps the sign-in.
             if (
               current.driverKind === "azure-foundry" &&
               current.configuration.authentication === "directory-oauth"
             ) {
               await this.#forgetCredentialForOldEndpoint(current.id);
             }
-            const removed = removeProvider(current, {
-              activeSessionCount: this.#runtime.activeSessionCount(current.id),
-              updatedAt,
-            });
             await this.#runtime.invalidateRuntime(current.id);
             this.#persistence.journal.append({
               aggregate: { aggregateType: "provider-instance", aggregateId: current.id },

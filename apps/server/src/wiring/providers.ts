@@ -364,6 +364,16 @@ export function pathIsProjectConfined(projectRoot: string, absolutePath: string)
   }
 }
 
+/** The credential store's answer for an instance that holds no credential. */
+function isMissingCredential(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "category" in error &&
+    error.category === "unauthenticated"
+  );
+}
+
 function isPathWithin(root: string, candidate: string): boolean {
   const confined = relative(root, candidate);
   return (
@@ -1073,7 +1083,11 @@ export function wireProviders(deps: ProvidersDependencies) {
       let stored: string | undefined;
       try {
         stored = await credentialBroker.resolve(instanceId);
-      } catch {
+      } catch (error) {
+        // Only a missing credential means there is no pointer. A store that
+        // could not be read may still hold one, and deleting it unread would
+        // orphan its grant, so the change is refused instead.
+        if (!isMissingCredential(error)) throw error;
         stored = undefined;
       }
       const pointer = stored === undefined ? undefined : readDirectoryOAuthCredential(stored);
