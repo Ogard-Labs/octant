@@ -39,7 +39,12 @@ import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 export interface OllamaDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly configuration: OllamaProviderConfiguration;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  /**
+   * What the driver reads and reports about its instance. The Verify tools
+   * record is the host's, so a driver behind the endpoint port holds no way to
+   * write it.
+   */
+  readonly runtimeRegistry: Pick<ProviderRuntimeRegistry, "observedState" | "setObservedState">;
   readonly fetch?: OllamaFetch;
   readonly limits?: Partial<OllamaHttpLimits>;
   readonly clock?: () => string;

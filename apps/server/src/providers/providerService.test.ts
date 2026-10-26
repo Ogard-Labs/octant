@@ -4766,6 +4766,31 @@ describe("ProviderService", () => {
       ).toEqual(["model-1"]);
     });
 
+    it("forgets a Verify tools record when the endpoint's address changes, and a later check does not restore it", async () => {
+      const fixture = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        driver: toolDriver("supported") as never,
+      });
+      await fixture.service.probe(windowId, instanceId);
+      await fixture.service.execute(windowId, {
+        kind: "verify-model-tools",
+        instanceId,
+        modelId: decodeProviderModelId("model-1"),
+      });
+
+      await fixture.service.execute(windowId, {
+        kind: "change-ollama-configuration",
+        instanceId,
+        expectedVersion: 1,
+        configuration: { kind: "ollama-native-http", baseUrl: "http://localhost:11434" },
+      });
+      const probed = await fixture.service.probe(windowId, instanceId);
+
+      expect(probed.verifiedToolModelIds ?? []).toEqual([]);
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds ?? []).toEqual([]);
+    });
+
     it("refuses a model the endpoint does not list and never calls the driver", async () => {
       const driver = toolDriver("supported");
       const fixture = serviceFixture({
