@@ -1,5 +1,6 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -581,6 +582,13 @@ describe("Code language service against a hostile server", () => {
     ).toEqual({ changes: [{ uri: pathToFileURL(join(paths.checkout, "a.ts")).href, type: 2 }] });
   });
 
+  it("answers too-large for a document whose escaped text would not fit a frame, and does not send it", async () => {
+    const { test, log } = fake("normal");
+    // 2.5 MB of text, past 4 MiB once each quote is escaped for the frame.
+    expect((await test.open("b.ts", { text: '"'.repeat(2_500_000) })).status).toBe("too-large");
+    expect(logged(log).some((entry) => entry.method === "textDocument/didOpen")).toBe(false);
+  });
+
   it("stops a server that sends a frame past the cap", async () => {
     const { test, paths } = fake("oversize", { maxCrashRestarts: 0 });
     const fileId = syncedFileId(await test.open("b.ts"));
@@ -591,7 +599,9 @@ describe("Code language service against a hostile server", () => {
   });
 
   it("times a read out at its deadline and cancels it at the server", async () => {
-    const { test, log } = fake("silent", { requestDeadlineMs: 200 });
+    // The deadline also bounds `initialize`; a shorter one let a loaded runner
+    // count a slow start as a crash before the read was ever sent.
+    const { test, log } = fake("silent", { requestDeadlineMs: 2_000 });
     const fileId = syncedFileId(await test.open("b.ts"));
     expect(await test.definition(fileId, 0, 0)).toEqual({
       status: "unavailable",
@@ -635,6 +645,43 @@ describe("Code language service against a hostile server", () => {
     test.state.threads = [test.state.thread];
     await test.service.sweep();
     await eventually(() => logged(log).filter((entry) => entry.method === "exit").length === 2);
+  });
+
+  it("gives a restarted server a fresh temporary directory, never the target of a link it left there", async () => {
+    const paths = workspace();
+    const prepared: ProcessConfinementPrepareInput[] = [];
+    const processes = new LanguageServerProcessPort({
+      confinement: {
+        prepare: (input) => {
+          prepared.push(input);
+          return passthrough.prepare(input);
+        },
+      },
+    });
+    const cacheDirectory = join(paths.cacheRoot, "server");
+    const launch = () =>
+      processes.launch({
+        ownerId: "server",
+        executable: process.execPath,
+        args: ["-e", ""],
+        installRoot: dirname(process.execPath),
+        checkoutRoot: paths.checkout,
+        cacheDirectory,
+        cacheRoot: paths.cacheRoot,
+      });
+    const first = await launch();
+    if (first.status === "launched") await first.process.kill();
+    // What a compromised server can do inside the cache it may write.
+    rmSync(join(cacheDirectory, "tmp"), { recursive: true, force: true });
+    symlinkSync(paths.outside, join(cacheDirectory, "tmp"));
+
+    const second = await launch();
+    if (second.status === "launched") await second.process.kill();
+    expect(second.status).toBe("launched");
+    const temporaryDirectory = prepared.at(-1)?.temporaryDirectory ?? "";
+    expect(lstatSync(temporaryDirectory).isSymbolicLink()).toBe(false);
+    expect(realpathSync(temporaryDirectory)).toBe(join(cacheDirectory, "tmp"));
+    expect(readdirSync(paths.outside)).toEqual(["secret.ts"]);
   });
 
   it("reaps a server a previous run of the host left behind", async () => {

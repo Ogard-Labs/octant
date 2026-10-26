@@ -203,6 +203,9 @@ restrictive one was taken.
   adapter rewrites every absolute path or `file:` URI in a message: one inside
   the checkout becomes checkout-relative, and any other becomes
   `<outside checkout>`. The schema cannot enforce this, so slice 2 tests it.
+  A quoted span that starts like a path is rewritten whole, spaces included,
+  because the TypeScript server quotes the paths it names. An unquoted path
+  with a space in it is cut at the space, and the words after it stay.
 - **Read before start.** Every authority check of a read, `no-reach`
   included, runs before the launch decision is consulted. A refused read never
   starts a server, so a paired device can start a `static` server only for a
@@ -269,8 +272,16 @@ design left a choice open.
   `shutdown` and `exit` first). Host shutdown stops every server.
 - **Launch.** The checkout is the read-only bound root, the component's install
   is a read root, and its cache is the only write root; the cache parent is
-  denied so no server reads a sibling's cache. Network is `none`, exec is the
-  server's own binary only, and Linux loads the no-fork filter. Seatbelt also
+  denied so no server reads a sibling's cache. The temporary directory inside
+  the cache is made anew at every start, because the server may write there
+  and confinement grants a launch root's resolved target: a link it left
+  would otherwise grant the next run whatever folder the link names. Network
+  is `none`. On macOS Seatbelt lets the server exec only its own binary. On
+  Linux the filter refuses fork, clone, and `execveat`, and the host's program
+  folders are hidden. Bubblewrap applies the filter before it starts the
+  server, so it cannot refuse `execve`, and the server could replace itself
+  with another file it can see. That file runs with the same confinement:
+  no fork, no network, and writes only to the cache. Seatbelt also
   gets the broad system read every other confined launch uses, because a
   binary cannot start without the system libraries, while the home folder and
   the private system paths stay denied. The environment holds only `HOME` and
@@ -474,7 +485,7 @@ accounts or hardware.
      maintainer runs it.
    - _State:_ built. On Linux the bundled `tsc --lsp --stdio` 7.0.2 answers the
      two-file fixture's type error and cross-file definition under Bubblewrap
-     with the network unshared, the no-fork and no-exec filter loaded, and the
+     with the network unshared, the no-fork filter loaded, and the
      checkout bound read-only, in a Plan thread
      (`codeLanguageServiceProcess.test.ts`). A hostile fake server covers
      `applyEdit`, `executeCommand`, and `showDocument` (method-not-found, the

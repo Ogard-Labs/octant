@@ -246,9 +246,20 @@ async function prepareCacheDirectory(
   if ((await directorySize(cacheDirectory)) > LANGUAGE_SERVER_CACHE_CAP_BYTES) {
     await rm(cacheDirectory, { recursive: true, force: true });
   }
+  // The temporary directory sits inside the cache the server may write, so a
+  // previous run could have replaced it with a link. Confinement grants a
+  // launch root in its resolved form too, so a link left there would hand the
+  // next run its target (on macOS, read and write to any folder it names).
+  // It holds nothing worth keeping, so each start gets a new one.
+  await rm(temporaryDirectory, { recursive: true, force: true });
   await mkdir(temporaryDirectory, { recursive: true, mode: 0o700 });
-  await chmod(cacheDirectory, 0o700);
-  await chmod(temporaryDirectory, 0o700);
+  for (const directory of [cacheDirectory, temporaryDirectory]) {
+    const metadata = await lstat(directory);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new Error("Language server cache is not a plain directory.");
+    }
+    await chmod(directory, 0o700);
+  }
 }
 
 async function directorySize(root: string): Promise<number> {

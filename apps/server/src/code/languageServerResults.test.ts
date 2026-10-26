@@ -46,8 +46,25 @@ describe("language server results", () => {
     ).toBe(`A sibling ${OUTSIDE_CHECKOUT_TEXT} is not inside.`);
   });
 
+  it("rewrites a quoted path with spaces whole, and paths after a colon or in any file: form", () => {
+    const spaced = "/Users/someone/My Projects/repo";
+    expect(
+      rewriteHostPaths(
+        `File '${spaced}/src/a.ts' extends '/Users/someone/Client Work/base.json'.`,
+        spaced,
+      ),
+    ).toBe(`File 'src/a.ts' extends '${OUTSIDE_CHECKOUT_TEXT}'.`);
+    expect(
+      rewriteHostPaths(
+        "error:/home/someone/a.ts FILE:///home/someone/b.ts file:/home/someone/c.ts",
+        checkoutRoot,
+      ),
+    ).toBe(`error:${OUTSIDE_CHECKOUT_TEXT} ${OUTSIDE_CHECKOUT_TEXT} ${OUTSIDE_CHECKOUT_TEXT}`);
+  });
+
   it("leaves relative paths, fractions, and ordinary words alone", () => {
-    const text = "Cannot find module './a.js' or 'pkg/sub'; and/or 1/2 of Array<string>.";
+    const text =
+      "Cannot find module './a.js', '@/b', or 'pkg/sub'; '/' expected; see https://aka.ms/x; and/or 1/2 of Array<string>.";
     expect(rewriteHostPaths(text, checkoutRoot)).toBe(text);
   });
 

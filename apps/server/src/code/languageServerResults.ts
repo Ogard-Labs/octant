@@ -42,28 +42,43 @@ const SEVERITIES: Readonly<Record<number, CodeLanguageDiagnosticSeverity>> = {
 };
 
 /**
- * One alternation, so a rewritten span is never scanned again: a `file:` URI,
- * or an absolute path (optionally `~`-relative) that is not the tail of a word,
- * a relative path, or a URL. Quotes, brackets, whitespace, `,`, and `;` end
- * either form, and a bare path also ends at the `:` compiler output puts
- * before a line number.
+ * One alternation, so a rewritten span is never scanned again:
+ *
+ * - A quoted span that starts like a path is one path, spaces included. The
+ *   TypeScript server quotes the paths it names, and a checkout under a folder
+ *   such as `My Projects` otherwise left `Projects/...` behind in the text.
+ * - A `file:` URI in any letter case, with or without `//`.
+ * - An absolute path (optionally `~`-relative) that is not the tail of a word,
+ *   a relative path, an alias such as `@/x`, or a URL. A path straight after a
+ *   `:` (`error:/home/...`) is still one; `://` is a URL.
+ *
+ * Quotes, brackets, whitespace, `,`, and `;` end the unquoted forms, and a
+ * bare path also ends at the `:` compiler output puts before a line number.
+ * An unquoted path with a space in it is cut at the space; the part after it
+ * stays as written.
  */
 const HOST_PATH_PATTERN =
-  /file:\/\/[^\s'"`<>()[\]{},;]+|(?<![\w.~\-/:@+%\\])~?\/[^\s'"`<>()[\]{},;:]+/g;
+  /(['"`])((?:file:|~?\/)[^'"`\r\n]+)\1|(?<!\w)file:[^\s'"`<>()[\]{},;]+|(?:(?<=:)(?!\/\/)|(?<![\w.~\-/:@+%\\]))~?\/[^\s'"`<>()[\]{},;:]+/gi;
 
 export function rewriteHostPaths(message: string, checkoutRoot: string): string {
-  return message.replace(HOST_PATH_PATTERN, (match) => {
-    // A sentence that ends on a path keeps its full stop outside the path.
-    const trimmed = match.replace(/\.+$/, "");
-    const trailing = match.slice(trimmed.length);
-    return `${hostPathText(trimmed, checkoutRoot)}${trailing}`;
-  });
+  return message.replace(
+    HOST_PATH_PATTERN,
+    (match: string, quote: string | undefined, quoted: string | undefined) => {
+      if (quote !== undefined && quoted !== undefined) {
+        return `${quote}${hostPathText(quoted, checkoutRoot)}${quote}`;
+      }
+      // A sentence that ends on a path keeps its full stop outside the path.
+      const trimmed = match.replace(/\.+$/, "");
+      const trailing = match.slice(trimmed.length);
+      return `${hostPathText(trimmed, checkoutRoot)}${trailing}`;
+    },
+  );
 }
 
 function hostPathText(match: string, checkoutRoot: string): string {
   if (match.startsWith("~")) return OUTSIDE_CHECKOUT_TEXT;
   let path: string;
-  if (match.startsWith("file:")) {
+  if (/^file:/i.test(match)) {
     try {
       path = fileURLToPath(match);
     } catch {

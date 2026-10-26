@@ -151,8 +151,8 @@ export type CodeLanguageReadResult = typeof CodeLanguageReadResult.Type;
 /**
  * The longest document text the editor may hand the language server, in
  * UTF-16 code units: the editor's own bound on an editable file. A document
- * whose protocol frame would still pass the server's frame cap is answered
- * `too-large` instead of being sent.
+ * within it whose protocol frame would still exceed the server's frame cap is
+ * answered `too-large` instead of being sent.
  */
 export const MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH = 5 * 1024 * 1024;
 

@@ -576,6 +576,12 @@ export class CodeLanguageService {
       };
       this.#servers.set(key, record);
     }
+    // A server whose output has ended is gone even before its exit is
+    // reported; counting that now keeps a request from being served by the
+    // dead connection (observed as an editor retry swallowed in that window).
+    if (record.state === "ready" && record.connection?.closed !== false) {
+      void this.#crash(record, record.generation);
+    }
     if (record.state === "crashed") {
       if (intent !== "open") return { status: "unavailable", reason: "crashed" };
       record.crashTimes = [];
@@ -813,8 +819,16 @@ function serverKey(checkoutId: CodeCheckoutId, component: CodeLanguageServerComp
     .slice(0, 32);
 }
 
+/**
+ * Judged on the text as the frame carries it: JSON escaping can double a
+ * quote-heavy file, and a frame past the cap is never written, so text that
+ * fit only before escaping was reported synced while the server never saw it.
+ */
 function fitsFrame(text: string): boolean {
-  return Buffer.byteLength(text, "utf8") + FRAME_ENVELOPE_BYTES <= LANGUAGE_SERVER_FRAME_CAP_BYTES;
+  return (
+    Buffer.byteLength(JSON.stringify(text), "utf8") + FRAME_ENVELOPE_BYTES <=
+    LANGUAGE_SERVER_FRAME_CAP_BYTES
+  );
 }
 
 function documentItem(document: OpenDocument) {
