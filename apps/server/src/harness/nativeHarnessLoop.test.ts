@@ -577,6 +577,30 @@ describe("native harness loop", () => {
     ]);
   });
 
+  it("journals no conversation and offers no resume cursor for a session nothing will resume", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport([{ text: "the summary", toolCalls: [] }]);
+    const { handle, events } = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          const handle = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            singleUse: true,
+          });
+          const events = yield* sendAndCollect(connection, "Summarize the thread.", isTerminal);
+          return { handle, events };
+        }),
+      ),
+    );
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(requests[0]?.history.map((message) => message.text)).toEqual(["Summarize the thread."]);
+    expect(handle.resumeCursor).toBeUndefined();
+    expect(transcripts.load(sessionId)).toBeUndefined();
+  });
+
   it("sends instructions as the system prompt and names the Octant tools on offer", async () => {
     const { transport, requests } = scriptedTransport([{ text: "ok", toolCalls: [] }]);
     await Effect.runPromise(

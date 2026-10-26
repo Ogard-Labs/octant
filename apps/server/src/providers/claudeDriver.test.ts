@@ -2,6 +2,7 @@ import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
   type ClaudeAuthentication,
+  type ContextEntryId,
   type PermissionPersistence,
   type ProviderFailure,
   type ProviderModelId,
@@ -28,6 +29,10 @@ import {
 } from "./claudeEnvironment";
 import { claudeLoginKeychainPath, type ClaudeProcessPort } from "./claudeProcess";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import { draftGitText } from "../code/codeGitDraftService";
+import { makeContextSummaryGenerator } from "../context/contextSummaryGenerator";
+import { completeOnceOutcome } from "../harness/nativeHarnessSingleShot";
+import { makeThreadHandOffCompletion } from "../threadHandOffCompletion";
 
 const instanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000701");
 const otherInstanceId = decodeProviderInstanceId("80000000-0000-4000-8000-000000000702");
@@ -3988,6 +3993,123 @@ describe("Claude session lifecycle", () => {
     expect(f.runtimeRegistry.activeSessionCount(instanceId)).toBe(0);
     expect(f.releasedEnvironments[0]?.ANTHROPIC_API_KEY).toBeUndefined();
     await acquired.close();
+  });
+});
+
+describe("Claude single-use sessions", () => {
+  // Answers the request the next query receives, as Claude would: streamed
+  // text, then the turn's result.
+  const answerNextRequest = async (f: ReturnType<typeof harness>, index: number) => {
+    await vi.waitFor(() => expect(f.queries[index]?.sent).toHaveLength(1));
+    const query = f.queries[index]!;
+    await query.emit({
+      kind: "stream-event",
+      sessionId: query.sdkSessionId,
+      event: { kind: "text-delta", index: 0, text: "Describe the change\n\nIt reads clearly." },
+    });
+    await query.emit(completed(query.sdkSessionId));
+  };
+
+  it("records no resume identity and offers no resume cursor for a session nothing will resume", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+
+    const singleUse = await Effect.runPromise(
+      acquired.connection.start({
+        sessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+        singleUse: true,
+      }),
+    );
+    const ordinary = await Effect.runPromise(
+      acquired.connection.start({
+        sessionId: otherSessionId,
+        modelId,
+        executionPolicy: "approval-gated",
+      }),
+    );
+
+    expect(singleUse.resumeCursor).toBeUndefined();
+    expect([...f.resumeIdentities.values()].map((identity) => identity.octantSessionId)).toEqual([
+      otherSessionId,
+    ]);
+    expect(ordinary.resumeCursor?.value).toBe(f.queries[1]?.sdkSessionId);
+    await acquired.close();
+  });
+
+  it("leaves no resume identity behind for a hand-off, context or compaction summary, git draft, or advisor call", async () => {
+    const f = harness();
+    const scratchSessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000705");
+
+    const handOff = makeThreadHandOffCompletion({
+      resolveDriver: () => f.driver,
+      scratchRoot: () => projectRoot,
+      uuid: () => scratchSessionId,
+    })({
+      providerInstanceId: instanceId,
+      modelId,
+      mode: "work",
+      threadId: "thread-1",
+      prompt: "Write the hand-off.",
+      signal: new AbortController().signal,
+    });
+    await answerNextRequest(f, 0);
+    await expect(handOff).resolves.toContain("Describe the change");
+
+    // Context maintenance and session compaction both summarize through this
+    // generator.
+    const summary = makeContextSummaryGenerator({
+      driver: f.driver,
+      providerInstanceId: instanceId,
+      scratchRoot: projectRoot,
+      sessionId: scratchSessionId,
+      mode: "chat",
+    })(
+      {
+        providerInstanceId: instanceId,
+        modelId,
+        materials: [
+          {
+            entryId: "80000000-0000-4000-8000-000000000706" as ContextEntryId,
+            content: "Earlier turn.",
+            sizeTokens: 3,
+          },
+        ],
+      },
+      new AbortController().signal,
+    );
+    await answerNextRequest(f, 1);
+    await expect(summary).resolves.toMatchObject({ content: expect.stringContaining("clearly") });
+
+    const draft = draftGitText(
+      {
+        driver: f.driver,
+        instanceId,
+        modelId,
+        sessionId: scratchSessionId,
+        projectRoot,
+      },
+      { purpose: "commit-message", diff: "+added line", diffTruncated: false, paths: ["a.ts"] },
+    );
+    await answerNextRequest(f, 2);
+    await expect(draft).resolves.toMatchObject({ status: "drafted" });
+
+    const advice = completeOnceOutcome({
+      driver: f.driver,
+      providerInstanceId: instanceId,
+      modelId,
+      sessionId: scratchSessionId,
+      projectRoot,
+      prompt: "Review this turn.",
+      timeoutMs: 5_000,
+    });
+    await answerNextRequest(f, 3);
+    await expect(advice).resolves.toMatchObject({ status: "completed" });
+
+    expect(f.queries).toHaveLength(4);
+    expect(f.resumeIdentityPort.put).not.toHaveBeenCalled();
+    expect(f.resumeIdentities.size).toBe(0);
   });
 });
 
