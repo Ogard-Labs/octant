@@ -10,7 +10,8 @@ host-initiated network calls
 ([Overview and principles](../architecture.md#overview-and-principles)), and
 release scope ([Current Release Boundary](../architecture.md#current-release-boundary)).
 
-**Status: accepted 2026-10-26; slice 1 is starting.** The maintainer unlocked
+**Status: accepted 2026-10-26; slice 1 (contracts and policy) is built and in
+review, reached by no transport.** The maintainer unlocked
 this parked workstream as authorized post-preview work and accepted the
 decisions below on 2026-10-26. Nothing below is in force until its slice
 lands; until then the private-network-only rules in Architecture are the whole
@@ -76,8 +77,12 @@ self-hosted as one process with no database.
   (`localDeviceAdministrationRoutes.ts`) each accept only the three named
   classes. The audit projection's `source_class` column has a `CHECK` on the
   same four values (`apps/server/src/persistence/migrations.ts`).
-- **No relay of any kind.** There is no outbound host connection for remote
-  access, no relay contract, and no relay service.
+- **No relay in use.** There is no outbound host connection for remote access
+  and no relay service. The wire contract and pure policy below exist
+  (`packages/contracts/src/hostedRelay.ts`, and `hostedRelayProtocol.ts`,
+  `remoteSourceAdmission.ts`, and `hostedRelayPathPolicy.ts` in
+  `packages/domain/src`), but no listener gate, transport, or client calls
+  them, and no transport produces the `relayed` class.
 
 ## Settled by existing specifications
 
@@ -157,6 +162,48 @@ symmetric NAT that motivates a relay. Public ingress to the listener (port
 forwarding or a public mesh funnel) is what the address classifier exists to
 refuse.
 
+### Wire contract
+
+- **Framing.** Each frame is a 2-byte big-endian body length, then a compact
+  JSON body of at most 4,096 bytes of printable ASCII. A reader refuses a
+  length over the limit from the prefix alone, before buffering the body, and
+  refuses an empty body, any byte outside printable ASCII, an unknown kind,
+  and any field the kind does not define. The ALPN `octant-relay-1` versions
+  the protocol, so frames carry no version field.
+- **Frames.**
+
+  | Connection          | Sender | Frames, in order                                                                                                |
+  | ------------------- | ------ | --------------------------------------------------------------------------------------------------------------- |
+  | Host control        | Host   | `control-open`, then any of `route-challenge-request`, `route-register`, `route-unregister`                     |
+  | Host control        | Relay  | `control-ready`, then `route-challenge`, `route-registered`, `route-unregistered`, `stream-offer`, or `refused` |
+  | Host stream         | Host   | `stream-accept` naming the offered stream id                                                                    |
+  | Device              | Device | `route-open` naming the grant's route id                                                                        |
+  | Host stream, device | Relay  | `splice-ready`, after which every byte is the spliced inner session, or `refused` and close                     |
+
+- **Registration.** The host asks for a challenge (256 random bits, single
+  use, 30 seconds), then sends the route id, the route key as an Ed25519
+  SubjectPublicKeyInfo in unpadded base64url, the challenge, and an Ed25519
+  signature over `octant.relay-route-registration.v1`, the challenge, and the
+  route id, each on its own line. The relay registers the route only when the
+  key derives the route id and the signature verifies. A key in any other
+  algorithm is refused rather than negotiated.
+- **Refusals.** `route-unavailable` (an unknown route and an offline host
+  alike), `stream-unavailable`, `challenge-unavailable`, `proof-refused`,
+  `route-limit`, `rate-limited`, and `frame-refused`. Only a refusal on the
+  control connection names a route id.
+- **Grant.** `relayOrigin` is one canonical HTTPS origin: a lowercase name or
+  bracketed IPv6 address and an optional port other than 443, with no path,
+  credentials, or trailing slash. `relayPin` is a `sha256-` pin in the
+  listener pin's form. Any other field is refused.
+
+Rationale: a 2-byte prefix covers the 4 KiB bound, and printable ASCII is
+all any field can hold, so refusing early on either costs nothing.
+Binding the route id into the signed message means one signature answers one
+challenge for one route. The grant allows a port other than 443 because a
+self-hosted relay, and the loopback relay the host and client smokes run, may
+not own port 443; the outer hop's own trust still judges whatever origin it
+names.
+
 ### Routes, grants, and pairing
 
 - **Pairing stays on the private network.** A relayed stream can never pair:
@@ -193,6 +240,11 @@ pseudonymously; it already sees each device's address.
 - It tries the direct private path first, under the existing address rule,
   and falls back to the relay only when that path fails to connect within
   three seconds. It re-tries direct on each reconnect.
+- A direct path that fails to connect includes a name that does not resolve
+  and the address rule refusing every resolved address before anything is
+  sent. A direct path that reaches a peer which then fails the pin or the
+  signed host hello does not fall back: that refusal is shown, because a relay
+  would hide a wrong host on the person's network.
 - On the relay path the address rule is replaced, not relaxed: the client
   dials only the grant's relay origin, judged by the outer hop's own trust,
   and runs the inner handshake held to the pin exactly as on the private path.
@@ -209,6 +261,19 @@ and authenticated product requests, and refused for every pairing route and
 ticket. Everything else an admission or route classifier refuses stays
 refused. Network position grants nothing in the current model, so the device
 key, not the path, carries authority (Maintainer decisions, 4).
+
+The listener's other unauthenticated routes (health, the host list, the
+sandboxed design page) and the web client's static files refuse `relayed`
+too. Only a browser or a web view uses them, and neither holds pinned trust,
+so neither can reach a relay; refusing them keeps the internet-reachable
+surface to the steps a paired app takes. Loopback, private LAN, and Tailscale
+sources keep every gate they have today, and an unclassified source is
+refused at every gate. One difference from today is deliberate and left to
+slice 3: the listener boundary hands a static-file request from an
+unclassified peer to the file handler's own Host and origin check rather than
+refusing it, and slice 3 either keeps that pass-through or adopts the table's
+refusal knowingly. The server's source-class checks keep their current
+three-class allow-lists until slice 3 replaces them with this table.
 
 ### Settings and administration
 
@@ -358,6 +423,11 @@ slice 1. No implementation slice merges before the release-boundary change.
    ticket minting refuse `relayed`; path choice picks relay only with pinned
    trust and a grant, after direct fails. Verification: focused contract and
    domain tests, typecheck of consumers. **Linux container: yes.**
+   **Built, in review:** the schemas in `packages/contracts/src/hostedRelay.ts`;
+   route ids, the registration message, and frame reading and writing in
+   `packages/domain/src/hostedRelayProtocol.ts`; the admission table in
+   `remoteSourceAdmission.ts`; and path choice in `hostedRelayPathPolicy.ts`.
+   Nothing outside their tests calls them yet.
 2. **Relay service.** `apps/relay`: registration with possession proof, route
    table, splice, limits, the first-record check, and identical refusal for
    unknown and offline routes; a compiled executable and a container recipe.

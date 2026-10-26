@@ -8256,7 +8256,8 @@ find-identity` and `codesign`, through a port with no network; `codesign`
     (`y` or `yes`); any other answer denies the request, and an input that
     ends without an answer leaves it pending for `octant pair approve`. It
     changes no firewall rule and runs no Tailscale command.
-- **Hosted relay.** Accepted 2026-10-26, not built: a ciphertext-only relay
+- **Hosted relay.** Accepted 2026-10-26; only its wire contract and pure
+  policy exist, and nothing calls them: a ciphertext-only relay
   that splices an already-paired app's pinned TLS session to the host, off by
   default and holding no authority, is specified in [Hosted relay](design/hosted-relay.md);
   until it lands, the listener and client trust rules above are the whole of
