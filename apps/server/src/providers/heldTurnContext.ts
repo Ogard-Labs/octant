@@ -17,6 +17,8 @@ interface SessionHold {
   readonly sending?: ReadonlySet<string>;
   /** Whether the running turn's adapter said the runtime keeps its prompts. */
   readonly keeps?: boolean;
+  /** Whether the running turn restates the whole context, superseding what was held. */
+  readonly restates?: boolean;
 }
 
 function blockDigest(block: ProviderContextBlock): string {
@@ -30,7 +32,8 @@ function blockDigest(block: ProviderContextBlock): string {
  * A block counts as held only after a turn that carried it completed on that
  * same session and reported, on its usage, that the runtime keeps its prompts
  * (`promptRetention: "kept"`): a failed or interrupted turn may never have
- * reached the runtime's history, and an adapter that says nothing about
+ * reached the runtime's history, yet a failed restatement may have, so it
+ * leaves the session holding nothing; and an adapter that says nothing about
  * retention (ACP agents) never reports a compaction either, so a dropped copy
  * there would never be sent again. A session started afresh holds nothing,
  * and a compaction, automatic or requested, drops everything, because the
@@ -66,6 +69,7 @@ export class HeldTurnContext {
     this.#sessions.set(key, {
       held,
       sending: new Set(context.filter(isStandingProviderContext).map(blockDigest)),
+      restates: delta.kind === "restated",
     });
     return delta;
   }
@@ -87,7 +91,10 @@ export class HeldTurnContext {
     } else if (event.kind === "completed" && session.sending !== undefined) {
       this.#sessions.set(key, { held: session.keeps === true ? session.sending : session.held });
     } else if (event.kind === "failed" || event.kind === "interrupted") {
-      this.#sessions.set(key, { held: session.held });
+      // A failed restatement may still be in the runtime's history (Claude
+      // reports usage before its failed result), where it supersedes blocks the
+      // record would otherwise call held; holding nothing forces a full send.
+      this.#sessions.set(key, { held: session.restates === true ? new Set() : session.held });
     }
   }
 

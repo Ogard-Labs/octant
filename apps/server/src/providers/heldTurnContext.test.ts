@@ -2,6 +2,7 @@ import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
   type CorrelationId,
+  type ProviderContextBlock,
   type ProviderRuntimeEvent,
   type UtcTimestamp,
 } from "@octant/contracts";
@@ -31,7 +32,7 @@ const mention = { kind: "user-message", text: "Mentioned thread." } as const;
 function completeTurn(
   ledger: HeldTurnContext,
   resumed: boolean,
-  context: ReadonlyArray<typeof instructions | typeof mention>,
+  context: ReadonlyArray<ProviderContextBlock>,
 ) {
   const delta = ledger.forTurn({ sessionId, resumed, context });
   ledger.observe(keptUsage);
@@ -104,5 +105,21 @@ describe("HeldTurnContext", () => {
     ledger.observe(keptUsage);
     ledger.observe(completed);
     expect(completeTurn(ledger, true, [instructions]).context).toEqual([]);
+  });
+
+  it("restates everything after a restating turn fails, since the runtime may have kept its restatement", () => {
+    const ledger = new HeldTurnContext();
+    const skill = { kind: "instructions", text: "Review as a skeptic." } as const;
+    completeTurn(ledger, false, [instructions, skill]);
+    ledger.forTurn({ sessionId, resumed: true, context: [instructions] });
+    ledger.observe(keptUsage);
+    ledger.observe({
+      ...fields,
+      kind: "failed",
+      failure: { category: "provider-failed", message: "The runtime stopped." },
+    });
+    expect(
+      ledger.forTurn({ sessionId, resumed: true, context: [instructions, skill] }).context,
+    ).toEqual([instructions, skill]);
   });
 });

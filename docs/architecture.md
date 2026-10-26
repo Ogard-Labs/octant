@@ -3692,7 +3692,10 @@ prompt is therefore built to be appended, never rewritten:
   an adapter that cannot say what its runtime keeps (ACP agents today) reports
   no compaction either, so its sessions are sent the standing context every
   turn. A
-  session opened by `start` holds nothing. A compaction, automatic
+  failed or interrupted turn that restated the context leaves the session
+  holding nothing, because the runtime may still have kept that restatement
+  (Claude reports usage before a failed result), and it supersedes what was
+  held. A session opened by `start` holds nothing. A compaction, automatic
   (`context-compacted`, or a usage report with `promptRetention: "compacted"`)
   or requested, drops the record, because the runtime keeps only a share of
   earlier prompts Octant cannot see. The record lives in memory, so after a
