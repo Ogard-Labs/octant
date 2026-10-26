@@ -753,6 +753,11 @@ Code settings. The renderer preserves its proposed branch as delivery intent wit
 claiming a checked-out branch; detached Git checkouts remain refused. Git-dependent
 actions continue to report unavailable for plain folders.
 
+A Code Project bound to a folder on a machine this host reaches over SSH is a
+design accepted on 2026-10-26, not yet built; its admission, confinement
+attestation, transport, and how it differs from a paired host are owned by
+[Remote SSH environments](design/remote-ssh-environments.md).
+
 An authorized repository test remains cancellable while the host rediscovers its
 command definition. Cancellation during discovery prevents process launch; runtime
 shutdown also cancels pending discovery and waits for it to settle. Thread and
