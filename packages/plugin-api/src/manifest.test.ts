@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeExtensionPackageManifest } from "./manifest";
+import { decodeExtensionPackageManifest, ExtensionLanguageServerClass } from "./manifest";
 
 const extensionId = "10000000-0000-4000-8000-000000000001";
 const packageId = "20000000-0000-4000-8000-000000000001";
@@ -185,6 +185,32 @@ describe("plugin-api manifest re-exports", () => {
       "appearance.preset",
       "preview.viewer",
     ]);
+  });
+
+  it("accepts a language-server component through the public package and refuses an unknown class", () => {
+    const component = {
+      id: "tsserver",
+      kind: "language-server",
+      displayName: "TypeScript",
+      declaredCapabilities: [],
+      entryPoint: "builtin:language-server/typescript",
+      languageServer: { languages: ["typescript"], launchClass: "static" },
+    };
+    const decoded = decodeExtensionPackageManifest(
+      manifest({ slug: "typescript-language", components: [component] }),
+    );
+    expect(decoded.components[0]?.languageServer?.launchClass).toBe("static");
+    expect(ExtensionLanguageServerClass.literals).toEqual(["static", "repo-tooling"]);
+    expect(() =>
+      decodeExtensionPackageManifest(
+        manifest({
+          slug: "typescript-language",
+          components: [
+            { ...component, languageServer: { languages: ["typescript"], launchClass: "trusted" } },
+          ],
+        }),
+      ),
+    ).toThrow();
   });
 
   it("rejects an unknown contribution point through the public package", () => {

@@ -67,6 +67,31 @@ function manifest() {
   };
 }
 
+function languageServerManifest(
+  languageServer: Record<string, unknown> = {
+    languages: ["typescript", "javascript"],
+    launchClass: "static",
+  },
+) {
+  return {
+    ...manifest(),
+    slug: "typescript-language",
+    declaredCapabilities: [],
+    primaryComponentId: "tsserver",
+    compatibility: { platforms: ["macos", "linux"], modes: ["code"], providerFamilies: [] },
+    components: [
+      {
+        id: "tsserver",
+        kind: "language-server",
+        displayName: "TypeScript",
+        declaredCapabilities: [],
+        entryPoint: "entry-tsserver",
+        languageServer,
+      },
+    ],
+  };
+}
+
 describe("extension package contracts", () => {
   it("strictly decodes a provider-neutral manifest", () => {
     const decoded = decodeExtensionPackageManifest(manifest());
@@ -310,6 +335,70 @@ describe("extension package contracts", () => {
       "desktop-provider",
     );
     expect(() => desktopProvider()).toThrow();
+  });
+
+  it("accepts an executable language server that declares its languages and launch class", () => {
+    const decoded = decodeExtensionPackageManifest(languageServerManifest());
+    expect(decoded.components[0]).toMatchObject({
+      kind: "language-server",
+      entryPoint: "entry-tsserver",
+      languageServer: { languages: ["typescript", "javascript"], launchClass: "static" },
+    });
+    expect(
+      decodeExtensionPackageManifest(
+        languageServerManifest({ languages: ["rust"], launchClass: "repo-tooling" }),
+      ).components[0]?.languageServer?.launchClass,
+    ).toBe("repo-tooling");
+  });
+
+  it("refuses a language server whose class, languages, or executable shape is not one Octant knows", () => {
+    // The class decides confinement, so a class this host cannot enforce is
+    // refused when the manifest is read rather than mapped to a nearby one.
+    for (const declaration of [
+      { languages: ["typescript"], launchClass: "unrestricted" },
+      { languages: ["typescript"], launchClass: "static", network: "unrestricted" },
+      { languages: [], launchClass: "static" },
+      { languages: ["Type Script"], launchClass: "static" },
+      { languages: ["typescript"] },
+    ]) {
+      expect(() =>
+        decodeExtensionPackageManifest(languageServerManifest(declaration as never)),
+      ).toThrow();
+    }
+    const [component] = languageServerManifest().components;
+    expect(() =>
+      decodeExtensionPackageManifest({
+        ...languageServerManifest(),
+        components: [{ ...component, entryPoint: undefined }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeExtensionPackageManifest({
+        ...languageServerManifest(),
+        components: [{ ...component, languageServer: undefined }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeExtensionPackageManifest({
+        ...manifest(),
+        components: [
+          {
+            id: "server",
+            kind: "mcp-server",
+            displayName: "Build MCP",
+            declaredCapabilities: ["mcp"],
+            entryPoint: "entry-server",
+            languageServer: { languages: ["typescript"], launchClass: "static" },
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeExtensionPackageManifest({
+        ...languageServerManifest(),
+        components: [{ ...component, kind: "debug-adapter" }],
+      }),
+    ).toThrow();
   });
 
   it("rejects an appearance-pack that claims an executable entry point", () => {

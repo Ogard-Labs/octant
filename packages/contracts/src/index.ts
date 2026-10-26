@@ -4,6 +4,7 @@ export * from "./codePlanner";
 export * from "./codeFileListing";
 export * from "./codeSearch";
 export * from "./codeOperations";
+export * from "./codeLanguage";
 export * from "./threadBoard";
 export * from "./threadBoardPullRequests";
 export * from "./codeTestDefinitions";

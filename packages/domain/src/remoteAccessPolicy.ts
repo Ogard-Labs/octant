@@ -83,6 +83,10 @@ const REMOTE_APPROVABLE_ACTIONS = new Set([
   "code.local-servers.open",
   "code.local-servers.stop-owned",
   "project.overview.read",
+  // Language services: diagnostics and definitions for a Code thread the device
+  // already reaches, answered by a confined server. Starting a server that runs
+  // the repository's own tooling is not a read and is not listed here.
+  "code.language.read",
   // Companion surfaces: a paired device may watch what the host is already
   // showing for a thread, and may act inside that view. Reading the browser's
   // observation, a simulator screenshot the Apple toolchain recorded, and a

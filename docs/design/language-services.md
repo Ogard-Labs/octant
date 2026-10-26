@@ -14,8 +14,9 @@ start gates this design answers are in
 post-preview work on 2026-10-26, when parked backlog work was unlocked. That
 authorizes the design and the slices below; the release-boundary statement in
 `AGENTS.md` and the architecture is updated separately. The maintainer
-accepted this design and its [decisions](#maintainer-decisions) on 2026-10-26;
-slice 1 is starting. **Nothing here is built.** Monaco editing and the explicit
+accepted this design and its [decisions](#maintainer-decisions) on 2026-10-26.
+**Slice 1 (seam and policy) is built; nothing launches a language server
+yet.** Slice 2 is next. Monaco editing and the explicit
 external-editor handoff stay the primary Code editing paths and are unchanged
 by every slice.
 
@@ -57,8 +58,15 @@ behind its own approval and confinement rules.
   supervises reviewed executable components: ready handshake, bounded output,
   crash budget (two restarts a minute), receipts, drain-then-stop. Component
   kinds live in `packages/contracts/src/extensions.ts`
-  (`ExtensionComponentKind`). There is no language-server or debug-adapter
-  kind.
+  (`ExtensionComponentKind`). Slice 1 added the `language-server` kind; there
+  is no debug-adapter kind.
+- **Language seam (slice 1).** `packages/contracts/src/extensions.ts` declares
+  the `language-server` kind and its `languageServer` declaration;
+  `packages/plugin-host/src/activation.ts` admits it in Code only;
+  `packages/domain/src/languageServerLaunchPolicy.ts` decides a launch;
+  `packages/contracts/src/codeLanguage.ts` holds the read and refusal
+  contracts; and `code.language.read` is remote-approvable in
+  `remoteAccessPolicy.ts`. No server module uses them yet.
 - **Network levels.** `apps/server/src/process/threadEgressPolicy.ts` resolves
   `none`, `provider-endpoints-only`, and `unrestricted`. The
   [harness tool egress rules](../architecture.md#harness-tool-egress-rules)
@@ -133,6 +141,64 @@ It writes nothing in the checkout, runs nothing from it, reaches no network,
 and reads only what the thread can already read. The person's act is opening a
 file in an editor with an enabled component. That is also why it may serve a
 Plan thread, whose read-only rule it cannot breach.
+
+### Seam and launch decision
+
+Slice 1 settled these details. Where the design left a choice open, the more
+restrictive one was taken.
+
+- **Declaration.** A `language-server` component carries
+  `languageServer: { languages, launchClass }`, present exactly when the kind
+  is `language-server`. `languages` holds 1 to 32 Language Server Protocol
+  identifiers (`^[a-z][a-z0-9-]{0,63}$`), which normalization sorts and
+  de-duplicates. The kind is executable, so it needs an entry point. An
+  unknown class, an unknown field, or an unknown kind is refused when the
+  manifest is decoded. The class decides confinement, so a class the host does
+  not know is never mapped to a nearby one.
+- **Updates.** An update that moves a component to `repo-tooling` counts as a
+  capability expansion even when its kind and declared capabilities are
+  unchanged. The package is quarantined and its trust and switches are
+  cleared, as for any other expansion. Reason: the class alone lets the
+  server write the checkout, run tooling, and reach the network. Adding or
+  removing languages, or moving to `static`, is not an expansion.
+- **Launch decision.** `decideLanguageServerLaunch` takes the class, the
+  thread's posture, the host platform, who caused the start (local window or
+  paired device), and whether the shell-command approval for this checkout and
+  component is on record. It returns a launch shape or the first refusal in
+  this order: `unsupported-platform` (neither macOS nor Linux),
+  `plan-read-only`, `local-host-required`, `approval-required`. The last three
+  apply only to `repo-tooling`. A `static` server may start when a paired
+  device's authorized read asks for one, because starting it grants nothing
+  beyond that read. Starting `repo-tooling` from a paired device is refused even
+  with an approval on record, and there is no remote action for it, so the
+  remote gate rejects the request too. Reason: the approval is the person's
+  act at the machine, and D4 keeps running repository tooling there.
+- **Read contracts** (`@octant/contracts/code-language`). A read names a thread,
+  checkout, and file reference, never a path. Diagnostics and definitions use
+  zero-based lines and UTF-16 character offsets. A result is diagnostics (at
+  most 1,000, with a `truncated` flag; messages at most 2,048 characters;
+  source labels at most 64 and holding no path separator), definition
+  targets (at most 64), `unavailable`
+  (`starting`, `crashed`, `timed-out`: states to wait out or retry), or
+  `refused` with one reason. The refusal reasons are `thread-inactive`,
+  `checkout-unavailable`, `checkout-mismatch`, `file-outside-thread`,
+  `path-outside-checkout`, `no-reach`, `turned-off` (the Settings switch,
+  D2), `no-language-server`, `confinement-unavailable`, and the four launch
+  refusals unchanged. An installed component that is not effective reads as
+  `no-language-server`, so a read never shows which disabled or unreviewed
+  components exist.
+- **Host paths in message text.** Structured paths are checkout-relative by
+  schema, but a diagnostic message is the server's free text and can name a
+  host path, such as a `tsconfig` it could not read outside the checkout. The
+  adapter rewrites every absolute path or `file:` URI in a message: one inside
+  the checkout becomes checkout-relative, and any other becomes
+  `<outside checkout>`. The schema cannot enforce this, so slice 2 tests it.
+- **Read before start.** Every authority check of a read, `no-reach`
+  included, runs before the launch decision is consulted. A refused read never
+  starts a server, so a paired device can start a `static` server only for a
+  thread it already reaches (D4).
+- **Not yet wired.** No server module uses the policy or the read contracts
+  until slice 2. The module wiring check lists both as islands until then.
 
 ### Authority
 
@@ -291,6 +357,13 @@ accounts or hardware.
      classes and kinds are refused on decode, and every consumer typechecks.
    - _Verify:_ focused contract and domain tests, typecheck consumers,
      `style:check`.
+   - _State:_ built. The launch table holds for every class, posture,
+     platform, starter, and approval in the domain tests. Unknown classes,
+     fields, and kinds fail to decode. Installing a language-server package
+     through the lifecycle service leaves it untrusted and disabled, and once
+     enabled it is still `mode-prohibited` in Chat and Work. An update that
+     widens it to `repo-tooling` is quarantined for review. The rules settled
+     on the way are under [Seam and launch decision](#seam-and-launch-decision).
 2. **Companion supervisor and the bundled TypeScript server.** Container: yes
    for Linux.
    - The server launches, frames, allow-lists, times out, idles, crash-limits,
@@ -300,7 +373,8 @@ accounts or hardware.
      cross-file definition through the real binary under Bubblewrap with the
      network unshared, the no-fork filter loaded, and the checkout read-only.
    - _Negatives:_ an archived thread, a checkout mismatch, a path escape
-     through a symlink, an outside-checkout definition, a server `applyEdit`,
+     through a symlink, an outside-checkout definition, a diagnostic message
+     naming a host path outside the checkout, a server `applyEdit`,
      an oversize frame, the crash budget, missing `bwrap`, another platform,
      and a device without reach are each refused or contained. A restarted
      host reaps receipts.
