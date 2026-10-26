@@ -669,6 +669,59 @@ export const AppleDeviceRefusalReason = Schema.Literal(
 );
 export type AppleDeviceRefusalReason = typeof AppleDeviceRefusalReason.Type;
 
+/**
+ * Whose lease a device is under, as the asking thread may know it. Another
+ * thread is never named: the holder only a local person's move confirmation
+ * shows stays on the host.
+ */
+export const AppleDeviceLeaseHolder = Schema.Literal("this-thread", "another-thread");
+export type AppleDeviceLeaseHolder = typeof AppleDeviceLeaseHolder.Type;
+
+/** What `discover` answers: the host's paired iPhones and iPads and its device tooling. */
+export const AppleDeviceDiscovery = Schema.Struct({
+  devices: Schema.Array(AppleDeviceRecord).pipe(Schema.maxItems(64)),
+  tooling: Schema.Array(AppleDeviceToolingOperation).pipe(Schema.maxItems(16)),
+  leases: Schema.Array(
+    Schema.Struct({ deviceId: AppleDeviceId, holder: AppleDeviceLeaseHolder }).annotations(strict),
+  ).pipe(Schema.maxItems(64)),
+  discoveredAt: UtcTimestamp,
+}).annotations(strict);
+export type AppleDeviceDiscovery = typeof AppleDeviceDiscovery.Type;
+
+/**
+ * The device routes' answers. A refusal carries the policy's reason and
+ * nothing else, so a request another thread's lease refused learns only that.
+ */
+export const AppleDeviceResponse = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-discovery"),
+    discovery: AppleDeviceDiscovery,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-status"),
+    device: AppleDeviceRecord,
+    holder: Schema.optional(AppleDeviceLeaseHolder),
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-leased"),
+    deviceId: AppleDeviceId,
+    grantedAt: UtcTimestamp,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-released"),
+    deviceId: AppleDeviceId,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-refused"),
+    reason: AppleDeviceRefusalReason,
+  }).annotations(strict),
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-failure"),
+    failure: AppleToolchainFailure,
+  }).annotations(strict),
+);
+export type AppleDeviceResponse = typeof AppleDeviceResponse.Type;
+
 export const decodeAppleProjectPath = Schema.decodeUnknownSync(AppleProjectPath);
 export const decodeAppleToolchainId = Schema.decodeUnknownSync(AppleToolchainId);
 export const decodeAppleSimulatorId = Schema.decodeUnknownSync(AppleSimulatorId);
@@ -695,6 +748,8 @@ export const decodeAppleBuildEvidence = Schema.decodeUnknownSync(AppleBuildEvide
 export const decodeAppleActionProgress = Schema.decodeUnknownSync(AppleActionProgress);
 export const decodeAppleRuntimeSnapshot = Schema.decodeUnknownSync(AppleRuntimeSnapshot);
 export const decodeAppleToolchainFailure = Schema.decodeUnknownSync(AppleToolchainFailure);
+export const decodeAppleDeviceId = Schema.decodeUnknownSync(AppleDeviceId);
 export const decodeAppleDeviceRecord = Schema.decodeUnknownSync(AppleDeviceRecord);
 export const decodeAppleDeviceRequest = Schema.decodeUnknownSync(AppleDeviceRequest);
 export const decodeAppleDeviceLease = Schema.decodeUnknownSync(AppleDeviceLease);
+export const decodeAppleDeviceResponse = Schema.decodeUnknownSync(AppleDeviceResponse);

@@ -787,6 +787,39 @@ describe("Apple physical device contracts", () => {
     ).toThrow();
   });
 
+  it("answers a discovery that says a device is leased without naming the other thread", () => {
+    const answer = AppleContracts.decodeAppleDeviceResponse({
+      kind: "apple-device-discovery",
+      discovery: {
+        devices: [device],
+        tooling: ["list-devices", "install-app"],
+        leases: [{ deviceId: device.deviceId, holder: "another-thread" }],
+        discoveredAt: "2026-10-26T12:00:00.000Z",
+      },
+    });
+    expect(answer.kind).toBe("apple-device-discovery");
+    expect(() =>
+      AppleContracts.decodeAppleDeviceResponse({
+        kind: "apple-device-discovery",
+        discovery: {
+          devices: [device],
+          tooling: [],
+          leases: [
+            { deviceId: device.deviceId, holder: "another-thread", threadId: request.threadId },
+          ],
+          discoveredAt: "2026-10-26T12:00:00.000Z",
+        },
+      }),
+    ).toThrow();
+    expect(() =>
+      AppleContracts.decodeAppleDeviceResponse({
+        kind: "apple-device-refused",
+        reason: "destination-leased",
+        threadId: request.threadId,
+      }),
+    ).toThrow();
+  });
+
   it("records a lease only as granted by a person at the Mac", () => {
     const lease = {
       deviceId: device.deviceId,

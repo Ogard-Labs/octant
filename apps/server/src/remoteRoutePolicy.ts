@@ -57,6 +57,9 @@ const LOCAL_ONLY_PREFIXES = [
   // Reviewing what a thread read and clearing its outside-content mark is a
   // person's act at this machine.
   "/api/thread-external-content",
+  // Starting, moving, or releasing a physical device's lease is a person's
+  // act at the Mac the device is paired with.
+  "/api/apple/device-leases",
 ] as const;
 
 /**

@@ -1040,6 +1040,86 @@ describe("startOctantServer", () => {
     );
   });
 
+  it("registers the physical device routes and refuses a thread the window cannot reach", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "octant-server-apple-device-routes-"));
+    directories.push(directory);
+    let routeHandler: ((request: Request) => Response | Promise<Response>) | undefined;
+    const capability = "A".repeat(43);
+    const windowId = "00000000-0000-4000-8000-000000000483";
+    const deviceRequest = (kind: "discover" | "use-device") => ({
+      actionId: "00000000-0000-4000-8000-000000000484",
+      correlationId: "00000000-0000-4000-8000-000000000485",
+      authority: {
+        hostId: "00000000-0000-4000-8000-000000000486",
+        mode: "code",
+        projectId: "00000000-0000-4000-8000-000000000487",
+        providerInstanceId: "00000000-0000-4000-8000-000000000488",
+        extension: { kind: "core" },
+      },
+      threadId: "00000000-0000-4000-8000-000000000489",
+      checkoutId: "00000000-0000-4000-8000-00000000048a",
+      kind,
+      requestedBy: { kind: "local-user", actorId: "00000000-0000-4000-8000-000000000002" },
+      ...(kind === "discover" ? {} : { deviceId: "00000000-0000-4000-8000-00000000048b" }),
+      timeoutMs: 30_000,
+      approval: { kind: "not-required" },
+    });
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* startOctantServer({
+            hostname: "127.0.0.1",
+            port: 0,
+            desktopBridgeSecret: "desktop-secret",
+            serve: (options) => {
+              routeHandler = options.fetch;
+              return { url: new URL("http://127.0.0.1:13773"), stop: () => undefined };
+            },
+          });
+          const registered = yield* Effect.promise(() =>
+            Promise.resolve(
+              routeHandler?.(
+                new Request("http://127.0.0.1:13773/api/desktop/window-authorities", {
+                  method: "POST",
+                  headers: { "x-octant-desktop-secret": "desktop-secret" },
+                  body: JSON.stringify({ windowId, capability }),
+                }),
+              ),
+            ),
+          );
+          expect(registered?.status).toBe(204);
+
+          for (const [path, kind] of [
+            ["/api/apple/devices", "discover"],
+            ["/api/apple/device-leases", "use-device"],
+          ] as const) {
+            const response = yield* Effect.promise(() =>
+              Promise.resolve(
+                routeHandler?.(
+                  new Request(`http://127.0.0.1:13773${path}`, {
+                    method: "POST",
+                    headers: {
+                      "content-type": "application/json",
+                      "x-octant-window-capability": capability,
+                    },
+                    body: JSON.stringify(deviceRequest(kind)),
+                  }),
+                ),
+              ),
+            );
+            expect(response?.status).toBe(403);
+            const body = yield* Effect.promise(() => Promise.resolve(response?.json()));
+            expect(body).toMatchObject({
+              kind: "apple-device-failure",
+              failure: { category: "unauthorized" },
+            });
+          }
+        }).pipe(Effect.provide(makePersistenceLive({ dataDirectory: directory }))),
+      ),
+    );
+  });
+
   it("registers authenticated Code routes while preserving the larger Chat outer ceiling", async () => {
     const directory = mkdtempSync(join(tmpdir(), "octant-server-code-routes-"));
     directories.push(directory);

@@ -23,6 +23,9 @@ import {
   decodeProviderSessionId,
   type CodeCheckoutIdentity,
   type AppleActionRequest,
+  type AppleDeviceId,
+  type AppleDeviceRecord,
+  type AppleDeviceRequest,
   type AndroidEmulatorRequest,
   type CodeOperationCommand,
   type CodeOperationFailure,
@@ -280,6 +283,13 @@ export interface CodeOperationRuntimeOptions {
     readonly thread: CodeThread;
   }) => AppManagedToolSet | undefined;
   readonly persistence: RuntimePersistence;
+  /**
+   * The paired device a lease confirmation names, as the host last saw it.
+   * Absent on a host with no device layer, where no lease is ever confirmed.
+   */
+  readonly describeAppleDevice?: (
+    deviceId: AppleDeviceId,
+  ) => Pick<AppleDeviceRecord, "name" | "model" | "osVersion" | "connection"> | undefined;
   readonly windowAccess: {
     readonly canAccessProject: CodeOperationAuthorityPort["canAccessProject"];
     /**
@@ -678,6 +688,8 @@ export interface CodeOperationRuntime {
   cancelApproval?(windowId: WindowId, confirmation: CodeOperationApprovalConfirmation): void;
   validateAppleApproval(windowId: WindowId, request: AppleActionRequest): Promise<boolean>;
   validateAndroidApproval(windowId: WindowId, request: AndroidEmulatorRequest): Promise<boolean>;
+  /** Whether a person at this window confirmed exactly this device lease. */
+  validateAppleDeviceLease?(windowId: WindowId, request: AppleDeviceRequest): Promise<boolean>;
   revokeApprovals(windowId: WindowId): void;
   /**
    * Shows a native-harness question on the thread's running turn so it is
@@ -1116,6 +1128,12 @@ export function createCodeOperationRuntime(
         );
         thread = resolved?.thread;
         checkout = resolved?.checkout;
+      } else if (request.effect.kind === "apple-device-lease") {
+        const lease = await resolveAppleDeviceLeaseScope(options, windowId, request.effect.request);
+        if (lease === undefined) return undefined;
+        directContext = await approvalContext(options, undefined, lease.thread, lease.checkout);
+        directThreadTitle = lease.thread.title;
+        directPrompt = appleDeviceLeasePrompt(lease);
       } else if (request.effect.kind === "create-thread-full-access") {
         thread = request.effect.thread;
         checkout = options.persistence.readCodeCheckout(thread.checkoutId);
@@ -1256,6 +1274,19 @@ export function createCodeOperationRuntime(
       return await approvalValidator.validate({
         windowId,
         effect: { kind: "apple-action", request },
+        contextDigest: approvalContextDigest(context),
+        approvalId: request.approval.approvalId,
+      });
+    },
+    validateAppleDeviceLease: async (windowId, request) => {
+      if (approvalValidator === undefined || request.approval.kind !== "approved") return false;
+      const lease = await resolveAppleDeviceLeaseScope(options, windowId, request);
+      if (lease === undefined) return false;
+      const context = await approvalContext(options, undefined, lease.thread, lease.checkout);
+      if (context === undefined) return false;
+      return await approvalValidator.validate({
+        windowId,
+        effect: { kind: "apple-device-lease", request },
         contextDigest: approvalContextDigest(context),
         approvalId: request.approval.approvalId,
       });
@@ -1727,6 +1758,74 @@ async function resolveAndroidApprovalScope(
   return resolveDeviceApprovalScope(options, windowId, request);
 }
 
+interface AppleDeviceLeaseScope {
+  readonly thread: CodeThread;
+  readonly checkout: CodeCheckoutIdentity;
+  readonly device: NonNullable<
+    ReturnType<NonNullable<CodeOperationRuntimeOptions["describeAppleDevice"]>>
+  >;
+  /** The thread a move takes the device from, which the person must be shown. */
+  readonly from?: CodeThread;
+}
+
+/**
+ * The thread, checkout, and device a lease confirmation names. Unlike an
+ * effect's approval it does not depend on the thread's posture: a lease asks
+ * a person under every posture, Full access and Plan included.
+ */
+async function resolveAppleDeviceLeaseScope(
+  options: CodeOperationRuntimeOptions,
+  windowId: WindowId,
+  request: AppleDeviceRequest,
+): Promise<AppleDeviceLeaseScope | undefined> {
+  const thread = options.persistence.readCodeThread(request.threadId);
+  const checkout = options.persistence.readCodeCheckout(request.checkoutId);
+  const device =
+    request.deviceId === undefined ? undefined : options.describeAppleDevice?.(request.deviceId);
+  const from =
+    request.fromThreadId === undefined
+      ? undefined
+      : options.persistence.readCodeThread(request.fromThreadId);
+  if (
+    request.kind !== "use-device" ||
+    device === undefined ||
+    thread === undefined ||
+    checkout === undefined ||
+    thread.checkoutId !== checkout.id ||
+    thread.repositoryId !== checkout.repositoryId ||
+    thread.projectId !== request.authority.projectId ||
+    thread.providerInstanceId !== request.authority.providerInstanceId ||
+    thread.lifecycle !== "active" ||
+    checkout.availability !== "available" ||
+    request.authority.mode !== "code" ||
+    request.authority.extension.kind !== "core" ||
+    (request.fromThreadId !== undefined && from === undefined) ||
+    !(await options.windowAccess.canAccessProject(windowId, thread.projectId))
+  ) {
+    return undefined;
+  }
+  return { thread, checkout, device, ...(from === undefined ? {} : { from }) };
+}
+
+/** Names the device and the thread, and for a move the thread that loses it. */
+function appleDeviceLeasePrompt(lease: AppleDeviceLeaseScope): {
+  readonly message: string;
+  readonly detail: string;
+} {
+  const { device, from, thread } = lease;
+  return {
+    message: `Let this thread use ${device.name}?`,
+    detail: boundApprovalDetail(
+      [
+        `Device: ${device.name} · ${device.model} · iOS ${device.osVersion} · ${device.connection === "wired" ? "connected by cable" : "on the network"}`,
+        `Thread: ${thread.title}`,
+        ...(from === undefined ? [] : [`Moves the device from: ${from.title}`]),
+        "Until the lease ends, this thread can install and run its own app on the device, take screenshots, and read that app's console output.",
+      ].join("\n"),
+    ),
+  };
+}
+
 async function resolveDeviceApprovalScope(
   options: CodeOperationRuntimeOptions,
   windowId: WindowId,
@@ -1820,6 +1919,10 @@ function approvalPrompt(
         ? [`Scheme: ${effect.request.scheme}`]
         : []),
     ].join("\n");
+  } else if (effect.kind === "apple-device-lease") {
+    // prepareApproval words a lease from the device it names, which this
+    // function is not given; reaching here is a wiring fault.
+    throw new TypeError("A device lease is prompted with the device it names.");
   } else if (effect.kind === "android-action") {
     const input =
       isAndroidEmulatorInputKind(effect.request.kind) ||
