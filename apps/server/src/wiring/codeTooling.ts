@@ -21,6 +21,9 @@ import {
 import { createCodeRouteHandler, MAX_CODE_FILE_BODY_SIZE } from "../codeRoutes";
 import { CodeLanguageService, type CodeLanguageServerComponent } from "../code/codeLanguageService";
 import { LanguageServerProcessPort } from "../code/languageServerProcess";
+import { installedLanguageServerComponents } from "../code/installedLanguageServers";
+import { isExtensionCompatibilityCompatible } from "../extensions/packageInspector";
+import { EXTENSION_AGGREGATE_TYPE } from "../persistence/extensionProjection";
 import {
   createCodeCheckoutOpenRouteHandler,
   createCodeExternalEditorRouteHandler,
@@ -52,8 +55,9 @@ import type { AgentRunsWiring } from "./agentRuns";
 import type { WorkspaceWiring } from "./workspace";
 import type { CodeWiring } from "./code";
 import type { CodeRuntimeWiring } from "./codeRuntime";
+import type { ProvidersWiring } from "./providers";
 
-export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence"> &
+export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence" | "version"> &
   Pick<AuthorityWiring, "codeSessionAuthority" | "windowAuthorityStore"> &
   Pick<AgentRunsWiring, "managedWorktreeReceipts"> &
   Pick<WorkspaceWiring, "projectRootPort" | "projectService"> &
@@ -61,7 +65,8 @@ export type CodeToolingDependencies = Pick<ServerStart, "options" | "persistence
     CodeWiring,
     "canAccessCodeProject" | "codeFileWatch" | "codeWorkingDirectoryProbePath" | "roots"
   > &
-  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService" | "terminalProcessPort">;
+  Pick<CodeRuntimeWiring, "codeOperationRuntime" | "routeCodeService" | "terminalProcessPort"> &
+  Pick<ProvidersWiring, "extensionLifecycleService" | "extensionPackageStore">;
 
 export function wireCodeTooling(deps: CodeToolingDependencies) {
   const {
@@ -70,6 +75,8 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     codeOperationRuntime,
     codeSessionAuthority,
     codeWorkingDirectoryProbePath,
+    extensionLifecycleService,
+    extensionPackageStore,
     managedWorktreeReceipts,
     options,
     persistence,
@@ -78,6 +85,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     roots,
     routeCodeService,
     terminalProcessPort,
+    version,
     windowAuthorityStore,
   } = deps;
   return Effect.gen(function* () {
@@ -129,13 +137,20 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     yield* Effect.addFinalizer(() => Effect.sync(unsubscribeProjectTerminalAuthority));
     // Language services: confined language servers started on demand for a
     // Code checkout (docs/design/language-services.md). The bundled
-    // TypeScript server is the only component today; it is on by default,
-    // Settings › Code turns it off, and it reads as unavailable on an install
-    // that has no binary for this host.
+    // TypeScript server is on by default, Settings › Code turns it off, and
+    // it reads as unavailable on an install that has no binary for this host.
+    // A server a person installed serves only once it is reviewed and switched
+    // on, and after the bundled one for a language both declare.
     const bundledLanguageServers = bundledLanguageServerComponents(
       resolveBundledTypeScriptServerBinary(),
       () => persistence.readCodeSettings()?.settings.bundledLanguageServer !== false,
     );
+    const installedLanguageServers = installedLanguageServerComponents({
+      snapshot: () => extensionLifecycleService.snapshot(),
+      store: extensionPackageStore,
+      compatible: (compatibility) =>
+        isExtensionCompatibilityCompatible(compatibility, version, process.platform),
+    });
     const languageServerProcesses = new LanguageServerProcessPort({
       receiptDirectory: join(persistence.dataDirectory, "code", "language-server-receipts"),
     });
@@ -149,7 +164,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         resolveRoot: (scopeId, thread, checkout, relativePath) =>
           roots.resolve(scopeId, thread, checkout, relativePath),
       },
-      components: () => bundledLanguageServers("effective"),
+      components: () => [...bundledLanguageServers("effective"), ...installedLanguageServers()],
       turnedOffComponents: () => bundledLanguageServers("turned-off"),
       processes: languageServerProcesses,
       platform: languageServerHostPlatform(process.platform),
@@ -159,16 +174,17 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
     // A previous run's servers are ended before this run starts any.
     yield* Effect.promise(() => languageServerProcesses.reconcile().catch(() => undefined));
     languageService.startSweeping();
-    // An archived or completed thread, a checkout that went away, or the
-    // Settings switch turned off stops its server at once rather than at the
-    // next timed sweep.
+    // An archived or completed thread, a checkout that went away, the Settings
+    // switch turned off, or a server whose trust or switch was withdrawn stops
+    // at once rather than at the next timed sweep.
     const unsubscribeLanguageServerAuthority = persistence.journal.subscribeCommitted((append) => {
       if (
         append.events.some(
           (event) =>
             event.aggregateType === "code-thread" ||
             event.aggregateType === "code-checkout" ||
-            event.aggregateType === "code-settings",
+            event.aggregateType === "code-settings" ||
+            event.aggregateType === EXTENSION_AGGREGATE_TYPE,
         )
       ) {
         void languageService.sweep().catch(() => undefined);
@@ -412,7 +428,7 @@ function bundledLanguageServerComponents(
         componentKey: `${bundled.manifest.extensionId}:${bundled.component.id}`,
         languages: bundled.languageServer.languages,
         launchClass: bundled.languageServer.launchClass,
-        executable: typeScriptBinary,
+        executable: async () => typeScriptBinary,
         args: ["--lsp", "--stdio"],
         installRoot: dirname(typeScriptBinary),
         sourceLabel: "typescript",

@@ -1500,6 +1500,7 @@ export function wireProviders(deps: ProvidersDependencies) {
       discoveryRoutes,
       extensionActivationService,
       extensionApiService,
+      extensionLifecycleService,
       extensionPackageStore,
       extensionRoutes,
       generatedImageStore,
