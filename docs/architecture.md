@@ -2460,9 +2460,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   auth variables (existing installs authenticate that way). Extra
   assigned homes strip those variables so they cannot share the
   host key, and strip `CODEX_SQLITE_HOME` so their thread state
-  database is not the host's. The AWS profile and file variables
-  stay for every account: they choose among the AWS identities of
-  the one operating-system user and hold no login of their own. An
+  database is not the host's. No account receives the AWS profile
+  or shared-config variables (`AWS_PROFILE`, `AWS_CONFIG_FILE`,
+  `AWS_SHARED_CREDENTIALS_FILE`); a Bedrock sign-in follows the
+  rule under the confinement matrix in
+  [security and authority](#security-and-authority). An
   explicit API-key instance still receives only the
   broker-resolved key. Each Codex account has its own
   long-lived app-server and never shares that process with another
@@ -6433,6 +6435,31 @@ mechanisms are:
   change that, and nothing requires it. Claude's unwrapped postures rest on
   the runtime's own sandbox for the same reason: its sign-in and tools need
   reach that a deny-default profile would have to re-grant.
+  Codex's `read-only` sandbox reads the whole disk, so `~/.aws`, `~/.ssh`,
+  and every other file under `HOME` is reachable from a Codex command in
+  every posture. Octant therefore gives the Codex runtime no reusable cloud
+  credential the person did not configure for that account. The environment
+  Octant launches it with carries no AWS profile, shared-config location, or
+  IAM key (Codex still loads the account home's own `.env`, which is that
+  account's configuration), and an Amazon Bedrock sign-in is traced in
+  Codex's own order (`auth_source` in codex-rs
+  `model-provider/src/amazon_bedrock/auth.rs`, rust-v0.162.1): the provider's
+  `auth` command, `aws.credential_export`, `aws.profile`, a key or access
+  keys stored in the account's Codex home, `AWS_BEARER_TOKEN_BEDROCK`, then
+  the AWS SDK default chain. A credential export, a profile, and the default
+  chain are refused: each reads the AWS shared config or hands the runtime
+  general-purpose AWS keys, whether or not a profile variable names them.
+  The probe reports `incompatible` with the reason and the recovery (a
+  Bedrock API key), and acquiring a session fails the same way, so a caller
+  that did not probe cannot start a thread on it either. A token command, a
+  sign-in stored in the account's Codex home, and the bearer token are the
+  person's configuration for that account and are admitted. Codex reports
+  the stored sign-in only as `usesCodexManagedCredentials`, and Octant never
+  reads Codex's credential store, so stored access keys count as that
+  account's own sign-in just as a stored Bedrock key does. An AWS profile
+  was the documented Bedrock route until 2026-10-26; nothing kept its files
+  from the commands, and admitting it again needs Codex wrapped or its
+  sandbox's readable roots narrowed.
   `providerProcessConfinement.test.ts` refuses a new module that launches
   without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
