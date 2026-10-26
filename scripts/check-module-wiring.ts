@@ -125,6 +125,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/provider-sdk/src/imageGenerationConformance.ts",
     "Image-seam conformance harness that image driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the image seam is retired.",
   ],
+  [
+    "packages/plugin-api/src/desktopProviderConformance.ts",
+    "Desktop-provider seam conformance harness that desktop driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the desktop-provider seam is retired.",
+  ],
 ]);
 
 /** Route modules exempt from Rule A, with the reason they are not registered. */
