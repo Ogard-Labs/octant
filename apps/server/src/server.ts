@@ -477,6 +477,7 @@ export function startOctantServer(
       buildCodeService,
       canAccessCodeProject,
       codeAttachments,
+      codeFileWatch,
       codeProjectAccess,
       codeTestDiscovery,
       codeWorkingDirectoryProbePath,
@@ -687,7 +688,9 @@ export function startOctantServer(
       remoteServerGrants,
     } = yield* wireCodeTooling({
       canAccessCodeProject,
+      codeFileWatch,
       codeOperationRuntime,
+      codeSessionAuthority,
       codeWorkingDirectoryProbePath,
       managedWorktreeReceipts,
       options,

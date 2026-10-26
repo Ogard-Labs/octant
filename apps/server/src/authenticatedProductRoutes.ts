@@ -92,6 +92,17 @@ export function classifyProductAction(request: Request): string | undefined {
     if (method === "POST" && path === "/api/code/local-servers/commands") {
       return "code.local-servers.list";
     }
+    // Language services are a read of a thread the device already reaches.
+    // Syncing the editor's open documents feeds that read and writes nothing,
+    // so both ride on the read action; the service re-checks reach, the
+    // thread, and the checkout, and the launch policy refuses any server that
+    // would run repository tooling for a device.
+    if (
+      method === "POST" &&
+      (path === "/api/code/language/read" || path === "/api/code/language/documents")
+    ) {
+      return "code.language.read";
+    }
     if (method === "POST" && path.endsWith("/commands")) return "code.plan-turn";
     if (method === "GET" || method === "HEAD") return "project.overview.read";
     return undefined;

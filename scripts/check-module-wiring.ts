@@ -95,15 +95,7 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/persistence/sqlitePort.conformance.ts",
     "Conformance kit that sqlitePort.test.ts and sqlitePort.smoke.ts run against the SQLite port; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port's last conformance test is retired.",
   ],
-  [
-    "packages/domain/src/languageServerLaunchPolicy.ts",
-    "Language-server launch policy delivered with its seam before the companion supervisor that applies it (docs/design/language-services.md, delivery plan slice 2). Remove once the server launches a language server through it.",
-  ],
   // ── Reached only through another island, so an island with it ──
-  [
-    "packages/contracts/src/codeLanguage.ts",
-    "Language read and refusal wire schemas whose only consumer today is languageServerLaunchPolicy.ts. Remove once the server answers a language read (docs/design/language-services.md, delivery plan slice 2).",
-  ],
   [
     "packages/contracts/src/auditEvents.ts",
     "Audit event schemas whose only consumer is evaluateEscapeSuite.ts. Remove once a product runner reaches the escape suite or the suite is retired.",
@@ -665,6 +657,14 @@ export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   [
     "/api/apple/device-leases",
     "2026-10-26: starting and releasing a physical device's lease is served ahead of its caller, the device pane's lease confirmation of docs/design/apple-devices.md (delivery slice 4). Remove when the pane calls it.",
+  ],
+  [
+    "/api/code/language/documents",
+    "Language services' document sync, served by the host since 2026-10-26 ahead of the editor that calls it (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor syncs its open documents.",
+  ],
+  [
+    "/api/code/language/read",
+    "Language services' diagnostics and definition reads, served by the host since 2026-10-26 ahead of the editor that calls them (docs/design/language-services.md, delivery plan slice 3). Remove once the Code editor shows diagnostics and jumps to definitions.",
   ],
   [
     "/api/v1/shares",

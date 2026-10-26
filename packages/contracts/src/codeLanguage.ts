@@ -148,5 +148,60 @@ export const CodeLanguageReadResult = Schema.Union(
 );
 export type CodeLanguageReadResult = typeof CodeLanguageReadResult.Type;
 
+/**
+ * The longest document text the editor may hand the language server, in
+ * UTF-16 code units: the editor's own bound on an editable file. A document
+ * within it whose protocol frame would still exceed the server's frame cap is
+ * answered `too-large` instead of being sent.
+ */
+export const MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH = 5 * 1024 * 1024;
+
+const documentText = Schema.String.pipe(Schema.maxLength(MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH));
+
+/**
+ * What the editor has open, so the server analyses the person's text rather
+ * than only the saved file. `open` is the one request that names a file by
+ * path: a checkout-relative path the host confines, from which it derives the
+ * file reference every later request uses. A read names only that reference,
+ * and a reference with no open document belongs to no file the server holds.
+ * Text lives in memory for as long as the document is open and is never
+ * written to disk.
+ */
+export const CodeLanguageDocumentRequest = Schema.Union(
+  Schema.Struct({
+    kind: Schema.Literal("open"),
+    threadId: CodeThreadId,
+    checkoutId: CodeCheckoutId,
+    path: CodeRelativePath,
+    text: documentText,
+  }).annotations(strict),
+  Schema.Struct({ kind: Schema.Literal("change"), ...scope, text: documentText }).annotations(
+    strict,
+  ),
+  Schema.Struct({ kind: Schema.Literal("close"), ...scope }).annotations(strict),
+);
+export type CodeLanguageDocumentRequest = typeof CodeLanguageDocumentRequest.Type;
+
+export const CodeLanguageDocumentResult = Schema.Union(
+  Schema.Struct({ status: Schema.Literal("synced"), ...scope }).annotations(strict),
+  /** The text is past the server's frame cap, so it is not sent. */
+  Schema.Struct({ status: Schema.Literal("too-large"), ...scope }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("unavailable"),
+    reason: CodeLanguageUnavailableReason,
+  }).annotations(strict),
+  Schema.Struct({
+    status: Schema.Literal("refused"),
+    reason: CodeLanguageRefusalReason,
+  }).annotations(strict),
+);
+export type CodeLanguageDocumentResult = typeof CodeLanguageDocumentResult.Type;
+
 export const decodeCodeLanguageReadRequest = Schema.decodeUnknownSync(CodeLanguageReadRequest);
 export const decodeCodeLanguageReadResult = Schema.decodeUnknownSync(CodeLanguageReadResult);
+export const decodeCodeLanguageDocumentRequest = Schema.decodeUnknownSync(
+  CodeLanguageDocumentRequest,
+);
+export const decodeCodeLanguageDocumentResult = Schema.decodeUnknownSync(
+  CodeLanguageDocumentResult,
+);

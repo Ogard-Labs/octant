@@ -182,9 +182,12 @@ next step.
 **Language services.** Code editor language services and, later, a debugger
 run as confined children the server launches per checkout, under the
 [Language services](design/language-services.md) design accepted on 2026-10-26.
-Only its seam is built: the `language-server` component kind, the pure launch
-policy, the read contracts, and the remote-approvable `code.language.read`
-action. Nothing launches a language server yet.
+Its seam and companion are built: the `language-server` component kind, the
+pure launch policy, the read and document contracts, the remote-approvable
+`code.language.read` action, and the server's confined, receipted,
+crash-limited language servers behind `POST /api/code/language/documents` and
+`POST /api/code/language/read`. The bundled TypeScript server is the only
+component, and the editor does not call these routes yet.
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
