@@ -1,6 +1,7 @@
 import {
   createHash,
   generateKeyPairSync,
+  randomBytes,
   randomUUID,
   sign as cryptoSign,
   type KeyObject,
@@ -211,7 +212,11 @@ export async function startFakeDirectory(): Promise<FakeDirectory> {
         response.end();
         return;
       }
-      const code = issue("code");
+      // The directory's authorization codes are opaque and run past a thousand
+      // characters (an Entra ID code of 1,350 characters has been reported), so
+      // the fake issues one that long rather than a short stand-in.
+      const code = `fake-directory-code-${randomBytes(1_000).toString("base64url")}`;
+      issued.push(code);
       codes.set(code, { challenge, redirectUri, nonce, clientId });
       const callback = new URL(redirectUri);
       callback.searchParams.set("code", code);

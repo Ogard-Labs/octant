@@ -191,6 +191,10 @@ Rules slice 1b resolved in the broker, each the most conservative reading:
   audience, and endpoint origin and nothing else: no URL, no scope, no device
   flow. The broker requests the audience's `.default` scope with `openid`,
   `profile`, and `offline_access`, and no other resource.
+- **Callback code.** The directory's authorization codes are opaque and run
+  past a thousand characters, so the directory callback accepts a code up to
+  the 4,096-character query cap; the other dialects keep the 512-character
+  limit.
 - **Echoed scope.** Every resource scope the directory echoes must sit under
   the audience, and at least one must; the identity scopes, which the echo may
   omit, are ignored. A refresh whose echo leaves the audience ends the grant

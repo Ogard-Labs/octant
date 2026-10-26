@@ -90,6 +90,10 @@ const MAX_TOKEN_CHARS = 4_096;
 const MAX_RESPONSE_CHARS = 16 * 1_024;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const CODE_PATTERN = /^[A-Za-z0-9._~-]{1,512}$/;
+// The directory's authorization codes are opaque and run past a thousand
+// characters (an Entra ID code of 1,350 characters has been reported), so the
+// directory callback takes any code the 4,096-character query cap admits.
+const DIRECTORY_CODE_PATTERN = /^[A-Za-z0-9._~-]{1,4096}$/;
 const ERROR_PATTERN = /^[a-z_]{1,64}$/;
 const USER_CODE_PATTERN = /^[A-Za-z0-9-]{1,64}$/;
 const ISSUED_CLIENT_ID_PATTERN = /^oaiapp_[A-Za-z0-9_-]{1,128}$/;
@@ -1728,7 +1732,8 @@ export function createHostOAuthRuntime(options: {
       return;
     }
     const code = params.get("code") ?? "";
-    if (!CODE_PATTERN.test(code)) {
+    const codePattern = session.directory === undefined ? CODE_PATTERN : DIRECTORY_CODE_PATTERN;
+    if (!codePattern.test(code)) {
       publish(
         session.attemptId,
         refused(session.attemptId, session.descriptor.descriptorId, "exchange-refused"),
