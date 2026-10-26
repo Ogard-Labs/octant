@@ -3,10 +3,15 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 export interface HostOAuthBrokerDescriptor {
   readonly descriptorId: string;
   readonly clientId?: string;
-  readonly dialect?: "openrouter-pkce" | "chatgpt-plan-siwc" | "mcp-authorization";
+  readonly dialect?:
+    | "openrouter-pkce"
+    | "chatgpt-plan-siwc"
+    | "mcp-authorization"
+    | "directory-oidc";
   readonly flow: "authorization-code-pkce" | "device-code";
   readonly authorizationEndpoint?: string;
-  readonly tokenEndpoint: string;
+  /** Absent only for the directory dialect, whose authority the broker builds. */
+  readonly tokenEndpoint?: string;
   readonly deviceAuthorizationEndpoint?: string;
   readonly scopes: readonly string[];
   readonly termsId: string;
@@ -17,6 +22,18 @@ export interface HostOAuthBrokerDescriptor {
   /** MCP authorization dialect: the server the token is for, and the callback port. */
   readonly resource?: string;
   readonly redirectPort?: number;
+  /** Directory dialect: the tenant, the one audience, and the endpoint origin the grant binds. */
+  readonly tenantId?: string;
+  readonly audience?: string;
+  readonly endpointOrigin?: string;
+}
+
+/** What a directory grant was signed in for; its token is released only under this binding. */
+export interface HostOAuthBrokerBinding {
+  readonly tenantId: string;
+  readonly clientId: string;
+  readonly audience: string;
+  readonly endpointOrigin: string;
 }
 
 export interface HostOAuthBrokerPort {
@@ -29,7 +46,11 @@ export interface HostOAuthBrokerPort {
   }) => Promise<unknown>;
   readonly status: (attemptId: string) => Promise<unknown>;
   readonly refresh: (credentialRef: string) => Promise<unknown>;
-  readonly access: (credentialRef: string) => Promise<unknown>;
+  /**
+   * A directory grant releases its token only to a caller naming its exact
+   * binding; a grant of any other kind refuses one.
+   */
+  readonly access: (credentialRef: string, binding?: HostOAuthBrokerBinding) => Promise<unknown>;
   /**
    * Revoke a grant: the ChatGPT plan dialect revokes the refresh token at
    * the issuer's revocation endpoint before the local grant is dropped.
@@ -82,7 +103,9 @@ export function makeHostOAuthBrokerClient(options: {
             : { clientId: input.descriptor.clientId }),
           ...(input.descriptor.dialect === undefined ? {} : { dialect: input.descriptor.dialect }),
           flow: input.descriptor.flow,
-          tokenEndpoint: input.descriptor.tokenEndpoint,
+          ...(input.descriptor.tokenEndpoint === undefined
+            ? {}
+            : { tokenEndpoint: input.descriptor.tokenEndpoint }),
           scopes: input.descriptor.scopes,
           termsId: input.descriptor.termsId,
           ...(input.descriptor.authorizationEndpoint === undefined
@@ -103,6 +126,15 @@ export function makeHostOAuthBrokerClient(options: {
           ...(input.descriptor.redirectPort === undefined
             ? {}
             : { redirectPort: input.descriptor.redirectPort }),
+          ...(input.descriptor.tenantId === undefined
+            ? {}
+            : { tenantId: input.descriptor.tenantId }),
+          ...(input.descriptor.audience === undefined
+            ? {}
+            : { audience: input.descriptor.audience }),
+          ...(input.descriptor.endpointOrigin === undefined
+            ? {}
+            : { endpointOrigin: input.descriptor.endpointOrigin }),
         },
       });
     },
@@ -118,11 +150,25 @@ export function makeHostOAuthBrokerClient(options: {
       }
       return post("/v1/oauth/refresh", { credentialRef });
     },
-    access: (credentialRef) => {
+    access: (credentialRef, binding) => {
       if (!UUID_PATTERN.test(credentialRef)) {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));
       }
-      return post("/v1/oauth/access", { credentialRef });
+      // Exactly the four binding fields: the broker refuses any other shape.
+      return post(
+        "/v1/oauth/access",
+        binding === undefined
+          ? { credentialRef }
+          : {
+              credentialRef,
+              binding: {
+                tenantId: binding.tenantId,
+                clientId: binding.clientId,
+                audience: binding.audience,
+                endpointOrigin: binding.endpointOrigin,
+              },
+            },
+      );
     },
     revoke: (credentialRef) => {
       if (!UUID_PATTERN.test(credentialRef)) {
