@@ -2653,6 +2653,9 @@ function probeFailureMessage(
   if (reason === "runtime-unavailable") return "Provider runtime is unavailable.";
   if (reason === "no-usable-model") return "No usable model is available.";
   if (reason === "driver-not-admitted") return "This provider driver is not available.";
+  if (reason === "driver-incompatible") {
+    return "This provider driver does not speak a protocol Octant can use.";
+  }
   if (readiness === "unauthenticated") return "Provider authentication is required.";
   if (readiness === "unavailable") return "Provider runtime is unavailable.";
   if (readiness === "incompatible") return "Provider configuration is incompatible.";

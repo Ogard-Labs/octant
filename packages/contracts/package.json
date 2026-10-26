@@ -48,6 +48,7 @@
     "./extensions": "./src/extensions.ts",
     "./extension-events": "./src/extensionEvents.ts",
     "./extension-rpc": "./src/extensionRpc.ts",
+    "./outside-driver-protocol": "./src/outsideDriverProtocol.ts",
     "./folder-browse": "./src/folderBrowse.ts",
     "./browser-automation": "./src/browserAutomation.ts",
     "./browser-automation-rpc": "./src/browserAutomationRpc.ts",
