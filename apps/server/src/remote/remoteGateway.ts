@@ -30,6 +30,7 @@ import {
 } from "@octant/contracts/remote-access";
 import type { Journal } from "../persistence/journal";
 import type { SqliteConnection } from "../persistence/sqlitePort";
+import { readDeviceRegistrations } from "../persistence/remoteAccessProjection";
 import { RemoteRequestProofService } from "../remoteRequestProofService";
 import { RemoteCredentialLifecycleService } from "../remoteCredentialLifecycleService";
 import {
@@ -68,7 +69,10 @@ import {
   type RemoteRequestRegistryPort,
   type RemoteServerProxyGrantPort,
 } from "./remoteHttpAuthentication";
-import { createPushNotificationTokenStore } from "./pushNotificationTokenStore";
+import {
+  pushRegistrationClearReasonFor,
+  type PushNotificationTokenStore,
+} from "./pushNotificationTokenStore";
 import type { RemoteServerGrantCloseReason } from "@octant/contracts";
 import {
   proxySessionEndReasonForCredentialChange,
@@ -149,10 +153,10 @@ export interface RemoteGatewayServices {
   readonly clock?: () => string;
   readonly actorId?: string;
   /**
-   * Optional shared push-token destination store. When omitted the gateway
-   * creates an isolated in-memory store for this generation.
+   * The host's push registrations. Absent, the push registration route
+   * answers unavailable rather than keeping a token it would lose.
    */
-  readonly pushTokenStore?: import("./pushNotificationTokenStore").PushNotificationTokenStore;
+  readonly pushTokenStore?: PushNotificationTokenStore;
   /**
    * Opening dev servers from a paired device. Absent, the proxy session route
    * and every proxy route answer unavailable.
@@ -537,9 +541,34 @@ function assembleServices(
             remoteServerGrants.holdsOpenSockets(sessionIdDigest),
         });
 
+  // A device that lost its standing in a past run (a revoke that committed
+  // just before the host stopped, ahead of its clear) keeps no push
+  // registration. A failure here does not keep remote access off: the store
+  // removes a token before it journals the clear, and the next enable tries
+  // again.
+  const pushTokenStore = options.pushTokenStore;
+  if (pushTokenStore !== undefined) {
+    const standing = readDeviceRegistrations(options.connection).filter(
+      (device) => device.state === "active",
+    );
+    try {
+      pushTokenStore.clearWithoutStanding({
+        hasStanding: (registeredHostId, deviceId) =>
+          standing.some(
+            (device) =>
+              String(device.host_id) === registeredHostId && String(device.device_id) === deviceId,
+          ),
+        now: clock(),
+      });
+    } catch {
+      // Left for the next enable to retry.
+    }
+  }
+
   // Credential lifecycle service — sign-out/rotate/revoke with session
   // invalidation. The onSessionsInvalidated callback cancels matching
-  // in-flight work via the registry.
+  // in-flight work via the registry and clears the push registration of a
+  // device that signed out or lost its standing.
   const credentialLifecycle = new RemoteCredentialLifecycleService({
     connection: options.connection,
     journal: options.journal,
@@ -563,6 +592,21 @@ function assembleServices(
         const result = registry.cancelByDevice({ hostId: input.hostId, deviceId });
         canceled += result.canceled;
         cancelHookFailures += result.cancelHookFailures;
+      }
+      const pushClearReason = pushRegistrationClearReasonFor(input.reasonCode);
+      if (pushTokenStore !== undefined && pushClearReason !== undefined) {
+        for (const deviceId of input.deviceIds) {
+          try {
+            pushTokenStore.clear({
+              hostId: input.hostId,
+              deviceId,
+              reason: pushClearReason,
+              now: clock(),
+            });
+          } catch {
+            cancelHookFailures += 1;
+          }
+        }
       }
       return { canceled, cancelHookFailures };
     },
@@ -643,7 +687,6 @@ function assembleServices(
 
   // HTTP authentication — pre-auth challenge/session + authenticated
   // self-service and product dispatch.
-  const pushTokenStore = options.pushTokenStore ?? createPushNotificationTokenStore();
   const auth: RemoteHttpAuthentication = createRemoteHttpAuthentication({
     proofService: proof,
     signNegotiationMetadata: (payload) =>
@@ -651,7 +694,7 @@ function assembleServices(
       // verify the session response came from the same host identity.
       options.signing.signHostPayload(payload),
     credentialSelfService,
-    pushTokenStore,
+    ...(pushTokenStore === undefined ? {} : { pushTokenStore }),
     requestRegistry: registry as RemoteRequestRegistryPort,
     sessionRevalidation,
     ...(options.productDispatch === undefined ? {} : { productDispatch: options.productDispatch }),

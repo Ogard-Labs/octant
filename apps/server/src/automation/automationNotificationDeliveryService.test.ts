@@ -15,7 +15,7 @@ import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { ProjectionRegistry } from "../persistence/projection";
 import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
-import { createPushNotificationTokenStore } from "../remote/pushNotificationTokenStore";
+import type { PushTokenRecord } from "../remote/pushNotificationTokenStore";
 import {
   AUTOMATION_NOTIFICATION_PREFERENCES_UPDATED,
   AutomationNotificationPreferencesStore,
@@ -65,6 +65,21 @@ function createJournal(connection = openConnection()) {
     .register(AUTOMATION_NOTIFICATION_DELIVERY_RECORDED, 1, AutomationNotificationDeliveryRecorded);
   const projections = new ProjectionRegistry().register(new AggregateHeadsProjection());
   return new Journal({ connection, registry, projections, clock: () => now });
+}
+
+/** One registered destination, as the host's registration store lists it for delivery. */
+function destinationsOf(input: Omit<PushTokenRecord, "updatedAt"> & { readonly now: string }) {
+  const record: PushTokenRecord = {
+    hostId: input.hostId,
+    deviceId: input.deviceId,
+    platform: input.platform,
+    token: input.token,
+    updatedAt: input.now,
+  };
+  return {
+    listDestinationsForHost: (host: string): ReadonlyArray<PushTokenRecord> =>
+      host === record.hostId ? [record] : [],
+  };
 }
 
 function sharedUuid() {
@@ -125,8 +140,7 @@ describe("AutomationNotificationDeliveryService", () => {
       actor,
       clock: () => now,
     });
-    const tokens = createPushNotificationTokenStore();
-    tokens.register({
+    const tokens = destinationsOf({
       hostId,
       deviceId: "device-1",
       platform: "ios",
@@ -191,8 +205,7 @@ describe("AutomationNotificationDeliveryService", () => {
       actor,
       clock: () => now,
     });
-    const tokens = createPushNotificationTokenStore();
-    tokens.register({
+    const tokens = destinationsOf({
       hostId,
       deviceId: "device-1",
       platform: "ios",
@@ -266,8 +279,7 @@ describe("AutomationNotificationDeliveryService", () => {
       actor,
       clock: () => now,
     });
-    const tokens = createPushNotificationTokenStore();
-    tokens.register({
+    const tokens = destinationsOf({
       hostId,
       deviceId: "device-1",
       platform: "android",
@@ -339,8 +351,7 @@ describe("AutomationNotificationDeliveryService", () => {
       "delivered",
     );
 
-    const tokens = createPushNotificationTokenStore();
-    tokens.register({
+    const tokens = destinationsOf({
       hostId,
       deviceId: "device-1",
       platform: "ios",
@@ -385,8 +396,7 @@ describe("AutomationNotificationDeliveryService", () => {
       actor,
       clock: () => now,
     });
-    const tokens = createPushNotificationTokenStore();
-    tokens.register({
+    const tokens = destinationsOf({
       hostId,
       deviceId: "device-1",
       platform: "ios",

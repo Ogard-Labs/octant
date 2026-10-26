@@ -370,7 +370,7 @@ describe("removeAllLocalData", () => {
     expect(existsSync(databasePath)).toBe(false);
   });
 
-  it("stages and removes only the private-listener host identity, TLS key, and remembered setting with the selected store", async () => {
+  it("stages and removes only the private-listener host identity, TLS key, remembered setting, and push registrations with the selected store", async () => {
     const { directory, databasePath } = temporaryStore();
     migratedConnection(databasePath).close();
     const remoteDirectory = join(directory, "remote");
@@ -380,12 +380,14 @@ describe("removeAllLocalData", () => {
     const tlsKey = join(remoteDirectory, "private-listener-tls-key.pem");
     const tlsCertificate = join(remoteDirectory, "private-listener-tls-cert.pem");
     const setting = join(remoteDirectory, "private-listener-setting.json");
+    const pushRegistrations = join(remoteDirectory, "push-registrations.json");
     const unrelatedRemoteState = join(remoteDirectory, "keep-me.txt");
     writeFileSync(hostId, "55555555-5555-4555-8555-555555555555\n");
     writeFileSync(hostKey, "private-key");
     writeFileSync(tlsKey, "tls-private-key");
     writeFileSync(tlsCertificate, "tls-certificate");
     writeFileSync(setting, '{"certificate":"self-made"}');
+    writeFileSync(pushRegistrations, '{"registrations":[]}');
     writeFileSync(unrelatedRemoteState, "must remain");
 
     const report = await removeAllLocalDataWithCredentialPurge({
@@ -403,6 +405,7 @@ describe("removeAllLocalData", () => {
       join("remote", "private-listener-setting.json"),
       join("remote", "private-listener-tls-cert.pem"),
       join("remote", "private-listener-tls-key.pem"),
+      join("remote", "push-registrations.json"),
     ]);
     expect(existsSync(databasePath)).toBe(false);
     expect(existsSync(hostId)).toBe(false);
@@ -410,6 +413,7 @@ describe("removeAllLocalData", () => {
     expect(existsSync(tlsKey)).toBe(false);
     expect(existsSync(tlsCertificate)).toBe(false);
     expect(existsSync(setting)).toBe(false);
+    expect(existsSync(pushRegistrations)).toBe(false);
     expect(existsSync(unrelatedRemoteState)).toBe(true);
   });
 
@@ -425,6 +429,7 @@ describe("removeAllLocalData", () => {
       "private-listener-tls-key.pem.4242.tmp",
       "private-listener-tls-cert.pem.4242.tmp",
       "private-listener-setting.json.4242.tmp",
+      "push-registrations.json.4242.tmp",
     ];
     for (const leftover of leftovers) writeFileSync(join(remoteDirectory, leftover), "staged");
     const unrelated = ["private-listener-tls-key.pem.tmp", "private-listener-other.pem.4242.tmp"];

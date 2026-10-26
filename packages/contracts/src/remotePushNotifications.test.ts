@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeRemotePushNotificationPayloadV1,
+  decodeRemotePushRegistrationClearedV1,
+  decodeRemotePushRegistrationRecordedV1,
   decodeRemotePushTokenReceiptV1,
   decodeRemotePushTokenRegistrationV1,
 } from "./remotePushNotifications";
@@ -43,6 +45,31 @@ describe("remotePushNotifications", () => {
         body: "See host.",
         prompt: "secret user prompt",
       }),
+    ).toThrow();
+  });
+
+  it("journals a registration change or clear with no room for the token", () => {
+    const deviceId = "22222222-2222-4222-8222-222222222222";
+    const recorded = {
+      hostId,
+      deviceId,
+      platform: "android",
+      change: "added",
+      recordedAt: "2026-10-26T12:00:00.000Z",
+    };
+    expect(decodeRemotePushRegistrationRecordedV1(recorded)).toEqual(recorded);
+    expect(() =>
+      decodeRemotePushRegistrationRecordedV1({ ...recorded, token: "opaque-provider-token" }),
+    ).toThrow();
+    const cleared = {
+      hostId,
+      deviceId,
+      reason: "pairing-abandoned",
+      clearedAt: "2026-10-26T12:00:00.000Z",
+    };
+    expect(decodeRemotePushRegistrationClearedV1(cleared)).toEqual(cleared);
+    expect(() =>
+      decodeRemotePushRegistrationClearedV1({ ...cleared, token: "opaque-provider-token" }),
     ).toThrow();
   });
 });

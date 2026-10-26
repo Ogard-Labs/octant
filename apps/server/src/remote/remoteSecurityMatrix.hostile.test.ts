@@ -25,7 +25,15 @@
 // (productDispatch is never invoked) — over brittle exact status codes.
 
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -53,6 +61,11 @@ import {
   type RemoteGatewayConfig,
   type RemoteGatewayOptions,
 } from "./remoteGateway";
+import {
+  createPushNotificationTokenStore,
+  PUSH_REGISTRATIONS_FILE,
+  type PushNotificationTokenStore,
+} from "./pushNotificationTokenStore";
 
 // Capture the exact PairingDeviceLifecycleService the gateway constructs so
 // the harness can create/approve pairing tickets the same way the packaged
@@ -144,12 +157,16 @@ function makeConfig(overrides: Partial<RemoteGatewayConfig["listener"]> = {}): R
 interface SetupOptions {
   readonly config?: RemoteGatewayConfig;
   readonly productDispatch?: RemoteGatewayOptions["productDispatch"];
+  /** A stopped host's data directory: the new harness is that host restarted. */
+  readonly restartOf?: string;
 }
 
 interface Harness {
   readonly gateway: RemoteGateway;
   readonly connection: SqliteConnection;
+  readonly directory: string;
   readonly dbPath: string;
+  readonly pushRegistrations: PushNotificationTokenStore;
   readonly lifecycle: PairingDeviceLifecycleService;
   readonly fetch: (req: Request, facts?: RequestTransportFacts) => Promise<Response>;
   readonly dispatched: DispatchedRequest[];
@@ -162,8 +179,8 @@ interface DispatchedRequest {
 }
 
 async function setup(options: SetupOptions = {}): Promise<Harness> {
-  const directory = mkdtempSync(join(tmpdir(), "octant-566-matrix-"));
-  directories.push(directory);
+  const directory = options.restartOf ?? mkdtempSync(join(tmpdir(), "octant-566-matrix-"));
+  if (options.restartOf === undefined) directories.push(directory);
   const dbPath = join(directory, "store.sqlite3");
   const connection = openSqlite(dbPath);
   applyMigrations(connection, MIGRATIONS, () => nowIso);
@@ -174,27 +191,31 @@ async function setup(options: SetupOptions = {}): Promise<Harness> {
     projections: runtime.projections,
     clock: () => nowIso,
   });
-  journal.append({
-    aggregate: { aggregateType: "remote-host", aggregateId: hostId },
-    expectedVersion: 0,
-    events: [
-      {
-        eventId: "55555555-5555-4555-8555-555555555555",
-        eventName: "remote.host-identity-initialized@1",
-        eventVersion: 1,
-        correlationId: "44444444-4444-4444-8444-444444444444",
-        actor: { kind: "system", actorId: "33333333-3333-4333-8333-333333333333" },
-        occurredAt: nowIso,
-        payload: {
-          hostId,
-          displayName: "This Mac",
-          hostKeyFingerprint: "a".repeat(64),
-          keyGeneration: 1,
-          createdAt: nowIso,
+  // A restarted host keeps its journal, so its identity is already there and
+  // every id it mints comes from a range the first run did not use.
+  const run = options.restartOf === undefined ? "2222" : "7777";
+  if (options.restartOf === undefined)
+    journal.append({
+      aggregate: { aggregateType: "remote-host", aggregateId: hostId },
+      expectedVersion: 0,
+      events: [
+        {
+          eventId: "55555555-5555-4555-8555-555555555555",
+          eventName: "remote.host-identity-initialized@1",
+          eventVersion: 1,
+          correlationId: "44444444-4444-4444-8444-444444444444",
+          actor: { kind: "system", actorId: "33333333-3333-4333-8333-333333333333" },
+          occurredAt: nowIso,
+          payload: {
+            hostId,
+            displayName: "This Mac",
+            hostKeyFingerprint: "a".repeat(64),
+            keyGeneration: 1,
+            createdAt: nowIso,
+          },
         },
-      },
-    ],
-  });
+      ],
+    });
 
   const dispatched: DispatchedRequest[] = [];
   const productDispatch =
@@ -210,6 +231,13 @@ async function setup(options: SetupOptions = {}): Promise<Harness> {
 
   const { serve, getFetch } = createCapturingServe();
   let uuidCounter = 0;
+  const uuid = () => `${run}${run}-2222-4222-8222-${String(++uuidCounter).padStart(12, "0")}`;
+  const pushRegistrations = createPushNotificationTokenStore({
+    dataDirectory: directory,
+    journal,
+    uuid,
+    hostActorId: "33333333-3333-4333-8333-333333333333",
+  });
   const before = capturedLifecycles.length;
   const gateway = createRemoteGateway({
     connection,
@@ -222,8 +250,9 @@ async function setup(options: SetupOptions = {}): Promise<Harness> {
     productDispatch,
     serve,
     now: () => nowMs,
-    uuid: () => `22222222-2222-4222-8222-${String(++uuidCounter).padStart(12, "0")}`,
+    uuid,
     clock: () => nowIso,
+    pushTokenStore: pushRegistrations,
     config: options.config ?? makeConfig(),
   });
   const lifecycle = capturedLifecycles[capturedLifecycles.length - 1];
@@ -233,7 +262,16 @@ async function setup(options: SetupOptions = {}): Promise<Harness> {
   await gateway.start();
   const fetch = getFetch();
   if (fetch === undefined) throw new Error("Gateway did not capture a boundary fetch.");
-  return { gateway, connection, dbPath, lifecycle, fetch, dispatched };
+  return {
+    gateway,
+    connection,
+    directory,
+    dbPath,
+    pushRegistrations,
+    lifecycle,
+    fetch,
+    dispatched,
+  };
 }
 
 // ─── Device keys and request builders ─────────────────────────────────
@@ -1169,6 +1207,269 @@ describe("hostile remote-access security matrix (in-memory gateway)", () => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+// Push registrations follow the paired device
+// ═══════════════════════════════════════════════════════════════════════
+
+const PUSH_TOKEN_PATH = "/api/remote/auth/push-token";
+let pushNonce = 0;
+
+function nextNonce(): string {
+  pushNonce += 1;
+  return `nonce_push_${String(pushNonce).padStart(8, "0")}_abcdefgh`;
+}
+
+async function putPushToken(
+  harness: Harness,
+  session: EstablishedSession,
+  token: string,
+  overrides: ProductRequestOverrides = {},
+): Promise<GatewayResponse> {
+  return callAuthenticated(harness, session, {
+    method: "PUT",
+    path: PUSH_TOKEN_PATH,
+    body: JSON.stringify({ platform: "ios", token }),
+    nonce: nextNonce(),
+    ...overrides,
+  });
+}
+
+async function postSelfService(
+  harness: Harness,
+  session: EstablishedSession,
+  path: "/api/remote/auth/revoke-self" | "/api/remote/auth/sign-out",
+): Promise<GatewayResponse> {
+  return callAuthenticated(harness, session, {
+    method: "POST",
+    path,
+    body: "{}",
+    nonce: nextNonce(),
+    commandId: "77777777-7777-4777-8777-777777777777",
+  });
+}
+
+function pushRegistrationEvents(harness: Harness): ReadonlyArray<{
+  readonly event_name: string;
+  readonly payload_json: string;
+}> {
+  return harness.connection
+    .prepare(
+      "SELECT event_name, payload_json FROM event_journal WHERE aggregate_type = 'remote-push-registration' ORDER BY global_sequence",
+    )
+    .all() as ReadonlyArray<{ readonly event_name: string; readonly payload_json: string }>;
+}
+
+describe("push registrations follow the paired device (in-memory gateway)", () => {
+  it("keeps a phone's push registration across a host restart and journals the add without the token", async () => {
+    const token = "apns-device-token-survives-restart";
+    const harness = await setup();
+    const session = await establishSession(harness);
+    const registered = await putPushToken(harness, session, token);
+    expect(registered.status).toBe(200);
+    expect(registered.json()).toMatchObject({ result: "registered" });
+    expect(registered.bodyText).not.toContain(token);
+    await harness.gateway.stop();
+
+    const restarted = await setup({ restartOf: harness.directory });
+    try {
+      expect(restarted.pushRegistrations.get({ hostId, deviceId: session.deviceId })).toMatchObject(
+        { platform: "ios", token },
+      );
+      const events = pushRegistrationEvents(restarted);
+      expect(events.map((event) => event.event_name)).toEqual([
+        "remote.push-registration-recorded@1",
+      ]);
+      expect(JSON.parse(events[0]?.payload_json ?? "{}")).toMatchObject({
+        deviceId: session.deviceId,
+        change: "added",
+      });
+      expect(JSON.stringify(events)).not.toContain(token);
+    } finally {
+      await restarted.gateway.stop();
+    }
+  });
+
+  it("drops at restart a registration whose device has no standing and keeps the paired phone's", async () => {
+    const harness = await setup();
+    const session = await establishSession(harness);
+    expect((await putPushToken(harness, session, "paired-phone-token")).status).toBe(200);
+    await harness.gateway.stop();
+    // A revoke that committed just before the host stopped, ahead of its
+    // clear, leaves a registration for a device that no longer stands.
+    const file = join(harness.directory, PUSH_REGISTRATIONS_FILE);
+    const stored = JSON.parse(readFileSync(file, "utf8")) as {
+      readonly registrations: ReadonlyArray<Record<string, string>>;
+    };
+    const unpaired = "99999999-9999-4999-8999-999999999999";
+    writeFileSync(
+      file,
+      JSON.stringify({
+        registrations: [
+          ...stored.registrations,
+          { ...stored.registrations[0], deviceId: unpaired, token: "unpaired-token" },
+        ],
+      }),
+    );
+
+    const restarted = await setup({ restartOf: harness.directory });
+    try {
+      expect(restarted.pushRegistrations.listDeviceIdsForHost(hostId)).toEqual([session.deviceId]);
+      expect(readFileSync(file, "utf8")).not.toContain("unpaired-token");
+      const cleared = pushRegistrationEvents(restarted).at(-1);
+      expect(JSON.parse(cleared?.payload_json ?? "{}")).toMatchObject({
+        deviceId: unpaired,
+        reason: "device-without-standing",
+      });
+    } finally {
+      await restarted.gateway.stop();
+    }
+  });
+
+  const clearingPaths = [
+    {
+      path: "the host revokes the device",
+      reason: "device-revoked",
+      clear: async (harness: Harness, session: EstablishedSession) => {
+        const administration = harness.gateway.localDeviceAdministration();
+        expect(administration).toBeDefined();
+        administration?.revokeDevice({ deviceId: session.deviceId });
+      },
+    },
+    {
+      path: "the device revokes itself",
+      reason: "self-revoked",
+      clear: async (harness: Harness, session: EstablishedSession) => {
+        const response = await postSelfService(harness, session, "/api/remote/auth/revoke-self");
+        expect(response.status).toBe(200);
+      },
+    },
+    {
+      path: "the device signs out",
+      reason: "signed-out",
+      clear: async (harness: Harness, session: EstablishedSession) => {
+        const response = await postSelfService(harness, session, "/api/remote/auth/sign-out");
+        expect(response.status).toBe(200);
+      },
+    },
+  ] as const;
+
+  it.each(clearingPaths)(
+    "deletes the registration when $path and journals the clear without the token",
+    async ({ reason, clear }) => {
+      const token = `device-token-cleared-${reason}`;
+      const harness = await setup();
+      try {
+        const session = await establishSession(harness);
+        expect((await putPushToken(harness, session, token)).status).toBe(200);
+
+        await clear(harness, session);
+
+        expect(harness.pushRegistrations.get({ hostId, deviceId: session.deviceId })).toBe(
+          undefined,
+        );
+        expect(existsSync(join(harness.directory, PUSH_REGISTRATIONS_FILE))).toBe(false);
+        const events = pushRegistrationEvents(harness);
+        expect(events.map((event) => event.event_name)).toEqual([
+          "remote.push-registration-recorded@1",
+          "remote.push-registration-cleared@1",
+        ]);
+        expect(JSON.parse(events[1]?.payload_json ?? "{}")).toMatchObject({
+          deviceId: session.deviceId,
+          reason,
+        });
+        expect(JSON.stringify(events)).not.toContain(token);
+        // The ended session cannot put the registration back.
+        expect((await putPushToken(harness, session, token)).status).toBe(401);
+        expect(harness.pushRegistrations.listDeviceIdsForHost(hostId)).toEqual([]);
+      } finally {
+        await harness.gateway.stop();
+      }
+    },
+  );
+
+  it("refuses a registration whose device is revoked while its body is being read, so none outlives the revoke", async () => {
+    const token = "device-token-raced-by-revoke";
+    const harness = await setup();
+    const session = await establishSession(harness);
+    const readBody = Request.prototype.text;
+    // The registration route reads its body after every earlier session
+    // check; the host revokes the device during that read, the one window a
+    // concurrent revoke can take.
+    const revokeDuringRead = vi
+      .spyOn(Request.prototype, "text")
+      .mockImplementationOnce(async function (this: Request) {
+        harness.gateway.localDeviceAdministration()?.revokeDevice({ deviceId: session.deviceId });
+        return await readBody.call(this);
+      });
+    try {
+      const raced = await putPushToken(harness, session, token);
+      expect(revokeDuringRead).toHaveBeenCalledOnce();
+      expect(raced.status).toBe(401);
+      expect(harness.pushRegistrations.listDeviceIdsForHost(hostId)).toEqual([]);
+      expect(existsSync(join(harness.directory, PUSH_REGISTRATIONS_FILE))).toBe(false);
+      expect(pushRegistrationEvents(harness)).toEqual([]);
+    } finally {
+      revokeDuringRead.mockRestore();
+      await harness.gateway.stop();
+    }
+  });
+
+  it("refuses a registration without the device's own session, key, CSRF token, or origin, and stores nothing", async () => {
+    const token = "device-token-hostile-attempt";
+    const harness = await setup();
+    try {
+      const session = await establishSession(harness);
+      const refusals = [
+        await putPushToken(harness, session, token, { cookie: null }),
+        await putPushToken(harness, session, token, {
+          signWith: deviceKeypair("Attacker").privateKeyPem,
+        }),
+        await putPushToken(harness, session, token, { csrf: null }),
+        await putPushToken(harness, session, token, { origin: "https://evil.example.test" }),
+        // The device is the principal's; a body cannot name another one.
+        await putPushToken(harness, session, token, {
+          body: JSON.stringify({
+            platform: "ios",
+            token,
+            deviceId: "99999999-9999-4999-8999-999999999999",
+          }),
+        }),
+      ];
+      for (const refusal of refusals) {
+        expect(refusal.status).toBeGreaterThanOrEqual(400);
+        expect(refusal.status).toBeLessThan(500);
+        expect(refusal.bodyText).not.toContain(token);
+      }
+      expect(harness.pushRegistrations.listDeviceIdsForHost(hostId)).toEqual([]);
+      expect(pushRegistrationEvents(harness)).toEqual([]);
+      expect(harness.dispatched).toHaveLength(0);
+    } finally {
+      await harness.gateway.stop();
+    }
+  });
+
+  it("lets a device clear only its own registration", async () => {
+    const harness = await setup();
+    try {
+      const phone = await establishSession(harness, deviceKeypair("Phone"));
+      const tablet = await establishSession(harness, deviceKeypair("Tablet"));
+      expect((await putPushToken(harness, phone, "phone-device-token")).status).toBe(200);
+
+      const cleared = await callAuthenticated(harness, tablet, {
+        method: "DELETE",
+        path: PUSH_TOKEN_PATH,
+        body: "{}",
+        nonce: nextNonce(),
+      });
+      expect(cleared.status).toBe(200);
+      expect(cleared.json()).toMatchObject({ result: "already-cleared" });
+      expect(harness.pushRegistrations.listDeviceIdsForHost(hostId)).toEqual([phone.deviceId]);
+    } finally {
+      await harness.gateway.stop();
+    }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 // Secret non-leakage: URLs / stores / logs / SQLite / exports
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -1364,6 +1665,103 @@ describe("secret non-leakage across URLs, stores, logs, SQLite, exports", () => 
       expect(violations).toEqual([]);
       // The product effect never ran for any hostile request.
       expect(harness.dispatched).toHaveLength(0);
+    } finally {
+      await harness.gateway.stop();
+      for (const spy of consoleSpies) spy.mockRestore();
+    }
+  });
+
+  it("keeps a push token out of every response, log, journal, store, and export, holding it only in its owner-only registration file", async () => {
+    const consoleSpies = [
+      vi.spyOn(console, "log"),
+      vi.spyOn(console, "info"),
+      vi.spyOn(console, "warn"),
+      vi.spyOn(console, "error"),
+      vi.spyOn(console, "debug"),
+    ];
+    const captured: string[] = [];
+    for (const spy of consoleSpies) {
+      spy.mockImplementation((...args: unknown[]) => {
+        captured.push(args.map((a) => (typeof a === "string" ? a : JSON.stringify(a))).join(" "));
+      });
+    }
+    const harness = await setup();
+    const responseBodies: string[] = [];
+    const scanningHarness: Harness = {
+      ...harness,
+      fetch: async (request, facts) => {
+        const response = await harness.fetch(request, facts);
+        responseBodies.push(await response.clone().text());
+        return response;
+      },
+    };
+    const first = "PUSHTOKENCANARYFIRST0001";
+    const changed = "PUSHTOKENCANARYCHANGED02";
+    const hostile = "PUSHTOKENCANARYHOSTILE03";
+    const kept = "PUSHTOKENCANARYKEPT00004";
+    try {
+      const session = await establishSession(harness);
+      expect((await putPushToken(scanningHarness, session, first)).status).toBe(200);
+      expect((await putPushToken(scanningHarness, session, first)).json()).toMatchObject({
+        result: "already-registered",
+      });
+      expect((await putPushToken(scanningHarness, session, changed)).status).toBe(200);
+      const refused = await putPushToken(scanningHarness, session, hostile, {
+        signWith: deviceKeypair("Attacker").privateKeyPem,
+      });
+      expect(refused.status).toBe(401);
+      const cleared = await callAuthenticated(scanningHarness, session, {
+        method: "DELETE",
+        path: PUSH_TOKEN_PATH,
+        body: "{}",
+        nonce: nextNonce(),
+      });
+      expect(cleared.json()).toMatchObject({ result: "cleared" });
+      expect((await putPushToken(scanningHarness, session, kept)).status).toBe(200);
+
+      const secrets = [first, changed, hostile, kept].map((value) => ({
+        name: `push token ${value}`,
+        value,
+      }));
+      const violations: string[] = [];
+      for (const body of responseBodies)
+        violations.push(...scanForSecrets("response body", body, secrets));
+      violations.push(...scanForSecrets("console log", captured.join("\n"), secrets));
+
+      // Every file the host keeps, the SQLite store and its write-ahead log
+      // included, is scanned. Exports, the journal, and the audit trail are
+      // all read from that store, so a token absent here is absent there.
+      const registrationFile = join(harness.directory, PUSH_REGISTRATIONS_FILE);
+      const scanned: string[] = [];
+      const scan = (directory: string): void => {
+        for (const entry of readdirSync(directory, { withFileTypes: true })) {
+          const path = join(directory, entry.name);
+          if (entry.isDirectory()) {
+            scan(path);
+            continue;
+          }
+          if (path === registrationFile) continue;
+          scanned.push(entry.name);
+          violations.push(
+            ...scanForSecrets(entry.name, readFileSync(path).toString("latin1"), secrets),
+          );
+        }
+      };
+      scan(harness.directory);
+      expect(scanned).toContain("store.sqlite3");
+      expect(scanned).toContain("store.sqlite3-wal");
+      expect(violations).toEqual([]);
+
+      // The one place a token lives: the current one, owner-only.
+      expect(statSync(registrationFile).mode & 0o777).toBe(0o600);
+      const stored = readFileSync(registrationFile, "utf8");
+      expect(stored).toContain(kept);
+      for (const gone of [first, changed, hostile]) expect(stored).not.toContain(gone);
+      expect(
+        pushRegistrationEvents(harness).map(
+          (event) => (JSON.parse(event.payload_json) as { readonly change?: string }).change,
+        ),
+      ).toEqual(["added", "changed", undefined, "added"]);
     } finally {
       await harness.gateway.stop();
       for (const spy of consoleSpies) spy.mockRestore();

@@ -33,6 +33,49 @@ export const RemotePushTokenReceiptV1 = Schema.Struct({
 }).annotations(strict);
 export type RemotePushTokenReceiptV1 = typeof RemotePushTokenReceiptV1.Type;
 
+/**
+ * The journal records that a device's push registration was added, changed,
+ * or cleared, and never the token: the token lives only in the host's
+ * owner-only registration file.
+ */
+export const REMOTE_PUSH_REGISTRATION_EVENT_NAMES = {
+  recorded: "remote.push-registration-recorded@1",
+  cleared: "remote.push-registration-cleared@1",
+} as const;
+
+export const RemotePushRegistrationRecordedV1 = Schema.Struct({
+  hostId: StableHostId,
+  deviceId: DeviceId,
+  platform: RemotePushPlatform,
+  change: Schema.Literal("added", "changed"),
+  recordedAt: UtcTimestamp,
+}).annotations(strict);
+export type RemotePushRegistrationRecordedV1 = typeof RemotePushRegistrationRecordedV1.Type;
+
+/**
+ * Why a registration went: the phone cleared it, its session signed out, or
+ * the device lost its standing (revoked by the host or by itself, abandoned
+ * mid-pairing, expired, or found without an active device record at startup).
+ */
+export const RemotePushRegistrationClearReason = Schema.Literal(
+  "device-cleared",
+  "signed-out",
+  "self-revoked",
+  "device-revoked",
+  "pairing-abandoned",
+  "credential-expired",
+  "device-without-standing",
+);
+export type RemotePushRegistrationClearReason = typeof RemotePushRegistrationClearReason.Type;
+
+export const RemotePushRegistrationClearedV1 = Schema.Struct({
+  hostId: StableHostId,
+  deviceId: DeviceId,
+  reason: RemotePushRegistrationClearReason,
+  clearedAt: UtcTimestamp,
+}).annotations(strict);
+export type RemotePushRegistrationClearedV1 = typeof RemotePushRegistrationClearedV1.Type;
+
 export const RemotePushNotificationKind = Schema.Literal(
   "completion",
   "waiting",
@@ -63,6 +106,12 @@ export const decodeRemotePushTokenRegistrationV1 = Schema.decodeUnknownSync(
 );
 export const decodeRemotePushTokenClearV1 = Schema.decodeUnknownSync(RemotePushTokenClearV1);
 export const decodeRemotePushTokenReceiptV1 = Schema.decodeUnknownSync(RemotePushTokenReceiptV1);
+export const decodeRemotePushRegistrationRecordedV1 = Schema.decodeUnknownSync(
+  RemotePushRegistrationRecordedV1,
+);
+export const decodeRemotePushRegistrationClearedV1 = Schema.decodeUnknownSync(
+  RemotePushRegistrationClearedV1,
+);
 export const decodeRemotePushNotificationPayloadV1 = Schema.decodeUnknownSync(
   RemotePushNotificationPayloadV1,
 );
