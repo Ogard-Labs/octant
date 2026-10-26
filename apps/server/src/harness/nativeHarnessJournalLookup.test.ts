@@ -133,6 +133,78 @@ describe("journal lookup", () => {
     },
   );
 
+  it.each(["chat", "work", "code"] as const)(
+    "reads all of a %s message longer than one lookup returns, in bounded parts through offset",
+    async (mode) => {
+      // A rebuilt session's first message carries the whole planned history.
+      const history = Array.from(
+        { length: 1_000 },
+        (_, index) => `Turn ${String(index).padStart(4, "0")} planned history. `,
+      ).join("");
+      const output = Array.from({ length: 2_000 }, (_, index) => `line ${index}`).join("\n");
+      const store = transcripts(mode);
+      store.append(sessionId, { role: "user", text: history });
+      store.append(sessionId, {
+        role: "assistant",
+        text: "",
+        toolCalls: [{ toolCallId: "c1", toolName: "grep", argumentsJson: '{"pattern":"x"}' }],
+      });
+      store.settle(sessionId, {
+        toolCallId: "c1",
+        resultJson: JSON.stringify(output),
+        isError: false,
+      });
+      const tools = lookupTools({ store, session: { providerInstanceId: instanceId }, mode });
+      const readAll = async (from: number, pick: (message: Record<string, unknown>) => string) => {
+        const parts: string[] = [];
+        let offset: number | undefined;
+        for (;;) {
+          const read = await lookUp(tools, {
+            from,
+            count: 1,
+            ...(offset === undefined ? {} : { offset }),
+          });
+          expect(read.isError).toBe(false);
+          expect(JSON.stringify(read.result).length).toBeLessThan(10_000);
+          const message = (read.result as { messages: ReadonlyArray<Record<string, unknown>> })
+            .messages[0];
+          if (message === undefined) throw new Error("the lookup returned no message");
+          expect(message.number).toBe(from);
+          parts.push(pick(message).replace(/ \[\d+ more characters left out[^\]]*\]$/, ""));
+          if (typeof message.nextOffset !== "number") return parts;
+          expect(pick(message)).toContain(`offset ${message.nextOffset}`);
+          offset = message.nextOffset;
+        }
+      };
+
+      const textParts = await readAll(0, (message) => String(message.text));
+      expect(history.length).toBeGreaterThan(8_000 * 3);
+      expect(textParts.length).toBeGreaterThan(3);
+      expect(textParts.join("")).toBe(history);
+      const resultParts = await readAll(2, (message) =>
+        String((message.toolResults as ReadonlyArray<{ result: string }>)[0]?.result),
+      );
+      expect(resultParts.length).toBeGreaterThan(1);
+      expect(resultParts.join("")).toBe(JSON.stringify(output));
+
+      // An offset past the message's end is refused, not answered with an empty part.
+      expect(await lookUp(tools, { from: 0, offset: history.length })).toMatchObject({
+        isError: true,
+        result: { error: "journal-offset-past-end", message: expect.stringContaining("0") },
+      });
+      // Messages after the first one read from their own start.
+      expect(await lookUp(tools, { from: 0, offset: 8_000, count: 2 })).toMatchObject({
+        isError: false,
+        result: {
+          messages: [
+            { number: 0, nextOffset: 16_000 },
+            { number: 1, toolCalls: [{ toolCallId: "c1", arguments: '{"pattern":"x"}' }] },
+          ],
+        },
+      });
+    },
+  );
+
   it("refuses a missing message, another thread's handle, a foreign session, and a revoked thread", async () => {
     const store = transcripts();
     store.append(sessionId, { role: "user", text: "Only message." });
@@ -238,5 +310,18 @@ describe("journal lookup", () => {
     // Only the conversation's own messages leave: no binding, session, or
     // other journal record rides along.
     expect(Object.keys(read.result as object).sort()).toEqual(["messages", "total"]);
+
+    // A secret straddling the edge between two parts is redacted before the
+    // message is split, so neither part carries a piece of it.
+    store.append(sessionId, { role: "user", text: `${"y".repeat(7_995)}${secret} and more` });
+    const parts = [
+      await lookUp(tools, { from: 3 }),
+      await lookUp(tools, { from: 3, offset: 8_000 }),
+    ];
+    for (const part of parts) {
+      expect(part.isError).toBe(false);
+      expect(JSON.stringify(part.result)).not.toContain("sk-l");
+      expect(JSON.stringify(part.result)).not.toContain("4242");
+    }
   });
 });
