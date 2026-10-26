@@ -1,16 +1,12 @@
 import type { UtcTimestamp } from "@octant/contracts";
+import type { HarnessEndpointRateLimitBucket } from "@octant/provider-sdk/harness-endpoint";
 
 /**
  * A quota bucket read from the headers of a response Octant already received.
  * Nothing here comes from a request made to learn limits; the provider volunteered
  * the numbers alongside the generation it was asked for.
  */
-export interface ObservedRateLimitBucket {
-  readonly bucket: "requests" | "tokens";
-  readonly limit: number;
-  readonly remaining: number;
-  readonly resetsAt?: UtcTimestamp;
-}
+export type ObservedRateLimitBucket = HarnessEndpointRateLimitBucket;
 
 /** Resets further out than this are treated as malformed rather than believed. */
 const MAX_RESET_MS = 7 * 24 * 3_600_000;
