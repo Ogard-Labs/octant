@@ -224,6 +224,25 @@ describe("executor reads of a bound remote root", () => {
     expect(diff).toMatchObject({ kind: "git-diff", diff: { truncated: true } });
   });
 
+  it("reads no repository from a folder above the bound root when the root has none of its own", async () => {
+    // The folder holding the checkout is a repository; the bound root is a
+    // plain folder inside it. Git must not walk up to the one the person did
+    // not bind, even where confinement would let it read there.
+    const outer = join(directory, "outer");
+    const inner = join(outer, "inner");
+    mkdirSync(inner, { recursive: true });
+    writeFileSync(join(inner, "notes.txt"), "inner\n");
+    spawnSync("git", ["init", "-q", outer], { encoding: "utf8" });
+    const root = remotePath(inner);
+    expect(await answerExecutorRead(environment, { kind: "git-status", root })).toEqual({
+      kind: "refused",
+      reason: "not-a-repository",
+    });
+    expect(await answerExecutorRead(environment, { kind: "git-diff", root })).toMatchObject({
+      kind: "refused",
+    });
+  });
+
   it("reads renamed and unmerged entries from porcelain status and drops a record a bound cut", () => {
     const output = Buffer.from(
       [

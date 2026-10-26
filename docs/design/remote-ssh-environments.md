@@ -9,7 +9,7 @@ builds on: [modes and checkout binding](../architecture.md#modes-chat-work-and-c
 [persistence](../architecture.md#persistence), and
 [security and authority](../architecture.md#security-and-authority).
 
-**Delivery state.** Accepted 2026-10-26. Slices 2, 3, and 4 are built. Slice 2
+**Delivery state.** Accepted 2026-10-26. Slices 2, 3, 4, and 5 are built. Slice 2
 is the admission policy and contracts: the schemas in
 `packages/contracts/src/sshTarget.ts` and the pure decision in
 `packages/domain/src/sshTargetAdmissionPolicy.ts`. Slice 3 is the executor,
@@ -21,8 +21,16 @@ Slice 4 binds a Code Project to a remote root from this machine and reads its
 Files, Git status, and diff through the executor
 ([Remote-bound Projects and reads](#remote-bound-projects-and-reads)), and
 journals targets, attestation digests, and bindings
-(`packages/contracts/src/sshTargetEvents.ts`). No thread runs on a target yet,
-so nothing but attestation and those reads reaches one; slices 5 to 8 are not
+(`packages/contracts/src/sshTargetEvents.ts`). Slice 5 runs the native
+harness's file tools and commands for a remote-bound Project's turn through the
+executor, with their egress decided and journaled on this host
+([Native harness on a target](#native-harness-on-a-target)): the remote tool
+set (`forRemoteCode` in `apps/server/src/harness/nativeHarnessComposition.ts`,
+`apps/server/src/sshTarget/sshRemoteHarness.ts`) and the executor's launches,
+file tools, and streams. The Code turn runtime does not yet compose that tool
+set for a thread, and no thread can be created in a remote-bound Project, so
+no product route reaches a target's tools; that step, reconnecting on its own,
+and restart recovery of remote turns are not built. Slices 6 to 8 are not
 built. Remote SSH
 environments are authorized post-preview work as of 2026-10-26, when the
 maintainer unlocked the parked backlog and accepted the
@@ -234,9 +242,10 @@ connection-head questions for egress (below). The executor cannot start a turn,
 ask for approval, call an app tool, or write to the journal.
 
 The protocol (`packages/contracts/src/sshExecutorProtocol.ts`) carries the
-introduction, the attestation, and since slice 4 the reads of a bound root;
-process channels and egress questions arrive with the launches that need them.
-These rules settle what the paragraph above leaves open:
+introduction, the attestation, since slice 4 the reads of a bound root, and
+since slice 5 the native harness's file tools, its commands, a `cancel` for
+the command in flight, and the byte streams of a proxied command's
+connections. These rules settle what the paragraph above leaves open:
 
 - **Framing.** A frame is a four-byte big-endian length and that many bytes of
   UTF-8 JSON, at most 1 MiB. A longer frame, a body that is not JSON, or a
@@ -258,9 +267,28 @@ These rules settle what the paragraph above leaves open:
   read as the reply to the request after it. A reply that would exceed the
   frame bound, such as a diff of control characters whose JSON escapes outgrew
   it, is answered `too-large` instead.
-- **Protocol 1 gained the reads.** The read requests joined protocol 1 before
-  any build with protocol 1 shipped, so the version did not change; the exact
-  build match still refuses any executor of another build.
+- **Protocol 1 gained the reads, then the harness.** The read requests, and in
+  slice 5 the file tools, commands, `cancel`, and streams, joined protocol 1
+  before any build with protocol 1 shipped, so the version did not change; the
+  exact build match still refuses any executor of another build.
+- **A command holds the session's one request.** Requests still run one at a
+  time, so while a command runs (up to its ten-minute bound) the target's
+  reads and other tool calls wait their turn; the host waits for a command's
+  reply a minute past its timeout before it ends the session. A `cancel`
+  names the request in flight and stops it, and the command then answers
+  `cancelled`; a `cancel` for any other id is ignored.
+- **Streams are channels with their own windows.** A proxied command's
+  connections are streams beside the requests, not requests: the executor
+  opens odd ids, one per connection the command makes to its forwarder, and
+  this host opens even ids, one per connection its proxy asks the target to
+  make (`dial`). Either side sends at most 256 KiB on a stream the other has
+  not taken off it, in chunks of at most 64 KiB, and the reader grants room
+  back as it reads, so a stalled connection holds a bounded amount and
+  starves neither the others nor the requests. Data past the window, a
+  stream id that was never opened or is reused, or a stream opened while no
+  proxied command runs ends the session; frames for a stream either side
+  already closed are dropped. `resolve` and `dial` are answered only while a
+  proxied command runs, and every stream closes when it ends.
 - **Why a session failed.** The client's own message is the only evidence of a
   refused key, so "host key verification failed" or "remote host identification
   has changed" reads as `host-key-changed`. The remote shell's 126 or 127 reads
@@ -273,7 +301,8 @@ These rules settle what the paragraph above leaves open:
 - **When it connects.** The host connects on registration, re-pin, and an
   explicit connect, and a connection that ends is held as `target-unreachable`
   with no attestation. Reconnecting on its own, with bounded backoff, arrives
-  with remote threads (slice 5), which give it a reason to. Until then a
+  with the remote threads the Code turn runtime starts, which give it a reason
+  to; slice 5 built the tools those threads run, not the threads. Until then a
   remote-bound Project whose session was lost refuses reads
   `target-unreachable`, and the person connects again
   (`octant ssh-target connect`); nothing reconnects unasked.
@@ -306,7 +335,12 @@ remote user is uid 0 is refused `remote-root-user`, because a root executor's
 confined children can undo their own confinement. It creates one owner-only
 runtime directory per session for scratch, temporary files, and the egress
 forwarder, removes it when the session ends, and sweeps stale ones at start. It
-opens no listening socket. The runtime directories sit under one
+opens no network listener: the one socket it listens on is a proxied
+command's forwarder, a Unix socket in a fresh owner-only directory of its
+runtime directory, open only while that command runs. A socket path longer
+than the kernel takes (107 bytes) is refused and the command reports
+unavailable, because Node binds a longer one cut short without a word. The
+runtime directories sit under one
 `octant-executor-<uid>` folder in the target's temporary directory; a folder of
 that name the remote user does not own, that is a link, or that others can
 enter is refused rather than used, and the canaries then report inconclusive.
@@ -448,11 +482,17 @@ details, each in the fail-closed direction:
   escaped would otherwise write into the person's folder, and the grants have
   the same shape for every root. One attestation covers every Project on the
   connection. Probes read no file's contents back.
-- **Writing postures have no network yet.** Until the executor's egress
-  forwarder exists (slice 5), Octant's launches on a target in every confined
-  posture get no network, so the probe that connects around the forwarder proves
-  that nothing leaves the capsule. The canaries run with the grants the
-  launches use, so attestation follows whatever those grants become.
+- **Writing postures probe through a forwarder.** Since slice 5 the writing
+  postures' commands run `proxied`, so their probes run proxied too, each
+  through a forwarder directory of its own (probes run at once, and a launch
+  writes its forwarder's script into that directory). Nothing listens on the
+  probes' sockets, so the probe that connects around the forwarder proves
+  that nothing else leaves the capsule; a target whose SSH server answers on
+  the forwarder's own port (3128) cannot show that and is inconclusive. The
+  canaries run with the grants the launches use, so attestation follows
+  whatever those grants become. On macOS, Seatbelt's `proxied` rule names a
+  loopback port the executor would have to listen on, so the writing postures
+  do not attest on a macOS target until slice 8 settles its forwarder.
 - **No canaries as root.** A uid 0 executor launches no probe: the host refuses
   `remote-root-user` before it looks at canaries, and a root launch would only
   add risk.
@@ -504,7 +544,11 @@ direction:
   every path is a literal name, never pathspec magic. A clean filter the
   checkout names cannot be turned off by name; the no-process grant is what
   keeps it from running, and the loopback smoke test reads a checkout whose
-  configuration names a program for each of these.
+  configuration names a program for each of these. Git's discovery stops at
+  the bound root (`GIT_CEILING_DIRECTORIES` is its parent, `GIT_WORK_TREE` the
+  root), so a root with no repository of its own reads as none rather than as
+  a repository in a folder above it the person did not bind, whatever the
+  confinement would let Git read.
 - **Every read is bounded.** A listing is one directory level and at most
   1,000 entries; a file at most 256 KiB, sent base64-encoded; a diff at most
   256 KiB of text after decoding, since bytes that are not UTF-8 grow as they
@@ -513,6 +557,67 @@ direction:
 - **No paired device reads a target in this slice.** The reads sit on the local
   administration routes, beside binding, until remote-bound Projects join the
   product routes with their threads.
+
+### Native harness on a target
+
+Slice 5 gives a remote-bound Project's Code turn its hands on the target. The
+composition's `forRemoteCode` offers the tools `forCode` offers, with the file
+tools and the shell acting on the target
+(`apps/server/src/sshTarget/sshRemoteHarness.ts`); inference, approvals,
+questions, the task list, the goal, and every authority check stay on this
+host. These rules settle what the slice needs, each in the fail-closed
+direction:
+
+- **A turn's tools are bound to one session.** They are composed only when the
+  target holds a session that admits file work in the turn's posture, and
+  every later call names that session: a call on a target whose session ended
+  refuses (`target-unavailable` for a file tool, an unavailable shell) and is
+  never sent on the next session, even one that attested again. When the
+  session ends the turn is told once (`onTargetDisconnected`); its runner
+  interrupts it with `target-disconnected` and aborts its calls, which
+  withdraws an approval or question still waiting, and the command running on
+  the target died with the executor. Nothing is retried or queued.
+- **Each call is admitted in the posture of that moment.** A file tool is a
+  file operation and a command is one of Octant's own launches; both ask the
+  admission policy with the turn's posture as it stands at the call, as a
+  local thread's narrowed turn does. Plan runs no command: the harness offers
+  none, the shell refuses one, and the protocol cannot name Plan for one.
+- **The file tools run the local class on the target.** The executor runs the
+  native harness's own file system class against the bound root, so a read,
+  write, edit, glob, or grep resolves and contains every path on the target
+  and returns what it returns locally. Each tool set is its own reader: an
+  edit needs a read by the same thread on the same session, so a thread reads
+  again after a reconnect. A result too large for a frame refuses
+  `file-too-large`.
+- **Commands run as local harness commands do.** `/bin/sh` runs a script the
+  executor wrote in its own script directory, through the same owned-process
+  port, confined with the posture's attested grants; its environment is built
+  on the target. Approval-gated and auto-accept-edits commands run `proxied`,
+  Full access with the writing postures' grants and the target's own network,
+  as on this host; a host without egress rules runs the networked postures'
+  commands offline rather than open. A reply carries the last 192 KiB of each
+  output stream.
+- **Egress is decided where it is journaled.** A proxied command's launch
+  starts this host's own egress proxy, under the thread's and Project's rules,
+  before the command runs. Each connection the command makes to its forwarder
+  on the target crosses the session as a stream into that proxy, which reads
+  it as a local command's: the token, the rule match, the TLS server name, the
+  decision before every chunk, rule expiry and revocation, the private-address
+  check, and the batched records and summary are all its own. The proxy's
+  lookup and connection are asked of the target (`resolve`, `dial`), so the
+  name resolves with the target's resolver and only an allowed connection is
+  opened, from the target, to an address this host checked.
+
+**Rationale: the whole connection, not only its head.** The design first had
+the forwarder send only each connection's head for this host to decide.
+Deciding a head is not all the proxy does: it decides again before every chunk
+so an expired or revoked rule closes its tunnels, checks the TLS server name
+against the name it allowed, checks every resolved address, and tallies and
+journals what passed. Splitting that between two machines would have copied
+the proxy's most security-sensitive code into the executor, or left those
+checks out on targets. Carrying the bytes keeps one implementation and one
+record; the cost is that a command's traffic crosses the SSH session twice,
+which bounds its throughput by the session's.
 
 ### Provider runtimes on a target
 
@@ -523,10 +628,11 @@ wraps it, because only then can the canaries speak for it:
 - **Native harness.** Admitted. Inference stays on this host with this host's
   credentials, exactly as today. Its tools (shell, file edits, tests) run through
   the executor. Harness egress decisions stay on this host: the executor's
-  forwarder sends each connection's head (destination, port, TLS server name) over
-  the session, this host decides it with `decideToolEgress` and journals the
-  decision, and only an allowed connection is opened, from the target. A decision
-  this host cannot journal refuses, as locally.
+  forwarder carries each connection over the session to this host's proxy,
+  which decides it with `decideToolEgress` and journals the decision, and only
+  an allowed connection is opened, from the target
+  ([Native harness on a target](#native-harness-on-a-target)). A decision this
+  host cannot journal refuses, as locally.
 - **Runtimes Octant wraps** (ACP, OpenCode, Pi; Claude in Plan). Admitted once
   the provider-sdk process-placement seam (slice 6) exists and the driver declares
   remote support, with one condition: a runtime whose app-tool transport is a
@@ -654,7 +760,7 @@ relay could front.
 | A file is swapped between check and read                     | The executor opens a handle and verifies identity, as local confined reads do                                    |
 | Confinement silently missing on the target                   | Canaries per posture before admission; any escape refuses                                                        |
 | An older or altered executor                                 | Exact version match and install verification; altering it needs the remote user's or root's access, out of scope |
-| Another user on the target reaches the executor or its tools | No listening socket; runtime directory owner-only; loopback tool transports refused until reviewed               |
+| Another user on the target reaches the executor or its tools | No network listener; runtime directory and forwarder owner-only; loopback tool transports refused until reviewed |
 | Provider or host credentials leak to the target              | None are sent; inference for the native harness stays on this host                                               |
 | Work continues unseen after a disconnect                     | Executor and children die with the session; turns stop as interrupted; nothing is queued                         |
 | The remote's root or kernel is hostile                       | Not defended, as on this Mac; registration says the target's administrator is trusted with the remote root       |
@@ -742,12 +848,25 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    `sshTargetStore.test.ts` (journal replay of target and binding events, the
    pin written from the journal, and export and diagnostics without target
    details), and `sshTargetAdministrationRoutes.test.ts`. The projection
-   tables are migration 85.
+   tables are migration 86.
 5. **Native harness on a target.** Container. Harness shell, edits, and tests run
    through the executor with approvals; egress heads decided and journaled on this
    host; disconnect interrupts the turn with `target-disconnected` and queues
    nothing. Accepted by a harness turn against loopback `sshd` with a local model
-   stub, plus the disconnect test.
+   stub, plus the disconnect test. Built 2026-10-26 as the remote tool set and
+   the executor's side of it; the Code turn runtime composing it for a thread,
+   thread creation in a remote-bound Project, reconnecting on its own, and
+   restart recovery of remote turns remain (see the delivery state). Its
+   evidence is `sshTargetLoopback.smoke.test.ts` (a native harness turn over a
+   model stub that reads, edits, tests, and fetches on the loopback target with
+   approvals, its allowed and refused destinations decided and journaled on this
+   host, Plan offering no write or command, and the disconnect test: a command
+   killed with its session, an approval withdrawn, the turn interrupted, and
+   nothing run on the next session), `sshTargetConnectionService.test.ts` (a
+   turn's tools bound to their session, told once when it ends, and sending
+   nothing on the next), `executorStreams.test.ts`, `executorSession.test.ts`,
+   `executorReads.test.ts` (Git discovery fenced at the bound root), and
+   `sshExecutorProtocol.test.ts`.
 6. **Provider-sdk process placement.** Container for the seam and conformance
    tests; real-provider smoke needs provider sign-in on a target (maintainer).
    Extend `ProviderAcquireInput` with a host-supplied placement that drivers

@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
+import { connect as netConnect, type Socket } from "node:net";
 import { join } from "node:path";
+import type { Duplex } from "node:stream";
 import { Schema } from "effect";
 import type { PermissionPersistence, ProviderExecutionPolicy } from "@octant/contracts/providers";
 import {
@@ -27,8 +29,17 @@ import {
 } from "@octant/contracts/ssh-target";
 import {
   SSH_EXECUTOR_PROTOCOL_VERSION,
+  SshEgressAddress,
+  SshEgressHostName,
+  type SshExecutorCommandRanReply,
+  type SshExecutorHarnessFileReply,
+  type SshExecutorHarnessFileRequest,
   type SshExecutorReadReply,
   type SshExecutorReadRequest,
+  type SshExecutorRefusedReply,
+  type SshExecutorReply,
+  type SshExecutorRequest,
+  type SshExecutorRunCommandRequest,
 } from "@octant/contracts/ssh-executor-protocol";
 import {
   SSH_CANARY_PROBES_BY_POSTURE,
@@ -37,7 +48,9 @@ import {
   type SshTargetConnection,
 } from "@octant/domain/ssh-target-admission-policy";
 import { childProcessEnvironment } from "../childProcessEnvironment";
-import { ExecutorChannel } from "./executorChannel";
+import type { ToolEgressProxyEndpoint } from "../harness/nativeHarnessEgressProxy";
+import { ExecutorChannel, type ExecutorRequestOptions } from "./executorChannel";
+import { joinToStream } from "./executorStreams";
 import {
   SYSTEM_SSH_CLIENT,
   sshClientEnvironment,
@@ -71,6 +84,15 @@ const HOST_KEY_PROBE_TIMEOUT_MS = 30_000;
 const PROBE_LIFETIME_MS = 10 * 60_000;
 const MAX_HELD_PROBES = 32;
 
+/**
+ * How long past a command's own timeout this host waits for its reply. The
+ * executor ends a command at its timeout and answers; one that stays silent
+ * past this ends the session.
+ */
+const COMMAND_REPLY_GRACE_MS = 60_000;
+
+const isEgressAddress = Schema.is(SshEgressAddress);
+const isEgressHostName = Schema.is(SshEgressHostName);
 const decodeConnectionId = Schema.decodeUnknownSync(SshConnectionId);
 const decodeTargetId = Schema.decodeUnknownSync(SshTargetId);
 const decodeProbeId = Schema.decodeUnknownSync(SshHostKeyProbeId);
@@ -104,14 +126,28 @@ export interface SshTargetAdmissionRequest {
   readonly subject: SshAdmissionSubject;
 }
 
-/** A read on a target: refused by admission, lost with its session, or answered. */
-export type SshTargetReadOutcome =
+/**
+ * A call on a target: refused by admission, lost with its session (or asked
+ * on a session that is no longer the target's), or answered.
+ */
+export type SshTargetCallOutcome<Reply> =
   | {
       readonly status: "refused";
       readonly decision: Extract<SshAdmissionDecision, { readonly status: "refused" }>;
     }
   | { readonly status: "unavailable" }
-  | { readonly status: "replied"; readonly reply: SshExecutorReadReply };
+  | { readonly status: "replied"; readonly reply: Reply };
+
+/** A read on a target: refused by admission, lost with its session, or answered. */
+export type SshTargetReadOutcome = SshTargetCallOutcome<SshExecutorReadReply>;
+
+/** One connected session of a target, which work bound to it names on every call. */
+export interface SshTargetSession {
+  readonly targetId: SshTargetId;
+  readonly connectionId: SshConnectionId;
+  /** Called once when the session ends; the returned function stops listening. */
+  readonly onEnd: (listener: () => void) => () => void;
+}
 
 interface HeldProbe {
   readonly destination: SshDestination;
@@ -221,15 +257,165 @@ export class SshTargetConnectionService {
     admission: SshTargetAdmissionRequest,
     request: SshExecutorReadRequest,
   ): Promise<SshTargetReadOutcome> {
+    const outcome = await this.#call(targetId, undefined, admission, request, this.#readTimeoutMs);
+    if (outcome.status !== "replied") return outcome;
+    const { reply } = outcome;
+    switch (reply.kind) {
+      case "root-resolved":
+      case "directory-listed":
+      case "file-read":
+      case "git-status":
+      case "git-diff":
+      case "refused":
+        return { status: "replied", reply };
+      default:
+        return { status: "unavailable" };
+    }
+  }
+
+  /**
+   * The session the target holds now, for work that must stay on it: a
+   * remote turn's tools name it on every call, and its end ends the turn.
+   * Undefined when no session is connected.
+   */
+  session(targetId: SshTargetId): SshTargetSession | undefined {
+    const record = this.#connections.get(String(targetId));
+    if (record?.state !== "connected") return undefined;
+    const { channel, connectionId } = record;
+    return { targetId, connectionId, onEnd: (listener) => channel.onEnd(listener) };
+  }
+
+  /**
+   * One native-harness file tool on the bound root, admitted in the turn's
+   * posture and sent only on the session the turn holds.
+   */
+  async harnessFile(
+    session: Pick<SshTargetSession, "targetId" | "connectionId">,
+    admission: SshTargetAdmissionRequest,
+    request: SshExecutorHarnessFileRequest,
+  ): Promise<SshTargetCallOutcome<SshExecutorHarnessFileReply | SshExecutorRefusedReply>> {
+    const outcome = await this.#call(
+      session.targetId,
+      session.connectionId,
+      admission,
+      request,
+      this.#readTimeoutMs,
+    );
+    if (outcome.status !== "replied") return outcome;
+    const { reply } = outcome;
+    return reply.kind === "harness-file" || reply.kind === "refused"
+      ? { status: "replied", reply }
+      : { status: "unavailable" };
+  }
+
+  /**
+   * One harness command, admitted as one of Octant's own launches in the
+   * turn's posture and sent only on the session the turn holds. A proxied
+   * command names this host's egress proxy for its launch: each connection
+   * the command makes on the target is joined to it here, where its egress is
+   * decided and journaled. Aborting `signal` asks the executor to stop it.
+   */
+  async runCommand(
+    session: Pick<SshTargetSession, "targetId" | "connectionId">,
+    admission: SshTargetAdmissionRequest,
+    request: SshExecutorRunCommandRequest,
+    options: {
+      readonly signal?: AbortSignal | undefined;
+      readonly egressProxy?: ToolEgressProxyEndpoint | undefined;
+    } = {},
+  ): Promise<SshTargetCallOutcome<SshExecutorCommandRanReply | SshExecutorRefusedReply>> {
+    const proxy = options.egressProxy;
+    if ((request.network === "proxied") !== (proxy !== undefined)) return { status: "unavailable" };
+    const outcome = await this.#call(
+      session.targetId,
+      session.connectionId,
+      admission,
+      request,
+      request.timeoutMs + COMMAND_REPLY_GRACE_MS,
+      {
+        signal: options.signal,
+        egress:
+          proxy === undefined
+            ? undefined
+            : { onStream: (stream) => joinToStream(connectToProxy(proxy), stream) },
+      },
+    );
+    if (outcome.status !== "replied") return outcome;
+    const { reply } = outcome;
+    return reply.kind === "command-ran" || reply.kind === "refused"
+      ? { status: "replied", reply }
+      : { status: "unavailable" };
+  }
+
+  /**
+   * The target's addresses for a name, for this host's egress proxy while a
+   * proxied command of the session runs. It rejects when none came, which
+   * the proxy reads as a name that did not resolve.
+   */
+  async resolveOnTarget(
+    session: Pick<SshTargetSession, "targetId" | "connectionId">,
+    host: string,
+  ): Promise<ReadonlyArray<string>> {
+    const channel = this.#channelOf(session);
+    if (channel === undefined || !isEgressHostName(host)) {
+      throw new Error("The target cannot resolve that name now.");
+    }
+    const addresses = await channel.resolve(host);
+    if (addresses === undefined) throw new Error("The target did not resolve that name.");
+    return addresses;
+  }
+
+  /**
+   * A connection from the target to an address this host's egress proxy
+   * checked, for that proxy while a proxied command of the session runs. It
+   * throws when none can be asked for, which the proxy reads as a failed
+   * connection.
+   */
+  dialFromTarget(
+    session: Pick<SshTargetSession, "targetId" | "connectionId">,
+    destination: { readonly address: string; readonly port: number },
+  ): Duplex {
+    const channel = this.#channelOf(session);
+    const stream =
+      channel === undefined || !isEgressAddress(destination.address)
+        ? undefined
+        : channel.dial(destination.address, destination.port);
+    if (stream === undefined) throw new Error("The target cannot open that connection now.");
+    return stream;
+  }
+
+  async #call(
+    targetId: SshTargetId,
+    connectionId: SshConnectionId | undefined,
+    admission: SshTargetAdmissionRequest,
+    request: SshExecutorRequest,
+    timeoutMs: number,
+    options?: ExecutorRequestOptions,
+  ): Promise<SshTargetCallOutcome<SshExecutorReply>> {
     const decision = this.admit(targetId, admission);
     if (decision.status !== "admitted") return { status: "refused", decision };
     const record = this.#connections.get(String(targetId));
     if (record?.state !== "connected") return { status: "unavailable" };
-    const outcome = await record.channel.request(request, this.#readTimeoutMs);
+    // Work bound to one session never travels on a later one: the turn that
+    // held it ended with it, and nothing is carried to the next.
+    if (connectionId !== undefined && String(record.connectionId) !== String(connectionId)) {
+      return { status: "unavailable" };
+    }
+    const outcome = await record.channel.request(request, timeoutMs, options);
     if (outcome.status !== "replied") return { status: "unavailable" };
     const { reply } = outcome;
     if (reply.kind === "attested" || reply.kind === "busy") return { status: "unavailable" };
     return { status: "replied", reply };
+  }
+
+  #channelOf(
+    session: Pick<SshTargetSession, "targetId" | "connectionId">,
+  ): ExecutorChannel | undefined {
+    const record = this.#connections.get(String(session.targetId));
+    return record?.state === "connected" &&
+      String(record.connectionId) === String(session.connectionId)
+      ? record.channel
+      : undefined;
   }
 
   /**
@@ -528,6 +714,20 @@ function lostStateFromExit(code: number | null, stderr: string): LostState {
   // The remote command ran and exited without introducing itself as an
   // executor: it is not one this host can speak to.
   return "executor-version-mismatch";
+}
+
+/**
+ * A connection to this host's egress proxy for one launch, carrying one
+ * connection the command made on the target. The proxy reads it exactly as
+ * it reads a local command's, so every decision and record is its own.
+ */
+function connectToProxy(endpoint: ToolEgressProxyEndpoint): Socket {
+  const socket =
+    endpoint.kind === "unix-socket"
+      ? netConnect({ path: endpoint.path, allowHalfOpen: true })
+      : netConnect({ host: endpoint.host, port: endpoint.port, allowHalfOpen: true });
+  socket.on("error", () => socket.destroy());
+  return socket;
 }
 
 function domainConnection(record: ConnectionRecord | undefined): SshTargetConnection {

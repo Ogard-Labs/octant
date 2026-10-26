@@ -65,6 +65,7 @@ import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
+import { wireSshTargets } from "./wiring/sshTargets";
 import { wireReplica } from "./wiring/replica";
 
 export { MAX_CHAT_ATTACHMENT_BYTES };
@@ -424,6 +425,11 @@ export function startOctantServer(
       windowAuthorityStore,
       workThreadProjection,
     });
+    const { sshTargetConnections, sshTargetStore } = wireSshTargets({
+      persistence,
+      providerDataDirectory,
+      version,
+    });
     const {
       followUpCreation,
       followUpSuggestionRoutes,
@@ -465,6 +471,7 @@ export function startOctantServer(
       providerDataDirectory,
       runningWorkTurnAccess,
       sideTasks,
+      sshTargetConnections,
       threadFollowUpSuggestions,
       toolEgressRules,
       turnMetrics,
@@ -1113,7 +1120,6 @@ export function startOctantServer(
       providerCredentialRoutes,
       remoteHost,
       sshTargetAdministrationRoutes,
-      sshTargetConnections,
     } = wireRemote({
       canvasPublicShareService,
       threadExportService,
@@ -1136,6 +1142,8 @@ export function startOctantServer(
       pushNotificationTokenStore,
       remoteServerGrants,
       serve,
+      sshTargetConnections,
+      sshTargetStore,
       startedAt,
       threadMessageQueue,
       toolEgressRules,

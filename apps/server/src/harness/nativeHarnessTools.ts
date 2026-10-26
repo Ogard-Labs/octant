@@ -46,7 +46,7 @@ import { decodeToolActionRequest } from "@octant/contracts";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import type { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import type { ToolEgressCallConfirmation } from "./nativeHarnessEgressRules";
-import type { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
+import type { NativeHarnessFileSystemPort } from "./nativeHarnessFileSystem";
 import type { NativeHarnessJournalLookup } from "./nativeHarnessJournalLookup";
 import { nativeHarnessGoalSummary, type NativeHarnessGoalPort } from "./nativeHarnessGoal";
 
@@ -166,7 +166,7 @@ export interface NativeHarnessWebFetchResult {
  * lacks one simply does not offer the tool, it never fakes it.
  */
 export interface NativeHarnessToolPorts {
-  readonly filesystem?: NativeHarnessFileSystem;
+  readonly filesystem?: NativeHarnessFileSystemPort;
   readonly shell?: NativeHarnessShellPort;
   readonly webSearch?: (input: {
     readonly query: string;

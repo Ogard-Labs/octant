@@ -778,9 +778,12 @@ actions continue to report unavailable for plain folders.
 A Code Project bound to a folder on a machine this host reaches over SSH is a
 design accepted on 2026-10-26. Its admission policy, the executor, the SSH
 transport, host-key pinning from a local window or the local CLI, Linux
-confinement attestation, and binding a remote root with Files, Git status,
-and diff reads through the executor are built; threads cannot run there yet.
-SSH targets, their attestation digests, and remote bindings are journaled. Its
+confinement attestation, binding a remote root with Files, Git status, and
+diff reads through the executor, and the native harness's file tools,
+commands, and egress for a remote-bound Project's turn are built; the Code
+turn runtime does not yet start a thread there, so no product route reaches a
+target's tools. SSH targets, their attestation digests, and remote bindings
+are journaled. Its
 admission, confinement attestation,
 transport, and how it differs from a paired host are owned by
 [Remote SSH environments](design/remote-ssh-environments.md).
@@ -5144,6 +5147,15 @@ listener per confined launch:
   connection byte-for-byte to the Unix socket, then runs the command and exits
   with it. The forwarder holds no policy; the token and every decision stay
   with the host proxy.
+- **Commands on an SSH target.** A command of a Project bound to a remote
+  root runs in the same capsule on the target, whose forwarder's socket is
+  the executor's, in its owner-only runtime directory. Each connection the
+  command makes there crosses the SSH session as a stream to this host's
+  proxy for that launch, which decides and journals it exactly as for a local
+  command; the proxy's lookup and connection are made by the target, so the
+  name resolves with the target's resolver and the connection leaves from
+  the target, while the private check and every decision stay here
+  ([Native harness on a target](design/remote-ssh-environments.md#native-harness-on-a-target)).
 - **Environment.** The launch environment adds `HTTPS_PROXY`, `HTTP_PROXY`,
   and `ALL_PROXY` (and their lowercase forms) set to
   `http://octant:<token>@127.0.0.1:<port>`, empty `NO_PROXY`/`no_proxy`, and

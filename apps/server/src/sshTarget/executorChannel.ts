@@ -2,11 +2,15 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { Schema } from "effect";
 import {
   SshExecutorFrame,
+  type SshEgressAddress,
+  type SshEgressHostName,
   type SshExecutorHello,
+  type SshExecutorHostFrame,
   type SshExecutorReply,
   type SshExecutorRequest,
 } from "@octant/contracts/ssh-executor-protocol";
 import { encodeExecutorFrame, ExecutorFrameReader } from "./executorFrames";
+import { ExecutorStreams, type ExecutorStream } from "./executorStreams";
 
 /**
  * This host's end of one executor session: the frames that come back on the
@@ -20,10 +24,18 @@ import { encodeExecutorFrame, ExecutorFrameReader } from "./executorFrames";
  * cannot be trusted with the next answer. A request the executor does not
  * answer in time ends the session too, so a late answer can never be read as
  * the reply to the request after it.
+ *
+ * A proxied command's request carries its egress while it runs: each stream
+ * the executor opens for it goes to that egress, and only then may this host
+ * ask the target to resolve a name or open a connection. A stream opened
+ * while no proxied command runs is a violation.
  */
 
 const MAX_STDERR_BYTES = 16_384;
 const MAX_WAITING_REQUESTS = 16;
+/** Streams either direction holds at once, beyond the proxy's own limits. */
+const MAX_STREAMS = 160;
+const RESOLVE_TIMEOUT_MS = 15_000;
 
 const decodeExecutorFrame = Schema.decodeUnknownEither(SshExecutorFrame);
 
@@ -39,8 +51,20 @@ export type ExecutorRequestOutcome =
   | { readonly status: "replied"; readonly reply: SshExecutorReply }
   | { readonly status: "lost"; readonly cause: "violated" | "ended" | "timed-out" | "queue-full" };
 
+/** Where a running proxied command's forwarded connections go on this host. */
+export interface ExecutorLaunchEgress {
+  readonly onStream: (stream: ExecutorStream) => void;
+}
+
+export interface ExecutorRequestOptions {
+  /** Aborting it asks the executor to stop the request; its reply still settles it. */
+  readonly signal?: AbortSignal | undefined;
+  readonly egress?: ExecutorLaunchEgress | undefined;
+}
+
 interface InFlight {
   readonly id: number;
+  readonly egress: ExecutorLaunchEgress | undefined;
   readonly settle: (outcome: ExecutorRequestOutcome) => void;
 }
 
@@ -48,18 +72,28 @@ export class ExecutorChannel {
   readonly #child: ChildProcessWithoutNullStreams;
   readonly #reader = new ExecutorFrameReader({ expectPreamble: true });
   readonly #waiting: Array<() => void> = [];
-  readonly #endListeners: Array<() => void> = [];
+  readonly #endListeners = new Set<() => void>();
   readonly #introduction: Promise<ExecutorIntroduction>;
+  /** Connections the executor forwarded from a running command (odd ids). */
+  readonly #forwarded: ExecutorStreams;
+  /** Connections this host asked the target to open (even ids). */
+  readonly #dialed: ExecutorStreams;
+  readonly #dialing = new Map<number, ExecutorStream>();
+  readonly #questions = new Map<number, (addresses: ReadonlyArray<string> | undefined) => void>();
   #introduce: (outcome: ExecutorIntroduction) => void = () => undefined;
   #introduced = false;
   #inFlight: InFlight | undefined;
   #busy = false;
   #nextId = 1;
+  #nextQuestion = 1;
   #ended: "violated" | "ended" | "timed-out" | undefined;
   #stderr = "";
 
   constructor(child: ChildProcessWithoutNullStreams, options: { readonly helloTimeoutMs: number }) {
     this.#child = child;
+    const send = (frame: SshExecutorHostFrame) => this.#write(frame);
+    this.#forwarded = new ExecutorStreams({ send, opens: "even", maxStreams: MAX_STREAMS });
+    this.#dialed = new ExecutorStreams({ send, opens: "even", maxStreams: MAX_STREAMS });
     this.#introduction = new Promise((resolve) => {
       let settled = false;
       const timer = setTimeout(() => {
@@ -91,14 +125,27 @@ export class ExecutorChannel {
     return this.#ended !== undefined;
   }
 
-  /** Called once when the session ends, for whatever reason. */
-  onEnd(listener: () => void): void {
-    if (this.#ended !== undefined) listener();
-    else this.#endListeners.push(listener);
+  /**
+   * Called once when the session ends, for whatever reason. The returned
+   * function stops listening, for a caller that no longer cares.
+   */
+  onEnd(listener: () => void): () => void {
+    if (this.#ended !== undefined) {
+      listener();
+      return () => undefined;
+    }
+    this.#endListeners.add(listener);
+    return () => {
+      this.#endListeners.delete(listener);
+    };
   }
 
   /** Writes one request after the last one was answered, and waits for its reply. */
-  async request(request: SshExecutorRequest, timeoutMs: number): Promise<ExecutorRequestOutcome> {
+  async request(
+    request: SshExecutorRequest,
+    timeoutMs: number,
+    options: ExecutorRequestOptions = {},
+  ): Promise<ExecutorRequestOutcome> {
     if (this.#ended !== undefined) return { status: "lost", cause: this.#ended };
     if (this.#busy) {
       if (this.#waiting.length >= MAX_WAITING_REQUESTS) {
@@ -109,11 +156,48 @@ export class ExecutorChannel {
     }
     this.#busy = true;
     try {
-      return await this.#send(request, timeoutMs);
+      return await this.#send(request, timeoutMs, options);
     } finally {
       this.#busy = false;
       this.#waiting.shift()?.();
     }
+  }
+
+  /**
+   * The target's answers for a name, asked only while a proxied command runs;
+   * undefined when it did not resolve or no such command runs.
+   */
+  resolve(host: SshEgressHostName): Promise<ReadonlyArray<string> | undefined> {
+    if (this.#ended !== undefined || this.#inFlight?.egress === undefined) {
+      return Promise.resolve(undefined);
+    }
+    const question = this.#nextQuestion;
+    this.#nextQuestion += 1;
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => answer(undefined), RESOLVE_TIMEOUT_MS);
+      const answer = (addresses: ReadonlyArray<string> | undefined) => {
+        clearTimeout(timer);
+        this.#questions.delete(question);
+        resolve(addresses);
+      };
+      this.#questions.set(question, answer);
+      this.#write({ type: "resolve", question, host });
+    });
+  }
+
+  /**
+   * A connection from the target to an address this host checked, as a
+   * stream that emits `connect` once the target reached it and closes if it
+   * could not. Undefined when no proxied command runs or past the limit.
+   */
+  dial(address: SshEgressAddress, port: number): ExecutorStream | undefined {
+    if (this.#ended !== undefined || this.#inFlight?.egress === undefined) return undefined;
+    const stream = this.#dialed.open();
+    if (stream === undefined) return undefined;
+    this.#dialing.set(stream.id, stream);
+    stream.once("close", () => this.#dialing.delete(stream.id));
+    this.#write({ type: "dial", stream: stream.id, address, port });
+    return stream;
   }
 
   /** Ends the session; the executor exits when its input closes. */
@@ -121,7 +205,11 @@ export class ExecutorChannel {
     this.#end("ended");
   }
 
-  #send(request: SshExecutorRequest, timeoutMs: number): Promise<ExecutorRequestOutcome> {
+  #send(
+    request: SshExecutorRequest,
+    timeoutMs: number,
+    options: ExecutorRequestOptions,
+  ): Promise<ExecutorRequestOutcome> {
     return new Promise((resolve) => {
       const id = this.#nextId;
       this.#nextId += 1;
@@ -131,16 +219,34 @@ export class ExecutorChannel {
         return;
       }
       const timer = setTimeout(() => this.#end("timed-out"), timeoutMs);
+      const cancel = () => this.#write({ type: "cancel", id });
       this.#inFlight = {
         id,
+        egress: options.egress,
         settle: (outcome) => {
           clearTimeout(timer);
+          options.signal?.removeEventListener("abort", cancel);
           this.#inFlight = undefined;
+          // A command's egress ends with it: its streams close and no
+          // question about it is answered any more.
+          if (options.egress !== undefined) this.#endLaunchEgress();
           resolve(outcome);
         },
       };
       this.#child.stdin.write(encoded.bytes);
+      if (options.signal?.aborted === true) cancel();
+      else options.signal?.addEventListener("abort", cancel, { once: true });
     });
+  }
+
+  #write(frame: SshExecutorHostFrame): void {
+    if (this.#ended !== undefined) return;
+    const encoded = encodeExecutorFrame(frame);
+    if (encoded.status !== "encoded") {
+      this.#end("violated");
+      return;
+    }
+    this.#child.stdin.write(encoded.bytes);
   }
 
   #onData(chunk: Buffer): void {
@@ -151,6 +257,7 @@ export class ExecutorChannel {
       return;
     }
     for (const value of reading.frames) {
+      if (this.#ended !== undefined) return;
       const decoded = decodeExecutorFrame(value);
       if (decoded._tag === "Left") {
         this.#end("violated");
@@ -166,13 +273,54 @@ export class ExecutorChannel {
         this.#introduce({ status: "introduced", hello: frame });
         continue;
       }
-      const inFlight = this.#inFlight;
-      if (frame.type !== "reply" || inFlight === undefined || frame.id !== inFlight.id) {
+      if (this.#receive(frame) === "violated") {
         this.#end("violated");
         return;
       }
-      inFlight.settle({ status: "replied", reply: frame.reply });
     }
+  }
+
+  #receive(frame: SshExecutorFrame): "accepted" | "violated" {
+    const inFlight = this.#inFlight;
+    switch (frame.type) {
+      case "hello":
+        return "violated";
+      case "reply":
+        if (inFlight === undefined || frame.id !== inFlight.id) return "violated";
+        inFlight.settle({ status: "replied", reply: frame.reply });
+        return "accepted";
+      case "stream-open": {
+        if (inFlight?.egress === undefined) return "violated";
+        const stream = this.#forwarded.adopt(frame.stream);
+        if (stream === "violated") return "violated";
+        if (stream !== "refused") inFlight.egress.onStream(stream);
+        return "accepted";
+      }
+      case "dialed": {
+        const stream = this.#dialing.get(frame.stream);
+        // A dial this host already gave up on can still be answered.
+        if (stream === undefined)
+          return this.#dialed.opened(frame.stream) ? "accepted" : "violated";
+        this.#dialing.delete(frame.stream);
+        if (frame.connected) stream.emit("connect");
+        else stream.destroy();
+        return "accepted";
+      }
+      case "resolved": {
+        const answer = this.#questions.get(frame.question);
+        if (answer !== undefined) answer(frame.addresses);
+        return frame.question < this.#nextQuestion ? "accepted" : "violated";
+      }
+      default:
+        return (frame.stream % 2 === 1 ? this.#forwarded : this.#dialed).receive(frame);
+    }
+  }
+
+  #endLaunchEgress(): void {
+    this.#forwarded.closeAll();
+    this.#dialed.closeAll();
+    this.#dialing.clear();
+    for (const answer of this.#questions.values()) answer(undefined);
   }
 
   #onExit(code: number | null): void {
@@ -207,8 +355,15 @@ export class ExecutorChannel {
 
   #finish(): void {
     const cause = this.#ended ?? "ended";
+    // The session is gone, so its streams go without a word to it.
+    this.#forwarded.abandonAll();
+    this.#dialed.abandonAll();
+    this.#dialing.clear();
+    for (const answer of this.#questions.values()) answer(undefined);
     this.#inFlight?.settle({ status: "lost", cause });
     for (const release of this.#waiting.splice(0)) release();
-    for (const listener of this.#endListeners.splice(0)) listener();
+    const listeners = [...this.#endListeners];
+    this.#endListeners.clear();
+    for (const listener of listeners) listener();
   }
 }

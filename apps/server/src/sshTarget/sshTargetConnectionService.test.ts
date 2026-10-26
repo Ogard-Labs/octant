@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { SshDestination, SshExecutorPath, SshRemotePath } from "@octant/contracts/ssh-target";
 import { SSH_EXECUTOR_PREAMBLE } from "@octant/contracts/ssh-executor-protocol";
 import { SSH_CANARY_PROBES_BY_POSTURE } from "@octant/domain/ssh-target-admission-policy";
+import { bindSshRemoteHarness } from "./sshRemoteHarness";
 import { SshRemoteProjectService } from "./sshRemoteProjectService";
 import { SshTargetConnectionService } from "./sshTargetConnectionService";
 import type { SshTargetStore } from "./sshTargetStore";
@@ -70,6 +71,10 @@ const answer = (request) => {
         : { kind: "refused", reason: "root-moved" };
     case "git-status":
       return { kind: "git-status", status: { head: { kind: "unborn", name: "main" }, entries: [{ path: "README.md", index: "?", worktree: "?" }], truncated: false } };
+    case "harness-file":
+      return { kind: "harness-file", result: { kind: "written", path: request.operation.arguments.path, bytes: 2, created: true } };
+    case "run-command":
+      return { kind: "command-ran", termination: "exited", exitCode: 0, stdout: Buffer.from("ran on " + request.root).toString("base64"), stderr: "" };
     default:
       return { kind: "refused", reason: "read-failed" };
   }
@@ -377,6 +382,106 @@ describe("SSH target connection service", () => {
     ]);
     expect(unattestedProjects.list().map((project) => project.id)).toEqual([projectId]);
     unattested.close();
+  });
+
+  it("binds a turn's tools to the session it started on, tells the turn once when it ends, and sends nothing on the next", async () => {
+    const requests = () =>
+      readFileSync(join(directory, "request.json.log"), "utf8").trim().split("\n");
+    const connections = service();
+    const projects = new SshRemoteProjectService({
+      store: registry,
+      connections,
+      uuid: () => "88888888-8888-4888-8888-888888888888",
+      clock: () => "2026-10-26T10:00:00.000Z",
+    });
+    const status = await registered(connections);
+    const bound = await projects.bind({
+      targetId: status.target.id,
+      remoteRoot: Schema.decodeUnknownSync(SshRemotePath)("/home/build/app"),
+      name: "App",
+    });
+    if (bound.status !== "ok") throw new Error("bind refused");
+    let posture: "plan" | "approval-gated" = "approval-gated";
+    let disconnected = 0;
+    const binding = bindSshRemoteHarness(
+      { connections, uuid: () => "99999999-9999-4999-8999-999999999999" },
+      {
+        project: bound.value,
+        scope: {
+          threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          projectId: String(bound.value.id),
+        },
+        posture: () => ({ executionPolicy: posture, permissionPersistence: "current-session" }),
+        onTargetDisconnected: () => {
+          disconnected += 1;
+        },
+      },
+    );
+    if (binding.status !== "bound") throw new Error("binding refused");
+    expect(await binding.filesystem.write({ path: "notes.md", content: "hi" })).toEqual({
+      kind: "written",
+      path: "notes.md",
+      bytes: 2,
+      created: true,
+    });
+    expect(
+      await binding.shell.run({
+        command: "bun test",
+        cwd: binding.filesystem.root,
+        timeoutMs: 1_000,
+      }),
+    ).toEqual({ status: "ran", exitCode: 0, output: "ran on /srv/app", truncated: false });
+    // Plan runs no command: nothing is sent for one.
+    posture = "plan";
+    expect(
+      await binding.shell.run({
+        command: "bun test",
+        cwd: binding.filesystem.root,
+        timeoutMs: 1_000,
+      }),
+    ).toMatchObject({ status: "unavailable" });
+    posture = "approval-gated";
+    expect(requests()).toEqual(["attest", "resolve-root", "harness-file", "run-command"]);
+
+    // The session ends and another attests: the turn is told once, and its
+    // tools refuse rather than travel on a session that is not theirs.
+    const again = await connections.connect(status.target.id);
+    expect(again).toMatchObject({ status: "ok", value: { connection: "connected" } });
+    expect(disconnected).toBe(1);
+    expect(await binding.filesystem.write({ path: "notes.md", content: "again" })).toEqual({
+      kind: "refused",
+      reason: "target-unavailable",
+    });
+    expect(
+      await binding.shell.run({
+        command: "bun test",
+        cwd: binding.filesystem.root,
+        timeoutMs: 1_000,
+      }),
+    ).toMatchObject({ status: "unavailable" });
+    expect(requests()).toEqual(["attest", "resolve-root", "harness-file", "run-command", "attest"]);
+    binding.release();
+
+    // A target with no session binds no tools; the decision says why.
+    connections.close();
+    expect(
+      bindSshRemoteHarness(
+        { connections, uuid: () => "99999999-9999-4999-8999-999999999999" },
+        {
+          project: bound.value,
+          scope: {
+            threadId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            projectId: String(bound.value.id),
+          },
+          posture: () => ({
+            executionPolicy: "approval-gated",
+            permissionPersistence: "current-session",
+          }),
+          onTargetDisconnected: () => undefined,
+        },
+      ),
+    ).toEqual({ status: "refused", decision: { status: "refused", reason: "target-unreachable" } });
+    expect(disconnected).toBe(1);
   });
 
   it("ends the session when the executor answers a read out of turn, and reads nothing after it", async () => {

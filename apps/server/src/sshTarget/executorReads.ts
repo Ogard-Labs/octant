@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { accessSync, constants, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Option, Schema } from "effect";
 import type { CodeRelativePath } from "@octant/contracts/code";
 import {
@@ -109,11 +109,8 @@ export async function answerExecutorRead(
       ? refused(resolved.reason)
       : { kind: "root-resolved", root: resolved.canonical };
   }
-  const root = await resolveRoot(environment, request.root);
+  const root = await resolveBoundRoot(environment, request.root);
   if (root.status === "refused") return refused(root.reason);
-  // The host bound the canonical path; one that resolves elsewhere now was
-  // moved or replaced by a link, and is not the folder the person bound.
-  if (root.canonical !== request.root) return refused("root-moved");
   switch (request.kind) {
     case "list-directory":
       return listDirectory(root.canonical, request.directory).catch(() => refused("read-failed"));
@@ -126,9 +123,23 @@ export async function answerExecutorRead(
   }
 }
 
-type ResolvedRoot =
+export type ResolvedRoot =
   | { readonly status: "resolved"; readonly canonical: string }
   | { readonly status: "refused"; readonly reason: SshRemoteReadRefusalReason };
+
+/**
+ * The root a request names, when it is still the folder the person bound.
+ * The host bound the canonical path; one that resolves elsewhere now was
+ * moved or replaced by a link, and is refused `root-moved`.
+ */
+export async function resolveBoundRoot(
+  environment: Pick<ExecutorReadEnvironment, "homeDirectory" | "sessionParent">,
+  root: string,
+): Promise<ResolvedRoot> {
+  const resolved = await resolveRoot(environment, root);
+  if (resolved.status === "refused") return resolved;
+  return resolved.canonical === root ? resolved : { status: "refused", reason: "root-moved" };
+}
 
 /**
  * A root is a directory that is not `/`, and neither holds nor sits inside
@@ -136,7 +147,7 @@ type ResolvedRoot =
  * containment, so a root that held the SSH keys would let Files read them.
  */
 async function resolveRoot(
-  environment: ExecutorReadEnvironment,
+  environment: Pick<ExecutorReadEnvironment, "homeDirectory" | "sessionParent">,
   root: string,
 ): Promise<ResolvedRoot> {
   let canonical: string;
@@ -383,7 +394,8 @@ async function runGit(
     // Whatever the Git launch asks for, it runs with Plan's grants: the
     // posture whose canaries speak for it.
     const plan: ProcessConfinementPort = {
-      prepare: (input) => base.prepare({ ...input, ...postureGrants("plan") }),
+      prepare: (input) =>
+        base.prepare({ ...input, ...postureGrants("plan"), networkEgress: "none" }),
     };
     let launch: ReturnType<ProcessConfinementPort["prepare"]>;
     try {
@@ -407,6 +419,11 @@ async function runGit(
         HOME: scratch,
         TMPDIR: scratch,
         LC_ALL: "C",
+        // Discovery stops at the bound root: a root with no repository of
+        // its own reads as none, never as a repository in a folder above it
+        // that the person did not bind.
+        GIT_CEILING_DIRECTORIES: dirname(root),
+        GIT_WORK_TREE: root,
       },
       maximumBytes,
     });
