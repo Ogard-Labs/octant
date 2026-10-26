@@ -1,7 +1,15 @@
-import { type ProviderInstance, type ProviderInstanceId } from "@octant/contracts";
+import {
+  type DirectoryIssuerBinding,
+  type OpenAiCompatibleProviderConfiguration,
+  type AnthropicCompatibleProviderConfiguration,
+  type ProviderInstance,
+  type ProviderInstanceId,
+} from "@octant/contracts";
 import {
   AZURE_FOUNDRY_DIRECTORY_SIGN_IN,
+  GATEWAY_DIRECTORY_SIGN_IN,
   normalizeOpenAiCompatibleBaseUrl,
+  subscriptionDescriptorIdOf,
   subscriptionOAuthOffers,
 } from "@octant/domain";
 import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
@@ -29,7 +37,9 @@ import {
   configurationFrom,
   anthropicConfigurationFrom,
   foundryConfigurationFrom,
+  gatewayDirectoryFrom,
   isDirectoryGuid,
+  isGatewayDirectory,
 } from "./configurationValues";
 
 interface HttpConfigurationFormProps {
@@ -47,28 +57,38 @@ interface HttpConfigurationFormProps {
 
 export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
   const credentialInput = useRef<HTMLInputElement>(null);
+  const [problem, setProblem] = useState<string>();
   // An endpoint created by a subscription sign-in keeps the endpoint its offer
   // names and holds that sign-in instead of a key: the row shows the sign-in,
   // so the form keeps the fixed values without offering to change them.
   const subscription = boundSubscriptionOffer(props.instance);
+  const saved = props.instance.configuration;
+  const directory = saved.authentication === "directory-oauth" ? saved.directory : undefined;
   return (
     <form
       className="provider-card__edit provider-card__edit--http"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        const configuration = {
-          ...configurationFrom(new FormData(event.currentTarget)),
-          ...(subscription === undefined
-            ? {}
+        const data = new FormData(event.currentTarget);
+        if (directory !== undefined && !isGatewayDirectory(gatewayDirectoryFrom(data))) {
+          setProblem(GATEWAY_DIRECTORY_PROBLEM);
+          return;
+        }
+        setProblem(undefined);
+        const formed = configurationFrom(data);
+        const configuration: OpenAiCompatibleProviderConfiguration =
+          saved.authentication === "directory-oauth" || formed.authentication === "directory-oauth"
+            ? formed
             : {
-                baseUrl: props.instance.configuration.baseUrl,
-                authentication: props.instance.configuration.authentication,
-              }),
-          ...(props.instance.configuration.oauthDescriptorId === undefined
-            ? {}
-            : { oauthDescriptorId: props.instance.configuration.oauthDescriptorId }),
-        };
+                ...formed,
+                ...(subscription === undefined
+                  ? {}
+                  : { baseUrl: saved.baseUrl, authentication: saved.authentication }),
+                ...(saved.oauthDescriptorId === undefined
+                  ? {}
+                  : { oauthDescriptorId: saved.oauthDescriptorId }),
+              };
         const enteredCredential = transientCredential(credentialInput.current);
         const key =
           configuration.authentication === "bearer"
@@ -90,17 +110,32 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         );
       }}
     >
-      {subscription === undefined ? (
+      {saved.authentication === "directory-oauth" ? (
         <>
           <BaseUrlField
             ariaLabel={`API base URL for ${props.instance.displayName}`}
             instanceId={props.instance.id}
             label="API base URL"
-            savedBaseUrl={props.instance.configuration.baseUrl}
-            takesKey={props.instance.configuration.authentication !== "none"}
+            savedBaseUrl={saved.baseUrl}
+            takesKey={false}
+          />
+          <GatewayDirectoryFields
+            directory={saved.directory}
+            instanceId={props.instance.id}
+            instanceName={props.instance.displayName}
+          />
+        </>
+      ) : subscription === undefined ? (
+        <>
+          <BaseUrlField
+            ariaLabel={`API base URL for ${props.instance.displayName}`}
+            instanceId={props.instance.id}
+            label="API base URL"
+            savedBaseUrl={saved.baseUrl}
+            takesKey={saved.authentication !== "none"}
           />
           <HttpCredentialFields
-            authentication={props.instance.configuration.authentication}
+            authentication={saved.authentication}
             authenticationLabel={`Authentication for ${props.instance.displayName}`}
             credentialInput={credentialInput}
             credentialLabel={`API key for ${props.instance.displayName}`}
@@ -163,8 +198,13 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         className="provider-settings__field-guidance"
         id={`endpoint-guidance-${props.instance.id}`}
       >
-        Remote endpoints require HTTPS. HTTP is allowed only for loopback hosts.
+        {directory === undefined ? KEYED_GUIDANCE : GATEWAY_DIRECTORY_GUIDANCE}
       </p>
+      {problem === undefined ? null : (
+        <OctantAlert className="provider-settings__alert" tone="warning">
+          {problem}
+        </OctantAlert>
+      )}
       <div className="provider-card__edit-actions">
         <OctantButton
           disabled={props.disabled}
@@ -175,7 +215,9 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
         >
           Save
         </OctantButton>
-        {props.credentialManagementAvailable && subscription === undefined ? (
+        {props.credentialManagementAvailable &&
+        subscription === undefined &&
+        directory === undefined ? (
           <OctantButton
             disabled={props.disabled || props.credential.status !== "stored"}
             onClick={() => {
@@ -207,7 +249,7 @@ export function HttpConfigurationForm(props: HttpConfigurationFormProps) {
 export function boundSubscriptionOffer(
   instance: Extract<ProviderInstance, { driverKind: "openai-compatible" | "anthropic-compatible" }>,
 ): SubscriptionOAuthOffer | undefined {
-  const descriptorId = instance.configuration.oauthDescriptorId;
+  const descriptorId = subscriptionDescriptorIdOf(instance.configuration);
   if (descriptorId === undefined) return undefined;
   return subscriptionOAuthOffers().find(
     (offer) =>
@@ -271,18 +313,28 @@ interface AnthropicConfigurationFormProps {
 
 export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProps) {
   const credentialInput = useRef<HTMLInputElement>(null);
+  const [problem, setProblem] = useState<string>();
+  const saved = props.instance.configuration;
+  const directory = saved.authentication === "directory-oauth" ? saved.directory : undefined;
   return (
     <form
       className="provider-card__edit provider-card__edit--http"
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        const configuration = {
-          ...anthropicConfigurationFrom(new FormData(event.currentTarget)),
-          ...(props.instance.configuration.oauthDescriptorId === undefined
-            ? {}
-            : { oauthDescriptorId: props.instance.configuration.oauthDescriptorId }),
-        };
+        const data = new FormData(event.currentTarget);
+        if (directory !== undefined && !isGatewayDirectory(gatewayDirectoryFrom(data))) {
+          setProblem(GATEWAY_DIRECTORY_PROBLEM);
+          return;
+        }
+        setProblem(undefined);
+        const formed = anthropicConfigurationFrom(data);
+        const configuration: AnthropicCompatibleProviderConfiguration =
+          saved.authentication === "directory-oauth" ||
+          formed.authentication === "directory-oauth" ||
+          saved.oauthDescriptorId === undefined
+            ? formed
+            : { ...formed, oauthDescriptorId: saved.oauthDescriptorId };
         const enteredCredential = transientCredential(credentialInput.current);
         const key =
           configuration.authentication !== "none"
@@ -308,28 +360,40 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         ariaLabel={`API base URL for ${props.instance.displayName}`}
         instanceId={props.instance.id}
         label="API base URL"
-        savedBaseUrl={props.instance.configuration.baseUrl}
-        takesKey={props.instance.configuration.authentication !== "none"}
+        savedBaseUrl={saved.baseUrl}
+        takesKey={saved.authentication !== "none" && directory === undefined}
       />
-      <HttpCredentialFields
-        authentication={props.instance.configuration.authentication}
-        authenticationLabel={`Authentication for ${props.instance.displayName}`}
-        credentialInput={credentialInput}
-        credentialLabel={`API key for ${props.instance.displayName}`}
-        credentialManagementAvailable={props.credentialManagementAvailable}
-        supportsApiKey
-      />
-      <DirectEndpointSignIn
-        baseUrl={props.instance.configuration.baseUrl}
-        disabled={props.disabled}
-        driverKind="anthropic-compatible"
-        instanceId={props.instance.id}
-        {...(props.onProviderOAuth === undefined ? {} : { onProviderOAuth: props.onProviderOAuth })}
-        {...(props.onOpenExternalUrl === undefined
-          ? {}
-          : { onOpenExternalUrl: props.onOpenExternalUrl })}
-        onUseApiKey={() => credentialInput.current?.focus()}
-      />
+      {saved.authentication === "directory-oauth" ? (
+        <GatewayDirectoryFields
+          directory={saved.directory}
+          instanceId={props.instance.id}
+          instanceName={props.instance.displayName}
+        />
+      ) : (
+        <>
+          <HttpCredentialFields
+            authentication={saved.authentication}
+            authenticationLabel={`Authentication for ${props.instance.displayName}`}
+            credentialInput={credentialInput}
+            credentialLabel={`API key for ${props.instance.displayName}`}
+            credentialManagementAvailable={props.credentialManagementAvailable}
+            supportsApiKey
+          />
+          <DirectEndpointSignIn
+            baseUrl={saved.baseUrl}
+            disabled={props.disabled}
+            driverKind="anthropic-compatible"
+            instanceId={props.instance.id}
+            {...(props.onProviderOAuth === undefined
+              ? {}
+              : { onProviderOAuth: props.onProviderOAuth })}
+            {...(props.onOpenExternalUrl === undefined
+              ? {}
+              : { onOpenExternalUrl: props.onOpenExternalUrl })}
+            onUseApiKey={() => credentialInput.current?.focus()}
+          />
+        </>
+      )}
       <SettingRow
         label="Anthropic protocol version"
         scope="host"
@@ -376,8 +440,13 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         className="provider-settings__field-guidance"
         id={`endpoint-guidance-${props.instance.id}`}
       >
-        Remote endpoints require HTTPS. HTTP is allowed only for loopback hosts.
+        {directory === undefined ? KEYED_GUIDANCE : GATEWAY_DIRECTORY_GUIDANCE}
       </p>
+      {problem === undefined ? null : (
+        <OctantAlert className="provider-settings__alert" tone="warning">
+          {problem}
+        </OctantAlert>
+      )}
       <div className="provider-card__edit-actions">
         <OctantButton
           disabled={props.disabled}
@@ -388,7 +457,7 @@ export function AnthropicConfigurationForm(props: AnthropicConfigurationFormProp
         >
           Save
         </OctantButton>
-        {props.credentialManagementAvailable ? (
+        {props.credentialManagementAvailable && directory === undefined ? (
           <OctantButton
             disabled={props.disabled || props.credential.status !== "stored"}
             onClick={() => {
@@ -602,6 +671,67 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
   );
 }
 
+const KEYED_GUIDANCE = "Remote endpoints require HTTPS. HTTP is allowed only for loopback hosts.";
+const GATEWAY_DIRECTORY_GUIDANCE =
+  "The gateway's address must be HTTPS. Changing its client, scope, or address signs this endpoint out. The issuer is fixed; add a new endpoint to sign in at another.";
+
+/** What the person is told when a gateway's issuer, client, or scope is not one the host takes. */
+export const GATEWAY_DIRECTORY_PROBLEM =
+  "Enter your organization's issuer (the https address its sign-in tokens name), the client ID it registered for Octant, and the one scope your gateway requires, such as gateway.models.";
+
+/**
+ * A gateway's organization sign-in: the issuer, fixed when the endpoint was
+ * added, and the client and scope, which may change and sign the endpoint
+ * out. None of it is secret.
+ */
+function GatewayDirectoryFields(props: {
+  readonly instanceId: ProviderInstanceId;
+  readonly instanceName: string;
+  readonly directory: DirectoryIssuerBinding;
+}) {
+  return (
+    <>
+      <input name="authentication" type="hidden" value="directory-oauth" />
+      <input name="issuer" type="hidden" value={String(props.directory.issuer)} />
+      <SettingRow
+        label="Sign-in issuer"
+        scope="host"
+        settingId={`provider-${props.instanceId}-directory-issuer`}
+      >
+        <span className="oct-meta--mono">{String(props.directory.issuer)}</span>
+      </SettingRow>
+      <SettingRow
+        label="Client ID"
+        scope="host"
+        settingId={`provider-${props.instanceId}-directory-client`}
+      >
+        <OctantInput
+          aria-label={`Client ID for ${props.instanceName}`}
+          autoComplete="off"
+          className="settings-view__text-input"
+          defaultValue={String(props.directory.clientId)}
+          name="clientId"
+          spellCheck={false}
+        />
+      </SettingRow>
+      <SettingRow
+        label="Scope"
+        scope="host"
+        settingId={`provider-${props.instanceId}-directory-scope`}
+      >
+        <OctantInput
+          aria-label={`Scope for ${props.instanceName}`}
+          autoComplete="off"
+          className="settings-view__text-input"
+          defaultValue={String(props.directory.scope)}
+          name="scope"
+          spellCheck={false}
+        />
+      </SettingRow>
+    </>
+  );
+}
+
 /** What the person is told when a pasted tenant or client id is not a GUID. */
 export const DIRECTORY_IDS_PROBLEM =
   "Enter the directory (tenant) ID and the application (client) ID your organization registered, each a GUID such as 6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f.";
@@ -682,12 +812,16 @@ function DirectoryIdFields(props: {
 }
 
 /**
- * Sign in with the organization account an Azure AI Foundry endpoint binds
- * to. The host builds the sign-in from the endpoint's own tenant, client, and
- * address; this panel only starts it and shows the public state.
+ * Sign in with the organization account an Azure AI Foundry endpoint or a
+ * gateway binds to. The host builds the sign-in from the endpoint's own
+ * directory, client, and address; this panel only starts it and shows the
+ * public state.
  */
 export function DirectoryEndpointSignIn(props: {
-  readonly instance: Extract<ProviderInstance, { driverKind: "azure-foundry" }>;
+  readonly instance: Extract<
+    ProviderInstance,
+    { driverKind: "azure-foundry" | "openai-compatible" | "anthropic-compatible" }
+  >;
   readonly disabled: boolean;
   readonly startSignIn?: boolean;
   readonly consentShown?: boolean;
@@ -698,10 +832,14 @@ export function DirectoryEndpointSignIn(props: {
   readonly onOpenExternalUrl?: (url: string) => void;
 }) {
   if (props.instance.configuration.authentication !== "directory-oauth") return null;
+  const signIn =
+    props.instance.driverKind === "azure-foundry"
+      ? AZURE_FOUNDRY_DIRECTORY_SIGN_IN
+      : GATEWAY_DIRECTORY_SIGN_IN;
   return (
     <ProviderOAuthSignInPanel
-      accountLabel={AZURE_FOUNDRY_DIRECTORY_SIGN_IN.accountLabel}
-      descriptorId={AZURE_FOUNDRY_DIRECTORY_SIGN_IN.descriptorId}
+      accountLabel={signIn.accountLabel}
+      descriptorId={signIn.descriptorId}
       disabled={props.disabled}
       instanceId={props.instance.id}
       localSignOut
@@ -711,7 +849,7 @@ export function DirectoryEndpointSignIn(props: {
       {...(props.onStateChange === undefined ? {} : { onStateChange: props.onStateChange })}
       {...(props.onProviderOAuth === undefined ? {} : { run: props.onProviderOAuth })}
       {...(props.onOpenExternalUrl === undefined ? {} : { openUrl: props.onOpenExternalUrl })}
-      termsSummary={AZURE_FOUNDRY_DIRECTORY_SIGN_IN.termsSummary}
+      termsSummary={signIn.termsSummary}
     />
   );
 }

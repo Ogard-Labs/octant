@@ -348,6 +348,56 @@ describe("Add endpoint, step by step", () => {
     );
   });
 
+  it("adds an organization's gateway that signs in at its own issuer, with no key and nothing rewritten", async () => {
+    const user = userEvent.setup();
+    const props = renderFlow();
+    const form = await connect(user, "OpenAI-compatible", {
+      name: "Company gateway",
+      url: "https://llm.example.test/v1/",
+    });
+
+    await chooseSelectFieldOption(
+      user,
+      within(form).getByLabelText("Sign in with"),
+      "Organization account (your sign-in provider)",
+    );
+    expect(within(form).queryByLabelText("API key")).not.toBeInTheDocument();
+    await user.type(within(form).getByLabelText("Issuer"), "http://login.example.test");
+    await user.type(within(form).getByLabelText("Client ID"), "0oa1octantDesktop");
+    await user.type(within(form).getByLabelText("Scope"), "openid");
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+    // An identity scope names no resource, and a sign-in page must be https.
+    expect(screen.getByText(/the one scope your gateway requires/)).toBeVisible();
+    expect(props.onCreateOpenAiCompatible).not.toHaveBeenCalled();
+
+    const issuer = within(form).getByLabelText("Issuer");
+    await user.clear(issuer);
+    await user.type(issuer, " https://login.example.test/oauth2/Gateway/ ");
+    const scope = within(form).getByLabelText("Scope");
+    await user.clear(scope);
+    await user.type(scope, "gateway.models");
+    await user.click(within(form).getByRole("button", { name: "Check and add" }));
+
+    expect(props.onCreateOpenAiCompatible).toHaveBeenCalledWith(
+      "Company gateway",
+      {
+        kind: "openai-compatible-http",
+        baseUrl: "https://llm.example.test/v1/",
+        authentication: "directory-oauth",
+        protocol: "auto",
+        manualModelIds: [],
+        // The issuer is compared exactly with what its tokens name: trimmed,
+        // never lowercased or stripped of its trailing slash.
+        directory: {
+          issuer: "https://login.example.test/oauth2/Gateway/",
+          clientId: "0oa1octantDesktop",
+          scope: "gateway.models",
+        },
+      },
+      expect.objectContaining({ value: "" }),
+    );
+  });
+
   it("adds an Azure AI Foundry endpoint that signs in with the organization's account, with no key and the ids lowercased", async () => {
     const user = userEvent.setup();
     const props = renderFlow();

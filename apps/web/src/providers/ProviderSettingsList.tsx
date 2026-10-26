@@ -18,6 +18,7 @@ import {
   isAcpAgentInstance,
   isImageProfileDriverKind,
   modelCanTakeDelegatedWork,
+  subscriptionDescriptorIdOf,
   supportsProviderCliUpdate,
 } from "@octant/domain";
 import { CheckCircle2, ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
@@ -1666,7 +1667,7 @@ function SubscriptionRowSignIn(props: {
   readonly onProviderOAuth?: ProviderSettingsViewProps["onProviderOAuth"];
   readonly onOpenExternalUrl?: ProviderSettingsViewProps["onOpenExternalUrl"];
 }) {
-  if (props.instance.configuration.oauthDescriptorId === undefined) return null;
+  if (subscriptionDescriptorIdOf(props.instance.configuration) === undefined) return null;
   return (
     <div
       aria-label={`Sign-in for ${props.instance.displayName}`}
@@ -1895,7 +1896,8 @@ function authenticationGuidance(instance: ProviderInstance): string {
   if (
     (instance.driverKind === "openai-compatible" ||
       instance.driverKind === "anthropic-compatible") &&
-    instance.configuration.oauthDescriptorId !== undefined
+    (subscriptionDescriptorIdOf(instance.configuration) !== undefined ||
+      instance.configuration.authentication === "directory-oauth")
   ) {
     return "Sign in above, then check the connection again.";
   }

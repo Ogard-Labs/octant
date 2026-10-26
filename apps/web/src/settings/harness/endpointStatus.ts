@@ -104,7 +104,7 @@ export function endpointStatus(input: EndpointStatusInput): EndpointStatus {
     if (input.signIn?.kind === "signed-out") return signInToUse(offer);
   }
   if (isDirectorySignInEndpoint(instance)) {
-    const signedIn = directorySignInStatus(observed, failure);
+    const signedIn = directorySignInStatus(instance, observed, failure);
     if (signedIn !== undefined) return signedIn;
   }
   if (failure !== undefined) return failureStatus(input, failure);
@@ -300,11 +300,14 @@ export function endpointHost(instance: ModelEndpointInstance): string {
   }
 }
 
-/** Whether the endpoint signs in with an organization account in place of a key. */
+/**
+ * Whether the endpoint signs in with an organization account in place of a
+ * key: Azure AI Foundry with its directory, or a gateway with its
+ * organization's own sign-in.
+ */
 export function isDirectorySignInEndpoint(instance: ModelEndpointInstance): boolean {
   return (
-    instance.driverKind === "azure-foundry" &&
-    instance.configuration.authentication === "directory-oauth"
+    instance.driverKind !== "ollama" && instance.configuration.authentication === "directory-oauth"
   );
 }
 
@@ -315,15 +318,18 @@ export function isDirectorySignInEndpoint(instance: ModelEndpointInstance): bool
  * ordinary reading (ready, cannot connect, no models) in place.
  */
 function directorySignInStatus(
+  instance: ModelEndpointInstance,
   observed: ProviderObservedState | undefined,
   failure: ProviderProbeFailure | undefined,
 ): EndpointStatus | undefined {
+  const foundry = instance.driverKind === "azure-foundry";
   if (observed?.readiness === "incompatible" && observed.directoryBinding !== undefined) {
     return {
       tone: "needs-you",
       label: "Sign-in doesn't match",
-      sentence:
-        "The organization sign-in is for another tenant, app, or address. Sign in again for this endpoint.",
+      sentence: foundry
+        ? "The organization sign-in is for another tenant, app, or address. Sign in again for this endpoint."
+        : "The organization sign-in is for another issuer, client, scope, or address. Sign in again for this endpoint.",
       fix: { kind: "sign-in-again", label: "Sign in again" },
     };
   }
@@ -355,8 +361,9 @@ function directorySignInStatus(
       return {
         tone: "failed",
         label: "No access",
-        sentence:
-          "You're signed in, but your account has no role on this Azure resource. Ask an administrator for the Cognitive Services OpenAI User role on it.",
+        sentence: foundry
+          ? "You're signed in, but your account has no role on this Azure resource. Ask an administrator for the Cognitive Services OpenAI User role on it."
+          : "You're signed in, but the gateway refused your account. Ask an administrator for access to it.",
       };
     default:
       return {
@@ -370,9 +377,10 @@ function directorySignInStatus(
 
 /** Whether the endpoint sends a key at all; one that sends none has no key line anywhere. */
 export function endpointTakesKey(instance: ModelEndpointInstance): boolean {
-  if (instance.driverKind === "ollama") return false;
-  if (instance.driverKind === "azure-foundry") return !isDirectorySignInEndpoint(instance);
-  return instance.configuration.authentication !== "none";
+  if (instance.driverKind === "ollama" || isDirectorySignInEndpoint(instance)) return false;
+  return (
+    instance.driverKind === "azure-foundry" || instance.configuration.authentication !== "none"
+  );
 }
 
 /** The line under a row's name: who is signed in, or where it is and whether it sends a key. */
