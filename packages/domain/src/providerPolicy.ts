@@ -186,13 +186,12 @@ export function canLocateRuntimeBinary(driverKind: ProviderDriverKind): boolean 
  */
 export function isNativeHarnessDriverKind(
   driverKind: ProviderDriverKind,
-): driverKind is "openai-compatible" | "anthropic-compatible" | "azure-foundry" {
-  // Ollama joins once its driver runs the tool loop; offering it as a slot
-  // candidate before then would route a lead to a model that cannot act.
+): driverKind is "openai-compatible" | "anthropic-compatible" | "azure-foundry" | "ollama" {
   return (
     driverKind === "openai-compatible" ||
     driverKind === "anthropic-compatible" ||
-    driverKind === "azure-foundry"
+    driverKind === "azure-foundry" ||
+    driverKind === "ollama"
   );
 }
 
@@ -205,11 +204,7 @@ export function isNativeHarnessDriverKind(
  * refusal.
  */
 export function providerKeepsConversation(driverKind: ProviderDriverKind): boolean {
-  return !(
-    isNativeHarnessDriverKind(driverKind) ||
-    isImageProfileDriverKind(driverKind) ||
-    driverKind === "ollama"
-  );
+  return !(isNativeHarnessDriverKind(driverKind) || isImageProfileDriverKind(driverKind));
 }
 
 function nextVersion(version: AggregateVersion): AggregateVersion {

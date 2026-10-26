@@ -59,7 +59,12 @@ describe("provider runtime integration", () => {
       transport: "request-tool-calls",
       reason: "model-verification-required",
     });
-    expect(describeProviderRuntimeIntegration("ollama", ready)?.tools).toEqual({
+    expect(describeProviderRuntimeIntegration("ollama", refused)?.tools).toEqual({
+      status: "unavailable",
+      transport: "request-tool-calls",
+      reason: "model-verification-required",
+    });
+    expect(describeProviderRuntimeIntegration("oh-my-pi", ready)?.tools).toEqual({
       status: "unavailable",
       reason: "no-transport",
     });

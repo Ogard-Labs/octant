@@ -511,7 +511,9 @@ function ModelsSection(props: ModelEndpointDetailProps & { readonly disabled: bo
             </ul>
           )}
           <p className="endpoint-detail__note">
-            Verify tools sends one request, which the service may bill.
+            {instance.driverKind === "ollama"
+              ? "Verify tools sends one request, which Ollama runs on this computer."
+              : "Verify tools sends one request, which the service may bill."}
           </p>
         </div>
       )}

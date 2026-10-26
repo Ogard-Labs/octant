@@ -1,37 +1,40 @@
-import { randomUUID } from "node:crypto";
-import { isAbsolute, resolve } from "node:path";
 import {
-  CorrelationId,
-  UtcTimestamp,
   decodeProviderFailure,
   decodeProviderProbeResult,
-  type OllamaHistorySnapshot,
   type OllamaProviderConfiguration,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
-  type ProviderRuntimeEvent,
-  type ProviderSessionId,
+  type ProviderTurnInput,
+  type UtcTimestamp,
 } from "@octant/contracts";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
+import { validateChatTurnInput } from "@octant/provider-sdk/chat-conformance";
+import type {
+  HarnessEndpointDriver,
+  HarnessEndpointRequest,
+  HarnessEndpointTransport,
+} from "@octant/provider-sdk/harness-endpoint";
+import { resolveModelContextWindow } from "@octant/domain/model-context-window";
+import { Effect } from "effect";
 import {
-  renderProviderTurnPrompt,
-  unsupportedAnswerTool,
-  validateChatTurnInput,
-} from "@octant/provider-sdk/chat-conformance";
-import { Effect, PubSub, Stream } from "effect";
-import {
+  buildOllamaChatBody,
   makeOllamaEndpoint,
+  ollamaChatInputFits,
+  ollamaModelTakesTools,
   probeOllama,
   sendOllamaChat,
+  type OllamaChatResult,
+  type OllamaEndpoint,
   type OllamaFetch,
-  type OllamaHistoryMessage,
   type OllamaHttpLimits,
-  type OllamaTurnEvent,
 } from "./ollamaEndpoint";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
-import { MemoryOllamaHistoryStore, type OllamaHistoryStore } from "./ollamaHistoryStore";
+import {
+  capabilityEchoToolDefinition,
+  isCapabilityEchoToolCall,
+  OCTANT_CAPABILITY_ECHO_TOOL_NAME,
+} from "./openAiToolEncoding";
 import { outputStopReason } from "./outputStopReason";
+import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 export interface OllamaDriverOptions {
   readonly instanceId: ProviderInstanceId;
@@ -39,55 +42,36 @@ export interface OllamaDriverOptions {
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   readonly fetch?: OllamaFetch;
   readonly limits?: Partial<OllamaHttpLimits>;
-  readonly historyStore?: OllamaHistoryStore;
   readonly clock?: () => string;
-  readonly correlationId?: () => string;
 }
 
-interface SessionState {
-  readonly sessionId: ProviderSessionId;
-  readonly modelId: ProviderModelId;
-  readonly root: string;
-  readonly mode: "chat" | "work" | "code";
-  readonly history: OllamaHistoryMessage[];
-  correlationId: CorrelationId;
-  sequence: number;
-  abortController: AbortController | undefined;
-  inFlight: Promise<void> | undefined;
-  terminal: boolean;
-  active: boolean;
-}
+/**
+ * Ollama has no forced tool choice, so the check asks for the call in words.
+ * A model that answers in text instead is not one Octant can hand its tools.
+ */
+const TOOL_CHECK_PROMPT = `Call the ${OCTANT_CAPABILITY_ECHO_TOOL_NAME} tool with echo set to "ready". Do not answer in text.`;
 
-type RuntimeEventWithoutEnvelope = ProviderRuntimeEvent extends infer RuntimeEvent
-  ? RuntimeEvent extends ProviderRuntimeEvent
-    ? Omit<RuntimeEvent, "instanceId" | "sessionId" | "sequence" | "correlationId" | "occurredAt">
-    : never
-  : never;
-
-function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
-  return { category, message };
-}
-
-function sanitizeFailure(error: unknown): ProviderFailure {
-  try {
-    return decodeProviderFailure(error);
-  } catch {
-    return failure("provider-failed", "The Ollama request failed.");
-  }
-}
-
-export function makeOllamaDriver(options: OllamaDriverOptions): ProviderDriver {
+/**
+ * The local Ollama service as an Octant Harness endpoint, through the
+ * provider-sdk harness endpoint port. The host's harness loop owns the
+ * conversation, every tool call, and retries; this driver supplies one
+ * request attempt over Ollama's native chat API on literal loopback, and the
+ * per-model Verify tools check that gates which models are offered tools.
+ */
+export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointDriver {
   const clock = options.clock ?? (() => new Date().toISOString());
-  const makeCorrelation = options.correlationId ?? randomUUID;
   const endpoint = makeOllamaEndpoint({
     baseUrl: options.configuration.baseUrl,
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     ...(options.limits === undefined ? {} : { limits: options.limits }),
   });
-  const historyStore = options.historyStore ?? new MemoryOllamaHistoryStore();
 
   return {
     kind: "ollama",
+    harnessEndpoint: {
+      ...ollamaTransport(options, endpoint, clock),
+      admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
+    },
     probe: ({ instanceId }) => {
       if (instanceId !== options.instanceId) {
         return Effect.fail(
@@ -98,6 +82,10 @@ export function makeOllamaDriver(options: OllamaDriverOptions): ProviderDriver {
         try: async () => {
           const observed = await probeOllama(endpoint);
           const observedAt = clock() as UtcTimestamp;
+          // A person's tool verification outlives routine probes, which run
+          // no generating request of their own.
+          const priorVerified =
+            options.runtimeRegistry.observedState(instanceId)?.verifiedToolModelIds;
           const result = decodeProviderProbeResult({
             instanceId,
             readiness: observed.readiness,
@@ -105,6 +93,7 @@ export function makeOllamaDriver(options: OllamaDriverOptions): ProviderDriver {
             detectedVersion: observed.version,
             models: observed.models,
             capabilities: observed.capabilities,
+            ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
             ...(observed.models.length === 0
               ? { message: "Ollama is reachable but has no installed models." }
               : {}),
@@ -117,347 +106,194 @@ export function makeOllamaDriver(options: OllamaDriverOptions): ProviderDriver {
         catch: sanitizeFailure,
       });
     },
-    acquire: ({ instanceId, projectRoot, mode }) => {
-      if (instanceId !== options.instanceId) {
-        return Effect.fail(
-          failure("invalid-configuration", "Provider instance does not match driver."),
-        );
-      }
-      if (mode === undefined) {
-        return Effect.fail(
-          failure("invalid-configuration", "Ollama requires an explicit product mode."),
-        );
-      }
-      if (!isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot) {
-        return Effect.fail(
-          failure(
-            "invalid-configuration",
-            "Provider Project root must be an absolute normalized path.",
-          ),
-        );
-      }
-      return makeConnection(
-        options,
-        endpoint,
-        projectRoot,
-        mode,
-        historyStore,
-        clock,
-        makeCorrelation,
-      );
+    verifyToolCapability: ({ instanceId, modelId }) =>
+      instanceId !== options.instanceId
+        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
+        : Effect.tryPromise({
+            try: async () => {
+              // Ollama refuses a request with tools for a model it says takes
+              // none, so that answer needs no generating request.
+              if (!(await ollamaModelTakesTools(endpoint, String(modelId)))) {
+                return { instanceId, modelId, appManagedTools: "unsupported" as const };
+              }
+              // One tool call proves the model answers with a tool use.
+              // Transport failures propagate so the person sees the real
+              // error instead of a false "unsupported".
+              const result = await sendOllamaChat(endpoint, {
+                modelId: String(modelId),
+                history: [{ role: "user", text: TOOL_CHECK_PROMPT }],
+                tools: [capabilityEchoToolDefinition()],
+              });
+              return {
+                instanceId,
+                modelId,
+                appManagedTools: result.toolCalls.some((call) =>
+                  isCapabilityEchoToolCall(call.toolName),
+                )
+                  ? ("supported" as const)
+                  : ("unsupported" as const),
+              };
+            },
+            catch: sanitizeFailure,
+          }),
+  };
+}
+
+/**
+ * Whether Ollama accepts this turn's input for the session's model. Image
+ * attachments follow the model's own vision report; Octant's tools follow
+ * the per-model Verify tools result, so one verified model never unlocks
+ * tools for its siblings, and the echo Verify tools sends is the only tool an
+ * unverified model is admitted with.
+ */
+function admitTurn(
+  options: OllamaDriverOptions,
+  turn: ProviderTurnInput,
+  modelId: ProviderModelId,
+): ProviderFailure | undefined {
+  const observed = options.runtimeRegistry.observedState(options.instanceId);
+  const model = observed?.models.find((candidate) => String(candidate.id) === String(modelId));
+  const isCapabilityEchoProbe =
+    turn.tools.length > 0 && turn.tools.every((tool) => isCapabilityEchoToolCall(tool.name));
+  const isVerifiedModel =
+    observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;
+  return validateChatTurnInput(
+    turn,
+    {
+      nativeAttachments: observed?.capabilities.nativeAttachments ?? "unsupported",
+      appManagedTools: isCapabilityEchoProbe || isVerifiedModel ? "supported" : "unsupported",
+    },
+    model,
+  );
+}
+
+/**
+ * Ollama as the harness loop sees it: one `/api/chat` request per step, sent
+ * once. The host retries a failure that usually passes.
+ */
+function ollamaTransport(
+  options: OllamaDriverOptions,
+  endpoint: OllamaEndpoint,
+  clock: () => string,
+): HarnessEndpointTransport {
+  return {
+    open: async () => {
+      let active: OllamaEndpoint | undefined = endpoint;
+      return {
+        fits: (request) => active !== undefined && requestFits(options, active, request),
+        send: async (request, stream) => {
+          const current = active;
+          if (current === undefined) throw failure("protocol", "Provider session is not active.");
+          let result: OllamaChatResult;
+          try {
+            result = await sendOllamaChat(current, {
+              modelId: String(request.modelId),
+              system: request.system,
+              history: request.history,
+              tools: request.tools,
+              signal: stream.signal,
+              onEvent: stream.onEvent,
+            });
+          } catch (error) {
+            if (stream.signal.aborted) {
+              throw failure("interrupted", "The provider request was cancelled.");
+            }
+            throw sanitizeFailure(error);
+          }
+          recordObservedTurn(options, result, clock);
+          const stop = outputStopReason(result.doneReason);
+          return {
+            text: result.text,
+            toolCalls: result.toolCalls,
+            ...(result.usage === undefined ? {} : { usage: result.usage }),
+            ...(stop === undefined || result.toolCalls.length > 0
+              ? {}
+              : { outputStopReason: stop }),
+          };
+        },
+        release: () => {
+          active = undefined;
+        },
+      };
     },
   };
 }
 
-function makeConnection(
+/** Whether a request fits the endpoint and the model's reported window, measured as it would be sent. */
+function requestFits(
   options: OllamaDriverOptions,
-  endpoint: ReturnType<typeof makeOllamaEndpoint>,
-  root: string,
-  mode: "chat" | "work" | "code",
-  historyStore: OllamaHistoryStore,
+  endpoint: OllamaEndpoint,
+  request: HarnessEndpointRequest,
+): boolean {
+  const input = {
+    modelId: String(request.modelId),
+    system: request.system,
+    history: request.history,
+    tools: request.tools,
+  };
+  if (!ollamaChatInputFits(endpoint, input)) return false;
+  const model = options.runtimeRegistry
+    .observedState(options.instanceId)
+    ?.models.find((candidate) => String(candidate.id) === String(request.modelId));
+  const contextLimit =
+    model === undefined ? undefined : resolveModelContextWindow(model)?.contextWindow;
+  if (contextLimit === undefined) return true;
+  // Roughly four bytes per token of the body as sent, less its images: Ollama
+  // reads an image as a fixed embedding, not as base64 text, and measuring a
+  // raw byte array serialized as JSON refused a 300 KB photo against a 128K
+  // window. The body size limit above still bounds every image.
+  const withoutImages = request.history.map(({ attachments: _attachments, ...message }) =>
+    message.toolResults === undefined
+      ? message
+      : {
+          ...message,
+          toolResults: message.toolResults.map(({ images: _images, ...result }) => result),
+        },
+  );
+  const text = JSON.stringify(buildOllamaChatBody({ ...input, history: withoutImages }));
+  return text.length / 4 <= contextLimit;
+}
+
+/**
+ * What a reply proves about the endpoint. One reply without counts or
+ * thinking says nothing about the next, so neither is ever declared
+ * unsupported from it: that would leave every unreported turn of this
+ * endpoint out of a spend ceiling.
+ */
+function recordObservedTurn(
+  options: OllamaDriverOptions,
+  result: OllamaChatResult,
   clock: () => string,
-  makeCorrelation: () => string,
-): Effect.Effect<ProviderConnection, never, import("effect").Scope.Scope> {
-  return Effect.gen(function* () {
-    const events = yield* PubSub.unbounded<ProviderRuntimeEvent>();
-    const sessions = new Map<ProviderSessionId, SessionState>();
+): void {
+  const observed = options.runtimeRegistry.observedState(options.instanceId);
+  if (observed === undefined) return;
+  options.runtimeRegistry.setObservedState(
+    decodeProviderProbeResult({
+      ...observed,
+      capabilities: {
+        ...observed.capabilities,
+        streaming: "supported",
+        usage: result.usage === undefined ? observed.capabilities.usage : "supported",
+        reasoning: result.reasoning.length > 0 ? "supported" : observed.capabilities.reasoning,
+      },
+      observedAt: clock() as UtcTimestamp,
+    }),
+  );
+}
 
-    const emit = (state: SessionState, value: RuntimeEventWithoutEnvelope) => {
-      const event = {
-        ...value,
-        instanceId: options.instanceId,
-        sessionId: state.sessionId,
-        sequence: state.sequence++,
-        correlationId: state.correlationId,
-        occurredAt: clock() as UtcTimestamp,
-      } as ProviderRuntimeEvent;
-      Effect.runFork(PubSub.publish(events, event));
-    };
-
-    const deactivate = (state: SessionState) => {
-      if (!state.active) return;
-      state.active = false;
-      options.runtimeRegistry.setActiveSessionCount(
-        options.instanceId,
-        Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) - 1),
-      );
-    };
-
-    const release = (state: SessionState) => {
-      state.abortController = undefined;
-      state.inFlight = undefined;
-      state.history.length = 0;
-      deactivate(state);
-      if (sessions.get(state.sessionId) === state) sessions.delete(state.sessionId);
-    };
-
-    yield* Effect.addFinalizer(() =>
-      Effect.promise(async () => {
-        for (const state of sessions.values()) state.abortController?.abort();
-        await Promise.allSettled(
-          [...sessions.values()].flatMap((state) =>
-            state.inFlight === undefined ? [] : [state.inFlight],
-          ),
-        );
-        for (const state of sessions.values()) release(state);
-        sessions.clear();
-        await Effect.runPromise(PubSub.shutdown(events));
-      }),
-    );
-
-    const stateFor = (sessionId: ProviderSessionId): SessionState => {
-      const state = sessions.get(sessionId);
-      if (state === undefined || !state.active) {
-        throw failure("protocol", "Ollama session is not active.");
-      }
-      return state;
-    };
-
-    const createState = (
-      sessionId: ProviderSessionId,
-      modelId: ProviderModelId,
-      history: readonly OllamaHistoryMessage[],
-    ) => {
-      if (sessions.has(sessionId)) throw failure("protocol", "Ollama session is already active.");
-      const state: SessionState = {
-        sessionId,
-        modelId,
-        root,
-        mode,
-        history: history.map((message) => ({ ...message })),
-        correlationId: makeCorrelation() as CorrelationId,
-        sequence: 1,
-        abortController: undefined,
-        inFlight: undefined,
-        terminal: false,
-        active: true,
-      };
-      sessions.set(sessionId, state);
-      options.runtimeRegistry.setActiveSessionCount(
-        options.instanceId,
-        options.runtimeRegistry.activeSessionCount(options.instanceId) + 1,
-      );
-      return state;
-    };
-
-    const snapshot = (
-      sessionId: ProviderSessionId,
-      modelId: ProviderModelId,
-      history: readonly OllamaHistoryMessage[],
-    ): OllamaHistorySnapshot => ({
-      instanceId: options.instanceId,
-      sessionId,
-      root,
-      mode,
-      modelId,
-      history: history.map((message) => ({ ...message })),
-    });
-
-    const mapTurnEvent = (state: SessionState, event: OllamaTurnEvent) => {
-      if (
-        event.kind === "text-delta" ||
-        event.kind === "reasoning-delta" ||
-        event.kind === "usage"
-      ) {
-        emit(state, event);
-        return;
-      }
-      emit(state, { kind: "tool-start", toolCallId: event.toolCallId, toolName: event.toolName });
-      emit(state, {
-        kind: "tool-failure",
-        toolCallId: event.toolCallId,
-        message: "Ollama requested a tool, but native tool execution is unavailable.",
-      });
-    };
-
-    const finishFailure = (state: SessionState, providerFailure: ProviderFailure) => {
-      if (state.terminal) return;
-      state.terminal = true;
-      if (providerFailure.category === "interrupted") {
-        emit(state, { kind: "interrupted", message: "The Ollama turn was interrupted." });
-      } else emit(state, { kind: "failed", failure: providerFailure });
-    };
-
-    const recordTurnCapabilities = (result: Awaited<ReturnType<typeof sendOllamaChat>>) => {
-      const observed = options.runtimeRegistry.observedState(options.instanceId);
-      if (observed === undefined) return;
-      options.runtimeRegistry.setObservedState(
-        decodeProviderProbeResult({
-          ...observed,
-          capabilities: {
-            ...observed.capabilities,
-            streaming: "supported",
-            // One response without counts says nothing about the next, so it
-            // never declares usage unsupported: that would leave every
-            // unreported turn of this endpoint out of a spend ceiling.
-            usage: result.usage === undefined ? observed.capabilities.usage : "supported",
-            reasoning: result.reasoning.length > 0 ? "supported" : observed.capabilities.reasoning,
-            toolActivity:
-              result.toolRequests.length > 0 ? "supported" : observed.capabilities.toolActivity,
-          },
-          observedAt: clock() as UtcTimestamp,
-        }),
-      );
-    };
-
+function sanitizeFailure(error: unknown): ProviderFailure {
+  try {
+    const decoded = decodeProviderFailure(error);
     return {
-      subscribe: Stream.fromPubSub(events, { scoped: true }),
-      start: (input) =>
-        Effect.tryPromise({
-          try: async () => {
-            if (sessions.has(input.sessionId)) {
-              throw failure("protocol", "Ollama session is already active.");
-            }
-            if ((await historyStore.load(input.sessionId)) !== undefined) {
-              throw failure(
-                "protocol",
-                "Ollama session history already exists; resume it explicitly.",
-              );
-            }
-            await historyStore.save(snapshot(input.sessionId, input.modelId, []));
-            createState(input.sessionId, input.modelId, []);
-            return {
-              sessionId: input.sessionId,
-              resumeCursor: { driverKind: "ollama" as const, value: input.sessionId },
-            };
-          },
-          catch: sanitizeFailure,
-        }),
-      resume: (input) =>
-        Effect.tryPromise({
-          try: async () => {
-            if (
-              input.resumeCursor.driverKind !== "ollama" ||
-              input.resumeCursor.value !== input.sessionId
-            ) {
-              throw failure("stale-resume", "Ollama resume identity is incompatible.");
-            }
-            const restored = await historyStore.load(input.sessionId);
-            if (
-              restored === undefined ||
-              restored.instanceId !== options.instanceId ||
-              restored.sessionId !== input.sessionId ||
-              restored.root !== root ||
-              restored.mode !== mode
-            ) {
-              throw failure("stale-resume", "Ollama resume identity does not match this Project.");
-            }
-            createState(input.sessionId, restored.modelId, restored.history);
-            return { sessionId: input.sessionId, resumeCursor: input.resumeCursor };
-          },
-          catch: (error) => {
-            const decoded = sanitizeFailure(error);
-            return decoded.category === "stale-resume"
-              ? decoded
-              : failure("stale-resume", "Ollama history could not be resumed.");
-          },
-        }),
-      send: (input) =>
-        Effect.try({
-          try: () => {
-            const state = stateFor(input.sessionId);
-            if (state.terminal) throw failure("protocol", "Ollama session is terminal.");
-            if (state.inFlight !== undefined)
-              throw failure("protocol", "Ollama already has an active turn.");
-            const observed = options.runtimeRegistry.observedState(options.instanceId);
-            const model = observed?.models.find((candidate) => candidate.id === state.modelId);
-            const chatCapabilities = observed?.capabilities ?? {
-              nativeAttachments: "unsupported",
-              appManagedTools: "unsupported",
-            };
-            const rejected = validateChatTurnInput(input, chatCapabilities, model);
-            if (rejected !== undefined) throw rejected;
-            const controller = new AbortController();
-            const priorHistory = state.history.map((message) => ({ ...message }));
-            const prompt = renderProviderTurnPrompt(input);
-            state.abortController = controller;
-            state.correlationId = makeCorrelation() as CorrelationId;
-            const turn = sendOllamaChat(endpoint, {
-              modelId: state.modelId,
-              history: priorHistory,
-              prompt,
-              attachments: input.attachments.map((attachment) => ({
-                mediaType: attachment.mediaType,
-                bytes: attachment.bytes,
-              })),
-              signal: controller.signal,
-              onEvent: (event) => mapTurnEvent(state, event),
-            })
-              .then(async (result) => {
-                if (state.terminal) return;
-                const stop = outputStopReason(result.doneReason);
-                recordTurnCapabilities(result);
-                if (result.toolRequests.length > 0) {
-                  return finishFailure(
-                    state,
-                    failure(
-                      "provider-failed",
-                      "Ollama requested a tool, but Octant tool execution is unavailable.",
-                    ),
-                  );
-                }
-                if (result.text.length === 0) {
-                  return finishFailure(
-                    state,
-                    failure("provider-failed", "Ollama completed without assistant text."),
-                  );
-                }
-                const nextHistory = [
-                  ...priorHistory,
-                  { role: "user" as const, text: prompt },
-                  { role: "assistant" as const, text: result.text },
-                ].slice(-endpoint.limits.maximumHistoryMessages);
-                await historyStore.save(snapshot(state.sessionId, state.modelId, nextHistory));
-                state.history.splice(0, state.history.length, ...nextHistory);
-                state.terminal = true;
-                emit(state, {
-                  kind: "completed",
-                  resumeCursor: { driverKind: "ollama", value: state.sessionId },
-                  ...(stop === undefined ? {} : { stopReason: stop }),
-                });
-              })
-              .catch((error) => finishFailure(state, sanitizeFailure(error)))
-              .finally(() => {
-                state.inFlight = undefined;
-                state.abortController = undefined;
-              });
-            state.inFlight = turn;
-          },
-          catch: sanitizeFailure,
-        }),
-      interrupt: (sessionId) =>
-        Effect.tryPromise({
-          try: async () => {
-            const state = stateFor(sessionId);
-            if (state.inFlight === undefined || state.abortController === undefined) {
-              throw failure("protocol", "Ollama session has no active turn.");
-            }
-            state.abortController.abort();
-            await state.inFlight;
-            release(state);
-          },
-          catch: sanitizeFailure,
-        }),
-      stop: (sessionId) =>
-        Effect.tryPromise({
-          try: async () => {
-            const state = sessions.get(sessionId);
-            if (state === undefined) return;
-            state.abortController?.abort();
-            if (state.inFlight !== undefined) await state.inFlight;
-            release(state);
-          },
-          catch: sanitizeFailure,
-        }),
-      answerApproval: () =>
-        Effect.fail(failure("unsupported", "Ollama does not provide native approval requests.")),
-      answerUserInput: () =>
-        Effect.fail(failure("unsupported", "Ollama does not provide native user questions.")),
-      answerTool: () =>
-        unsupportedAnswerTool(
-          options.runtimeRegistry.observedState(options.instanceId)?.capabilities.appManagedTools ??
-            "unsupported",
-        ),
+      category: decoded.category,
+      message: decoded.message,
+      ...(decoded.retryAfterMs === undefined ? {} : { retryAfterMs: decoded.retryAfterMs }),
     };
-  });
+  } catch {
+    return failure("provider-failed", "The Ollama request failed.");
+  }
+}
+
+function failure(category: ProviderFailure["category"], message: string): ProviderFailure {
+  return { category, message };
 }

@@ -1587,7 +1587,7 @@ export class ProviderService implements ProviderServiceApi {
       // uses. Other runtimes bring their own tools and have nothing to prove.
       if (!isNativeHarnessDriverKind(instance.driverKind)) {
         throw this.#invalid(
-          "Tool verification is only available for OpenAI-compatible, Anthropic-compatible, and Azure AI Foundry providers.",
+          "Tool verification is only available for OpenAI-compatible, Anthropic-compatible, Azure AI Foundry, and Ollama providers.",
         );
       }
       if (!instance.enabled) throw this.#invalid("Enable this provider before verifying tools.");
@@ -2755,7 +2755,7 @@ function isProviderFailure(value: unknown): value is ProviderFailure {
  * keep the closed generic wording.
  */
 function authorsEndpointFailures(driverKind: ProviderDriverKind): boolean {
-  return isNativeHarnessDriverKind(driverKind) || driverKind === "ollama";
+  return isNativeHarnessDriverKind(driverKind);
 }
 
 function probeFailureReadiness(

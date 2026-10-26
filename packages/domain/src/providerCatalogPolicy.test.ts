@@ -272,8 +272,8 @@ describe("provider catalog state", () => {
       sandbox: "not-applicable",
     });
     expect(providerCatalogCapabilities("ollama")).toEqual({
-      modes: { chat: "yes", work: "no", code: "no" },
-      agentLoop: "replies-only",
+      modes: { chat: "yes", work: "verified-models", code: "verified-models" },
+      agentLoop: "octant-harness",
       sandbox: "not-applicable",
     });
     expect(providerCatalogCapabilities("oh-my-pi")).toEqual({
