@@ -1472,7 +1472,7 @@ function ProviderRow(props: ProviderRowProps) {
                             </span>
                           </span>
                           {props.onModelContextWindowChange === undefined ||
-                          (!isHttp && !isAnthropicHttp && !isFoundry) ? null : (
+                          (!isHttp && !isAnthropicHttp && !isFoundry && !isOllama) ? null : (
                             <ModelContextWindowField
                               disabled={disabled}
                               model={model}

@@ -1723,6 +1723,41 @@ describe("ProviderSettingsView", () => {
     expect(onModelContextWindowChange).toHaveBeenCalledTimes(2);
   });
 
+  it("lets an Ollama model take a larger context window, held to the window it was trained for", async () => {
+    const user = userEvent.setup();
+    const onModelContextWindowChange = vi.fn(async () => true);
+    renderExpanded(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: ollamaProvider(),
+          observed: observation({
+            models: [
+              {
+                id: "qwen3:latest" as never,
+                displayName: "qwen3:latest",
+                source: "discovered",
+                verification: "verified",
+                contextLimit: 32_768,
+                trainedContextWindow: 131_072,
+                reasoning: "unsupported",
+                inputModalities: ["text"],
+                options: [],
+              },
+            ],
+          }),
+        })}
+        onModelContextWindowChange={onModelContextWindowChange}
+      />,
+    );
+
+    const field = screen.getByLabelText("Context window for qwen3:latest");
+    expect(field).toHaveAttribute("placeholder", "32,768 · Reported");
+    await user.type(field, "262144{Enter}");
+    // Ollama loads no more than the trained window, so that is what is saved and shown.
+    expect(onModelContextWindowChange).toHaveBeenCalledWith(id, "qwen3:latest", 131_072);
+    expect(field).toHaveValue("131072");
+  });
+
   it("asks for no context window on a provider that runs its own model", () => {
     renderExpanded(
       <ProviderSettingsView

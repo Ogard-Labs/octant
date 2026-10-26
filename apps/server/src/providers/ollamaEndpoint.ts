@@ -233,8 +233,9 @@ export async function probeOllama(endpoint: OllamaEndpoint): Promise<OllamaProbe
     // A window Ollama does not name is still the one each request asks it to
     // load, so it is reported too: the planner and the meter otherwise plan
     // against their own far larger estimate.
+    const trainedContextWindow = findTrainedContextWindow(modelInfo);
     const contextLimit =
-      ollamaContextWindow(modelInfo, parameters) ?? OLLAMA_UNKNOWN_CONTEXT_WINDOW;
+      ollamaContextWindow(trainedContextWindow, parameters) ?? OLLAMA_UNKNOWN_CONTEXT_WINDOW;
     const inputModalities: ProviderInputModality[] = capabilities.has("vision")
       ? ["text", "image"]
       : ["text"];
@@ -245,6 +246,8 @@ export async function probeOllama(endpoint: OllamaEndpoint): Promise<OllamaProbe
         source: "discovered",
         verification: "verified",
         contextLimit,
+        // The ceiling on a window a person sets: Ollama never loads more.
+        ...(trainedContextWindow === undefined ? {} : { trainedContextWindow }),
         reasoning: capabilities.has("thinking") ? "supported" : "unsupported",
         inputModalities,
         // Ollama reports an explicit capability list per model, so both the
@@ -321,14 +324,13 @@ async function showModel(
 }
 
 /**
- * The window Octant loads a model with, from its `/api/show` detail: the
- * model's own `num_ctx` parameter when it sets one, else its trained window
- * held to `OLLAMA_CONTEXT_WINDOW_CAP`. Ollama itself never loads more than
- * the trained window, so a `num_ctx` above it is read as the trained window.
- * Undefined when Ollama names neither.
+ * The window Octant loads a model with, from its trained window and its
+ * `/api/show` parameters: the model's own `num_ctx` parameter when it sets
+ * one, else its trained window held to `OLLAMA_CONTEXT_WINDOW_CAP`. Ollama
+ * itself never loads more than the trained window, so a `num_ctx` above it
+ * is read as the trained window. Undefined when Ollama names neither.
  */
-function ollamaContextWindow(modelInfo: unknown, parameters: unknown): number | undefined {
-  const trained = findTrainedContextWindow(modelInfo);
+function ollamaContextWindow(trained: number | undefined, parameters: unknown): number | undefined {
   const configured = findConfiguredContextWindow(parameters);
   if (configured !== undefined) {
     return trained === undefined ? configured : Math.min(configured, trained);

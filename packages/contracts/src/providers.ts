@@ -1105,6 +1105,12 @@ const ProviderModelFields = {
    */
   contextWindowOverride: Schema.optional(PositiveInt),
   /**
+   * The longest window the model was trained for, when its runtime names it
+   * apart from the window it reports for use. A runtime that never loads more
+   * (Ollama clamps `num_ctx` to it) makes it the ceiling on the override.
+   */
+  trainedContextWindow: Schema.optional(PositiveInt),
+  /**
    * The window the endpoint's own refusals and larger successful requests
    * taught Octant: a refusal that names a limit lowers it, a request that
    * fit above it raises it. Kept with the catalogue so it outlives a restart.

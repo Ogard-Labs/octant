@@ -2820,8 +2820,11 @@ A model's window is found without asking the person
 (`resolveModelContextWindow` in `@octant/domain/model-context-window`). The
 first source that names one wins, except that a learned window below the
 reported one takes precedence: a window the person typed into the model's
-details (`user-supplied`, "Set by you"); the provider's own model metadata
-(`provider-discovery`, "Reported"); a window learned from the endpoint's own
+details (`user-supplied`, "Set by you"), held to the model's
+`trainedContextWindow` when its provider reports one, as Ollama does
+(`effectiveContextWindowOverride`; a held window is labelled "Reported", and
+the Settings box saves a larger number as the trained window); the
+provider's own model metadata (`provider-discovery`, "Reported"); a window learned from the endpoint's own
 refusals (`observed-evidence`, "Learned"), which also wins over a larger
 reported figure because the endpoint refused above it; and the built-in model
 profile catalogue (`reviewed-catalog`, "Profile"). Nothing naming one leaves the
@@ -4207,8 +4210,11 @@ allocates the whole window's KV cache when it loads a model, whatever the
 prompt's length: an 8B model needs about 4 GiB of it at 32K and 16 GiB at a
 trained 128K, and a model trained for 1M would not load on most Macs. A
 Modelfile `num_ctx` is not capped, since it is a deliberate choice and what
-Ollama loads anyway. A window set on the model's catalogue entry wins and
-outlives every probe; when Ollama reports none, Octant assumes and asks for
+Ollama loads anyway. A window set on the model's catalogue entry (the Settings
+Context window box) wins and outlives every probe, held to the trained window
+the probe also reports as `trainedContextWindow`: Ollama clamps `num_ctx` to
+it, so a larger setting would let the planner and the meter count room the
+model never loads. When Ollama reports no window, Octant assumes and asks for
 4,096 tokens, Ollama's own default on a machine with little GPU memory, rather
 than guessing larger.
 Verify tools sends the same window, so the check does not make Ollama reload
