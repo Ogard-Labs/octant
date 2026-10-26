@@ -1,5 +1,6 @@
 import type {
   NativeHarnessTranscriptToolCall,
+  ProviderAttachmentInput,
   ProviderFailure,
   ProviderModelId,
   ProviderOutputStopReason,
@@ -33,6 +34,14 @@ import type { ProviderDriver } from "./driver";
 export interface HarnessEndpointMessage {
   readonly role: "user" | "assistant";
   readonly text: string;
+  /**
+   * Files the person sent with this user message. Like tool images they ride
+   * along live and are never journaled, and only for the turn they arrived
+   * with: a later turn's requests carry the text alone, as they would after a
+   * resume. Only an endpoint whose model takes native attachments is admitted
+   * a turn that has them.
+   */
+  readonly attachments?: ReadonlyArray<ProviderAttachmentInput> | undefined;
   readonly toolCalls?: ReadonlyArray<NativeHarnessTranscriptToolCall> | undefined;
   readonly toolResults?:
     | ReadonlyArray<{

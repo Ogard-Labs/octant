@@ -24,6 +24,7 @@ import { WindowAuthorityStore } from "../windowAuthorityStore";
 import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import { ProviderDriverConfigurationError } from "./providerDriverFactory";
 import { makeOllamaDriver } from "./ollamaDriver";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { createProviderRouteHandler } from "./providerRoutes";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import {
@@ -4338,12 +4339,15 @@ describe("ProviderService", () => {
       persistence: fixture.persistence,
       runtimeRegistry: fixture.runtime,
       driver: (instance) =>
-        makeOllamaDriver({
-          instanceId: instance.id,
-          configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
-          runtimeRegistry: fixture.runtime,
-          fetch: async () => new Response("secret upstream page", { status: 503 }),
-        }),
+        runOnNativeHarness(
+          makeOllamaDriver({
+            instanceId: instance.id,
+            configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+            runtimeRegistry: fixture.runtime,
+            fetch: async () => new Response("secret upstream page", { status: 503 }),
+          }),
+          { instanceId: instance.id, runtimeRegistry: fixture.runtime },
+        ),
       uuid: () => crypto.randomUUID(),
       clock: () => now,
     });
@@ -4752,10 +4756,30 @@ describe("ProviderService", () => {
       expect(driver).not.toHaveBeenCalled();
     });
 
+    it("records a verified model of the local Ollama provider", async () => {
+      const fixture = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        driver: toolDriver("supported") as never,
+      });
+      fixture.runtime.setObservedState(observation());
+
+      await expect(
+        fixture.service.execute(windowId, {
+          kind: "verify-model-tools",
+          instanceId,
+          modelId: decodeProviderModelId("model-1"),
+        }),
+      ).resolves.toMatchObject({ kind: "model-tools-verified", appManagedTools: "supported" });
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String)).toEqual([
+        "model-1",
+      ]);
+    });
+
     it("refuses a provider whose runtime brings its own tools", async () => {
       const driver = toolDriver("supported");
       const fixture = serviceFixture({
-        instances: [ollamaProvider()],
+        instances: [piProvider()],
         withCatalogPersistence: true,
         driver: driver as never,
       });

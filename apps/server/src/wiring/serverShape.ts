@@ -25,7 +25,6 @@ import { ClaudeResumeIdentityStore } from "../providers/claudeResumeIdentityStor
 import type { CodexProcessPort } from "../providers/codexProcess";
 import type { AcpProcessPort } from "../providers/acpProcess";
 import type { AcpProviderKind } from "../providers/acpProfiles";
-import type { OllamaHistoryStore } from "../providers/ollamaHistoryStore";
 import type { OpenCodeProcessPort } from "../providers/openCodeProcess";
 import type { OhMyPiProcessPort } from "../providers/ohMyPiProcess";
 import type { PiProcessPort } from "../providers/piProcess";
@@ -167,7 +166,6 @@ export interface StartOctantServerOptions {
   readonly claudeProcess?: ClaudeProcessPort;
   readonly claudeSdk?: ClaudeAgentSdkPort;
   readonly claudeResumeIdentityStore?: ClaudeResumeIdentityStore;
-  readonly ollamaHistoryStore?: OllamaHistoryStore;
   readonly isProjectConfinedPath?: (projectRoot: string, absolutePath: string) => boolean;
   readonly gitEnvironmentPort?: Pick<GitEnvironmentPort, "observe" | "close">;
   readonly codeService?: CodeRouteService;

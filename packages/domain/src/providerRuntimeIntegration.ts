@@ -19,7 +19,7 @@ import {
  * Claude Agent SDK connection owns an in-process tool server, Codex registers
  * dynamic tools on its app-server thread, the ACP drivers and OpenCode register
  * a loopback MCP server with one session, and Pi's extension calls a loopback
- * bridge. Ollama, Oh My Pi, and the image profiles have none. A settings card
+ * bridge. Oh My Pi and the image profiles have none. A settings card
  * that named a transport the adapter does not use would be the very guess this
  * mirror exists to prevent, so a new driver kind must be placed here.
  */
@@ -30,6 +30,7 @@ export function providerToolTransport(
     case "openai-compatible":
     case "anthropic-compatible":
     case "azure-foundry":
+    case "ollama":
       return "request-tool-calls";
     case "claude":
       return "sdk-tool-server";
@@ -52,7 +53,6 @@ export function providerToolTransport(
     case "pi":
       return "session-tool-bridge";
     case "oh-my-pi":
-    case "ollama":
     case "openai-image":
     case "gemini-native-image":
     case "bfl-image":

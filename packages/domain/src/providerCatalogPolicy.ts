@@ -76,9 +76,9 @@ export type ProviderCatalogModeSupport = "yes" | "checked-models" | "verified-mo
 
 /**
  * Who runs the agent loop: the runtime itself, Octant Harness over the
- * endpoint, nobody (replies only), or no turns at all yet.
+ * endpoint, or no turns at all yet.
  */
-export type ProviderCatalogAgentLoop = "runtime" | "octant-harness" | "replies-only" | "none";
+export type ProviderCatalogAgentLoop = "runtime" | "octant-harness" | "none";
 
 /**
  * Who confines a runtime's own tools, as the confinement matrix in the
@@ -117,8 +117,8 @@ export interface ProviderCatalogState {
  * What a driver can do in each mode, mirroring the gates the host applies to
  * a send: agent runtimes carry Work and Code tools for the models their
  * connection check reports, Octant Harness endpoints only for models a person
- * verified, Ollama replies in Chat until its driver runs the tool loop, and
- * Oh My Pi lists models but refuses to start a session.
+ * verified (Ollama included), and Oh My Pi lists models but refuses to start a
+ * session.
  */
 export function providerCatalogCapabilities(
   driverKind: ProviderDriverKind,
@@ -127,13 +127,6 @@ export function providerCatalogCapabilities(
     return {
       modes: { chat: "yes", work: "verified-models", code: "verified-models" },
       agentLoop: "octant-harness",
-      sandbox: "not-applicable",
-    };
-  }
-  if (driverKind === "ollama") {
-    return {
-      modes: { chat: "yes", work: "no", code: "no" },
-      agentLoop: "replies-only",
       sandbox: "not-applicable",
     };
   }

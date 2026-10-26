@@ -149,19 +149,19 @@ get a feature in full first. Every other provider is listed here with what is
 weaker. Where a provider cannot do something, Octant turns that feature off for
 it instead of imitating it.
 
-| Feature                           | Claude Code | Codex                       | OpenCode             | Pi            | ACP agents            | Ollama                | Model endpoints                          |
-| --------------------------------- | ----------- | --------------------------- | -------------------- | ------------- | --------------------- | --------------------- | ---------------------------------------- |
-| Reopen the thread's own session   | Yes         | Yes                         | Yes                  | Yes           | Most                  | Replayed              | Replayed                                 |
-| Approval prompts from the runtime | Yes         | Yes                         | Yes                  | Yes           | Yes                   | No                    | No                                       |
-| Questions from the agent          | Yes         | No                          | Yes (not on 2.x)     | No            | Most                  | No                    | No                                       |
-| Reasoning shown                   | Yes         | Yes                         | Yes                  | Yes           | If the agent sends it | If the model sends it | If the endpoint sends it                 |
-| Token usage counted               | Yes         | Yes                         | Yes                  | Yes           | No                    | After a reply         | After a reply                            |
-| File changes and diffs            | Yes         | Yes                         | Diffs only           | No            | No                    | No                    | No                                       |
-| Attachments sent natively         | No          | Image models                | Non-text models      | No            | No                    | Vision models         | No                                       |
-| Octant tools (Browser, Computer)  | Yes         | Yes                         | macOS, some releases | After a check | macOS, some agents    | No                    | Verified models                          |
-| Change model inside a thread      | Yes         | Yes                         | No                   | No            | No                    | Yes                   | Yes                                      |
-| Compact session                   | Yes         | Yes, Codex 0.162.1 or newer | No                   | No            | No                    | Octant does it        | Octant does it; Code uses Octant Harness |
-| Auto-review of approvals in Code  | Yes         | Yes                         | No                   | No            | No                    | No                    | No                                       |
+| Feature                           | Claude Code | Codex                       | OpenCode             | Pi            | ACP agents            | Ollama                                   | Model endpoints                          |
+| --------------------------------- | ----------- | --------------------------- | -------------------- | ------------- | --------------------- | ---------------------------------------- | ---------------------------------------- |
+| Reopen the thread's own session   | Yes         | Yes                         | Yes                  | Yes           | Most                  | Replayed                                 | Replayed                                 |
+| Approval prompts from the runtime | Yes         | Yes                         | Yes                  | Yes           | Yes                   | No                                       | No                                       |
+| Questions from the agent          | Yes         | No                          | Yes (not on 2.x)     | No            | Most                  | No                                       | No                                       |
+| Reasoning shown                   | Yes         | Yes                         | Yes                  | Yes           | If the agent sends it | If the model sends it                    | If the endpoint sends it                 |
+| Token usage counted               | Yes         | Yes                         | Yes                  | Yes           | No                    | After a reply                            | After a reply                            |
+| File changes and diffs            | Yes         | Yes                         | Diffs only           | No            | No                    | No                                       | No                                       |
+| Attachments sent natively         | No          | Image models                | Non-text models      | No            | No                    | Vision models                            | No                                       |
+| Octant tools (Browser, Computer)  | Yes         | Yes                         | macOS, some releases | After a check | macOS, some agents    | Verified models                          | Verified models                          |
+| Change model inside a thread      | Yes         | Yes                         | No                   | No            | No                    | Yes                                      | Yes                                      |
+| Compact session                   | Yes         | Yes, Codex 0.162.1 or newer | No                   | No            | No                    | Octant does it; Code uses Octant Harness | Octant does it; Code uses Octant Harness |
+| Auto-review of approvals in Code  | Yes         | Yes                         | No                   | No            | No                    | No                                       | No                                       |
 
 - **Replayed** means the provider keeps no session of its own, so Octant sends
   the thread's history again, fitted to the model's context window. Changing
@@ -171,7 +171,9 @@ it instead of imitating it.
 - **Token usage** is not measured for ACP agents. A spend ceiling leaves their
   turns out and says so, and a Code thread's context meter says the runtime
   reports no usage rather than waiting for a figure that will not come.
-- **Ollama** answers in Chat only: no tools, no file changes, no approvals.
+- **Ollama** runs Octant Harness against the Ollama service on this computer:
+  Octant tools reach only models you verified, and it reports no file changes
+  or approvals of its own.
 - **Model endpoints** (OpenAI-compatible, Anthropic-compatible, Azure AI
   Foundry) run Octant Harness. They show reasoning and usage only once a reply
   carries them, and Octant tools reach only models you verified.
@@ -438,10 +440,10 @@ dialog walks through five steps:
    again from the endpoint's page. Azure AI Foundry lists your deployments, and
    Local lists the models installed in Ollama.
 4. **Verify tools**: Octant sends each chosen model one short request, which
-   the service may bill, to see whether it calls Octant's tools. Each model
+   the service may bill (Ollama runs it on this computer), to see whether it calls Octant's tools. Each model
    ends **Verified** or **Chat only** with the reason and **Retry**. A model
-   that stays Chat only is still added and answers in chat. Ollama models are
-   Chat only for now, so no request is sent.
+   that stays Chat only is still added and answers in chat. An Ollama model
+   that Ollama says cannot use tools stays Chat only without a request.
 5. **Agents** (optional): let helper agents use a verified model, and make it
    the first choice for an Octant Harness role such as the main model; the
    role keeps its earlier models as backups. Chat only models cannot take
