@@ -5501,7 +5501,8 @@ proofs that suite already holds:
 `@octant/plugin-host` is the pure model: normalized component kinds
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
-`ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`), composer addressing
+`ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`, `replica-store`,
+`desktop-provider`), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
@@ -5845,7 +5846,10 @@ same. This holds in Chat, Work, and Code.
   Thread-leased disposable Linux desktops, their provider seam, artifact
   transfer, and verified lease teardown are post-preview design, accepted on
   2026-10-26, in
-  [Disposable desktops](design/disposable-desktops.md).
+  [Disposable desktops](design/disposable-desktops.md). The lease contract,
+  the `desktop-provider` seam with its conformance suite, and the host lease
+  service are built; no desktop provider, recipe storage, transfer, agent
+  binding, or Desktop pane is, so every lease command refuses as a value.
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host
