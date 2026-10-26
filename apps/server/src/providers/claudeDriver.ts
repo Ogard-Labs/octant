@@ -72,7 +72,7 @@ import {
   type ClaudeProcessPort,
 } from "./claudeProcess";
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
 const CLAUDE_TOOLS = [
@@ -288,7 +288,7 @@ export interface ClaudeDriverOptions {
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly resumeIdentityPort: ClaudeResumeIdentityPort;
   readonly permissionPersistence?: () => PermissionPersistence;
   readonly makeEnvironmentScope?: ClaudeEnvironmentFactory;
@@ -1804,6 +1804,10 @@ function makeConnection(
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
               ...(assignedSessionId === undefined ? {} : { sessionId: assignedSessionId }),
+              // Nothing resumes a single-use session, so the runtime's own
+              // transcript of it would only be a copy of the request left in
+              // the account's configuration directory.
+              ...(input.singleUse === true ? { persistSession: false as const } : {}),
               tools: executionOptions.tools,
               ...(sandbox === undefined ? {} : { sandbox }),
               canUseTool,

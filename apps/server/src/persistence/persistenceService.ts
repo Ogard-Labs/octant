@@ -62,6 +62,7 @@ import {
 } from "./migrationErrors";
 import { MIGRATIONS } from "./migrations";
 import { compactSupersededCheckoutObservations } from "./journalCompaction";
+import { sweepUnrecordedSessionData } from "./unrecordedSessionSweep";
 import {
   CheckpointAheadOfJournal,
   ProjectionQuarantined,
@@ -155,6 +156,7 @@ import type { AutomationProjection } from "../automation/automationProjection";
 import type { CanvasProjection } from "../canvas/canvasProjection";
 import type { GithubCloneProjection } from "./githubCloneProjection";
 import type { ImageJobProjection } from "../image/imageJobProjection";
+import type { DesktopLeaseProjection } from "../computerUse/desktopLeaseProjection";
 import type { ReplicaMembershipProjection } from "../replica/replicaMembershipProjection";
 import type { ReplicaArtifactProjection } from "../replica/replicaArtifactProjection";
 import { readThreadIdModes } from "./threadIdentity";
@@ -180,6 +182,7 @@ export interface PersistenceService {
   readonly automationProjection: AutomationProjection;
   readonly githubCloneProjection: GithubCloneProjection;
   readonly imageJobProjection: ImageJobProjection;
+  readonly desktopLeaseProjection: DesktopLeaseProjection;
   readonly replicaMembershipProjection: ReplicaMembershipProjection;
   readonly replicaArtifactProjection: ReplicaArtifactProjection;
   readonly readShellSettings: () => ProjectedShellSettings | undefined;
@@ -381,6 +384,17 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
         `Octant journal compaction removed ${compaction.eventsRemoved} superseded checkout observation(s) across ${compaction.checkoutsCompacted} checkout(s).`,
       );
     }
+    // Before any service can start a provider session, so no live session
+    // can still be waiting to journal its record.
+    const sessionSweep = sweepUnrecordedSessionData(connection);
+    if (
+      sessionSweep.status === "swept" &&
+      sessionSweep.resumeIdentitiesRemoved + sessionSweep.transcriptsRemoved > 0
+    ) {
+      console.warn(
+        `Octant removed ${sessionSweep.resumeIdentitiesRemoved} Claude resume identit(ies) and ${sessionSweep.transcriptsRemoved} Octant Harness transcript(s) that no thread or child run records.`,
+      );
+    }
     reconcileCodeRestart({ connection, journal, reconciledAt: clock() });
 
     let status = databaseStatus({ connection, journal, projections, compatibility });
@@ -433,6 +447,7 @@ async function acquirePersistence(options: PersistenceLiveOptions): Promise<Pers
       automationProjection: runtime.automationProjection,
       githubCloneProjection: runtime.githubCloneProjection,
       imageJobProjection: runtime.imageJobProjection,
+      desktopLeaseProjection: runtime.desktopLeaseProjection,
       replicaMembershipProjection: runtime.replicaMembershipProjection,
       replicaArtifactProjection: runtime.replicaArtifactProjection,
       readShellSettings: () => readShellSettings(connection),

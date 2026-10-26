@@ -13,12 +13,13 @@ import {
   type OpenAiCompatibleDriverProfile,
 } from "./openAiCompatibleDriver";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import { ProviderDriverConfigurationError } from "./providerDriverFactory";
+import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 
 export interface AzureFoundryDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly configuration: AzureFoundryProviderConfiguration;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
   readonly clock?: () => string;
@@ -37,6 +38,15 @@ const FOUNDRY_PROFILE: OpenAiCompatibleDriverProfile = {
  * IDs so the catalog orders them exactly as configured.
  */
 export function makeAzureFoundryDriver(options: AzureFoundryDriverOptions): HarnessEndpointDriver {
+  // The configuration contract already names directory sign-in, but this
+  // driver has no directory transport yet. Building the key path for such an
+  // instance would send whatever key the store holds in place of the
+  // organization's sign-in, so it refuses and reads as incompatible.
+  if (options.configuration.authentication === "directory-oauth") {
+    throw new ProviderDriverConfigurationError(
+      "Organization sign-in for Azure AI Foundry is not available in this version.",
+    );
+  }
   const compatibleConfiguration: OpenAiCompatibleProviderConfiguration = {
     kind: "openai-compatible-http",
     baseUrl: options.configuration.baseUrl,

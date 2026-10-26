@@ -8,12 +8,22 @@ import { DISCOVERY_DESCRIPTORS } from "@octant/provider-sdk/discovery";
 import { isAcpHostProfileDriver } from "@octant/provider-sdk/driver-plugins";
 import { providerKeepsConversation } from "@octant/domain";
 import { Effect } from "effect";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { snapshotClaudeHostEnvironment } from "./claudeAccountDirectory";
 import type { ClaudeAgentSdkPort } from "./claudeAgentSdkPort";
 import type { ClaudeProcessPort } from "./claudeProcess";
 import type { CodexProcessPort } from "./codexProcess";
+import type { AcpDriverOptions } from "./acpDriver";
 import type { AcpProcessPort } from "./acpProcess";
+import type { AnthropicCompatibleDriverOptions } from "./anthropicCompatibleDriver";
+import type { AzureFoundryDriverOptions } from "./azureFoundryDriver";
+import type { ClaudeDriverOptions } from "./claudeDriver";
+import type { CodexDriverOptions } from "./codexDriver";
+import type { OhMyPiDriverOptions } from "./ohMyPiDriver";
+import type { OllamaDriverOptions } from "./ollamaDriver";
+import type { OpenAiCompatibleDriverOptions } from "./openAiCompatibleDriver";
+import type { OpenCodeDriverOptions } from "./openCodeDriver";
+import type { PiDriverOptions } from "./piDriver";
 import type { OpenCodeProcessPort } from "./openCodeProcess";
 import type { OllamaFetch } from "./ollamaEndpoint";
 import type { PiProcessPort } from "./piProcess";
@@ -53,6 +63,39 @@ describe("bundled provider-driver plugins", () => {
       "qwen",
       "fx",
     ]);
+  });
+});
+
+describe("driver runtime registries", () => {
+  it("give no driver a way to write the host's Verify tools record", () => {
+    // Checked by the typechecker: a driver that could write the record would
+    // admit Octant's tools for a model no person verified.
+    expectTypeOf<OpenAiCompatibleDriverOptions["runtimeRegistry"]>().not.toHaveProperty(
+      "setVerifiedToolModels",
+    );
+    expectTypeOf<AnthropicCompatibleDriverOptions["runtimeRegistry"]>().not.toHaveProperty(
+      "setVerifiedToolModels",
+    );
+    expectTypeOf<AzureFoundryDriverOptions["runtimeRegistry"]>().not.toHaveProperty(
+      "setVerifiedToolModels",
+    );
+    expectTypeOf<OllamaDriverOptions["runtimeRegistry"]>().not.toHaveProperty(
+      "setVerifiedToolModels",
+    );
+    expectTypeOf<ClaudeDriverOptions["runtimeRegistry"]>().not.toHaveProperty(
+      "setVerifiedToolModels",
+    );
+    expectTypeOf<CodexDriverOptions["runtimeRegistry"]>().not.toHaveProperty(
+      "setVerifiedToolModels",
+    );
+    expectTypeOf<AcpDriverOptions["runtimeRegistry"]>().not.toHaveProperty("setVerifiedToolModels");
+    expectTypeOf<OpenCodeDriverOptions["runtimeRegistry"]>().not.toHaveProperty(
+      "setVerifiedToolModels",
+    );
+    expectTypeOf<PiDriverOptions["runtimeRegistry"]>().not.toHaveProperty("setVerifiedToolModels");
+    expectTypeOf<OhMyPiDriverOptions["runtimeRegistry"]>().not.toHaveProperty(
+      "setVerifiedToolModels",
+    );
   });
 });
 

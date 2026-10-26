@@ -1,4 +1,4 @@
-import { constants, lstat, open, readFile, realpath } from "node:fs/promises";
+import { constants, lstat, open, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { UtcTimestamp } from "@octant/contracts";
 import {
@@ -33,7 +33,7 @@ export interface WorkProjectStatusFilesystem {
   readonly replaceFile: (path: string, text: string) => Promise<void>;
 }
 
-const liveFilesystem: WorkProjectStatusFilesystem = {
+export const liveWorkProjectStatusFilesystem: WorkProjectStatusFilesystem = {
   realpath: (path) => realpath(path),
   lstat: async (path) => {
     const details = await lstat(path);
@@ -44,7 +44,21 @@ const liveFilesystem: WorkProjectStatusFilesystem = {
       mtimeMs: details.mtimeMs,
     };
   },
-  readFile: (path) => readFile(path, "utf8"),
+  readFile: async (path) => {
+    // The name was checked with lstat, but it can be swapped afterwards. The
+    // open neither follows a link nor waits on a FIFO, and the handle must
+    // still be a regular file.
+    const handle = await open(
+      path,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    );
+    try {
+      if (!(await handle.stat()).isFile()) throw new Error("The status name is not a file.");
+      return await handle.readFile("utf8");
+    } finally {
+      await handle.close();
+    }
+  },
   createFile: async (path, text) => {
     const handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL);
     try {
@@ -54,11 +68,17 @@ const liveFilesystem: WorkProjectStatusFilesystem = {
     }
   },
   replaceFile: async (path, text) => {
+    // Without O_NONBLOCK a FIFO swapped in under the name holds the open until
+    // a reader appears. With it, the open fails when there is no reader, and
+    // otherwise the isFile check refuses the handle. Truncating only after that
+    // check leaves nothing but a regular file emptied.
     const handle = await open(
       path,
-      constants.O_WRONLY | constants.O_TRUNC | (constants.O_NOFOLLOW ?? 0),
+      constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
     );
     try {
+      if (!(await handle.stat()).isFile()) throw new Error("The status name is not a file.");
+      await handle.truncate(0);
       await handle.writeFile(text, "utf8");
     } finally {
       await handle.close();
@@ -84,7 +104,7 @@ const liveFilesystem: WorkProjectStatusFilesystem = {
 export class WorkProjectStatusFiles {
   readonly #fs: WorkProjectStatusFilesystem;
 
-  constructor(filesystem: WorkProjectStatusFilesystem = liveFilesystem) {
+  constructor(filesystem: WorkProjectStatusFilesystem = liveWorkProjectStatusFilesystem) {
     this.#fs = filesystem;
   }
 

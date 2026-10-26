@@ -5,6 +5,7 @@ import type {
   FirstRunOnboardingStatus,
   ProviderDriverKind,
 } from "@octant/contracts";
+import { ACP_AGENT_KINDS } from "@octant/contracts/acp-agent-profiles";
 import { isImageProfileDriverKind } from "./providerPolicy";
 
 export type DiscoveryPolicyDecision =
@@ -62,21 +63,10 @@ const AUTO_DETECTABLE_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set([
   "codex",
   "claude",
   "opencode",
-  "kilo",
   "pi",
   "oh-my-pi",
-  "devin",
-  "mistral-vibe",
   "ollama",
-  "kimi-code",
-  "grok",
-  "goose",
-  "glm",
-  "gemini",
-  "copilot",
-  "cline",
-  "qwen",
-  "fx",
+  ...ACP_AGENT_KINDS,
 ]);
 
 const MANUAL_ENDPOINT_DRIVERS: ReadonlySet<ProviderDriverKind> = new Set([

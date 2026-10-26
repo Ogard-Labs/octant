@@ -1,4 +1,4 @@
-import type { ProviderDriverKind } from "@octant/contracts";
+import { ACP_AGENT_KINDS, acpAgentProfile, type ProviderDriverKind } from "@octant/contracts";
 
 /**
  * Declarative discovery descriptor contributed by each provider driver.
@@ -82,34 +82,6 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     isDirectEndpoint: false,
   },
   {
-    driverKind: "kimi-code",
-    displayName: "Kimi Code CLI",
-    executableNames: ["kimi"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: ["--version"],
-    onboardingGuidance:
-      "Run kimi login in your terminal, then check the connection again. Octant reuses the same provider profile.",
-    isDirectEndpoint: false,
-  },
-  {
-    driverKind: "devin",
-    displayName: "Devin ACP",
-    executableNames: ["devin"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: ["--version"],
-    onboardingGuidance: "Run devin auth login in your terminal, then check the connection again.",
-    isDirectEndpoint: false,
-  },
-  {
-    driverKind: "kilo",
-    displayName: "Kilo ACP",
-    executableNames: ["kilo"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: ["--version"],
-    onboardingGuidance: "Run kilo auth login in your terminal, then check the connection again.",
-    isDirectEndpoint: false,
-  },
-  {
     driverKind: "pi",
     displayName: "Pi RPC",
     executableNames: ["pi"],
@@ -129,91 +101,6 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
     isDirectEndpoint: false,
   },
   {
-    driverKind: "mistral-vibe",
-    displayName: "Mistral Vibe ACP",
-    executableNames: ["vibe-acp"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: ["--version"],
-    onboardingGuidance: "Run `vibe --setup` in your terminal, then check the connection again.",
-    isDirectEndpoint: false,
-  },
-  {
-    driverKind: "grok",
-    displayName: "Grok Build",
-    executableNames: ["grok"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: ["--version"],
-    onboardingGuidance:
-      "Run grok login (or grok login --device-auth on a headless host), then check the connection again.",
-    isDirectEndpoint: false,
-  },
-  {
-    driverKind: "goose",
-    displayName: "Goose",
-    executableNames: ["goose"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: ["--version"],
-    onboardingGuidance: "Run `goose configure`, then check the connection again.",
-    isDirectEndpoint: false,
-  },
-  {
-    driverKind: "glm",
-    displayName: "GLM Agent",
-    executableNames: ["glm-acp-agent"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: [],
-    onboardingGuidance:
-      "Run the provider-owned GLM Agent CLI login in your terminal, then check the connection again.",
-    isDirectEndpoint: false,
-  },
-  {
-    driverKind: "gemini",
-    displayName: "Gemini CLI",
-    executableNames: ["gemini"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: ["--version"],
-    onboardingGuidance:
-      "Run Gemini CLI in your terminal and complete its provider-owned login, then check the connection again.",
-    isDirectEndpoint: false,
-  },
-  {
-    driverKind: "copilot",
-    displayName: "GitHub Copilot",
-    executableNames: ["copilot"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: ["--version"],
-    onboardingGuidance: "Run `copilot login`, then check the connection again.",
-    isDirectEndpoint: false,
-  },
-  {
-    driverKind: "cline",
-    displayName: "Cline",
-    executableNames: ["cline"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: ["--version"],
-    onboardingGuidance: "Run `cline auth` in your terminal, then check the connection again.",
-    isDirectEndpoint: false,
-  },
-  {
-    driverKind: "qwen",
-    displayName: "Qwen Code",
-    executableNames: ["qwen"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: ["--version"],
-    onboardingGuidance:
-      "Run the provider-owned Qwen CLI login in your terminal, then check the connection again.",
-    isDirectEndpoint: false,
-  },
-  {
-    driverKind: "fx",
-    displayName: "fx",
-    executableNames: ["fx"],
-    approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
-    versionProbeArgs: ["--version"],
-    onboardingGuidance: "Add a Vercel AI Gateway API key for fx, then check the connection again.",
-    isDirectEndpoint: false,
-  },
-  {
     driverKind: "ollama",
     displayName: "Ollama",
     executableNames: ["ollama"],
@@ -223,6 +110,18 @@ export const DISCOVERY_DESCRIPTORS: ReadonlyArray<ProviderDiscoveryDescriptor> =
       "Start the user-managed Ollama service and verify the loopback API base URL, then retry.",
     isDirectEndpoint: false,
   },
+  ...ACP_AGENT_KINDS.map((kind): ProviderDiscoveryDescriptor => {
+    const profile = acpAgentProfile(kind);
+    return {
+      driverKind: kind,
+      displayName: profile.name,
+      executableNames: [profile.executable],
+      approvedLocations: ["/usr/local/bin", "/opt/homebrew/bin", "/usr/bin"],
+      versionProbeArgs: profile.versionProbeArgs,
+      onboardingGuidance: profile.signInGuidance,
+      isDirectEndpoint: false,
+    };
+  }),
   // Direct HTTP endpoint providers are NOT auto-detected.
   // They are listed here for completeness but excluded from scanning.
   {

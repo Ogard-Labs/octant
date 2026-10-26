@@ -1,8 +1,9 @@
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { WorkProjectStatusFiles } from "./workProjectStatusFiles";
+import { liveWorkProjectStatusFilesystem, WorkProjectStatusFiles } from "./workProjectStatusFiles";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -91,4 +92,27 @@ describe("a Work Project's status file", () => {
     expect(text).toContain("## Recent changes\n\n- 2026-09-12 Draft the offer: `offer.docx`");
     expect(text).toContain("Last updated: 2026-09-12");
   });
+});
+
+describe("the live status file filesystem", () => {
+  // The status name is checked with lstat first, so a FIFO only reaches these
+  // calls when it is swapped in after that check. A blocking open would then
+  // wait for a peer that never comes and stall the turn.
+  it.skipIf(process.platform === "win32")(
+    "refuses to read or replace a status name swapped to a FIFO without waiting for a peer",
+    async () => {
+      const fifo = join(await folder(), "STATUS.md");
+      execFileSync("mkfifo", [fifo]);
+      const settle = (operation: Promise<unknown>) =>
+        Promise.race([
+          operation.then(() => "done").catch(() => "refused"),
+          new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 2_000)),
+        ]);
+
+      expect(await settle(liveWorkProjectStatusFilesystem.readFile(fifo))).toBe("refused");
+      expect(await settle(liveWorkProjectStatusFilesystem.replaceFile(fifo, "# Status\n"))).toBe(
+        "refused",
+      );
+    },
+  );
 });

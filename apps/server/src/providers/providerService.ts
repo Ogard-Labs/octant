@@ -31,24 +31,18 @@ import {
 } from "@octant/contracts";
 import {
   ProviderPolicyRejected,
+  changeAcpAgentConfiguration,
+  createAcpAgentProvider,
+  isAcpAgentInstance,
+  isChangeAcpAgentConfigurationCommand,
+  isCreateAcpAgentProviderCommand,
   changeAnthropicCompatibleConfiguration,
   changeAzureFoundryConfiguration,
   changeBflImageConfiguration,
   changeIdeogramImageConfiguration,
   changeClaudeConfiguration,
   claudeChangeKeepsRuntime,
-  changeDevinConfiguration,
   changeGeminiImageConfiguration,
-  changeGrokConfiguration,
-  changeGooseConfiguration,
-  changeGlmConfiguration,
-  changeGeminiConfiguration,
-  changeCopilotConfiguration,
-  changeClineConfiguration,
-  changeQwenConfiguration,
-  changeFxConfiguration,
-  changeKiloConfiguration,
-  changeMistralVibeConfiguration,
   changeOllamaConfiguration,
   changePiConfiguration,
   changeOpenAiCompatibleConfiguration,
@@ -65,22 +59,10 @@ import {
   implicitClaudeAccountOwnerId,
   implicitCodexAccountOwnerId,
   createClaudeProvider,
-  createDevinProvider,
   createGeminiImageProvider,
-  createGrokProvider,
-  createGooseProvider,
-  createGlmProvider,
-  createGeminiProvider,
-  createCopilotProvider,
-  createClineProvider,
-  createQwenProvider,
-  createFxProvider,
-  createKiloProvider,
   createOpenAiCompatibleProvider,
   createOpenAiImageProvider,
   createCodexProvider,
-  createKimiCodeProvider,
-  createMistralVibeProvider,
   createOllamaProvider,
   createPiProvider,
   createOhMyPiProvider,
@@ -673,22 +655,11 @@ export class ProviderService implements ProviderServiceApi {
           if (
             command.kind === "create-opencode-provider" ||
             command.kind === "create-codex-provider" ||
-            command.kind === "create-kimi-code-provider" ||
             command.kind === "create-claude-provider" ||
-            command.kind === "create-devin-provider" ||
-            command.kind === "create-kilo-provider" ||
             command.kind === "create-pi-provider" ||
             command.kind === "create-oh-my-pi-provider" ||
             command.kind === "create-ollama-provider" ||
-            command.kind === "create-mistral-vibe-provider" ||
-            command.kind === "create-grok-provider" ||
-            command.kind === "create-goose-provider" ||
-            command.kind === "create-glm-provider" ||
-            command.kind === "create-gemini-provider" ||
-            command.kind === "create-copilot-provider" ||
-            command.kind === "create-cline-provider" ||
-            command.kind === "create-qwen-provider" ||
-            command.kind === "create-fx-provider" ||
+            isCreateAcpAgentProviderCommand(command) ||
             command.kind === "create-openai-compatible-provider" ||
             command.kind === "create-anthropic-compatible-provider" ||
             command.kind === "create-azure-foundry-provider" ||
@@ -732,9 +703,6 @@ export class ProviderService implements ProviderServiceApi {
                 if (assignedHome !== undefined) await this.#ensureCodexAccountHome(assignedHome);
                 break;
               }
-              case "create-kimi-code-provider":
-                instance = createKimiCodeProvider({ ...common, binaryPath: command.binaryPath });
-                break;
               case "create-claude-provider": {
                 // The host profile belongs to one subscription account. An
                 // API-key account never takes it, so one created first does
@@ -772,18 +740,6 @@ export class ProviderService implements ProviderServiceApi {
                 );
                 break;
               }
-              case "create-devin-provider":
-                instance = createDevinProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-kilo-provider":
-                instance = createKiloProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
               case "create-pi-provider":
                 instance = createPiProvider({
                   ...common,
@@ -798,60 +754,6 @@ export class ProviderService implements ProviderServiceApi {
                 break;
               case "create-ollama-provider":
                 instance = createOllamaProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-mistral-vibe-provider":
-                instance = createMistralVibeProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-grok-provider":
-                instance = createGrokProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-goose-provider":
-                instance = createGooseProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-glm-provider":
-                instance = createGlmProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-gemini-provider":
-                instance = createGeminiProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-copilot-provider":
-                instance = createCopilotProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-cline-provider":
-                instance = createClineProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-qwen-provider":
-                instance = createQwenProvider({
-                  ...common,
-                  configuration: command.configuration,
-                });
-                break;
-              case "create-fx-provider":
-                instance = createFxProvider({
                   ...common,
                   configuration: command.configuration,
                 });
@@ -894,6 +796,13 @@ export class ProviderService implements ProviderServiceApi {
                 break;
               case "create-ideogram-image-provider":
                 instance = createIdeogramImageProvider({
+                  ...common,
+                  configuration: command.configuration,
+                });
+                break;
+              default:
+                // Every other create command left is an ACP agent's.
+                instance = createAcpAgentProvider({
                   ...common,
                   configuration: command.configuration,
                 });
@@ -1009,11 +918,7 @@ export class ProviderService implements ProviderServiceApi {
             });
             eventName = "provider.instance-renamed@1";
           } else if (command.kind === "change-provider-binary") {
-            if (
-              current.driverKind !== "opencode" &&
-              current.driverKind !== "codex" &&
-              current.driverKind !== "kimi-code"
-            ) {
+            if (current.driverKind !== "opencode" && current.driverKind !== "codex") {
               throw this.#unsupported("This provider does not use a CLI binary.");
             }
             if (this.#runtime.activeSessionCount(current.id) !== 0) {
@@ -1176,131 +1081,14 @@ export class ProviderService implements ProviderServiceApi {
               await this.#ensureCodexAccountHome(instance.configuration.codexHome);
             }
             eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-mistral-vibe-configuration") {
-            if (current.driverKind !== "mistral-vibe") {
-              throw this.#unsupported("This provider does not use Mistral Vibe configuration.");
+          } else if (isChangeAcpAgentConfigurationCommand(command)) {
+            if (
+              !isAcpAgentInstance(current) ||
+              current.configuration.kind !== command.configuration.kind
+            ) {
+              throw this.#unsupported("This provider does not use that ACP agent configuration.");
             }
-            instance = changeMistralVibeConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-grok-configuration") {
-            if (current.driverKind !== "grok") {
-              throw this.#unsupported("This provider does not use Grok Build configuration.");
-            }
-            instance = changeGrokConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-goose-configuration") {
-            if (current.driverKind !== "goose") {
-              throw this.#unsupported("This provider does not use Goose configuration.");
-            }
-            instance = changeGooseConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-glm-configuration") {
-            if (current.driverKind !== "glm") {
-              throw this.#unsupported("This provider does not use GLM Agent configuration.");
-            }
-            instance = changeGlmConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-gemini-configuration") {
-            if (current.driverKind !== "gemini") {
-              throw this.#unsupported("This provider does not use Gemini CLI configuration.");
-            }
-            instance = changeGeminiConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-copilot-configuration") {
-            if (current.driverKind !== "copilot") {
-              throw this.#unsupported("This provider does not use GitHub Copilot configuration.");
-            }
-            instance = changeCopilotConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-cline-configuration") {
-            if (current.driverKind !== "cline") {
-              throw this.#unsupported("This provider does not use Cline configuration.");
-            }
-            instance = changeClineConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-qwen-configuration") {
-            if (current.driverKind !== "qwen") {
-              throw this.#unsupported("This provider does not use Qwen Code configuration.");
-            }
-            instance = changeQwenConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-fx-configuration") {
-            if (current.driverKind !== "fx") {
-              throw this.#unsupported("This provider does not use fx configuration.");
-            }
-            instance = changeFxConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-devin-configuration") {
-            if (current.driverKind !== "devin") {
-              throw this.#unsupported("This provider does not use Devin configuration.");
-            }
-            instance = changeDevinConfiguration(
-              current,
-              command.configuration,
-              updatedAt,
-              this.#runtime.activeSessionCount(current.id),
-            );
-            await this.#runtime.invalidateRuntime(current.id);
-            eventName = "provider.instance-configuration-changed@1";
-          } else if (command.kind === "change-kilo-configuration") {
-            if (current.driverKind !== "kilo") {
-              throw this.#unsupported("This provider does not use Kilo configuration.");
-            }
-            instance = changeKiloConfiguration(
+            instance = changeAcpAgentConfiguration(
               current,
               command.configuration,
               updatedAt,
@@ -1381,14 +1169,8 @@ export class ProviderService implements ProviderServiceApi {
           if (
             !keepsRuntime &&
             (command.kind === "change-claude-configuration" ||
-              command.kind === "change-mistral-vibe-configuration" ||
-              command.kind === "change-grok-configuration" ||
-              command.kind === "change-glm-configuration" ||
-              command.kind === "change-gemini-configuration" ||
-              command.kind === "change-cline-configuration" ||
-              command.kind === "change-qwen-configuration" ||
-              command.kind === "change-fx-configuration" ||
-              command.kind === "change-devin-configuration")
+              (isChangeAcpAgentConfigurationCommand(command) &&
+                command.configuration.authentication !== undefined))
           ) {
             this.#publishSelectedAuthenticationObservation(authoritative);
           }
@@ -1625,8 +1407,12 @@ export class ProviderService implements ProviderServiceApi {
         const current = this.#runtime.observedState(instanceId);
         if (current === undefined) {
           // The observation was cleared while the verification was in flight.
-          // The verification result is lost, but we avoid overwriting a cleared
-          // state with a stale snapshot.
+          // A "supported" result is lost rather than written over a cleared
+          // state, but an "unsupported" one still leaves the catalogue, or the
+          // next probe would restore the model's tools from it.
+          if (result.appManagedTools === "unsupported") {
+            this.#forgetPersistedToolVerification(instanceId, modelId);
+          }
           return result.appManagedTools;
         }
         const priorVerified = current.verifiedToolModelIds ?? [];
@@ -1640,6 +1426,9 @@ export class ProviderService implements ProviderServiceApi {
         // Without this, verifiedToolModelIds disappears after restart and users
         // must rerun the generating verification before Chat research works.
         if (updated !== undefined) this.#persistCatalog(updated);
+        if (result.appManagedTools === "unsupported") {
+          this.#forgetPersistedToolVerification(instanceId, modelId);
+        }
         return result.appManagedTools;
       } catch (error) {
         // Map the raw ProviderFailure (401, 403, 429, unsupported protocol,
@@ -1844,6 +1633,33 @@ export class ProviderService implements ProviderServiceApi {
       events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
     });
     const authoritative = this.#persistence.readProviderCatalog(observed.instanceId);
+    if (authoritative?.version !== snapshot.version) throw this.#unavailable();
+  }
+
+  /**
+   * Removes a model from the persisted Verify tools record whatever the
+   * current observation is. A check that failed during the run leaves an
+   * observation with no models, which `#persistCatalog` will not write over
+   * the catalogue; the catalogue then kept the model verified, and the next
+   * successful check restored it.
+   */
+  #forgetPersistedToolVerification(instanceId: ProviderInstanceId, modelId: ProviderModelId): void {
+    const current = this.#persistence.readProviderCatalog?.(instanceId);
+    const verified = current?.verifiedToolModelIds;
+    if (current === undefined || verified === undefined) return;
+    if (!verified.some((id) => String(id) === String(modelId))) return;
+    const snapshot = decodeProviderCatalogSnapshot({
+      ...current,
+      version: current.version + 1,
+      verifiedToolModelIds: verified.filter((id) => String(id) !== String(modelId)),
+      updatedAt: this.#clock(),
+    });
+    this.#persistence.journal.append({
+      aggregate: { aggregateType: "provider-catalog", aggregateId: instanceId },
+      expectedVersion: current.version,
+      events: [this.#pendingEvent("provider.catalog-updated@1", { snapshot })],
+    });
+    const authoritative = this.#persistence.readProviderCatalog?.(instanceId);
     if (authoritative?.version !== snapshot.version) throw this.#unavailable();
   }
 
@@ -2169,27 +1985,17 @@ export class ProviderService implements ProviderServiceApi {
   }
 
   #publishSelectedAuthenticationObservation(instance: ProviderInstance): void {
-    if (
-      instance.driverKind !== "claude" &&
-      instance.driverKind !== "mistral-vibe" &&
-      instance.driverKind !== "grok" &&
-      instance.driverKind !== "glm" &&
-      instance.driverKind !== "gemini" &&
-      instance.driverKind !== "cline" &&
-      instance.driverKind !== "qwen" &&
-      instance.driverKind !== "fx" &&
-      instance.driverKind !== "devin"
-    ) {
-      return;
-    }
+    const authentication =
+      instance.driverKind === "claude" || isAcpAgentInstance(instance)
+        ? instance.configuration.authentication
+        : undefined;
+    if (authentication === undefined) return;
     this.#runtime.setObservedState(
       decodeProviderObservedState({
         instanceId: instance.id,
         readiness: "checking",
         processState: "stopped",
-        ...(instance.configuration.authentication === "api-key"
-          ? { credentialStatus: "missing" }
-          : {}),
+        ...(authentication === "api-key" ? { credentialStatus: "missing" } : {}),
         models: [],
         capabilities: unavailableCapabilities,
         observedAt: decodeTimestamp(this.#clock()),

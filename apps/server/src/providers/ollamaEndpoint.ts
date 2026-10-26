@@ -278,8 +278,9 @@ export async function probeOllama(endpoint: OllamaEndpoint): Promise<OllamaProbe
       nativeAttachments: vision ? "supported" : "unsupported",
       reasoning: available ? (reasoning ? "unavailable" : "unsupported") : "unavailable",
       usage: "unavailable",
-      // Octant Harness keeps a Code session's transcript and compacts it; Chat
-      // and Work send the host's planned history, which the host compacts.
+      // Octant Harness keeps a Code session's transcript and compacts it. Chat and
+      // Work continue their journaled session too, but the host plans and compacts
+      // their history and rebuilds a fresh session from it after a compaction.
       sessionCompaction: { chat: "unsupported", work: "unsupported", code: "supported" },
     },
   };

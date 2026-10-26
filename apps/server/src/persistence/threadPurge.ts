@@ -723,7 +723,7 @@ function eraseReplicaArtifactCopies(
   }
 }
 
-function deleteJournalEvents(
+export function deleteJournalEvents(
   connection: SqliteConnection,
   aggregates: ReadonlyArray<AggregateKey>,
 ): void {

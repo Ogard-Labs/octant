@@ -55,9 +55,9 @@ import {
   type ProtocolTurnFailureMetadata,
   type ProtocolTurnResult,
 } from "./openAiResponses";
-import { capabilityEchoToolDefinition, isCapabilityEchoToolCall } from "./openAiToolEncoding";
+import { capabilityEchoToolDefinition } from "./openAiToolEncoding";
 import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
 
 /** The request profile the resolved credential selects, when it selects one. */
@@ -114,7 +114,7 @@ export interface OpenAiCompatibleDriverProfile {
 export interface OpenAiCompatibleDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly configuration: OpenAiCompatibleProviderConfiguration;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
   readonly clock?: () => string;
@@ -270,8 +270,6 @@ function admitTurn(
 ): ProviderFailure | undefined {
   const observed = options.runtimeRegistry.observedState(options.instanceId);
   const model = observed?.models.find((candidate) => candidate.id === modelId);
-  const isCapabilityEchoProbe =
-    input.tools.length > 0 && input.tools.every((tool) => isCapabilityEchoToolCall(tool.name));
   // Tool support is verified per model through the verify-model-tools command,
   // and the sender gates tool requests on the per-model verifiedToolModelIds
   // set alone, so one verified model does not unlock tools for the other
@@ -280,8 +278,7 @@ function admitTurn(
     observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;
   const effectiveCapabilities = {
     ...(observed?.capabilities ?? initialCapabilities),
-    appManagedTools:
-      isCapabilityEchoProbe || isVerifiedModel ? ("supported" as const) : ("unsupported" as const),
+    appManagedTools: isVerifiedModel ? ("supported" as const) : ("unsupported" as const),
   };
   return validateChatTurnInput(input, effectiveCapabilities, model);
 }

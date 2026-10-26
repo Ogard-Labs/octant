@@ -7,6 +7,7 @@ import type {
   ProviderToolTransport,
   ProviderUsageReporting,
 } from "@octant/contracts/providers";
+import { isAcpAgentKind } from "@octant/contracts/acp-agent-profiles";
 import {
   isImageProfileDriverKind,
   isNativeHarnessDriverKind,
@@ -21,11 +22,16 @@ import {
  * a loopback MCP server with one session, and Pi's extension calls a loopback
  * bridge. Oh My Pi and the image profiles have none. A settings card
  * that named a transport the adapter does not use would be the very guess this
- * mirror exists to prevent, so a new driver kind must be placed here.
+ * mirror exists to prevent, so a new native driver kind must be placed here;
+ * an ACP agent is placed by being one.
  */
 export function providerToolTransport(
   driverKind: ProviderDriverKind,
 ): ProviderToolTransport | undefined {
+  // Every ACP agent runs on the one shared ACP stack, whose only tool route is
+  // the session bridge; whether a given agent takes it is still the runtime's
+  // reported capability, never this placement.
+  if (isAcpAgentKind(driverKind)) return "session-mcp-bridge";
   switch (driverKind) {
     case "openai-compatible":
     case "anthropic-compatible":
@@ -37,18 +43,6 @@ export function providerToolTransport(
     case "codex":
       return "app-server-dynamic-tools";
     case "opencode":
-    case "kilo":
-    case "devin":
-    case "mistral-vibe":
-    case "kimi-code":
-    case "grok":
-    case "goose":
-    case "glm":
-    case "gemini":
-    case "copilot":
-    case "cline":
-    case "qwen":
-    case "fx":
       return "session-mcp-bridge";
     case "pi":
       return "session-tool-bridge";

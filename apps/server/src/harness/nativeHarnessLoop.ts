@@ -73,6 +73,17 @@ const OMITTED_HISTORY_NOTE =
   "Earlier messages of this session were left out to fit the context window.";
 
 /**
+ * What still carries the work a summary or a cut took out of view. A Chat
+ * session has no folder, so its lead is pointed at its task list only:
+ * naming files on disk would send it after something it cannot reach.
+ */
+function workStillReflected(mode: OctantMode | undefined): string {
+  return mode === "chat" || mode === undefined
+    ? "Your task list still reflects that work."
+    : "Your task list and the files on disk still reflect that work.";
+}
+
+/**
  * The note in front of a cut. It names message numbers only when the lead is
  * offered `journal-lookup` and every number it names is already journaled, so
  * the model is never handed a handle it cannot fetch. A Chat thread has no
@@ -82,26 +93,39 @@ function omittedHistoryNote(
   mode: OctantMode | undefined,
   journaledBefore: number | undefined,
 ): string {
-  const kept =
-    mode === "work" || mode === "code"
-      ? `${OMITTED_HISTORY_NOTE} Your task list and the files on disk still reflect that work.`
-      : `${OMITTED_HISTORY_NOTE} Your task list still reflects that work.`;
+  const note = `${OMITTED_HISTORY_NOTE} ${workStillReflected(mode)}`;
   return journaledBefore === undefined || journaledBefore < 1
-    ? kept
-    : `${kept} Messages 0 to ${journaledBefore - 1} are kept in the journal: call journal-lookup with one of those numbers as from to re-read them.`;
+    ? note
+    : `${note} Messages 0 to ${journaledBefore - 1} are kept in the journal: call journal-lookup with one of those numbers as from to re-read them.`;
 }
 
 /**
  * The compaction request asks for continuation material, not a reply: what a
  * later request needs to carry on the same work without the turns it replaces.
+ * A Chat session has no folder, so its summary is asked for no files or
+ * changes: naming them would send the lead after something it cannot reach.
  */
-const COMPACTION_INSTRUCTION = [
-  "Summarize the coding session excerpts below so the session can continue",
-  "without them. Preserve the task and goal, decisions, the files and",
-  "identifiers involved, what was changed, what was verified, and what is",
-  "still open. Do not answer anything, do not add commentary, and do not",
-  "invent detail that is not present.",
-].join(" ");
+function compactionInstruction(mode: OctantMode): string {
+  const preserve =
+    mode === "chat"
+      ? [
+          "Summarize the conversation excerpts below so the conversation can",
+          "continue without them. Preserve the request and goal, decisions, the",
+          "facts and identifiers involved, what was answered, and what is still",
+          "open.",
+        ]
+      : [
+          `Summarize the ${mode === "code" ? "coding" : "work"} session excerpts below so the session can continue`,
+          "without them. Preserve the task and goal, decisions, the files and",
+          "identifiers involved, what was changed, what was verified, and what is",
+          "still open.",
+        ];
+  return [
+    ...preserve,
+    "Do not answer anything, do not add commentary, and do not",
+    "invent detail that is not present.",
+  ].join(" ");
+}
 /**
  * The lead keeps its task list only through `todo-write` calls in the
  * conversation, so a summary that replaced the latest call would leave it
@@ -869,7 +893,7 @@ export function createNativeHarnessConnection(
         const request: NativeHarnessRequest = {
           sessionId: state.sessionId,
           modelId: state.modelId,
-          system: COMPACTION_INSTRUCTION,
+          system: compactionInstruction(options.mode),
           history: [
             {
               role: "user",
@@ -951,7 +975,7 @@ export function createNativeHarnessConnection(
       state.messages.splice(
         0,
         state.messages.length,
-        compactionSummaryMessage(compaction),
+        compactionSummaryMessage(compaction, options.mode),
         ...body.slice(kept),
       );
       // Every message the summary replaced was journaled before it, so the
@@ -987,18 +1011,23 @@ export function createNativeHarnessConnection(
 
     /**
      * The turn's request rebuilt after summarizing earlier turns in place,
-     * or undefined when nothing was summarized. A Code session only, whose
-     * transcript the harness keeps (Chat and Work send the host's planned
-     * history), and only on the lead's own model: the summary is sized for
-     * its window, and a fallback model's window may differ. The compaction is
-     * the runtime's own as far as the turn runner can tell, so it is reported
-     * `automatic` and marks the turn's usage compacted.
+     * or undefined when nothing was summarized. Every mode's session keeps
+     * its transcript in the journal and continues it turn after turn, so
+     * Chat and Work summarize exactly as Code does, with the same tool-less
+     * request to the session's own endpoint. A fresh Chat or Work session
+     * carries the host's planned, already compacted history inside its first
+     * message; that is the running turn, which is never summarized, so only
+     * turns the session itself ran before it are. Only on the lead's own
+     * model: the summary is sized for its window, and a fallback model's
+     * window may differ. The compaction is the runtime's own as far as the
+     * turn runner can tell, so it is reported `automatic` and marks the
+     * turn's usage compacted.
      */
     const compactToFit = async (
       state: SessionState,
       signal: AbortSignal,
     ): Promise<NativeHarnessRequest | undefined> => {
-      if (options.mode !== "code" || state.fallback !== undefined) return undefined;
+      if (state.fallback !== undefined) return undefined;
       // One summary request per turn: after a success nothing before the
       // running turn is left to summarize, and after a failure every later
       // step would pay for the same large request again only to fall back to
@@ -1123,7 +1152,11 @@ export function createNativeHarnessConnection(
               endpoint.release();
               throw error;
             }
-            const compacted = afterCompaction(messages, transcript.compactions.at(-1));
+            const compacted = afterCompaction(
+              messages,
+              transcript.compactions.at(-1),
+              options.mode,
+            );
             const state = newState({
               sessionId: input.sessionId,
               transcriptId,
@@ -1418,6 +1451,7 @@ function turnStarts(messages: ReadonlyArray<NativeHarnessMessage>): ReadonlyArra
  */
 function compactionSummaryMessage(
   compaction: NativeHarnessTranscriptCompaction,
+  mode: OctantMode,
 ): NativeHarnessMessage {
   const replaced =
     compaction.turns === 1
@@ -1425,7 +1459,7 @@ function compactionSummaryMessage(
       : `The first ${compaction.turns} turns of this session were summarized and are`;
   return {
     role: "user",
-    text: `${replaced} no longer shown in full; the files on disk still reflect that work. Summary:\n\n${compaction.summary}`,
+    text: `${replaced} no longer shown in full. ${workStillReflected(mode)} Summary:\n\n${compaction.summary}`,
   };
 }
 
@@ -1467,6 +1501,7 @@ function clipCompactionItem(value: string): string {
 function afterCompaction(
   messages: NativeHarnessMessage[],
   compaction: NativeHarnessTranscriptCompaction | undefined,
+  mode: OctantMode,
 ): {
   readonly messages: NativeHarnessMessage[];
   readonly compaction: NativeHarnessTranscriptCompaction | undefined;
@@ -1477,7 +1512,7 @@ function afterCompaction(
   const start = turnStarts(messages)[compaction.turns];
   if (start === undefined) return { messages, compaction: undefined, journalOffset: 0 };
   return {
-    messages: [compactionSummaryMessage(compaction), ...messages.slice(start)],
+    messages: [compactionSummaryMessage(compaction, mode), ...messages.slice(start)],
     compaction,
     journalOffset: start,
   };
@@ -1580,6 +1615,7 @@ export function fitRequest(
   options?: {
     readonly reduceOnce?: boolean | undefined;
     readonly journalNumberOf?: ((message: NativeHarnessMessage) => number | undefined) | undefined;
+    /** The session's mode; absent, the note points at no folder. */
     readonly mode?: OctantMode | undefined;
   },
 ): NativeHarnessRequest | undefined {

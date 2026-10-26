@@ -1,22 +1,15 @@
 import {
+  ACP_AGENT_KINDS,
+  acpAgentConfigurationKind,
+  acpAgentProfile,
+  isAcpAgentKind,
+  type AcpAgentAuthentication,
+  type AcpAgentKind,
   type ClaudeAccountAccent,
   type ClaudeAuthentication,
-  type GrokAuthentication,
-  type GrokProviderConfiguration,
-  type GeminiAuthentication,
-  type GlmAuthentication,
-  type GlmProviderConfiguration,
-  type GeminiProviderConfiguration,
-  type ClineAuthentication,
-  type ClineProviderConfiguration,
-  type QwenAuthentication,
-  type QwenProviderConfiguration,
-  type FxProviderConfiguration,
-  type MistralVibeAuthentication,
-  type MistralVibeProviderConfiguration,
 } from "@octant/contracts";
 import { ChevronDown } from "lucide-react";
-import { useRef, useState, type RefObject } from "react";
+import { useRef, useState } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
@@ -24,13 +17,15 @@ import { OctantTextarea } from "../../ui/base/OctantTextarea";
 import {
   ClaudeCreateAuthenticationFields,
   emptyTransientCredential,
-  GrokCreateAuthenticationFields,
   HttpCredentialFields,
   transientCredential,
-  VibeCreateAuthenticationFields,
 } from "../ProviderSettingsCredentials";
 import { driverLabel } from "../providerSettingsPresentation";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
+import {
+  AcpAgentCreateAuthenticationFields,
+  offeredAcpAuthentication,
+} from "./AcpConfigurationForms";
 import { ClaudeAccountSettingsFields, CodexAccountSettingsFields } from "./ClaudeAccountFields";
 import { claudeConfigurationFromFields } from "./claudeAccountValues";
 import {
@@ -63,35 +58,18 @@ export type ProviderCreateFormProps = Pick<
   | "onCreateBflImage"
   | "onCreateIdeogramImage"
   | "onCreateClaude"
-  | "onCreateMistralVibe"
-  | "onCreateGrok"
-  | "onCreateGlm"
-  | "onCreateGemini"
-  | "onCreateCline"
-  | "onCreateQwen"
-  | "onCreateFx"
+  | "onCreateAcpAgent"
   | "onCreateOllama"
 >;
 
 export type ProviderCreateProviderType =
   | "opencode"
   | "codex"
-  | "kimi-code"
   | "claude"
-  | "devin"
-  | "kilo"
   | "pi"
   | "oh-my-pi"
   | "ollama"
-  | "mistral-vibe"
-  | "grok"
-  | "goose"
-  | "glm"
-  | "gemini"
-  | "copilot"
-  | "cline"
-  | "qwen"
-  | "fx"
+  | AcpAgentKind
   | "openai-compatible"
   | "anthropic-compatible"
   | "azure-foundry"
@@ -156,15 +134,16 @@ export function ProviderCreateForm(
   const [claudeBinaryPath, setClaudeBinaryPath] = useState(props.initialBinaryPath ?? "");
   const [codexAccent, setCodexAccent] = useState<ClaudeAccountAccent | "">("");
   const [codexBinaryPath, setCodexBinaryPath] = useState(props.initialBinaryPath ?? "");
-  const vibeAuthentication: MistralVibeAuthentication = "api-key";
-  const [grokAuthentication, setGrokAuthentication] = useState<GrokAuthentication>("subscription");
-  const [glmAuthentication, setGlmAuthentication] = useState<GlmAuthentication>("provider-owned");
-  const [geminiAuthentication, setGeminiAuthentication] =
-    useState<GeminiAuthentication>("provider-owned");
-  const [clineAuthentication, setClineAuthentication] =
-    useState<ClineAuthentication>("provider-owned");
-  const [qwenAuthentication, setQwenAuthentication] =
-    useState<QwenAuthentication>("provider-owned");
+  // The posture a person picked for an ACP agent, kept only while that agent
+  // stays selected; any other agent opens on its profile's first offer.
+  const [acpAuthenticationChoice, setAcpAuthenticationChoice] = useState<
+    { readonly kind: AcpAgentKind; readonly authentication: AcpAgentAuthentication } | undefined
+  >(undefined);
+  const acpAuthentication = !isAcpAgentKind(providerType)
+    ? undefined
+    : acpAuthenticationChoice?.kind === providerType
+      ? acpAuthenticationChoice.authentication
+      : offeredAcpAuthentication(providerType)[0];
   const credentialInput = useRef<HTMLInputElement>(null);
   const selectedDriverLabel = driverLabel(providerType);
   // Whether the chosen provider can be added without a key, so a browser that
@@ -175,26 +154,17 @@ export function ProviderCreateForm(
     providerType === "gemini-native-image" ||
     providerType === "bfl-image" ||
     providerType === "ideogram-image" ||
-    providerType === "mistral-vibe" ||
-    providerType === "fx" ||
-    (providerType === "grok" && grokAuthentication === "api-key") ||
-    (providerType === "glm" && glmAuthentication === "api-key") ||
-    (providerType === "gemini" && geminiAuthentication === "api-key") ||
-    (providerType === "cline" && clineAuthentication === "api-key") ||
-    (providerType === "qwen" && qwenAuthentication === "api-key")
+    acpAuthentication === "api-key"
       ? "required"
       : providerType === "openai-compatible" || providerType === "anthropic-compatible"
         ? "optional"
         : "none";
   const allowedProviderTypes = props.allowedProviderTypes;
-  const selectedBinaryName =
-    providerType === "mistral-vibe"
-      ? "vibe-acp"
-      : providerType === "glm"
-        ? "glm-acp-agent"
-        : providerType === "oh-my-pi"
-          ? "omp"
-          : providerType;
+  const selectedBinaryName = isAcpAgentKind(providerType)
+    ? acpAgentProfile(providerType).executable
+    : providerType === "oh-my-pi"
+      ? "omp"
+      : providerType;
   return (
     <section className="provider-settings__manual" data-expanded={manualOpen ? "true" : "false"}>
       {props.embedded === true ? null : (
@@ -256,15 +226,9 @@ export function ProviderCreateForm(
                               ? "Add Ollama provider"
                               : providerType === "claude"
                                 ? "Add Claude provider"
-                                : providerType === "mistral-vibe"
-                                  ? "Add Mistral Vibe provider"
-                                  : providerType === "grok"
-                                    ? "Add Grok Build provider"
-                                    : providerType === "goose"
-                                      ? "Add Goose provider"
-                                      : providerType === "glm"
-                                        ? "Add GLM Agent provider"
-                                        : "Add provider"
+                                : isAcpAgentKind(providerType)
+                                  ? `Add ${acpAgentProfile(providerType).name} provider`
+                                  : "Add provider"
             }
             className={`provider-settings__create provider-settings__create--${providerType}`}
             noValidate
@@ -295,11 +259,6 @@ export function ProviderCreateForm(
               let operation: Promise<boolean>;
               if (
                 providerType === "opencode" ||
-                providerType === "kimi-code" ||
-                providerType === "devin" ||
-                providerType === "kilo" ||
-                providerType === "goose" ||
-                providerType === "copilot" ||
                 providerType === "pi" ||
                 providerType === "oh-my-pi"
               ) {
@@ -330,96 +289,20 @@ export function ProviderCreateForm(
                     ? enteredCredential
                     : emptyTransientCredential(enteredCredential),
                 );
-              } else if (providerType === "mistral-vibe") {
-                const configuration: MistralVibeProviderConfiguration = {
-                  kind: "mistral-vibe-acp",
-                  binaryPath: String(data.get("binaryPath") ?? ""),
-                  authentication: vibeAuthentication,
-                };
+              } else if (isAcpAgentKind(providerType)) {
                 const enteredCredential = transientCredential(credentialInput.current);
-                operation = props.onCreateMistralVibe(
+                operation = props.onCreateAcpAgent(
                   String(data.get("displayName") ?? ""),
-                  configuration,
-                  vibeAuthentication === "api-key"
+                  {
+                    kind: acpAgentConfigurationKind(providerType),
+                    binaryPath: String(data.get("binaryPath") ?? ""),
+                    ...(acpAuthentication === undefined
+                      ? {}
+                      : { authentication: acpAuthentication }),
+                  },
+                  acpAuthentication === "api-key"
                     ? enteredCredential
                     : emptyTransientCredential(enteredCredential),
-                );
-              } else if (providerType === "grok") {
-                const configuration: GrokProviderConfiguration = {
-                  kind: "grok-acp",
-                  binaryPath: String(data.get("binaryPath") ?? ""),
-                  authentication: grokAuthentication,
-                };
-                const enteredCredential = transientCredential(credentialInput.current);
-                operation = props.onCreateGrok(
-                  String(data.get("displayName") ?? ""),
-                  configuration,
-                  grokAuthentication === "api-key"
-                    ? enteredCredential
-                    : emptyTransientCredential(enteredCredential),
-                );
-              } else if (providerType === "glm") {
-                const configuration: GlmProviderConfiguration = {
-                  kind: "glm-acp",
-                  binaryPath: String(data.get("binaryPath") ?? ""),
-                  authentication: glmAuthentication,
-                };
-                operation = props.onCreateGlm(
-                  String(data.get("displayName") ?? ""),
-                  configuration,
-                  glmAuthentication === "api-key"
-                    ? transientCredential(credentialInput.current)
-                    : emptyTransientCredential(transientCredential(credentialInput.current)),
-                );
-              } else if (providerType === "gemini") {
-                const configuration: GeminiProviderConfiguration = {
-                  kind: "gemini-acp",
-                  binaryPath: String(data.get("binaryPath") ?? ""),
-                  authentication: geminiAuthentication,
-                };
-                operation = props.onCreateGemini(
-                  String(data.get("displayName") ?? ""),
-                  configuration,
-                  geminiAuthentication === "api-key"
-                    ? transientCredential(credentialInput.current)
-                    : emptyTransientCredential(transientCredential(credentialInput.current)),
-                );
-              } else if (providerType === "cline") {
-                const configuration: ClineProviderConfiguration = {
-                  kind: "cline-acp",
-                  binaryPath: String(data.get("binaryPath") ?? ""),
-                  authentication: clineAuthentication,
-                };
-                operation = props.onCreateCline(
-                  String(data.get("displayName") ?? ""),
-                  configuration,
-                  clineAuthentication === "api-key"
-                    ? transientCredential(credentialInput.current)
-                    : emptyTransientCredential(transientCredential(credentialInput.current)),
-                );
-              } else if (providerType === "qwen") {
-                const configuration: QwenProviderConfiguration = {
-                  kind: "qwen-acp",
-                  binaryPath: String(data.get("binaryPath") ?? ""),
-                  authentication: qwenAuthentication,
-                };
-                operation = props.onCreateQwen(
-                  String(data.get("displayName") ?? ""),
-                  configuration,
-                  qwenAuthentication === "api-key"
-                    ? transientCredential(credentialInput.current)
-                    : emptyTransientCredential(transientCredential(credentialInput.current)),
-                );
-              } else if (providerType === "fx") {
-                const configuration: FxProviderConfiguration = {
-                  kind: "fx-acp",
-                  binaryPath: String(data.get("binaryPath") ?? ""),
-                  authentication: "api-key",
-                };
-                operation = props.onCreateFx(
-                  String(data.get("displayName") ?? ""),
-                  configuration,
-                  transientCredential(credentialInput.current),
                 );
               } else if (providerType === "ollama") {
                 operation = props.onCreateOllama(String(data.get("displayName") ?? ""), {
@@ -511,21 +394,14 @@ export function ProviderCreateForm(
                 options={[
                   { id: "opencode", group: "Coding agents", label: "OpenCode CLI" },
                   { id: "codex", group: "Coding agents", label: "Codex CLI" },
-                  { id: "kimi-code", group: "Coding agents", label: "Kimi Code CLI" },
                   { id: "claude", group: "Coding agents", label: "Claude Agent SDK" },
-                  { id: "devin", group: "Coding agents", label: "Devin ACP" },
-                  { id: "kilo", group: "Coding agents", label: "Kilo ACP" },
                   { id: "pi", group: "Coding agents", label: "Pi RPC" },
                   { id: "oh-my-pi", group: "Coding agents", label: "Oh My Pi" },
-                  { id: "mistral-vibe", group: "Coding agents", label: "Mistral Vibe ACP" },
-                  { id: "grok", group: "Coding agents", label: "Grok Build ACP" },
-                  { id: "goose", group: "Coding agents", label: "Goose ACP" },
-                  { id: "glm", group: "Coding agents", label: "GLM Agent ACP" },
-                  { id: "gemini", group: "Coding agents", label: "Gemini CLI ACP" },
-                  { id: "copilot", group: "Coding agents", label: "GitHub Copilot ACP" },
-                  { id: "cline", group: "Coding agents", label: "Cline ACP" },
-                  { id: "qwen", group: "Coding agents", label: "Qwen Code ACP" },
-                  { id: "fx", group: "Coding agents", label: "fx ACP" },
+                  ...ACP_AGENT_KINDS.map((kind) => ({
+                    id: kind,
+                    group: "Coding agents",
+                    label: `${acpAgentProfile(kind).name} ACP`,
+                  })),
                   {
                     id: "openai-compatible",
                     group: "Chat, voice & custom image APIs",
@@ -588,11 +464,9 @@ export function ProviderCreateForm(
             providerType !== "ideogram-image" &&
             providerType !== "ollama" ? (
               <label>
-                <span>
-                  {providerType === "mistral-vibe" ? "vibe-acp" : selectedDriverLabel} binary
-                </span>
+                <span>{selectedDriverLabel} binary</span>
                 <OctantInput
-                  aria-label={`${providerType === "mistral-vibe" ? "vibe-acp" : selectedDriverLabel} binary`}
+                  aria-label={`${selectedDriverLabel} binary`}
                   className="settings-view__text-input window-no-drag"
                   name="binaryPath"
                   onChange={
@@ -885,94 +759,17 @@ export function ProviderCreateForm(
                 onAccentChange={setCodexAccent}
               />
             ) : null}
-            {providerType === "mistral-vibe" ? (
-              <VibeCreateAuthenticationFields
+            {isAcpAgentKind(providerType) ? (
+              <AcpAgentCreateAuthenticationFields
+                key={`create-${providerType}`}
+                authentication={acpAuthentication}
                 credentialInput={credentialInput}
                 credentialManagementAvailable={props.credentialManagementAvailable}
+                kind={providerType}
+                onAuthenticationChange={(authentication) =>
+                  setAcpAuthenticationChoice({ kind: providerType, authentication })
+                }
               />
-            ) : null}
-            {providerType === "grok" ? (
-              <GrokCreateAuthenticationFields
-                authentication={grokAuthentication}
-                credentialInput={credentialInput}
-                credentialManagementAvailable={props.credentialManagementAvailable}
-                onAuthenticationChange={(next) => {
-                  if (next === "subscription" && credentialInput.current !== null) {
-                    credentialInput.current.value = "";
-                  }
-                  setGrokAuthentication(next);
-                }}
-              />
-            ) : null}
-            {providerType === "glm" ? (
-              <ProviderOwnedApiKeyCreateFields
-                apiKeyLabel="Z.AI API key"
-                authentication={glmAuthentication}
-                credentialInput={credentialInput}
-                credentialManagementAvailable={props.credentialManagementAvailable}
-                onAuthenticationChange={setGlmAuthentication}
-              />
-            ) : null}
-            {providerType === "gemini" ? (
-              <ProviderOwnedApiKeyCreateFields
-                apiKeyLabel="Gemini API key"
-                authentication={geminiAuthentication}
-                credentialInput={credentialInput}
-                credentialManagementAvailable={props.credentialManagementAvailable}
-                onAuthenticationChange={setGeminiAuthentication}
-              />
-            ) : null}
-            {providerType === "cline" ? (
-              <ProviderOwnedApiKeyCreateFields
-                apiKeyLabel="Cline API key"
-                authentication={clineAuthentication}
-                credentialInput={credentialInput}
-                credentialManagementAvailable={props.credentialManagementAvailable}
-                onAuthenticationChange={setClineAuthentication}
-              />
-            ) : null}
-            {providerType === "qwen" ? (
-              <ProviderOwnedApiKeyCreateFields
-                apiKeyLabel="OpenAI-compatible API key"
-                authentication={qwenAuthentication}
-                credentialInput={credentialInput}
-                credentialManagementAvailable={props.credentialManagementAvailable}
-                onAuthenticationChange={setQwenAuthentication}
-              />
-            ) : null}
-            {providerType === "fx" ? (
-              <label>
-                <span>Vercel AI Gateway API key</span>
-                <OctantInput
-                  aria-label="Vercel AI Gateway API key"
-                  autoComplete="off"
-                  className="settings-view__text-input window-no-drag"
-                  disabled={!props.credentialManagementAvailable}
-                  name="apiKey"
-                  ref={credentialInput}
-                  required
-                  spellCheck={false}
-                  type="password"
-                />
-              </label>
-            ) : null}
-            {providerType === "goose" ? (
-              <p className="provider-settings__field-guidance">
-                Uses provider-owned Goose authentication. Run `goose configure` in your terminal,
-                then check the connection.
-              </p>
-            ) : null}
-            {providerType === "copilot" ? (
-              <p className="provider-settings__field-guidance">
-                Uses provider-owned GitHub Copilot authentication. Run `copilot login` in your
-                terminal, then check the connection.
-              </p>
-            ) : null}
-            {providerType === "devin" ? (
-              <p className="provider-settings__field-guidance">
-                Uses provider-owned Devin subscription authentication. Run devin auth login in your
-                terminal when sign-in is required.
-              </p>
             ) : null}
             {providerType === "pi" ? (
               <p className="provider-settings__field-guidance">
@@ -987,12 +784,6 @@ export function ProviderCreateForm(
                 not treat discovery as turn readiness.
               </p>
             ) : null}
-            {providerType === "kilo" ? (
-              <p className="provider-settings__field-guidance">
-                Uses provider-owned authentication and model credentials through Kilo. Run kilo auth
-                login in your terminal, then check the connection.
-              </p>
-            ) : null}
             {validationMessage === undefined ? null : (
               <OctantAlert className="provider-settings__alert" tone="warning">
                 {validationMessage}
@@ -1003,28 +794,12 @@ export function ProviderCreateForm(
               disabled={
                 props.busy ||
                 creating ||
-                (providerType === "mistral-vibe" &&
-                  vibeAuthentication === "api-key" &&
-                  !props.credentialManagementAvailable) ||
-                (providerType === "grok" &&
-                  grokAuthentication === "api-key" &&
-                  !props.credentialManagementAvailable) ||
-                (providerType === "glm" &&
-                  glmAuthentication === "api-key" &&
-                  !props.credentialManagementAvailable) ||
-                ((providerType === "gemini" ||
-                  providerType === "cline" ||
-                  providerType === "qwen") &&
-                  ((providerType === "gemini" && geminiAuthentication === "api-key") ||
-                    (providerType === "cline" && clineAuthentication === "api-key") ||
-                    (providerType === "qwen" && qwenAuthentication === "api-key")) &&
-                  !props.credentialManagementAvailable) ||
+                (acpAuthentication === "api-key" && !props.credentialManagementAvailable) ||
                 ((providerType === "openai-image" ||
                   providerType === "gemini-native-image" ||
                   providerType === "bfl-image" ||
                   providerType === "ideogram-image") &&
-                  !props.credentialManagementAvailable) ||
-                (providerType === "fx" && !props.credentialManagementAvailable)
+                  !props.credentialManagementAvailable)
               }
               type="submit"
             >
@@ -1053,59 +828,6 @@ export function ProviderCreateForm(
         </div>
       ) : null}
     </section>
-  );
-}
-
-function ProviderOwnedApiKeyCreateFields(props: {
-  readonly apiKeyLabel: string;
-  readonly authentication:
-    | GlmAuthentication
-    | GeminiAuthentication
-    | ClineAuthentication
-    | QwenAuthentication;
-  readonly credentialInput: RefObject<HTMLInputElement | null>;
-  readonly credentialManagementAvailable: boolean;
-  readonly onAuthenticationChange: (value: "provider-owned" | "api-key") => void;
-}) {
-  return (
-    <>
-      <label>
-        <span>Authentication</span>
-        <OctantSelectField
-          aria-label="Provider authentication"
-          className="settings-view__select window-no-drag"
-          onValueChange={(value) =>
-            props.onAuthenticationChange(value as "provider-owned" | "api-key")
-          }
-          options={[
-            { id: "provider-owned", label: "Provider CLI login (recommended)" },
-            { id: "api-key", label: props.apiKeyLabel },
-          ]}
-          value={props.authentication}
-        />
-      </label>
-      {props.authentication === "api-key" ? (
-        <label>
-          <span>{props.apiKeyLabel}</span>
-          <OctantInput
-            aria-label={props.apiKeyLabel}
-            autoComplete="off"
-            className="settings-view__text-input window-no-drag"
-            disabled={!props.credentialManagementAvailable}
-            name="apiKey"
-            ref={props.credentialInput}
-            required
-            spellCheck={false}
-            type="password"
-          />
-        </label>
-      ) : (
-        <p className="provider-settings__field-guidance">
-          Authenticate with the provider-owned CLI in your terminal. Octant will reuse its native
-          profile and binary.
-        </p>
-      )}
-    </>
   );
 }
 
