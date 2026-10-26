@@ -148,9 +148,10 @@ authority, privacy, and release boundaries.
   push notifications, native capture, voice input, and public store
   distribution for the Expo client. Design:
   [Mobile maturity](design/mobile-maturity.md).
-- **Hosted relay** — ciphertext-only and holding no authority; LAN, Tailscale,
-  and SSH stay the default remote paths. Research:
-  [remote-path-sufficiency.md](remote-path-sufficiency.md).
+- **Hosted relay** — designed as an opt-in, self-hostable, ciphertext-only
+  fallback for already-paired apps; no reachability gap over LAN, Tailscale,
+  or SSH has been demonstrated, and operating an Octant-run relay is an open
+  maintainer decision. Design: [design/hosted-relay.md](design/hosted-relay.md).
 - **Full LSP / extension host / debugger** — Monaco and explicit external-editor
   handoff remain primary; a full IDE would run as a separately launched
   companion. Design gates:
