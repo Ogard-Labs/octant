@@ -153,3 +153,28 @@ describe("live Work filesystem file open", () => {
     },
   );
 });
+
+describe("live Work filesystem file overwrite", () => {
+  // An overwrite opens an existing name without O_CREAT, so a FIFO swapped in
+  // after the containment check used to hold the open until a reader appeared.
+  it.skipIf(process.platform === "win32")(
+    "refuses to overwrite a FIFO without waiting for a reader",
+    async () => {
+      const fifo = join(fixture(), "notes.md");
+      execFileSync("mkfifo", [fifo]);
+
+      const opened = await Promise.race([
+        liveWorkFilesystem.openWriteFile(fifo, { exclusiveCreate: false }).then(
+          async (file) => {
+            await file.close();
+            return "opened" as const;
+          },
+          () => "refused" as const,
+        ),
+        new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 2_000)),
+      ]);
+
+      expect(opened).toBe("refused");
+    },
+  );
+});

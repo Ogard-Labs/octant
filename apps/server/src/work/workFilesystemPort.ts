@@ -331,9 +331,13 @@ async function openLiveWriteFile(
   options: { readonly exclusiveCreate: boolean },
   noFollow: number = constants.O_NOFOLLOW,
 ): Promise<WorkOpenWriteFile> {
+  // An overwrite opens an existing name, so a FIFO swapped in after the
+  // containment check would hold a blocking open until a reader appeared.
+  // O_NONBLOCK refuses it with ENXIO instead; with a reader present the open
+  // succeeds and the caller's isFile check on the handle refuses it.
   const flags = options.exclusiveCreate
     ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow
-    : constants.O_WRONLY | noFollow;
+    : constants.O_WRONLY | constants.O_NONBLOCK | noFollow;
   const handle = await open(path, flags, 0o600);
   return {
     stat: async () => {
