@@ -1,4 +1,5 @@
 import {
+  NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE,
   TOOL_EGRESS_PROJECT_AGGREGATE,
   TOOL_EGRESS_THREAD_AGGREGATE,
   TURN_METRICS_AGGREGATE_TYPE,
@@ -382,8 +383,8 @@ function collectOwnedAggregates(
     add("canvas-outside-content", canvasId);
   }
   followLinkedAggregates(connection, keys, add, "agent-run", RUN_LINK_PATHS);
-  for (const sessionId of harnessSessionIds(connection, threadId)) {
-    add("native-harness-transcript", sessionId);
+  for (const sessionId of providerSessionsStartedBy(connection, keys)) {
+    add(NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE, sessionId);
     for (const match of aggregatesMatching(connection, ["$.sessionId"], sessionId)) {
       add(match.aggregateType, match.aggregateId);
     }
@@ -476,19 +477,64 @@ function aggregatesMatching(
   return rows.map((row) => ({ aggregateType: row.aggregate_type, aggregateId: row.aggregate_id }));
 }
 
-function harnessSessionIds(connection: SqliteConnection, threadId: string): ReadonlyArray<string> {
-  const rows = connection
-    .prepare(
-      `SELECT json_extract(payload_json, '$.id') AS session_id
-       FROM event_journal
-       WHERE aggregate_type = 'native-harness-session' AND aggregate_id = ?`,
-    )
-    .all(threadId) as ReadonlyArray<{ readonly session_id: unknown }>;
-  const ids: string[] = [];
-  for (const row of rows) {
-    if (typeof row.session_id === "string" && row.session_id.length > 0) ids.push(row.session_id);
+/** The thread records that name the provider sessions its turns ran in. */
+const SESSION_RECORDING_AGGREGATE_TYPES = ["chat-thread", "work-turn", "code-operation"] as const;
+
+/**
+ * A native-harness transcript is journaled under the provider session id a
+ * Chat attempt, Work turn, or Code operation ran, not under the
+ * native-harness session record's own id, and its events never name a
+ * thread. The thread's own records are the only link: a Chat attempt or Work
+ * turn names `providerSessionId`, and a Code operation records
+ * `provider-session-ready`.
+ *
+ * A session belongs to the thread that recorded it first. A Chat branch copies
+ * its source's completed attempts with their real session ids, so the branch
+ * names a session it never ran; purging the branch must not take the source's
+ * transcript, and purging the source still takes it.
+ */
+function providerSessionsStartedBy(
+  connection: SqliteConnection,
+  keys: ReadonlyMap<string, AggregateKey>,
+): ReadonlyArray<string> {
+  const named = connection.prepare(
+    `SELECT DISTINCT tree.value AS session_id
+     FROM event_journal, json_tree(event_journal.payload_json) AS tree
+     WHERE event_journal.aggregate_type = ? AND event_journal.aggregate_id = ?
+       AND tree.key = 'providerSessionId' AND tree.type = 'text'
+     UNION
+     SELECT json_extract(payload_json, '$.event.sessionId') AS session_id
+     FROM event_journal
+     WHERE aggregate_type = ? AND aggregate_id = ?
+       AND json_extract(payload_json, '$.event.kind') = 'provider-session-ready'`,
+  );
+  const firstRecorder = connection.prepare(
+    `SELECT aggregate_type, aggregate_id FROM event_journal
+     WHERE aggregate_type IN (${SESSION_RECORDING_AGGREGATE_TYPES.map(() => "?").join(", ")})
+       AND instr(payload_json, ?) > 0
+     ORDER BY global_sequence LIMIT 1`,
+  );
+  const recordingTypes = new Set<string>(SESSION_RECORDING_AGGREGATE_TYPES);
+  const sessions = new Set<string>();
+  for (const key of keys.values()) {
+    if (!recordingTypes.has(key.aggregateType)) continue;
+    const rows = named.all(
+      key.aggregateType,
+      key.aggregateId,
+      key.aggregateType,
+      key.aggregateId,
+    ) as ReadonlyArray<{ readonly session_id: unknown }>;
+    for (const row of rows) {
+      if (typeof row.session_id === "string" && row.session_id.length > 0)
+        sessions.add(row.session_id);
+    }
   }
-  return ids;
+  return [...sessions].filter((sessionId) => {
+    const first = firstRecorder.get(...SESSION_RECORDING_AGGREGATE_TYPES, sessionId) as
+      | { readonly aggregate_type: string; readonly aggregate_id: string }
+      | undefined;
+    return first !== undefined && keys.has(`${first.aggregate_type}:${first.aggregate_id}`);
+  });
 }
 
 /**
