@@ -1,252 +1,156 @@
 import {
-  type GrokAuthentication,
-  type GrokProviderConfiguration,
-  type GlmProviderConfiguration,
-  type GeminiProviderConfiguration,
-  type ClineProviderConfiguration,
-  type QwenProviderConfiguration,
-  type FxProviderConfiguration,
-  type MistralVibeAuthentication,
-  type MistralVibeProviderConfiguration,
+  acpAgentProfile,
+  type AcpAgentAuthentication,
+  type AcpAgentKind,
+  type AcpAgentProviderInstance,
   type ProviderInstance,
 } from "@octant/contracts";
-import { useRef, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { OctantButton } from "../../ui/base/OctantButton";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { SettingRow } from "../../settings/primitives";
-import {
-  emptyTransientCredential,
-  transientCredential,
-  type CredentialStatusController,
-} from "../ProviderSettingsCredentials";
+import { emptyTransientCredential, transientCredential } from "../ProviderSettingsCredentials";
 import type { ProviderSettingsViewProps } from "../ProviderSettingsView";
-import type { TransientProviderCredential } from "../useProviderController";
 
-export function KiloConfigurationForm(props: {
-  readonly disabled: boolean;
-  readonly instance: Extract<ProviderInstance, { driverKind: "kilo" }>;
-  readonly onChange: ProviderSettingsViewProps["onChangeKiloConfiguration"];
-}) {
-  return (
-    <form
-      className="provider-card__edit"
-      noValidate
-      onSubmit={(event) => {
-        event.preventDefault();
-        const data = new FormData(event.currentTarget);
-        void props.onChange(props.instance.id, {
-          kind: "kilo-acp",
-          binaryPath: String(data.get("binaryPath") ?? ""),
-        });
-      }}
-    >
-      <SettingRow
-        htmlFor={`provider-${props.instance.id}-binary-path-control`}
-        label="Binary path"
-        scope="host"
-        settingId={`provider-${props.instance.id}-binary-path`}
-      >
-        <OctantInput
-          aria-label={`Binary path for ${props.instance.displayName}`}
-          className="settings-view__text-input"
-          defaultValue={props.instance.configuration.binaryPath}
-          id={`provider-${props.instance.id}-binary-path-control`}
-          name="binaryPath"
-          required
-        />
-      </SettingRow>
-      <div className="provider-card__edit-actions">
-        <OctantButton
-          disabled={props.disabled}
-          type="submit"
-          variant="outline"
-          size="sm"
-          aria-label={`Save Kilo settings for ${props.instance.displayName}`}
-        >
-          Save
-        </OctantButton>
-      </div>
-    </form>
-  );
+/** The postures Settings lets a person choose for an ACP agent, in profile order. */
+export function offeredAcpAuthentication(
+  kind: AcpAgentKind,
+): ReadonlyArray<AcpAgentAuthentication> {
+  const profile = acpAgentProfile(kind);
+  return profile.offeredAuthentication ?? profile.authentication;
 }
 
-export function GooseConfigurationForm(props: {
-  readonly disabled: boolean;
-  readonly instance: Extract<ProviderInstance, { driverKind: "goose" }>;
-  readonly onChange: ProviderSettingsViewProps["onChangeGooseConfiguration"];
-}) {
-  return (
-    <form
-      className="provider-card__edit"
-      noValidate
-      onSubmit={(event) => {
-        event.preventDefault();
-        const data = new FormData(event.currentTarget);
-        void props.onChange(props.instance.id, {
-          kind: "goose-acp",
-          binaryPath: String(data.get("binaryPath") ?? ""),
-        });
-      }}
-    >
-      <SettingRow
-        htmlFor={`provider-${props.instance.id}-binary-path-control`}
-        label="goose binary path"
-        scope="host"
-        settingId={`provider-${props.instance.id}-binary-path`}
-      >
-        <OctantInput
-          aria-label={`goose binary for ${props.instance.displayName}`}
-          className="settings-view__text-input"
-          defaultValue={props.instance.configuration.binaryPath}
-          id={`provider-${props.instance.id}-binary-path-control`}
-          name="binaryPath"
-          required
-        />
-      </SettingRow>
-      <div className="provider-card__edit-actions">
-        <OctantButton
-          disabled={props.disabled}
-          type="submit"
-          variant="outline"
-          size="sm"
-          aria-label={`Save Goose settings for ${props.instance.displayName}`}
-        >
-          Save
-        </OctantButton>
-      </div>
-    </form>
-  );
+function postureLabel(kind: AcpAgentKind, posture: AcpAgentAuthentication): string {
+  return posture === "api-key"
+    ? (acpAgentProfile(kind).apiKeyLabel ?? "API key")
+    : "Provider CLI login (recommended)";
 }
 
-export function GlmConfigurationForm(props: {
-  readonly instance: Extract<ProviderInstance, { driverKind: "glm" }>;
-  readonly disabled: boolean;
+/** What a card says an ACP agent instance signs in with. */
+export function acpAuthenticationFact(instance: AcpAgentProviderInstance): string {
+  const profile = acpAgentProfile(instance.driverKind);
+  switch (instance.configuration.authentication) {
+    case "api-key":
+      return profile.apiKeyLabel ?? "API key";
+    case "subscription":
+      return `${profile.name} subscription`;
+    default:
+      return `provider-owned ${profile.name} credentials`;
+  }
+}
+
+/**
+ * The authentication part of the create form for any ACP agent: a choice when
+ * its profile offers more than one posture, the key when the chosen posture is
+ * an API key, and how to sign in otherwise.
+ */
+export function AcpAgentCreateAuthenticationFields(props: {
+  readonly kind: AcpAgentKind;
+  readonly authentication: AcpAgentAuthentication | undefined;
+  readonly credentialInput: RefObject<HTMLInputElement | null>;
   readonly credentialManagementAvailable: boolean;
-  readonly credential: CredentialStatusController;
-  readonly onChange: ProviderSettingsViewProps["onChangeGlmConfiguration"];
+  readonly onAuthenticationChange: (authentication: AcpAgentAuthentication) => void;
 }) {
-  const credentialInput = useRef<HTMLInputElement>(null);
-  const [authentication, setAuthentication] = useState(props.instance.configuration.authentication);
+  const profile = acpAgentProfile(props.kind);
+  const offered = offeredAcpAuthentication(props.kind);
   return (
-    <form
-      className="provider-card__edit provider-card__edit--glm"
-      noValidate
-      onSubmit={(event) => {
-        event.preventDefault();
-        const configuration: GlmProviderConfiguration = {
-          kind: "glm-acp",
-          binaryPath: String(new FormData(event.currentTarget).get("binaryPath") ?? ""),
-          authentication,
-        };
-        void props.onChange(
-          props.instance.id,
-          configuration,
-          authentication === "api-key"
-            ? transientCredential(credentialInput.current)
-            : emptyTransientCredential(transientCredential(credentialInput.current)),
-        );
-      }}
-    >
-      <SettingRow
-        htmlFor={`provider-${props.instance.id}-binary-path-control`}
-        label="glm-acp-agent binary path"
-        scope="host"
-        settingId={`provider-${props.instance.id}-binary-path`}
-      >
-        <OctantInput
-          aria-label={`glm-acp-agent binary for ${props.instance.displayName}`}
-          className="settings-view__text-input"
-          defaultValue={props.instance.configuration.binaryPath}
-          id={`provider-${props.instance.id}-binary-path-control`}
-          name="binaryPath"
-          required
-        />
-      </SettingRow>
-      <SettingRow
-        description={
-          authentication === "api-key"
-            ? undefined
-            : "Run the provider-owned GLM Agent CLI login in your terminal. Octant reuses its native profile and binary."
-        }
-        htmlFor={`provider-${props.instance.id}-authentication-control`}
-        label="Authentication"
-        scope="host"
-        settingId={`provider-${props.instance.id}-authentication`}
-      >
-        <OctantSelectField
-          aria-label={`GLM authentication for ${props.instance.displayName}`}
-          className="settings-view__select"
-          id={`provider-${props.instance.id}-authentication-control`}
-          onValueChange={(value) => setAuthentication(value as typeof authentication)}
-          options={[
-            { id: "provider-owned", label: "Provider CLI login (recommended)" },
-            { id: "api-key", label: "Z.AI API key" },
-          ]}
-          value={authentication}
-        />
-      </SettingRow>
-      {authentication === "api-key" ? (
-        <SettingRow
-          htmlFor={`provider-${props.instance.id}-api-key-control`}
-          label="Z.AI API key (leave blank to preserve)"
-          scope="host"
-          settingId={`provider-${props.instance.id}-api-key`}
-        >
+    <>
+      {profile.authenticationNote === undefined ? null : (
+        <p className="provider-settings__field-guidance">{profile.authenticationNote}</p>
+      )}
+      {offered.length > 1 && props.authentication !== undefined ? (
+        <label>
+          <span>Authentication</span>
+          <OctantSelectField
+            aria-label={`${profile.name} authentication`}
+            className="settings-view__select window-no-drag"
+            onValueChange={(value) => {
+              const next = offered.find((posture) => posture === value);
+              if (next === undefined) return;
+              if (next !== "api-key" && props.credentialInput.current !== null) {
+                props.credentialInput.current.value = "";
+              }
+              props.onAuthenticationChange(next);
+            }}
+            options={offered.map((posture) => ({
+              id: posture,
+              label: postureLabel(props.kind, posture),
+            }))}
+            value={props.authentication}
+          />
+        </label>
+      ) : null}
+      {props.authentication === "api-key" ? (
+        <label>
+          <span>{postureLabel(props.kind, "api-key")}</span>
           <OctantInput
-            aria-label={`Z.AI API key for ${props.instance.displayName}`}
-            autoComplete="off"
-            className="settings-view__text-input"
+            aria-label={postureLabel(props.kind, "api-key")}
+            autoComplete="new-password"
+            className="settings-view__text-input window-no-drag"
             disabled={!props.credentialManagementAvailable}
-            id={`provider-${props.instance.id}-api-key-control`}
             name="apiKey"
-            ref={credentialInput}
+            ref={props.credentialInput}
+            required
             spellCheck={false}
             type="password"
           />
-        </SettingRow>
-      ) : null}
-      <div className="provider-card__edit-actions">
-        <OctantButton
-          disabled={props.disabled}
-          type="submit"
-          variant="outline"
-          size="sm"
-          aria-label={`Save GLM settings for ${props.instance.displayName}`}
-        >
-          Save
-        </OctantButton>
-      </div>
-    </form>
+        </label>
+      ) : (
+        <p className="provider-settings__field-guidance">
+          Uses {profile.name}&apos;s own sign-in. {profile.signInGuidance}
+        </p>
+      )}
+    </>
   );
 }
 
-export function CopilotConfigurationForm(props: {
+/** A Settings card's configuration form for any ACP agent instance. */
+export function AcpAgentConfigurationForm(props: {
+  readonly instance: AcpAgentProviderInstance;
   readonly disabled: boolean;
-  readonly instance: Extract<ProviderInstance, { driverKind: "copilot" }>;
-  readonly onChange: ProviderSettingsViewProps["onChangeCopilotConfiguration"];
+  readonly credentialManagementAvailable: boolean;
+  readonly onChange: ProviderSettingsViewProps["onChangeAcpAgentConfiguration"];
 }) {
+  const kind = props.instance.driverKind;
+  const profile = acpAgentProfile(kind);
+  const offered = offeredAcpAuthentication(kind);
+  const credentialInput = useRef<HTMLInputElement>(null);
+  const saved = props.instance.configuration.authentication;
+  // A saved posture Settings no longer offers (a Mistral Vibe instance
+  // discovery registered on its subscription) opens on the first one it does.
+  const [authentication, setAuthentication] = useState<AcpAgentAuthentication | undefined>(
+    saved !== undefined && offered.includes(saved) ? saved : offered[0],
+  );
+  const binaryLabel = `${profile.executable} binary path`;
   return (
     <form
-      className="provider-card__edit"
+      className={`provider-card__edit provider-card__edit--${kind}`}
       noValidate
       onSubmit={(event) => {
         event.preventDefault();
-        const data = new FormData(event.currentTarget);
-        void props.onChange(props.instance.id, {
-          kind: "copilot-acp",
-          binaryPath: String(data.get("binaryPath") ?? ""),
-        });
+        const enteredCredential = transientCredential(credentialInput.current);
+        void props.onChange(
+          props.instance.id,
+          {
+            kind: props.instance.configuration.kind,
+            binaryPath: String(new FormData(event.currentTarget).get("binaryPath") ?? ""),
+            ...(authentication === undefined ? {} : { authentication }),
+          },
+          authentication === "api-key"
+            ? enteredCredential
+            : emptyTransientCredential(enteredCredential),
+        );
       }}
     >
       <SettingRow
         htmlFor={`provider-${props.instance.id}-binary-path-control`}
-        label="copilot binary path"
+        label={binaryLabel}
         scope="host"
         settingId={`provider-${props.instance.id}-binary-path`}
       >
         <OctantInput
-          aria-label={`copilot binary for ${props.instance.displayName}`}
+          aria-label={`${binaryLabel} for ${props.instance.displayName}`}
           className="settings-view__text-input"
           defaultValue={props.instance.configuration.binaryPath}
           id={`provider-${props.instance.id}-binary-path-control`}
@@ -254,121 +158,47 @@ export function CopilotConfigurationForm(props: {
           required
         />
       </SettingRow>
-      <div className="provider-card__edit-actions">
-        <OctantButton
-          disabled={props.disabled}
-          type="submit"
-          variant="outline"
-          size="sm"
-          aria-label={`Save GitHub Copilot settings for ${props.instance.displayName}`}
-        >
-          Save
-        </OctantButton>
-      </div>
-    </form>
-  );
-}
-
-export function ApiKeyAcpConfigurationForm<
-  T extends
-    | GeminiProviderConfiguration
-    | ClineProviderConfiguration
-    | QwenProviderConfiguration
-    | FxProviderConfiguration,
->(props: {
-  readonly disabled: boolean;
-  readonly credentialManagementAvailable: boolean;
-  readonly instance: ProviderInstance;
-  readonly driverLabel: string;
-  readonly binaryLabel: string;
-  readonly apiKeyLabel: string;
-  readonly configuration: T;
-  /**
-   * Drivers whose contract carries exactly one authentication posture set this
-   * so the form draws no selector and always submits that literal. Offering a
-   * choice would build a configuration the server refuses to decode.
-   */
-  readonly fixedAuthentication?: T["authentication"];
-  readonly onChange: (
-    instanceId: ProviderInstance["id"],
-    configuration: T,
-    credential: TransientProviderCredential,
-  ) => Promise<boolean>;
-}) {
-  const credentialInput = useRef<HTMLInputElement>(null);
-  const [authentication, setAuthentication] = useState<T["authentication"]>(
-    props.fixedAuthentication ?? props.configuration.authentication,
-  );
-  return (
-    <form
-      className="provider-card__edit"
-      noValidate
-      onSubmit={(event) => {
-        event.preventDefault();
-        const configuration = {
-          ...props.configuration,
-          binaryPath: String(new FormData(event.currentTarget).get("binaryPath") ?? ""),
-          authentication,
-        } as T;
-        void props.onChange(
-          props.instance.id,
-          configuration,
-          authentication === "api-key"
-            ? transientCredential(credentialInput.current)
-            : emptyTransientCredential(transientCredential(credentialInput.current)),
-        );
-      }}
-    >
-      <SettingRow
-        htmlFor={`provider-${props.instance.id}-binary-path-control`}
-        label={props.binaryLabel}
-        scope="host"
-        settingId={`provider-${props.instance.id}-binary-path`}
-      >
-        <OctantInput
-          aria-label={`${props.binaryLabel} for ${props.instance.displayName}`}
-          className="settings-view__text-input"
-          defaultValue={props.configuration.binaryPath}
-          id={`provider-${props.instance.id}-binary-path-control`}
-          name="binaryPath"
-          required
-        />
-      </SettingRow>
-      {props.fixedAuthentication === undefined ? (
+      {offered.length > 1 && authentication !== undefined ? (
         <SettingRow
-          description={
-            authentication === "api-key"
-              ? undefined
-              : "Authenticate with the provider-owned CLI in your terminal. Octant launches this same binary and reuses its native profile; it does not create a second login."
-          }
+          {...(authentication === "api-key" ? {} : { description: profile.signInGuidance })}
           htmlFor={`provider-${props.instance.id}-authentication-control`}
           label="Authentication"
           scope="host"
           settingId={`provider-${props.instance.id}-authentication`}
         >
           <OctantSelectField
-            aria-label={`Authentication for ${props.instance.displayName}`}
+            aria-label={`${profile.name} authentication for ${props.instance.displayName}`}
             className="settings-view__select"
             id={`provider-${props.instance.id}-authentication-control`}
-            onValueChange={(value) => setAuthentication(value as typeof authentication)}
-            options={[
-              { id: "provider-owned", label: "Provider CLI login (recommended)" },
-              { id: "api-key", label: props.apiKeyLabel },
-            ]}
+            onValueChange={(value) => {
+              const next = offered.find((posture) => posture === value);
+              if (next === undefined) return;
+              if (next !== "api-key" && credentialInput.current !== null) {
+                credentialInput.current.value = "";
+              }
+              setAuthentication(next);
+            }}
+            options={offered.map((posture) => ({
+              id: posture,
+              label: postureLabel(kind, posture),
+            }))}
             value={authentication}
           />
         </SettingRow>
       ) : null}
       {authentication === "api-key" ? (
         <SettingRow
+          {...(profile.authenticationNote === undefined
+            ? {}
+            : { description: profile.authenticationNote })}
           htmlFor={`provider-${props.instance.id}-api-key-control`}
-          label={`${props.apiKeyLabel} (leave blank to preserve)`}
+          label={`${postureLabel(kind, "api-key")} (leave blank to preserve)`}
           scope="host"
           settingId={`provider-${props.instance.id}-api-key`}
         >
           <OctantInput
-            aria-label={`${props.apiKeyLabel} for ${props.instance.displayName}`}
-            autoComplete="off"
+            aria-label={`${postureLabel(kind, "api-key")} for ${props.instance.displayName}`}
+            autoComplete="new-password"
             className="settings-view__text-input"
             disabled={!props.credentialManagementAvailable}
             id={`provider-${props.instance.id}-api-key-control`}
@@ -385,93 +215,12 @@ export function ApiKeyAcpConfigurationForm<
           type="submit"
           variant="outline"
           size="sm"
-          aria-label={`Save ${props.driverLabel} settings for ${props.instance.displayName}`}
+          aria-label={`Save ${profile.name} settings for ${props.instance.displayName}`}
         >
           Save
         </OctantButton>
       </div>
     </form>
-  );
-}
-
-export function GeminiConfigurationForm(props: {
-  readonly instance: Extract<ProviderInstance, { driverKind: "gemini" }>;
-  readonly disabled: boolean;
-  readonly credentialManagementAvailable: boolean;
-  readonly onChange: ProviderSettingsViewProps["onChangeGeminiConfiguration"];
-}) {
-  return (
-    <ApiKeyAcpConfigurationForm
-      apiKeyLabel="Gemini API key (leave blank to preserve)"
-      binaryLabel="gemini binary path"
-      configuration={props.instance.configuration}
-      credentialManagementAvailable={props.credentialManagementAvailable}
-      disabled={props.disabled}
-      driverLabel="Gemini CLI"
-      instance={props.instance}
-      onChange={props.onChange}
-    />
-  );
-}
-
-export function ClineConfigurationForm(props: {
-  readonly instance: Extract<ProviderInstance, { driverKind: "cline" }>;
-  readonly disabled: boolean;
-  readonly credentialManagementAvailable: boolean;
-  readonly onChange: ProviderSettingsViewProps["onChangeClineConfiguration"];
-}) {
-  return (
-    <ApiKeyAcpConfigurationForm
-      apiKeyLabel="Cline API key (leave blank to preserve)"
-      binaryLabel="cline binary path"
-      configuration={props.instance.configuration}
-      credentialManagementAvailable={props.credentialManagementAvailable}
-      disabled={props.disabled}
-      driverLabel="Cline"
-      instance={props.instance}
-      onChange={props.onChange}
-    />
-  );
-}
-
-export function QwenConfigurationForm(props: {
-  readonly instance: Extract<ProviderInstance, { driverKind: "qwen" }>;
-  readonly disabled: boolean;
-  readonly credentialManagementAvailable: boolean;
-  readonly onChange: ProviderSettingsViewProps["onChangeQwenConfiguration"];
-}) {
-  return (
-    <ApiKeyAcpConfigurationForm
-      apiKeyLabel="OpenAI-compatible API key (leave blank to preserve)"
-      binaryLabel="qwen binary path"
-      configuration={props.instance.configuration}
-      credentialManagementAvailable={props.credentialManagementAvailable}
-      disabled={props.disabled}
-      driverLabel="Qwen Code"
-      instance={props.instance}
-      onChange={props.onChange}
-    />
-  );
-}
-
-export function FxConfigurationForm(props: {
-  readonly instance: Extract<ProviderInstance, { driverKind: "fx" }>;
-  readonly disabled: boolean;
-  readonly credentialManagementAvailable: boolean;
-  readonly onChange: ProviderSettingsViewProps["onChangeFxConfiguration"];
-}) {
-  return (
-    <ApiKeyAcpConfigurationForm
-      apiKeyLabel="Vercel AI Gateway API key (leave blank to preserve)"
-      binaryLabel="fx binary path"
-      configuration={props.instance.configuration}
-      credentialManagementAvailable={props.credentialManagementAvailable}
-      disabled={props.disabled}
-      driverLabel="fx"
-      fixedAuthentication="api-key"
-      instance={props.instance}
-      onChange={props.onChange}
-    />
   );
 }
 
@@ -516,194 +265,6 @@ export function OllamaConfigurationForm(props: {
           variant="outline"
           size="sm"
           aria-label={`Save Ollama settings for ${props.instance.displayName}`}
-        >
-          Save
-        </OctantButton>
-      </div>
-    </form>
-  );
-}
-
-interface VibeConfigurationFormProps {
-  readonly instance: Extract<ProviderInstance, { driverKind: "mistral-vibe" }>;
-  readonly disabled: boolean;
-  readonly credentialManagementAvailable: boolean;
-  readonly credential: CredentialStatusController;
-  readonly onChange: ProviderSettingsViewProps["onChangeMistralVibeConfiguration"];
-}
-
-export function VibeConfigurationForm(props: VibeConfigurationFormProps) {
-  const credentialInput = useRef<HTMLInputElement>(null);
-  const authentication: MistralVibeAuthentication = "api-key";
-  return (
-    <form
-      className="provider-card__edit provider-card__edit--vibe"
-      noValidate
-      onSubmit={(event) => {
-        event.preventDefault();
-        const configuration: MistralVibeProviderConfiguration = {
-          kind: "mistral-vibe-acp",
-          binaryPath: String(new FormData(event.currentTarget).get("binaryPath") ?? ""),
-          authentication,
-        };
-        const enteredCredential = transientCredential(credentialInput.current);
-        const key =
-          authentication === "api-key"
-            ? enteredCredential
-            : emptyTransientCredential(enteredCredential);
-        void props.onChange(props.instance.id, configuration, key);
-      }}
-    >
-      <SettingRow
-        htmlFor={`provider-${props.instance.id}-binary-path-control`}
-        label="vibe-acp binary path"
-        scope="host"
-        settingId={`provider-${props.instance.id}-binary-path`}
-      >
-        <OctantInput
-          aria-label={`vibe-acp binary for ${props.instance.displayName}`}
-          className="settings-view__text-input"
-          defaultValue={props.instance.configuration.binaryPath}
-          id={`provider-${props.instance.id}-binary-path-control`}
-          name="binaryPath"
-          required
-        />
-      </SettingRow>
-      <SettingRow
-        description="Mistral Vibe uses a Mistral API key. Octant's confined launch cannot read the key Vibe stores in the macOS Keychain."
-        htmlFor={`provider-${props.instance.id}-api-key-control`}
-        label="Mistral API key (leave blank to preserve)"
-        scope="host"
-        settingId={`provider-${props.instance.id}-api-key`}
-      >
-        <OctantInput
-          aria-label={`Mistral API key for ${props.instance.displayName}`}
-          autoComplete="new-password"
-          className="settings-view__text-input"
-          disabled={!props.credentialManagementAvailable}
-          id={`provider-${props.instance.id}-api-key-control`}
-          ref={credentialInput}
-          spellCheck={false}
-          type="password"
-        />
-      </SettingRow>
-      <div className="provider-card__edit-actions">
-        <OctantButton
-          disabled={props.disabled}
-          type="submit"
-          variant="outline"
-          size="sm"
-          aria-label={`Save Mistral Vibe settings for ${props.instance.displayName}`}
-        >
-          Save
-        </OctantButton>
-      </div>
-    </form>
-  );
-}
-
-interface GrokConfigurationFormProps {
-  readonly instance: Extract<ProviderInstance, { driverKind: "grok" }>;
-  readonly disabled: boolean;
-  readonly credentialManagementAvailable: boolean;
-  readonly credential: CredentialStatusController;
-  readonly onChange: ProviderSettingsViewProps["onChangeGrokConfiguration"];
-}
-
-export function GrokConfigurationForm(props: GrokConfigurationFormProps) {
-  const credentialInput = useRef<HTMLInputElement>(null);
-  const [authentication, setAuthentication] = useState<GrokAuthentication>(
-    props.instance.configuration.authentication,
-  );
-  return (
-    <form
-      className="provider-card__edit provider-card__edit--grok"
-      noValidate
-      onSubmit={(event) => {
-        event.preventDefault();
-        const configuration: GrokProviderConfiguration = {
-          kind: "grok-acp",
-          binaryPath: String(new FormData(event.currentTarget).get("binaryPath") ?? ""),
-          authentication,
-        };
-        const enteredCredential = transientCredential(credentialInput.current);
-        const key =
-          authentication === "api-key"
-            ? enteredCredential
-            : emptyTransientCredential(enteredCredential);
-        void props.onChange(props.instance.id, configuration, key);
-      }}
-    >
-      <SettingRow
-        htmlFor={`provider-${props.instance.id}-binary-path-control`}
-        label="grok binary path"
-        scope="host"
-        settingId={`provider-${props.instance.id}-binary-path`}
-      >
-        <OctantInput
-          aria-label={`grok binary for ${props.instance.displayName}`}
-          className="settings-view__text-input"
-          defaultValue={props.instance.configuration.binaryPath}
-          id={`provider-${props.instance.id}-binary-path-control`}
-          name="binaryPath"
-          required
-        />
-      </SettingRow>
-      <SettingRow
-        description={
-          authentication === "api-key"
-            ? undefined
-            : "Run grok login in your terminal, or grok login --device-auth on a headless host. Octant reuses the same Grok profile and binary."
-        }
-        htmlFor={`provider-${props.instance.id}-authentication-control`}
-        label="Authentication"
-        scope="host"
-        settingId={`provider-${props.instance.id}-authentication`}
-      >
-        <OctantSelectField
-          aria-label={`Grok Build authentication for ${props.instance.displayName}`}
-          className="settings-view__select"
-          id={`provider-${props.instance.id}-authentication-control`}
-          onValueChange={(value) => {
-            const next = value as GrokAuthentication;
-            if (next === "subscription" && credentialInput.current !== null) {
-              credentialInput.current.value = "";
-            }
-            setAuthentication(next);
-          }}
-          options={[
-            { id: "subscription", label: "Provider CLI login (recommended)" },
-            { id: "api-key", label: "xAI API key" },
-          ]}
-          value={authentication}
-        />
-      </SettingRow>
-      {authentication === "api-key" ? (
-        <SettingRow
-          htmlFor={`provider-${props.instance.id}-api-key-control`}
-          label="xAI API key (leave blank to preserve)"
-          scope="host"
-          settingId={`provider-${props.instance.id}-api-key`}
-        >
-          <OctantInput
-            aria-label={`xAI API key for ${props.instance.displayName}`}
-            autoComplete="new-password"
-            className="settings-view__text-input"
-            disabled={!props.credentialManagementAvailable}
-            id={`provider-${props.instance.id}-api-key-control`}
-            ref={credentialInput}
-            spellCheck={false}
-            type="password"
-          />
-        </SettingRow>
-      ) : null}
-      <div className="provider-card__edit-actions">
-        <OctantButton
-          disabled={props.disabled}
-          type="submit"
-          variant="outline"
-          size="sm"
-          aria-label={`Save Grok Build settings for ${props.instance.displayName}`}
         >
           Save
         </OctantButton>

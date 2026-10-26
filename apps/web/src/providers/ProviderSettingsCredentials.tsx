@@ -1,6 +1,5 @@
 import type {
   ClaudeAuthentication,
-  GrokAuthentication,
   ProviderCredentialStatus,
   ProviderInstanceId,
   ProviderObservedState,
@@ -58,76 +57,6 @@ export function ClaudeCreateAuthenticationFields(props: {
         <p className="provider-settings__field-guidance">
           Sign in with the official Claude Code CLI using the unmodified claude auth login command
           in a terminal for this account, then check the connection.
-        </p>
-      )}
-    </>
-  );
-}
-
-export function VibeCreateAuthenticationFields(props: {
-  readonly credentialInput: RefObject<HTMLInputElement | null>;
-  readonly credentialManagementAvailable: boolean;
-}) {
-  return (
-    <>
-      <p className="provider-settings__field-guidance">
-        Mistral Vibe uses a Mistral API key. Octant&apos;s confined launch cannot read the key Vibe
-        stores in the macOS Keychain.
-      </p>
-      <label>
-        <span>Mistral API key</span>
-        <OctantInput
-          aria-label="Mistral API key"
-          autoComplete="new-password"
-          className="settings-view__text-input window-no-drag"
-          disabled={!props.credentialManagementAvailable}
-          ref={props.credentialInput}
-          spellCheck={false}
-          type="password"
-        />
-      </label>
-    </>
-  );
-}
-
-export function GrokCreateAuthenticationFields(props: {
-  readonly authentication: GrokAuthentication;
-  readonly credentialInput: RefObject<HTMLInputElement | null>;
-  readonly credentialManagementAvailable: boolean;
-  readonly onAuthenticationChange: (authentication: GrokAuthentication) => void;
-}) {
-  return (
-    <>
-      <label>
-        <span>Authentication</span>
-        <OctantSelectField
-          aria-label="Grok Build authentication"
-          className="settings-view__select window-no-drag"
-          onValueChange={(value) => props.onAuthenticationChange(value as GrokAuthentication)}
-          options={[
-            { id: "subscription", label: "Provider CLI login (recommended)" },
-            { id: "api-key", label: "xAI API key" },
-          ]}
-          value={props.authentication}
-        />
-      </label>
-      {props.authentication === "api-key" ? (
-        <label>
-          <span>xAI API key</span>
-          <OctantInput
-            aria-label="xAI API key"
-            autoComplete="new-password"
-            className="settings-view__text-input window-no-drag"
-            disabled={!props.credentialManagementAvailable}
-            ref={props.credentialInput}
-            spellCheck={false}
-            type="password"
-          />
-        </label>
-      ) : (
-        <p className="provider-settings__field-guidance">
-          Run grok login in your terminal. On a headless host, use grok login --device-auth. Octant
-          reuses the provider-owned Grok profile and binary.
         </p>
       )}
     </>

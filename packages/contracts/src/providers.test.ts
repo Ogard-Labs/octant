@@ -1433,16 +1433,29 @@ describe("provider registry contracts", () => {
     } as const;
 
     expect(decodeProviderInstance(kimi)).toEqual(kimi);
+    // Binary changes the journal recorded before Kimi Code took configuration
+    // commands still replay.
     expect(decodeProviderInstanceBinaryChanged({ instance: kimi })).toEqual({ instance: kimi });
+    expect(decodeProviderInstanceConfigurationChanged({ instance: kimi })).toEqual({
+      instance: kimi,
+    });
     expect(
       decodeProviderRegistryCommand({
         kind: "create-kimi-code-provider",
         instanceId: ids.instance,
         expectedVersion: 0,
         displayName: "Kimi Code local",
-        binaryPath: "/opt/homebrew/bin/kimi",
+        configuration: kimi.configuration,
       }),
     ).toMatchObject({ kind: "create-kimi-code-provider" });
+    expect(
+      decodeProviderRegistryCommand({
+        kind: "change-kimi-code-configuration",
+        instanceId: ids.instance,
+        expectedVersion: 1,
+        configuration: kimi.configuration,
+      }),
+    ).toMatchObject({ kind: "change-kimi-code-configuration" });
 
     expect(() =>
       decodeProviderRegistryCommand({
@@ -1450,7 +1463,17 @@ describe("provider registry contracts", () => {
         instanceId: ids.instance,
         expectedVersion: 0,
         displayName: "Kimi Code local",
-        binaryPath: "bin/kimi",
+        configuration: { ...kimi.configuration, binaryPath: "bin/kimi" },
+      }),
+    ).toThrow();
+    // The bare binary path the command once carried is refused.
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-kimi-code-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Kimi Code local",
+        binaryPath: "/opt/homebrew/bin/kimi",
       }),
     ).toThrow();
 
@@ -1472,6 +1495,111 @@ describe("provider registry contracts", () => {
         }),
       ).toThrow();
     }
+  });
+
+  it("refuses an ACP agent instance or command whose configuration names another agent", () => {
+    const qwen = {
+      id: ids.instance,
+      displayName: "Qwen local",
+      driverKind: "qwen",
+      configuration: {
+        kind: "qwen-acp",
+        binaryPath: "/Users/example/.local/bin/qwen",
+        authentication: "provider-owned",
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+    const fxConfiguration = {
+      kind: "fx-acp",
+      binaryPath: "/Users/example/.local/bin/fx",
+      authentication: "api-key",
+    } as const;
+
+    expect(decodeProviderInstance(qwen)).toEqual(qwen);
+    expect(() => decodeProviderInstance({ ...qwen, configuration: fxConfiguration })).toThrow();
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-qwen-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Qwen local",
+        configuration: fxConfiguration,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "change-qwen-configuration",
+        instanceId: ids.instance,
+        expectedVersion: 1,
+        configuration: fxConfiguration,
+      }),
+    ).toThrow();
+    // Only Kimi Code ever recorded a binary change.
+    expect(() => decodeProviderInstanceBinaryChanged({ instance: qwen })).toThrow();
+  });
+
+  it("refuses a posture an ACP agent's profile does not list, and one on an agent that lists none", () => {
+    const base = {
+      id: ids.instance,
+      displayName: "Agent local",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(() =>
+      decodeProviderInstance({
+        ...base,
+        driverKind: "fx",
+        configuration: { kind: "fx-acp", binaryPath: "/bin/fx", authentication: "provider-owned" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...base,
+        driverKind: "qwen",
+        configuration: { kind: "qwen-acp", binaryPath: "/bin/qwen" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...base,
+        driverKind: "kilo",
+        configuration: { kind: "kilo-acp", binaryPath: "/bin/kilo", authentication: "api-key" },
+      }),
+    ).toThrow();
+  });
+
+  it("refuses a driver kind that neither a profile nor a native driver names", () => {
+    expect(() => Schema.decodeUnknownSync(ProviderDriverKind)("probe-agent")).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        id: ids.instance,
+        displayName: "Probe local",
+        driverKind: "probe-agent",
+        configuration: { kind: "probe-agent-acp", binaryPath: "/bin/probe-agent" },
+        enabled: true,
+        environmentPolicy: "inherit-host",
+        version: 1,
+        createdAt: occurredAt,
+        updatedAt: occurredAt,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-probe-agent-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: "Probe local",
+        configuration: { kind: "probe-agent-acp", binaryPath: "/bin/probe-agent" },
+      }),
+    ).toThrow();
   });
 
   it("allows only bounded provider-specific creation commands", () => {

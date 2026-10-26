@@ -2681,6 +2681,28 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;
   ACP vendors configure that shared stack rather than shipping a second runtime.
+  An ACP agent is registered in one place, in two halves: its row in
+  `ACP_AGENT_PROFILES` ([`acpAgentProfiles.ts`](../packages/contracts/src/acpAgentProfiles.ts)),
+  which holds what Octant knows before the agent runs (name, executable,
+  version probe, authentication postures, key label, sign-in guidance, update
+  command, bundled-plugin serial), and its runtime profile in
+  [`acpProfiles.ts`](../apps/server/src/providers/acpProfiles.ts), which the
+  compiler requires for every row. Everything else is derived from the row:
+  the closed `ProviderDriverKind` vocabulary, the shared configuration and
+  instance schemas, the `create-<kind>-provider` and
+  `change-<kind>-configuration` commands, tool-transport placement, the
+  discovery descriptor, the bundled plugin and its identity, picker and
+  Settings labels, and the Settings create and configuration forms. A new
+  agent adds its row, its runtime profile, its logo, and conformance evidence.
+  The row never widens the vocabulary to `string`: an unlisted kind fails to
+  decode, a configuration must name the same agent as its instance or command
+  and a posture its row lists, and every capability is still the one the
+  agent's own `initialize` and probe report. Native drivers stay exhaustive
+  switches; only the ACP placement is read from the table. The provider
+  projection checks only that `driver_kind` is non-empty: its closed list had
+  to be rebuilt for every new driver kind, while the instance schema already
+  decodes each instance before it is written and each row when it is read,
+  and refuses a row whose `driver_kind` disagrees with it.
   Disabled or incompatible driver plugins contribute no models, tools, or
   capabilities. Provider-specific wire payloads never leave the adapter — the
   rest of the system sees only normalized runtime events.
