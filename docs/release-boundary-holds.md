@@ -59,11 +59,11 @@ keeps ship integrations on the same plugin seams without opening a marketplace.
 
 ## Full LSP / extension host / debugger
 
-**Authorized post-preview on 2026-10-26, design-first.** The maintainer request
-the third gate below asked for has been given. Gates 1 and 2 still bind: the
-companion's owning specification must document them before implementation
-starts. Monaco editing and explicit external-editor handoff remain primary for
-Code in the technical preview.
+**Authorized post-preview on 2026-10-26; design accepted.** The maintainer
+request the third gate below asked for has been given, and the maintainer
+accepted [Language services](design/language-services.md) on 2026-10-26, which
+documents gates 1 and 2; its slices may start. Monaco editing and explicit
+external-editor handoff remain primary for Code in the technical preview.
 
 **Historical hold.** A full language-server stack, IDE-style extension host,
 and debugger companion stayed Later.
