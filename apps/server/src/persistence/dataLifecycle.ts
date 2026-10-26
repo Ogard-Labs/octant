@@ -260,21 +260,24 @@ const REMOVE_ALL_DELETED: ReadonlyArray<DeletedScope> = [
 // a pasted TLS key, and a remembered self-made listener left behind would make
 // a new key and turn the listener back on at the next start. Keep this list
 // exact: a `remote/` directory can hold future unrelated state and must never
-// become an implicit recursive deletion target.
+// become an implicit recursive deletion target. Paired phones' push
+// registrations live beside them and hold delivery tokens, so they go too.
 const PRIVATE_LISTENER_HOST_IDENTITY_ARTIFACTS = [
   join("remote", "private-listener-host-id"),
   join("remote", "private-listener-host-key.pem"),
   join("remote", "private-listener-setting.json"),
   join("remote", "private-listener-tls-cert.pem"),
   join("remote", "private-listener-tls-key.pem"),
+  join("remote", "push-registrations.json"),
 ] as const;
 
 // A write that stopped between creating its staging file and renaming it
-// leaves `<file>.<pid>.tmp` beside the key, certificate, or setting; a staged
-// key holds key material, so removal takes those with the rest. The pattern
-// names exactly those three files and a numeric process id.
+// leaves `<file>.<pid>.tmp` beside the key, certificate, setting, or push
+// registrations; a staged key or registration holds secret material, so
+// removal takes those with the rest. The pattern names exactly those four
+// files and a numeric process id.
 const PRIVATE_LISTENER_STAGING_LEFTOVER =
-  /^remote[\\/]private-listener-(?:tls-key\.pem|tls-cert\.pem|setting\.json)\.\d+\.tmp$/;
+  /^remote[\\/](?:private-listener-(?:tls-key\.pem|tls-cert\.pem|setting\.json)|push-registrations\.json)\.\d+\.tmp$/;
 
 /**
  * A regular file, or a link standing in for a listener file. The link is

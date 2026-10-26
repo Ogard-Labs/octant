@@ -571,7 +571,7 @@ export function createRemoteHttpAuthentication(
       }
 
       if (isPushTokenRoute) {
-        const response = await handlePushTokenRoute(handoff, route!, options);
+        const response = await handlePushTokenRoute(handoff, sessionId, options);
         registryRelease?.();
         registryRelease = undefined;
         return response;
@@ -832,7 +832,7 @@ async function handleOwnDeviceRoute(
 
 async function handlePushTokenRoute(
   handoff: RemoteClientPrincipalHandoff,
-  route: RemoteRouteDefinition,
+  sessionId: string,
   options: RemoteHttpAuthenticationOptions,
 ): Promise<Response> {
   const store = options.pushTokenStore;
@@ -842,11 +842,24 @@ async function handlePushTokenRoute(
   }
   const { hostId, deviceId } = handoff.principal;
   const occurredAt = new Date().toISOString();
+  // Reading the body yields, and a revoke or sign-out can commit meanwhile and
+  // clear this device's registration. The session is checked again after the
+  // read, with nothing between the check and the store, so a registration
+  // can never land after the clear.
+  const requireActiveSession = (): void => {
+    if (
+      options.sessionRevalidation !== undefined &&
+      !options.sessionRevalidation.isSessionActive(sessionId)
+    ) {
+      throw new RemoteHttpAuthFailure(401, "unauthorized", true);
+    }
+  };
   if (handoff.request.method === "PUT") {
     const body = decodeBounded(
       decodeRemotePushTokenRegistrationV1,
       await readJsonObject(handoff.request),
     );
+    requireActiveSession();
     const outcome = store.register({
       hostId,
       deviceId,
@@ -861,13 +874,13 @@ async function handlePushTokenRoute(
   }
   if (handoff.request.method === "DELETE") {
     decodeBounded(decodeRemotePushTokenClearV1, await readJsonObject(handoff.request));
-    const outcome = store.clear({ hostId, deviceId });
+    requireActiveSession();
+    const outcome = store.clear({ hostId, deviceId, reason: "device-cleared", now: occurredAt });
     return jsonResponse(
       200,
       decodeRemotePushTokenReceiptV1({ result: outcome.result, occurredAt }),
     );
   }
-  void route;
   throw new RemoteHttpAuthFailure(400, "invalid");
 }
 

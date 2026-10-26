@@ -1,45 +1,204 @@
-import { describe, expect, it } from "vitest";
-import { createPushNotificationTokenStore } from "./pushNotificationTokenStore";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
+import { Journal } from "../persistence/journal";
+import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
+import { openSqlite, type SqliteConnection } from "../persistence/sqlitePort";
+import {
+  createPushNotificationTokenStore,
+  PUSH_REGISTRATIONS_FILE,
+  pushRegistrationClearReasonFor,
+} from "./pushNotificationTokenStore";
 
-describe("pushNotificationTokenStore", () => {
-  it("registers, idempotently re-registers, and clears per device", () => {
-    const store = createPushNotificationTokenStore();
-    const base = {
-      hostId: "host-a",
-      deviceId: "device-1",
-      platform: "ios" as const,
-      token: "token-a",
-      now: "2026-08-05T12:00:00.000Z",
-    };
-    expect(store.register(base)).toEqual({ result: "registered" });
-    expect(store.register(base)).toEqual({ result: "already-registered" });
+const hostId = "11111111-1111-4111-8111-111111111111";
+const phone = "22222222-2222-4222-8222-222222222222";
+const tablet = "33333333-3333-4333-8333-333333333333";
+const hostActorId = "00000000-0000-4000-8000-000000000002";
+const now = "2026-10-26T12:00:00.000Z";
+const directories: string[] = [];
+const connections: SqliteConnection[] = [];
+
+afterEach(() => {
+  for (const connection of connections.splice(0)) connection.close();
+  for (const directory of directories.splice(0))
+    rmSync(directory, { recursive: true, force: true });
+});
+
+function host(dataDirectory = mkdtempSync(join(tmpdir(), "octant-push-registrations-"))) {
+  directories.push(dataDirectory);
+  const connection = openSqlite(join(dataDirectory, "store.sqlite3"));
+  connections.push(connection);
+  applyMigrations(connection, MIGRATIONS, () => now);
+  const runtime = createPhase1RuntimeRegistries();
+  const journal = new Journal({
+    connection,
+    registry: runtime.events,
+    projections: runtime.projections,
+    clock: () => now,
+  });
+  let counter = 0;
+  const open = () =>
+    createPushNotificationTokenStore({
+      dataDirectory,
+      journal,
+      hostActorId,
+      uuid: () => `44444444-4444-4444-8444-${String(++counter).padStart(12, "0")}`,
+    });
+  const journaled = () =>
+    connection
+      .prepare(
+        "SELECT event_name, payload_json, actor_json FROM event_journal WHERE aggregate_type = 'remote-push-registration' ORDER BY global_sequence",
+      )
+      .all() as ReadonlyArray<{
+      readonly event_name: string;
+      readonly payload_json: string;
+      readonly actor_json: string | null;
+    }>;
+  return { dataDirectory, connection, journal, open, journaled };
+}
+
+describe("push registrations on the host", () => {
+  it("keeps a registration across a restart in an owner-only file the journal never holds the token of", () => {
+    const first = host();
+    const store = first.open();
+    expect(
+      store.register({ hostId, deviceId: phone, platform: "ios", token: "apns-secret-1", now }),
+    ).toEqual({ result: "registered" });
+
+    const restarted = first.open();
+    expect(restarted.get({ hostId, deviceId: phone })).toEqual({
+      hostId,
+      deviceId: phone,
+      platform: "ios",
+      token: "apns-secret-1",
+      updatedAt: now,
+    });
+    const file = join(first.dataDirectory, PUSH_REGISTRATIONS_FILE);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(statSync(join(first.dataDirectory, "remote")).mode & 0o777).toBe(0o700);
+
+    const events = first.journaled();
+    expect(events.map((event) => event.event_name)).toEqual([
+      "remote.push-registration-recorded@1",
+    ]);
+    expect(JSON.parse(events[0]?.payload_json ?? "{}")).toEqual({
+      hostId,
+      deviceId: phone,
+      platform: "ios",
+      change: "added",
+      recordedAt: now,
+    });
+    expect(JSON.stringify(events)).not.toContain("apns-secret-1");
+  });
+
+  it("journals an add, a change, and a clear once each, and a repeat of any of them not at all", () => {
+    const { open, journaled, dataDirectory } = host();
+    const store = open();
+    const base = { hostId, deviceId: phone, platform: "ios" as const, now };
+    expect(store.register({ ...base, token: "token-a" })).toEqual({ result: "registered" });
+    expect(store.register({ ...base, token: "token-a" })).toEqual({
+      result: "already-registered",
+    });
     expect(store.register({ ...base, token: "token-b" })).toEqual({ result: "registered" });
-    expect(store.get({ hostId: "host-a", deviceId: "device-1" })?.token).toBe("token-b");
-    expect(store.clear({ hostId: "host-a", deviceId: "device-1" })).toEqual({ result: "cleared" });
-    expect(store.clear({ hostId: "host-a", deviceId: "device-1" })).toEqual({
+    expect(store.clear({ hostId, deviceId: phone, reason: "device-cleared", now })).toEqual({
+      result: "cleared",
+    });
+    expect(store.clear({ hostId, deviceId: phone, reason: "device-cleared", now })).toEqual({
       result: "already-cleared",
     });
-    expect(store.get({ hostId: "host-a", deviceId: "device-1" })).toBeUndefined();
+
+    const events = journaled();
+    expect(
+      events.map((event) => {
+        const payload = JSON.parse(event.payload_json) as Record<string, unknown>;
+        return payload.change ?? payload.reason;
+      }),
+    ).toEqual(["added", "changed", "device-cleared"]);
+    expect(JSON.parse(events[2]?.actor_json ?? "{}")).toMatchObject({
+      kind: "remote-device",
+      deviceId: phone,
+    });
+    expect(JSON.stringify(events)).not.toMatch(/token-[ab]/);
+    expect(existsSync(join(dataDirectory, PUSH_REGISTRATIONS_FILE))).toBe(false);
+    expect(open().get({ hostId, deviceId: phone })).toBeUndefined();
   });
 
   it("isolates tokens across devices on the same host", () => {
-    const store = createPushNotificationTokenStore();
-    store.register({
-      hostId: "host-a",
-      deviceId: "phone",
-      platform: "ios",
-      token: "phone-token",
-      now: "2026-08-05T12:00:00.000Z",
+    const store = host().open();
+    store.register({ hostId, deviceId: phone, platform: "ios", token: "phone-token", now });
+    store.register({ hostId, deviceId: tablet, platform: "android", token: "tablet-token", now });
+    store.clear({ hostId, deviceId: phone, reason: "device-revoked", now });
+    expect(store.get({ hostId, deviceId: tablet })?.token).toBe("tablet-token");
+    expect(store.listDeviceIdsForHost(hostId)).toEqual([tablet]);
+  });
+
+  it("clears the registration of a device that no longer stands, as the host", () => {
+    const { open, journaled } = host();
+    const store = open();
+    store.register({ hostId, deviceId: phone, platform: "ios", token: "phone-token", now });
+    store.register({ hostId, deviceId: tablet, platform: "android", token: "tablet-token", now });
+
+    expect(
+      store.clearWithoutStanding({
+        hasStanding: (_registeredHostId, deviceId) => deviceId === tablet,
+        now,
+      }),
+    ).toBe(1);
+    expect(store.listDeviceIdsForHost(hostId)).toEqual([tablet]);
+    const cleared = journaled().at(-1);
+    expect(JSON.parse(cleared?.payload_json ?? "{}")).toMatchObject({
+      deviceId: phone,
+      reason: "device-without-standing",
     });
-    store.register({
-      hostId: "host-a",
-      deviceId: "tablet",
-      platform: "android",
-      token: "tablet-token",
-      now: "2026-08-05T12:00:00.000Z",
+    expect(JSON.parse(cleared?.actor_json ?? "{}")).toEqual({
+      kind: "system",
+      actorId: hostActorId,
     });
-    store.clear({ hostId: "host-a", deviceId: "phone" });
-    expect(store.get({ hostId: "host-a", deviceId: "tablet" })?.token).toBe("tablet-token");
-    expect(store.listDeviceIdsForHost("host-a")).toEqual(["tablet"]);
+  });
+
+  it("keeps no token the journal refused to record", () => {
+    const { dataDirectory, journal, connection } = host();
+    const store = createPushNotificationTokenStore({
+      dataDirectory,
+      journal: {
+        aggregateVersions: (type) => journal.aggregateVersions(type),
+        // The file is written inside the append, and the commit then fails.
+        append: (_input, options) => {
+          options?.beforeEvents?.(connection);
+          expect(existsSync(join(dataDirectory, PUSH_REGISTRATIONS_FILE))).toBe(true);
+          throw new Error("journal unavailable");
+        },
+      },
+      hostActorId,
+      uuid: () => "44444444-4444-4444-8444-000000000001",
+    });
+    expect(() =>
+      store.register({ hostId, deviceId: phone, platform: "ios", token: "refused-token", now }),
+    ).toThrow();
+    expect(store.get({ hostId, deviceId: phone })).toBeUndefined();
+    expect(existsSync(join(dataDirectory, PUSH_REGISTRATIONS_FILE))).toBe(false);
+  });
+
+  it("starts with no registrations from a file it cannot read back exactly", () => {
+    const first = host();
+    first.open().register({ hostId, deviceId: phone, platform: "ios", token: "phone-token", now });
+    const file = join(first.dataDirectory, PUSH_REGISTRATIONS_FILE);
+    writeFileSync(file, readFileSync(file, "utf8").replace('"ios"', '"windows"'));
+    expect(first.open().listDestinationsForHost(hostId)).toEqual([]);
+  });
+
+  it("keeps a registration through a key rotation or a listener stop, and clears it on every other credential change", () => {
+    expect(pushRegistrationClearReasonFor("credential-rotated")).toBeUndefined();
+    expect(pushRegistrationClearReasonFor("credentials-rotated-all")).toBeUndefined();
+    expect(pushRegistrationClearReasonFor("listener-disabled")).toBeUndefined();
+    expect(pushRegistrationClearReasonFor("signed-out")).toBe("signed-out");
+    expect(pushRegistrationClearReasonFor("self-revoked")).toBe("self-revoked");
+    expect(pushRegistrationClearReasonFor("pairing-abandoned")).toBe("pairing-abandoned");
+    expect(pushRegistrationClearReasonFor("credential-expired")).toBe("credential-expired");
+    expect(pushRegistrationClearReasonFor("local-device-revoked")).toBe("device-revoked");
+    expect(pushRegistrationClearReasonFor("host-key-recovered")).toBe("device-revoked");
+    expect(pushRegistrationClearReasonFor("a-reason-added-later")).toBe("device-revoked");
   });
 });
