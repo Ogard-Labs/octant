@@ -11,6 +11,7 @@ import type {
   HarnessEndpointDriver,
   HarnessEndpointRequest,
   HarnessEndpointResponse,
+  HarnessEndpointStreamEvent,
 } from "@octant/provider-sdk/harness-endpoint";
 import { Effect, Exit, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
@@ -36,7 +37,10 @@ const readTool: ProviderToolDefinition = {
  */
 function portDriver(
   script: Array<HarnessEndpointResponse | ProviderFailure>,
-  options: { readonly admitsEveryTurn?: boolean } = {},
+  options: {
+    readonly admitsEveryTurn?: boolean;
+    readonly emits?: ReadonlyArray<HarnessEndpointStreamEvent>;
+  } = {},
 ): {
   readonly driver: HarnessEndpointDriver;
   readonly requests: HarnessEndpointRequest[];
@@ -50,8 +54,9 @@ function portDriver(
       harnessEndpoint: {
         open: async () => ({
           fits: () => true,
-          send: async (request) => {
+          send: async (request, stream) => {
             requests.push(request);
+            for (const event of options.emits ?? []) stream.onEvent(event);
             const next = script.shift();
             if (next === undefined) throw new Error("The script ran out of responses.");
             if ("category" in next) throw next;
@@ -92,9 +97,9 @@ function verifiedToolsOn(model: ProviderModelId): ProviderRuntimeRegistry {
     processState: "stopped",
     models: [],
     capabilities: honestDirectEndpointCapabilities,
-    verifiedToolModelIds: [model],
     observedAt: "2026-10-26T09:00:00.000Z",
   });
+  runtimeRegistry.setVerifiedToolModels(instanceId, [model]);
   return runtimeRegistry;
 }
 
@@ -148,6 +153,29 @@ describe("native harness endpoint port", () => {
       ["user", expect.stringContaining("Say hello")],
       ["assistant", "Hello."],
     ]);
+  });
+
+  it("announces only the host's own retries, never a retry notice the driver streams itself", async () => {
+    const { driver } = portDriver([{ text: "Hello.", toolCalls: [] }], {
+      emits: [
+        { kind: "retrying", attempt: 2, maxAttempts: 9, delayMs: 1, reason: "unavailable" },
+        { kind: "text-delta", text: "Hello." },
+      ],
+    });
+    const composed = runOnNativeHarness(driver, host(new MemoryNativeHarnessTranscriptStore()));
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* composed.acquire({ instanceId, projectRoot, mode: "chat" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+          return yield* runTurn(connection, []);
+        }),
+      ),
+    );
+
+    expect(events.map((event) => event.kind)).not.toContain("retrying");
+    expect(events.at(-1)?.kind).toBe("completed");
   });
 
   it("refuses a turn the driver does not admit before any request is sent or recorded", async () => {

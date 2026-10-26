@@ -122,11 +122,12 @@ async function verifyTools(
       : await Effect.runPromise(
           Effect.scoped(driver.verifyToolCapability({ instanceId, modelId })),
         );
-  const observed = runtimeRegistry.observedState(instanceId);
-  if (verification?.appManagedTools !== "supported" || observed === undefined) {
+  if (
+    verification?.appManagedTools !== "supported" ||
+    runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]) === undefined
+  ) {
     throw new Error("The model did not verify for app-managed tools.");
   }
-  runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
 }
 
 function required(name: string): string {

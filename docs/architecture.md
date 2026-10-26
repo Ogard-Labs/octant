@@ -4331,8 +4331,10 @@ the model at another size.
   asked, the host refuses a turn offering tools to a model without a Verify
   tools record on the instance, so a driver's own verdict cannot hand tools
   to an unverified model. The host wraps the transport in its
-  retry policy (below), registers that retrying endpoint in the
-  `NativeHarnessEndpointRegistry` with the driver's `admitTurn`, wires lead
+  retry policy (below), dropping any `retrying` event the driver streams
+  itself because retry notices are the host's, registers that retrying
+  endpoint in the `NativeHarnessEndpointRegistry` with the driver's
+  `admitTurn`, wires lead
   fallback and the shared transcript store, keeps the instance's session
   count, and keeps what each attempt teaches about the model's context window
   ([Context and usage accounting](#context-and-usage-accounting)).
@@ -4539,8 +4541,13 @@ the model at another size.
   `verifiedToolModelIds` on the observed state, which the journal persists with
   the catalog and a configuration change clears; a model that answers in text
   leaves it out, and a transport failure (authentication, timeout) is reported
-  rather than recorded as "unsupported". Admission, the AgentRun transport
-  check, and the Chat preflight read that set per model, so verifying one model
+  rather than recorded as "unsupported". Only this host-run command writes the
+  record: the provider runtime registry keeps it apart from each observation and
+  drops any `verifiedToolModelIds` a driver's probe or observation reports, so
+  a driver that misreports cannot widen tool admission. A probe after a restart
+  restores the record from a catalog that no configuration change invalidated.
+  Admission, the AgentRun transport check, the harness endpoint port, and the
+  Chat preflight read that set per model, so verifying one model
   never offers tools to its siblings; the only tool an unverified model is
   admitted with is that echo. A tool call in a real turn widens nothing either:
   the provider-level `appManagedTools` flag of an OpenAI-compatible,

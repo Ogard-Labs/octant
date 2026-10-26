@@ -393,10 +393,10 @@ describe("curated Build iOS Apps through the provider-neutral extension path", (
     const observed = await Effect.runPromise(
       Effect.scoped(driver.probe({ instanceId: providerInstanceId })),
     );
-    runtimeRegistry.setObservedState({
-      ...observed,
-      verifiedToolModelIds: observed.models.map((model) => model.id),
-    });
+    runtimeRegistry.setVerifiedToolModels(
+      observed.instanceId,
+      observed.models.map((model) => model.id),
+    );
 
     await Effect.runPromise(
       Effect.scoped(

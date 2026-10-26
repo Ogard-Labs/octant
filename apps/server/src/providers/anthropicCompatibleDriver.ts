@@ -139,10 +139,7 @@ export function makeAnthropicCompatibleDriver(
                 gate.kind === "oauth",
               );
               const result = await probeAnthropicModels(endpoint);
-              // A person's tool verification outlives routine probes, which
-              // run no generating request of their own.
               const prior = options.runtimeRegistry.observedState(instanceId);
-              const priorVerified = prior?.verifiedToolModelIds;
               const probe = decodeProviderObservedState({
                 instanceId,
                 readiness: result.readiness,
@@ -154,7 +151,6 @@ export function makeAnthropicCompatibleDriver(
                 // person's override, outlive the probe a Chat turn runs first.
                 models: carryModelContextWindowFacts(result.models, prior?.models),
                 capabilities: initialCapabilities,
-                ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
                 ...(result.failure === undefined ? {} : { message: result.failure.message }),
                 lastSuccessfulProbeAt: observedAt,
                 observedAt,
@@ -362,9 +358,6 @@ function recordObservedTurn(
       usage: result.usage === undefined ? "unavailable" : "supported",
     },
     ...(current?.message === undefined ? {} : { message: current.message }),
-    ...(current?.verifiedToolModelIds === undefined
-      ? {}
-      : { verifiedToolModelIds: current.verifiedToolModelIds }),
     ...(current?.lastSuccessfulProbeAt === undefined
       ? {}
       : { lastSuccessfulProbeAt: current.lastSuccessfulProbeAt }),
