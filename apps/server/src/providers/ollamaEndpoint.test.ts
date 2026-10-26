@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   makeOllamaEndpoint,
+  OLLAMA_CONTEXT_WINDOW_CAP,
   probeOllama,
   sendOllamaChat,
   type OllamaFetch,
@@ -75,7 +76,8 @@ describe("Ollama native endpoint", () => {
         {
           id: "qwen3:latest",
           displayName: "qwen3:latest",
-          contextLimit: 131072,
+          // Its trained 128K window, held to the window Octant loads.
+          contextLimit: 32768,
           reasoning: "supported",
           // Observed capability list without "vision": an explicit fact, not
           // an unknown.
@@ -105,6 +107,51 @@ describe("Ollama native endpoint", () => {
         ["http://127.0.0.1:11434/api/show", "POST"],
       ],
     );
+  });
+
+  it("settles each model's window from its num_ctx or its trained window held to the cap", async () => {
+    const details: Readonly<Record<string, unknown>> = {
+      "small:latest": { model_info: { "llama.context_length": 8192 } },
+      "long:latest": { model_info: { "llama.context_length": 1_048_576 } },
+      "configured:latest": {
+        model_info: { "llama.context_length": 131072 },
+        parameters:
+          'num_ctx                        65536\nstop                           "<|eot_id|>"',
+      },
+      "overconfigured:latest": {
+        model_info: { "llama.context_length": 16384 },
+        parameters: "num_ctx 65536",
+      },
+      "unreported:latest": {},
+      "ambiguous:latest": {
+        model_info: { "llama.context_length": 8192, "clip.context_length": 4096 },
+      },
+    };
+    const fetch = vi.fn<OllamaFetch>(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/version")) return json({ version: "0.31.2" });
+      if (url.endsWith("/tags")) {
+        return json({ models: Object.keys(details).map((model) => ({ model })) });
+      }
+      const name = String(JSON.parse(String(init?.body)).model);
+      return json({ capabilities: ["completion"], ...(details[name] as object) });
+    });
+    const result = await probeOllama(
+      makeOllamaEndpoint({ baseUrl: "http://127.0.0.1:11434", fetch }),
+    );
+
+    expect(
+      Object.fromEntries(result.models.map((model) => [String(model.id), model.contextLimit])),
+    ).toEqual({
+      "small:latest": 8192,
+      "long:latest": OLLAMA_CONTEXT_WINDOW_CAP,
+      // A Modelfile's own num_ctx is a deliberate choice, so the cap yields to it.
+      "configured:latest": 65536,
+      // Ollama loads no more than the trained window, whatever num_ctx says.
+      "overconfigured:latest": 16384,
+      "unreported:latest": undefined,
+      "ambiguous:latest": undefined,
+    });
   });
 
   it("sends the harness conversation with each tool result named for the call it answers", async () => {
@@ -161,6 +208,7 @@ describe("Ollama native endpoint", () => {
           inputSchema: { type: "object", properties: { path: { type: "string" } } },
         },
       ],
+      contextWindow: 32768,
     });
     expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
       model: "qwen3:latest",
@@ -191,6 +239,7 @@ describe("Ollama native endpoint", () => {
           },
         },
       ],
+      options: { num_ctx: 32768 },
     });
   });
 

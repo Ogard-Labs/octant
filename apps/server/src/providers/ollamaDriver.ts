@@ -14,13 +14,13 @@ import type {
   HarnessEndpointRequest,
   HarnessEndpointTransport,
 } from "@octant/provider-sdk/harness-endpoint";
-import { resolveModelContextWindow } from "@octant/domain/model-context-window";
 import { Effect } from "effect";
 import {
   buildOllamaChatBody,
   makeOllamaEndpoint,
   ollamaChatInputFits,
   ollamaModelTakesTools,
+  OLLAMA_UNKNOWN_CONTEXT_WINDOW,
   probeOllama,
   sendOllamaChat,
   type OllamaChatResult,
@@ -123,6 +123,9 @@ export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointD
                 modelId: String(modelId),
                 history: [{ role: "user", text: TOOL_CHECK_PROMPT }],
                 tools: [capabilityEchoToolDefinition()],
+                // The window turns use, so the check does not make Ollama
+                // reload the model at another size.
+                contextWindow: requestContextWindow(options, String(modelId)),
               });
               return {
                 instanceId,
@@ -191,6 +194,7 @@ function ollamaTransport(
               system: request.system,
               history: request.history,
               tools: request.tools,
+              contextWindow: requestContextWindow(options, String(request.modelId)),
               signal: stream.signal,
               onEvent: stream.onEvent,
             });
@@ -219,25 +223,36 @@ function ollamaTransport(
   };
 }
 
-/** Whether a request fits the endpoint and the model's reported window, measured as it would be sent. */
+/**
+ * The one window a request to this model is both measured against and sent
+ * with as `num_ctx`. Ollama cuts a prompt longer than the window it loaded
+ * without an error, which can drop the harness's instructions and tools, so
+ * the two must never differ: a person's own window for the model, else the
+ * one the probe settled from Ollama's report, else the small window Octant
+ * assumes when Ollama reports none.
+ */
+function requestContextWindow(options: OllamaDriverOptions, modelId: string): number {
+  const model = options.runtimeRegistry
+    .observedState(options.instanceId)
+    ?.models.find((candidate) => String(candidate.id) === modelId);
+  return model?.contextWindowOverride ?? model?.contextLimit ?? OLLAMA_UNKNOWN_CONTEXT_WINDOW;
+}
+
+/** Whether a request fits the endpoint and the window it is sent with, measured as it would be sent. */
 function requestFits(
   options: OllamaDriverOptions,
   endpoint: OllamaEndpoint,
   request: HarnessEndpointRequest,
 ): boolean {
+  const contextWindow = requestContextWindow(options, String(request.modelId));
   const input = {
     modelId: String(request.modelId),
     system: request.system,
     history: request.history,
     tools: request.tools,
+    contextWindow,
   };
   if (!ollamaChatInputFits(endpoint, input)) return false;
-  const model = options.runtimeRegistry
-    .observedState(options.instanceId)
-    ?.models.find((candidate) => String(candidate.id) === String(request.modelId));
-  const contextLimit =
-    model === undefined ? undefined : resolveModelContextWindow(model)?.contextWindow;
-  if (contextLimit === undefined) return true;
   // Roughly four bytes per token of the body as sent, less its images: Ollama
   // reads an image as a fixed embedding, not as base64 text, and measuring a
   // raw byte array serialized as JSON refused a 300 KB photo against a 128K
@@ -251,7 +266,7 @@ function requestFits(
         },
   );
   const text = JSON.stringify(buildOllamaChatBody({ ...input, history: withoutImages }));
-  return text.length / 4 <= contextLimit;
+  return text.length / 4 <= contextWindow;
 }
 
 /**
