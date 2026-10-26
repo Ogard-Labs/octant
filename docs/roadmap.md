@@ -150,8 +150,9 @@ starts.
   handoff remain primary; a full IDE would run as a separately launched
   companion. Start gates:
   [release-boundary holds](release-boundary-holds.md#full-lsp--extension-host--debugger).
-- **Apple devices and distribution** — paired physical devices, then a
-  person-confirmed upload of a person's own app to App Store Connect, beyond the
+- **Apple devices and distribution** — paired physical devices, then
+  person-confirmed upload, App Review submission, and release of a person's own
+  app through App Store Connect, beyond the
   internal TestFlight remote-client track (authorized post-preview, 2026-10-26). Design:
   [Apple physical devices and distribution](design/apple-devices.md).
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon

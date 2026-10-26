@@ -3,8 +3,9 @@
 This topic specification owns the Apple workbench beyond the Simulator: a
 person's paired iPhone or iPad as a build destination (discover, install,
 launch, logs, screenshots), the signing and provisioning custody that needs,
-and the separately authorized upload of a person's own app to App Store
-Connect for TestFlight. Architecture owns the device authority rules this
+and the separately authorized distribution of a person's own app through App
+Store Connect: upload, submission for App Review, and release, each when the
+person asks for it. Architecture owns the device authority rules this
 extends ([Architecture: device transport and evidence](../architecture.md#device-transport-and-evidence));
 [Device workbench](device-workbench.md) owns the Simulator and emulator panes.
 
@@ -12,7 +13,7 @@ extends ([Architecture: device transport and evidence](../architecture.md#device
 authorized this scope as post-preview work and accepted the decisions below on
 2026-10-26. That authorizes this design and its slices; it does not by itself
 authorize spending, creating developer accounts,
-signing or uploading a real build, or changing the first-release boundary,
+signing, uploading, submitting, or releasing a real build, or changing the first-release boundary,
 which stays Simulator and local macOS on Apple Silicon. Octant's own internal
 TestFlight track for its mobile client is a separate operator runbook
 ([mobile-testflight.md](../mobile-testflight.md)) and grants nothing here.
@@ -25,9 +26,9 @@ TestFlight track for its mobile client is a separate operator runbook
    its console output, take screenshots, and stop it, with the same evidence
    and approval model as the Simulator.
 2. **Distribution second, separately.** A person can upload a build of their
-   own app to App Store Connect from the Mac, confirmed by them for that exact
-   build. Octant never submits for App Review, adds external testers, or
-   releases; the person does that in App Store Connect.
+   own app to App Store Connect from the Mac, submit a version for App Review,
+   and release an approved version, each when they ask for it and confirm that
+   exact build or version. Octant never takes one of these steps on its own.
 
 ## What exists today
 
@@ -61,15 +62,15 @@ TestFlight track for its mobile client is a separate operator runbook
 
 ## Three layers, three authorities
 
-| Layer           | Destination                          | Authority                                                                                          | Who may start an effect                                         |
-| --------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Simulator       | Host-owned Simulator, the local Mac  | Thread posture per operation (unchanged)                                                           | Agent or person                                                 |
-| Physical device | A paired device leased to one thread | Person-confirmed lease, then thread posture per operation; development signing only                | Agent or person, inside the lease                               |
-| Distribution    | The person's App Store Connect app   | Person-confirmed per upload under every posture; distribution signing and an App Store Connect key | A local person only; no agent operation and no remote principal |
+| Layer           | Destination                          | Authority                                                                                                                   | Who may start an effect                                         |
+| --------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Simulator       | Host-owned Simulator, the local Mac  | Thread posture per operation (unchanged)                                                                                    | Agent or person                                                 |
+| Physical device | A paired device leased to one thread | Person-confirmed lease, then thread posture per operation; development signing only                                         | Agent or person, inside the lease                               |
+| Distribution    | The person's App Store Connect app   | Person-confirmed per upload, submission, and release under every posture; distribution signing and an App Store Connect key | A local person only; no agent operation and no remote principal |
 
 The layers do not collapse into one "devices" flag. A Simulator grant never
 covers a physical device, a device lease never covers distribution, and Full
-access covers neither the device lease nor an upload.
+access covers neither the device lease nor any distribution step.
 
 ## Rules
 
@@ -134,6 +135,8 @@ access covers neither the device lease nor an upload.
 | `uninstall`                           | Person-only effect (data loss) | Refuses | Person asks, confirmed            | Person asks, confirmed   |
 | Provisioning update                   | Person-only account mutation   | Refuses | Not offered (decision 3)          | Not offered (decision 3) |
 | Upload to App Store Connect           | Distribution, person-only      | Refuses | Person asks, confirmed            | Person asks, confirmed   |
+| Submit a version for App Review       | Distribution, person-only      | Refuses | Person asks, confirmed            | Person asks, confirmed   |
+| Release an approved version           | Distribution, person-only      | Refuses | Person asks, confirmed            | Person asks, confirmed   |
 
 - For `use-device`, "Asks" is the lease confirmation above. For effects it is
   the existing mechanism: an `approval-requested` turn event whose
@@ -172,8 +175,8 @@ access covers neither the device lease nor an upload.
 
 - Distribution is never agent-initiated. `octant_apple` has no upload, archive
   for distribution, submit, or release operation, and a provider's own shell
-  approval does not cover one: the upload route is local-only, like
-  `/api/desktop`, so a paired device and the private listener cannot reach it.
+  approval does not cover one: the distribution routes are local-only, like
+  `/api/desktop`, so a paired device and the private listener cannot reach them.
 - The workbench's **Upload to App Store Connect…** is offered only to a local
   person on a macOS host with a stored App Store Connect key. Its confirmation
   names the app, bundle id, version, build number, team, signing identity, and
@@ -189,8 +192,25 @@ access covers neither the device lease nor an upload.
   and App Store Connect's delivery identifier. Never the key, its issuer
   secret, or the signed archive's bytes. The archive stays in host-private
   evidence under existing retention and thread purge.
-- What happens after upload — processing, internal testers, external groups,
-  App Review, release — is the person's act in App Store Connect.
+- **Submit for App Review…** is offered for a version whose build App Store
+  Connect has finished processing. Its confirmation names the app, version,
+  build, and platform, and is bound to exactly those; one confirmation submits
+  that one version. Octant submits only what App Store Connect already holds:
+  it does not write or change metadata, screenshots, pricing, availability, or
+  export-compliance answers, and a submission App Store Connect refuses for a
+  missing item reports App Store Connect's reason and changes nothing.
+- **Release…** is offered only for a version App Store Connect reports as
+  approved and waiting for a manual release. Its confirmation names the app and
+  version and states that it publishes the version to the App Store; one
+  confirmation releases that one version. Octant never sets a version to
+  release automatically after approval, so every release is a person's act at
+  the moment they confirm it.
+- The journal records each submission and release like an upload: actor, app,
+  version, build, result, and App Store Connect's identifier for the
+  submission. A failure or an answer Octant cannot classify is recorded as not
+  done and never retried on its own.
+- Adding testers or tester groups, answering App Review, and phased-release
+  controls stay the person's acts in App Store Connect.
 
 ### Remote clients
 
@@ -198,7 +218,8 @@ access covers neither the device lease nor an upload.
 - Device install, launch, terminate, and uninstall from a `remote-device`
   person are refused: remote clients observe only (decision 4).
 - Starting or moving a lease, signing setup, provisioning updates, the App Store
-  Connect key, and upload are local-only, never remote-approvable.
+  Connect key, upload, submission, and release are local-only, never
+  remote-approvable.
 
 ## Threat model
 
@@ -206,14 +227,15 @@ access covers neither the device lease nor an upload.
 | ------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | An agent or project build script exfiltrates a signing private key              | No export path; Octant never reads key material; signing runs in a confined launch with no network (decision 2)      |
 | A Run Script phase uses the keychain grant to sign something else as the person | Signing is a host-owned step after the build, on the host-chosen bundle only (decision 2)                            |
-| Prompt injection uploads or submits an app                                      | No agent operation; local-only route; per-build person confirmation under every posture                              |
+| Prompt injection uploads, submits, or releases an app                           | No agent operation; local-only routes; per-build or per-version person confirmation under every posture              |
+| A version goes live that the person did not mean to publish                     | Release only of an approved version, per version, at the person's confirmation; never an automatic release           |
 | A thread drives a personal phone it was not given                               | Person-confirmed lease per thread; `destination-leased`; Full access does not start a lease                          |
 | A thread opens or kills the person's other apps                                 | `launch` and `terminate` only the bundle Octant installed for that thread; process ownership                         |
 | Screenshots or logs leak personal data to a provider                            | Reads only inside a person-confirmed lease; console of own process only; evidence by reference                       |
 | Silent developer-account changes (new profiles, registered devices)             | Octant never passes `-allowProvisioningUpdates` (decision 3); Octant never registers devices or creates certificates |
 | Device identifiers tracked across journal, providers, or remotes                | Host-minted `AppleDeviceId`; UDID, serial, ECID stay host-local                                                      |
 | The App Store Connect key leaks during upload                                   | Broker storage; per-launch `0600` file denied to other launches; removed after; never journaled                      |
-| A remote principal escalates                                                    | Lease, signing, provisioning, key, and upload are local-only; remote never mints local receipts                      |
+| A remote principal escalates                                                    | Lease, signing, provisioning, key, and distribution are local-only; remote never mints local receipts                |
 | A non-macOS host pretends                                                       | Refused before any process; family omitted; no cloud Mac                                                             |
 
 ## Settled by current specifications
@@ -235,7 +257,7 @@ access covers neither the device lease nor an upload.
 - Confinement grants are measured, per-launch, and listed beside the Apple
   `test` rule.
 - An agent cannot mark work Done, merge, or release; distribution follows the
-  same line.
+  same line: a person may release, the agent may not.
 
 ## Maintainer decisions
 
@@ -268,10 +290,14 @@ alternatives considered and the reason for the choice follow it.
    own device tooling and are reported unavailable where it offers none.
    Rejected: a third-party device library. No new dependency is added, and the
    capability probe reports the gap honestly.
-6. **Distribution scope.** Octant uploads a build to App Store Connect and does
-   nothing further. Rejected: submitting for App Review or adding testers.
-   Store submission is the person's act and stays out of Octant.
-7. **Distribution timing.** Distribution slices (6 and 7 below) start only
+6. **Distribution scope.** Octant uploads a build, submits a version for App
+   Review, and releases an approved version, each only when the local person
+   asks and confirms that exact build or version. The maintainer changed this
+   on 2026-10-26 from upload only: a person who chose Octant for the release
+   should not have to finish it elsewhere. Kept out: adding testers, editing
+   store metadata, and automatic release after approval, because each acts for
+   the person without a confirmation tied to one version.
+7. **Distribution timing.** Distribution slices (6 to 8 below) start only
    after an explicit maintainer request and a change to the Current Release
    Boundary in their own PR. That gate stays; device slices do not wait on it.
 
@@ -324,7 +350,15 @@ accounts or hardware; its real-hardware acceptance is separate where noted.
    with a journaled record. _Accept:_ one confirmation uploads exactly the
    named build; no agent or remote path reaches it. _Verify:_ server tests with
    a stubbed uploader, plus a maintainer-run upload of a test app.
+8. **Person-confirmed submission and release** (maintainer account, a real app,
+   and the decision-7 gate). Submit a processed build's version for App Review
+   and release an approved version, each as one confirmed local action with a
+   journaled record. _Accept:_ one confirmation submits or releases exactly the
+   named version; release is offered only for an approved version waiting for
+   a manual release; no agent or remote path reaches either. _Verify:_ server
+   tests with a stubbed App Store Connect client, plus a maintainer-run
+   submission and release of a test app.
 
 Slices 1, 2, 4, and 5 can be built before any hardware or account exists;
-slices 3 and 7 cannot be accepted without the maintainer's Mac, a paired
+slices 3, 7, and 8 cannot be accepted without the maintainer's Mac, a paired
 device, and an Apple developer team or App Store Connect app.
