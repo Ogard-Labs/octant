@@ -8,13 +8,16 @@ app-managed ([Architecture: extensions and skills](../architecture.md#extensions
 launches go through the shared confinement port, and authority is checked on the
 server ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
-**Delivery state.** Accepted 2026-10-26; slice 1 is starting. The maintainer
-authorized this scope as post-preview work and accepted the
+**Delivery state.** Accepted 2026-10-26; slice 1 is built and slices 2–6 are
+not. The maintainer authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26; it is not
 part of the first release, and the
 [Current Release Boundary](../../AGENTS.md#current-release-boundary) is
-unchanged by this document. No provider, lease, transfer, or Desktop pane
-exists yet.
+unchanged by this document. The lease contract, the `desktop-provider` seam
+and its conformance suite, and the host lease service exist; no provider,
+recipe storage, transfer, agent binding, or Desktop pane does, so a running
+host refuses every lease command as a value (see
+[Built in slice 1](#built-in-slice-1)).
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -34,11 +37,14 @@ somewhere that holds neither.
 ## What exists today
 
 - **Destination reporting.** `apps/server/src/computerUse/computerUseDestination.ts`
-  reports `available`/`macos-host` on a Mac with a screen and otherwise
-  `unavailable` with `no-destination` or `no-provider-configured`, and
-  `refuseComputerUseDestination` turns that into a refusal value. Its
-  non-Darwin `providerConfigured` branch is a placeholder: no provider exists,
-  so it can only answer `no-destination`.
+  reports `available`/`macos-host` on a Mac with a screen,
+  `leasable`/`disposable-desktop` with the effective desktop providers on a host
+  whose only option is a lease, and otherwise `unavailable` with
+  `no-destination` (a Mac without a screen) or `no-provider-configured`. A Mac
+  with a screen also lists any leasable providers. `refuseComputerUseDestination`
+  turns that into a refusal value; the Mac runtime refuses `leasable` as
+  `no-destination`, because a provider is not a screen until a send binds a
+  lease.
 - **Runtime seam.** `apps/server/src/computerUse/computerUseRuntime.ts` owns
   policy, approvals, sensitive-field protection, session expiry
   (`ComputerUsePolicy.maxSessionDurationMs`, at most one hour), and evidence
@@ -55,7 +61,8 @@ somewhere that holds neither.
   `computerUseControlHost.ts`). That driver is supported only on Apple Silicon
   macOS (`apps/desktop/src/computerUseDesktopService.ts`). A headless host has
   no broker, so `apps/server/src/wiring/computerUse.ts` builds no tool service
-  and the runtime reports `no-destination`.
+  and the runtime reports the lease service's destination: `no-destination` on
+  a Mac without a screen, `no-provider-configured` elsewhere.
 - **Command set.** `ComputerControlCommand` has `apps`, `launch`, `windows`,
   `observe`, `click` (by element index, or by `x`/`y` on a screenshot for an
   image-capable model), `type`, `press`, `scroll`, and `stop`. The older
@@ -125,6 +132,19 @@ the resource is gone; a destroy call that returned is not proof. Each transition
 is a journal event carrying the lease id, thread, provider, and the acting
 `EventActor`. Projections of leases are rebuildable from those events.
 
+The events are `desktop.lease-requested@1`, `desktop.lease-transitioned@1`,
+and `desktop.lease-extended@1` on the `desktop-lease` aggregate. Acquisition
+events carry the caller as actor; teardown transitions carry `system`, with
+the person or agent who asked in `requestedBy` and the cause in `endReason`.
+`provisioning` is journaled immediately before the provider call and `ready`
+once the driver returns a handle. A retry of a `release-failed` lease records
+only its outcome (`release-failed` → `released`), so a desktop a provider keeps
+refusing to destroy does not grow the journal per attempt. The driver's handle
+is never journaled: after a restart the host finds a desktop by its tag. Detail
+text in the journal is Octant-authored, never a driver's reason. Idle time and
+open tabs are host memory, not journal state, because a restart destroys every
+lease anyway.
+
 ## Rules
 
 ### Authority
@@ -135,7 +155,21 @@ is a journal event carrying the lease id, thread, provider, and the acting
   provider's plugin is installed, trusted, enabled, and effective. Each failure
   is a named refusal (`no-provider-configured`, `provider-disabled`,
   `not-leasable-mode`, `lease-limit`, `leased-by-another-thread`,
-  `lease-ended`).
+  `lease-ended`). The rest of the closed set: `thread-not-active` (archived,
+  completed, or deleted), `not-permitted` (the caller may not open the thread,
+  an agent names another thread, or the actor is `system`), `computer-use-off`,
+  `plan-mode`, `declined` (a confirmation was refused, or authority changed
+  while a person decided), `provider-unavailable` (the driver's `status` is not
+  ready), `release-pending` (see verified release), and for extension
+  `agent-cannot-extend`, `beyond-maximum`, and `extension-unconfirmed`. A lease
+  id the host does not know answers `lease-ended`.
+- An operating command (extend, screen, control, deliver) re-resolves the
+  driver through the plugin host on every call and requires it effective; it
+  never uses the driver a lease retained for teardown. A recipe whose provider
+  or credential reference changed counts as removed. Extensions on one lease
+  run one at a time, provider call included, so the journal records the
+  expiry the provider was last asked for; the provider call is bounded like a
+  teardown call.
 - **Teardown** is the one path those revocations do not close. Release and
   verification of an existing lease run on a host-owned path, as `system`,
   that needs only the lease id; it stays authorized after the thread is
@@ -145,12 +179,20 @@ is a journal event carrying the lease id, thread, provider, and the acting
   `listOwned`; it never acquires, extends, transfers, reads the screen, or
   sends input. A person's Release or Retry, and an agent's release of its own
   thread's lease, ask the host to run it. (Refusing teardown when authority is
-  revoked would leave a billed desktop running with no way to stop it.)
+  revoked would leave a billed desktop running with no way to stop it.) A
+  release from a thread names that thread and is refused for another thread's
+  lease. Retry is a person's action only and may name any lease on the host
+  whose release is not yet verified (`releasing` or `release-failed`), because
+  it can only stop spending; it refuses `not-permitted` for a running lease,
+  which only its own thread may release. An agent cannot Retry.
 - **Acquiring** is an effect. Plan refuses it. Approval-gated and
   auto-accept-edits ask in the thread. Full access proceeds for a host-local
   provider. For a provider that bills the person, a person confirms every
   billed lease in every posture, Full access included
-  ([decision 2](#maintainer-decisions)).
+  ([decision 2](#maintainer-decisions)). A person who acquires a host-local
+  desktop has already decided and is not asked again; Plan still refuses them,
+  and a billed lease still asks. The host re-checks authority after the answer,
+  and an answer given for one provider or posture never covers another.
 - **Reading** the screen (a frame, a screenshot, a window list) needs no
   approval. **Agent input** follows the existing computer-use rules unchanged:
   `@Computer`-style per-send selection, per-application approval, sensitive-field
@@ -214,14 +256,30 @@ is a journal event carrying the lease id, thread, provider, and the acting
   confirms the new expiry; otherwise the extension is refused, the original
   expiry stands, and the lease ends on time. Idle release applies when no tab
   is open and neither operator has acted.
+- The host checks every running lease against these causes after each journal
+  commit and every 30 seconds; a commit that lands while a check is running
+  starts one more check after it. A lease ended while its provider is still
+  creating it cancels the acquisition, and the desktop is destroyed as soon as
+  a handle arrives. A graceful host stop does not release leases; restart
+  reconciliation and the provider-side expiry cover them.
 - **Journal before create.** The host journals `requested` with a host-minted
   lease id before calling the provider, and the driver tags the resource with
   that id and the host's identity. A crash between the provider call and the
   `provisioning` event therefore leaves a tagged resource the host can find.
+  The host identity is a random tag minted once and kept in the host's data
+  directory, never derived from a path, because two machines sharing one
+  provider account can have the same data-directory path.
+- **A failed acquisition leaves nothing.** When the driver refuses, fails, or
+  is cancelled, the host lists the provider's tagged desktops for that lease id
+  and destroys any it finds. One it cannot verify gone blocks the provider as a
+  `release-failed` lease does.
 - **Provider-side expiry is mandatory for a billed provider.** The driver sets
   the provider's own timeout to the lease expiry plus a short margin, so a host
   that never comes back still stops paying. A billed provider that cannot set
-  one is refused by the seam's conformance suite.
+  one is refused by the seam's conformance suite, and the host itself refuses
+  to keep a billed desktop whose reported provider-side expiry is missing or
+  earlier than the lease expiry: the lease is `failed` and the desktop is
+  destroyed.
 - **Teardown outlives revocation.** The `requested` event records the
   provider and the recipe's credential reference, never the material. When a
   lease is not yet `released`, removing its recipe or credential, or disabling
@@ -235,45 +293,63 @@ is a journal event carrying the lease id, thread, provider, and the acting
   lease the journal does not show as `released`, and every tagged resource its
   driver lists that has no live lease. Host-local desktops are reaped through
   their process-group receipts and their lease directories are deleted. Tabs for
-  those leases restore as unavailable and never reconnect.
+  those leases restore as unavailable and never reconnect. An acquire waits for
+  this reconciliation to finish. A provider listing that answers without a
+  lease's desktop is the provider confirming it is absent; a lease whose driver
+  is not loaded, or whose provider cannot list, stays `release-failed`.
 - **Verified release.** Release succeeds only when the driver confirms the
   resource is absent. Otherwise the lease is `release-failed`: the host retries
   with backoff, the Desktop tab and Settings show "still running" with the
   provider and a Retry, and new leases on that provider are refused until it
   clears. Octant shows elapsed time and expiry, never a cost estimate it cannot
-  verify.
+  verify. Each teardown call is bounded at 60 seconds and a call that times out
+  counts as failed, never as gone. Retries back off from 30 seconds, doubling
+  to at most 15 minutes; a person's Retry ignores the backoff.
 
 ## Provider seam
 
 A desktop provider is a bundled or third-party plugin contribution, kind
 `desktop-provider`, declared in `@octant/plugin-api` beside the replica-store
-and Computer use ports. A driver imports only `@octant/contracts` and that
-seam; a test fails on any other import, as for image drivers. Every operation
+and Computer use ports (`@octant/plugin-api/desktop-provider`). The component
+kind is executable, so a manifest must name its entry point, and it is
+mode-safe in Work and Code only. A driver also declares its `id`,
+`displayName`, `locality` (`host-local` or `cloud`), and whether it is
+`billed`. A driver imports only `@octant/contracts` and that seam; a test
+fails on any other import, as for image drivers. Every operation
 returns a discriminated result (`status`: `ready`, `refused`, `failed`,
 `not-connected`, and the operation's own success), never a throw for an expected
 outcome. The host owns leases, journaling, authority, approvals, teardown,
 reconciliation, the stream proxy, and evidence; the driver owns only the
 translation to its provider.
 
-| Operation                                     | Driver contract                                                                                             |
-| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `status`                                      | Whether the provider can be used on this host now (binaries present, credential readable); performs no work |
-| `acquire(leaseId, recipe, expiresAt, signal)` | Creates one tagged desktop with provider-side expiry; returns an opaque handle                              |
-| `extend(handle, expiresAt)`                   | Moves the provider-side expiry; succeeds only with the expiry the provider now reports                      |
-| `screen(handle)`                              | A bounded frame source and an input sink (pointer, key, text, scroll) for the host's stream                 |
-| `control(handle, command)`                    | The `octant_computer` commands it supports; unsupported ones refuse `unsupported`                           |
-| `deliver(handle, name, bytes)`                | Writes one read-only file to the inbox                                                                      |
-| `release(handle)` / `verifyGone(handle)`      | Destroy, then confirm absence                                                                               |
-| `listOwned(hostId)`                           | Tagged resources for restart reconciliation                                                                 |
+| Operation                                              | Driver contract                                                                                                                            |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `status`                                               | Whether the provider can be used on this host now (binaries present, credential readable); performs no work                                |
+| `acquire(leaseId, hostTag, recipe, expiresAt, signal)` | Creates one desktop tagged with the lease id and host tag, with provider-side expiry when billed; returns an opaque handle, or `cancelled` |
+| `extend(handle, expiresAt)`                            | Moves the provider-side expiry; succeeds only with the expiry the provider now reports                                                     |
+| `screen(handle)`                                       | A bounded frame source and an input sink (pointer, key, text, scroll) for the host's stream                                                |
+| `control(handle, command)`                             | The `octant_computer` commands it supports; unsupported ones refuse `unsupported`                                                          |
+| `deliver(handle, name, bytes)`                         | Writes one read-only file to the inbox                                                                                                     |
+| `release(handle)` / `verifyGone(handle)`               | Destroy, then confirm absence                                                                                                              |
+| `listOwned(hostTag)`                                   | Tagged resources for restart reconciliation                                                                                                |
 
 The host gives the driver capability-scoped ports, never raw handles: a confined
 launch port for a host-local provider, and an authenticated HTTPS call port for a
-cloud provider. A conformance suite, modelled on
+cloud provider. Each port is added to the seam with the slice whose driver
+needs it (2 and 6); slice 1 defines no port. A driver the host keeps only for
+teardown is held as `DesktopTeardownPort` (`id`, `release`, `verifyGone`,
+`listOwned`), so it cannot be asked to do anything else. A conformance suite
+(`@octant/plugin-api/desktop-provider-conformance`), modelled on
 `packages/provider-sdk/src/imageGenerationConformance.ts`, proves that a driver
 stops when cancelled, tags what it creates, sets provider-side expiry when it
 bills, reports an extension only when the provider confirms the new expiry,
 reports absence only when absent, and refuses rather than degrades an
-unsupported command. The desktop's agent-facing commands are the existing
+unsupported command. Its fixture maps two scenarios onto whatever backs the
+driver, a provider that declines an extension and a desktop that outlives its
+destroy, so a recorded transport can drive the same checks. The in-memory
+driver tests use (`packages/plugin-api/src/fakeDesktopProvider.ts`) is test
+scaffolding, imported by path, and not part of the published seam. The
+desktop's agent-facing commands are the existing
 `octant_computer` set; a host-local desktop without an accessibility tree
 returns observations with a screenshot and no elements, so it is usable only by
 image-capable models and refuses `needs-image-model` otherwise. Adding `drag`
@@ -387,6 +463,29 @@ Later, each with its own design note here: a forwarded Local server port,
 accessibility element trees for host-local desktops, `drag` and `move-cursor`,
 and Work-mode leasing if it is not delivered with Code.
 
+### Built in slice 1
+
+- **Contract.** `packages/contracts/src/desktopLease.ts`: lease, recipe, owner,
+  states, end reasons, refusals, events, and screen input. A recipe's lease
+  limits are bounded by the four-hour maximum, and its initial lease cannot
+  exceed its own maximum. `desktop-provider` joins the manifest component kinds.
+- **Policy.** `packages/domain/src/desktopLeasePolicy.ts`: transitions, the
+  acquire gate, the per-thread and host-local caps, the lease clock, extension,
+  and the billed-expiry check.
+- **Seam.** `packages/plugin-api/src/desktopProvider.ts`, its conformance suite,
+  and the in-memory driver. `plugin-host` treats the kind as mode-safe in Work
+  and Code.
+- **Host.** `apps/server/src/computerUse/desktopLeaseService.ts` and its
+  projection, wired in `apps/server/src/wiring/computerUse.ts`. It reconciles
+  on start and sweeps after each commit and every 30 seconds.
+
+The running host registers no desktop provider, and no Project stores a
+recipe. No caller can open a thread through the service and confirmation
+always declines, because the Desktop pane (slice 5) and the agent's lease
+binding (slice 4) bring their own caller authority and approval surface. Recipe
+storage and its Project settings editor are not yet assigned to a slice; a
+Project's recipe will take decision 4's limits as defaults.
+
 ## Rationale
 
 The original plan leaned on execution capsules for isolation and a cloud
@@ -401,9 +500,11 @@ rule.
 
 ## Verification
 
-Source entry points once built: `apps/server/src/computerUse/` (lease service,
-destination reporting), `packages/contracts/src/computerUse*.ts`,
-`packages/plugin-api/src/` (the seam), `apps/server/src/process/linuxConfinement.ts`
-(the host-local launch), and the web Desktop pane. Each slice above lists its
+Source entry points: `apps/server/src/computerUse/desktopLeaseService.ts` and
+`computerUseDestination.ts` (lease service, destination reporting),
+`packages/contracts/src/desktopLease.ts`, `packages/domain/src/desktopLeasePolicy.ts`,
+`packages/plugin-api/src/desktopProvider.ts` and `desktopProviderConformance.ts`
+(the seam); once built, `apps/server/src/process/linuxConfinement.ts` (the
+host-local launch) and the web Desktop pane. Each slice above lists its
 evidence. Lease negatives, restart reconciliation, and real-`bwrap` permission
 negatives are the load-bearing checks; a cloud smoke is maintainer-run.

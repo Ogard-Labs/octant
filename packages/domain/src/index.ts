@@ -1,6 +1,7 @@
 export * from "./browserAutomationPolicy";
 export * from "./browserCapturePolicy";
 export * from "./computerUsePolicy";
+export * from "./desktopLeasePolicy";
 export * from "./validationCompositionPolicy";
 export * from "./providerDiscoveryPolicy";
 export * from "./appleToolchainPolicy";
