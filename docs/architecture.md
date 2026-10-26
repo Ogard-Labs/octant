@@ -4229,27 +4229,39 @@ so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
   request, so a long Code session survives an overflow more often than a
   single ladder step lets it. When the ladder still cuts exchanges, the note tells the lead that its task list and the
   files on disk still reflect that work, and the journal keeps the full
-  conversation for people, replay, and export. A Code lead can also read a
-  cut exchange back: it is offered `journal-lookup`, a read-only harness read
-  of its own `native-harness-transcript`. The note then names the journal
+  conversation for people, replay, and export. A lead in any mode can also
+  read a cut exchange back: it is offered `journal-lookup`, a read-only
+  harness read of its own `native-harness-transcript`. The note then names the journal
   message numbers before the first message it kept (`Messages 0 to N`), and
   only numbers already journaled, so it never hands out a handle the model
   cannot fetch; the numbering is the journal's, so a compaction summary
   (requested, restored on resume, or made automatically part-way through the
   running turn) or an earlier cut does not shift it. A lookup takes `from` (and an optional
   `count`, at most 20) and nothing else: it cannot name a thread or a session.
-  The host reads the conversation of the session the thread's newest turn
-  recorded in its own journal, and refuses (`journal-unavailable`) when that
-  session is not a harness session of the thread's provider in Code; a number
-  past the end refuses as `journal-message-missing`. A result is bounded (32k
+  The host reads the conversation of the session the thread's running turn
+  recorded in its own journal (a Chat thread's newest attempt, which a
+  regenerated earlier turn may hold rather than the tail; a Work thread's
+  newest turn; a Code thread's newest `provider-session-ready`), and refuses
+  (`journal-unavailable`) when that session is not a harness session of the
+  thread's provider in the thread's own mode; a number past the end refuses
+  as `journal-message-missing`. A Chat or Work session the host rebuilt
+  because the previous one could not continue (a host compaction, a retry
+  or edit, a regenerated earlier turn, or a model or provider change) is a
+  new conversation, so a lookup reads only the one the
+  running turn uses; an earlier one stays in the journal for people, replay,
+  and export but is not reachable from the tool. Rationale: the rebuilt
+  session began from the host's planned history of those turns, and reaching
+  an older session would need a handle the call cannot name. A result is bounded (32k
   characters in all, a long text or payload clipped with a marker saying how
   much was left out) and says the next number when more follows. The turn's
   resolved credential values are redacted from it exactly as a fork's copy
   redacts them, plain and JSON-escaped; nothing but the conversation's own
-  messages leaves, so no approval or other journal record rides along. The
-  lead is not offered the tool without that secret list. Chat and Work now
-  continue one session across turns, but the catalog still offers
-  `journal-lookup` in Code only, so their note names no numbers. When the endpoint still rejects a request as too large,
+  messages leaves, so no approval or other journal record rides along. A
+  Code lead is not offered the tool without that secret list; Chat and Work
+  turns resolve no credential values, so theirs is empty. The read is
+  `thread-local` in the catalog, so it needs no approval, is allowed in Plan,
+  and gives a Chat thread no file, shell, or network reach. A Side Chat, not
+  being a lead, is not offered it. When the endpoint still rejects a request as too large,
   the loop recognises the refusal as a filled context window (OpenAI's
   `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
   413 shape from an OpenAI-compatible host). A Code connection that has not
@@ -4743,8 +4755,9 @@ so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
   Harness parity while any item is open.
   1. **Offered tools.** Always offered: `todo-write`, `context-remaining`,
      and `second-opinion` in every mode; `read`, `grep`, `glob`, `edit`, and
-     `write` in Work and Code; `bash`, `goal-check`, and `journal-lookup`
-     in Code only. Offered
+     `write` in Work and Code; `bash` and `goal-check` in Code only;
+     `journal-lookup` in every mode when the host supplies the journal (and,
+     in Code, the turn's secret list). Offered
      when the host supplies the port: `delegate`, `ask-user`, and `goal`
      (every mode), and `web-fetch` and `web-search` (Work and Code; Chat only
      while its research is on, and `web-search` only with a search
