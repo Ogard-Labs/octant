@@ -130,6 +130,7 @@ describe("OpenCode provider conformance", () => {
       turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
       resume: {
         sessionId,
+        modelId,
         resumeCursor: { driverKind: "opencode", value: "provider-session" },
         executionPolicy: "approval-gated",
       },
@@ -242,6 +243,7 @@ describe("OpenCode provider conformance", () => {
       turn: { sessionId, prompt: "hello", attachments: [], tools: [] },
       resume: {
         sessionId,
+        modelId,
         resumeCursor: { driverKind: "opencode", value: "provider-session" },
         executionPolicy: "approval-gated",
       },

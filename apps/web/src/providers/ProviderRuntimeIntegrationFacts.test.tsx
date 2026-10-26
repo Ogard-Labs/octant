@@ -8,15 +8,22 @@ const sessionActivity = {
   observes: ["replies", "tool-calls", "approvals"],
 } as const;
 
+const reportedContext = { usage: "reported", compaction: "runtime" } as const;
+
 function renderFacts(
-  integration: ProviderRuntimeIntegration | undefined,
+  integration:
+    | (Omit<ProviderRuntimeIntegration, "context"> &
+        Partial<Pick<ProviderRuntimeIntegration, "context">>)
+    | undefined,
   verifiedToolModelIds?: ReadonlyArray<string>,
 ) {
   render(
     <ProviderRuntimeIntegrationFacts
       instanceId="runtime"
       observed={{
-        ...(integration === undefined ? {} : { integration }),
+        ...(integration === undefined
+          ? {}
+          : { integration: { context: reportedContext, ...integration } }),
         ...(verifiedToolModelIds === undefined
           ? {}
           : { verifiedToolModelIds: verifiedToolModelIds as ReadonlyArray<ProviderModelId> }),
@@ -154,6 +161,32 @@ describe("provider runtime integration facts", () => {
     expect(fact("Resume")).toHaveTextContent(
       "NoneNo session runs on this runtime here, so there is none to reopen.",
     );
+  });
+
+  it("says an ACP agent's threads show no context window and cannot be compacted", () => {
+    renderFacts({
+      tools: { status: "available", transport: "session-mcp-bridge" },
+      activity: sessionActivity,
+      resume: "precise",
+      context: { usage: "not-reported", compaction: "none" },
+    });
+    expect(fact("Context window")).toHaveTextContent(
+      "Not reportedThis runtime reports no usage, so its threads show no context window and spend limits leave its turns out.",
+    );
+    expect(fact("Compaction")).toHaveTextContent(
+      "Not availableThe runtime keeps its own history and Octant has no compaction request for it, so Octant can't see what it keeps or compact it.",
+    );
+  });
+
+  it("names Octant as compacting a history it plans, and says when usage reporting is unconfirmed", () => {
+    renderFacts({
+      tools: { status: "available", transport: "request-tool-calls" },
+      activity: sessionActivity,
+      resume: "best-effort",
+      context: { usage: "not-confirmed", compaction: "octant" },
+    });
+    expect(fact("Context window")).toHaveTextContent("Not confirmed");
+    expect(fact("Compaction")).toHaveTextContent("By Octant");
   });
 
   it("claims nothing when the server reported no integration", () => {

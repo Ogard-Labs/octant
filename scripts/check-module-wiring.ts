@@ -84,6 +84,10 @@ const IGNORED_DIRECTORIES = new Set([
 export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   // ── Remaining ──
   [
+    "apps/server/src/harness/nativeHarnessEndpointDriver.ts",
+    "Host side of the provider-sdk harness endpoint port, proven by its own test before its first driver moves onto it. Remove once a driver built by the provider factory runs through it.",
+  ],
+  [
     "apps/server/src/remote/remoteExitEvidenceADriver.ts",
     "Browser-realm bundle entry built by remoteExitEvidenceA.smoke.test.ts via `bun build`; excluded from the server tsconfig on purpose. Remove once that evidence is served by a product caller or the smoke is retired.",
   ],
@@ -116,6 +120,10 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
   [
     "packages/provider-sdk/src/contextFactsConformance.ts",
     "Conformance evidence a driver test runs against contextFacts; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the last driver test that uses the kit is retired.",
+  ],
+  [
+    "packages/provider-sdk/src/harnessEndpointConformance.ts",
+    "Harness-endpoint-port conformance harness that direct-endpoint driver tests run; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port is retired.",
   ],
   [
     "packages/provider-sdk/src/imageGenerationConformance.ts",

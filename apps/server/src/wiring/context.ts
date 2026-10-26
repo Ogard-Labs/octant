@@ -15,6 +15,7 @@ import { windowCanOpenProject } from "../projectOpenAuthority";
 import { createBrowserAutomationRouteHandler } from "../browserAutomationRoutes";
 import { createAgentMessageRouteHandler } from "../agentMessage/agentMessageRoutes";
 import { defaultShellSettings, enabledModes, providerKeepsConversation } from "@octant/domain";
+import { runtimeAnsweredCapabilities } from "@octant/domain/provider-runtime-integration";
 import { makeConfiguredProviderDriver, type ProvidersWiring } from "./providers";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -408,11 +409,14 @@ export function wireContext(deps: ContextDependencies) {
       return providerKeepsConversation(instance.driverKind) ? "runtime" : "host";
     },
     // What the adapter reported for this install; an instance the host has
-    // not observed yet is undefined, so it reads as unavailable, not unable.
+    // not observed yet, or one not ready to report (a signed-out Claude lists
+    // no capabilities), is undefined, so it reads as unavailable, not unable.
     runtimeCompaction: (providerInstanceId, mode) => {
       const observed = providerRuntimeRegistry.observedState(providerInstanceId);
       if (observed === undefined) return undefined;
-      return observed.capabilities.sessionCompaction?.[mode] ?? "unsupported";
+      const answer = observed.capabilities.sessionCompaction?.[mode];
+      if (answer !== undefined) return answer;
+      return runtimeAnsweredCapabilities(observed.readiness) ? "unsupported" : undefined;
     },
     providerFacts: (providerInstanceId, modelId) => {
       const provider = persistence.readProviderInstance(providerInstanceId);

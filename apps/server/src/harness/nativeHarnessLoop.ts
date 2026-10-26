@@ -6,6 +6,7 @@ import {
   type NativeHarnessTranscriptToolResult,
   type OctantMode,
   type ProviderContextBlock,
+  type ProviderDriverKind,
   type ProviderFailure,
   type ProviderInstanceId,
   type ProviderModelId,
@@ -103,14 +104,10 @@ const COMPACTION_ITEM_CHARACTERS = 4_000;
  */
 const MAX_SELF_CORRECTION_ROUNDS = 3;
 
-export type NativeHarnessDriverKind =
-  | "openai-compatible"
-  | "anthropic-compatible"
-  | "azure-foundry";
-
 export interface NativeHarnessConnectionOptions {
   readonly instanceId: ProviderInstanceId;
-  readonly driverKind: NativeHarnessDriverKind;
+  /** The driver the session's resume cursor names, so only that driver resumes it. */
+  readonly driverKind: ProviderDriverKind;
   readonly projectRoot: string;
   readonly mode: OctantMode;
   readonly transport: NativeHarnessTransport;

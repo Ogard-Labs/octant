@@ -91,12 +91,13 @@ function connect(
   transport: NativeHarnessTransport,
   transcripts: NativeHarnessTranscriptStore,
   leadFallback?: NativeHarnessLeadFallback,
+  mode: "chat" | "work" | "code" = "code",
 ): Effect.Effect<ProviderConnection, never, Scope.Scope> {
   return createNativeHarnessConnection({
     instanceId,
     driverKind: "openai-compatible",
     projectRoot,
-    mode: "code",
+    mode,
     transport,
     transcripts,
     ...(leadFallback === undefined ? {} : { leadFallback }),
@@ -1985,5 +1986,182 @@ describe("compacting an Octant Harness session", () => {
       ),
     );
     expect(offered).toEqual([true, true]);
+  });
+});
+
+describe("durable Chat and Work sessions", () => {
+  const cursor: ProviderResumeCursor = {
+    driverKind: "openai-compatible",
+    value: String(sessionId),
+  };
+
+  // Event ids stay unique across the two processes that share one journal.
+  let identity = 0;
+
+  /** Runs a body against the journal in `directory`, as one host process would. */
+  const withJournal = <A, E>(
+    directory: string,
+    body: (transcripts: NativeHarnessTranscriptStore) => Effect.Effect<A, E, Scope.Scope>,
+  ) =>
+    Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const persistence = yield* Persistence;
+          return yield* body(
+            new JournalNativeHarnessTranscriptStore({
+              journal: persistence.journal,
+              uuid: () => `80000000-0000-4000-8000-${String(++identity).padStart(12, "0")}`,
+              clock: () => now,
+              actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+            }),
+          );
+        }).pipe(
+          Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
+        ),
+      ),
+    );
+
+  /** A Chat or Work send, which offers no harness tools of its own here. */
+  const sendTurn = (connection: ProviderConnection, prompt: string) =>
+    Effect.gen(function* () {
+      const events = yield* Effect.fork(
+        Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+      );
+      yield* connection.send({ sessionId, prompt, attachments: [], tools: [] });
+      return Array.from(yield* Fiber.join(events));
+    });
+
+  it.each(["chat", "work"] as const)(
+    "resumes a %s session from the journal after a host restart, under the same prompt cache key",
+    async (mode) => {
+      const directory = mkdtempSync(join(tmpdir(), "octant-harness-durable-"));
+      directories.push(directory);
+      const { transport, requests } = scriptedTransport([
+        { text: "first answer", toolCalls: [] },
+        { text: "second answer", toolCalls: [] },
+      ]);
+      const started = await withJournal(directory, (transcripts) =>
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts, undefined, mode);
+          const handle = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+          });
+          yield* sendTurn(connection, "first");
+          yield* connection.stop(sessionId);
+          return handle.resumeCursor;
+        }),
+      );
+      expect(started).toEqual(cursor);
+
+      const events = await withJournal(directory, (transcripts) =>
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts, undefined, mode);
+          yield* connection.resume({
+            sessionId,
+            resumeCursor: cursor,
+            executionPolicy: "approval-gated",
+          });
+          return yield* sendTurn(connection, "second");
+        }),
+      );
+
+      expect(events.at(-1)?.kind).toBe("completed");
+      expect(String(requests[1]?.sessionId)).toBe(String(requests[0]?.sessionId));
+      expect(requests[1]?.history.map((message) => message.text)).toEqual([
+        "first",
+        "first answer",
+        "second",
+      ]);
+    },
+  );
+
+  it.each(["chat", "work"] as const)(
+    "continues a %s session whose turn was cancelled, on the next connection",
+    async (mode) => {
+      const requests: NativeHarnessRequest[] = [];
+      const transport: NativeHarnessTransport = {
+        open: async () => ({
+          fits: () => true,
+          send: (request, stream) =>
+            new Promise<NativeHarnessResponse>((resolve, reject) => {
+              requests.push(request);
+              if (requests.length > 1) {
+                resolve({ text: "second answer", toolCalls: [] });
+                return;
+              }
+              stream.signal.addEventListener(
+                "abort",
+                () =>
+                  reject({
+                    category: "interrupted",
+                    message: "The provider request was cancelled.",
+                  }),
+                { once: true },
+              );
+            }),
+          release: () => undefined,
+        }),
+      };
+      const transcripts = new MemoryNativeHarnessTranscriptStore();
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(transport, transcripts, undefined, mode);
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            const first = yield* Effect.fork(
+              Stream.runCollect((yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal))),
+            );
+            yield* connection.send({ sessionId, prompt: "first", attachments: [], tools: [] });
+            yield* connection.interrupt(sessionId);
+            expect(Array.from(yield* Fiber.join(first)).at(-1)?.kind).toBe("interrupted");
+            // The turn ends the way a Chat or Work runner ends it: the live
+            // session is stopped and its conversation stays in the store.
+            yield* connection.stop(sessionId);
+          }),
+        ),
+      );
+      const events = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(transport, transcripts, undefined, mode);
+            yield* connection.resume({
+              sessionId,
+              resumeCursor: cursor,
+              executionPolicy: "approval-gated",
+            });
+            return yield* sendTurn(connection, "second");
+          }),
+        ),
+      );
+
+      expect(events.at(-1)?.kind).toBe("completed");
+      expect(String(requests[1]?.sessionId)).toBe(String(sessionId));
+      expect(requests[1]?.history.map((message) => message.text)).toEqual(["first", "second"]);
+    },
+  );
+
+  it("refuses to resume a Chat session on a Work connection", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    transcripts.open(sessionId, { instanceId, modelId, projectRoot, mode: "chat" });
+    const { transport, requests } = scriptedTransport([]);
+    const exit = await Effect.runPromiseExit(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts, undefined, "work");
+          return yield* connection.resume({
+            sessionId,
+            resumeCursor: cursor,
+            executionPolicy: "approval-gated",
+          });
+        }),
+      ),
+    );
+    expect(exit).toMatchObject({
+      _tag: "Failure",
+      cause: { error: { category: "stale-resume" } },
+    });
+    expect(requests).toEqual([]);
   });
 });

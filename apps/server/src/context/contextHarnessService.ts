@@ -790,6 +790,19 @@ export class ContextHarnessService {
     );
   }
 
+  /**
+   * Whether the host summarized this subject's conversation at or after
+   * `since`. A resumed session would never read that summary, so a Chat or
+   * Work follow-up after it rebuilds a fresh session from the compacted
+   * history instead.
+   */
+  hostCompactedSince(subject: ContextSubjectRef, since: string): boolean {
+    const after = Date.parse(since);
+    return this.completedCompactions(subject).some(
+      (receipt) => receipt.executor.kind === "host" && Date.parse(receipt.completedAt) >= after,
+    );
+  }
+
   /** The subject's most recent compaction, if it has had one. */
   latestCompaction(subject: ContextSubjectRef): ContextCompactionRecord | undefined {
     this.#assertReady();

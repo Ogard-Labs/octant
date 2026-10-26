@@ -1,22 +1,11 @@
-import type {
-  ProviderFailure,
-  ProviderInstanceId,
-  ProviderModelId,
-  ProviderTurnInput,
-} from "@octant/contracts";
+import type { ProviderInstanceId } from "@octant/contracts";
+import type { ProviderHarnessEndpoint } from "@octant/provider-sdk/harness-endpoint";
 import type { EndpointRetryOptions } from "../providers/endpointRetry";
 import type { ModelContextWindowMemory } from "../providers/modelContextWindowFacts";
-import type { NativeHarnessLeadFallback, NativeHarnessTransport } from "./nativeHarnessTransport";
+import type { NativeHarnessLeadFallback } from "./nativeHarnessTransport";
 
 /** A direct endpoint as another instance's lead can reach it when its own model is down. */
-export interface NativeHarnessEndpoint {
-  readonly open: NativeHarnessTransport["open"];
-  /** The endpoint's verdict on a turn's input for one of its models. */
-  readonly admitTurn: (
-    input: ProviderTurnInput,
-    modelId: ProviderModelId,
-  ) => ProviderFailure | undefined;
-}
+export type NativeHarnessEndpoint = ProviderHarnessEndpoint;
 
 /**
  * The direct endpoints this host runs, by provider instance. A lead whose

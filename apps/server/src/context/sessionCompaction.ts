@@ -33,6 +33,7 @@ import type {
   ProviderSessionCompaction,
   ProviderSessionResume,
 } from "@octant/provider-sdk/driver";
+import { heldTurnContext } from "../providers/heldTurnContext";
 import { decodeSpendCeilingReservationId, type SpendCeilingService } from "../spendCeilingService";
 import { WORK_TURN_SAFE_INPUT_TOKENS } from "../work/workTurnContext";
 import {
@@ -757,6 +758,9 @@ export class SessionCompactionService {
       // broken adapter; the runtime was never asked.
       const compact = connection.compact;
       if (compact === undefined) return { kind: "not-asked" } as const;
+      // Once asked, the runtime may keep only a share of earlier prompts, so
+      // the next turn sends its standing context again.
+      heldTurnContext.forget(sessionId);
       const answered = yield* Effect.either(
         compact({ sessionId, compactionId }).pipe(Effect.timeoutOption(timeoutMs)),
       );

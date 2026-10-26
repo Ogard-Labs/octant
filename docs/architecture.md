@@ -2108,7 +2108,13 @@ flowchart LR
   purge erases a thread's bulk content, derived projections, attachments,
   canvases authored in that thread (including their comments, shares,
   refreshes, actions, and mirrored files), agent-run session and content
-  stores, harness sessions, and a managed worktree only when no other
+  stores, harness sessions, the Octant Harness transcript (with its
+  compaction summaries) and Ollama session history of every provider session
+  the thread's own Chat attempts, Work turns, or Code operations first
+  recorded or its child runs' session records name (each is keyed by that
+  provider session, not by the harness session record, and a session a Chat
+  branch copied from its source stays with the source), and a
+  managed worktree only when no other
   thread still references it, and only at a path inside that repository's
   managed worktree directory: a receipt that names any other path, or one
   the sweep cannot read, leaves every owned worktree in place and keeps
@@ -2668,7 +2674,7 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   the host reports a runtime to a client (the registry snapshot and a
   Connection Check result) it attaches an `integration` derived in
   `@octant/domain/provider-runtime-integration` from the driver kind and that
-  observation; drivers never set it and it is not stored. It states three
+  observation; drivers never set it and it is not stored. It states four
   facts. **Octant tools** is `available` with its transport, or `unavailable`
   with a reason (`not-confirmed`, `model-verification-required`,
   `runtime-not-confirmed`, `no-transport`). The transport per runtime:
@@ -2686,8 +2692,18 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   event kinds the live session reports, or `none` when no session runs here.
   **Resume** is `precise` for a provider-owned conversation whose driver
   resumes its session, `best-effort` for a host-owned conversation whose
-  history Octant plans again from the journal, and `none` otherwise. Settings ›
-  Providers & Models shows the three facts on each runtime card, and the
+  history Octant plans again from the journal, and `none` otherwise.
+  **Context** pairs `usage` (`reported`, `not-reported` when the driver
+  declares usage unsupported, `not-confirmed`) with `compaction` (`octant` for
+  a host-owned conversation; for a runtime-owned one `runtime` when any mode
+  takes the request, `runtime-update-required` when the install is too old,
+  `not-confirmed` when the runtime is neither ready nor degraded and so
+  reported no capabilities, and `none` otherwise, mirroring the host's
+  compaction decision, which treats such a runtime as unavailable rather than
+  unable). ACP agents
+  read `not-reported` and `none`: their history is the agent's own and opaque
+  to Octant. Settings › Providers & Models shows these facts on each runtime
+  card (Octant tools, Activity, Resume, Context window, Compaction), and the
   composers offer neither `@Browser` nor `@Computer` for a selection whose
   runtime does not carry Octant's tools. Bounded
   provider subprocesses run under a deny-default profile: Seatbelt via
@@ -2985,7 +3001,9 @@ Octant sent inside the prompt is counted. Per runtime:
   tokens and the model's `limit.context`) and Pi (assistant `message_end` usage;
   the occupancy is the last message's input, cache and output) report one
   figure and no categories. The ACP driver reports no usage at all, so an ACP
-  thread shows no window. Lists of tools, MCP servers, skills or instruction
+  thread shows no window, and its Code context meter says the runtime reports
+  no usage (from the runtime's integration `context.usage`) rather than that
+  none has arrived yet. Lists of tools, MCP servers, skills or instruction
   files exist in some runtimes but carry no token weight, so they are not parts.
 
   Pi usage is accumulated from completed assistant messages, not streaming usage
@@ -3004,11 +3022,14 @@ Octant sent inside the prompt is counted. Per runtime:
 
 **What Octant sends with each turn.** Octant's instructions (a profile's
 instructions, the Browser guidance), skills (a profile's admitted skills and the
-skills selected for a turn) and attachments are sent with every turn, inside the
-prompt: `renderProviderTurnPrompt` puts the context blocks in the prompt text as
-JSON, and attachments travel as the prompt's images. A runtime that keeps its
-prompts therefore holds one copy per turn, and a running total is right only
-while every copy is accounted for. The adapter, which knows its runtime, says on
+skills selected for a turn) and attachments travel inside the prompt:
+`renderProviderTurnPrompt` puts each context block in the prompt text as a
+tagged plain-text section ahead of the request, and attachments travel as the
+prompt's images. A runtime that keeps its prompts holds every copy it was sent,
+so standing context it already holds is not sent again (see
+[held standing context](#held-standing-context)); this turn's copy is only what
+actually went out, and a running total is right only while every copy is
+accounted for. The adapter, which knows its runtime, says on
 each usage report what the runtime does with the prompt (`promptRetention`), and
 the turn runner reports `compacted` for the rest of a turn once the adapter's
 `context-compacted` event arrives:
@@ -3025,7 +3046,8 @@ the turn runner reports `compacted` for the rest of a turn once the adapter's
 From that the turn runner builds the parts (`octantWindowBreakdown` in
 `apps/server/src/code/codeTurnContext.ts`):
 
-- This turn's copy is estimated as sent: each context block's JSON at four
+- This turn's copy is estimated as sent, leaving out standing blocks the
+  session already held: each context block's JSON at four
   characters to a token (floor 16), and each image by area as a provider scales
   it (fitted to 1568 px and about 1.15 megapixels, width × height / 750, at
   most 1,600), or 1,600 when its size cannot be read. Octant ships no tokenizer
@@ -3073,15 +3095,24 @@ refused as invalid usage. Unknown fields in a response are ignored; a known fiel
 the wrong type still fails the turn. The input tokens a request reports also
 calibrate the native harness's next size estimate: a model's real bytes-per-token,
 measured from the last call, is preferred over a flat four-bytes-per-token guess, so
-a filled window is caught before the endpoint has to refuse the request. ACP and Pi resume cursors carry a durable
-task binding, and resume supplies the currently allowed tool catalogue without
+a filled window is caught before the endpoint has to refuse the request. ACP, Pi,
+Claude Code, Codex, and OpenCode resume cursors carry a durable task binding
+(provider instance, Octant session, Project root, mode, and the model the session
+started on), written by the driver when the session starts and journaled with the
+turn, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
 follow-ups; Chat retries retain that identity and native scratch files. Native
 Chat editing refuses where rollback is unavailable, so it cannot replace the
 conversation behind the user's back. Resume refuses as `stale-resume` when the
 cursor's binding names another provider instance, Octant session, Project
-root, mode, or native id, and at most one live or starting process may own a
-native session per provider instance, refused before spawn otherwise
+root, mode, or native id, or, on OpenCode and Pi, whose sessions keep the model
+they started on, another model; the check runs before the runtime is asked or any live
+session is retired. A cursor written before its driver recorded a binding is
+still checked by the driver against the runtime's own session (its folder and
+history). A child run's completed turn restates the native id without the
+binding; the run keeps the bound cursor it started with. At most one live or
+starting process may own a native session per provider instance, refused before
+spawn otherwise
 ([0157](decisions/0157-native-resume-keeps-a-durable-identity.md)). A separate replay checkpoint imports existing Code reports on
 upgrade without replaying unrelated purged usage. The provider and model are
 those recorded when the turn started, including after a later handoff. These
@@ -3231,13 +3262,13 @@ action.
 
 | Thread                                                   | Who compacts             | How                                                                                                                                                                                                                                                                                                                                                                                                                                    | Refuses with                                                  |
 | -------------------------------------------------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Chat or Work on a direct endpoint (host-planned history) | Host                     | `ContextHarnessService` summarizes the planned conversation before the tail through the existing summary generator (`makeContextSummaryGenerator`, a one-shot session on the thread's provider and model), then commits it as `maintainContext` does today.                                                                                                                                                                            | `nothing-to-compact`                                          |
+| Chat or Work on a direct endpoint (host-planned history) | Host                     | `ContextHarnessService` summarizes the planned conversation before the tail through the existing summary generator (`makeContextSummaryGenerator`, a one-shot session on the thread's provider and model), then commits it as `maintainContext` does today. The next message rebuilds a fresh harness session from the compacted plan rather than continuing the old one.                                                              | `nothing-to-compact`                                          |
 | Code on Octant Harness (journaled transcript)            | Octant Harness           | The harness connection's `compact` summarizes the transcript turns before the tail with the same endpoint and journals a `compacted` transcript event; later requests are built from the summary and the tail.                                                                                                                                                                                                                         | `nothing-to-compact`, `no-session`                            |
 | Codex app-server, any mode                               | Codex                    | `thread/compact/start` with the thread id (codex-cli 0.159.3 and 0.162.1 app-server schemas); the run is observed as a turn carrying the `contextCompaction` item.                                                                                                                                                                                                                                                                     | `runtime-version-unsupported` when the method is not found    |
 | Claude Code, any mode                                    | Claude Code              | The runtime's own `/compact`, sent by the port as a user-role input that carries no tools and is not counted as a turn; observed as `system`/`compact_boundary` (`compact_metadata.trigger: "manual"`, `pre_tokens`) and the `status` message's `compact_result`. A resumed session sends its `compacting` status and a `rate_limit_event` before it initializes; the port holds both and delivers them after the initialized message. | `runtime-version-unsupported` when `compact` is not announced |
 | OpenCode, any mode                                       | OpenCode                 | `/api/session/:sessionID/compact` (served by OpenCode 2.0.26); observed as `session.compaction.ended`, `session.next.compaction.ended` or `session.compacted`.                                                                                                                                                                                                                                                                         | `runtime-version-unsupported` on a server without the route   |
 | Pi and Oh My Pi, any mode                                | Pi                       | Pi's RPC `compact` command (`packages/coding-agent/docs/rpc.md`); observed as `compaction_end`, which changed nothing when it carries no `result`.                                                                                                                                                                                                                                                                                     | `runtime-version-unsupported` when the command is refused     |
-| ACP agents                                               | Nobody                   | The protocol has no compaction request.                                                                                                                                                                                                                                                                                                                                                                                                | `runtime-cannot-compact`                                      |
+| ACP agents                                               | Nobody                   | The protocol has no compaction request; the thread says so in place of the button.                                                                                                                                                                                                                                                                                                                                                     | `runtime-cannot-compact`                                      |
 | Any other adapter                                        | Nobody, unless it claims | An adapter compacts only by reporting the capability and implementing the seam below.                                                                                                                                                                                                                                                                                                                                                  | `runtime-cannot-compact`                                      |
 
 The Codex and Claude rows cite the schema and message shapes they were read
@@ -3464,8 +3495,9 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   compaction supersedes an earlier one. A fork copies the latest compaction
   made before the turn it was forked at, rewritten for the fork's folder and
   secrets like the messages, so the fork reads what its source read then. Only
-  a Code connection offers `compact`: Chat and Work send the host's planned
-  history.
+  a Code connection offers `compact`: the host compacts a Chat or Work
+  thread's planned history, and the next message after that compaction
+  rebuilds a fresh session from it instead of continuing the old one.
 - The thread's timeline shows a compaction divider from the completed event.
   Everything above it stays visible, searchable and exported. The compaction
   state read carries every completed receipt, oldest first
@@ -3653,6 +3685,77 @@ _Failures._
 | The thread's mode is disabled while compacting                                                                     | A runtime that reports success has changed its session, so the compaction is journaled `completed` and the thread stays unusable until the mode returns. Only an interrupted or unknown outcome is `failed` (`subject-unavailable`), marked as one that may have changed the session. A host summary that has not been committed is dropped and recorded `failed`.                                                                                                                                                                                                                                                                                                                                              |
 | The thread is deleted while compacting                                                                             | The result is discarded and the request ends `failed` (`subject-unavailable`), because an ordinary delete keeps the ledger until a purge and a request left open would read as running. Usage the provider reported is still journaled, because the request was spent; the thread's purge erases the compaction and keeps that usage.                                                                                                                                                                                                                                                                                                                                                                           |
 | The host restarts mid-compaction                                                                                   | Recorded as `failed` (`interrupted`); for a runtime the line says it may have compacted, and the next usage report settles it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+### Held standing context
+
+A provider that keeps its own conversation (`conversationOwnership: "provider"`:
+Claude Code, Codex, OpenCode, Pi, Oh My Pi and ACP agents) records every user
+message it is sent and sends it again with every later request. Octant's turn
+prompt is therefore built to be appended, never rewritten:
+
+- **Framing.** `renderProviderTurnPrompt` writes each context block as a
+  `<octant-context kind="…">` section of plain text, in the order given, then
+  `Current request:` and the request. The framing holds nothing but the blocks'
+  own text, so the same blocks render to the same bytes every turn, and the
+  runtime's own transcript reads as plain user and assistant text. A block's
+  text cannot open or close a section: `<octant-context` and `</octant-context`
+  inside it are written with `&lt;`. This replaced a single JSON array of every
+  block, which put escaped JSON at the head of every recorded user message.
+- **Only what is new.** Standing blocks (`instructions`, which carry Octant's
+  instructions and skills, `project-memory` and `work-item`) that the session
+  already holds are left out of the turn; per-turn blocks (messages, summaries,
+  mentions, issue context, handoffs) are always sent. A new session, including
+  one started afresh after a refused resume, gets everything once. When a held
+  standing block is no
+  longer part of the turn's context (a deselected skill), the whole context is
+  sent again behind a fixed note that it replaces all earlier Octant context, so
+  a stale copy never stands alone. The rule is `providerTurnContextDelta` in
+  `@octant/provider-sdk/chat-conformance`.
+- **When a block counts as held.** The server keeps one record per provider
+  session id (`apps/server/src/providers/heldTurnContext.ts`), which the Chat,
+  Work, and Code turn runners consult before sending. A block counts as held only
+  after a turn that carried it reported `completed` on that same session, with a
+  usage report saying the runtime keeps its prompts (`promptRetention: "kept"`):
+  a failed or interrupted turn may never have reached the runtime's history, and
+  an adapter that cannot say what its runtime keeps (ACP agents today) reports
+  no compaction either, so its sessions are sent the standing context every
+  turn. A
+  failed or interrupted turn that restated the context leaves the session
+  holding nothing, because the runtime may still have kept that restatement
+  (Claude reports usage before a failed result), and it supersedes what was
+  held. A session opened by `start` holds nothing. A compaction, automatic
+  (`context-compacted`, or a usage report with `promptRetention: "compacted"`)
+  or requested, drops the record, because the runtime keeps only a share of
+  earlier prompts Octant cannot see. The record is kept in the host data
+  directory (`providers/held-turn-context.json`, owner-only): provider session
+  ids and SHA-256 digests of standing blocks, never their text, for at most the
+  256 most recently changed sessions. A resumed session's first turn after a
+  restart therefore sends only what is new, as the runtime's own history
+  survived the restart too. Every change that drops a holding (a fresh start, a
+  failed restatement, a compaction) is written synchronously before the next turn is sent, and a write
+  that fails removes the file; a missing, unreadable, or malformed file holds
+  nothing, which costs one extra copy, never a missing one.
+- **What the journal and meter say.** The Chat and Work context plans still list
+  a held block as included: it is in the window, delivered by an earlier turn. A
+  Code turn's window breakdown counts only the copy this turn actually sent, so
+  `octant-instructions` and `skills` grow when they change, not every turn.
+
+Turn usage keeps the provider's cache-read and cache-write counters
+(`cacheReadInputTokens`, `cacheWriteInputTokens`), so the effect is measurable
+on the existing turn metrics: on a multi-turn Claude or Codex thread, each
+later turn's uncached input no longer carries the standing context again.
+`apps/server/src/providers/heldTurnContext.benchmark.test.ts` measures it on a
+real Code session (opt-in, it spends the signed-in account's turns): the same
+four Plan turns, with a resume before the third, are run once sending the whole
+standing context every turn and once sending only what the session does not
+hold, and each turn's time to first text, turn time, input, uncached input,
+cache hit, and standing characters sent are printed side by side. No figures
+are recorded here until that run has been made on a maintainer's machine.
+
+Agent runs and host-owned conversations (direct endpoints, the native harness,
+Ollama) are unchanged apart from the framing: a host-owned conversation is
+rebuilt from the journal every turn, and the native harness carries
+instructions in its system prompt.
 
 ### Stop reasons
 
@@ -3863,8 +3966,32 @@ depends only on the provider it is sent to, decided by the pure
 `decideConversationSession` policy: a provider whose history the host holds
 (`providerKeepsConversation` false) is sent the history again every turn, from
 whatever provider wrote it, so moving to one needs nothing handed over and no
-longer refuses when the previous provider kept a session or is gone. A
-provider that keeps its conversation in a session of its own continues that
+longer refuses when the previous provider kept a session or is gone. Octant
+Harness on a direct endpoint is host-owned in this sense but keeps every
+session durably (`conversationOwnership: "host-resumable"`), so a new message
+continues the previous attempt's session and sends only itself: the same
+session id, which is the endpoint's prompt cache key, and the lead's own
+messages, tool calls and results. It continues only the same provider instance
+and model (in Work also the same folder binding), after a turn that completed,
+was cancelled, or was cut off by a restart, with a recorded resume cursor, and
+with no host compaction completed since that turn, because the session would
+never read the summary. The host still plans the whole conversation for a
+continued turn and only leaves its blocks out of the send: the plan is what
+spend admission and capacity size the request by (the session sends its
+transcript again with every request), what the context meter shows, and what
+a requested compaction selects from, so a long continued conversation stays
+compactable. When that plan has to leave earlier conversation out to fit, the
+turn does not continue either: the host rebuilds the history in a fresh
+session from that plan (Chat also compacts what it dropped, as for any
+host-planned turn), so what the model reads is what the plan journals rather
+than whatever the session's own window fitting kept. Anything else (the
+first turn, a failed or parked turn, a retry, an edit, a branch, an earlier
+turn regenerated or resumed after the previous turn ran, another provider or
+model) rebuilds the history on the host in a fresh session, as before, and the
+next message continues that one. Resuming never widens a thread: the harness refuses a
+transcript opened for another endpoint, folder, or mode as `stale-resume`, and
+each turn offers only the tools its own mode allows, so a Chat thread gains no
+tools by continuing. A provider that keeps its conversation in a session of its own continues that
 session only when it is the same provider instance with a recorded resume
 cursor (and, for another model, the `modelSwitch` capability; in Work also the
 same folder binding). Any other provider instance starts a new session with a
@@ -4076,10 +4203,9 @@ native harness in `apps/server/src/harness`:
   resolved credential values are redacted from it exactly as a fork's copy
   redacts them, plain and JSON-escaped; nothing but the conversation's own
   messages leaves, so no approval or other journal record rides along. The
-  lead is not offered the tool without that secret list. Chat and Work start
-  a fresh harness session each turn, so they have no durable conversation to
-  read: the catalog offers `journal-lookup` in Code only, and Chat and Work
-  join once their sessions are durable. Their note names no numbers. When the endpoint still rejects a request as too large,
+  lead is not offered the tool without that secret list. Chat and Work now
+  continue one session across turns, but the catalog still offers
+  `journal-lookup` in Code only, so their note names no numbers. When the endpoint still rejects a request as too large,
   the loop recognises the refusal as a filled context window (OpenAI's
   `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
   413 shape from an OpenAI-compatible host), shrinks it one further ladder
@@ -4097,6 +4223,32 @@ native harness in `apps/server/src/harness`:
   step are answered as not run, so the conversation stays valid for the next
   send. An unknown stream event type is
   ignored and logged, never fatal.
+- **Endpoint port.** A direct endpoint reaches the harness through the
+  provider-sdk harness endpoint port (`@octant/provider-sdk/harness-endpoint`),
+  the same seam a third-party driver would use. The port is types only: the
+  request, message, stream-event, response, and transport shapes the loop
+  consumes (the server's `NativeHarness*` transport names are aliases of them,
+  so there is one definition), and a `HarnessEndpointDriver` that keeps its own
+  probe, Verify tools, and authentication and supplies a `harnessEndpoint`: an
+  `open` that sends one request attempt and an `admitTurn` verdict on a turn's
+  input for one of its models. It has no `acquire`: `runOnNativeHarness` turns
+  it into a `ProviderDriver` whose connections the host builds with
+  `createNativeHarnessConnection`, refusing a connection with no product mode,
+  and whose conversations are host-owned. Before the driver's `admitTurn` is
+  asked, the host refuses a turn offering tools to a model without a Verify
+  tools record on the instance, so a driver's own verdict cannot hand tools
+  to an unverified model. The host wraps the transport in its
+  retry policy (below), registers that retrying endpoint in the
+  `NativeHarnessEndpointRegistry` with the driver's `admitTurn`, wires lead
+  fallback and the shared transcript store, and keeps the instance's session
+  count. `runHarnessEndpointConformance` proves an endpoint refuses unverified
+  tools, rejects a cancel as `interrupted`, and stops sending after release. The
+  OpenAI-compatible, Anthropic-compatible, and Azure AI Foundry drivers predate
+  the port and still build their connection, registration, and retries
+  themselves from host modules; they are queued to move onto it, and no new
+  driver takes that path. Moving them needs the port to carry what a response
+  teaches about the model's context window and served model, which only those
+  drivers learn today.
 - **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
   each step as it happens (`native-harness-transcript`, one aggregate per
   session): the user message once the request is known to fit, each reply,
@@ -4115,9 +4267,13 @@ native harness in `apps/server/src/harness`:
   Opening an endpoint belongs to the pending start or resume: if that operation
   is cancelled or its connection closes before opening finishes, the late
   endpoint is released without admitting a session or changing its transcript.
-  It cannot restore an active-session count after cleanup. Chat and Work still
-  rebuild their history on the host and
-  start a fresh session each turn.
+  It cannot restore an active-session count after cleanup. Chat and Work
+  continue the same way: a new message resumes the previous turn's session
+  from its cursor, whether the process restarted in between or the turn was
+  cancelled (each Chat or Work turn stops its live session when it ends, and
+  the next one resumes it from the journal), and the host rebuilds the history
+  in a fresh session only when the session cannot be taken up as it stands
+  (see "Chat and Work handoff").
 - **Forks.** A Code fork on a harness model starts its first session from a
   copy of the source's transcript through the fork point
   (`seedCodeForkHarnessSession`), resumed like any other: the lead keeps its
@@ -4257,13 +4413,20 @@ native harness in `apps/server/src/harness`:
   are unchanged. Residual risk: a short plain-word query can still carry a few
   words, but only to the endpoint the person chose. Revisit if a default
   hosted third-party search provider ships. A tool the thread was not offered
-  refuses as `tool-unavailable` without reaching policy or a person. The harness has no
-  per-host network rules, rule expiry, or learn mode yet: a tool process gets the
-  thread's OS-level `none` or `allow`. The approved design for them, with its pure
-  decision, event schemas, host proxy, grants, and learn mode built but no command routed through the proxy yet, is
-  [Harness tool egress rules](#harness-tool-egress-rules). `nativeHarnessEgress.hostile.test.ts` holds the
-  adversarial proofs; `nativeHarnessShell.test.ts` runs both shells under real
-  Seatbelt and shows only the networked one reaching a loopback listener.
+  refuses as `tool-unavailable` without reaching policy or a person. A harness
+  `bash` or `goal-check` command on an approval-gated or auto-accept-edits Code
+  thread runs on the `proxied` OS level: the OS rules deny it direct egress and
+  open only its launch's loopback proxy, its environment names that proxy, and
+  the host proxy decides each outside connection by the thread's and Project's
+  per-host rules, with expiry and learn-mode proposals a person confirms. A
+  launch whose proxy or start record is missing never runs its command. Full
+  access keeps `allow`, and Plan, Work, Chat, and a child without network
+  authority keep `none`. [Harness tool egress rules](#harness-tool-egress-rules)
+  owns the design. `nativeHarnessEgress.hostile.test.ts` holds the
+  adversarial proofs, including its `commands on proxied network` probes under
+  real Seatbelt or `bwrap`; `nativeHarnessShell.test.ts` runs the `none` and
+  `allow` shells under real Seatbelt and shows only the networked one reaching
+  a loopback listener.
 - **Tool verification.** A routine Check connection runs no generating
   request, so an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
   endpoint offers a model Octant's tools only after a person proved that model
@@ -4316,8 +4479,9 @@ native harness in `apps/server/src/harness`:
   subagent. The lead is the exception: it runs on the model its thread chose,
   and the `default` slot decides only where it continues once that model has
   failed (below).
-- **Endpoint failures.** Each direct-endpoint transport sends through
-  `sendWithEndpointRetry`, one policy for both wire protocols. Retryable are
+- **Endpoint failures.** Every direct-endpoint request goes through
+  `sendWithEndpointRetry`, one policy for every wire protocol; for a driver on
+  the endpoint port the host applies it around the driver's single attempt. Retryable are
   HTTP 408, 429, 500, 502, 503, 504, and 529 (classified `unavailable` or
   `rate-limited`, with a provider's `Retry-After` carried on the failure), a
   refused or reset connection, an idle stream, a stream that closes before its
@@ -4351,8 +4515,9 @@ native harness in `apps/server/src/harness`:
   turn's Project (a Project's table may only narrow the host's; turns of
   different Projects that would pick different models get no fallback), journals
   that decision on the thread's harness session, and opens the next model's
-  endpoint through the `NativeHarnessEndpointRegistry` that every direct-endpoint
-  driver fills as it is built. The target may belong to another provider
+  endpoint through the `NativeHarnessEndpointRegistry`, filled for every
+  direct endpoint as its driver is built (by the host for a driver on the
+  endpoint port). The target may belong to another provider
   instance; it must be a harness endpoint and must admit the turn's input, or
   the fallback is refused. The turn continues on it for its remaining steps and
   the next turn starts on the thread's own model. With no other ready model the
@@ -5000,9 +5165,17 @@ where it was or narrows it:
   product capsule hosted by the Electron runtime had only loopback, relayed to
   the host proxy, and refused direct connects, host loopback ports and name
   lookups.
-- _Accepted limit._ x64 Linux and the packaged AppImage's in-capsule forwarder
-  are unverified until there is an x64 Linux host or a CI job with bubblewrap
-  and a signed feed.
+- _x64 Linux probes._ They ran on 2026-10-25 on x64 Ubuntu 24.04 with
+  bubblewrap 0.9.0 and Node 22.22, all 11 cases, none skipped. The first run
+  failed one case: a Node 22 forwarder answers the `NODE_USE_ENV_PROXY=1` it
+  inherits for the command with an experimental-feature warning on stderr,
+  which is the command's stderr, so every proxied command's output carried it.
+  The forwarder now runs with `--no-warnings`; its own refusals are written
+  directly and still reach the output, and the command's environment is
+  unchanged.
+- _Accepted limit._ The packaged AppImage's in-capsule forwarder (Electron as
+  Node) is unverified until there is a CI job with bubblewrap and a signed
+  feed.
 - _The tainted thread's command confirmation._ When a lead's `bash` or
   `goal-check` on a tainted Code thread will run on `proxied`, its single-use
   approval lists the hosts the thread's live thread and Project rules name,
@@ -5775,6 +5948,12 @@ feature is already an independently packaged plugin:
 | Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
 | Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                          |
+
+A direct-endpoint provider driver supplies a transport through the provider-sdk
+harness endpoint port; the harness loop, endpoint registry, lead fallback, and
+retries stay host-owned. The OpenAI-compatible, Anthropic-compatible, and Azure
+AI Foundry drivers still wire those host modules directly and are queued to move
+onto the port ([Native harness](#native-harness)).
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a

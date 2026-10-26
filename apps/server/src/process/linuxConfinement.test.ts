@@ -518,6 +518,7 @@ describe("Linux Bubblewrap confinement", () => {
     const forwarder = join(sockets, "forwarder.cjs");
     expect(launch.args.slice(launch.args.indexOf("--") + 1)).toEqual([
       runtime,
+      "--no-warnings",
       forwarder,
       socket,
       String(LINUX_EGRESS_FORWARDER_PORT),

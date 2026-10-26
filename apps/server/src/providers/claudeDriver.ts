@@ -73,6 +73,7 @@ import {
 } from "./claudeProcess";
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
 const CLAUDE_TOOLS = [
   "Read",
@@ -1919,6 +1920,13 @@ function makeConnection(
             resumeCursor: {
               driverKind: "claude" as const,
               value: state.claudeSessionId!,
+              binding: providerResumeBinding({
+                instanceId: options.instanceId,
+                sessionId: state.sessionId,
+                projectRoot,
+                mode,
+                modelId: input.modelId,
+              }),
             },
           })),
         ),
@@ -1926,6 +1934,22 @@ function makeConnection(
         if (input.resumeCursor.driverKind !== "claude") {
           return Effect.fail(
             failure("stale-resume", "Provider resume cursor does not belong to Claude."),
+          );
+        }
+        // The recorded identity names the instance, session, folder, and
+        // sign-in but not the mode; the cursor's binding does, so a Work
+        // session is never reopened under Code's posture or the other way.
+        // The SDK resumes onto another model, so the model is not checked.
+        if (
+          resumeBindingRefuses(input.resumeCursor, {
+            instanceId: options.instanceId,
+            sessionId: input.sessionId,
+            projectRoot,
+            mode,
+          })
+        ) {
+          return Effect.fail(
+            failure("stale-resume", "The saved Claude session belongs to another task or Project."),
           );
         }
         return withSessionReservation(input.sessionId, async (signal) => {

@@ -94,6 +94,7 @@ import { unavailableLimitsReason } from "../providers/providerLimitsReporting";
 import { createProviderUsageLimitsRouteHandler } from "../providers/providerUsageLimitsRoutes";
 import { ProviderAccountPlanUsageStore } from "../providers/providerAccountPlanUsageStore";
 import { ProviderUsageReadingStore } from "../providers/providerUsageReadingStore";
+import { HeldTurnContextFile, heldTurnContext } from "../providers/heldTurnContext";
 import { ProviderRuntimeUsageLimitsStore } from "../providers/providerRuntimeUsageLimitsStore";
 import { attachProviderRuntimeUsageLimits } from "../providers/providerRuntimeUsageLimitsDriver";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
@@ -399,6 +400,12 @@ export function wireProviders(deps: ProvidersDependencies) {
       { readonly instanceId: string; readonly version: number; readonly driver: ProviderDriver }
     >();
     const providerDataDirectory = persistence.dataDirectory;
+    // What each provider-owned session already holds outlives this process, as
+    // the runtime's own history does, so a resumed session's first turn after
+    // a restart is sent only what is new.
+    heldTurnContext.persistTo(
+      new HeldTurnContextFile(join(providerDataDirectory, "providers", "held-turn-context.json")),
+    );
     const providerRuntimeUsageLimitsStore = new ProviderRuntimeUsageLimitsStore();
     const providerAccountPlanUsageStore = new ProviderAccountPlanUsageStore(
       join(providerDataDirectory, "providers", "plan-usage.json"),

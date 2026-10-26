@@ -131,8 +131,15 @@ export interface ProviderUserInputAnswer {
 }
 
 export interface ProviderDriver {
-  /** Provider-owned conversations must resume; host-owned APIs receive planned history. */
-  readonly conversationOwnership?: "provider" | "host";
+  /**
+   * Provider-owned conversations must resume; host-owned APIs receive planned
+   * history. `host-resumable` is host-owned, but the runtime keeps each
+   * session durably: a follow-up on the same instance and model may resume the
+   * earlier session and send only the new message, so its prompt cache and its
+   * own tool state survive, and the host rebuilds the history in a fresh
+   * session whenever that session cannot be taken up as it stands.
+   */
+  readonly conversationOwnership?: "provider" | "host" | "host-resumable";
   readonly kind: ProviderDriverKind;
   readonly contextFacts?: ProviderContextFactsSource;
   /** Optional read-only local history reader owned by the configured driver. */

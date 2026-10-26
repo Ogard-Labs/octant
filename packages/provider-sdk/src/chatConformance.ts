@@ -1,6 +1,7 @@
 import type {
   ProviderCapabilities,
   ProviderCapabilitySupport,
+  ProviderContextBlock,
   ProviderFailure,
   ProviderFailureCategory,
   ProviderInputModality,
@@ -72,17 +73,112 @@ export const unsupportedChatCapabilities = {
 
 export const textOnlyInputModalities: readonly ProviderInputModality[] = ["text"];
 
+const CONTEXT_TAG = "octant-context";
+
+/**
+ * A block's text with anything that could open or close a context tag
+ * neutralized. The JSON framing this replaced escaped every block; plain text
+ * does not, so without this a block could close its own section and pass the
+ * rest of its text off as another block, or as Octant's instructions.
+ */
+function neutralizeContextTags(text: string): string {
+  return text.replace(/<(\/?)(octant-context)/giu, "&lt;$1$2");
+}
+
+/**
+ * The text a provider receives for one turn: each context block as a tagged
+ * plain-text section in the order given, then the request itself.
+ *
+ * The framing is fixed and holds nothing but the blocks' own text, so the same
+ * blocks render to the same bytes every turn, and a runtime's own transcript
+ * stays readable. It replaced one JSON array of every block, which put escaped
+ * JSON at the head of every user message a native session recorded.
+ */
 export function renderProviderTurnPrompt(
   input: Pick<ProviderTurnInput, "context" | "prompt">,
 ): string {
   if (input.context === undefined || input.context.length === 0) return input.prompt;
   return [
-    "Octant normalized Chat context (JSON):",
-    JSON.stringify(input.context),
-    "",
+    ...input.context.map(
+      (block) =>
+        `<${CONTEXT_TAG} kind="${block.kind}">\n${neutralizeContextTags(block.text)}\n</${CONTEXT_TAG}>\n`,
+    ),
     "Current request:",
     input.prompt,
   ].join("\n");
+}
+
+/**
+ * The block kinds that stand for the whole session rather than for one turn:
+ * Octant's instructions, selected skills, project memory, and the work item. A
+ * session that already received one keeps it in its own history.
+ */
+const STANDING_CONTEXT_KINDS: ReadonlySet<ProviderContextBlock["kind"]> = new Set([
+  "instructions",
+  "project-memory",
+  "work-item",
+]);
+
+/** Whether a block stands for the whole session, and so is held once delivered. */
+export function isStandingProviderContext(block: ProviderContextBlock): boolean {
+  return STANDING_CONTEXT_KINDS.has(block.kind);
+}
+
+export const PROVIDER_CONTEXT_RESTATED =
+  "Octant's standing context for this conversation changed. The Octant context in this message replaces all Octant context sent earlier in this conversation.";
+
+export type ProviderTurnContextDelta =
+  | {
+      /** Held standing blocks are left out; everything else is sent. */
+      readonly kind: "appended";
+      readonly context: ReadonlyArray<ProviderContextBlock>;
+      /** Standing blocks left out because the session already holds them. */
+      readonly held: ReadonlyArray<ProviderContextBlock>;
+    }
+  | {
+      /** A held standing block was withdrawn, so the whole context is sent again. */
+      readonly kind: "restated";
+      readonly context: ReadonlyArray<ProviderContextBlock>;
+      readonly held: readonly [];
+    };
+
+/**
+ * What one turn sends to a provider-owned session that may already hold some
+ * of its standing context from earlier turns.
+ *
+ * A native session keeps every user message it was sent, so resending the same
+ * instructions each turn added another copy to its window and its visible
+ * history every turn, and made each turn's new input larger than the request.
+ * Standing blocks the session holds are left out; per-turn blocks (messages,
+ * summaries, mentions, handoffs) are always sent. When a standing block the
+ * session holds is no longer in the turn's context (a deselected skill, say),
+ * leaving the rest out would let the stale copy stand, so the whole context is
+ * sent again behind a note that it replaces what came before.
+ */
+export function providerTurnContextDelta(input: {
+  readonly context: ReadonlyArray<ProviderContextBlock>;
+  /** Whether the session holds this exact block from an earlier turn. */
+  readonly holds: (block: ProviderContextBlock) => boolean;
+  /** How many distinct standing blocks the session holds. */
+  readonly heldCount: number;
+}): ProviderTurnContextDelta {
+  const held: ProviderContextBlock[] = [];
+  const context: ProviderContextBlock[] = [];
+  const stillHeld = new Set<string>();
+  for (const block of input.context) {
+    if (isStandingProviderContext(block) && input.holds(block)) {
+      held.push(block);
+      stillHeld.add(`${block.kind}\u0000${block.text}`);
+    } else context.push(block);
+  }
+  if (stillHeld.size < input.heldCount) {
+    return {
+      kind: "restated",
+      context: [{ kind: "instructions", text: PROVIDER_CONTEXT_RESTATED }, ...input.context],
+      held: [],
+    };
+  }
+  return { kind: "appended", context, held };
 }
 
 export const attachmentMediaTypeToModality = (

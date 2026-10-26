@@ -962,6 +962,7 @@ describe("OpenCode driver", () => {
           });
           yield* connection.resume({
             sessionId,
+            modelId,
             resumeCursor: { driverKind: "opencode", value: "provider-session" },
             executionPolicy: "approval-gated",
             tools: [{ name: "octant_browser", inputSchema: { type: "object" } }],
@@ -978,6 +979,85 @@ describe("OpenCode driver", () => {
     expect(fixture.calls.some((call) => call.startsWith("mcp.add:"))).toBe(true);
     expect(fixture.calls.some((call) => call.startsWith("session.create:"))).toBe(false);
     expect(fixture.calls).toContain("session.promptAsync");
+    // The legacy session record names no model; the prompt runs on the thread's.
+    expect(fixture.promptModels).toEqual([modelId]);
+  });
+
+  it("refuses to resume a session it cannot name a model for", async () => {
+    const fixture = driverFixture();
+    const exit = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project" }).pipe(
+          Effect.flatMap((connection) =>
+            Effect.exit(
+              connection.resume({
+                sessionId,
+                resumeCursor: { driverKind: "opencode", value: "provider-session" },
+                executionPolicy: "approval-gated",
+              }),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(String(exit)).toContain("stale-resume");
+    expect(fixture.calls).not.toContain("session.promptAsync");
+  });
+
+  it("records the session's task, folder, mode, and model at start and refuses a resume that names others", async () => {
+    const fixture = driverFixture();
+    const binding = {
+      instanceId,
+      sessionId,
+      projectRoot: "/tmp/project",
+      mode: "work" as const,
+      modelId,
+    };
+    const started = await Effect.runPromise(
+      Effect.scoped(
+        fixture.driver
+          .acquire({ instanceId, projectRoot: "/tmp/project", mode: "work" })
+          .pipe(
+            Effect.flatMap((connection) =>
+              connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+            ),
+          ),
+      ),
+    );
+    expect(started.resumeCursor).toEqual({
+      driverKind: "opencode",
+      value: "provider-session",
+      binding,
+    });
+    for (const mismatch of [
+      { sessionId: decodeProviderSessionId("90000000-0000-4000-8000-0000000000aa") },
+      { projectRoot: "/tmp/other" },
+      { mode: "code" as const },
+      { modelId: "openai/gpt-5" as ProviderModelId },
+    ]) {
+      const exit = await Effect.runPromise(
+        Effect.scoped(
+          fixture.driver.acquire({ instanceId, projectRoot: "/tmp/project", mode: "work" }).pipe(
+            Effect.flatMap((connection) =>
+              Effect.exit(
+                connection.resume({
+                  sessionId,
+                  modelId,
+                  resumeCursor: {
+                    driverKind: "opencode",
+                    value: "provider-session",
+                    binding: { ...binding, ...mismatch },
+                  },
+                  executionPolicy: "approval-gated",
+                }),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(String(exit)).toContain("stale-resume");
+    }
+    expect(fixture.calls.filter((call) => call.startsWith("mcp.add:"))).toEqual([]);
   });
 
   it("refuses a replacement native identity returned during resume", async () => {
@@ -2509,6 +2589,7 @@ function driverFixture(
   };
   const session = providerSession(options.sessionDirectory ?? "/tmp/project");
   const sessionRoots: string[] = [];
+  const promptModels: string[] = [];
   const client: OpenCodeClientPort = {
     health: async () => ({ healthy: true, version: "1.18.0" }),
     providers: async () => providerList(),
@@ -2532,8 +2613,9 @@ function driverFixture(
       return session;
     },
     getSession: async () => ({ ...session, id: options.resumedSessionId ?? session.id }),
-    prompt: async () => {
+    prompt: async ({ providerId, modelId: promptModel }) => {
       calls.push("session.promptAsync");
+      promptModels.push(`${providerId}/${promptModel}`);
     },
     addMcpServer: async ({ name, url }) => {
       if (options.mcpSupported === false) throw new Error("MCP transport is unavailable");
@@ -2600,6 +2682,7 @@ function driverFixture(
   };
   return {
     calls,
+    promptModels,
     catalogueRoots,
     sessionRoots,
     processInputs,
