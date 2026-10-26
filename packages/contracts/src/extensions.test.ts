@@ -289,6 +289,29 @@ describe("extension package contracts", () => {
     ).toThrow();
   });
 
+  it("accepts a desktop-provider only as an executable component with an entry point", () => {
+    const desktopProvider = (entryPoint?: string) =>
+      decodeExtensionPackageManifest({
+        ...manifest(),
+        slug: "host-local-desktop",
+        declaredCapabilities: ["computer-use"],
+        primaryComponentId: "desktop-provider",
+        components: [
+          {
+            id: "desktop-provider",
+            kind: "desktop-provider",
+            displayName: "Host-local desktop",
+            declaredCapabilities: ["computer-use"],
+            ...(entryPoint === undefined ? {} : { entryPoint }),
+          },
+        ],
+      });
+    expect(desktopProvider("builtin:desktop-provider/host-local").components[0]?.kind).toBe(
+      "desktop-provider",
+    );
+    expect(() => desktopProvider()).toThrow();
+  });
+
   it("rejects an appearance-pack that claims an executable entry point", () => {
     expect(() =>
       decodeExtensionPackageManifest({
