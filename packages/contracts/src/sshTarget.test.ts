@@ -9,8 +9,6 @@ const target = {
     algorithm: "ssh-ed25519",
     publicKey: "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
   },
-  remoteUser: "build",
-  platform: "linux",
   executorPath: "/opt/octant/bin/octant",
 };
 
@@ -46,10 +44,35 @@ describe("SSH target contracts", () => {
     expect(decode({ ...target, executorPath: "octant" })._tag).toBe("Left");
   });
 
-  it("refuses a target on a platform the confinement port does not support", () => {
-    expect(Schema.decodeUnknownEither(SshTarget)({ ...target, platform: "windows" })._tag).toBe(
-      "Left",
-    );
+  it("accepts an executor path only in characters the target's login shell passes through unchanged", () => {
+    const decode = Schema.decodeUnknownEither(SshTarget);
+    for (const executorPath of [
+      "/opt/octant/bin/octant",
+      "/home/build/.local/share/octant/current/bin/octant",
+      "/srv/octant-1.2.3+build/bin/octant",
+    ]) {
+      expect(decode({ ...target, executorPath })._tag).toBe("Right");
+    }
+    for (const executorPath of [
+      "octant",
+      "/opt/octant bin/octant",
+      "/opt/octant;id",
+      "/opt/$(id)/octant",
+      "/opt/`id`/octant",
+      "/opt/octant'/bin",
+      "/opt/octant/bin/octant\n",
+      "/opt/*/octant",
+      "/opt//octant",
+      "/",
+    ]) {
+      expect(decode({ ...target, executorPath })._tag).toBe("Left");
+    }
+  });
+
+  it("keeps a registered target free of the remote user and platform, which each connection attests anew", () => {
+    const decode = Schema.decodeUnknownEither(SshTarget);
+    expect(decode({ ...target, remoteUser: "build" })._tag).toBe("Left");
+    expect(decode({ ...target, platform: "linux" })._tag).toBe("Left");
   });
 
   it("decodes an attestation from an unsupported platform as data the host can refuse", () => {

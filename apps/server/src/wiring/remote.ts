@@ -41,6 +41,9 @@ import { resolvePrivateListenerHostIdentity } from "../remote/privateListenerHos
 import { createPrivateListenerAdministrationRouteHandler } from "../remote/privateListenerAdministrationRoutes";
 import { createPrivateListenerSetting } from "../remote/privateListenerSetting";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
+import { createSshTargetAdministrationRouteHandler } from "../sshTarget/sshTargetAdministrationRoutes";
+import { SshTargetConnectionService } from "../sshTarget/sshTargetConnectionService";
+import { SshTargetRegistry } from "../sshTarget/sshTargetRegistry";
 import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -318,6 +321,18 @@ export function wireRemote(deps: RemoteDependencies) {
     setting: privateListenerSetting,
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
+  // SSH targets are administered from this machine alone, like the listener:
+  // the routes sit on the loopback chain beside it, never in product dispatch.
+  const sshTargetConnections = new SshTargetConnectionService({
+    registry: new SshTargetRegistry(providerDataDirectory),
+    buildVersion: version,
+  });
+  const sshTargetAdministrationRoutes = createSshTargetAdministrationRouteHandler({
+    desktopBridgeSecret: options.desktopBridgeSecret,
+    windowAuthorityStore,
+    connections: sshTargetConnections,
+    maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
+  });
   // One diagnostics composer is shared by the owner control socket (through
   // the returned server shape) and the authenticated local host-control
   // routes, so the web Settings host card and `octant server status`
@@ -519,6 +534,8 @@ export function wireRemote(deps: RemoteDependencies) {
     privateListenerSetting,
     providerCredentialRoutes,
     remoteHost,
+    sshTargetAdministrationRoutes,
+    sshTargetConnections,
   };
 }
 

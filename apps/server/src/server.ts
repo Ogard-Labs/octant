@@ -1088,6 +1088,8 @@ export function startOctantServer(
       privateListenerSetting,
       providerCredentialRoutes,
       remoteHost,
+      sshTargetAdministrationRoutes,
+      sshTargetConnections,
     } = wireRemote({
       canvasPublicShareService,
       threadExportService,
@@ -1184,6 +1186,7 @@ export function startOctantServer(
               }
               return (
                 (await privateListenerAdministrationRoutes(request)) ??
+                (await sshTargetAdministrationRoutes(request)) ??
                 (await providerCredentialRoutes(request)) ??
                 (await localDeviceAdministrationRoutes(request)) ??
                 (await hostControlRoutes(request)) ??
@@ -1375,6 +1378,12 @@ export function startOctantServer(
           }
           try {
             zenService.close();
+          } catch (error) {
+            shutdownFailure ??= error;
+          }
+          try {
+            // Each executor exits when its session's input closes.
+            sshTargetConnections.close();
           } catch (error) {
             shutdownFailure ??= error;
           }

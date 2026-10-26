@@ -9,11 +9,18 @@ builds on: [modes and checkout binding](../architecture.md#modes-chat-work-and-c
 [persistence](../architecture.md#persistence), and
 [security and authority](../architecture.md#security-and-authority).
 
-**Delivery state.** Accepted 2026-10-26. Slice 2, the admission policy and
-contracts, is built: the schemas in `packages/contracts/src/sshTarget.ts` and
-the pure decision in `packages/domain/src/sshTargetAdmissionPolicy.ts`. No host
-service calls it yet, so no Project can bind a remote root; slices 3 to 8 are
-not built. Remote SSH
+**Delivery state.** Accepted 2026-10-26. Slices 2 and 3 are built. Slice 2 is
+the admission policy and contracts: the schemas in
+`packages/contracts/src/sshTarget.ts` and the pure decision in
+`packages/domain/src/sshTargetAdmissionPolicy.ts`. Slice 3 is the executor,
+transport, and attestation in `apps/server/src/sshTarget/`: the executor behind
+`octant executor --stdio`, the framed protocol in
+`packages/contracts/src/sshExecutorProtocol.ts`, the host connection service,
+the local administration routes, `octant ssh-target`, and Linux canaries. No
+Project can bind a remote root yet, so nothing but attestation runs on a target;
+slices 4 to 8 are not built. Until slice 4 journals target events, a
+registration and its pin live only in the owner-only `ssh-targets` directory
+under the data directory, and attestation results only in memory. Remote SSH
 environments are authorized post-preview work as of 2026-10-26, when the
 maintainer unlocked the parked backlog and accepted the
 [maintainer decisions](#maintainer-decisions) below. That authorizes this design
@@ -38,8 +45,9 @@ design is built around.
 ## Terms
 
 - **SSH target.** A remote machine this host has registered: an SSH destination
-  (as the person would type it after `ssh`), a pinned host key, the remote user it
-  logged in as, its platform, and the path of the executor on it. An SSH target is
+  (as the person would type it after `ssh`), a pinned host key, and the path of
+  the executor on it. The remote user and platform are facts each connection
+  attests, not part of the registration. An SSH target is
   not a host, a Machine, or a paired device. It has no journal, identity key,
   listener, or credential store of Octant's.
 - **Executor.** A small Octant process on the SSH target, started by this host
@@ -142,13 +150,39 @@ no shell metacharacter such as `;`, `$`, `|`, a quote, or a backtick, because
 the client substitutes the host into a configured `ProxyCommand`; OpenSSH 9.6
 refuses the same names itself, and older clients pass them on.
 
+These rules settle how registration reads and pins a key, each in the
+fail-closed direction:
+
+- **Reading the key logs in nowhere.** The probe connects with every
+  authentication method off and asks for no command (`-N`), accepting the new
+  key only into a fresh file of its own, so it ends at "permission denied". The
+  host holds the key it read for ten minutes, for one confirmation: a
+  fingerprint that does not match, or a second use, refuses and pins nothing.
+- **The person confirms the fingerprint.** `octant ssh-target add` and
+  `repin` show it and pin only on a typed `yes`, or on `--fingerprint` given
+  beforehand and equal to the one presented; without a terminal and without
+  that flag nothing is pinned. A re-pin probe must name the target's own
+  destination (`destination-mismatch` otherwise).
+- **One pin file per target.** Each target's known-hosts file holds exactly its
+  pinned key for every name (`*`), so the person's configuration may resolve
+  the destination to any host name, port, or jump host without the pin
+  depending on which name the client looks up, and the file never vouches for
+  another target. The registration and the file are owner-only.
+- **A registration remembers no attested fact.** It holds the destination, the
+  pinned key, and the executor path. The remote user and platform are facts of
+  each connection's attestation and are shown only while that connection holds
+  one.
+
 ### Transport
 
 One SSH connection per target, owned by a host service in `apps/server`. The host
 runs the system OpenSSH client with a fixed argument list. Nothing a thread,
-model, or remote produces reaches its arguments or environment. Options given on
-the command line take precedence over the person's SSH configuration, and these
-are always set:
+model, or remote produces reaches its arguments or environment. The client
+inherits only `HOME`, `USER`, `LOGNAME`, `PATH`, `SSH_AUTH_SOCK`, `TMPDIR` and the
+locale, never the server's whole environment: a person's `SendEnv` pattern would
+otherwise forward provider keys exported in their shell to any target whose
+`sshd` accepts them. Options given on the command line take precedence over the
+person's SSH configuration, and these are always set:
 
 | Option                                                | Why                                                             |
 | ----------------------------------------------------- | --------------------------------------------------------------- |
@@ -158,6 +192,29 @@ are always set:
 | `StrictHostKeyChecking=yes`, `UserKnownHostsFile=<…>` | Only the pinned key is accepted, from Octant's file             |
 | `BatchMode=yes`, `-T`                                 | No password or passphrase prompt reaches Octant; no remote PTY  |
 | Remote command: the executor's absolute path only     | The remote shell receives no interpolated data, only the binary |
+| `--` before the destination                           | No destination can be read as an option, whatever the schema    |
+
+Slice 3 settled the rest of the list, each against a configured behavior that
+would otherwise weaken a row above: `GlobalKnownHostsFile=/dev/null`,
+`KnownHostsCommand=none`, `VerifyHostKeyDNS=no`, `UpdateHostKeys=no`,
+`CheckHostIP=no`, and `HashKnownHosts=no` keep Octant's pin file the only voice
+for the target's key; `ControlMaster=no` and `ControlPath=none` keep a shared
+master, checked under other rules, from carrying the session;
+`RemoteCommand=none` keeps a configured command from replacing the executor;
+`ForwardX11Trusted=no` and `Tunnel=no` close the remaining forwarding paths;
+`EscapeChar=none` keeps frame bytes from controlling the client; and
+`ServerAliveInterval=15` with `ServerAliveCountMax=3` turns a silent session
+into a lost one. The known-hosts path is quoted, with `%` doubled, because
+OpenSSH splits that option's value on whitespace into several files and expands
+`%` tokens in it: unquoted, a data directory under macOS's `Application
+Support` named `~/Library/Application` as a second known-hosts file, which the
+probe wrote every key it read into and every session then trusted. A path
+holding a quote, backslash, or control character is refused.
+`apps/server/src/sshTarget/sshClientArguments.ts` holds the list, and its test
+pins it. The remote command is the executor path followed by
+the fixed words `executor --stdio`, and the executor path is an absolute path
+whose segments hold only letters, digits, `.`, `_`, `+`, and `-`, so the
+target's login shell passes it through unchanged.
 
 The person's own configuration (destination alias, user, port, `ProxyJump`,
 identity file) still applies. The SSH client runs outside the thread sandbox: it
@@ -172,6 +229,38 @@ flow control, so one noisy command cannot starve another. Requests go from host
 to executor; the executor sends only replies, process output, exit status, and
 connection-head questions for egress (below). The executor cannot start a turn,
 ask for approval, call an app tool, or write to the journal.
+
+The protocol as slice 3 built it (`packages/contracts/src/sshExecutorProtocol.ts`)
+carries only the introduction and attestation; process channels and egress
+questions arrive with the launches that need them. These rules settle what the
+paragraph above leaves open:
+
+- **Framing.** A frame is a four-byte big-endian length and that many bytes of
+  UTF-8 JSON, at most 1 MiB. A longer frame, a body that is not JSON, or a
+  value that does not decode ends the session; a stream that lost its framing
+  is never resynchronized.
+- **Login-shell output.** The target's login shell can print text before the
+  executor starts. The executor writes a fixed preamble before its first frame,
+  and the host discards at most 64 KiB before it, unread; more refuses.
+- **Introduction first.** The executor's first frame names its build, protocol,
+  and whether its install verified, in a shape no protocol version changes. The
+  host asks nothing of an executor whose introduction differs from this host in
+  any of the three, and holds the connection as `executor-version-mismatch`; the
+  policy refuses that state with the same reason. Requests run one at a time;
+  a second while one runs is answered `busy`.
+- **Why a session failed.** The client's own message is the only evidence of a
+  refused key, so "host key verification failed" or "remote host identification
+  has changed" reads as `host-key-changed`. The remote shell's 126 or 127 reads
+  as `executor-missing`. The client's 255, a session killed, or no introduction
+  within a minute (or no attestation within three) reads as `target-unreachable`.
+  Any other exit before an introduction means the program at the executor path
+  is not an executor this host can speak to, and reads as
+  `executor-version-mismatch`. An exit after a matching introduction is a lost
+  session and reads as `target-unreachable`.
+- **When it connects.** Slice 3 connects on registration, re-pin, and an
+  explicit connect, and a connection that ends is held as `target-unreachable`
+  with no attestation. Reconnecting on its own, with bounded backoff, arrives
+  with remote-bound Projects, which give it a reason to.
 
 **Rationale: an executor, not plain `ssh` commands.** Running each operation as
 `ssh target <command>` was rejected. Each call would be a command string parsed
@@ -190,14 +279,21 @@ reports exactly this host's build version and protocol version, and the executor
 verifies its own install the way the headless server already does before it
 answers. The refusal names the install command for the matching version.
 Octant does not upload the executor
-([decision 1](#maintainer-decisions)).
+([decision 1](#maintainer-decisions)). The headless artifact ships the executor
+as its own bundle, `lib/server/sshTarget/executorMain.mjs`, which loads none of
+the server and opens no store. An executor run from a source checkout has no
+install to verify and reports the development version, which only a development
+host matches, so a packaged host never admits one.
 
 The executor runs as the logged-in remote user, never root: a session whose
 remote user is uid 0 is refused `remote-root-user`, because a root executor's
 confined children can undo their own confinement. It creates one owner-only
 runtime directory per session for scratch, temporary files, and the egress
 forwarder, removes it when the session ends, and sweeps stale ones at start. It
-opens no listening socket.
+opens no listening socket. The runtime directories sit under one
+`octant-executor-<uid>` folder in the target's temporary directory; a folder of
+that name the remote user does not own, that is a link, or that others can
+enter is refused rather than used, and the canaries then report inconclusive.
 
 ### Confinement attestation and admission
 
@@ -292,9 +388,13 @@ rules settle what the tables above leave open, each in the fail-closed direction
   connection, the attestation's connection, identity, platform, user, any escape,
   the backend, and the requested posture's canaries.
 
-**What attestation proves, and what it does not.** It proves that this
-connection's executor is the matching Octant build and that confinement held
-against the canaries on that kernel, under a non-root user. It does not prove
+**What attestation proves, and what it does not.** Every fact is the executor's
+own report, because this host cannot inspect the target. Reported by an
+unaltered executor, it shows that this connection's executor is the matching
+Octant build and that confinement held against the canaries on that kernel,
+under a non-root user. An executor altered by the remote user or root can report
+anything, including a passing attestation; attestation does not detect that,
+which is why altering the executor is outside the threat model below. It does not prove
 anything against the remote's root or kernel, exactly as local confinement proves
 nothing against this Mac's root. A remote administrator can read the remote root
 and alter the executor; the person's choice of target is the trust in that
@@ -306,6 +406,38 @@ because a launch that cannot get its namespaces fails closed at launch. On an
 unknown remote kernel the same failure would surface mid-turn as a broken tool.
 Canaries turn it into an up-front refusal with a recovery, and they also catch a
 backend that starts but does not confine, which a presence check cannot.
+
+The Linux canaries as slice 3 built them (`executorAttestation.ts`) settle these
+details, each in the fail-closed direction:
+
+- **A refusal must be the probe's own report.** Each probe is this build's
+  runtime running a fixed probe program through the executor's
+  `ProcessConfinementPort`. It prints a per-launch nonce and its verdict; a
+  launch that fails to start, times out, or prints anything else is
+  `inconclusive`.
+- **A forbidden action must be possible unconfined.** Before each probe the
+  executor checks, as itself, that the action would succeed without
+  confinement: the folders exist and are writable, `~/.ssh` exists and can be
+  listed, `/bin/sh` runs, and the SSH server's own address (from
+  `SSH_CONNECTION`) accepts a connection. Otherwise the probe is `inconclusive`,
+  because a refusal could not be told from an impossible action. A target
+  without `~/.ssh` therefore cannot attest the writing postures.
+- **The network probes dial the SSH server.** It is the one address certain to
+  be listening on the target, so a probe that cannot reach it was stopped by its
+  confinement, and the executor needs no listener of its own.
+- **Scratch root until Projects bind roots.** Until slice 4 binds a remote root,
+  the canaries prove the posture's grants against a scratch root, its sibling
+  folder, a folder outside it, and a stand-in for another session's runtime
+  directory, all in the executor's own owner-only directory. Probes read no
+  file's contents back.
+- **Writing postures have no network yet.** Until the executor's egress
+  forwarder exists (slice 5), Octant's launches on a target in every confined
+  posture get no network, so the probe that connects around the forwarder proves
+  that nothing leaves the capsule. The canaries run with the grants the
+  launches use, so attestation follows whatever those grants become.
+- **No canaries as root.** A uid 0 executor launches no probe: the host refuses
+  `remote-root-user` before it looks at canaries, and a root launch would only
+  add risk.
 
 ### Provider runtimes on a target
 
@@ -491,7 +623,13 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    reason for each of: missing `bwrap`, a fake confinement whose canary escapes,
    a changed host key, a version mismatch, and a root login; a test asserts the
    SSH argument list; registration from a paired device is refused. Verification
-   includes server route negatives and `git diff --check`.
+   includes server route negatives and `git diff --check`. Built 2026-10-26; its
+   evidence is `sshTargetLoopback.smoke.test.ts` (the system client, a loopback
+   `sshd`, and the bundled executor; it runs as root on Linux with OpenSSH server
+   and bubblewrap installed, and skips elsewhere), `sshClientArguments.test.ts`,
+   `sshTargetAdministrationRoutes.test.ts`, and
+   `sshTargetConnectionService.test.ts`, which covers the host side against a
+   stand-in client wherever `sshd` is absent.
 4. **Remote-bound Code Projects and reads.** Container. Bind a remote root
    (local-only), Files, Git status, and diff through the executor, each admitted
    by slice 2's policy. Accepted when a Project on an unattested target refuses
