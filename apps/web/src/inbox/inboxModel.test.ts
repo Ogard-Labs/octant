@@ -10,17 +10,18 @@ import {
 
 const signal = (overrides: Partial<ThreadAttentionSignal>): ThreadAttentionSignal => ({
   threadId: "thread-a",
-  reason: "turn-finished",
+  reason: "question-asked",
   title: "Thread",
   source: "code",
   ...overrides,
 });
 
 describe("buildInboxAttentionItems", () => {
-  it("lists blocked threads before finished ones and names their Project", () => {
+  it("lists what needs the person, names the Project, and leaves finished turns out", () => {
     const items = buildInboxAttentionItems(
       [
         signal({ threadId: "t1", reason: "turn-finished", title: "Done turn" }),
+        signal({ threadId: "t4", reason: "follow-up-due", title: "Due" }),
         signal({ threadId: "t2", reason: "approval-required", title: "Blocked", projectId: "p1" }),
         signal({ threadId: "t3", reason: "question-asked", title: "Asking" }),
       ],
@@ -30,7 +31,7 @@ describe("buildInboxAttentionItems", () => {
     expect(items.map((item) => item.signal.reason)).toEqual([
       "approval-required",
       "question-asked",
-      "turn-finished",
+      "follow-up-due",
     ]);
     expect(items[0]?.projectName).toBe("Octant");
     expect(items[1]?.projectName).toBeUndefined();
@@ -65,21 +66,21 @@ describe("buildInboxAttentionItems", () => {
       );
 
     expect(meta("work")).toEqual([
-      "Chat thread: Finished a turn · Ideas",
-      "Code thread: Finished a turn · Octant · Code",
-      "Work thread: Finished a turn · Notes",
+      "Chat thread: Asked a question · Ideas",
+      "Code thread: Asked a question · Octant · Code",
+      "Work thread: Asked a question · Notes",
     ]);
     expect(meta("code")).toEqual([
-      "Chat thread: Finished a turn · Ideas · Work",
-      "Code thread: Finished a turn · Octant",
-      "Work thread: Finished a turn · Notes · Work",
+      "Chat thread: Asked a question · Ideas · Work",
+      "Code thread: Asked a question · Octant",
+      "Work thread: Asked a question · Notes · Work",
     ]);
   });
 
   it("still names the mode of a thread whose Project is not known", () => {
     const [item] = buildInboxAttentionItems([signal({ source: "code" })], new Map(), "work");
     expect(item === undefined ? undefined : inboxAttentionMeta(item)).toBe(
-      "Finished a turn · Code",
+      "Asked a question · Code",
     );
   });
 });
@@ -89,7 +90,7 @@ describe("inboxThreadProjectId", () => {
     const otherProjectId = decodeProjectId("00000000-0000-4000-8000-000000000802");
     const waitingThread: ThreadAttentionSignal = {
       threadId: "00000000-0000-4000-8000-000000000803",
-      reason: "turn-finished",
+      reason: "question-asked",
       title: "Cross-project chat",
       source: "chat",
       projectId: String(otherProjectId),

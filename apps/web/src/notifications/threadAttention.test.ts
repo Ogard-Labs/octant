@@ -25,14 +25,23 @@ describe("thread attention", () => {
       EMPTY_THREAD_ATTENTION,
     );
     expect(first.announce).toEqual([finished, asked]);
-    expect(first.badgeCount).toBe(2);
+    expect(first.badgeCount).toBe(1);
 
     const second = evaluateThreadAttention(
       { signals: [finished, asked], windowFocused: false },
       first.raised,
     );
     expect(second.announce).toEqual([]);
-    expect(second.badgeCount).toBe(2);
+    expect(second.badgeCount).toBe(1);
+  });
+
+  it("announces a finished turn but never counts it toward the badge", () => {
+    const outcome = evaluateThreadAttention(
+      { signals: [finished], windowFocused: false },
+      EMPTY_THREAD_ATTENTION,
+    );
+    expect(outcome.announce).toEqual([finished]);
+    expect(outcome.badgeCount).toBe(0);
   });
 
   it("re-announces a signal that cleared and came back", () => {
@@ -41,7 +50,6 @@ describe("thread attention", () => {
       EMPTY_THREAD_ATTENTION,
     );
     const cleared = evaluateThreadAttention({ signals: [], windowFocused: false }, raised.raised);
-    expect(cleared.badgeCount).toBe(0);
     const again = evaluateThreadAttention(
       { signals: [finished], windowFocused: false },
       cleared.raised,
@@ -60,11 +68,11 @@ describe("thread attention", () => {
 
   it("badges but does not re-banner a signal the user already watched", () => {
     const watched = evaluateThreadAttention(
-      { signals: [finished], watchedThreadId: "thread-a", windowFocused: true },
+      { signals: [asked], watchedThreadId: "thread-b", windowFocused: true },
       EMPTY_THREAD_ATTENTION,
     );
     const blurred = evaluateThreadAttention(
-      { signals: [finished], watchedThreadId: "thread-a", windowFocused: false },
+      { signals: [asked], watchedThreadId: "thread-b", windowFocused: false },
       watched.raised,
     );
     expect(blurred.announce).toEqual([]);
@@ -86,14 +94,14 @@ describe("thread attention", () => {
   it("counts a thread with a waiting subagent once, without announcing it", () => {
     const outcome = evaluateThreadAttention(
       {
-        signals: [finished],
+        signals: [asked],
         waitingThreadIds: ["thread-a", "thread-c", "thread-c"],
         windowFocused: false,
       },
       EMPTY_THREAD_ATTENTION,
     );
-    expect(outcome.badgeCount).toBe(2);
-    expect(outcome.announce).toEqual([finished]);
+    expect(outcome.badgeCount).toBe(3);
+    expect(outcome.announce).toEqual([asked]);
   });
 
   it("does not count a waiting subagent on the thread the user is watching", () => {

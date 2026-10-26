@@ -67,7 +67,8 @@ The sidebar displays a mode-aware Project hierarchy. Each mode group lists its P
 ## Count tiles and the thread list
 
 Four tiles at the top of the sidebar count what matters right now: **Inbox**
-(threads that need you), **Running**, **To review** (finished turns you have
+(approvals, questions, due follow-ups and subagent requests waiting on you),
+**Running**, **To review** (finished turns you have
 not opened yet), and **Done today**. Click a tile to go there: Running opens
 the Board (the Activity feed in Chat), To review opens the Review page, and
 Done today opens the Put away shelf. Turn the tiles off in **Settings ›
