@@ -69,17 +69,25 @@ const NOT_RUN_RESULT_JSON = JSON.stringify({
   note: "This call was not run: the turn stopped after repeated malformed tool calls.",
 });
 const OMITTED_HISTORY_NOTE =
-  "Earlier messages of this session were left out to fit the context window. Your task list and the files on disk still reflect that work.";
+  "Earlier messages of this session were left out to fit the context window.";
 
 /**
  * The note in front of a cut. It names message numbers only when the lead is
  * offered `journal-lookup` and every number it names is already journaled, so
- * the model is never handed a handle it cannot fetch.
+ * the model is never handed a handle it cannot fetch. A Chat thread has no
+ * folder, so its note does not point the lead at files it cannot reach.
  */
-function omittedHistoryNote(journaledBefore: number | undefined): string {
+function omittedHistoryNote(
+  mode: OctantMode | undefined,
+  journaledBefore: number | undefined,
+): string {
+  const kept =
+    mode === "work" || mode === "code"
+      ? `${OMITTED_HISTORY_NOTE} Your task list and the files on disk still reflect that work.`
+      : `${OMITTED_HISTORY_NOTE} Your task list still reflects that work.`;
   return journaledBefore === undefined || journaledBefore < 1
-    ? OMITTED_HISTORY_NOTE
-    : `${OMITTED_HISTORY_NOTE} Messages 0 to ${journaledBefore - 1} are kept in the journal: call journal-lookup with one of those numbers as from to re-read them.`;
+    ? kept
+    : `${kept} Messages 0 to ${journaledBefore - 1} are kept in the journal: call journal-lookup with one of those numbers as from to re-read them.`;
 }
 
 /**
@@ -478,7 +486,7 @@ export function createNativeHarnessConnection(
         const refit = fitRequest(
           state.fallback.endpoint,
           { ...request, modelId: state.fallback.target.modelId },
-          { journalNumberOf: journalNumberIn(state) },
+          { journalNumberOf: journalNumberIn(state), mode: options.mode },
         );
         if (refit === undefined) {
           throw failure(
@@ -519,6 +527,7 @@ export function createNativeHarnessConnection(
               : fitRequest(state.fallback?.endpoint ?? state.endpoint, current, {
                   reduceOnce: true,
                   journalNumberOf: journalNumberIn(state),
+                  mode: options.mode,
                 });
             if (refit !== undefined) {
               state.pricingBoundariesKnown = false;
@@ -555,7 +564,7 @@ export function createNativeHarnessConnection(
           const moved = fitRequest(
             outcome.endpoint,
             { ...current, modelId: outcome.target.modelId },
-            { journalNumberOf: journalNumberIn(state) },
+            { journalNumberOf: journalNumberIn(state), mode: options.mode },
           );
           if (moved === undefined) {
             outcome.endpoint.release();
@@ -1020,7 +1029,7 @@ export function createNativeHarnessConnection(
           history,
           tools: sortToolDefinitionsByName(state.tools),
         },
-        { journalNumberOf: journalNumberIn(state) },
+        { journalNumberOf: journalNumberIn(state), mode: options.mode },
       );
 
     return {
@@ -1545,7 +1554,8 @@ export function sortToolDefinitionsByName(
  *
  * `journalNumberOf` gives a message's number in the journal. When the request
  * offers `journal-lookup`, the note names the journaled messages before the
- * first one kept, which is every message a cut can have left out.
+ * first one kept, which is every message a cut can have left out. `mode` is
+ * the session's; without it the note claims no files on disk.
  */
 export function fitRequest(
   endpoint: Pick<NativeHarnessTransportSession, "fits">,
@@ -1553,6 +1563,7 @@ export function fitRequest(
   options?: {
     readonly reduceOnce?: boolean | undefined;
     readonly journalNumberOf?: ((message: NativeHarnessMessage) => number | undefined) | undefined;
+    readonly mode?: OctantMode | undefined;
   },
 ): NativeHarnessRequest | undefined {
   if (options?.reduceOnce !== true && endpoint.fits(request)) return request;
@@ -1584,6 +1595,7 @@ export function fitRequest(
     start = next;
     const kept = history[start];
     const note = omittedHistoryNote(
+      options?.mode,
       lookupOffered && kept !== undefined ? options?.journalNumberOf?.(kept) : undefined,
     );
     // Cutting only an earlier note and putting the same note back changes nothing.

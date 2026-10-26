@@ -166,7 +166,11 @@ thread shows a compaction divider and the context meter marks the session
 compacted. Only when there is nothing earlier to summarize, the summary
 fails, or the running turn outgrows the window again, are whole earlier
 exchanges left out, with a note to the model that names the saved messages
-it can read back with `journal-lookup`. The saved conversation keeps
+it can read back with `journal-lookup`. The note points the model at its task
+list and, in Work and Code, at the files on disk; a Chat thread has no folder,
+so its note names only the task list and the lookup. A saved message too long
+for one read, such as the history a restarted conversation begins with, comes
+back in parts the model reads one after another. The saved conversation keeps
 everything.
 
 Forking a Code thread on a harness model gives the fork the model's own
