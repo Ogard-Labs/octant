@@ -99,6 +99,7 @@ export default defineConfig({
           items: [
             { text: "Files and Previews", link: "/advanced/files" },
             { text: "Editor and Terminals", link: "/advanced/editor-and-terminals" },
+            { text: "Language Services", link: "/advanced/language-services" },
             { text: "Git and Worktrees", link: "/advanced/git-worktrees" },
             { text: "Code Thread Board", link: "/advanced/code-board" },
             { text: "Browser and Computer Use", link: "/advanced/browser-and-computer-use" },
