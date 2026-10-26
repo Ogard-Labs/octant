@@ -72,7 +72,7 @@ import {
   type ClaudeProcessPort,
 } from "./claudeProcess";
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
 const CLAUDE_TOOLS = [
@@ -288,7 +288,7 @@ export interface ClaudeDriverOptions {
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly resumeIdentityPort: ClaudeResumeIdentityPort;
   readonly permissionPersistence?: () => PermissionPersistence;
   readonly makeEnvironmentScope?: ClaudeEnvironmentFactory;
