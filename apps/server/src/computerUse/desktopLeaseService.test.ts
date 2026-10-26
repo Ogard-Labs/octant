@@ -18,7 +18,7 @@ import type { DesktopProvider } from "@octant/plugin-api/desktop-provider";
 import {
   createFakeDesktopProvider,
   type FakeDesktopBackend,
-} from "@octant/plugin-api/fake-desktop-provider";
+} from "../../../../packages/plugin-api/src/fakeDesktopProvider";
 import { Journal } from "../persistence/journal";
 import { applyMigrations, MIGRATIONS } from "../persistence/migrations";
 import { catchUpProjection } from "../persistence/projection";
@@ -530,6 +530,153 @@ describe("desktop lease service", () => {
         .map((desktop) => desktop.handle.resource)
         .sort(),
     ).toEqual(["another-host", "desktop-2"]);
+  });
+
+  it("keeps tearing down other leases when a driver throws instead of answering", async () => {
+    const healthy = createFakeDesktopProvider();
+    const throwing = createFakeDesktopProvider({ id: "throwing-desktop" });
+    const throwsAtOnce = (): never => {
+      throw new Error("driver bug");
+    };
+    const harness = host({
+      providers: [
+        healthy,
+        {
+          provider: {
+            ...throwing.provider,
+            release: throwsAtOnce,
+            verifyGone: throwsAtOnce,
+            listOwned: throwsAtOnce,
+          },
+        },
+      ],
+    });
+    harness.state.recipes.set(threadA, recipeFor("throwing-desktop"));
+    await acquired(harness.service, threadA);
+    await acquired(harness.service, threadB);
+
+    harness.state.now = START + 30 * MINUTE;
+    await harness.service.sweep();
+    expect(healthy.backend.desktops()).toEqual([]);
+    await expect(harness.restart().start()).resolves.toMatchObject({ stillRunning: 1 });
+  });
+
+  it("never leaves a lease provisioning when the driver throws while creating", async () => {
+    const fake = createFakeDesktopProvider();
+    const { service } = host({
+      providers: [
+        {
+          provider: {
+            ...fake.provider,
+            acquire: (): never => {
+              throw new Error("driver bug");
+            },
+          },
+        },
+      ],
+    });
+    const result = await service.acquire({ owner: code(threadA), actor: agentOf(threadA) });
+    expect(result.status === "not-acquired" ? result.lease.state : result.status).toBe("failed");
+  });
+
+  it("journals the expiry the provider ended with when two people extend at once", async () => {
+    const fake = createFakeDesktopProvider();
+    let providerExpiresAt = "";
+    const answers: Array<() => void> = [];
+    const harness = host({
+      providers: [
+        {
+          provider: {
+            ...fake.provider,
+            // The provider applies each extension as it arrives but answers late.
+            extend: async (handle, expiresAt) => {
+              providerExpiresAt = expiresAt;
+              await new Promise<void>((resolve) => answers.push(resolve));
+              return fake.provider.extend(handle, expiresAt);
+            },
+          },
+        },
+      ],
+    });
+    const leaseId = await acquired(harness.service, threadA);
+    const lease = { owner: code(threadA), leaseId };
+    const longer = harness.service.extend({ ...lease, actor: person, byMinutes: 60 });
+    const shorter = harness.service.extend({ ...lease, actor: paired, byMinutes: 30 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (let turn = 0; turn < 20; turn += 1) {
+      // Answer the latest call first, as a provider racing two requests may.
+      answers.pop()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const journaled = Math.max(
+      ...(await Promise.all([longer, shorter])).map((result) =>
+        result.status === "extended" ? Date.parse(result.lease.expiresAt) : 0,
+      ),
+    );
+    expect(journaled).toBe(Date.parse(providerExpiresAt));
+  });
+
+  it("refuses a person's Retry on another thread's running lease", async () => {
+    const { service, backend } = host();
+    const leaseId = await acquired(service, threadA);
+    await expect(service.retryRelease({ leaseId, actor: paired })).resolves.toEqual({
+      status: "refused",
+      reason: "not-permitted",
+    });
+    expect(runningDesktops(backend)).toBe(1);
+  });
+
+  it("refuses operating a lease once the recipe's credential reference changed", async () => {
+    const { service, state } = host();
+    const leaseId = await acquired(service, threadA);
+    state.recipes.set(
+      threadA,
+      decodeDesktopRecipe({
+        ...recipeFor("fake-desktop"),
+        credentialRef: "e1000000-0000-4000-8000-0000000000dd",
+      }),
+    );
+    await expect(
+      service.control({
+        owner: code(threadA),
+        actor: agentOf(threadA),
+        leaseId,
+        command: { operation: "apps" },
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "no-provider-configured" });
+  });
+
+  it("checks again for a commit that arrives while a sweep is already tearing down", async () => {
+    const fake = createFakeDesktopProvider();
+    let openGate: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      openGate = resolve;
+    });
+    let slowLease = "";
+    const harness = host({
+      providers: [
+        {
+          provider: {
+            ...fake.provider,
+            release: async (handle) => {
+              if (String(handle.leaseId) === slowLease) await gate;
+              return fake.provider.release(handle);
+            },
+          },
+        },
+      ],
+    });
+    const watched = await acquired(harness.service, threadA);
+    slowLease = String(await acquired(harness.service, threadB));
+    harness.service.markTab(watched, "opened");
+    harness.state.now = START + 15 * MINUTE;
+    const first = harness.service.sweep();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    harness.state.threads.set(threadA, { active: false, executionPolicy: "full-access" });
+    const second = harness.service.sweep();
+    openGate();
+    await Promise.all([first, second]);
+    expect(fake.backend.desktops()).toEqual([]);
   });
 
   it("keeps a lease release-failed across restart when its driver is no longer loaded", async () => {

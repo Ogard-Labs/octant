@@ -219,6 +219,16 @@ const isPerson = (actor: EventActor): boolean =>
 const sameOwner = (left: DesktopLeaseOwner, right: DesktopLeaseOwner): boolean =>
   left.mode === right.mode && String(left.threadId) === String(right.threadId);
 
+/**
+ * Calls into a driver so that a synchronous throw arrives as a rejection. A
+ * plugin's driver is untrusted code; without this, one that throws before
+ * returning a promise escapes every `.catch` below and aborts the sweep or the
+ * restart reconciliation for every other lease.
+ */
+function driverCall<T>(call: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve) => resolve(call()));
+}
+
 function teardownPortOf(provider: DesktopTeardownPort): DesktopTeardownPort {
   return {
     id: provider.id,
@@ -226,6 +236,15 @@ function teardownPortOf(provider: DesktopTeardownPort): DesktopTeardownPort {
     verifyGone: (handle) => provider.verifyGone(handle),
     listOwned: (hostTag) => provider.listOwned(hostTag),
   };
+}
+
+/** A recipe whose provider or credential reference changed counts as removed. */
+function recipeStillCovers(recipe: DesktopRecipe | undefined, lease: DesktopLease): boolean {
+  return (
+    recipe !== undefined &&
+    String(recipe.providerId) === String(lease.providerId) &&
+    String(recipe.credentialRef ?? "") === String(lease.credentialRef ?? "")
+  );
 }
 
 function leasableOf(provider: DesktopProvider): LeasableDesktopProvider {
@@ -247,6 +266,7 @@ export function createDesktopLeaseService(
   const serial = new Map<string, Promise<unknown>>();
   let reconciliation: Promise<DesktopLeaseReconciliation> | undefined;
   let sweeping: Promise<void> | undefined;
+  let sweepAgain = false;
 
   const iso = (ms: number): UtcTimestamp => decodeUtcTimestamp(new Date(ms).toISOString());
 
@@ -347,7 +367,7 @@ export function createDesktopLeaseService(
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
-        call().catch(() => timedOut),
+        driverCall(call).catch(() => timedOut),
         new Promise<T>((resolve) => {
           timer = setTimeout(() => resolve(timedOut), teardownTimeoutMs);
         }),
@@ -588,9 +608,9 @@ export function createDesktopLeaseService(
     await start();
     const first = admitAcquire(caller);
     if (first.status === "refused") return first;
-    const status = await first.provider
-      .status()
-      .catch(() => ({ status: "not-connected" as const }));
+    const status = await driverCall(() => first.provider.status()).catch(() => ({
+      status: "not-connected" as const,
+    }));
     if (status.status !== "ready") return refused("provider-unavailable");
     const gate = decideDesktopLeaseAcquire({
       executionPolicy: first.thread.executionPolicy,
@@ -655,9 +675,9 @@ export function createDesktopLeaseService(
       caller.signal === undefined
         ? controller.signal
         : AbortSignal.any([controller.signal, caller.signal]);
-    const result = await provider
-      .acquire({ leaseId, hostTag, recipe, expiresAt: iso(expiresAt), signal })
-      .catch(() => ({ status: "failed" as const, reason: "The driver threw." }));
+    const result = await driverCall(() =>
+      provider.acquire({ leaseId, hostTag, recipe, expiresAt: iso(expiresAt), signal }),
+    ).catch(() => ({ status: "failed" as const, reason: "The driver threw." }));
 
     return inOrder(leaseId, async (): Promise<DesktopLeaseAcquireResult> => {
       delete entry.acquiring;
@@ -722,8 +742,7 @@ export function createDesktopLeaseService(
     if (record.lease.state !== "ready" || handle === undefined) return refused("lease-ended");
     const thread = options.thread(owner);
     if (thread === undefined || !thread.active) return refused("thread-not-active");
-    const recipe = options.recipe(owner);
-    if (recipe === undefined || String(recipe.providerId) !== String(record.lease.providerId)) {
+    if (!recipeStillCovers(options.recipe(owner), record.lease)) {
       return refused("no-provider-configured");
     }
     const loaded = registered(String(record.lease.providerId));
@@ -737,7 +756,8 @@ export function createDesktopLeaseService(
     if (admitted.status === "refused") return admitted;
     const entry = live.get(String(caller.leaseId));
     if (entry !== undefined) entry.lastActivityAt = options.now();
-    const result = await admitted.provider.control(admitted.handle, caller.command).catch(
+    const { provider, handle } = admitted;
+    const result = await driverCall(() => provider.control(handle, caller.command)).catch(
       (): ComputerControlResult => ({
         kind: "failed",
         reason: "driver-error",
@@ -747,37 +767,43 @@ export function createDesktopLeaseService(
     return { status: "answered", result };
   };
 
-  const extend: DesktopLeaseService["extend"] = async (caller) => {
-    const admitted = admitOperating(caller);
-    if (admitted.status === "refused") return admitted;
-    const lease = admitted.record.lease;
-    const decision = decideDesktopLeaseExtension({
-      actor: caller.actor.kind,
-      expiresAt: Date.parse(lease.expiresAt),
-      maximumExpiresAt: Date.parse(lease.maximumExpiresAt),
-      byMinutes: caller.byMinutes,
-    });
-    if (decision.kind === "refused") return refused(decision.reason);
-    const reported = await admitted.provider
-      .extend(admitted.handle, iso(decision.expiresAt))
-      .catch(() => ({ status: "failed" as const, reason: "The driver threw." }));
-    // The provider's own clock must have moved, or a host that stops would
-    // leave the desktop dying at the old time while the lease says otherwise.
-    if (reported.status !== "extended" || Date.parse(reported.expiresAt) < decision.expiresAt) {
-      return refused("extension-unconfirmed");
-    }
-    return inOrder(caller.leaseId, async (): Promise<DesktopLeaseExtendResult> => {
-      const current = read(caller.leaseId);
-      if (current.lease.state !== "ready") return refused("lease-ended");
+  /**
+   * Extensions run in the lease's order, provider call included. Two people
+   * extending at once could otherwise have the provider apply one expiry and
+   * the journal record the other, leaving a billed desktop that dies before
+   * its lease says. The provider call is bounded like teardown so a provider
+   * that never answers cannot hold a release behind it.
+   */
+  const extend: DesktopLeaseService["extend"] = (caller) =>
+    inOrder(caller.leaseId, async (): Promise<DesktopLeaseExtendResult> => {
+      const admitted = admitOperating(caller);
+      if (admitted.status === "refused") return admitted;
+      const { record, provider, handle } = admitted;
+      const decision = decideDesktopLeaseExtension({
+        actor: caller.actor.kind,
+        expiresAt: Date.parse(record.lease.expiresAt),
+        maximumExpiresAt: Date.parse(record.lease.maximumExpiresAt),
+        byMinutes: caller.byMinutes,
+      });
+      if (decision.kind === "refused") return refused(decision.reason);
+      const reported = await bounded(() => provider.extend(handle, iso(decision.expiresAt)), {
+        status: "failed" as const,
+        reason: "timed-out",
+      });
+      // The provider's own clock must have moved, or a host that stops would
+      // leave the desktop dying at the old time while the lease says otherwise.
+      if (reported.status !== "extended" || Date.parse(reported.expiresAt) < decision.expiresAt) {
+        return refused("extension-unconfirmed");
+      }
       append(
-        current,
+        record,
         caller.leaseId,
         DESKTOP_LEASE_EVENT_NAMES.extended,
         {
           leaseId: caller.leaseId,
-          owner: current.lease.owner,
-          providerId: current.lease.providerId,
-          previousExpiresAt: current.lease.expiresAt,
+          owner: record.lease.owner,
+          providerId: record.lease.providerId,
+          previousExpiresAt: record.lease.expiresAt,
           expiresAt: iso(decision.expiresAt),
         },
         caller.actor,
@@ -786,7 +812,6 @@ export function createDesktopLeaseService(
       if (entry !== undefined) entry.lastActivityAt = options.now();
       return { status: "extended", lease: read(caller.leaseId).lease };
     });
-  };
 
   const release: DesktopLeaseService["release"] = async (caller) => {
     const record = projection.get(caller.leaseId);
@@ -803,7 +828,15 @@ export function createDesktopLeaseService(
 
   const retryRelease: DesktopLeaseService["retryRelease"] = async (input) => {
     if (!isPerson(input.actor)) return refused("not-permitted");
-    if (projection.get(input.leaseId) === undefined) return refused("lease-ended");
+    const record = projection.get(input.leaseId);
+    if (record === undefined) return refused("lease-ended");
+    // Retry may name any thread's lease only because it can only stop spending
+    // on a release that was never verified; ending another thread's running
+    // desktop is that thread's own Release.
+    const state = record.lease.state;
+    if (state !== "releasing" && state !== "release-failed") {
+      return refused(desktopLeaseHoldsDesktop(state) ? "not-permitted" : "lease-ended");
+    }
     return inOrder(input.leaseId, () => end(input.leaseId, "released", input.actor));
   };
 
@@ -819,14 +852,7 @@ export function createDesktopLeaseService(
     const lease = record.lease;
     const thread = options.thread(lease.owner);
     if (thread === undefined || !thread.active) return "thread-ended";
-    const recipe = options.recipe(lease.owner);
-    if (
-      recipe === undefined ||
-      String(recipe.providerId) !== String(lease.providerId) ||
-      String(recipe.credentialRef ?? "") !== String(lease.credentialRef ?? "")
-    ) {
-      return "recipe-removed";
-    }
+    if (!recipeStillCovers(options.recipe(lease.owner), lease)) return "recipe-removed";
     if (registered(String(lease.providerId))?.effective !== true) return "provider-disabled";
     if (!options.computerUseEnabled()) return "computer-use-off";
     if (lease.state !== "ready") return undefined;
@@ -861,10 +887,27 @@ export function createDesktopLeaseService(
     }
   }
 
+  /**
+   * One sweep runs at a time. A request that arrives while one runs (a journal
+   * commit that archived a thread the running sweep already passed, say) runs
+   * one more pass rather than joining the one in flight and being lost.
+   */
   const sweep = (): Promise<void> => {
-    sweeping ??= sweepOnce().finally(() => {
-      sweeping = undefined;
-    });
+    if (sweeping !== undefined) {
+      sweepAgain = true;
+      return sweeping;
+    }
+    const run = async (): Promise<void> => {
+      try {
+        do {
+          sweepAgain = false;
+          await sweepOnce();
+        } while (sweepAgain);
+      } finally {
+        sweeping = undefined;
+      }
+    };
+    sweeping = run();
     return sweeping;
   };
 

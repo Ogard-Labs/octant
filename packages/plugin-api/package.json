@@ -13,7 +13,6 @@
     "./replica-store": "./src/replicaStore.ts",
     "./desktop-provider": "./src/desktopProvider.ts",
     "./desktop-provider-conformance": "./src/desktopProviderConformance.ts",
-    "./fake-desktop-provider": "./src/fakeDesktopProvider.ts",
     "./provider-driver-catalog": "./src/providerDriverCatalog.ts"
   },
   "scripts": {

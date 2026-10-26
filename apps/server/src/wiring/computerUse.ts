@@ -19,7 +19,7 @@ import {
   readThreadExternalContentTaint,
 } from "../context/externalContentTaintProjection";
 import { readFile as readFileFromDisk, stat as statFromDisk } from "node:fs/promises";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { decodeDesktopHostTag, type DesktopHostTag } from "@octant/contracts";
 import { defaultShellSettings } from "@octant/domain";
 import { createDesktopLeaseService } from "../computerUse/desktopLeaseService";
@@ -48,10 +48,17 @@ export function resolveWebAssetsPath(): string {
 function readOrMintDesktopHostTag(directory: string): DesktopHostTag {
   const path = join(directory, "host-tag");
   mkdirSync(directory, { recursive: true, mode: 0o700 });
+  // Minted whole beside the tag and linked into place, which refuses to
+  // replace an existing tag. Creating the tag file directly could leave it
+  // empty after a crash, and an unreadable tag stops every later start.
+  const minted = join(directory, `host-tag.${randomUUID()}.tmp`);
+  writeFileSync(minted, randomUUID(), { flag: "wx", mode: 0o600 });
   try {
-    writeFileSync(path, randomUUID(), { flag: "wx", mode: 0o600 });
+    linkSync(minted, path);
   } catch (error) {
     if (!(error instanceof Error && "code" in error && error.code === "EEXIST")) throw error;
+  } finally {
+    rmSync(minted, { force: true });
   }
   return decodeDesktopHostTag(readFileSync(path, "utf8").trim());
 }

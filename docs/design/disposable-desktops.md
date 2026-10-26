@@ -166,7 +166,10 @@ lease anyway.
 - An operating command (extend, screen, control, deliver) re-resolves the
   driver through the plugin host on every call and requires it effective; it
   never uses the driver a lease retained for teardown. A recipe whose provider
-  or credential reference changed counts as removed.
+  or credential reference changed counts as removed. Extensions on one lease
+  run one at a time, provider call included, so the journal records the
+  expiry the provider was last asked for; the provider call is bounded like a
+  teardown call.
 - **Teardown** is the one path those revocations do not close. Release and
   verification of an existing lease run on a host-owned path, as `system`,
   that needs only the lease id; it stays authorized after the thread is
@@ -178,8 +181,10 @@ lease anyway.
   thread's lease, ask the host to run it. (Refusing teardown when authority is
   revoked would leave a billed desktop running with no way to stop it.) A
   release from a thread names that thread and is refused for another thread's
-  lease. Retry is a person's action only and may name any lease on the host,
-  because it can only stop spending; an agent cannot Retry.
+  lease. Retry is a person's action only and may name any lease on the host
+  whose release is not yet verified (`releasing` or `release-failed`), because
+  it can only stop spending; it refuses `not-permitted` for a running lease,
+  which only its own thread may release. An agent cannot Retry.
 - **Acquiring** is an effect. Plan refuses it. Approval-gated and
   auto-accept-edits ask in the thread. Full access proceeds for a host-local
   provider. For a provider that bills the person, a person confirms every
@@ -252,7 +257,8 @@ lease anyway.
   expiry stands, and the lease ends on time. Idle release applies when no tab
   is open and neither operator has acted.
 - The host checks every running lease against these causes after each journal
-  commit and every 30 seconds. A lease ended while its provider is still
+  commit and every 30 seconds; a commit that lands while a check is running
+  starts one more check after it. A lease ended while its provider is still
   creating it cancels the acquisition, and the desktop is destroyed as soon as
   a handle arrives. A graceful host stop does not release leases; restart
   reconciliation and the provider-side expiry cover them.
@@ -341,7 +347,9 @@ reports absence only when absent, and refuses rather than degrades an
 unsupported command. Its fixture maps two scenarios onto whatever backs the
 driver, a provider that declines an extension and a desktop that outlives its
 destroy, so a recorded transport can drive the same checks. The in-memory
-driver tests use is `@octant/plugin-api/fake-desktop-provider`. The desktop's agent-facing commands are the existing
+driver tests use (`packages/plugin-api/src/fakeDesktopProvider.ts`) is test
+scaffolding, imported by path, and not part of the published seam. The
+desktop's agent-facing commands are the existing
 `octant_computer` set; a host-local desktop without an accessibility tree
 returns observations with a screenshot and no elements, so it is usable only by
 image-capable models and refuses `needs-image-model` otherwise. Adding `drag`
