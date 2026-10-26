@@ -44,6 +44,19 @@ describe("provider-driver host runtime", () => {
     ).toEqual([...ACP_AGENT_KINDS]);
   });
 
+  it("runs the outside family on its own host runtime, with no discovery descriptor", () => {
+    expect(providerDriverHostRuntime("outside-harness-endpoint")).toBe("outside-endpoint");
+    expect(isAcpHostProfileDriver("outside-harness-endpoint")).toBe(false);
+    expect(
+      DISCOVERY_DESCRIPTORS.some(
+        (descriptor) => descriptor.driverKind === "outside-harness-endpoint",
+      ),
+    ).toBe(false);
+    expect(
+      discoveryDescriptorsForAdmittedDrivers(new Set(["outside-harness-endpoint"] as const)),
+    ).toEqual([]);
+  });
+
   it("omits models from discovery when a driver plugin is not admitted", () => {
     const admitted = new Set(["codex", "openai-compatible"] as const);
     expect(

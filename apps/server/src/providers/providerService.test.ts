@@ -794,6 +794,7 @@ describe("ProviderService", () => {
             context: { usage: "not-confirmed", compaction: "not-confirmed" },
           },
           message: "This provider driver is not available.",
+          reason: "driver-not-admitted",
           observedAt: now,
         },
       ],
@@ -821,6 +822,44 @@ describe("ProviderService", () => {
       }),
     ).rejects.toThrow(/not available/);
     expect(createFixture.append).not.toHaveBeenCalled();
+  });
+
+  it("reports an outside driver instance as not admitted, with no models, and never builds its driver", async () => {
+    const driver = vi.fn((): never => {
+      throw new Error("An outside driver must not be built before it is admitted.");
+    });
+    const fixture = serviceFixture({
+      instances: [outsideProvider()],
+      withCatalogPersistence: true,
+      initialCatalog: persistedCatalog(),
+      driver,
+    });
+    // A ready observation left over from elsewhere must not leak models.
+    fixture.runtime.setObservedState(observation());
+
+    const snapshot = await fixture.service.bootstrap(windowId);
+    expect(snapshot.catalogs).toBeUndefined();
+    expect(snapshot.observedStates).toHaveLength(1);
+    const [blocked] = snapshot.observedStates;
+    expect(blocked).toMatchObject({
+      instanceId,
+      readiness: "unavailable",
+      processState: "stopped",
+      models: [],
+      reason: "driver-not-admitted",
+      message: "This provider driver is not available.",
+    });
+    expect(new Set(Object.values(blocked?.capabilities ?? {}))).toEqual(new Set(["unavailable"]));
+
+    await expect(fixture.service.probe(windowId, instanceId)).rejects.toThrow(/not available/);
+    expect(fixture.runtime.observedState(instanceId)).toMatchObject({
+      readiness: "unavailable",
+      models: [],
+      reason: "driver-not-admitted",
+    });
+    await fixture.service.warmEnabledProviders();
+    expect(fixture.probe).not.toHaveBeenCalled();
+    expect(driver).not.toHaveBeenCalled();
   });
 
   it("refuses to probe an image profile and records no observation", async () => {
@@ -5077,6 +5116,30 @@ function provider(overrides: Record<string, unknown> = {}) {
     displayName: "OpenCode local",
     driverKind: "opencode",
     configuration: { kind: "opencode-cli", binaryPath: "/opt/homebrew/bin/opencode" },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+    ...overrides,
+  });
+}
+
+function outsideProvider(overrides: Record<string, unknown> = {}) {
+  return decodeProviderInstance({
+    id: instanceId,
+    displayName: "Local chat server",
+    driverKind: "outside-harness-endpoint",
+    configuration: {
+      kind: "outside-harness-endpoint",
+      driver: {
+        extensionId: "00000000-0000-4000-8000-000000000911",
+        packageId: "00000000-0000-4000-8000-000000000912",
+        componentId: "provider-driver",
+        version: "1.2.0",
+        digest: `sha256:${"a".repeat(64)}`,
+      },
+    },
     enabled: true,
     environmentPolicy: "inherit-host",
     version: 1,

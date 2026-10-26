@@ -112,6 +112,8 @@ export function driverLabel(driverKind: ProviderInstance["driverKind"]): string 
   if (driverKind === "gemini-native-image") return "Gemini Image";
   if (driverKind === "bfl-image") return "Black Forest Labs Image";
   if (driverKind === "ideogram-image") return "Ideogram Image";
+  // An outside driver package never borrows a bundled provider's name.
+  if (driverKind === "outside-harness-endpoint") return "Outside driver";
   return "OpenAI-compatible";
 }
 
@@ -136,6 +138,13 @@ export function providerRefusalCopy(
     return {
       reason: `${label} authentication is required.`,
       nextStep: `Sign in to ${label} with its provider-owned login, then check the connection again.`,
+    };
+  }
+  if (reason === "driver-not-admitted") {
+    return {
+      reason: "This provider's driver package is not admitted, so it offers no models.",
+      nextStep:
+        "Octant runs this provider only once its driver package is installed, trusted, and enabled.",
     };
   }
   if (reason === "runtime-unavailable") {

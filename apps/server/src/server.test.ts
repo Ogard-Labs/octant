@@ -267,6 +267,38 @@ describe("startOctantServer", () => {
     ).toThrow(/not effective/i);
   });
 
+  it("refuses to construct a driver for an outside driver instance, which nothing admits yet", () => {
+    const instance = decodeProviderInstance({
+      id: "80000000-0000-4000-8000-000000000411",
+      displayName: "Local chat server",
+      driverKind: "outside-harness-endpoint",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000911",
+          packageId: "00000000-0000-4000-8000-000000000912",
+          componentId: "provider-driver",
+          version: "1.2.0",
+          digest: `sha256:${"a".repeat(64)}`,
+        },
+      },
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-07-15T10:00:00.000Z",
+      updatedAt: "2026-07-15T10:00:00.000Z",
+    });
+
+    expect(() =>
+      makeConfiguredProviderDriver(instance, {
+        openCodeProcess: { start: () => Effect.die("must not start OpenCode") },
+        codexProcess: { start: () => Effect.die("must not start Codex") },
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        permissionPersistence: () => "current-session",
+      }),
+    ).toThrow(/not effective/i);
+  });
+
   it.each(["openai-image", "gemini-native-image"] as const)(
     "refuses to construct a turn driver for an %s image profile",
     (driverKind) => {

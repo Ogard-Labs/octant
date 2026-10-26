@@ -10,8 +10,13 @@ and [plugin boundaries](../architecture.md#plugin-boundaries-and-remaining-extra
 and credentials and confinement
 ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
-**Delivery state.** Accepted 2026-10-26; slice 1 is starting. The maintainer
-authorized this scope as post-preview work and accepted the
+**Delivery state.** Accepted 2026-10-26. Slice 1 (outside family identity) is
+built: the reserved kind, the instance arm with its driver reference, the
+`outside-endpoint` host runtime, the capability matrix column, and the
+provider projection migration that admits the family. Nothing admits an
+outside driver yet, so an outside instance reports `driver-not-admitted` with
+no models and runs no turn; slices 2 and 3 are next. The maintainer authorized
+this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26; the release
 boundary in `AGENTS.md` and the architecture is updated separately. Today only
 bundled drivers are admitted. Slices and their evidence are tracked in Linear;
@@ -91,6 +96,30 @@ digest }`. The set of outside drivers is data, held by the package store.
 - An outside driver's display identity is its package display name with an
   "outside driver" label and a generic glyph. It cannot claim a bundled kind's
   name, logo, account profile, discovery descriptor, or sign-in dialect.
+- **Family policy.** The family is a native harness kind in `@octant/domain`:
+  the host owns the conversation, Octant's tools travel as request tool calls
+  and reach only verified models, and the agent loop is Octant Harness. It has
+  no discovery descriptor and reports no account limits
+  (`runtime-does-not-report`), since the host reads no quota headers on its
+  brokered calls.
+- **A blocked instance.** While a driver kind is not effective on the
+  activation ladder, the host reports its instances `unavailable` with the
+  closed reason `driver-not-admitted`, no models, and every capability
+  `unavailable`, and decides this before the driver factory runs, so no driver
+  code describes its own block. A connection check refuses and keeps that
+  observation rather than clearing it. The rule covers bundled kinds a patch
+  disables as well as the outside family.
+- **The instance arm grows with admission.** The configuration holds only the
+  `kind` and the driver reference until the add-provider step lands; the
+  address, key placement, and listed model ids join it in that same change.
+  No command creates or reconfigures an outside instance before then, so no
+  journaled instance can lack them. The provider projection's `driver_kind`
+  constraint admits the family (migration 84) so that replay of such an
+  instance never fails.
+- **The matrix column's source.** An outside package ships no capability block
+  Octant reads, so `providerFeatureMatrix.test.ts` holds the column to the
+  bundled harness endpoints' static blocks, which are its ceiling, until the
+  host's ceiling clamp has a block of its own.
 - **Composition with data-driven bundled kinds.** Making bundled driver-kind
   registration data-driven (a bundled ACP agent as a profile plus its logo and
   tests) changes how bundled entries are declared; it keeps the bundled set
@@ -291,7 +320,8 @@ Conformance is enforced by the host, not trusted from the author:
 ## Threat model
 
 The attacker is the driver package (malicious or compromised) or whoever can
-put a package in front of the person. Controls marked new are this design's.
+put a package in front of the person. Controls marked new are this design's;
+"built" marks one a landed slice has made real.
 
 | Threat                                                              | Control                                                                                                                                |
 | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -306,7 +336,7 @@ put a package in front of the person. Controls marked new are this design's.
 | Points the key at an internal service or attacker host              | Existing endpoint rule: HTTPS or literal-loopback HTTP, origin-checked before the key is read; no cross-origin redirect                |
 | Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds plus new per-message cap and host-owned deadlines                                                           |
 | An agent, mention, routine, or paired device installs or trusts one | Existing and new: lifecycle actions only from a local window; structured references stay inert                                         |
-| Impersonates a bundled provider                                     | New: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect            |
+| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect     |
 
 Residual risk: the configured endpoint receives what the person sends it, as
 for any endpoint; a trusted driver can mistranslate (send a different model id,

@@ -40,11 +40,13 @@ const CODE_OUTCOMES = {
   "gemini-native-image": "unavailable",
   "bfl-image": "unavailable",
   "ideogram-image": "unavailable",
+  // Nothing admits an outside driver package yet, so no outside instance runs a turn.
+  "outside-harness-endpoint": "unavailable",
 } as const satisfies Readonly<Record<ProviderDriverKind, CodeOutcome>>;
 
 describe("Code provider matrix", () => {
   it("classifies every declared provider kind with conformance or explicit unavailability", () => {
-    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(25);
+    expect(Object.keys(CODE_OUTCOMES)).toHaveLength(26);
     for (const [providerKind, outcome] of Object.entries(CODE_OUTCOMES) as Array<
       [ProviderDriverKind, CodeOutcome]
     >) {
@@ -55,6 +57,7 @@ describe("Code provider matrix", () => {
           "gemini-native-image",
           "bfl-image",
           "ideogram-image",
+          "outside-harness-endpoint",
         ]).toContain(providerKind);
         continue;
       }

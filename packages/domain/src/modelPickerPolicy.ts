@@ -39,6 +39,9 @@ const driverLabels: Readonly<Record<Exclude<ProviderDriverKind, AcpAgentKind>, s
   "gemini-native-image": "Gemini Image",
   "bfl-image": "Black Forest Labs Image",
   "ideogram-image": "Ideogram Image",
+  // A bundled kind's name is never borrowed: an outside instance is labelled
+  // as what it is, beside its package's own display name.
+  "outside-harness-endpoint": "Outside driver",
 };
 
 export function driverLabel(driverKind: ProviderDriverKind): string {
