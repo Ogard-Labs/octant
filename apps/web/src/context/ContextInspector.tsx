@@ -2,7 +2,7 @@ import type { ContextEntryId, ContextRemedy, ServiceLimitBucket } from "@octant/
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import type { ReactNode, RefObject } from "react";
-import { CompactSessionButton } from "./CompactSession";
+import { CompactSessionButton, CompactionNotOffered } from "./CompactSession";
 import {
   contextWindowSourceLabel,
   contextCategoryLabel,
@@ -50,7 +50,9 @@ export function ContextInspector(props: ContextInspectorProps) {
   // Compacting is the one remedy with an action behind it, and a session the
   // host will never compact is not offered it.
   const remedies = uniqueRemedies(plan.remedies).filter(
-    (remedy) => remedy.kind !== "compact-range" || props.compaction?.offer.kind !== "hidden",
+    (remedy) =>
+      remedy.kind !== "compact-range" ||
+      (props.compaction?.offer.kind !== "hidden" && props.compaction?.offer.kind !== "not-offered"),
   );
   const close = () => {
     props.onClose();
@@ -63,6 +65,12 @@ export function ContextInspector(props: ContextInspectorProps) {
           <span className="context-inspector__eyebrow">{snapshot.displayLabel}</span>
           <h2>Context inspector</h2>
           {props.compaction?.status}
+          {props.compaction === undefined ? null : (
+            <CompactionNotOffered
+              className="context-inspector__compaction oct-meta"
+              offer={props.compaction.offer}
+            />
+          )}
         </div>
         <div className="context-inspector__header-actions">
           {props.compaction === undefined ? null : (

@@ -3431,12 +3431,14 @@ function LaunchedShell(
       return usage;
     }
     const observed = providerController.observedByInstance.get(activeCodeThreadProviderInstanceId);
+    const usageReporting = observed?.integration?.context.usage;
+    const reported = usageReporting === undefined ? usage : { ...usage, usageReporting };
     const model = observed?.models.find(
       (listed) => String(listed.id) === String(activeCodeThreadModelId),
     );
     const declared = model === undefined ? undefined : resolveModelContextWindow(model);
-    if (usage.contextWindow !== undefined || declared === undefined) return usage;
-    return { ...usage, modelContextWindow: declared.contextWindow };
+    if (usage.contextWindow !== undefined || declared === undefined) return reported;
+    return { ...reported, modelContextWindow: declared.contextWindow };
   }, [
     activeCodeThreadModelId,
     activeCodeThreadProviderInstanceId,

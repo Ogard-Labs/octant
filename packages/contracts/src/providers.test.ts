@@ -2327,7 +2327,7 @@ describe("provider registry contracts", () => {
     ).toThrow();
   });
 
-  it("carries a runtime's integration and refuses one that claims tools without a transport", () => {
+  it("carries a runtime's integration and refuses one that claims tools without a transport or an unknown context fact", () => {
     const observed = {
       instanceId: ids.instance,
       readiness: "ready",
@@ -2358,6 +2358,7 @@ describe("provider registry contracts", () => {
       tools: { status: "available", transport: "session-mcp-bridge" },
       activity: { source: "session", observes: ["replies", "tool-calls"] },
       resume: "precise",
+      context: { usage: "not-reported", compaction: "none" },
     } as const;
 
     expect(decodeProviderObservedState({ ...observed, integration })).toMatchObject({
@@ -2370,6 +2371,7 @@ describe("provider registry contracts", () => {
           tools: { status: "unavailable", reason: "no-transport" },
           activity: { source: "none" },
           resume: "none",
+          context: { usage: "not-confirmed", compaction: "octant" },
         },
       }).integration?.tools,
     ).toEqual({ status: "unavailable", reason: "no-transport" });
@@ -2389,6 +2391,18 @@ describe("provider registry contracts", () => {
       decodeProviderObservedState({
         ...observed,
         integration: { ...integration, resume: "maybe" },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderObservedState({
+        ...observed,
+        integration: { ...integration, context: { usage: "estimated", compaction: "none" } },
+      }),
+    ).toThrow();
+    expect(() =>
+      decodeProviderObservedState({
+        ...observed,
+        integration: { ...integration, context: undefined },
       }),
     ).toThrow();
   });
