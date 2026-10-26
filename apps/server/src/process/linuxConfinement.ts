@@ -73,16 +73,20 @@ export function buildLinuxAllowDefaultDenyLaunch(
       "Linux Full access working directory must be absolute.",
     );
   }
+  // The host root goes first: a later `--bind / /` covers /dev again, and a
+  // plain bind is mounted nodev, so on bwrap 0.9.0 opening /dev/null,
+  // /dev/zero, or /dev/urandom failed with "Permission denied". The deny
+  // covers below come after all three mounts so nothing remounts over them.
   const args: string[] = [
     "--die-with-parent",
+    "--bind",
+    "/",
+    "/",
     "--dev-bind",
     "/dev",
     "/dev",
     "--proc",
     "/proc",
-    "--bind",
-    "/",
-    "/",
   ];
   // Every host path keeps its own name under the host-root bind, so a linked
   // deny path is covered at its target exactly as the restricted capsule does

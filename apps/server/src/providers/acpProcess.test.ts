@@ -1374,14 +1374,14 @@ describe("Kimi Code host-profile extension surfaces", () => {
     expect(launch.command).toBe(target.bwrapPath);
     expect(launch.args.slice(0, 9)).toEqual([
       "--die-with-parent",
+      "--bind",
+      "/",
+      "/",
       "--dev-bind",
       "/dev",
       "/dev",
       "--proc",
       "/proc",
-      "--bind",
-      "/",
-      "/",
     ]);
     expect(launch.args).toContainEqual("--tmpfs");
     expect(launch.args).toContain(join(canonicalHostPath, "skills"));
