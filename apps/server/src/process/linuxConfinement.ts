@@ -6,6 +6,7 @@ import {
   lstatSync,
   mkdtempSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   statSync,
   writeFileSync,
@@ -532,35 +533,106 @@ function hostSecretPaths(): ReadonlyArray<string> {
  * root: measured on bwrap 0.9.0, a denied `.claude/skills` or host key linked
  * to another folder refused the whole launch with "Can't create file at".
  * A path that passes through a link inside bound content is therefore covered
- * at its target instead, found through the mount that exposes it. Binds keep
- * the path the launch names and take their resolved folder as the source, so
- * the target is mapped back from that source rather than used as a host path:
- * a bound root named through a link still has its files denied under the name
- * the capsule sees. A target no mount exposes is unreachable and needs no
- * cover. A missing path keeps its name so it stays hidden if created later,
- * and a dangling link names nothing to hide.
+ * at its target instead: both where the capsule reaches through the link
+ * (see `resolveInCapsule`) and the file the host resolves it to, each under
+ * every name a bind gives it. A target no bind exposes is unreachable and
+ * needs no cover. A missing path keeps its name so it stays hidden if created
+ * later. So does a missing one reached through a link when a writable bind
+ * would hold it: measured on bwrap 0.9.0, skipping a dangling `.mcp.json` link
+ * let the capsule write the file it pointed to, through the link, past the
+ * write denial. Elsewhere the capsule cannot create it, and it is skipped.
  */
 function denyTargetsInCapsule(
   path: string,
   mounts: ReadonlyMap<string, Mount>,
 ): ReadonlyArray<string> {
-  if (!pathExists(path)) return [path];
-  const resolved = safeRealpathSync(path);
-  if (resolved === undefined) return [];
-  if (resolved === path) return [path];
-  // Above every bind the capsule holds only the folders Bubblewrap made for
-  // its mount points, so a link there on the host is no link in the capsule.
-  const exposing = mountExposing(path, mounts);
-  if (exposing === undefined || exposing.kind === "tmpfs" || exposing.kind === "tmpfs-rw") {
-    return [path];
+  const resolved = resolveInCapsule(path, mounts);
+  if (resolved.kind !== "looped" && !resolved.throughLink) return [path];
+  if (resolved.kind === "missing") {
+    return mountExposing(resolved.path, mounts)?.kind === "bind" ? [resolved.path] : [];
   }
+  // What the capsule reaches through the link, and the file the host means by
+  // the path, each under every name a bind gives it.
+  const reached =
+    resolved.kind === "present" ? hostPathInCapsule(resolved.path, mounts) : undefined;
+  const meant = safeRealpathSync(path);
+  return [
+    ...new Set(
+      [reached, meant].flatMap((hostPath) =>
+        hostPath === undefined ? [] : namesInCapsule(hostPath, mounts),
+      ),
+    ),
+  ];
+}
+
+function namesInCapsule(
+  hostPath: string,
+  mounts: ReadonlyMap<string, Mount>,
+): ReadonlyArray<string> {
   return [...mounts.values()].flatMap((mount) => {
     if (mount.kind !== "bind" && mount.kind !== "ro-bind") return [];
-    if (resolved !== mount.source && !resolved.startsWith(`${mount.source}${sep}`)) return [];
-    const target = join(mount.target, relative(mount.source, resolved));
+    if (hostPath !== mount.source && !hostPath.startsWith(`${mount.source}${sep}`)) return [];
+    const target = join(mount.target, relative(mount.source, hostPath));
     // A deeper mount over the same place shows something else there.
     return mountExposing(target, mounts) === mount ? [target] : [];
   });
+}
+
+type CapsuleResolution =
+  | { readonly kind: "present" | "missing"; readonly path: string; readonly throughLink: boolean }
+  | { readonly kind: "looped" };
+
+/**
+ * Follows a path one component at a time as the capsule would. A host
+ * `realpath` is not enough: a relative `../shared/token` inside a bound root
+ * named through a link climbs out of the root's capsule name, not out of the
+ * folder it resolves to on the host, so the two can reach different files.
+ * Above every bind, and inside a tmpfs, the capsule holds only folders
+ * Bubblewrap made, so a link the host has there is no link in the capsule.
+ */
+function resolveInCapsule(path: string, mounts: ReadonlyMap<string, Mount>): CapsuleResolution {
+  let pending = path.split(sep).filter((part) => part.length > 0);
+  let current: string = sep;
+  let throughLink = false;
+  let linksFollowed = 0;
+  for (;;) {
+    const [part, ...rest] = pending;
+    if (part === undefined) return { kind: "present", path: current, throughLink };
+    pending = rest;
+    if (part === ".") continue;
+    if (part === "..") {
+      current = dirname(current);
+      continue;
+    }
+    const next = join(current, part);
+    const host = hostPathInCapsule(next, mounts);
+    if (host === undefined) {
+      current = next;
+      continue;
+    }
+    let link: string | undefined;
+    try {
+      link = lstatSync(host).isSymbolicLink() ? readlinkSync(host) : undefined;
+    } catch {
+      return { kind: "missing", path: join(next, ...pending), throughLink };
+    }
+    if (link === undefined) {
+      current = next;
+      continue;
+    }
+    // The kernel's own limit; past it the capsule cannot open the path either.
+    linksFollowed += 1;
+    if (linksFollowed > 40) return { kind: "looped" };
+    throughLink = true;
+    if (isAbsolute(link)) current = sep;
+    pending = [...link.split(sep).filter((part) => part.length > 0), ...pending];
+  }
+}
+
+function hostPathInCapsule(path: string, mounts: ReadonlyMap<string, Mount>): string | undefined {
+  const mount = mountExposing(path, mounts);
+  if (mount === undefined || (mount.kind !== "bind" && mount.kind !== "ro-bind")) return undefined;
+  return join(mount.source, relative(mount.target, path));
 }
 
 function mountExposing(path: string, mounts: ReadonlyMap<string, Mount>): Mount | undefined {
@@ -729,20 +801,37 @@ let reusedEmptyDenySource: string | undefined;
  * temp directory for the server's lifetime, where a cleaner such as
  * systemd-tmpfiles may delete it; Bubblewrap then refused every later launch
  * with "Can't find source path" until the server restarted. So it is checked
- * before each use and made again when it is gone or no longer empty.
+ * before each use and made again when it is gone or no longer empty. Its
+ * name is public in every Bubblewrap command line, so once a cleaner removes
+ * it another local user can make a folder of that name in the shared temp
+ * directory; measured on bwrap 0.9.0, a cover reused from such a folder
+ * showed what that user wrote into it after the check. It is reused only
+ * while this server alone can change it.
  */
 function emptyDenySource(): string | undefined {
   if (reusedEmptyDenySource !== undefined) {
     try {
+      const folder = lstatSync(dirname(reusedEmptyDenySource));
       const stats = lstatSync(reusedEmptyDenySource);
-      if (stats.isFile() && stats.size === 0) return reusedEmptyDenySource;
+      const owner = process.getuid?.();
+      if (
+        folder.isDirectory() &&
+        folder.uid === owner &&
+        (folder.mode & 0o022) === 0 &&
+        stats.isFile() &&
+        stats.uid === owner &&
+        (stats.mode & 0o022) === 0 &&
+        stats.size === 0
+      ) {
+        return reusedEmptyDenySource;
+      }
     } catch {
       // Removed since the last launch; make another below.
     }
   }
   try {
     const file = join(mkdtempSync(join(tmpdir(), "octant-deny-")), "file");
-    writeFileSync(file, "");
+    writeFileSync(file, "", { mode: 0o600 });
     reusedEmptyDenySource = file;
     return file;
   } catch {
