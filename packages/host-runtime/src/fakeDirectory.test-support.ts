@@ -101,8 +101,28 @@ export interface FakeDirectory {
   readonly echoExchangeScope: (scope: string) => void;
   /** Act as the person's browser: open the authorize URL and follow it to the callback. */
   readonly consent: (authorizationUrl: string) => Promise<void>;
+  /** Every device authorization request, as its form fields. */
+  readonly deviceRequests: () => ReadonlyArray<Readonly<Record<string, string>>>;
+  /** How the device authorization endpoint answers the next request. */
+  readonly answerDeviceAuthorizationWith: (answer: FakeDeviceAuthorizationAnswer) => void;
+  /**
+   * Act as the person on another device: enter the code at the verification
+   * page and approve, decline, or let the code expire.
+   */
+  readonly settleDeviceCode: (
+    userCode: string,
+    outcome: "approved" | "declined" | "expired",
+  ) => void;
   readonly close: () => Promise<void>;
 }
+
+/** How the device authorization endpoint answers. */
+export type FakeDeviceAuthorizationAnswer =
+  | { readonly kind: "code"; readonly verificationUri?: string }
+  | { readonly kind: "error"; readonly status: number; readonly error: string };
+
+/** The verification page the directory names for a device code. */
+export const DEVICE_VERIFICATION_URI = "https://microsoft.com/devicelogin";
 
 interface KeyPairs {
   readonly signing: { readonly publicKey: KeyObject; readonly privateKey: KeyObject };
@@ -127,6 +147,12 @@ interface PendingCode {
   readonly clientId: string;
 }
 
+interface PendingDevice {
+  readonly userCode: string;
+  readonly clientId: string;
+  outcome: "pending" | "approved" | "declined" | "expired";
+}
+
 export async function startFakeDirectory(): Promise<FakeDirectory> {
   const { signing, unpublished } = keyPairs();
   const hosts: string[] = [];
@@ -138,6 +164,9 @@ export async function startFakeDirectory(): Promise<FakeDirectory> {
   let refreshAnswer: FakeRefreshAnswer = { kind: "tokens" };
   let exchangeFlaw: FakeIdTokenFlaw | undefined;
   let exchangeScope = `${AUDIENCE}/user_impersonation`;
+  const deviceRequests: Record<string, string>[] = [];
+  const devices = new Map<string, PendingDevice>();
+  let deviceAnswer: FakeDeviceAuthorizationAnswer = { kind: "code" };
 
   const issue = (kind: string): string => {
     const value = `fake-directory-${kind}-${randomUUID()}`;
@@ -171,11 +200,42 @@ export async function startFakeDirectory(): Promise<FakeDirectory> {
     exp: Math.floor(Date.now() / 1_000) + 3_600,
     ...(nonce === undefined ? {} : { nonce }),
   });
+  /**
+   * The answer to a finished sign-in, with the identity token the configured
+   * flaw describes. A device-code sign-in sends no nonce, so its token has none.
+   */
+  const signedInTokens = (nonce: string | undefined): Readonly<Record<string, unknown>> => {
+    const flaw = exchangeFlaw;
+    const claims = {
+      ...claimsFor(flaw === "other-tenant" ? OTHER_TENANT_ID : TENANT_ID, nonce),
+      ...(flaw === "other-tenant" ? { iss: `${DIRECTORY_ORIGIN}/${TENANT_ID}/v2.0` } : {}),
+      ...(flaw === "other-issuer" ? { iss: `${DIRECTORY_ORIGIN}/${OTHER_TENANT_ID}/v2.0` } : {}),
+      ...(flaw === "other-audience" ? { aud: randomUUID() } : {}),
+      ...(flaw === "other-nonce" ? { nonce: randomUUID() } : {}),
+      ...(flaw === "expired" ? { exp: Math.floor(Date.now() / 1_000) - 3_600 } : {}),
+    };
+    return {
+      token_type: "Bearer",
+      scope: exchangeScope,
+      expires_in: 3_599,
+      ext_expires_in: 3_599,
+      access_token: issue("access"),
+      refresh_token: issue("refresh"),
+      ...(flaw === "missing"
+        ? {}
+        : {
+            id_token: identityToken(
+              claims,
+              flaw === "unpublished-key" ? unpublished.privateKey : signing.privateKey,
+            ),
+          }),
+    };
+  };
 
   const server = createServer((request, response) => {
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     const match =
-      /^\/([^/]+)\/(oauth2\/v2\.0\/authorize|oauth2\/v2\.0\/token|discovery\/v2\.0\/keys)$/.exec(
+      /^\/([^/]+)\/(oauth2\/v2\.0\/authorize|oauth2\/v2\.0\/token|oauth2\/v2\.0\/devicecode|discovery\/v2\.0\/keys)$/.exec(
         url.pathname,
       );
     const tenant = match?.[1];
@@ -226,6 +286,34 @@ export async function startFakeDirectory(): Promise<FakeDirectory> {
       response.end();
       return;
     }
+    if (request.method === "POST" && route === "oauth2/v2.0/devicecode") {
+      void readForm(request).then((form) => {
+        deviceRequests.push(form);
+        const answer = deviceAnswer;
+        response.writeHead(answer.kind === "error" ? answer.status : 200, {
+          "content-type": "application/json",
+        });
+        if (answer.kind === "error") {
+          response.end(JSON.stringify({ error: answer.error, error_codes: [7000218] }));
+          return;
+        }
+        const deviceCode = issue("device-code");
+        const userCode = randomBytes(6).toString("hex").toUpperCase().slice(0, 9);
+        devices.set(deviceCode, { userCode, clientId: form.client_id ?? "", outcome: "pending" });
+        response.end(
+          JSON.stringify({
+            device_code: deviceCode,
+            user_code: userCode,
+            verification_uri: answer.verificationUri ?? DEVICE_VERIFICATION_URI,
+            expires_in: 900,
+            interval: 5,
+            // Free text the broker must never show: only the code and the page are its own.
+            message: `To sign in, use a web browser to open the page and enter the code ${userCode}.`,
+          }),
+        );
+      });
+      return;
+    }
     if (request.method !== "POST" || route !== "oauth2/v2.0/token") {
       response.writeHead(405);
       response.end();
@@ -251,33 +339,30 @@ export async function startFakeDirectory(): Promise<FakeDirectory> {
           reply(400, { error: "invalid_grant", error_codes: [70002] });
           return;
         }
-        const flaw = exchangeFlaw;
-        const claims = {
-          ...claimsFor(flaw === "other-tenant" ? OTHER_TENANT_ID : TENANT_ID, pending.nonce),
-          ...(flaw === "other-tenant" ? { iss: `${DIRECTORY_ORIGIN}/${TENANT_ID}/v2.0` } : {}),
-          ...(flaw === "other-issuer"
-            ? { iss: `${DIRECTORY_ORIGIN}/${OTHER_TENANT_ID}/v2.0` }
-            : {}),
-          ...(flaw === "other-audience" ? { aud: randomUUID() } : {}),
-          ...(flaw === "other-nonce" ? { nonce: randomUUID() } : {}),
-          ...(flaw === "expired" ? { exp: Math.floor(Date.now() / 1_000) - 3_600 } : {}),
-        };
-        reply(200, {
-          token_type: "Bearer",
-          scope: exchangeScope,
-          expires_in: 3_599,
-          ext_expires_in: 3_599,
-          access_token: issue("access"),
-          refresh_token: issue("refresh"),
-          ...(flaw === "missing"
-            ? {}
-            : {
-                id_token: identityToken(
-                  claims,
-                  flaw === "unpublished-key" ? unpublished.privateKey : signing.privateKey,
-                ),
-              }),
-        });
+        reply(200, signedInTokens(pending.nonce));
+        return;
+      }
+      if (form.grant_type === "urn:ietf:params:oauth:grant-type:device_code") {
+        const device = devices.get(form.device_code ?? "");
+        if (device === undefined || device.clientId !== form.client_id) {
+          reply(400, { error: "bad_verification_code", error_codes: [70019] });
+          return;
+        }
+        // The directory's own codes for each state of a device code.
+        if (device.outcome === "pending") {
+          reply(400, { error: "authorization_pending", error_codes: [70016] });
+          return;
+        }
+        if (device.outcome === "declined") {
+          reply(400, { error: "authorization_declined", error_codes: [70000] });
+          return;
+        }
+        if (device.outcome === "expired") {
+          reply(400, { error: "expired_token", error_codes: [70019] });
+          return;
+        }
+        devices.delete(form.device_code ?? "");
+        reply(200, signedInTokens(undefined));
         return;
       }
       if (form.grant_type !== "refresh_token") {
@@ -358,6 +443,15 @@ export async function startFakeDirectory(): Promise<FakeDirectory> {
     },
     echoExchangeScope: (scope) => {
       exchangeScope = scope;
+    },
+    deviceRequests: () => [...deviceRequests],
+    answerDeviceAuthorizationWith: (answer) => {
+      deviceAnswer = answer;
+    },
+    settleDeviceCode: (userCode, outcome) => {
+      const device = [...devices.values()].find((candidate) => candidate.userCode === userCode);
+      if (device === undefined) throw new Error("The fake directory issued no such user code.");
+      device.outcome = outcome;
     },
     consent: async (authorizationUrl) => {
       const redirected = await routedFetch(authorizationUrl, { redirect: "manual" });

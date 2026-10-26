@@ -31,6 +31,11 @@ import {
   runProviderKeyCliCommand,
 } from "./providerKeyCommand";
 import {
+  resolveProviderSignInCliCommand,
+  runProviderSignInCliCommand,
+  type ProviderSignInCliCommand,
+} from "./providerSignInCommand";
+import {
   resolveAuthCliCommand,
   resolveListenerCliCommand,
   resolvePairCliCommand,
@@ -274,6 +279,14 @@ async function main(): Promise<number> {
       }),
     );
   }
+  if (args.command === "provider" && args.positional[0] === "sign-in") {
+    const command = resolveProviderSignInCliCommand(args.positional, args.flags);
+    if (command === undefined) {
+      printUsage();
+      return 1;
+    }
+    return await runProviderSignInFlow(command);
+  }
   if (args.command === "provider") {
     const command = resolveProviderKeyCliCommand(args.positional, args.flags);
     if (command === undefined) {
@@ -446,6 +459,34 @@ async function runPairFlow(options: ServerPairingOptions): Promise<number> {
   }
 }
 
+/** `octant provider sign-in`: the terms question needs a terminal; the code does not. */
+async function runProviderSignInFlow(command: ProviderSignInCliCommand): Promise<number> {
+  const interactive = process.stdin.isTTY === true;
+  const prompt = interactive
+    ? createInterface({ input: process.stdin, output: process.stdout })
+    : undefined;
+  const closed =
+    prompt === undefined
+      ? undefined
+      : new Promise<undefined>((resolve) => prompt.once("close", () => resolve(undefined)));
+  try {
+    return await withLocalControlSession((session) =>
+      runProviderSignInCliCommand({
+        command,
+        session,
+        ask:
+          prompt === undefined || closed === undefined
+            ? undefined
+            : (question) => Promise.race([prompt.question(question), closed]),
+        stdout: process.stdout,
+        stderr: process.stderr,
+      }),
+    );
+  } finally {
+    prompt?.close();
+  }
+}
+
 function resolveCliHostRuntimePaths() {
   return resolveHostRuntimePaths({
     env: process.env,
@@ -482,6 +523,7 @@ function printUsage(): void {
       "  octant provider key set <instance> [--replace] [--stdin]",
       "  octant provider key status|remove <instance>",
       "  octant provider remove <instance>",
+      "  octant provider sign-in <instance>",
       "  octant listener [status]",
       "  octant listener enable --hostname <lan-or-tailscale-address> --port <port> --cert <path> --key <path>",
       "  octant listener disable",

@@ -8,6 +8,7 @@ import type { SubscriptionOAuthOffer } from "@octant/contracts/host-oauth";
 import { useRef, useState } from "react";
 import { OctantAlert } from "../../ui/base/OctantAlert";
 import { OctantButton } from "../../ui/base/OctantButton";
+import { OctantCheckbox } from "../../ui/base/OctantCheckbox";
 import { OctantInput } from "../../ui/base/OctantInput";
 import { OctantSelectField } from "../../ui/base/OctantSelect";
 import { OctantTextarea } from "../../ui/base/OctantTextarea";
@@ -507,6 +508,9 @@ export function FoundryConfigurationForm(props: FoundryConfigurationFormProps) {
       ) : (
         <DirectoryIdFields
           clientId={savedDirectory === undefined ? "" : String(savedDirectory.clientId)}
+          deviceCodeSignIn={
+            saved.authentication === "directory-oauth" && saved.deviceCodeSignIn === true
+          }
           instanceId={props.instance.id}
           instanceName={name}
           tenantId={savedDirectory === undefined ? "" : String(savedDirectory.tenantId)}
@@ -612,6 +616,8 @@ function DirectoryIdFields(props: {
   readonly instanceName: string;
   readonly tenantId: string;
   readonly clientId: string;
+  /** Whether the host-local command may sign this endpoint in with a device code. */
+  readonly deviceCodeSignIn: boolean;
 }) {
   return (
     <>
@@ -644,6 +650,32 @@ function DirectoryIdFields(props: {
           placeholder="00000000-0000-0000-0000-000000000000"
           spellCheck={false}
         />
+      </SettingRow>
+      <SettingRow
+        label="Sign in from this host's terminal"
+        scope="host"
+        settingId={`provider-${props.instanceId}-directory-device-code`}
+      >
+        <label className="endpoint-flow__check">
+          <OctantCheckbox
+            aria-describedby={`provider-${props.instanceId}-directory-device-code-guidance`}
+            aria-label={`Allow sign-in with a code from this host's terminal for ${props.instanceName}`}
+            defaultChecked={props.deviceCodeSignIn}
+            name="deviceCodeSignIn"
+          />
+          <span>
+            <span>Allow sign-in with a code from this host's terminal</span>
+            <span
+              className="endpoint-flow__hint"
+              id={`provider-${props.instanceId}-directory-device-code-guidance`}
+            >
+              For a host without the Octant desktop app: run{" "}
+              <code>octant provider sign-in "{props.instanceName}"</code> on the host and enter the
+              code it shows on any device. Leave this off unless you need it; many organizations
+              block signing in with a code.
+            </span>
+          </span>
+        </label>
       </SettingRow>
     </>
   );

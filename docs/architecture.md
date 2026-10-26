@@ -2830,7 +2830,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   bearer per request through `DirectoryOAuthHost` and sends no stored value,
   and switching an instance between a key and a sign-in, or changing its
   tenant, client, or base URL, deletes the stored credential and forgets the
-  grant before the change is journaled. `cloud-iam` is not built.
+  grant before the change is journaled. A device-code sign-in begins only for
+  an instance opted in to it, and only from the host-local
+  `octant provider sign-in` command (see "Organization sign-in on a host
+  without the desktop app" under [security and authority](#security-and-authority)).
+  `cloud-iam` is not built.
   Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
@@ -7796,6 +7800,22 @@ mechanisms are:
     an unreachable store leaves the request for the next start. The authority
     boundary above is unchanged: the new route sits behind the same bridge
     secret, window capability, no-`Origin`, and loopback checks.
+- **Organization sign-in on a host without the desktop app.** An Azure AI
+  Foundry endpoint that signs in with a directory account and opted in to it
+  (`deviceCodeSignIn`) signs in with a device code from
+  `octant provider sign-in <instance>`
+  ([`providerSignInCommand.ts`](../packages/cli/src/providerSignInCommand.ts),
+  [`providerDeviceSignInRoutes.ts`](../apps/server/src/providers/oauth/providerDeviceSignInRoutes.ts)).
+  Its `/api/desktop/provider-sign-in/begin` and `/poll` routes take exactly
+  the caller the provider key routes take (bridge secret, window capability,
+  no `Origin`, loopback), and the private listener never forwards them; the
+  browser sign-in route never begins a device code, so a code appears only in
+  the terminal that asked for it. The broker builds the tenant's device
+  authorization URL from its closed issuer host and refuses a verification
+  page off a closed list; the server follows an issued code until the broker
+  settles it, so an interrupted command never leaves a grant without a
+  pointer. [Enterprise provider identity](design/enterprise-provider-identity.md)
+  owns the rules.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider

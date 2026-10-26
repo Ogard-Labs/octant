@@ -333,7 +333,7 @@ type ResolvedInstance =
     };
 
 /** An instance id, or an exact display name that names exactly one instance. */
-function resolveInstance(
+export function resolveInstance(
   reference: string,
   instances: ReadonlyArray<ProviderInstance>,
   removedIds: ReadonlyArray<string>,
@@ -422,7 +422,7 @@ async function readJson(
   }
 }
 
-function secretsEqual(expected: string, actual: string): boolean {
+export function secretsEqual(expected: string, actual: string): boolean {
   const left = createHash("sha256").update(expected, "utf8").digest();
   const right = createHash("sha256").update(actual, "utf8").digest();
   return timingSafeEqual(left, right);

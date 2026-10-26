@@ -296,6 +296,7 @@ const COMPUTED_SETTING_ROWS: Readonly<Record<string, string>> = {
   "provider-*-oauth-offer": "provider-authentication",
   "provider-*-directory-tenant": "provider-authentication",
   "provider-*-directory-client": "provider-authentication",
+  "provider-*-directory-device-code": "provider-authentication",
   "provider-*-api-key": "provider-api-key",
   "provider-*-base-url": "provider-base-url",
   "provider-*-protocol": "provider-protocol",

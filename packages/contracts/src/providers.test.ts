@@ -345,6 +345,48 @@ describe("provider registry contracts", () => {
     refused({ ...configuration, authentication: "api-key" });
   });
 
+  it("records an Azure AI Foundry device-code sign-in only as an organization sign-in's explicit opt-in", () => {
+    const base = {
+      id: "80000000-0000-4000-8000-000000000423",
+      displayName: "Azure Foundry headless",
+      driverKind: "azure-foundry",
+      enabled: true,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: "2026-10-26T10:00:00.000Z",
+      updatedAt: "2026-10-26T10:00:00.000Z",
+    } as const;
+    const configuration = {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["deployment-fixture"],
+      directory: {
+        tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+        clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+      },
+      deviceCodeSignIn: true,
+    } as const;
+
+    expect(decodeProviderInstance({ ...base, configuration }).configuration).toEqual(configuration);
+    // Off is the absence of the opt-in; one spelling only.
+    expect(() =>
+      decodeProviderInstance({
+        ...base,
+        configuration: { ...configuration, deviceCodeSignIn: false },
+      }),
+    ).toThrow();
+    // An API-key endpoint has no organization sign-in to begin with a code.
+    const { directory: _directory, ...withoutDirectory } = configuration;
+    expect(() =>
+      decodeProviderInstance({
+        ...base,
+        configuration: { ...withoutDirectory, authentication: "api-key" },
+      }),
+    ).toThrow();
+  });
+
   it("decodes an OpenAI image profile without a base URL or secret", () => {
     const instance = decodeProviderInstance({
       id: "80000000-0000-4000-8000-000000000431",

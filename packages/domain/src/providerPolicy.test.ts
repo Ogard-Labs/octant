@@ -849,6 +849,45 @@ describe("provider instance policy", () => {
     expect(create({ authentication: "api-key" })).toThrow("does not name a directory tenant");
   });
 
+  it("keeps a device-code sign-in only as an organization sign-in's explicit opt-in", () => {
+    const configuration: AzureFoundryConfigurationInput = {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["deployment-a"],
+      directory: {
+        tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+        clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+      },
+    };
+    const create = (input: AzureFoundryConfigurationInput) =>
+      createAzureFoundryProvider({
+        id: ids.local,
+        displayName: "Azure Foundry headless",
+        configuration: input,
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
+      });
+
+    const optedIn = create({ ...configuration, deviceCodeSignIn: true });
+    expect(optedIn.configuration).toMatchObject({ deviceCodeSignIn: true });
+    // Off is stored as the absence of the opt-in, never as `false`.
+    const optedOut = changeAzureFoundryConfiguration(
+      optedIn,
+      { ...configuration, deviceCodeSignIn: false },
+      createdAt,
+    );
+    expect(optedOut.configuration).not.toHaveProperty("deviceCodeSignIn");
+    expect(create(configuration).configuration).not.toHaveProperty("deviceCodeSignIn");
+    // An API-key endpoint has no organization sign-in to begin with a code.
+    const { directory: _directory, ...keyed } = configuration;
+    expect(() => create({ ...keyed, authentication: "api-key", deviceCodeSignIn: true })).toThrow(
+      "device code",
+    );
+  });
+
   it("rejects an Azure AI Foundry configuration with no deployment IDs", () => {
     expect(() =>
       createAzureFoundryProvider({

@@ -15,8 +15,10 @@ maintainer, on 2026-10-26. Slice 1 is built: 1a (the seam and its
 conformance), 1b (the broker's `directory-oidc` dialect), and 1c (the Azure AI
 Foundry driver, Settings, and user guide). An Azure AI Foundry endpoint can
 sign in with the organization's Microsoft Entra ID account against fakes;
-closing slice 1 waits only on the maintainer's real-tenant smoke below.
-`cloud-iam` and slices 2 to 4 are not built.
+closing slice 1 waits only on the maintainer's real-tenant smoke below. Slice
+2 is built: a host without the desktop app signs an opted-in instance in with
+a device code from `octant provider sign-in`, against fakes; closing it waits
+on its own real-tenant smoke. `cloud-iam` and slices 3 and 4 are not built.
 Each slice below lands with its own implementation, tests, and the edits to
 this file that record what it built.
 
@@ -43,6 +45,7 @@ and never falls back to another authentication.
 | Bedrock through API keys  | [`bedrockMantleSmoke.integration.test.ts`](../../apps/server/src/providers/bedrockMantleSmoke.integration.test.ts), [`codexProcess.ts`](../../apps/server/src/providers/codexProcess.ts)                                                                       | Bedrock's OpenAI-compatible endpoint works as an ordinary `openai-compatible` instance with a Bedrock API key. Codex's own Bedrock provider reads the person's AWS profile in its delegated posture; static `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` never cross into it                 |
 | `directory-oauth` seam    | [`directoryOAuth.ts`](../../packages/provider-sdk/src/directoryOAuth.ts), [`directoryOAuthConformance.ts`](../../packages/provider-sdk/src/directoryOAuthConformance.ts), `DirectoryBinding` in [`providers.ts`](../../packages/contracts/src/providers.ts)    | Slice 1a: the pointer, `DirectoryOAuthHost`, per-request resolve with the binding checks, the one-renewal 401 rule, fixed failure sentences, and `runDirectoryOAuthConformance` against an in-memory fake directory and endpoint                                                            |
 | `directory-oidc` dialect  | [`hostOAuth.ts`](../../packages/host-runtime/src/hostOAuth.ts), [`fakeDirectory.test-support.ts`](../../packages/host-runtime/src/fakeDirectory.test-support.ts)                                                                                               | Slice 1b: tenant-built authority, identity-token validation with `tid`, the echoed-scope binding, the binding check on `access`, directory error-code mapping, local sign-out, and an HTTP fake directory (authorize, token, key set) the broker tests drive                                |
+| Device-code sign-in       | [`providerDeviceSignInRoutes.ts`](../../apps/server/src/providers/oauth/providerDeviceSignInRoutes.ts), [`providerSignInCommand.ts`](../../packages/cli/src/providerSignInCommand.ts)                                                                          | Slice 2: `octant provider sign-in <instance>` on the host, the host-local `/api/desktop/provider-sign-in` routes, the broker's directory device authorization, and the per-instance `deviceCodeSignIn` opt-in                                                                               |
 | Secret absence            | [`directProviderSecretAbsence.test.ts`](../../apps/server/src/providers/directProviderSecretAbsence.test.ts), [`hostOAuthDirectorySecretAbsence.test.ts`](../../packages/host-runtime/src/hostOAuthDirectorySecretAbsence.test.ts)                             | The pattern for proving a credential reaches no event, failure, diagnostic, or journal record; slice 1b applies it to every broker answer and the console for a directory grant                                                                                                             |
 
 Nothing today signs in to a directory tenant or signs a cloud request.
@@ -114,7 +117,7 @@ dialect and a binding, not a second store or a second refresh path.
 
 | Route                                      | Caller                                    | Directory change                                                                                                                                                                                                                                                                                                                                                                                           |
 | ------------------------------------------ | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/v1/oauth/begin`                          | Server, for a local principal             | Dialect `directory-oidc`. The descriptor carries a tenant id (a GUID, never `common` or `organizations`), a client id, and an audience from a closed list; the broker builds the authority URLs from a closed issuer host, so configuration cannot name an arbitrary IdP                                                                                                                                   |
+| `/v1/oauth/begin`                          | Server, for a local principal             | Dialect `directory-oidc`. The descriptor carries a tenant id (a GUID, never `common` or `organizations`), a client id, and an audience from a closed list; the broker builds the authority URLs from a closed issuer host, so configuration cannot name an arbitrary IdP. The flow is the loopback PKCE redirect or (slice 2) a device code at the tenant's own device authorization URL                   |
 | `/v1/oauth/status`                         | Server                                    | Unchanged; on success the grant records the validated tenant, client, audience, the endpoint origin it was signed in for, and an account label                                                                                                                                                                                                                                                             |
 | `/v1/oauth/access`                         | Server driver, per request                | Takes a required `binding` (tenant, client, audience, endpoint origin) for a directory grant and refuses (`binding-mismatch`) when it differs from the grant; returns the access token and expiry only                                                                                                                                                                                                     |
 | `/v1/oauth/refresh`                        | Server driver, when access is near expiry | Unchanged single-flight refresh; directory error codes map to sign-in-again reasons                                                                                                                                                                                                                                                                                                                        |
@@ -189,9 +192,10 @@ Rules slice 1b resolved in the broker, each the most conservative reading:
   `https://cognitiveservices.azure.com`, the resource Azure AI Foundry's
   OpenAI-compatible endpoints accept.
 - **Descriptor shape.** A `directory-oidc` descriptor names the tenant, client,
-  audience, and endpoint origin and nothing else: no URL, no scope, no device
-  flow. The broker requests the audience's `.default` scope with `openid`,
-  `profile`, and `offline_access`, and no other resource.
+  audience, and endpoint origin and nothing else: no URL and no scope (slice
+  1b also refused the device flow, which slice 2 admits without a URL). The
+  broker requests the audience's `.default` scope with `openid`, `profile`,
+  and `offline_access`, and no other resource.
 - **Callback code.** The directory's authorization codes are opaque and run
   past a thousand characters, so the directory callback accepts a code up to
   the 4,096-character query cap; the other dialects keep the 512-character
@@ -298,6 +302,63 @@ Rules slice 1c resolved, each the most conservative reading:
   the instance holds when the sign-in finishes; if the grant was begun for
   another, the broker refuses it at the first request (`incompatible`).
 
+Rules slice 2 resolved, each the most conservative reading of decision 2:
+
+- **The opt-in.** A `directory-oauth` Azure AI Foundry configuration carries
+  `deviceCodeSignIn: true` when the person turned the sign-in on; absent is
+  off, the contract refuses `false` so off has one spelling, and provider
+  policy refuses the opt-in on an API-key instance. Settings shows it as
+  "Allow sign-in with a code from this host's terminal" under Name and
+  address, off by default. It is not part of the binding: turning it on or off
+  keeps the grant, because it governs how a sign-in begins and a grant is the
+  same whichever flow made it. Sign out ends a grant.
+- **Where a device code begins.** Only the host-local
+  `/api/desktop/provider-sign-in/begin` and `/poll` routes
+  ([`providerDeviceSignInRoutes.ts`](../../apps/server/src/providers/oauth/providerDeviceSignInRoutes.ts))
+  begin one, and they take only the caller the provider key routes take: the
+  desktop bridge secret, no `Origin`, a loopback address, and a registered
+  window capability. The private listener never forwards `/api/desktop`, so a
+  paired device cannot reach them, and a browser on the host never holds the
+  secret. Settings' `/api/providers/oauth` route never begins a device code,
+  even when a command asks for one: the code is shown only in the terminal
+  where the person typed the command, because a code shown on a page someone
+  else can reach is how device-code phishing works. Both routes refuse an
+  instance that has not opted in before any broker call, and the shared
+  sign-in path checks the opt-in again for every caller.
+- **The broker's device authorization.** The broker builds
+  `{tenant}/oauth2/v2.0/devicecode` from the closed issuer host, so the
+  descriptor still names no URL; it requests only the audience's scopes. It
+  reads `device_code`, `user_code`, `verification_uri`, `expires_in`, and
+  `interval`, never the directory's free-text `message`. The page must be
+  https on `microsoft.com`, `login.microsoft.com`, or
+  `login.microsoftonline.com`, with no port or credentials, and its text
+  must be visible ASCII (the URL parser reads past an escape character or a
+  line break that a terminal would act on), or the attempt is refused before
+  any code is shown; the command refuses such a page again before printing. A code lives at most 15 minutes and is
+  polled every 1 to 60 seconds. A 4xx answer (an app registration that does
+  not allow public client flows, for one) is `exchange-refused`; a 429, a
+  5xx, or no answer is `unavailable`.
+- **Polling.** `authorization_pending` and `slow_down` wait;
+  `authorization_declined` or `access_denied` is `denied`; `expired_token` is
+  `timeout`; any other refusal is `exchange-refused`; a network failure or a
+  5xx ends the attempt `unavailable`, as the standard device flow already
+  does. A finished sign-in passes the loopback flow's scope and identity-token
+  checks without a nonce: none can be sent, and the token is the tenant
+  token endpoint's answer to the attempt's own device code.
+- **Consent.** The command prints the same consent line Settings shows (terms
+  id `azure-foundry-directory-1`) and asks once per host; without a terminal
+  to answer it starts nothing. Beside the code it prints a fixed sentence
+  telling the person to enter a code only because they just ran the command.
+- **An interrupted command.** Once a code is issued, the server follows the
+  attempt until the broker settles it and stores the pointer then, so a
+  sign-in finished after the command stopped waiting still names its grant.
+  It reads the broker's answer with the descriptor the attempt began with,
+  so a sign-in finished after its instance was removed, or stopped signing in
+  with its organization, or whose pointer could not be stored, has its new
+  grant forgotten: no refresh token is left without a pointer. A poll answers
+  only the command (its window authority) that began the attempt, for that
+  instance.
+
 ## Expiry, refresh, and revocation
 
 - **Per-request resolution.** The bearer is resolved for each `send`, never once
@@ -340,7 +401,7 @@ and its consumer sign-in delta (O1–O5):
 | E5  | A mis-set instance talks to the wrong tenant or host                   | Four-point binding above; GUID tenant only; closed audience and endpoint host lists                                                                                                                                                                                                                                   | 1           |
 | E6  | A compromised server uses the signer as a general cloud oracle         | `sign` receives request fields, not a digest; the broker checks method, host, and path against the binding it stored (service, region, host, path prefix, method), builds the canonical request itself, and refuses everything else, so an allowed binding cannot cover another request; the server never holds a key | 4           |
 | E7  | A bearer leaks through an error, diagnostic, fork, or `journal-lookup` | Fixed Octant sentences for every failure; the bearer joins the turn's redacted credential values; secret-absence tests extend to the new kinds                                                                                                                                                                        | 1           |
-| E8  | Consent phishing or a look-alike sign-in page                          | The broker builds authority URLs from a closed issuer host and the tenant GUID; PKCE with one-shot loopback redirect and state; device code is opt-in per instance (decision 2)                                                                                                                                       | 1, 2        |
+| E8  | Consent phishing or a look-alike sign-in page                          | The broker builds authority URLs from a closed issuer host and the tenant GUID; PKCE with one-shot loopback redirect and state; device code is opt-in per instance, begins only from the host-local command, and shows only a code and a page from a closed list (decision 2)                                         | 1, 2        |
 
 ## Conformance cases
 
@@ -500,9 +561,39 @@ needs a new wire transport and a signer, and Vertex needs a relay, so either
 would be several slices before the first sign-in.
 
 **Slice 2: device-code sign-in for hosts without the desktop app**
-(decision 2). `octant provider sign-in` on the host, opt-in per instance.
-_Acceptance:_ a headless host signs in with device code against a fake
-directory; remote principals cannot start it. Linux container capable.
+(decision 2). Built; stacks on slice 1. `octant provider sign-in` on the
+host, opt-in per instance (rules above). _Acceptance:_ a headless host signs
+in with device code against a fake directory; remote principals cannot start
+it. Linux container capable. _Evidence:_ the broker's directory dialect,
+against the HTTP fake directory's device authorization endpoint, issues a
+code at the tenant's own authority for only the audience, shows only the page
+and code, and stores a grant bound like a loopback one once the person
+approves; a declined or expired code, each identity-token flaw, a scope off
+the audience, a page off the closed list, and a refused or unreachable device
+authorization each store nothing; the broker's routes answer the same, and
+refuse a non-loopback, tokenless, or browser caller's device-code begin with
+no directory request; the secret-absence run finds no device code or token in
+any answer. The host-local routes sign an opted-in instance in from its own
+binding and keep the pointer, finish a sign-in after the command stops
+waiting, forget the grant of one finished after its instance was removed, and
+refuse an instance that has not opted in, one without an
+organization sign-in, a caller without the bridge secret, a browser page, a
+non-loopback address, a caller without a window authority, and another
+command's poll, each before any broker call; Settings' route never begins a
+device code; the remote forward-list gate proves the private listener does
+not forward either route. The command shows the page, code, and warning,
+asks before accepting the terms, and explains every refusal; Settings keeps
+the opt-in on save and drops it when unchecked.
+
+- **Needs the maintainer:** a real-tenant smoke with the slice 1 app
+  registration and **Allow public client flows** set to Yes, from a headless
+  Linux host with an unlocked Secret Service: `octant provider sign-in`
+  prints a page on the closed list (record the `verification_uri` the
+  directory returns); entering the code on another device signs the endpoint
+  in, Settings names the account, and a Chat turn runs; a code left to expire
+  and a declined sign-in read as such; and a registration without public
+  client flows, and a tenant whose conditional access blocks device-code
+  sign-in, are refused (record the codes the directory returns).
 
 **Slice 3: directory sign-in for OpenAI-compatible and Anthropic-compatible
 gateways.** A generic OIDC directory dialect for an organization's own model

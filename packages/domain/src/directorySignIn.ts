@@ -14,6 +14,13 @@ export const AZURE_FOUNDRY_DIRECTORY_SIGN_IN = {
   accountLabel: "Organization account",
   termsSummary:
     "Octant signs you in with your organization's Microsoft Entra ID account and keeps the sign-in in this computer's credential broker. Requests to this Azure AI Foundry endpoint run as you, under your organization's policies. Sign out removes this computer's sign-in only; it does not end your organization session.",
+  /**
+   * Printed beside a device code by the host-local command. A device code is
+   * the easier sign-in to phish: someone who sends a person their own code
+   * gets a sign-in as that person when it is entered.
+   */
+  deviceCodeWarning:
+    "Enter this code only because you just ran this command on this computer. Never enter a sign-in code someone sent you.",
   /** The resource Azure AI Foundry's OpenAI v1 endpoints accept a token for. */
   audience: "https://cognitiveservices.azure.com",
   /** The hosts Azure AI Foundry serves its OpenAI v1 API under. */
@@ -43,18 +50,23 @@ export function azureFoundryDirectoryOrigin(baseUrl: string): string | undefined
 /**
  * The broker descriptor a sign-in for this instance begins with, built from
  * its configuration alone; undefined when the address is off the host list.
+ * The flow is the loopback redirect unless the caller asks for a device code;
+ * whether the instance allows one is the server's check, not this one's.
  */
-export function azureFoundryDirectoryDescriptor(configuration: {
-  readonly baseUrl: string;
-  readonly directory: DirectoryBinding;
-}): HostOAuthDescriptor | undefined {
+export function azureFoundryDirectoryDescriptor(
+  configuration: {
+    readonly baseUrl: string;
+    readonly directory: DirectoryBinding;
+  },
+  flow: HostOAuthDescriptor["flow"] = "authorization-code-pkce",
+): HostOAuthDescriptor | undefined {
   const endpointOrigin = azureFoundryDirectoryOrigin(configuration.baseUrl);
   if (endpointOrigin === undefined) return undefined;
   return {
     descriptorId:
       AZURE_FOUNDRY_DIRECTORY_SIGN_IN.descriptorId as HostOAuthDescriptor["descriptorId"],
     dialect: "directory-oidc",
-    flow: "authorization-code-pkce",
+    flow,
     clientId: String(configuration.directory.clientId),
     tenantId: String(configuration.directory.tenantId),
     audience: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.audience,

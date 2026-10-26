@@ -123,7 +123,14 @@ does not end the organization session (sign-out answers Signed out on this
 computer). Name and address keeps the endpoint's sign-in method: its
 Authentication select (API key or Organization account) and the tenant and
 client fields, and a note that switching methods removes what was stored for
-the other. Diagnostics adds "Signed in for", the tenant, client, and origin the
+the other. An organization account adds the checkbox "Allow sign-in with a
+code from this host's terminal", off by default, whose hint names
+`octant provider sign-in "<name>"` for a host without the desktop app and says
+many organizations block signing in with a code. Settings itself never shows
+a device code: the sign-in panel always signs in through the browser, and the
+code appears only in the terminal that ran the command
+([Enterprise provider identity](enterprise-provider-identity.md) owns the
+rule). Diagnostics adds "Signed in for", the tenant, client, and origin the
 last check bound to.
 
 Row states read the host's reason: Sign in to use (no sign-in), Sign in again
