@@ -11,10 +11,12 @@ provider SDK seam, and who may change credentials
 Add endpoint flow.
 
 Status: authorized post-preview scope, and its decisions accepted by the
-maintainer, on 2026-10-26. Slice 1a (the seam and its conformance) is built;
-slices 1b and 1c are next. Nothing here changes what ships today: no broker
-dialect or driver speaks `directory-oauth` yet: provider policy refuses to
-configure an instance with it, and one read from storage is `incompatible`.
+maintainer, on 2026-10-26. Slices 1a (the seam and its conformance) and 1b
+(the broker's `directory-oidc` dialect) are built; slice 1c is next. Nothing
+here changes what ships today: the broker can hold a directory grant, but no
+server path begins one and no driver speaks `directory-oauth` yet: provider
+policy refuses to configure an instance with it, and one read from storage is
+`incompatible`.
 Each slice below lands with its own implementation, tests, and the edits to
 this file that record what it built.
 
@@ -39,7 +41,8 @@ and never falls back to another authentication.
 | Azure AI Foundry driver   | [`azureFoundryDriver.ts`](../../apps/server/src/providers/azureFoundryDriver.ts), `AzureFoundryProviderConfiguration` in [`providers.ts`](../../packages/contracts/src/providers.ts)                                                                        | `authentication: "api-key"` only, sent in the `api-key` header                                                                                                                                                                                                                              |
 | Bedrock through API keys  | [`bedrockMantleSmoke.integration.test.ts`](../../apps/server/src/providers/bedrockMantleSmoke.integration.test.ts), [`codexProcess.ts`](../../apps/server/src/providers/codexProcess.ts)                                                                    | Bedrock's OpenAI-compatible endpoint works as an ordinary `openai-compatible` instance with a Bedrock API key. Codex's own Bedrock provider reads the person's AWS profile in its delegated posture; static `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` never cross into it                 |
 | `directory-oauth` seam    | [`directoryOAuth.ts`](../../packages/provider-sdk/src/directoryOAuth.ts), [`directoryOAuthConformance.ts`](../../packages/provider-sdk/src/directoryOAuthConformance.ts), `DirectoryBinding` in [`providers.ts`](../../packages/contracts/src/providers.ts) | Slice 1a: the pointer, `DirectoryOAuthHost`, per-request resolve with the binding checks, the one-renewal 401 rule, fixed failure sentences, and `runDirectoryOAuthConformance` against an in-memory fake directory and endpoint                                                            |
-| Secret absence            | [`directProviderSecretAbsence.test.ts`](../../apps/server/src/providers/directProviderSecretAbsence.test.ts)                                                                                                                                                | The pattern for proving a credential reaches no event, failure, diagnostic, or journal record                                                                                                                                                                                               |
+| `directory-oidc` dialect  | [`hostOAuth.ts`](../../packages/host-runtime/src/hostOAuth.ts), [`fakeDirectory.test-support.ts`](../../packages/host-runtime/src/fakeDirectory.test-support.ts)                                                                                            | Slice 1b: tenant-built authority, identity-token validation with `tid`, the echoed-scope binding, the binding check on `access`, directory error-code mapping, local sign-out, and an HTTP fake directory (authorize, token, key set) the broker tests drive                                |
+| Secret absence            | [`directProviderSecretAbsence.test.ts`](../../apps/server/src/providers/directProviderSecretAbsence.test.ts), [`hostOAuthDirectorySecretAbsence.test.ts`](../../packages/host-runtime/src/hostOAuthDirectorySecretAbsence.test.ts)                          | The pattern for proving a credential reaches no event, failure, diagnostic, or journal record; slice 1b applies it to every broker answer and the console for a directory grant                                                                                                             |
 
 Nothing today signs in to a directory tenant or signs a cloud request.
 
@@ -176,6 +179,61 @@ Rules slice 1a resolved, each the stricter reading of the text above:
   and no stored key is sent in place of the sign-in. Slice 1c replaces both
   refusals with the directory transport.
 
+Rules slice 1b resolved in the broker, each the most conservative reading:
+
+- **One issuer, one audience.** The closed issuer host is
+  `login.microsoftonline.com`; sovereign clouds wait for an organization that
+  needs one. The broker builds the tenant's authorize, token, and key-set URLs
+  from it and fetches no discovery document. The closed audience list is
+  `https://cognitiveservices.azure.com`, the resource Azure AI Foundry's
+  OpenAI-compatible endpoints accept.
+- **Descriptor shape.** A `directory-oidc` descriptor names the tenant, client,
+  audience, and endpoint origin and nothing else: no URL, no scope, no device
+  flow. The broker requests the audience's `.default` scope with `openid`,
+  `profile`, and `offline_access`, and no other resource.
+- **Echoed scope.** Every resource scope the directory echoes must sit under
+  the audience, and at least one must; the identity scopes, which the echo may
+  omit, are ignored. A refresh whose echo leaves the audience ends the grant
+  (`revoked`).
+- **Identity token.** Sign-in checks `tid` beside the tenant-specific issuer.
+  A refresh's new identity token must keep the tenant and subject or the grant
+  ends; one the broker cannot check because the key set is unreachable keeps
+  the rotated tokens and the prior identity, as the ChatGPT plan dialect does,
+  since the directory may already have retired the previous refresh token. The
+  grant keeps the subject and an account label (`preferred_username`, else
+  `name`, when either is plain text), never the identity token. A key set may
+  be up to 64 KiB because the directory publishes certificate chains.
+- **Binding on `access`.** A directory grant releases its token only to a
+  request naming its exact binding; a missing binding is `binding-mismatch`. A
+  binding sent for a grant of any other kind is also `binding-mismatch`, so a
+  caller expecting a directory grant never receives another kind's bearer. A
+  binding that is not exactly the four text fields is a malformed request. The
+  broker requires a canonical https origin and compares it exactly; the
+  endpoint host list stays the driver's, because the server already holds each
+  request's token and a second list in the broker would not narrow what a
+  compromised server could do.
+- **Refresh error codes.** The broker reads the directory's `error`,
+  `suberror`, and numeric `error_codes`, never its description text.
+  `interaction_required`, `login_required`, `consent_required`, the
+  `basic_action`, `additional_action`, `message_only`, `user_password_expired`,
+  and `consent_required` sub-errors, and AADSTS50076, 50079, 50158, and 65001
+  are `interaction-required` and keep the grant. `invalid_grant` with the
+  `token_expired` sub-error or AADSTS70008, 700082, or 70043 is `expired`; any
+  other `invalid_grant` (including AADSTS50173, a password change or an
+  administrator's revocation), `invalid_client`, and `unauthorized_client` are
+  `revoked`. Both drop the grant. Every other answer, a 429 or 5xx, and a
+  network failure are transient and keep it. The directory does not detect
+  refresh-token reuse, so this dialect never reports `refresh-reused`.
+- **Remote principals.** The broker answers only the server: a loopback peer
+  carrying the launch token and no browser `Origin`. The server's principal
+  gate refuses a remote begin, refresh, or sign-out before any broker call,
+  for every dialect.
+- **Left to 1c.** The server's broker client gains the binding argument with
+  its first caller, the Foundry transport. Until the server contract names
+  `interaction-required`, the server reads that refresh reason as
+  `unavailable`, which fails closed. The status answer is unchanged, so how
+  Settings shows the account label is 1c's to decide.
+
 ## Expiry, refresh, and revocation
 
 - **Per-request resolution.** The bearer is resolved for each `send`, never once
@@ -234,7 +292,8 @@ rules (binding re-check, single-flight refresh, which refusals drop the
 grant), so "grant kept" is proved by the driver recovering without a new
 sign-in and "grant dropped" by its staying unauthenticated. The raw-resolve and
 remote-principal rows concern the broker and the server, not a driver; slice
-1b proves them against the broker.
+1b proves them against the broker, with the real dialect behind it, and the
+server's principal gate.
 
 | Case                                                                                                      | Expected                                                                       |
 | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
@@ -312,12 +371,23 @@ three layers:
   or echo the bearer in a failure each fail the runner; the contract refuses
   multi-tenant aliases and secrets; provider policy and the Foundry driver
   refuse a `directory-oauth` configuration until 1c.
-- **1b. Broker dialect.** `directory-oidc` in the host OAuth runner: closed
-  issuer host, tenant-specific authority, identity-token validation, binding on
-  `access`, error-code mapping, local revoke. _Acceptance:_ a fake directory
-  drives sign-in, refresh, every sign-in-again reason, and binding refusal;
-  raw resolve refuses the grant; remote negatives refuse. _Verification:_
-  host-runtime tests.
+- **1b. Broker dialect.** Built. `directory-oidc` in the host OAuth runner:
+  closed issuer host, tenant-specific authority, identity-token validation,
+  binding on `access`, error-code mapping, local revoke. _Acceptance:_ a fake
+  directory drives sign-in, refresh, every sign-in-again reason, and binding
+  refusal; raw resolve refuses the grant; remote negatives refuse.
+  _Verification:_ host-runtime tests. _Evidence:_ an HTTP fake directory
+  (authorize, token, and key set, reached only through the closed issuer host)
+  drives sign-in, single-flight refresh, each identity-token and scope flaw,
+  every sign-in-again reason the dialect maps (`expired`, `revoked`, and
+  `interaction-required`, which keeps the grant), transient answers that keep
+  it, and local sign-out; the broker's routes refuse every mismatched,
+  missing, or foreign binding, a raw resolve of the grant, and a non-loopback,
+  tokenless, or browser caller for begin, refresh, access, and sign-out, with
+  nothing changed; the server refuses a remote refresh or sign-out before any
+  broker call; and a secret-absence run finds no code, token, or verifier in
+  any broker answer or console line except the one access token `access`
+  releases under its binding.
 - **1c. Foundry driver and Settings.** The Foundry driver, already on the
   harness endpoint port, sends the bearer per request, probes with it, and
   redacts it; Add endpoint offers Sign in beside the key with tenant and client
