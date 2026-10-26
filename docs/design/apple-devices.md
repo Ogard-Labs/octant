@@ -41,8 +41,9 @@ TestFlight track for its mobile client is a separate operator runbook
   pure `evaluateAppleDeviceRequest` in
   [`appleToolchainPolicy.ts`](../../packages/domain/src/appleToolchainPolicy.ts)
   decide every row of the authority table below and every refusal named in
-  these rules. No host code calls them yet: there is no device discovery,
-  lease store, route, or tool operation.
+  these rules; upload is refused until distribution is enabled. No host code
+  calls them yet: there is no device discovery, lease store, route, or tool
+  operation.
 - Every build passes `CODE_SIGNING_ALLOWED=NO`
   ([`appleToolchainService.ts`](../../apps/server/src/apple/appleToolchainService.ts),
   `xcodebuildArguments`), so no signing identity is ever touched, and
@@ -185,10 +186,10 @@ access covers neither the device lease nor any distribution step.
   could carry `-allowProvisioningUpdates`.
 - `build` needs the lease but not a connected device: it signs for the device
   without touching it.
-- Every refusal that needs nobody's answer (host, remote, person, posture,
-  tooling, device, lease, state, ownership) is decided before an approval or
-  confirmation is asked for, so nobody is asked to approve a call that would
-  then be refused.
+- Every refusal that needs nobody's answer (host, distribution gate, remote,
+  person, posture, tooling, device, lease, state, ownership) is decided before
+  an approval or confirmation is asked for, so nobody is asked to approve a
+  call that would then be refused.
 - `logs` is the console output of the process Octant launched
   (`devicectl device process launch --console`). Device-wide system logs carry
   other apps' and the person's data and are not offered.
@@ -214,6 +215,11 @@ access covers neither the device lease nor any distribution step.
 
 ### Distribution
 
+- Until the Current Release Boundary admits distribution (decision 7), every
+  upload is refused (`distribution-not-enabled`) whoever asks and under every
+  posture. The host passes the boundary to the policy as an input that stays
+  off until the decision-7 PR turns it on; the upload row of the authority
+  table is the rule that applies after that.
 - Distribution never runs on an agent's word. When the person asks in the
   thread, its agent may request an upload, a submission, or a release through
   `octant_apple`; the request raises the same confirmation the workbench

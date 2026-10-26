@@ -706,7 +706,11 @@ describe("evaluateAppleDeviceRequest", () => {
     ],
     devices: [device()],
     leases: [lease()],
+    distributionEnabled: false,
   };
+  // The upload row of the authority table, as it will apply once the release
+  // boundary admits distribution.
+  const distributing: AppleDeviceHost = { ...mac, distributionEnabled: true };
   const holdings: AppleDeviceThreadHoldings = {
     builtProducts: [deviceRequest("install").artifact ?? "apple-product-1"],
     installed: [{ deviceId: device().deviceId, bundleIdentifier: "sh.octant.Fixture" }],
@@ -847,29 +851,44 @@ describe("evaluateAppleDeviceRequest", () => {
 
     it("uploads only when a person at the Mac asks and confirms, never in Plan and never for an agent", () => {
       const asked = deviceRequest("upload", { requestedBy: person, approval: approved });
-      expect(evaluateAppleDeviceRequest(asked, approvedScope("plan"), mac, nothingHeld)).toEqual(
-        denied("read-only-policy"),
-      );
+      expect(
+        evaluateAppleDeviceRequest(asked, approvedScope("plan"), distributing, nothingHeld),
+      ).toEqual(denied("read-only-policy"));
       for (const posture of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
         expect(
           evaluateAppleDeviceRequest(
             deviceRequest("upload", { requestedBy: person }),
             scope(posture),
-            mac,
+            distributing,
             nothingHeld,
           ),
         ).toEqual(denied("confirmation-required"));
-        expect(evaluateAppleDeviceRequest(asked, approvedScope(posture), mac, nothingHeld)).toEqual(
-          allowed,
-        );
+        expect(
+          evaluateAppleDeviceRequest(asked, approvedScope(posture), distributing, nothingHeld),
+        ).toEqual(allowed);
         expect(
           evaluateAppleDeviceRequest(
             deviceRequest("upload", { approval: approved }),
             approvedScope(posture),
-            mac,
+            distributing,
             nothingHeld,
           ),
         ).toEqual(denied("person-required"));
+      }
+    });
+
+    it("refuses every upload while the release boundary does not admit distribution", () => {
+      for (const posture of postures) {
+        for (const requestedBy of [agent, person, remotePerson]) {
+          expect(
+            evaluateAppleDeviceRequest(
+              deviceRequest("upload", { requestedBy, approval: approved }),
+              approvedScope(posture),
+              mac,
+              nothingHeld,
+            ),
+          ).toEqual(denied("distribution-not-enabled"));
+        }
       }
     });
   });
@@ -1023,7 +1042,7 @@ describe("evaluateAppleDeviceRequest", () => {
           evaluateAppleDeviceRequest(
             deviceRequest(kind, { requestedBy: remotePerson, approval: approved }),
             approvedScope("full-access", remotePerson),
-            mac,
+            distributing,
             holdings,
           ),
         ).toEqual(denied("local-person-required"));
@@ -1034,7 +1053,7 @@ describe("evaluateAppleDeviceRequest", () => {
       for (const [kind, requestedBy, host] of [
         ["use-device", agent, { ...mac, leases: [] }],
         ["uninstall", person, mac],
-        ["upload", person, mac],
+        ["upload", person, distributing],
       ] as const) {
         expect(
           evaluateAppleDeviceRequest(
@@ -1249,6 +1268,27 @@ describe("evaluateAppleDeviceRequest", () => {
           installedElsewhere,
         ),
       ).toEqual(denied("foreign-bundle"));
+    });
+
+    it("refuses a call that would fail anyway before asking anyone to approve or confirm it", () => {
+      const locked = { ...mac, devices: [device("locked")] };
+      const heldElsewhere = { ...mac, leases: [lease(ids.otherThread, ids.otherCheckout)] };
+      const noInstall = { ...mac, tooling: mac.tooling.filter((op) => op !== "install-app") };
+      for (const [request, host, reason] of [
+        [deviceRequest("install"), locked, "locked"],
+        [deviceRequest("install"), noInstall, "operation-unavailable"],
+        [
+          deviceRequest("launch", { bundleIdentifier: "com.apple.mobilesafari" }),
+          mac,
+          "foreign-bundle",
+        ],
+        [deviceRequest("uninstall", { requestedBy: person }), locked, "locked"],
+        [deviceRequest("use-device"), heldElsewhere, "destination-leased"],
+      ] as const) {
+        expect(
+          evaluateAppleDeviceRequest(request, scope("approval-gated"), host, holdings),
+        ).toEqual(denied(reason));
+      }
     });
 
     it("stops and reads only a process Octant launched", () => {

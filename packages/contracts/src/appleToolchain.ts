@@ -641,6 +641,7 @@ export const AppleDeviceRefusalReason = Schema.Literal(
   "toolchain-unavailable",
   "operation-unavailable",
   "provisioning-updates-not-offered",
+  "distribution-not-enabled",
   "person-required",
   "local-person-required",
   "read-only-policy",

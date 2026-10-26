@@ -261,6 +261,12 @@ export interface AppleDeviceHost {
   readonly tooling: ReadonlyArray<AppleDeviceToolingOperation>;
   readonly devices: ReadonlyArray<AppleDeviceRecord>;
   readonly leases: ReadonlyArray<AppleDeviceLease>;
+  /**
+   * Whether the Current Release Boundary admits distribution. Decision 7 of
+   * the design keeps it closed until a maintainer request and a boundary
+   * change land in their own PR, so every upload is refused until then.
+   */
+  readonly distributionEnabled: boolean;
 }
 
 export interface AppleDeviceBundle {
@@ -349,6 +355,9 @@ export function evaluateAppleDeviceRequest(
   // developer account, so no posture, actor, or approval reaches it.
   if (request.kind === "provisioning-update") {
     return deviceDenied("provisioning-updates-not-offered");
+  }
+  if (request.kind === "upload" && !host.distributionEnabled) {
+    return deviceDenied("distribution-not-enabled");
   }
   // Remote clients observe only; widening later is cheaper than narrowing.
   if (actor.kind === "remote-device" && request.kind !== "discover" && request.kind !== "status") {
