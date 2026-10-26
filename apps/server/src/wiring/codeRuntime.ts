@@ -246,6 +246,7 @@ export type CodeRuntimeDependencies = Pick<ServerStart, "options" | "persistence
   Pick<
     DevicesWiring,
     | "androidToolchainService"
+    | "appleDeviceService"
     | "appleToolchainService"
     | "bindDeviceApprovals"
     | "recordAppleEvidence"
@@ -307,6 +308,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     agentsManagedToolsFor,
     androidInputGrants,
     androidToolchainService,
+    appleDeviceService,
     appleToolchainService,
     bindDeviceApprovals,
     browserAuthority,
@@ -377,12 +379,15 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     let codeOperationRuntime: CodeOperationRuntime | undefined = options.codeOperationRuntime;
     const {
       androidToolchainRoutes,
+      appleDeviceRoutes,
       appleToolchainRoutes,
       resolveAndroidContext,
       resolveAppleContext,
     } = bindDeviceApprovals({
       validateAppleApproval: (windowId, request) =>
         codeOperationRuntime?.validateAppleApproval(windowId, request),
+      validateAppleDeviceLease: (windowId, request) =>
+        codeOperationRuntime?.validateAppleDeviceLease?.(windowId, request),
       validateAndroidApproval: (windowId, request) =>
         codeOperationRuntime?.validateAndroidApproval(windowId, request),
     });
@@ -491,6 +496,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
       codeOperationRuntime = createCodeOperationRuntime({
         liveTurns,
         activeTurns: codeActiveTurns,
+        describeAppleDevice: (deviceId) => appleDeviceService.describe(deviceId),
         terminalBrowserGrants: grants,
         onPendingRequestWithdrawn: () => machineChangeFeed.publish(["code-navigation"]),
         gitMutationPort,
@@ -1248,6 +1254,7 @@ export function wireCodeRuntime(deps: CodeRuntimeDependencies) {
     };
     return {
       androidToolchainRoutes,
+      appleDeviceRoutes,
       appleToolchainRoutes,
       baseRouteCodeService,
       codeCompletedThreadSource,

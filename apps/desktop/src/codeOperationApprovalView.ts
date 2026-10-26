@@ -226,6 +226,7 @@ function threadAndProject(
       };
     case "apple-action":
     case "android-action":
+    case "apple-device-lease":
       return {
         projectId: undefined,
         threadId: String(request.effect.request.threadId),

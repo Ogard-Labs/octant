@@ -220,6 +220,12 @@ export interface AppleToolchainServiceOptions {
    * Stable across restarts, so a host clears what its last run left behind.
    */
   readonly captureOwner?: string;
+  /**
+   * Other host-private directories every launch is denied after its broad
+   * grants, as the capture directory is: the physical device layer's
+   * `devicectl` answers, which name each paired device's hardware identifiers.
+   */
+  readonly isolatedRoots?: ReadonlyArray<string>;
   readonly writeArtifact?: (reference: string, bytes: Uint8Array) => Promise<void>;
   readonly readArtifact?: (reference: string) => Promise<Uint8Array | undefined>;
   readonly persistReceipts?: (receipts: ReadonlyArray<AppleRuntimeReceipt>) => Promise<void>;
@@ -1428,7 +1434,7 @@ export class AppleToolchainService {
         // a checkout bound to an ancestor cannot read another thread's raw
         // screen. The screenshot launch alone re-allows it by carrying the
         // same directory as an additional write root (0160).
-        isolatedRoots: [this.#captureDirectory],
+        isolatedRoots: [this.#captureDirectory, ...(this.#options.isolatedRoots ?? [])],
         ...(grants === undefined ? {} : grants),
       },
       signal,

@@ -382,6 +382,27 @@ describe("authenticated product route dispatch", () => {
     expect(dispatch).toHaveBeenCalledTimes(3);
   });
 
+  it("dispatches a paired device's physical device read but never a device lease", async () => {
+    const dispatch = vi.fn(async () => Response.json({ ok: true }));
+    const product = createAuthenticatedProductDispatch({ dispatch });
+
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/apple/devices", { method: "POST" }),
+      ),
+    ).toBe("project.overview.read");
+    expect((await product(handoff("/api/apple/devices", "POST")))?.status).toBe(200);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+
+    expect(
+      classifyProductAction(
+        new Request("https://octant.example/api/apple/device-leases", { method: "POST" }),
+      ),
+    ).toBeUndefined();
+    expect((await product(handoff("/api/apple/device-leases", "POST")))?.status).toBe(403);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
   it("classifies the POST-only Extension, validation, and Context reads as reads", () => {
     for (const path of [
       "/api/extensions/catalog",

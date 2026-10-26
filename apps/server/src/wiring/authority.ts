@@ -38,6 +38,7 @@ import type { BrowserModelBinding } from "../browser/browserAppManagedTools";
 import { BrowserCaptureService } from "../browser/browserCaptureService";
 import { BrowserCaptureStore } from "../browser/browserCaptureStore";
 import { SimulatorInputGrants } from "../apple/simulatorInputGrants";
+import { AppleDeviceLeases } from "../apple/appleDeviceLeases";
 import type { ServerStart } from "./serverShape";
 import type { FoundationsWiring } from "./foundations";
 
@@ -68,6 +69,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
   const processAuthorityClock = new ProcessAuthorityClock();
   const simulatorInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
   const androidInputGrants = new SimulatorInputGrants(processAuthorityClock.now(), Date.now);
+  const appleDeviceLeases = new AppleDeviceLeases(processAuthorityClock.now());
   const machineChangeFeed = new MachineChangeFeed();
   // What each running turn is doing, for the Chat, Work, and Code navigation
   // reads. Process-local by design: a restart interrupts every turn. A step
@@ -232,6 +234,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
     agentRunParentAuthority,
     agentRunPersistence,
     androidInputGrants,
+    appleDeviceLeases,
     bindingReceiptStore,
     browserCaptureStore,
     browserCaptures,
