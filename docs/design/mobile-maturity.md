@@ -15,13 +15,15 @@ remote client (pairing, inbox, approvals, thread screen, appearance) stays as
 architecture describes it; this specification adds to that client and does
 not redesign it.
 
-**Status.** The maintainer authorized this scope as post-preview work on
-2026-10-26. That authorizes design, planning, and implementation of the slices
-below that need no new account, spend, hosted service, store submission, or
-widened authority. Each [maintainer decision](#maintainer-decisions) gates the
-slices that depend on it. The release-boundary statement in `AGENTS.md` and
-architecture is updated by a separate change; until it lands, public store
-work (Phase E) does not start. Nothing below is implemented unless
+**Status.** Accepted 2026-10-26; slice 1 is starting. The maintainer
+authorized this scope as post-preview work and accepted the
+[maintainer decisions](#maintainer-decisions) below on 2026-10-26. That
+authorizes design, planning, and implementation of the slices below that need
+no new account, spend, hosted service, store submission, or widened authority;
+the account, deployment, and sign-off gates the decisions name stay maintainer
+actions. The release-boundary statement in `AGENTS.md` and architecture is
+updated by a separate change; until it lands, public store work (Phase E) does
+not start. Nothing below is implemented unless
 [Exists today](#exists-today) says so.
 
 ## Outcome
@@ -182,8 +184,8 @@ A notification has two layers:
 Apple and Google deliver only on behalf of the developer account that signs
 the app, with that account's credential. Hosts are people's own computers, so
 that credential cannot be shipped to them. Remote push therefore needs a
-sender holding it ([decision M1](#maintainer-decisions)). The recommended
-shape is a minimal Octant push gateway:
+sender holding it. The sender is a minimal Octant push gateway
+([decision M1](#maintainer-decisions)):
 
 - The phone, when push is enabled, sends its platform token and the host's
   identity fingerprint to the gateway once per host and receives a delivery
@@ -299,14 +301,18 @@ addresses, and platform tokens.
 
 ## Maintainer decisions
 
-| Id  | Decision                       | Options                                                                                                                                                                            | Recommended default                                                                                                                                                    |
-| --- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| M1  | Push delivery path             | (a) Octant push gateway as above; (b) Expo's push service, which sees envelopes and whose token is itself a send capability; (c) no remote push, phone notifies only while running | (a), in `octant-webapp` beside the Canvas share service, off by default. Needs the Apple push capability, a Firebase project, deployment, and a release-boundary entry |
-| M2  | Lock-screen text               | (a) kind and computer label, thread titles opt-in per phone; (b) thread title always (current policy); (c) placeholder only                                                        | (a)                                                                                                                                                                    |
-| M3  | Android internal distribution  | (a) EAS internal distribution (signed APK by link); (b) Play internal testing track (needs a Play Console account and fee)                                                         | (a) now; (b) only when Phase E opens                                                                                                                                   |
-| M4  | Signing and publisher identity | Personal accounts or an organization (needs a D-U-N-S number; new personal Google developer accounts must run a closed test before production access)                              | Organization accounts before Phase E; internal tracks can stay on the current accounts                                                                                 |
-| M5  | Where speech is transcribed    | (a) host Voice endpoint; (b) the phone's operating-system recognizer, which may send audio to Apple or Google outside host policy                                                  | (a)                                                                                                                                                                    |
-| M6  | Store review path              | (a) offline labelled demo; (b) a reviewer-reachable demo host                                                                                                                      | (a); (b) would be a hosted, always-on Octant host                                                                                                                      |
+The maintainer accepted these on 2026-10-26. Each rule is decided; the
+alternatives considered stay beside it as rationale, and the gates a rule
+names are still maintainer actions, not facts.
+
+| Id  | Decision                       | Rule                                                                                                        | Alternatives considered, and remaining gates                                                                                                                                                                                                         |
+| --- | ------------------------------ | ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M1  | Push delivery path             | The Octant push gateway described above, in `octant-webapp` beside the Canvas share service, off by default | Rejected: Expo's push service, which sees envelopes and whose token is itself a send capability; no remote push, notifying only while the phone runs. Gates: the Apple push capability, a Firebase project, deployment, and a release-boundary entry |
+| M2  | Lock-screen text               | Kind and computer label; thread titles only when the person opts in for that phone                          | Rejected: thread title always (the current policy); placeholder only                                                                                                                                                                                 |
+| M3  | Android internal distribution  | EAS internal distribution (signed APK by link) now                                                          | Play internal testing track only when Phase E opens; it needs a Play Console account and fee                                                                                                                                                         |
+| M4  | Signing and publisher identity | Organization accounts before Phase E; internal tracks stay on the current accounts                          | Rejected: personal accounts for the store. Gate: creating the organization accounts (a D-U-N-S number; new personal Google developer accounts must run a closed test before production access)                                                       |
+| M5  | Where speech is transcribed    | The host's Voice endpoint                                                                                   | Rejected: the phone's operating-system recognizer, which may send audio to Apple or Google outside host policy                                                                                                                                       |
+| M6  | Store review path              | An offline, clearly labelled demo                                                                           | Rejected: a reviewer-reachable demo host, which would be a hosted, always-on Octant host                                                                                                                                                             |
 
 ## Delivery plan
 
@@ -316,7 +322,7 @@ implement and verify it in a Linux container without accounts or hardware.
 | #   | Slice                                                        | Acceptance                                                                                                                                                                                     | Verification                                                                                     | Needs                                                                     |
 | --- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
 | 1   | Host keeps push registrations and drops them with the device | Registration survives restart; revoke, revoke-self, sign-out, and `pairing-abandoned` delete it; journal records add/clear without the token; no token in any response, log, or export         | Server tests: restart, each revoke path, route auth negatives, export and log scans              | Container                                                                 |
-| 2   | Host builds sealed, redacted thread notifications            | Ordinary threads in all modes produce deduplicated, rate-limited deliveries for the four kinds; envelope carries no content; sealed content opens only with the device key; receipts journaled | Domain redaction and sealing tests; server delivery tests with the recording transport           | Container (M2 for title rule; default (a) until decided)                  |
+| 2   | Host builds sealed, redacted thread notifications            | Ordinary threads in all modes produce deduplicated, rate-limited deliveries for the four kinds; envelope carries no content; sealed content opens only with the device key; receipts journaled | Domain redaction and sealing tests; server delivery tests with the recording transport           | Container (M2 title rule)                                                 |
 | 3   | Camera and file capture                                      | Phone attaches camera photo, library image, or file where the thread accepts it; host strips image metadata for paired uploads; permission copy names both camera uses                         | Host metadata-strip tests; client-runtime tests; rendered phone QA; device pass for camera       | Container for code; physical device for acceptance                        |
 | 4   | Voice input through the host                                 | Paired device transcribes within bounds and budget only while `ready`; audio persisted nowhere; draft receives transcript; mic hidden otherwise                                                | Route admission and negatives (window-only paths stay refused), budget tests; device pass        | M5; container for host; physical device for acceptance                    |
 | 5   | Android internal builds                                      | Manual workflow builds a signed internal APK from `main`; secure-window, key storage, biometric, and pinned TLS adapters work; device pass recorded                                            | Expo config validation in CI; Android device acceptance pass                                     | M3; maintainer `EXPO_TOKEN` and protected environment; Android device     |
@@ -325,8 +331,8 @@ implement and verify it in a Linux container without accounts or hardware.
 | 8   | Store readiness without submission                           | Offline demo, privacy disclosures and data-safety answers drafted, listing copy reviewed, screenshot protection on both platforms                                                              | Rendered QA of demo; doc review                                                                  | M6; container for demo; release-boundary change landed                    |
 | 9   | Store submission                                             | Listings live on both stores for the same client                                                                                                                                               | Store review outcome; post-install device pass                                                   | M4, M6; maintainer accounts, legal sign-off, submission                   |
 
-Slices 1 to 4 do not depend on each other or on a maintainer decision beyond
-M5 for slice 4. Slice 6 depends on 1, 2, and 7; slice 9 on 8.
+Slices 1 to 4 do not depend on each other, and with M5 decided none waits on a
+maintainer decision. Slice 6 depends on 1, 2, and 7; slice 9 on 8.
 
 ## Rationale
 
