@@ -1,8 +1,14 @@
 import {
   decodeDirectoryClientId,
+  decodeDirectoryIssuer,
+  decodeDirectoryIssuerClientId,
+  decodeDirectoryResourceScope,
   decodeDirectoryTenantId,
   decodeProviderFailure,
   type DirectoryClientId,
+  type DirectoryIssuer,
+  type DirectoryIssuerClientId,
+  type DirectoryResourceScope,
   type DirectoryTenantId,
   type ProviderFailure,
 } from "@octant/contracts";
@@ -17,13 +23,27 @@ import { FakeDirectory, type FakeDirectoryRefreshAnswer } from "./fakeDirectory"
 /** The fetch the runner hands a subject; it answers as the fake endpoint. */
 export type DirectoryOAuthConformanceFetch = (url: URL, init: RequestInit) => Promise<Response>;
 
+/**
+ * The instance's configuration as the runner sets it: a tenant and client
+ * for a tenant kind, or the organization's issuer, client, and gateway scope
+ * for an issuer kind.
+ */
+export type DirectoryOAuthConformanceConfiguration =
+  | {
+      readonly tenantId: DirectoryTenantId;
+      readonly clientId: DirectoryClientId;
+      readonly baseUrl: string;
+    }
+  | {
+      readonly issuer: DirectoryIssuer;
+      readonly clientId: DirectoryIssuerClientId;
+      readonly scope: DirectoryResourceScope;
+      readonly baseUrl: string;
+    };
+
 /** What the runner builds a subject from, as the host would build the driver. */
 export interface DirectoryOAuthConformanceInput {
-  readonly configuration: {
-    readonly tenantId: DirectoryTenantId;
-    readonly clientId: DirectoryClientId;
-    readonly baseUrl: string;
-  };
+  readonly configuration: DirectoryOAuthConformanceConfiguration;
   /** The credential store's value for the instance, as the driver would read it. */
   readonly storedCredential: string | undefined;
   readonly host: DirectoryOAuthHost;
@@ -46,15 +66,27 @@ export interface DirectoryOAuthConformanceSubject {
   readonly send: () => Promise<void>;
 }
 
-export interface DirectoryOAuthConformanceFixture {
-  /** The one resource this driver kind's endpoint accepts. */
-  readonly audience: string;
-  /** A base URL on the driver kind's endpoint host list. */
+interface DirectoryOAuthConformanceFixtureBase {
+  /** A base URL the driver kind may send a bearer to (on its host list, if it has one). */
   readonly baseUrl: string;
-  /** A second base URL on the list, at another origin. */
+  /** A second such base URL, at another origin. */
   readonly otherBaseUrl: string;
   readonly makeSubject: (input: DirectoryOAuthConformanceInput) => DirectoryOAuthConformanceSubject;
 }
+
+/**
+ * A tenant kind names the one resource its endpoint accepts and keeps a
+ * closed host list; an issuer kind is configured with the organization's own
+ * issuer and scope and has no host list, since a gateway lives on the
+ * organization's own host.
+ */
+export type DirectoryOAuthConformanceFixture =
+  | (DirectoryOAuthConformanceFixtureBase & {
+      readonly signsInTo: "tenant";
+      /** The one resource this driver kind's endpoint accepts. */
+      readonly audience: string;
+    })
+  | (DirectoryOAuthConformanceFixtureBase & { readonly signsInTo: "issuer" });
 
 export type DirectoryOAuthConformanceCase =
   | "valid grant and binding is ready after the probe"
@@ -64,7 +96,9 @@ export type DirectoryOAuthConformanceCase =
   | "refresh that needs the person present keeps the grant"
   | "unreachable broker or directory, or a 5xx, is unavailable and keeps the grant"
   | "pointer tenant, client, or audience differing from configuration is incompatible without the broker"
+  | "pointer issuer, client, or scope differing from configuration is incompatible without the broker"
   | "base URL off the grant's origin or off the host list is incompatible without the broker"
+  | "base URL off the grant's origin is incompatible without the broker"
   | "broker binding refusal is incompatible"
   | "missing role assignment is not-authorized"
   | "401 after a usable token refreshes once and resends once"
@@ -78,6 +112,14 @@ const TENANT = decodeDirectoryTenantId("6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f");
 const OTHER_TENANT = decodeDirectoryTenantId("1e2d3c4b-5a69-4788-9a0b-c1d2e3f40516");
 const CLIENT = decodeDirectoryClientId("0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d");
 const OTHER_CLIENT = decodeDirectoryClientId("9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a");
+const ISSUER = decodeDirectoryIssuer("https://login.directory-conformance.example/oauth2/gateway");
+const OTHER_ISSUER = decodeDirectoryIssuer(
+  "https://login.directory-conformance.example/oauth2/other",
+);
+const ISSUER_CLIENT = decodeDirectoryIssuerClientId("0oa1conformanceDesktop");
+const OTHER_ISSUER_CLIENT = decodeDirectoryIssuerClientId("0oa1conformanceOther");
+const SCOPE = decodeDirectoryResourceScope("gateway.models");
+const OTHER_SCOPE = decodeDirectoryResourceScope("gateway.admin");
 const OFF_LIST_BASE_URL = "https://directory-conformance.invalid/v1/";
 const START = Date.parse("2026-10-26T09:00:00.000Z");
 const HOUR = 3_600_000;
@@ -204,14 +246,14 @@ export async function runDirectoryOAuthConformance(
   );
 
   await prove(
-    "pointer tenant, client, or audience differing from configuration is incompatible without the broker",
+    fixture.signsInTo === "tenant"
+      ? "pointer tenant, client, or audience differing from configuration is incompatible without the broker"
+      : "pointer issuer, client, or scope differing from configuration is incompatible without the broker",
     async () => {
-      const pointers: ReadonlyArray<Partial<DirectoryOAuthBinding>> = [
-        { tenantId: OTHER_TENANT },
-        { clientId: OTHER_CLIENT },
-        { audience: "https://another-resource.example.test" },
-      ];
-      for (const pointer of pointers) {
+      // A pointer of the other kind is refused as well: a tenant pointer
+      // never answers for an issuer, nor an issuer pointer for a tenant.
+      const configured = run.configuredBinding();
+      for (const pointer of [...differingBindings(configured), otherKindOf(configured)]) {
         // The broker holds a grant that matches the pointer, so only the
         // driver's own comparison with its configuration can refuse it.
         const scene = run.scene({ grant: pointer, pointer });
@@ -223,16 +265,21 @@ export async function runDirectoryOAuthConformance(
   );
 
   await prove(
-    "base URL off the grant's origin or off the host list is incompatible without the broker",
+    fixture.signsInTo === "tenant"
+      ? "base URL off the grant's origin or off the host list is incompatible without the broker"
+      : "base URL off the grant's origin is incompatible without the broker",
     async () => {
       const moved = run.scene({ baseUrl: fixture.otherBaseUrl });
       expectRefused(await moved.subject.probe(), "incompatible");
       expectFailure(await moved.sendFailure(), "incompatible");
       moved.expectUntouched();
 
+      // An organization's gateway has no host list: the origin it was signed
+      // in for is the only one that receives its bearer.
+      if (fixture.signsInTo === "issuer") return;
       // Signed in for, and configured with, an address no driver of this kind
       // may reach: the host list refuses it although every other fact agrees.
-      const offList = { endpointOrigin: origin(OFF_LIST_BASE_URL) };
+      const offList = { ...run.configuredBinding(), endpointOrigin: origin(OFF_LIST_BASE_URL) };
       const unlisted = run.scene({ baseUrl: OFF_LIST_BASE_URL, grant: offList, pointer: offList });
       expectRefused(await unlisted.subject.probe(), "incompatible");
       expectFailure(await unlisted.sendFailure(), "incompatible");
@@ -242,8 +289,9 @@ export async function runDirectoryOAuthConformance(
 
   await prove("broker binding refusal is incompatible", async () => {
     // The pointer and configuration agree, but the grant itself was signed in
-    // for another tenant: only the broker's re-check catches it.
-    const scene = run.scene({ grant: { tenantId: OTHER_TENANT } });
+    // for another tenant or issuer: only the broker's re-check catches it.
+    const [otherDirectory] = differingBindings(run.configuredBinding());
+    const scene = run.scene({ grant: otherDirectory });
     expectRefused(await scene.subject.probe(), "incompatible");
     expectFailure(await scene.sendFailure(), "incompatible");
     check(scene.endpoint.requests.length === 0, "the endpoint was called after a binding refusal");
@@ -294,10 +342,10 @@ interface SceneOptions {
   readonly baseUrl?: string;
   readonly expiresInMs?: number;
   readonly refreshAnswer?: FakeDirectoryRefreshAnswer;
-  /** How the broker's grant differs from the configured binding. */
-  readonly grant?: Partial<DirectoryOAuthBinding>;
-  /** How the stored pointer differs from the configured binding. */
-  readonly pointer?: Partial<DirectoryOAuthBinding>;
+  /** The binding the broker's grant was signed in for, when not the configured one. */
+  readonly grant?: DirectoryOAuthBinding;
+  /** The binding the stored pointer names, when not the configured one. */
+  readonly pointer?: DirectoryOAuthBinding;
   readonly storedCredential?: string | undefined;
   readonly roleAssigned?: boolean;
 }
@@ -319,20 +367,22 @@ class ConformanceRun {
     return this.#directories.flatMap((directory) => directory.issuedTokens());
   }
 
+  /** The binding the instance's configuration names at the fixture's base URL. */
+  configuredBinding(): DirectoryOAuthBinding {
+    const endpointOrigin = origin(this.#fixture.baseUrl);
+    return this.#fixture.signsInTo === "tenant"
+      ? { tenantId: TENANT, clientId: CLIENT, audience: this.#fixture.audience, endpointOrigin }
+      : { issuer: ISSUER, clientId: ISSUER_CLIENT, scope: SCOPE, endpointOrigin };
+  }
+
   scene(options: SceneOptions = {}) {
     const now = () => START;
     const directory = new FakeDirectory(now);
     this.#directories.push(directory);
-    const configured: DirectoryOAuthBinding = {
-      tenantId: TENANT,
-      clientId: CLIENT,
-      audience: this.#fixture.audience,
-      endpointOrigin: origin(this.#fixture.baseUrl),
-    };
-    const credentialRef = directory.signIn(
-      { ...configured, ...options.grant },
-      { expiresInMs: options.expiresInMs ?? HOUR },
-    );
+    const configured = this.configuredBinding();
+    const credentialRef = directory.signIn(options.grant ?? configured, {
+      expiresInMs: options.expiresInMs ?? HOUR,
+    });
     if (options.refreshAnswer !== undefined) directory.answerRefreshWith(options.refreshAnswer);
     const storedCredential =
       "storedCredential" in options
@@ -341,14 +391,14 @@ class ConformanceRun {
             kind: "directory-oauth",
             credentialRef,
             accountLabel: "person@contoso.example",
-            ...configured,
-            ...options.pointer,
+            ...(options.pointer ?? configured),
           });
     const endpoint = new FakeEndpoint(directory, options.roleAssigned ?? true);
     const subject = this.#fixture.makeSubject({
       configuration: {
-        tenantId: TENANT,
-        clientId: CLIENT,
+        ...(this.#fixture.signsInTo === "tenant"
+          ? { tenantId: TENANT, clientId: CLIENT }
+          : { issuer: ISSUER, clientId: ISSUER_CLIENT, scope: SCOPE }),
         baseUrl: options.baseUrl ?? this.#fixture.baseUrl,
       },
       storedCredential,
@@ -434,6 +484,37 @@ class FakeEndpoint {
       ? Response.json({ choices: [{ message: { role: "assistant", content: "Hello." } }] })
       : Response.json({ data: [{ id: "deployment-fixture" }] });
   }
+}
+
+/** The configured binding with its directory, client, or resource changed, one at a time. */
+function differingBindings(
+  configured: DirectoryOAuthBinding,
+): readonly [DirectoryOAuthBinding, DirectoryOAuthBinding, DirectoryOAuthBinding] {
+  if ("tenantId" in configured) {
+    return [
+      { ...configured, tenantId: OTHER_TENANT },
+      { ...configured, clientId: OTHER_CLIENT },
+      { ...configured, audience: "https://another-resource.example.test" },
+    ];
+  }
+  return [
+    { ...configured, issuer: OTHER_ISSUER },
+    { ...configured, clientId: OTHER_ISSUER_CLIENT },
+    { ...configured, scope: OTHER_SCOPE },
+  ];
+}
+
+/** A binding of the other directory kind at the same origin. */
+function otherKindOf(configured: DirectoryOAuthBinding): DirectoryOAuthBinding {
+  const endpointOrigin = configured.endpointOrigin;
+  return "tenantId" in configured
+    ? { issuer: ISSUER, clientId: ISSUER_CLIENT, scope: SCOPE, endpointOrigin }
+    : {
+        tenantId: TENANT,
+        clientId: CLIENT,
+        audience: "https://another-resource.example.test",
+        endpointOrigin,
+      };
 }
 
 class ConformanceViolation extends Error {}

@@ -1,7 +1,8 @@
-import type {
-  DirectoryOAuthBinding,
-  DirectoryOAuthHost,
-  DirectoryOAuthSignInAgainReason,
+import {
+  sameDirectoryOAuthBinding,
+  type DirectoryOAuthBinding,
+  type DirectoryOAuthHost,
+  type DirectoryOAuthSignInAgainReason,
 } from "./directoryOAuth";
 
 /**
@@ -108,7 +109,9 @@ export class FakeDirectory {
         if (!this.#brokerReachable) throw new Error("The broker is unreachable.");
         const grant = this.#grants.get(credentialRef);
         if (grant === undefined) return { kind: "sign-in-again", reason: "expired" };
-        if (!sameBinding(grant.binding, binding)) return { kind: "binding-mismatch" };
+        if (!sameDirectoryOAuthBinding(grant.binding, binding)) {
+          return { kind: "binding-mismatch" };
+        }
         return {
           kind: "granted",
           accessToken: grant.accessToken,
@@ -160,12 +163,3 @@ export class FakeDirectory {
 }
 
 type RefreshAnswer = Awaited<ReturnType<DirectoryOAuthHost["refresh"]>>;
-
-function sameBinding(left: DirectoryOAuthBinding, right: DirectoryOAuthBinding): boolean {
-  return (
-    String(left.tenantId) === String(right.tenantId) &&
-    String(left.clientId) === String(right.clientId) &&
-    left.audience === right.audience &&
-    left.endpointOrigin === right.endpointOrigin
-  );
-}

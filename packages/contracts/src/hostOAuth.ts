@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { UtcTimestamp } from "./events";
+import { DirectoryIssuer, DirectoryIssuerClientId, DirectoryResourceScope } from "./providers";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 
@@ -48,13 +49,17 @@ export type HostOAuthFlow = typeof HostOAuthFlow.Type;
  * a stable host id, and the callback returns the issued `client_id` the
  * exchange and every later refresh must use. The directory dialect signs in
  * to an organization's own tenant: the broker builds every authority URL from
- * its closed issuer host and the tenant, so the descriptor names no URL.
+ * its closed issuer host and the tenant, so the descriptor names no URL. The
+ * issuer dialect signs in to an organization's own OpenID Connect issuer for
+ * its own model gateway: the broker reads the issuer's endpoints from its
+ * discovery document, so the descriptor names the issuer and no URL.
  */
 export const HostOAuthDialect = Schema.Literal(
   "openrouter-pkce",
   "chatgpt-plan-siwc",
   "mcp-authorization",
   "directory-oidc",
+  "issuer-oidc",
 );
 export type HostOAuthDialect = typeof HostOAuthDialect.Type;
 
@@ -122,8 +127,10 @@ export const HostOAuthDescriptor = Schema.Struct({
   tenantId: Schema.optional(DirectoryGuid),
   /** Directory dialect only: the one resource the driver kind's endpoint accepts. */
   audience: Schema.optional(Endpoint),
-  /** Directory dialect only: the origin of the endpoint the grant is signed in for. */
+  /** Directory and issuer dialects: the origin of the endpoint the grant is signed in for. */
   endpointOrigin: Schema.optional(HttpsOrigin),
+  /** Issuer dialect only: the organization's own OpenID Connect issuer. */
+  issuer: Schema.optional(DirectoryIssuer),
 })
   .pipe(
     Schema.filter(
@@ -155,6 +162,31 @@ export const HostOAuthDescriptor = Schema.Struct({
             descriptor.resource === undefined &&
             descriptor.redirectPort === undefined &&
             descriptor.extAgentHostId === undefined &&
+            descriptor.agentNameHint === undefined &&
+            descriptor.issuer === undefined
+          );
+        }
+        // The issuer dialect names the organization's issuer, its public
+        // client, the one scope its gateway requires, and the endpoint; the
+        // broker discovers every URL from the issuer itself.
+        if (descriptor.dialect === "issuer-oidc") {
+          const [scope, ...more] = descriptor.scopes;
+          return (
+            descriptor.issuer !== undefined &&
+            descriptor.clientId !== undefined &&
+            Schema.is(DirectoryIssuerClientId)(descriptor.clientId) &&
+            scope !== undefined &&
+            more.length === 0 &&
+            Schema.is(DirectoryResourceScope)(scope) &&
+            descriptor.endpointOrigin !== undefined &&
+            descriptor.tenantId === undefined &&
+            descriptor.audience === undefined &&
+            descriptor.authorizationEndpoint === undefined &&
+            descriptor.tokenEndpoint === undefined &&
+            descriptor.deviceAuthorizationEndpoint === undefined &&
+            descriptor.resource === undefined &&
+            descriptor.redirectPort === undefined &&
+            descriptor.extAgentHostId === undefined &&
             descriptor.agentNameHint === undefined
           );
         }
@@ -162,7 +194,8 @@ export const HostOAuthDescriptor = Schema.Struct({
           descriptor.tokenEndpoint === undefined ||
           descriptor.tenantId !== undefined ||
           descriptor.audience !== undefined ||
-          descriptor.endpointOrigin !== undefined
+          descriptor.endpointOrigin !== undefined ||
+          descriptor.issuer !== undefined
         ) {
           return false;
         }
@@ -187,7 +220,7 @@ export const HostOAuthDescriptor = Schema.Struct({
       },
       {
         description:
-          "a standard flow requires a client ID and at least one scope; only the directory dialect pairs with a device-code grant; the ChatGPT plan dialect requires at least one scope; only the directory dialect omits the token endpoint, and it names its tenant, client, audience, and endpoint and no URL or scope",
+          "a standard flow requires a client ID and at least one scope; only the directory dialect pairs with a device-code grant; the ChatGPT plan dialect requires at least one scope; only the directory and issuer dialects omit the token endpoint: the directory dialect names its tenant, client, audience, and endpoint and no URL or scope, and the issuer dialect names its issuer, client, one resource scope, and endpoint and no URL",
       },
     ),
   )
@@ -247,7 +280,7 @@ export const HostOAuthSignInState = Schema.Union(
     descriptorId: DescriptorId,
     credentialRef: CredentialRef,
     /**
-     * Directory dialect only: the account the identity token named, when it
+     * Directory and issuer dialects: the account the identity token named, when it
      * named one in plain text. A display label, never a token or a claim set.
      */
     accountLabel: Schema.optional(SignedInAccountLabel),
