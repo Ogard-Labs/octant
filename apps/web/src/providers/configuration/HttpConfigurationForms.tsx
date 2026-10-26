@@ -691,8 +691,8 @@ function GatewayDirectoryFields(props: {
 }) {
   return (
     <>
-      <input name="authentication" type="hidden" value="directory-oauth" />
-      <input name="issuer" type="hidden" value={String(props.directory.issuer)} />
+      <OctantInput name="authentication" type="hidden" value="directory-oauth" />
+      <OctantInput name="issuer" type="hidden" value={String(props.directory.issuer)} />
       <SettingRow
         label="Sign-in issuer"
         scope="host"

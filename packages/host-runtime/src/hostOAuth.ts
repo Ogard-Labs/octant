@@ -960,16 +960,22 @@ async function discoverIssuer(
 > {
   let response: Response;
   try {
+    // A redirect is never followed, and it is an issuer answering wrongly,
+    // not an unreachable one: under `redirect: "error"` it read as
+    // `unavailable`, which tells the person to retry a sign-in that cannot work.
     response = await fetchImpl(`${issuer.replace(/\/+$/, "")}${DISCOVERY_PATH}`, {
       method: "GET",
-      redirect: "error",
+      redirect: "manual",
       headers: { accept: "application/json" },
     });
   } catch {
     return { kind: "unavailable" };
   }
   if (response.status === 429 || response.status >= 500) return { kind: "unavailable" };
-  if (!response.ok) return { kind: "invalid" };
+  if (!response.ok) {
+    void response.body?.cancel().catch(() => undefined);
+    return { kind: "invalid" };
+  }
   const body = await readResponseJson(response, MAX_DISCOVERY_CHARS);
   if (body === undefined || body.issuer !== issuer) return { kind: "invalid" };
   const origin = new URL(issuer).origin;

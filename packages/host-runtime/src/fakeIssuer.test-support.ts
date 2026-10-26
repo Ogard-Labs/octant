@@ -61,6 +61,9 @@ export type FakeDiscoveryFlaw =
   | "token-endpoint-off-origin"
   | "authorize-endpoint-off-origin"
   | "key-set-off-origin"
+  | "token-endpoint-other-port"
+  | "key-set-with-credentials"
+  | "redirects-elsewhere"
   | "no-s256"
   | "unreachable"
   | "server-error";
@@ -173,11 +176,28 @@ export async function startFakeIssuer(): Promise<FakeIssuer> {
       }
       if (flaw === "server-error") return reply(503, {});
       const elsewhere = "https://login.look-alike.example/oauth2/gateway";
+      if (flaw === "redirects-elsewhere") {
+        response.writeHead(302, { location: `${elsewhere}/.well-known/openid-configuration` });
+        response.end();
+        return;
+      }
       return reply(200, {
         issuer: flaw === "other-issuer" ? elsewhere : ISSUER,
         authorization_endpoint: `${flaw === "authorize-endpoint-off-origin" ? elsewhere : ISSUER}/v1/authorize`,
-        token_endpoint: `${flaw === "token-endpoint-off-origin" ? elsewhere : ISSUER}/v1/token`,
-        jwks_uri: `${flaw === "key-set-off-origin" ? elsewhere : ISSUER}/v1/keys`,
+        token_endpoint: `${
+          flaw === "token-endpoint-off-origin"
+            ? elsewhere
+            : flaw === "token-endpoint-other-port"
+              ? `https://${ISSUER_HOST}:8443/oauth2/gateway`
+              : ISSUER
+        }/v1/token`,
+        jwks_uri: `${
+          flaw === "key-set-off-origin"
+            ? elsewhere
+            : flaw === "key-set-with-credentials"
+              ? `https://keys@${ISSUER_HOST}/oauth2/gateway`
+              : ISSUER
+        }/v1/keys`,
         response_types_supported: ["code"],
         code_challenge_methods_supported: flaw === "no-s256" ? ["plain"] : ["S256"],
       });

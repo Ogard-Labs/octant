@@ -16,6 +16,7 @@ import {
   AZURE_FOUNDRY_DIRECTORY_SIGN_IN,
   GATEWAY_DIRECTORY_SIGN_IN,
   azureFoundryDirectoryDescriptor,
+  gatewayDirectoryDescriptor,
 } from "@octant/domain";
 import {
   encodeDirectoryOAuthCredential,
@@ -261,27 +262,41 @@ describe("organization sign-in routes", () => {
     expect(catalog.stored()).toBe(pointerFor(OLD_GRANT));
   });
 
-  it("refuses a remote principal's organization sign-in before any broker call", async () => {
-    const calls: string[] = [];
-    const service = createHostOAuthService({
-      journal: { append: () => undefined },
-      broker: recordingBroker(calls),
-    });
-    const descriptor = azureFoundryDirectoryDescriptor({
-      baseUrl: "https://contoso.openai.azure.com/openai/v1/",
-      directory: { tenantId: TENANT, clientId: CLIENT },
-    });
-    if (descriptor === undefined) throw new Error("expected a directory descriptor");
+  it.each([
+    [
+      "an Azure AI Foundry tenant",
+      azureFoundryDirectoryDescriptor({
+        baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+        directory: { tenantId: TENANT, clientId: CLIENT },
+      }),
+    ],
+    [
+      "a gateway's own issuer",
+      gatewayDirectoryDescriptor({
+        baseUrl: "https://llm.example.test/v1/",
+        directory: { issuer: ISSUER, clientId: ISSUER_CLIENT, scope: SCOPE },
+      }),
+    ],
+  ])(
+    "refuses a remote principal's organization sign-in at %s before any broker call",
+    async (_, descriptor) => {
+      const calls: string[] = [];
+      const service = createHostOAuthService({
+        journal: { append: () => undefined },
+        broker: recordingBroker(calls),
+      });
+      if (descriptor === undefined) throw new Error("expected a directory descriptor");
 
-    const begun = await service.begin({
-      principalKind: "remote-device",
-      actorId: String(windowId),
-      descriptor: decodeHostOAuthDescriptor(descriptor),
-    });
+      const begun = await service.begin({
+        principalKind: "remote-device",
+        actorId: String(windowId),
+        descriptor: decodeHostOAuthDescriptor(descriptor),
+      });
 
-    expect(begun).toMatchObject({ kind: "refused", reason: "local-host-required" });
-    expect(calls).toEqual([]);
-  });
+      expect(begun).toMatchObject({ kind: "refused", reason: "local-host-required" });
+      expect(calls).toEqual([]);
+    },
+  );
 });
 
 function recordingBroker(calls: string[]): HostOAuthBrokerPort {
