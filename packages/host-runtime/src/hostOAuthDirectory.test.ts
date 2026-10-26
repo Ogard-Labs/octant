@@ -100,7 +100,9 @@ describe("directory sign-in dialect", () => {
     expect(authorize.searchParams.get("redirect_uri")).toMatch(
       /^http:\/\/127\.0\.0\.1:\d+\/oauth\/callback$/,
     );
-    expect(settled.kind).toBe("signed-in");
+    // Settings shows who signed in: the label from the validated identity
+    // token, and nothing else of it.
+    expect(settled).toMatchObject({ kind: "signed-in", accountLabel: ACCOUNT_LABEL });
 
     const [exchange] = fake.tokenRequests();
     expect(exchange).toMatchObject({
@@ -431,6 +433,15 @@ describe("credential broker with a directory grant", () => {
     if (!isRecord(status) || typeof status.credentialRef !== "string") {
       throw new Error("expected a signed-in state");
     }
+    // The status route answers with the account label beside the reference.
+    expect(Object.keys(status).sort()).toEqual([
+      "accountLabel",
+      "attemptId",
+      "credentialRef",
+      "descriptorId",
+      "kind",
+    ]);
+    expect(status.accountLabel).toBe(ACCOUNT_LABEL);
     return { broker, fake, store, credentialRef: status.credentialRef };
   }
 

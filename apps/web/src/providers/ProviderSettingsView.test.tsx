@@ -1895,6 +1895,84 @@ describe("ProviderSettingsView", () => {
     expect(document.body.textContent).not.toContain("rotated-secret");
   });
 
+  it("keeps a Foundry endpoint's organization sign-in when its settings are saved, lowercasing a pasted tenant, and shows who is signed in", async () => {
+    const user = userEvent.setup();
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "signed-in" as const,
+      accountLabel: "person@contoso.example",
+    }));
+    const props = {
+      ...fixture({
+        instance: directoryFoundryProvider(),
+        observed: observation({ models: [], directoryBinding: foundryBinding }),
+      }),
+      onProviderOAuth,
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    expect(await screen.findByText("person@contoso.example")).toBeVisible();
+    expect(onProviderOAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "status", descriptorId: "azure-foundry-directory" }),
+    );
+    const card = screen.getByLabelText("Foundry relay");
+    expect(within(card).queryByLabelText("API key for Foundry relay")).not.toBeInTheDocument();
+    expect(
+      within(card).getByText(/Tenant 6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f · client/),
+    ).toBeInTheDocument();
+    const tenant = within(card).getByLabelText("Directory (tenant) ID for Foundry relay");
+    expect(tenant).toHaveValue("6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f");
+    await user.clear(tenant);
+    await user.type(tenant, "1E2D3C4B-5A69-4788-9A0B-C1D2E3F40516");
+    await user.click(
+      within(card).getByRole("button", {
+        name: "Save Azure AI Foundry settings for Foundry relay",
+      }),
+    );
+
+    const [, configuration, credential] = vi.mocked(props.onChangeAzureFoundryConfiguration).mock
+      .calls[0]!;
+    expect(configuration).toEqual({
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["deployment-a"],
+      directory: {
+        tenantId: "1e2d3c4b-5a69-4788-9a0b-c1d2e3f40516",
+        clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+      },
+    });
+    expect(credential.value).toBe("");
+  });
+
+  it("says when the organization wants a Foundry sign-in repeated in person", async () => {
+    const onProviderOAuth = vi.fn(async () => ({
+      kind: "expired" as const,
+      accountLabel: "person@contoso.example",
+      reason: "interaction-required",
+    }));
+    const props = {
+      ...fixture({
+        instance: directoryFoundryProvider(),
+        observed: observation({
+          readiness: "unauthenticated",
+          unauthenticatedReason: "interaction-required",
+          credentialStatus: "stored",
+          models: [],
+          directoryBinding: foundryBinding,
+        }),
+      }),
+      onProviderOAuth,
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+
+    const inPerson =
+      "Your organization asks you to sign in again in person, for example to complete multi-factor authentication.";
+    // The row's state and the sign-in panel both say it.
+    await waitFor(() => expect(screen.getAllByText(inPerson)).toHaveLength(2));
+    expect(screen.getByRole("button", { name: "Sign in again" })).toBeVisible();
+  });
+
   it("creates an OpenAI image profile with a write-only key and no base URL", async () => {
     const user = userEvent.setup();
     const props = fixture({ instance: openAiImageProvider() });
@@ -4763,6 +4841,36 @@ function foundryProvider(): ProviderInstance {
     updatedAt: "2026-07-19T10:00:00.000Z" as never,
   };
 }
+
+function directoryFoundryProvider(): ProviderInstance {
+  return {
+    id,
+    displayName: "Foundry relay",
+    driverKind: "azure-foundry",
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1 as never,
+    createdAt: "2026-07-19T10:00:00.000Z" as never,
+    updatedAt: "2026-07-19T10:00:00.000Z" as never,
+    configuration: {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["deployment-a" as never],
+      directory: {
+        tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f" as never,
+        clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d" as never,
+      },
+    },
+  };
+}
+
+const foundryBinding = {
+  tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f" as never,
+  clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d" as never,
+  endpointOrigin: "https://contoso.openai.azure.com",
+};
 
 function observation(patch: Partial<ProviderObservedState> = {}): ProviderObservedState {
   return {

@@ -1,5 +1,7 @@
 import type {
   AgentEligibleModelRef,
+  DirectoryClientId,
+  DirectoryTenantId,
   HiddenProviderModelRef,
   HostId,
   NativeHarnessRoutingSettings,
@@ -22,7 +24,12 @@ import {
   type RefObject,
 } from "react";
 import { ProviderGlyph } from "../../providers/ProviderGlyph";
-import { parseManualModelIds } from "../../providers/configuration/configurationValues";
+import {
+  directoryGuid,
+  isDirectoryGuid,
+  parseManualModelIds,
+} from "../../providers/configuration/configurationValues";
+import { DIRECTORY_IDS_PROBLEM } from "../../providers/configuration/HttpConfigurationForms";
 import { BedrockMantleGuide } from "../../providers/configuration/ProviderCreateForm";
 import type { ProviderSettingsViewProps } from "../../providers/ProviderSettingsView";
 import type {
@@ -359,6 +366,8 @@ function ConnectStep(props: ConnectStepProps) {
   const [protocol, setProtocol] = useState<string>(preset?.protocol ?? "auto");
   const [protocolVersion, setProtocolVersion] = useState("2023-06-01");
   const [deployments, setDeployments] = useState<ReadonlyArray<ProviderModelId>>([]);
+  // Azure AI Foundry signs in with a key or with the organization's account.
+  const [foundrySignIn, setFoundrySignIn] = useState<"api-key" | "directory-oauth">("api-key");
   const [problem, setProblem] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const credentialInput = useRef<HTMLInputElement>(null);
@@ -428,7 +437,8 @@ function ConnectStep(props: ConnectStepProps) {
   }
 
   const keysHere = props.credentialManagementAvailable;
-  const takesKey = presentation.key !== "none" && !noKey;
+  const organizationSignIn = props.kind === "azure-foundry" && foundrySignIn === "directory-oauth";
+  const takesKey = presentation.key !== "none" && !noKey && !organizationSignIn;
   const azureSuggested = props.kind === "openai-compatible" && looksLikeAzureFoundry(url);
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -439,7 +449,18 @@ function ConnectStep(props: ConnectStepProps) {
     if (trimmedUrl.length === 0) return setProblem("Enter its address.");
     const credential =
       keysHere && takesKey ? credentialFrom(credentialInput.current) : EMPTY_CREDENTIAL;
-    if (props.kind === "azure-foundry" && keysHere && credential.value.length === 0) {
+    const form = event.currentTarget;
+    const tenantId = directoryGuid(new FormData(form).get("tenantId"));
+    const clientId = directoryGuid(new FormData(form).get("clientId"));
+    if (organizationSignIn && !(isDirectoryGuid(tenantId) && isDirectoryGuid(clientId))) {
+      return setProblem(DIRECTORY_IDS_PROBLEM);
+    }
+    if (
+      props.kind === "azure-foundry" &&
+      !organizationSignIn &&
+      keysHere &&
+      credential.value.length === 0
+    ) {
       return setProblem("Enter the Azure AI Foundry API key.");
     }
     // Azure lists base models, not deployments, so the host needs at least
@@ -456,17 +477,32 @@ function ConnectStep(props: ConnectStepProps) {
         baseUrl: trimmedUrl,
       });
     } else if (props.kind === "azure-foundry") {
-      operation = props.onCreateAzureFoundry(
-        trimmedName,
-        {
-          kind: "azure-foundry-openai-http",
-          baseUrl: trimmedUrl,
-          authentication: "api-key",
-          protocol: protocol as "auto" | "responses" | "chat-completions",
-          manualModelIds: deployments,
-        },
-        credential,
-      );
+      const foundry = {
+        kind: "azure-foundry-openai-http",
+        baseUrl: trimmedUrl,
+        protocol: protocol as "auto" | "responses" | "chat-completions",
+        manualModelIds: deployments,
+      } as const;
+      // The organization sign-in holds no key: it is begun from the
+      // endpoint's page once the host has added it.
+      operation = organizationSignIn
+        ? props.onCreateAzureFoundry(
+            trimmedName,
+            {
+              ...foundry,
+              authentication: "directory-oauth",
+              directory: {
+                tenantId: tenantId as DirectoryTenantId,
+                clientId: clientId as DirectoryClientId,
+              },
+            },
+            EMPTY_CREDENTIAL,
+          )
+        : props.onCreateAzureFoundry(
+            trimmedName,
+            { ...foundry, authentication: "api-key" },
+            credential,
+          );
     } else if (props.kind === "anthropic-compatible") {
       operation = props.onCreateAnthropicCompatible(
         trimmedName,
@@ -544,7 +580,9 @@ function ConnectStep(props: ConnectStepProps) {
           value={url}
         />
         <span className="endpoint-flow__hint" id={`${ids}-url`}>
-          {presentation.urlHint}
+          {organizationSignIn
+            ? "Ends in /openai/v1/, on openai.azure.com, services.ai.azure.com, or cognitiveservices.azure.com."
+            : presentation.urlHint}
         </span>
       </div>
       {azureSuggested ? (
@@ -572,7 +610,59 @@ function ConnectStep(props: ConnectStepProps) {
           by name.
         </OctantAlert>
       ) : null}
-      {presentation.key === "none" || noKey ? null : keysHere ? (
+      {props.kind === "azure-foundry" ? (
+        <div className="endpoint-flow__field">
+          <span>Sign in with</span>
+          <OctantSelectField
+            aria-describedby={`${ids}-sign-in`}
+            aria-label="Sign in with"
+            className="settings-view__select"
+            onValueChange={(value) =>
+              setFoundrySignIn(value === "directory-oauth" ? "directory-oauth" : "api-key")
+            }
+            options={[
+              { id: "api-key", label: "API key" },
+              { id: "directory-oauth", label: "Organization account (Microsoft Entra ID)" },
+            ]}
+            value={foundrySignIn}
+          />
+          <span className="endpoint-flow__hint" id={`${ids}-sign-in`}>
+            {organizationSignIn
+              ? "Use the tenant ID and the client ID of the public app your organization registered for Octant. You sign in from the endpoint's page once it is added."
+              : "A key from the resource's Keys and Endpoint page."}
+          </span>
+        </div>
+      ) : null}
+      {organizationSignIn ? (
+        <>
+          <div className="endpoint-flow__field">
+            <label htmlFor={`${ids}-tenant-input`}>Directory (tenant) ID</label>
+            <OctantInput
+              autoComplete="off"
+              className="settings-view__text-input"
+              id={`${ids}-tenant-input`}
+              name="tenantId"
+              placeholder="00000000-0000-0000-0000-000000000000"
+              spellCheck={false}
+            />
+          </div>
+          <div className="endpoint-flow__field">
+            <label htmlFor={`${ids}-client-input`}>Application (client) ID</label>
+            <OctantInput
+              aria-describedby={`${ids}-client`}
+              autoComplete="off"
+              className="settings-view__text-input"
+              id={`${ids}-client-input`}
+              name="clientId"
+              placeholder="00000000-0000-0000-0000-000000000000"
+              spellCheck={false}
+            />
+            <span className="endpoint-flow__hint" id={`${ids}-client`}>
+              Both are on the app registration's overview in Microsoft Entra ID.
+            </span>
+          </div>
+        </>
+      ) : presentation.key === "none" || noKey ? null : keysHere ? (
         <div className="endpoint-flow__field">
           <label htmlFor={`${ids}-key-input`}>API key</label>
           <OctantInput

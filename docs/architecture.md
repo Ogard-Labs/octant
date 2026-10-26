@@ -2567,7 +2567,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   provider instead of creating a second one, and leaves its switch unchanged.
   Ollama is set up as an endpoint, never from the scan.
 - **Driver families.** Direct HTTP drivers (OpenAI-compatible, Anthropic-
-  compatible, Azure AI Foundry API-key, Ollama), image HTTP profiles
+  compatible, Azure AI Foundry with an API key or a directory sign-in, Ollama),
+  image HTTP profiles
   (OpenAI Image and Gemini native image — never selectable as Chat, Work, or
   Code turn drivers), SDK/RPC drivers (Claude Agent SDK, Codex app-server,
   OpenCode, Pi, and Oh My Pi — whose driver discovers models but refuses
@@ -2808,10 +2809,14 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   historical record remains Proposed. Enterprise directory sign-in and
   cloud-IAM request signing (`directory-oauth`, `cloud-iam`) are an accepted
   design (2026-10-26) in [Enterprise provider identity](design/enterprise-provider-identity.md).
-  The `directory-oauth` contract, provider-sdk seam, and the broker's
-  `directory-oidc` dialect exist; no server path begins a directory sign-in
-  and no driver speaks the kind, so provider policy refuses to configure such
-  an instance and one read from storage reads `incompatible`.
+  Azure AI Foundry speaks `directory-oauth`: the server begins a sign-in only
+  for a local principal and only from the instance's own tenant, client, and
+  endpoint origin (the `/api/providers/oauth` route builds the broker
+  descriptor from configuration), the driver resolves one audience-bound
+  bearer per request through `DirectoryOAuthHost` and sends no stored value,
+  and switching an instance between a key and a sign-in, or changing its
+  tenant, client, or base URL, deletes the stored credential and forgets the
+  grant before the change is journaled. `cloud-iam` is not built.
   Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
@@ -4531,6 +4536,12 @@ the model at another size.
   endpoint's base URL deletes its stored key before the change is journaled,
   and refuses the change if the key cannot be deleted, so the person enters a
   key again for the new server. Changing only other settings keeps the key.
+  An Azure AI Foundry credential is also bound to how it signs in: switching
+  between an API key and a directory sign-in, or changing a sign-in's tenant
+  or client, deletes the stored key or pointer (and forgets the sign-in's
+  broker grant) the same way, so a pointer is never sent as a key nor a key
+  read as a pointer, and the key path refuses a stored value that reads as a
+  directory pointer.
   `web-fetch` sends no credential and no model-chosen header, method, or body
   (its arguments are a URL and a size), so a public
   inference host sees an anonymous GET and a local one (Ollama, LM Studio) is a

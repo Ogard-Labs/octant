@@ -25,7 +25,7 @@ export interface McpServerSignInRecord {
   readonly descriptor: HostOAuthDescriptor;
   readonly issuer: string;
   /** Set once the broker answered that the grant is gone; Settings then says Sign in again. */
-  readonly signInAgain?: HostOAuthSignInAgainReason;
+  readonly signInAgain?: McpSignInAgainReason;
 }
 
 type AwaitingConsent = Extract<McpServerSignInView, { kind: "awaiting-consent" }>;
@@ -568,7 +568,13 @@ function recordView(record: McpServerSignInRecord): McpServerSignInView {
     : { kind: "sign-in-again", reason: record.signInAgain };
 }
 
-function signInAgainReason(value: unknown): HostOAuthSignInAgainReason | undefined {
+/**
+ * An MCP server's sign-in ends or is revoked; only the organization directory
+ * dialect asks for a person to be present again, so that reason never applies.
+ */
+type McpSignInAgainReason = Exclude<HostOAuthSignInAgainReason, "interaction-required">;
+
+function signInAgainReason(value: unknown): McpSignInAgainReason | undefined {
   return value === "revoked" || value === "expired" || value === "refresh-reused"
     ? value
     : undefined;
@@ -587,7 +593,11 @@ function viewOf(state: HostOAuthSignInState, issuer: string): McpServerSignInVie
     case "signed-in":
       return { kind: "signed-in", issuer };
     case "sign-in-again":
-      return { kind: "sign-in-again", reason: state.reason };
+      // Never sent for an MCP grant; read as an ended sign-in if it were.
+      return {
+        kind: "sign-in-again",
+        reason: state.reason === "interaction-required" ? "expired" : state.reason,
+      };
     case "refused":
       if (state.reason === "denied") return refused("denied", "The sign-in was denied.");
       if (state.reason === "timeout")

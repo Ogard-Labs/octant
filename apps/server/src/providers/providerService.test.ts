@@ -5546,4 +5546,89 @@ describe("a stored provider key and the base URL it was entered for", () => {
       baseUrl: "https://gateway.example/v1/",
     });
   });
+
+  it("removes Azure AI Foundry's stored credential when it moves between a key and an organization sign-in, its sign-in names another tenant or client, or it is removed", async () => {
+    const keyed = {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+      authentication: "api-key",
+      protocol: "auto",
+      manualModelIds: ["deployment-a"],
+    } as const;
+    const signedIn = (tenantId: string, clientId: string) => ({
+      ...keyed,
+      authentication: "directory-oauth" as const,
+      directory: { tenantId, clientId },
+    });
+    const tenant = "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
+    const client = "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d";
+    const clearProviderCredential = vi.fn(async () => undefined);
+    const fixture = serviceFixture({
+      instances: [httpProvider({ driverKind: "azure-foundry", configuration: keyed })],
+      clearProviderCredential,
+    });
+    let version = 1;
+    const change = async (configuration: unknown) => {
+      await fixture.service.execute(windowId, {
+        kind: "change-azure-foundry-configuration",
+        instanceId,
+        expectedVersion: version,
+        configuration,
+      } as never);
+      version += 1;
+      return clearProviderCredential.mock.calls.length;
+    };
+
+    // A key is never read as a sign-in's pointer, nor a pointer as a key.
+    expect(await change(signedIn(tenant, client))).toBe(1);
+    // Only the deployments changed: the sign-in still holds.
+    expect(await change({ ...signedIn(tenant, client), manualModelIds: ["deployment-b"] })).toBe(1);
+    // Another tenant or client drops the grant; it is never rebound.
+    expect(await change(signedIn("1e2d3c4b-5a69-4788-9a0b-c1d2e3f40516", client))).toBe(2);
+    expect(await change(signedIn(tenant, "9f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a"))).toBe(3);
+    expect(await change(keyed)).toBe(4);
+    expect(await change(signedIn(tenant, client))).toBe(5);
+
+    await fixture.service.execute(windowId, {
+      kind: "remove-provider",
+      instanceId,
+      expectedVersion: version,
+    } as never);
+    expect(clearProviderCredential).toHaveBeenCalledTimes(6);
+  });
+
+  it("keeps an Azure AI Foundry organization sign-in when its removal is refused for active sessions", async () => {
+    const clearProviderCredential = vi.fn(async () => undefined);
+    const fixture = serviceFixture({
+      instances: [
+        httpProvider({
+          driverKind: "azure-foundry",
+          configuration: {
+            kind: "azure-foundry-openai-http",
+            baseUrl: "https://contoso.openai.azure.com/openai/v1/",
+            authentication: "directory-oauth",
+            directory: {
+              tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+              clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+            },
+            protocol: "auto",
+            manualModelIds: ["deployment-a"],
+          },
+        }),
+      ],
+      clearProviderCredential,
+    });
+    fixture.runtime.setActiveSessionCount(instanceId, 1);
+
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "remove-provider",
+        instanceId,
+        expectedVersion: 1,
+      }),
+    ).rejects.toMatchObject({
+      failure: { message: "Stop active sessions before removing this provider." },
+    });
+    expect(clearProviderCredential).not.toHaveBeenCalled();
+  });
 });
