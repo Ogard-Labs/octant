@@ -134,6 +134,128 @@ describe("Linux Full access extension denials", () => {
       ),
     ).toThrow(/could not be overlaid/);
   });
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "hides a linked file or folder at its target and still starts the command",
+    () => {
+      const { root, boundRoot } = fixture();
+      const shared = join(root, "shared");
+      mkdirSync(join(shared, "skills"), { recursive: true });
+      mkdirSync(join(shared, "agents"));
+      writeFileSync(join(shared, "mcp.json"), "hidden");
+      writeFileSync(join(shared, "settings.json"), "hidden");
+      writeFileSync(join(shared, "skills", "SKILL.md"), "hidden");
+      writeFileSync(join(shared, "agents", "SKILL.md"), "hidden");
+      // Absolute links refused the whole launch with "Can't mount tmpfs on
+      // /newroot/..." before the command started; relative ones are covered
+      // the same way so both forms behave alike.
+      symlinkSync(join(shared, "mcp.json"), join(boundRoot, ".mcp.json"));
+      symlinkSync(join(shared, "skills"), join(boundRoot, "skills"));
+      symlinkSync("../shared/settings.json", join(boundRoot, "settings.json"));
+      symlinkSync("../shared/agents", join(boundRoot, ".agents"));
+      const denied = [".mcp.json", "skills", "settings.json", ".agents"].map((name) =>
+        join(boundRoot, name),
+      );
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          'for path in "$@"; do cat "$path" "$path/SKILL.md"; done; echo end',
+          "sh",
+          ...denied,
+        ],
+        cwd: boundRoot,
+        denyPaths: denied,
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      // The command's own refusals stay on stderr; only Bubblewrap's would
+      // mean the launch never started.
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "keeps a denied link to a missing file from being written through",
+    () => {
+      const { root, boundRoot } = fixture();
+      const shared = join(root, "shared");
+      mkdirSync(shared);
+      const absolute = join(boundRoot, ".mcp.json");
+      const relative = join(boundRoot, "settings.json");
+      symlinkSync(join(shared, "mcp.json"), absolute);
+      symlinkSync("../shared/settings.json", relative);
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          'for path in "$@"; do { echo planted > "$path"; } && echo written; done; echo end',
+          "sh",
+          absolute,
+          relative,
+        ],
+        cwd: boundRoot,
+        denyPaths: [absolute, relative],
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "hides a denied link into another denied folder and still starts the command",
+    () => {
+      const { boundRoot } = fixture();
+      mkdirSync(join(boundRoot, ".agents"));
+      writeFileSync(join(boundRoot, ".agents", "mcp.json"), "hidden");
+      symlinkSync(".agents/mcp.json", join(boundRoot, ".mcp.json"));
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: ["-c", "cat .mcp.json .agents/mcp.json; echo end"],
+        cwd: boundRoot,
+        denyPaths: [join(boundRoot, ".agents"), join(boundRoot, ".mcp.json")],
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "starts the command when a denied link names a file this user could not create",
+    () => {
+      const { root, boundRoot } = fixture();
+      // A root host can still write the locked folder, so the file in the
+      // way is what refuses Bubblewrap there.
+      const locked = join(root, "locked");
+      mkdirSync(locked, { mode: 0o555 });
+      writeFileSync(join(root, "file"), "");
+      const unwritable = join(boundRoot, ".mcp.json");
+      const underFile = join(boundRoot, "settings.json");
+      symlinkSync(join(locked, "mcp.json"), unwritable);
+      symlinkSync("../file/settings.json", underFile);
+      const launch = buildLinuxAllowDefaultDenyLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          'for path in "$@"; do { echo planted > "$path"; } && echo written; done; echo end',
+          "sh",
+          unwritable,
+          underFile,
+        ],
+        cwd: boundRoot,
+        denyPaths: [unwritable, underFile],
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.stderr).not.toContain("bwrap:");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("end\n");
+    },
+  );
 });
 
 describe("Linux Bubblewrap confinement", () => {
@@ -211,6 +333,28 @@ describe("Linux Bubblewrap confinement", () => {
     expect(boundPairs(launch.args, "--bind")).not.toContainEqual(["/tmp", "/tmp"]);
     expect(hasFlagValue(launch.args, "--remount-ro", "/tmp")).toBe(false);
     expect(hasFlagValue(launch.args, "--remount-ro", "/")).toBe(true);
+  });
+
+  it("does not treat a sibling folder whose name extends the bound root's as inside it", () => {
+    const { boundRoot, temporaryDirectory, bwrapPath } = fixture();
+    const sibling = `${boundRoot}-b`;
+    mkdirSync(sibling);
+    const denied = join(boundRoot, ".mcp.json");
+    symlinkSync(join(sibling, "mcp.json"), denied);
+    const launch = buildBubblewrapLaunch(
+      {
+        executable: "/bin/true",
+        args: [],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+        additionalDenyWritePaths: [denied],
+      },
+      { bwrapPath },
+    );
+    // The sibling is not bound, so the capsule cannot write the file the link
+    // names and nothing is covered there.
+    expect(launch.args.some((arg) => arg.startsWith(sibling))).toBe(false);
   });
 
   it("still binds a dedicated temporary directory after hiding host /tmp", () => {

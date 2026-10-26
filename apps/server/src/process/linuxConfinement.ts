@@ -84,6 +84,14 @@ export function buildLinuxAllowDefaultDenyLaunch(
     "/",
     "/",
   ];
+  // Every host path keeps its own name under the host-root bind, so a linked
+  // deny path is covered at its target exactly as the restricted capsule does
+  // (see `denyTargetsInCapsule`): measured on bwrap 0.9.0, an absolute link
+  // at a mount point refused the whole launch with "Can't mount tmpfs on
+  // /newroot/...", and a dangling one, absolute or relative, did too.
+  const hostRoot = new Map<string, Mount>([["/", { kind: "bind", source: "/", target: "/" }]]);
+  // Each target keeps the first deny path that named it, for the refusal.
+  const targets = new Map<string, string>();
   for (const path of input.denyPaths) {
     if (!isAbsolute(path)) {
       throw new ProcessConfinementError(
@@ -91,24 +99,42 @@ export function buildLinuxAllowDefaultDenyLaunch(
         `Linux Full access deny path "${path}" must be absolute.`,
       );
     }
-    const normalized = normalize(path);
     // The host root is bound writable here, so Bubblewrap would create a
     // missing mount point in the person's real folder and leave an empty
     // `.claude/skills` or `.agents` behind in their Project. A path that does
-    // not exist holds nothing for a runtime to load when it starts.
+    // not exist holds nothing for a runtime to load when it starts. A dangling
+    // link does exist: the capsule could write the file it names through it
+    // and load what it wrote, so its target is covered, and Bubblewrap leaves
+    // an empty folder there.
     if (!pathExists(path)) continue;
-    if (isDirectoryForDeny(path)) {
-      args.push("--tmpfs", normalized, "--remount-ro", normalized);
+    for (const target of denyTargetsInCapsule(normalize(path), hostRoot)) {
+      // Bubblewrap makes a missing target with its missing parents, as this
+      // host user: measured on bwrap 0.9.0, a dangling link into a folder the
+      // user cannot write refused the whole launch with "Can't mkdir". The
+      // capsule could not write the file through that link either.
+      if (!pathExists(target) && !canCreateOnHost(target)) continue;
+      if (!targets.has(target)) targets.set(target, path);
+    }
+  }
+  const folders = [...targets.keys()].filter((target) => isDirectoryForDeny(target));
+  for (const [target, path] of targets) {
+    // A link can name a path inside another denied folder. That folder's
+    // read-only tmpfs already hides it, and measured on bwrap 0.9.0 a cover
+    // placed after it refused the launch with "Can't create file at ...:
+    // Read-only file system".
+    if (folders.some((folder) => folder !== target && isSameOrInside(target, folder))) continue;
+    if (folders.includes(target)) {
+      args.push("--tmpfs", target, "--remount-ro", target);
       continue;
     }
-    const source = createEmptySourceForPath(path);
+    const source = createEmptySourceForPath(target);
     if (source === undefined) {
       throw new ProcessConfinementError(
         "invalid-configuration",
         `Linux Full access deny path "${path}" could not be overlaid.`,
       );
     }
-    args.push("--ro-bind", source, normalized);
+    args.push("--ro-bind", source, target);
   }
   args.push("--chdir", input.cwd, "--", input.executable, ...input.args);
   return { command: bwrapPath, args };
@@ -571,7 +597,7 @@ function namesInCapsule(
 ): ReadonlyArray<string> {
   return [...mounts.values()].flatMap((mount) => {
     if (mount.kind !== "bind" && mount.kind !== "ro-bind") return [];
-    if (hostPath !== mount.source && !hostPath.startsWith(`${mount.source}${sep}`)) return [];
+    if (!isSameOrInside(hostPath, mount.source)) return [];
     const target = join(mount.target, relative(mount.source, hostPath));
     // A deeper mount over the same place shows something else there.
     return mountExposing(target, mounts) === mount ? [target] : [];
@@ -638,7 +664,7 @@ function hostPathInCapsule(path: string, mounts: ReadonlyMap<string, Mount>): st
 function mountExposing(path: string, mounts: ReadonlyMap<string, Mount>): Mount | undefined {
   let deepest: Mount | undefined;
   for (const mount of mounts.values()) {
-    if (path !== mount.target && !path.startsWith(`${mount.target}${sep}`)) continue;
+    if (!isSameOrInside(path, mount.target)) continue;
     if (deepest === undefined || depth(mount.target) > depth(deepest.target)) deepest = mount;
   }
   return deepest;
@@ -739,6 +765,11 @@ function isSharedHostTemporaryRoot(path: string): boolean {
   return normalized === "/tmp" || normalized === "/var/tmp";
 }
 
+/** The host-root bind's folder is `/`, which ends in the separator already. */
+function isSameOrInside(path: string, folder: string): boolean {
+  return path === folder || path.startsWith(folder.endsWith(sep) ? folder : `${folder}${sep}`);
+}
+
 function depth(path: string): number {
   return path.split(sep).filter((segment) => segment.length > 0).length;
 }
@@ -771,6 +802,23 @@ function pathExists(path: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Whether this host user could make a missing `path` and its missing parents. */
+function canCreateOnHost(path: string): boolean {
+  let folder = dirname(path);
+  for (;;) {
+    try {
+      if (!statSync(folder).isDirectory()) return false;
+      accessSync(folder, constants.W_OK);
+      return true;
+    } catch (error) {
+      if (!isMissingPath(error)) return false;
+    }
+    const parent = dirname(folder);
+    if (parent === folder) return false;
+    folder = parent;
   }
 }
 
