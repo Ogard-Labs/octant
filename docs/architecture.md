@@ -2123,6 +2123,11 @@ flowchart LR
   not erased: their token and cost aggregates stay for host accounting, the
   thread's identity leaves them (`subject_id` becomes NULL, modelled as a
   `deLinked` usage subject), and replay never re-links a purged thread.
+  A provider session that answers one host request and stops (a hand-off,
+  a context or compaction summary, a commit or pull-request draft, an
+  advisor review) starts single-use under a random id no thread records, so
+  a purge could never find what it kept; Claude therefore records no resume
+  identity for it, and nothing is left behind to purge.
   The thread's child runs are erased with it, so their `agent-run` rows
   are de-linked the same way; replay treats a run whose
   `agent.run-requested@1` event is gone as purged.
