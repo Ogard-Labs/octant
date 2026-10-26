@@ -17,8 +17,13 @@ built: the reserved kind, the instance arm with its driver reference, the
 schema, inspection of a local driver folder with closed refusals, a
 quarantined install, and the local-window-only lifecycle (see
 [Manifest, inspection, and quarantine](#manifest-inspection-and-quarantine)).
-Nothing admits an outside driver yet, so an outside instance reports
-`driver-not-admitted` with no models and runs no turn; slice 3 is next. The
+Slice 3 (wire protocol and host proxy) is built: the protocol schemas in
+`@octant/contracts/outside-driver-protocol`, a host proxy that implements
+`HarnessEndpointDriver` over an in-memory channel, the brokered `http/request`,
+the ceiling clamp, and closed reasons (see
+[Wire protocol rules](#wire-protocol-rules)). No process carries the channel
+yet and nothing admits an outside driver, so an outside instance reports
+`driver-not-admitted` with no models and runs no turn; slice 4 is next. The
 maintainer authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26; the release
 boundary in `AGENTS.md` and the architecture is updated separately. Today only
@@ -121,8 +126,8 @@ digest }`. The set of outside drivers is data, held by the package store.
   instance schema, so replay of such an instance needs no migration of its own.
 - **The matrix column's source.** An outside package ships no capability block
   Octant reads, so `providerFeatureMatrix.test.ts` holds the column to the
-  bundled harness endpoints' static blocks, which are its ceiling, until the
-  host's ceiling clamp has a block of its own.
+  host's ceiling clamp (`outsideDriverCeiling.ts`), whose block equals the
+  bundled harness endpoints' declaration.
 - **Composition with data-driven bundled kinds.** Making bundled driver-kind
   registration data-driven (a bundled ACP agent as a profile plus its logo and
   tests) changes how bundled entries are declared; it keeps the bundled set
@@ -227,6 +232,74 @@ synchronous parts never cross the process boundary: `admitTurn` is computed on
 the host from the last probe observation and Verify tools records (as Ollama's
 already is), and `fits` from the bounds `session/open` returned, or `true` when
 none were given, leaving overflow to the host's existing ladder.
+
+### Wire protocol rules
+
+These rules resolve what the protocol table above left to implementation; each
+takes the fail-closed option.
+
+- **The host's versions.** `HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS`
+  (`harness-endpoint/1`) lives with the schemas in `@octant/contracts`, so
+  inspection and the handshake read one set. `initialize` sends that set with
+  the base URL and the listed model ids; a reply naming any other version stops
+  the driver.
+- **What the host reads.** Every schema the driver writes is strict. The driver
+  stops at the first line that is over the size cap, is not JSON, names a method
+  the protocol does not have, carries a field it does not name (a
+  `servedModelId`, an `instanceId`, a `verifiedToolModelIds`), answers or
+  streams for a call the host never made, or announces a retry (retries are the
+  host's). A late answer or event for a call the host already settled
+  (cancelled or timed out) is ignored rather than treated as a violation, since
+  a driver cannot see the host's cancel before it answers. A stopped driver's
+  instance is `incompatible` with the closed reason `driver-incompatible`, no
+  models, and every capability `unavailable`; a handshake on an unknown
+  version reports the same reason.
+- **Failures.** A driver's JSON-RPC error is read only as structure: a
+  `category`, an optional `retryAfterMs`, and an optional `contextOverflow`
+  with the window when known. The host writes the message for each category
+  itself, and an overflow becomes the host's own overflow sentence so the
+  window is still learned. Error text, data with any other field, and anything
+  else a driver rejects with become the fixed `protocol` failure. Only failures
+  the proxy wrote leave it, so nothing the driver wrote reaches the provider
+  service, whose endpoint failures reach a client.
+- **Models.** The probe returns model ids, an optional window each, and
+  capability claims. The host offers only the ids the person listed that the
+  probe also reported, each named by its id, so no name the driver chose
+  reaches a person; a probe that reports none of them leaves the instance
+  `unavailable` with `no-usable-model`. The probe cannot add to
+  `verifiedToolModelIds`; that record is the host's alone.
+- **The ceiling.** A claim can lower a capability but not raise one; streaming,
+  reasoning, and usage lift from `unavailable` only once a response shows
+  them. Image input stays `unsupported`: the bundled harness endpoints' column
+  declares it so, and no response can show it while the host refuses every
+  turn with a person's attachments, which never cross the channel.
+  `appManagedTools` stays `unsupported` for the whole instance, so a gate that
+  reads "provider-wide support, or this model verified" (picker reach,
+  delegated work) sees only the host's per-model record.
+- **Host-answered calls.** `admitTurn` comes from the last observation and the
+  host's Verify tools record; `fits` from `session/open`'s
+  `bounds.contextWindowTokens` at about four characters a token, or `true`
+  without it. A cancel answers the send as `interrupted` at once and sends
+  `session/cancel`; a release sends `session/release`, and the host refuses
+  every later send itself. The proxy has no `verifyToolCapability`: Verify
+  tools is the host's, built with admission in slice 5.
+- **The brokered call.** `GET` or `POST`; headers as name and value pairs with
+  no line breaks; bodies as UTF-8 text both ways, since the services a driver
+  translates speak text. The driver may not set `authorization`,
+  `proxy-authorization`, `cookie`, `host`, or the header it asks the key in;
+  the reply withholds that header, `authorization`, `proxy-authorization`, and
+  `set-cookie`. No redirect is followed, even on the same origin, because a
+  redirect could only carry the key somewhere the person did not enter. An
+  instance has at most eight brokered calls in flight.
+- **Bounds.** A driver line is at most 4 MiB. `initialize`, `probe`, and
+  `session/open` get 30 seconds and `session/send` ten minutes; a brokered call
+  gets 10 seconds to connect, 120 seconds between response chunks, and 16 MiB
+  of response.
+- **The channel.** The proxy reads and writes lines through a channel
+  interface; slice 3 runs it in memory, and slice 4 attaches the confined
+  process's stdin and stdout. The author-facing re-export from
+  `@octant/provider-sdk` lands with the author kit in slice 7, by
+  [decision 8](#maintainer-decisions).
 
 ### Credentials and egress
 
@@ -386,20 +459,20 @@ The attacker is the driver package (malicious or compromised) or whoever can
 put a package in front of the person. Controls marked new are this design's;
 "built" marks one a landed slice has made real.
 
-| Threat                                                              | Control                                                                                                                                |
-| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| Exfiltrates prompts, code, or files                                 | New: no network, read only its package, no Project path; only egress is the brokered call to the configured origin                     |
-| Steals or replays a credential                                      | New: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment |
-| Uses another instance's or provider's credential                    | New: one process and one request channel per instance; the lease is keyed by that instance                                             |
-| Escapes to the host (files, processes, other extensions)            | New: deny-default Seatbelt without exec or fork; Linux refuses to launch                                                               |
-| Over-claims capabilities (tools, approvals, resume)                 | New: host ceiling clamp; host-run Verify tools; `admitTurn` computed by the host                                                       |
-| Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply            |
-| Puts attacker text in Settings or diagnostics                       | New: closed reasons only; stderr bounded and kept out of clients                                                                       |
-| Swaps code under a trusted name (update, mirror, typosquat)         | New: digest-bound trust, publisher key pin, quarantined updates that clear verification                                                |
-| Points the key at an internal service or attacker host              | Existing endpoint rule: HTTPS or literal-loopback HTTP, origin-checked before the key is read; no cross-origin redirect                |
-| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds plus new per-message cap and host-owned deadlines                                                           |
-| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle actions only from a local window; structured references stay inert; install stays quarantined       |
-| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect     |
+| Threat                                                              | Control                                                                                                                                                             |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Exfiltrates prompts, code, or files                                 | New: no network, read only its package, no Project path; only egress is the brokered call to the configured origin                                                  |
+| Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment |
+| Uses another instance's or provider's credential                    | New: one process and one request channel per instance; built: the lease is keyed by that instance                                                                   |
+| Escapes to the host (files, processes, other extensions)            | New: deny-default Seatbelt without exec or fork; Linux refuses to launch                                                                                            |
+| Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host. New: host-run Verify tools                                                                        |
+| Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                         |
+| Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only. New: stderr bounded and kept out of clients                                                                                        |
+| Swaps code under a trusted name (update, mirror, typosquat)         | New: digest-bound trust, publisher key pin, quarantined updates that clear verification                                                                             |
+| Points the key at an internal service or attacker host              | Existing endpoint rule, built for the brokered call: HTTPS or loopback HTTP, origin-checked before the key is read; no redirect                                     |
+| Exhausts the host (floods, hangs, crash loops)                      | Existing supervisor bounds; new, built: per-message cap, host-owned deadlines, bounded brokered calls                                                               |
+| An agent, mention, routine, or paired device installs or trusts one | Existing and new, built: lifecycle actions only from a local window; structured references stay inert; install stays quarantined                                    |
+| Impersonates a bundled provider                                     | New, built: one reserved family; package-name identity with an outside label; no bundled logo, account profile, or sign-in dialect                                  |
 
 Residual risk: the configured endpoint receives what the person sends it, as
 for any endpoint; a trusted driver can mistranslate (send a different model id,
@@ -483,5 +556,6 @@ data-driven, since both touch driver registration.
 Each slice's verification is listed above. Evidence that the design holds
 overall: the escape tests in slice 4 and the misbehaving-fixture conformance
 run in slice 3 are the security acceptance; the macOS loopback smoke in slice 5
-is the product acceptance. The security architecture threat model gains an
-abuse case for a rogue provider driver when slice 3 lands.
+is the product acceptance. The security architecture threat model carries the
+rogue provider driver abuse case
+([AC6](../security/security-architecture-threat-model.md#ac6--rogue-outside-provider-driver)).
