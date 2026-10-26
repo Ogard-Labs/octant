@@ -13,9 +13,9 @@ start gates this design answers are in
 **Scope and delivery state.** The maintainer authorized this scope as
 post-preview work on 2026-10-26, when parked backlog work was unlocked. That
 authorizes the design and the slices below; the release-boundary statement in
-`AGENTS.md` and the architecture is updated separately. This document is a
-proposed design until its pull request is approved; after that, slice 1 is
-approved design. **Nothing here is built.** Monaco editing and the explicit
+`AGENTS.md` and the architecture is updated separately. The maintainer
+accepted this design and its [decisions](#maintainer-decisions) on 2026-10-26;
+slice 1 is starting. **Nothing here is built.** Monaco editing and the explicit
 external-editor handoff stay the primary Code editing paths and are unchanged
 by every slice.
 
@@ -233,52 +233,44 @@ Plan thread, whose read-only rule it cannot breach.
 
 ## Maintainer decisions
 
-1. **D1. Source of the first server.**
-   - (a) Bundle the pinned `typescript` native binary, about 24 MB per
-     architecture.
-   - (b) Use the Project's own installed TypeScript.
-   - (c) Add a third-party language-server dependency.
+The maintainer accepted these on 2026-10-26. Each states the rule; the
+alternatives considered and the reason for the choice follow it.
 
-   **Recommended: (a).** It is already a dependency, it speaks LSP natively,
-   and it runs no repository code. Option (b) runs a repository-supplied binary,
-   so it would be `repo-tooling`. It could come later as a person's explicit
-   choice. Option (c) adds a dependency for nothing (a) lacks.
+1. **D1. Source of the first server.** Octant bundles the pinned `typescript`
+   native binary, about 24 MB per architecture. It is already a dependency, it
+   speaks LSP natively, and it runs no repository code. Rejected for now: using
+   the Project's own installed TypeScript, which runs a repository-supplied
+   binary and so would be `repo-tooling`; it could come later as a person's
+   explicit choice. Rejected: a third-party language-server dependency, which
+   adds a dependency for nothing the bundled binary lacks.
 
-2. **D2. Bundled server on by default.**
-   - (a) On for Code, with a Settings › Code switch to turn it off.
-   - (b) Off until the person turns it on.
+2. **D2. Bundled server on by default.** The bundled server is on for Code,
+   with a Settings › Code switch to turn it off. It ships inside the signed app,
+   as Monaco does, and as a `static` server it grants nothing beyond what the
+   thread can already read. User-added servers always follow the full ladder.
+   Rejected: off until the person turns it on.
 
-   **Recommended: (a).** It ships inside the signed app, as Monaco does, and as
-   a `static` server it grants nothing beyond what the thread can already read.
-   User-added servers always follow the full ladder.
+3. **D3. Plan threads.** Plan threads are served by `static` servers, and
+   `repo-tooling` servers are refused there. Rejected: refusing every server in
+   Plan.
+4. **D4. Paired devices.** Paired devices may read (`code.language.read`) for
+   threads they can already reach; starting `repo-tooling` servers and debug
+   sessions stays local-host only. Rejected: local windows only.
+5. **D5. Agent access** (slice 7). Agents get read-only app-managed tools in
+   the closed catalog, available in Plan and provider-neutral, after the editor
+   slices ship. Rejected: never, with agents running checks through their own
+   tools.
+6. **D6. Network for `repo-tooling` servers.** `proxied` under the Code
+   Project's egress rules. A thread rule does not apply because the server
+   serves the checkout, not one thread. Rejected: `none`, and following the
+   starting thread's posture.
 
-3. **D3. Plan threads.** **Recommended: serve `static` servers in Plan and
-   refuse `repo-tooling` there.** Alternative: refuse every server in Plan.
-4. **D4. Paired devices.** **Recommended: allow remote reads
-   (`code.language.read`) for threads the device can already reach, and keep
-   starting `repo-tooling` servers and debug sessions local-host only.**
-   Alternative: local windows only.
-5. **D5. Agent access** (slice 7). **Recommended: yes, as read-only app-managed
-   tools in the closed catalog, available in Plan, provider-neutral, after the
-   editor slices ship.** Alternative: never; agents keep running checks through
-   their own tools.
-6. **D6. Network for `repo-tooling` servers.**
-   - (a) `proxied` under the Code Project's egress rules. A thread rule does
-     not apply because the server serves the checkout, not one thread.
-   - (b) `none`.
-   - (c) Follow the starting thread's posture.
-
-   **Recommended: (a).**
-
-7. **D7. Extension host.**
-   - (a) No host for another editor's extension API. Language-server and
-     debug-adapter component kinds on the existing ladder satisfy the
-     "extension host" scope.
-   - (b) A distinct extension host.
-
-   **Recommended: (a).** A foreign extension API is a very large, fast-moving
-   surface. Emulating it imports another product's API, and its
-   install-equals-run model conflicts with the activation ladder.
+7. **D7. Extension host.** Octant hosts no other editor's extension API.
+   Language-server and debug-adapter component kinds on the existing ladder
+   satisfy the "extension host" scope. Rejected: a distinct extension host. A
+   foreign extension API is a very large, fast-moving surface; emulating it
+   imports another product's API, and its install-equals-run model conflicts
+   with the activation ladder.
 
 ## Delivery plan
 
@@ -355,7 +347,7 @@ accounts or hardware.
      start one, and egress outside the rules is refused and journaled the way
      `proxied` journals.
    - _Verify:_ approval, permission-negative, and egress tests.
-7. **Agent read tools** (only if D5 is yes). Container: yes.
+7. **Agent read tools** (D5; after the editor slices ship). Container: yes.
    - Add read-only `code-diagnostics` and `code-definition` app-managed tools
      to the closed catalog, through the provider SDK's tool transport, for
      every provider that supports app-managed tools. Providers without that

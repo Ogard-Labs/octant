@@ -40,10 +40,10 @@ keeps ship integrations on the same plugin seams without opening a marketplace.
 
 ## Full LSP / extension host / debugger
 
-**Design in review (2026-10-26).** The maintainer authorized this scope on
-2026-10-26 (gate 3). [Language services](design/language-services.md) proposes
-the design gates 1 and 2 require. The release-boundary statement is updated
-separately, and the hold below stands until that design is approved.
+**Design accepted (2026-10-26).** The maintainer authorized this scope
+(gate 3) and accepted [Language services](design/language-services.md), the
+design gates 1 and 2 require, on 2026-10-26; its slices may start. The
+release-boundary statement is updated separately.
 
 **Hold.** A full language-server stack, IDE-style extension host, and debugger
 companion stay Later. Monaco editing and explicit external-editor handoff remain

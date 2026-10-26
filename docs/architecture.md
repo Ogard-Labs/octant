@@ -180,8 +180,9 @@ start refuses. An ownership failure names the code, the artifact path, and the
 next step.
 
 **Language services.** Code editor language services and, later, a debugger
-run as confined children the server launches per checkout, under the proposed
-[Language services](design/language-services.md) design; none is built yet.
+run as confined children the server launches per checkout, under the
+[Language services](design/language-services.md) design accepted on 2026-10-26;
+none is built yet.
 
 **Host resources.** `GET /api/host/resources` is a read-only snapshot of this
 host's load: CPU use averaged over a short sample of the process's CPU times,
