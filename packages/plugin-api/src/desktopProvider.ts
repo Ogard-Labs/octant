@@ -151,6 +151,68 @@ export interface DesktopProvider {
 }
 
 /**
+ * One confined launch the host runs for a host-local desktop. The driver
+ * names the program and its arguments; the host owns everything else: the
+ * dedicated Bubblewrap capsule, its environment, its private home and inbox,
+ * its network namespace, and the process-group receipt that lets a restarted
+ * host reap it. The launch's standard streams are its only channel: `output`
+ * receives what it writes to standard output, and `write` feeds its standard
+ * input. Its standard error is discarded.
+ */
+export interface DesktopLaunchRequest {
+  readonly leaseId: DesktopLeaseId;
+  /** Recorded with the desktop so `listOwned` finds it under the tag it was made for. */
+  readonly hostTag: DesktopHostTag;
+  /** A program name the host resolves on the desktop's own search path, never a path. */
+  readonly program: string;
+  readonly args: ReadonlyArray<string>;
+  readonly output: (chunk: Uint8Array) => void;
+  readonly signal: AbortSignal;
+}
+
+export type DesktopLaunchWriteResult =
+  | { readonly status: "written" }
+  | { readonly status: "closed" };
+
+export interface LaunchedDesktop {
+  readonly write: (bytes: Uint8Array) => Promise<DesktopLaunchWriteResult>;
+  /** Settles once the launch's process has exited, for any reason. */
+  readonly exited: Promise<void>;
+}
+
+/**
+ * `refused` covers a lease the host is not provisioning, a lease that already
+ * has a desktop, and a program the host cannot find.
+ */
+export type DesktopLaunchResult =
+  | { readonly status: "launched"; readonly desktop: LaunchedDesktop }
+  | { readonly status: "cancelled" }
+  | { readonly status: "refused"; readonly reason: string }
+  | { readonly status: "failed"; readonly reason: string };
+
+export type DesktopLaunchListResult =
+  | { readonly status: "listed"; readonly leaseIds: ReadonlyArray<DesktopLeaseId> }
+  | { readonly status: "failed"; readonly reason: string };
+
+/**
+ * The capability-scoped port a host-local driver receives in place of process
+ * or filesystem access. It launches only for a lease the host is provisioning,
+ * at most one desktop per lease, and only as the host's dedicated desktop
+ * capsule. `stop` destroys the launch and deletes its lease directory; `inspect`
+ * reports `gone` only once no process of the desktop and none of its files
+ * remain.
+ */
+export interface DesktopLaunchPort {
+  /** Whether this host can run a desktop that needs `programs`. Performs no work. */
+  readonly readiness: (programs: ReadonlyArray<string>) => DesktopProviderStatusResult;
+  readonly launch: (request: DesktopLaunchRequest) => Promise<DesktopLaunchResult>;
+  readonly stop: (leaseId: DesktopLeaseId) => Promise<DesktopReleaseResult>;
+  readonly inspect: (leaseId: DesktopLeaseId) => Promise<DesktopVerifyGoneResult>;
+  /** Leases with a desktop, or what is left of one, made under `hostTag`. */
+  readonly listOwned: (hostTag: DesktopHostTag) => Promise<DesktopLaunchListResult>;
+}
+
+/**
  * The only operations the host's teardown path holds. A driver kept loaded
  * after its recipe, credential, or plugin was revoked is held as this, so it
  * can destroy and verify but never acquire, extend, read the screen, or send

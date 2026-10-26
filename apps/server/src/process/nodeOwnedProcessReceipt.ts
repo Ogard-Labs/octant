@@ -143,6 +143,44 @@ export async function reconcileProcessReceipts(options: ProcessReceiptOptions): 
   }
 }
 
+/**
+ * The supervisor's receipts, read without acting on them, for a caller that
+ * reaps each one on its own schedule. A receipt that does not parse is
+ * reported rather than skipped: an owned process nobody can identify must not
+ * look like no process at all.
+ */
+export async function readOwnedProcessReceipts(
+  options: Pick<ProcessReceiptOptions, "receiptDirectory" | "supervisor">,
+): Promise<ReadonlyArray<{ readonly path: string; readonly receipt: OwnedProcessReceipt }>> {
+  validateReceiptDirectory(options.receiptDirectory);
+  if (options.receiptDirectory === undefined) return [];
+  let names: string[];
+  try {
+    names = (await readdir(options.receiptDirectory)).sort();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  if (names.length > MAX_RECEIPTS) throw new Error("Too many process ownership receipts.");
+  const receipts: Array<{ readonly path: string; readonly receipt: OwnedProcessReceipt }> = [];
+  for (const name of names) {
+    if (!/^receipt-[a-f0-9]{64}\.json$/.test(name)) continue;
+    const path = join(options.receiptDirectory, name);
+    let metadata;
+    try {
+      metadata = await stat(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (!metadata.isFile() || metadata.size > MAX_RECEIPT_BYTES)
+      throw new Error("Invalid receipt size.");
+    const receipt = parseReceipt(JSON.parse(await readFile(path, "utf8")));
+    if (receipt.supervisor === options.supervisor) receipts.push({ path, receipt });
+  }
+  return receipts;
+}
+
 export async function terminateOwnedProcess(
   pid: number,
   expectedIdentity: string,
@@ -228,9 +266,12 @@ export async function readProcessIdentity(pid: number): Promise<string | undefin
     try {
       processStat = await readFile(`/proc/${pid}/stat`, "utf8");
     } catch (error) {
-      // ENOENT for the leader's proc entry is the only absence signal. Other
-      // read failures are an observation error and must fail closed.
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      // ENOENT for the leader's proc entry, or ESRCH when the leader is reaped
+      // between opening its entry and reading it (seen while a killed
+      // Bubblewrap launch was reaped mid-read), is the only absence signal.
+      // Other read failures are an observation error and must fail closed.
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ESRCH") return undefined;
       throw error;
     }
     const bootId = await readFile("/proc/sys/kernel/random/boot_id", "utf8");
