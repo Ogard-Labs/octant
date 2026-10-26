@@ -201,6 +201,71 @@ describe("PersistenceLive", () => {
     });
   });
 
+  it("erases a resume identity no thread records at the first startup and still reports the store current", async () => {
+    const directory = temporaryDirectory();
+    const seeded = openSqlite(join(directory, "octant.sqlite3"));
+    applyMigrations(seeded, MIGRATIONS, () => now);
+    insertFixtureEvent(seeded);
+    const singleUseSession = "00000000-0000-4000-8000-000000000911";
+    seeded
+      .prepare(`
+        INSERT INTO event_journal (
+          event_id, aggregate_type, aggregate_id, aggregate_version,
+          event_name, event_version, correlation_id, actor_kind, actor_id,
+          occurred_at, payload_json
+        ) VALUES (?, 'claude-resume-identity', ?, 1, 'claude.resume-identity-recorded@1', 1, ?,
+          'local-user', ?, ?, ?)
+      `)
+      .run(
+        "00000000-0000-4000-8000-000000000914",
+        singleUseSession,
+        "00000000-0000-4000-8000-000000000913",
+        "00000000-0000-4000-8000-000000000902",
+        now,
+        JSON.stringify({
+          providerInstanceId: "00000000-0000-4000-8000-000000000915",
+          octantSessionId: singleUseSession,
+          sdkSessionId: "00000000-0000-4000-8000-000000000916",
+          identity: {
+            providerInstanceId: "00000000-0000-4000-8000-000000000915",
+            octantSessionId: singleUseSession,
+            sdkSessionId: "00000000-0000-4000-8000-000000000916",
+            projectRoot: "/private/scratch/hand-off",
+            modelId: "claude-sonnet",
+            authentication: "subscription",
+          },
+        }),
+      );
+    seeded.close();
+
+    const { status, identities } = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const persistence = yield* Persistence;
+          return {
+            status: persistence.status(),
+            identities: persistence.connection
+              .prepare(
+                `SELECT count(*) AS events FROM event_journal
+                 WHERE aggregate_type = 'claude-resume-identity'`,
+              )
+              .get(),
+          };
+        }).pipe(
+          Effect.provide(makePersistenceLive({ dataDirectory: directory, clock: () => now })),
+        ),
+      ),
+    );
+
+    expect(identities).toEqual({ events: 0 });
+    expect(status).toMatchObject({
+      journalHead: 1,
+      aggregateCount: 1,
+      state: "current",
+      integrity: "ok",
+    });
+  });
+
   it("boots from exact legacy shell settings without rewriting persisted v1 data", async () => {
     const directory = temporaryDirectory();
     const seeded = openSqlite(join(directory, "octant.sqlite3"));

@@ -111,6 +111,12 @@ export interface ClaudeOpenQueryInput {
    * ignored when `resumeSessionId` names an existing session.
    */
   readonly sessionId?: string;
+  /**
+   * `false` keeps the runtime from saving the session's transcript in its
+   * configuration directory. Such a session cannot be resumed, so only a
+   * session the host never resumes asks for it.
+   */
+  readonly persistSession?: false;
   readonly tools: readonly string[];
   /** Decoder attestation for the one in-process server owned by this adapter. */
   readonly managedToolServer?: boolean;
@@ -451,6 +457,7 @@ interface ClaudeAgentSdkInvocationOptions {
   readonly pathToClaudeCodeExecutable: string;
   readonly resume?: string;
   readonly sessionId?: string;
+  readonly persistSession?: false;
   readonly permissionMode: ClaudePermissionMode;
   readonly allowDangerouslySkipPermissions?: true;
   readonly settings?: { readonly availableModels: readonly string[] };
@@ -928,6 +935,7 @@ export function makeClaudeAgentSdkPort(options: ClaudeAgentSdkPortOptions): Clau
               ...(input.resumeSessionId === undefined && input.sessionId !== undefined
                 ? { sessionId: input.sessionId }
                 : {}),
+              ...(input.persistSession === false ? { persistSession: false as const } : {}),
               permissionMode: expectedMode,
               ...(input.executionPolicy === "full-access"
                 ? { allowDangerouslySkipPermissions: true }

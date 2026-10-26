@@ -434,6 +434,19 @@ describe("Claude Agent SDK port", () => {
     },
   );
 
+  test("tells the runtime to keep no transcript only when asked to", async () => {
+    const { resumeSessionId: _resume, ...newSessionInput } = openInput;
+    const unsaved = makeHarness();
+    await Effect.runPromise(
+      Effect.scoped(unsaved.port.openQuery({ ...newSessionInput, persistSession: false })),
+    );
+    expect(unsaved.invocation?.options).toMatchObject({ persistSession: false });
+
+    const saved = makeHarness();
+    await Effect.runPromise(Effect.scoped(saved.port.openQuery(newSessionInput)));
+    expect(saved.invocation?.options).not.toHaveProperty("persistSession");
+  });
+
   test.each(["default", "sonnet", "opus"])(
     "preserves the runtime selection policy for %s in Plan",
     async (model) => {

@@ -2128,8 +2128,17 @@ flowchart LR
   a context or compaction summary, a commit or pull-request draft, an
   advisor review) starts single-use under a random id no thread records, so
   a purge could never find what it kept; Claude therefore records no resume
-  identity for it, Octant Harness keeps its transcript in memory only, and
-  nothing is left behind to purge.
+  identity for it and is asked to save no transcript of its own
+  (`persistSession: false`), Octant Harness keeps its transcript in memory
+  only, and nothing is left behind to purge. A store from before that rule
+  is swept once, at the first startup after the upgrade and before any
+  session can start: a Claude resume identity or Octant Harness transcript
+  is erased only when no other journal event and no child run's session
+  record names its session (nor, for Claude, the runtime's own session id a
+  resume looks up). Any mention keeps it, a fork's source included, so the
+  sweep never takes what a thread or run can still resume. Unlike the
+  operations above it runs without a request, because it removes only what
+  no scope owns and no purge can reach.
   The thread's child runs are erased with it, so their `agent-run` rows
   are de-linked the same way; replay treats a run whose
   `agent.run-requested@1` event is gone as purged.
