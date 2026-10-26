@@ -193,6 +193,27 @@ page they are allowed on, including what the agent reads.
 - An extension's own pages (`chrome-extension://` addresses: popups, options)
   are outside every agent allowlist. The agent cannot open or act on them.
 
+### Popups
+
+Electron alone does not show an extension's toolbar popup or implement most of
+`chrome.tabs`. Octant builds this support itself, after the extensions above
+work without it, and takes no extension-support package:
+
+- Choosing an extension in the extensions button's list opens its
+  `action.default_popup` page in a small Octant popover anchored to the button,
+  loaded in the page's profile. Clicking outside it or pressing Escape closes
+  it. An extension without a popup page gets the `chrome.action.onClicked`
+  event instead.
+- The popup and the background worker get the part of `chrome.tabs` a popup
+  needs, scoped to the page's profile: the active tab's address and title,
+  sending a message to a tab's content script, and opening or updating a tab in
+  that profile. A tab call never reaches another profile or a Private page.
+- Anything else in `chrome.tabs` stays unsupported and fails inside the
+  extension, as other unsupported APIs do.
+- Rationale: the one package that adds popups is offered under GPL-3.0 or a
+  paid commercial license; the maintainer chose to build the needed part
+  rather than take either.
+
 ### Showing it
 
 - The Browser toolbar shows an extensions button (a puzzle-piece icon) when at
@@ -218,17 +239,8 @@ page they are allowed on, including what the agent reads.
 
 Each refusal is a value the pane shows in words; none is a silent no-op.
 
-## Decisions for review
+## Rationale
 
-- **Extension toolbar popups.** Electron alone does not show an extension's
-  toolbar popup or implement most of `chrome.tabs`. The
-  `electron-chrome-extensions` package adds both, but it is offered under
-  GPL-3.0 or a paid commercial license, not a permissive one. Without popup
-  support, extensions get content scripts, a background service worker, and an
-  options page, which is enough for page-changing extensions but not for ones
-  driven from a popup. This specification builds without it first; popup
-  support is a separate change, either Octant's own or that package under a
-  paid license, and needs the maintainer's decision before it is built.
 - **Rationale for per-pair approvals.** Remembering an origin for Private pages
   is safe because a Private page carries no sign-in. The same origin in a
   profile acts as the person's account, so the grant has to name the profile it
