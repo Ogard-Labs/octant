@@ -138,4 +138,12 @@ describe("loading a plugin folder in another tool's layout", () => {
     const root = await folder({ "README.md": "nothing here" });
     await expect(loadPluginDirectory(root)).rejects.toThrow(/not a plugin/);
   });
+
+  it("refuses a folder that holds both a language server's and a provider driver's description", async () => {
+    const root = await folder({
+      "octant-language-server.json": "{}",
+      "octant-provider-driver.json": "{}",
+    });
+    await expect(loadPluginDirectory(root)).rejects.toThrow(/not both/);
+  });
 });
