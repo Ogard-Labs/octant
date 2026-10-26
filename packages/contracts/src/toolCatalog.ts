@@ -242,11 +242,12 @@ const NATIVE_HARNESS_TOOL_POLICY: Readonly<
     irreversibleUnderTaint: false,
     resultTaintsThread: false,
   },
-  // Only Code keeps one harness conversation across turns; Chat and Work start
-  // a fresh session each turn, so they have nothing durable to read back. A
-  // re-read brings in nothing the thread had not already taken in.
+  // Every mode keeps one harness conversation across turns, and a lookup reads
+  // only the thread's own, so it reaches no file, shell, or network a Chat
+  // thread lacks. A re-read brings in nothing the thread had not already
+  // taken in.
   "journal-lookup": {
-    modes: ["code"],
+    modes: ["chat", "work", "code"],
     requiredCapabilityClass: "instructions",
     approvalClass: "thread-local",
     irreversibleUnderTaint: false,

@@ -1,3 +1,4 @@
+import { ACP_AGENT_KINDS, acpAgentProfile } from "@octant/contracts/acp-agent-profiles";
 import type { ProviderDriverKind } from "@octant/contracts/providers";
 import type {
   ExtensionActivationState,
@@ -18,30 +19,21 @@ import {
   type ExtensionActivationContext,
 } from "./activation";
 
-const BUNDLED_PROVIDER_DRIVERS = [
+interface BundledDriverSpec {
+  readonly driverKind: ProviderDriverKind;
+  readonly displayName: string;
+  /** Single-hex nibble or two-hex seed for bundled digest derivation. */
+  readonly digestNibble: string;
+  readonly uuidNibble: string;
+}
+
+const NATIVE_PROVIDER_DRIVERS = [
   { driverKind: "codex", displayName: "Codex CLI", digestNibble: "0", uuidNibble: "01" },
   { driverKind: "claude", displayName: "Claude Code", digestNibble: "1", uuidNibble: "02" },
   { driverKind: "opencode", displayName: "OpenCode CLI", digestNibble: "2", uuidNibble: "03" },
-  { driverKind: "kilo", displayName: "Kilo ACP", digestNibble: "3", uuidNibble: "04" },
   { driverKind: "pi", displayName: "Pi RPC", digestNibble: "4", uuidNibble: "05" },
   { driverKind: "oh-my-pi", displayName: "Oh My Pi", digestNibble: "5", uuidNibble: "06" },
-  { driverKind: "devin", displayName: "Devin ACP", digestNibble: "6", uuidNibble: "07" },
-  {
-    driverKind: "mistral-vibe",
-    displayName: "Mistral Vibe ACP",
-    digestNibble: "7",
-    uuidNibble: "08",
-  },
   { driverKind: "ollama", displayName: "Ollama", digestNibble: "8", uuidNibble: "09" },
-  { driverKind: "kimi-code", displayName: "Kimi Code CLI", digestNibble: "9", uuidNibble: "0a" },
-  { driverKind: "grok", displayName: "Grok Build", digestNibble: "a", uuidNibble: "0b" },
-  { driverKind: "goose", displayName: "Goose ACP", digestNibble: "e", uuidNibble: "0f" },
-  { driverKind: "glm", displayName: "GLM Agent", digestNibble: "f", uuidNibble: "10" },
-  { driverKind: "gemini", displayName: "Gemini CLI", digestNibble: "10", uuidNibble: "11" },
-  { driverKind: "copilot", displayName: "GitHub Copilot", digestNibble: "11", uuidNibble: "12" },
-  { driverKind: "cline", displayName: "Cline", digestNibble: "12", uuidNibble: "13" },
-  { driverKind: "qwen", displayName: "Qwen Code", digestNibble: "13", uuidNibble: "14" },
-  { driverKind: "fx", displayName: "fx", digestNibble: "14", uuidNibble: "15" },
   {
     driverKind: "openai-compatible",
     displayName: "OpenAI-compatible HTTP",
@@ -60,13 +52,27 @@ const BUNDLED_PROVIDER_DRIVERS = [
     digestNibble: "d",
     uuidNibble: "0e",
   },
-] as const satisfies ReadonlyArray<{
-  readonly driverKind: ProviderDriverKind;
-  readonly displayName: string;
-  /** Single-hex nibble or two-hex seed for bundled digest derivation. */
-  readonly digestNibble: string;
-  readonly uuidNibble: string;
-}>;
+] as const satisfies ReadonlyArray<BundledDriverSpec>;
+
+/**
+ * Each ACP agent's plugin identity comes from its profile's serial, in the
+ * same seed scheme the native drivers use: the serial in hex seeds the digest
+ * and the next value ends the ids.
+ */
+const ACP_AGENT_DRIVERS: ReadonlyArray<BundledDriverSpec> = ACP_AGENT_KINDS.map((kind) => {
+  const profile = acpAgentProfile(kind);
+  return {
+    driverKind: kind,
+    displayName: profile.name,
+    digestNibble: profile.bundledPluginSerial.toString(16),
+    uuidNibble: (profile.bundledPluginSerial + 1).toString(16).padStart(2, "0"),
+  };
+});
+
+const BUNDLED_PROVIDER_DRIVERS: ReadonlyArray<BundledDriverSpec> = [
+  ...NATIVE_PROVIDER_DRIVERS,
+  ...ACP_AGENT_DRIVERS,
+];
 
 /**
  * Image providers reach the image job service through the provider-sdk image
@@ -93,12 +99,7 @@ const BUNDLED_IMAGE_DRIVERS = [
     uuidNibble: "18",
   },
   { driverKind: "ideogram-image", displayName: "Ideogram", digestNibble: "18", uuidNibble: "19" },
-] as const satisfies ReadonlyArray<{
-  readonly driverKind: ProviderDriverKind;
-  readonly displayName: string;
-  readonly digestNibble: string;
-  readonly uuidNibble: string;
-}>;
+] as const satisfies ReadonlyArray<BundledDriverSpec>;
 
 const PROVIDER_DRIVER_COMPONENT_ID = "provider-driver";
 
@@ -114,9 +115,7 @@ const digest = (seed: string) => {
   return decodeExtensionContentDigest(`sha256:${normalized}`);
 };
 
-function bundledProviderDriverManifest(
-  spec: (typeof BUNDLED_PROVIDER_DRIVERS)[number] | (typeof BUNDLED_IMAGE_DRIVERS)[number],
-) {
+function bundledProviderDriverManifest(spec: BundledDriverSpec) {
   return decodeExtensionPackageManifest({
     manifestVersion: 1,
     extensionId: `10000000-0000-4000-8000-0000000002${spec.uuidNibble}`,

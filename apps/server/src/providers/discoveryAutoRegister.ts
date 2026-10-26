@@ -8,6 +8,7 @@ import type {
 import {
   groupByDriverKind,
   initialEnabledForDiscovery,
+  isAcpAgentInstance,
   isFirstRunDiscoveryEnablementEligible,
   selectPreferredCandidate,
   shouldAutoRegisterCandidate,
@@ -111,22 +112,10 @@ function configuredBinaryPath(instance: ProviderInstance): string | undefined {
   switch (instance.configuration.kind) {
     case "opencode-cli":
     case "codex-cli":
-    case "kimi-code-acp":
     case "claude-agent-sdk":
-    case "mistral-vibe-acp":
-    case "grok-acp":
-    case "goose-acp":
-    case "glm-acp":
-    case "gemini-acp":
-    case "copilot-acp":
-    case "cline-acp":
-    case "qwen-acp":
-    case "fx-acp":
-    case "devin-acp":
-    case "kilo-acp":
     case "pi-rpc":
       return instance.configuration.binaryPath;
     default:
-      return undefined;
+      return isAcpAgentInstance(instance) ? instance.configuration.binaryPath : undefined;
   }
 }

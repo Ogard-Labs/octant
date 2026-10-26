@@ -97,7 +97,7 @@
     "apps/web/src/projects/ProjectSidebarSection.tsx": 4,
     "apps/web/src/providers/ComposerModelPicker.tsx": 1,
     "apps/web/src/providers/ProviderSettingsList.tsx": 2,
-    "apps/web/src/providers/useProviderController.ts": 15,
+    "apps/web/src/providers/useProviderController.ts": 4,
     "apps/web/src/shell/SettingsView.tsx": 6,
     "apps/web/src/zen/useZenController.ts": 1,
     "apps/web/src/zen/widgets/ZenChecklist.tsx": 3,

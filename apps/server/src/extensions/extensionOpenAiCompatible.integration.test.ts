@@ -16,6 +16,7 @@ import {
   type CapabilityCatalogEntry,
   type CapabilitySelectionRequest,
 } from "../context/capabilityCatalog";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeOpenAiCompatibleDriver } from "../providers/openAiCompatibleDriver";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { composeSelectedExtensionCapabilities } from "./extensionAddressingService";
@@ -165,22 +166,30 @@ describe("structured extensions on the Generic OpenAI-compatible provider", () =
       protocol: "chat-completions",
       manualModelIds: [modelId],
     };
-    const driver = makeOpenAiCompatibleDriver({
-      instanceId: providerInstanceId,
-      configuration,
-      runtimeRegistry,
-      credentialResolver: { has: async () => true, resolve: async () => "private-key" },
-      fetch,
-      clock: () => "2026-07-29T00:00:00.000Z",
-      correlationId: () => "91000000-0000-4000-8000-000000000003",
-    });
+    const driver = runOnNativeHarness(
+      makeOpenAiCompatibleDriver({
+        instanceId: providerInstanceId,
+        configuration,
+        runtimeRegistry,
+        credentialResolver: { has: async () => true, resolve: async () => "private-key" },
+        fetch,
+        clock: () => "2026-07-29T00:00:00.000Z",
+      }),
+      {
+        instanceId: providerInstanceId,
+        runtimeRegistry,
+        conversationOwnership: "host-resumable",
+        clock: () => "2026-07-29T00:00:00.000Z",
+        correlationId: () => "91000000-0000-4000-8000-000000000003",
+      },
+    );
     const observed = await Effect.runPromise(
       Effect.scoped(driver.probe({ instanceId: providerInstanceId })),
     );
-    runtimeRegistry.setObservedState({
-      ...observed,
-      verifiedToolModelIds: observed.models.map((model) => model.id),
-    });
+    runtimeRegistry.setVerifiedToolModels(
+      observed.instanceId,
+      observed.models.map((model) => model.id),
+    );
 
     await Effect.runPromise(
       Effect.scoped(
@@ -188,6 +197,7 @@ describe("structured extensions on the Generic OpenAI-compatible provider", () =
           const connection = yield* driver.acquire({
             instanceId: providerInstanceId,
             projectRoot: "/tmp/octant-generic-provider",
+            mode: "chat",
           });
           yield* connection.start({
             sessionId: providerSessionId,

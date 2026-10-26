@@ -7,6 +7,8 @@ import type { OctantMode } from "@octant/contracts/modes";
 
 const rendererKinds = ["ui-surface", "appearance-pack", "preview-viewer"] as const;
 const providerDriverKind = ["provider-driver"] as const;
+// Chat never leases a desktop: a Chat Project has no root to send an artifact from.
+const desktopProviderKind = ["desktop-provider"] as const;
 
 const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kind"]>>> = {
   chat: new Set([
@@ -27,6 +29,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "app",
     ...rendererKinds,
     ...providerDriverKind,
+    ...desktopProviderKind,
   ]),
   code: new Set([
     "skill-instructions",
@@ -42,6 +45,7 @@ const modeKinds: Readonly<Record<OctantMode, ReadonlySet<ExtensionComponent["kin
     "integration",
     ...rendererKinds,
     ...providerDriverKind,
+    ...desktopProviderKind,
   ]),
 };
 

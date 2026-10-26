@@ -76,6 +76,7 @@ import { ExternalContentIngestionStore } from "../context/externalContentIngesti
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { createPhase1RuntimeRegistries } from "../persistence/runtimeRegistry";
 import type { CompatibleFetch } from "../providers/openAiCompatibleEndpoint";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeOpenAiCompatibleDriver } from "../providers/openAiCompatibleDriver";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { CodeProjectAccess } from "../codeProjectAccess";
@@ -7416,24 +7417,31 @@ describe("sibling-threads tool on Code turns", () => {
         : responsesTextStream("done");
     });
     const registry = new ProviderRuntimeRegistry();
-    const driver = makeOpenAiCompatibleDriver({
-      instanceId: thread().providerInstanceId,
-      configuration: {
-        kind: "openai-compatible-http",
-        baseUrl: "https://provider.example/v1",
-        authentication: "none",
-        protocol: "responses",
-        manualModelIds: [thread().modelId],
+    const driver = runOnNativeHarness(
+      makeOpenAiCompatibleDriver({
+        instanceId: thread().providerInstanceId,
+        configuration: {
+          kind: "openai-compatible-http",
+          baseUrl: "https://provider.example/v1",
+          authentication: "none",
+          protocol: "responses",
+          manualModelIds: [thread().modelId],
+        },
+        runtimeRegistry: registry,
+        fetch: fetch as CompatibleFetch,
+      }),
+      {
+        instanceId: thread().providerInstanceId,
+        runtimeRegistry: registry,
+        conversationOwnership: "host-resumable",
       },
-      runtimeRegistry: registry,
-      fetch: fetch as CompatibleFetch,
-    });
+    );
     const probed = await Effect.runPromise(
       Effect.scoped(driver.probe({ instanceId: thread().providerInstanceId })),
     );
     // A person verified that this model calls tools, which is what lets a
     // direct endpoint carry any app-managed tool.
-    registry.setObservedState({ ...probed, verifiedToolModelIds: [thread().modelId] });
+    registry.setVerifiedToolModels(probed.instanceId, [thread().modelId]);
     const fixture = runtimeFixture({
       provider: driver,
       supportsAppManagedTools: true,
@@ -8276,22 +8284,29 @@ async function functionCallingEndpoint(
         );
   });
   const registry = new ProviderRuntimeRegistry();
-  const driver = makeOpenAiCompatibleDriver({
-    instanceId: thread().providerInstanceId,
-    configuration: {
-      kind: "openai-compatible-http",
-      baseUrl: "https://provider.example/v1",
-      authentication: "none",
-      protocol: "responses",
-      manualModelIds: [thread().modelId],
+  const driver = runOnNativeHarness(
+    makeOpenAiCompatibleDriver({
+      instanceId: thread().providerInstanceId,
+      configuration: {
+        kind: "openai-compatible-http",
+        baseUrl: "https://provider.example/v1",
+        authentication: "none",
+        protocol: "responses",
+        manualModelIds: [thread().modelId],
+      },
+      runtimeRegistry: registry,
+      fetch: fetch as CompatibleFetch,
+    }),
+    {
+      instanceId: thread().providerInstanceId,
+      runtimeRegistry: registry,
+      conversationOwnership: "host-resumable",
     },
-    runtimeRegistry: registry,
-    fetch: fetch as CompatibleFetch,
-  });
+  );
   const probed = await Effect.runPromise(
     Effect.scoped(driver.probe({ instanceId: thread().providerInstanceId })),
   );
-  registry.setObservedState({ ...probed, verifiedToolModelIds: [thread().modelId] });
+  registry.setVerifiedToolModels(probed.instanceId, [thread().modelId]);
   /** Each call's answer, in call order, as the provider received it. */
   const answers = (): ReadonlyArray<string | undefined> => {
     const byCall = new Map<string, string>();

@@ -280,6 +280,7 @@ export const ExtensionComponentKind = Schema.Literal(
   "preview-viewer",
   "provider-driver",
   "replica-store",
+  "desktop-provider",
 );
 export type ExtensionComponentKind = typeof ExtensionComponentKind.Type;
 export const ExtensionSkillName = Schema.NonEmptyTrimmedString.pipe(
@@ -311,6 +312,7 @@ const executableKinds = new Set<ExtensionComponentKind>([
   "board",
   "integration",
   "provider-driver",
+  "desktop-provider",
 ]);
 const mcpChildKinds = new Set<ExtensionComponentKind>(["mcp-tool", "mcp-prompt", "mcp-resource"]);
 

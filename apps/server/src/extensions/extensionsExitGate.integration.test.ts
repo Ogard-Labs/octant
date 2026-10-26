@@ -36,6 +36,7 @@ import {
   type CapabilityActiveScope,
   type CapabilityCatalogEntry,
 } from "../context/capabilityCatalog";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeOpenAiCompatibleDriver } from "../providers/openAiCompatibleDriver";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { AppleToolchainService } from "../apple/appleToolchainService";
@@ -599,28 +600,37 @@ async function sendSelectedSkillToGenericProvider(
     protocol: "chat-completions",
     manualModelIds: [modelId],
   };
-  const driver = makeOpenAiCompatibleDriver({
-    instanceId: providerInstanceId,
-    configuration,
-    runtimeRegistry,
-    credentialResolver: { has: async () => true, resolve: async () => "private-key" },
-    fetch,
-    clock: () => "2026-07-30T00:00:00.000Z",
-    correlationId: () => "42000000-0000-4000-8000-000000000103",
-  });
+  const driver = runOnNativeHarness(
+    makeOpenAiCompatibleDriver({
+      instanceId: providerInstanceId,
+      configuration,
+      runtimeRegistry,
+      credentialResolver: { has: async () => true, resolve: async () => "private-key" },
+      fetch,
+      clock: () => "2026-07-30T00:00:00.000Z",
+    }),
+    {
+      instanceId: providerInstanceId,
+      runtimeRegistry,
+      conversationOwnership: "host-resumable",
+      clock: () => "2026-07-30T00:00:00.000Z",
+      correlationId: () => "42000000-0000-4000-8000-000000000103",
+    },
+  );
   const observed = await Effect.runPromise(
     Effect.scoped(driver.probe({ instanceId: providerInstanceId })),
   );
-  runtimeRegistry.setObservedState({
-    ...observed,
-    verifiedToolModelIds: observed.models.map((model) => model.id),
-  });
+  runtimeRegistry.setVerifiedToolModels(
+    observed.instanceId,
+    observed.models.map((model) => model.id),
+  );
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
         const connection = yield* driver.acquire({
           instanceId: providerInstanceId,
           projectRoot: "/tmp/octant-phase10-generic-provider",
+          mode: "chat",
         });
         yield* connection.start({
           sessionId: providerSessionId,
@@ -1472,28 +1482,37 @@ describe("extensions marketplace integrated exit gate", () => {
       protocol: "chat-completions",
       manualModelIds: [modelId],
     };
-    const driver = makeOpenAiCompatibleDriver({
-      instanceId: providerInstanceId,
-      configuration,
-      runtimeRegistry,
-      credentialResolver: { has: async () => true, resolve: async () => "private-key" },
-      fetch,
-      clock: () => "2026-07-30T00:00:00.000Z",
-      correlationId: () => "42000000-0000-4000-8000-000000000210",
-    });
+    const driver = runOnNativeHarness(
+      makeOpenAiCompatibleDriver({
+        instanceId: providerInstanceId,
+        configuration,
+        runtimeRegistry,
+        credentialResolver: { has: async () => true, resolve: async () => "private-key" },
+        fetch,
+        clock: () => "2026-07-30T00:00:00.000Z",
+      }),
+      {
+        instanceId: providerInstanceId,
+        runtimeRegistry,
+        conversationOwnership: "host-resumable",
+        clock: () => "2026-07-30T00:00:00.000Z",
+        correlationId: () => "42000000-0000-4000-8000-000000000210",
+      },
+    );
     const observed = await Effect.runPromise(
       Effect.scoped(driver.probe({ instanceId: providerInstanceId })),
     );
-    runtimeRegistry.setObservedState({
-      ...observed,
-      verifiedToolModelIds: observed.models.map((model) => model.id),
-    });
+    runtimeRegistry.setVerifiedToolModels(
+      observed.instanceId,
+      observed.models.map((model) => model.id),
+    );
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
           const connection = yield* driver.acquire({
             instanceId: providerInstanceId,
             projectRoot: "/tmp/octant-phase10-skill-provider",
+            mode: "chat",
           });
           yield* connection.start({
             sessionId: providerSessionId,

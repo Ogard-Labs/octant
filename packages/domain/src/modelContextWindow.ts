@@ -17,6 +17,8 @@ export interface ModelContextWindowFacts {
   readonly maxOutputTokens?: number | undefined;
   /** The window a person typed into the model's details. */
   readonly contextWindowOverride?: number | undefined;
+  /** The longest window the model was trained for, when its runtime names it. */
+  readonly trainedContextWindow?: number | undefined;
   /** The window the endpoint's own refusal or a larger successful request taught Octant. */
   readonly learnedContextWindow?: number | undefined;
   /** The `model` the endpoint named in its responses, which may differ from a deployment's name. */
@@ -222,10 +224,25 @@ export function resolveModelMaxOutput(
 }
 
 /**
+ * The window a person set, held to the window the model was trained for when
+ * that is known. Ollama loads no more than the trained window whatever
+ * `num_ctx` asks for, so a larger setting would let the planner and the meter
+ * count room the model never has, and a prompt between the two would be cut
+ * without an error. Undefined when no window was set.
+ */
+export function effectiveContextWindowOverride(
+  model: Pick<ModelContextWindowFacts, "contextWindowOverride" | "trainedContextWindow">,
+): number | undefined {
+  const { contextWindowOverride: override, trainedContextWindow: trained } = model;
+  return override === undefined || trained === undefined ? override : Math.min(override, trained);
+}
+
+/**
  * The model's window from the most direct source that names one: what a
- * person set, then what the provider reported, then what its refusals taught,
- * then the built-in profile — matched on the model's id and, for a deployment
- * with a name of its own, on the model the endpoint said it served. A learned
+ * person set (held to the trained window, which then names it as reported),
+ * then what the provider reported, then what its refusals taught, then the
+ * built-in profile — matched on the model's id and, for a deployment with a
+ * name of its own, on the model the endpoint said it served. A learned
  * window below the reported one wins too, since the endpoint itself refused
  * above it. Undefined means nothing named it, and the caller plans with its
  * labelled estimate.
@@ -242,8 +259,12 @@ export function resolveModelContextWindow(
       source,
     };
   };
-  if (model.contextWindowOverride !== undefined) {
-    return resolved(model.contextWindowOverride, "user-supplied");
+  const override = effectiveContextWindowOverride(model);
+  if (override !== undefined) {
+    return resolved(
+      override,
+      override === model.contextWindowOverride ? "user-supplied" : "provider-discovery",
+    );
   }
   const learned = model.learnedContextWindow;
   if (

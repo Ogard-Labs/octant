@@ -234,8 +234,10 @@ revocable Expo token; Apple certificates, profiles, and the App Store Connect
 key stay in EAS's credential service. The App ID enables no optional Apple
 capability (push, associated domains, Sign in with Apple, iCloud), testers are
 maintainer-controlled App Store Connect users, and external groups, public
-links, and store listing stay closed under the
-[mobile store hold](mobile-store-v1-hold.md). A build counts only after the
+links, and store listing stay closed until public store distribution, an
+authorized post-preview track, has its own specification and a separate
+maintainer action for submission ([mobile store note](mobile-store-v1-hold.md)).
+A build counts only after the
 device pass in the [TestFlight runbook](mobile-testflight.md), not when EAS or
 Apple finishes processing it.
 
@@ -601,7 +603,11 @@ address (Allow input never covers it), and evidence keeps only the origin. **Rot
 and landscape for a person who asked; it is an effect confirmed on its own
 (Allow input never covers it). Pane states, discovery, capture, input
 delivery, keyboard layouts, and the managed streaming tools are specified in
-[Device workbench](design/device-workbench.md).
+[Device workbench](design/device-workbench.md). Physical Apple devices,
+their person-confirmed leases and signing custody, and person-confirmed upload
+to App Store Connect are the design accepted on 2026-10-26, being implemented
+from its first slice, in
+[Apple physical devices and distribution](design/apple-devices.md).
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -2114,7 +2120,8 @@ flowchart LR
   canvases authored in that thread (including their comments, shares,
   refreshes, actions, and mirrored files), agent-run session and content
   stores, harness sessions, the Octant Harness transcript (with its
-  compaction summaries) and Ollama session history of every provider session
+  compaction summaries), Ollama session history, and Claude resume identity
+  of every provider session
   the thread's own Chat attempts, Work turns, or Code operations first
   recorded or its child runs' session records name (each is keyed by that
   provider session, not by the harness session record, and a session a Chat
@@ -2128,6 +2135,21 @@ flowchart LR
   not erased: their token and cost aggregates stay for host accounting, the
   thread's identity leaves them (`subject_id` becomes NULL, modelled as a
   `deLinked` usage subject), and replay never re-links a purged thread.
+  A provider session that answers one host request and stops (a hand-off,
+  a context or compaction summary, a commit or pull-request draft, an
+  advisor review) starts single-use under a random id no thread records, so
+  a purge could never find what it kept; Claude therefore records no resume
+  identity for it and is asked to save no transcript of its own
+  (`persistSession: false`), Octant Harness keeps its transcript in memory
+  only, and nothing is left behind to purge. A store from before that rule
+  is swept once, at the first startup after the upgrade and before any
+  session can start: a Claude resume identity or Octant Harness transcript
+  is erased only when no other journal event and no child run's session
+  record names its session (nor, for Claude, the runtime's own session id a
+  resume looks up). Any mention keeps it, a fork's source included, so the
+  sweep never takes what a thread or run can still resume. Unlike the
+  operations above it runs without a request, because it removes only what
+  no scope owns and no purge can reach.
   The thread's child runs are erased with it, so their `agent-run` rows
   are de-linked the same way; replay treats a run whose
   `agent.run-requested@1` event is gone as purged.
@@ -2464,9 +2486,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   auth variables (existing installs authenticate that way). Extra
   assigned homes strip those variables so they cannot share the
   host key, and strip `CODEX_SQLITE_HOME` so their thread state
-  database is not the host's. The AWS profile and file variables
-  stay for every account: they choose among the AWS identities of
-  the one operating-system user and hold no login of their own. An
+  database is not the host's. No account receives the AWS profile
+  or shared-config variables (`AWS_PROFILE`, `AWS_CONFIG_FILE`,
+  `AWS_SHARED_CREDENTIALS_FILE`); a Bedrock sign-in follows the
+  rule under the confinement matrix in
+  [security and authority](#security-and-authority). An
   explicit API-key instance still receives only the
   broker-resolved key. Each Codex account has its own
   long-lived app-server and never shares that process with another
@@ -2523,8 +2547,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   declared capabilities, contributions, a second component, an entry point
   other than `builtin:provider-driver/<kind>`, and any source other than
   `bundled`. Outside drivers need their own design before the schema admits
-  them; third-party provider-driver plugins are parked until after the
-  technical preview. The catalog repeats installed and trusted from the activation context
+  them; third-party provider-driver plugins are an authorized post-preview
+  track that the schema refuses until that design is documented. The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -2668,6 +2692,28 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   generic ACP client and protocol layer. Each in-tree vendor is a bundled
   `provider-driver` plugin that reaches the host only through `provider-sdk`;
   ACP vendors configure that shared stack rather than shipping a second runtime.
+  An ACP agent is registered in one place, in two halves: its row in
+  `ACP_AGENT_PROFILES` ([`acpAgentProfiles.ts`](../packages/contracts/src/acpAgentProfiles.ts)),
+  which holds what Octant knows before the agent runs (name, executable,
+  version probe, authentication postures, key label, sign-in guidance, update
+  command, bundled-plugin serial), and its runtime profile in
+  [`acpProfiles.ts`](../apps/server/src/providers/acpProfiles.ts), which the
+  compiler requires for every row. Everything else is derived from the row:
+  the closed `ProviderDriverKind` vocabulary, the shared configuration and
+  instance schemas, the `create-<kind>-provider` and
+  `change-<kind>-configuration` commands, tool-transport placement, the
+  discovery descriptor, the bundled plugin and its identity, picker and
+  Settings labels, and the Settings create and configuration forms. A new
+  agent adds its row, its runtime profile, its logo, and conformance evidence.
+  The row never widens the vocabulary to `string`: an unlisted kind fails to
+  decode, a configuration must name the same agent as its instance or command
+  and a posture its row lists, and every capability is still the one the
+  agent's own `initialize` and probe report. Native drivers stay exhaustive
+  switches; only the ACP placement is read from the table. The provider
+  projection checks only that `driver_kind` is non-empty: its closed list had
+  to be rebuilt for every new driver kind, while the instance schema already
+  decodes each instance before it is written and each row when it is read,
+  and refuses a row whose `driver_kind` disagrees with it.
   Disabled or incompatible driver plugins contribute no models, tools, or
   capabilities. Provider-specific wire payloads never leave the adapter — the
   rest of the system sees only normalized runtime events.
@@ -2759,7 +2805,10 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   request profile is enforced before send and its `subscription_sharing_*`
   error codes map to user-facing states. The effective
   authority rule is in [security and authority](#security-and-authority); the
-  historical record remains Proposed. Secrets
+  historical record remains Proposed. Enterprise directory sign-in and
+  cloud-IAM request signing (`directory-oauth`, `cloud-iam`) are an accepted
+  design (2026-10-26), not yet built, in [Enterprise provider identity](design/enterprise-provider-identity.md).
+  Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
   never receive raw token material. Broker URLs and tokens are stripped from
@@ -2824,8 +2873,11 @@ A model's window is found without asking the person
 (`resolveModelContextWindow` in `@octant/domain/model-context-window`). The
 first source that names one wins, except that a learned window below the
 reported one takes precedence: a window the person typed into the model's
-details (`user-supplied`, "Set by you"); the provider's own model metadata
-(`provider-discovery`, "Reported"); a window learned from the endpoint's own
+details (`user-supplied`, "Set by you"), held to the model's
+`trainedContextWindow` when its provider reports one, as Ollama does
+(`effectiveContextWindowOverride`; a held window is labelled "Reported", and
+the Settings box saves a larger number as the trained window); the
+provider's own model metadata (`provider-discovery`, "Reported"); a window learned from the endpoint's own
 refusals (`observed-evidence`, "Learned"), which also wins over a larger
 reported figure because the endpoint refused above it; and the built-in model
 profile catalogue (`reviewed-catalog`, "Profile"). Nothing naming one leaves the
@@ -2848,13 +2900,17 @@ the `reviewed-catalog` source, so it is also labelled "Profile". Profiles match 
 prefix, a `:` tag, a release date, and `-latest` are ignored; a version is
 not), and also on the `model` a direct endpoint names in its responses, so an
 Azure AI Foundry or OpenAI-compatible deployment with a name of its own takes
-its model's profile from its first completed request. A direct endpoint
-(OpenAI-compatible, Azure AI Foundry, Anthropic-compatible) learns from each
-request: an overflow refusal that names the limit ("maximum context length is
-N tokens", "prompt is too long: X tokens > N maximum", and similar) lowers the
-learned window before the harness's shrink-once recovery resends a smaller
-request, and a completed request that used more than the learned window raises
-it. A refusal that names no limit teaches nothing; the shrink-once recovery
+its model's profile from its first completed request. The host learns from
+each request a direct endpoint sends through the harness endpoint port, for
+every such endpoint alike: an overflow refusal whose message names the limit
+("maximum context length is N tokens", "prompt is too long: X tokens > N
+maximum", and similar) lowers the learned window before the harness's
+shrink-once recovery resends a smaller request, a completed request whose
+reported usage went past the learned window raises it, and the model a
+response names (`servedModelId`) is recorded. The endpoint only reports these
+in what its request settles with; the host keeps them. Ollama names no served
+model, so an Ollama model learns a window only once a refusal names its limit.
+A refusal that names no limit teaches nothing; the shrink-once recovery
 still runs and the person sees at most the normal compaction notice. The
 override, the learned window, and the served model are kept per provider
 instance and model on the provider's model catalogue, so they survive probes
@@ -3503,11 +3559,14 @@ _Journaling._ All on the subject's `context-ledger` aggregate:
   build requests from the summary and the turns after it, and a later
   compaction supersedes an earlier one. The model reads the summary behind a
   line saying how many of the session's first turns it stands for and that
-  they are no longer shown in full. Because the lead keeps its task list only
+  they are no longer shown in full, then that its task list and, in Work and
+  Code, the files on disk still reflect that work. A Chat session, which has
+  no folder, is told only of its task list and is not asked by its summary
+  request for files or changes. Because the lead keeps its task list only
   through `todo-write` calls, the summary carries the arguments of the latest
   successful `todo-write` in the summarized turns verbatim (or the list the
   earlier summary carried) instead of trusting the model to restate it. The
-  same compaction runs automatically mid-turn when a Code request would
+  same compaction runs automatically mid-turn when a request in any mode would
   otherwise lose whole exchanges (see the native harness loop). A fork copies the latest compaction
   its source had read by the turn it was forked at, including one made
   part-way through that turn, rewritten for the fork's folder and secrets like
@@ -3986,8 +4045,9 @@ depends only on the provider it is sent to, decided by the pure
 (`providerKeepsConversation` false) is sent the history again every turn, from
 whatever provider wrote it, so moving to one needs nothing handed over and no
 longer refuses when the previous provider kept a session or is gone. Octant
-Harness on a direct endpoint is host-owned in this sense but keeps every
-session durably (`conversationOwnership: "host-resumable"`), so a new message
+Harness on an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
+endpoint is host-owned in this sense but keeps every session durably
+(`conversationOwnership: "host-resumable"`; Ollama stays `host`), so a new message
 continues the previous attempt's session and sends only itself: the same
 session id, which is the endpoint's prompt cache key, and the lead's own
 messages, tool calls and results. It continues only the same provider instance
@@ -4192,7 +4252,29 @@ Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
 `azure-foundry`, and `ollama`) run under the native harness in
 `apps/server/src/harness`. Ollama stays a literal-loopback HTTP origin: its
 transport speaks Ollama's native `/api/chat` and refuses any other base URL,
-so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
+so a cloud, LAN, or tunnelled Ollama is not a harness endpoint. Ollama cuts a
+prompt longer than the window it loaded without an error, which can drop the
+harness's instructions and tool definitions, so every Ollama request names its
+window as `options.num_ctx` and the transport measures the request against
+that same number. The probe settles it per model from `/api/show`: the
+Modelfile's own `num_ctx` (held to the trained window, which Ollama never
+exceeds), else the `<general.architecture>.context_length` Ollama itself reads
+the trained window from, held to 32,768 tokens, else 4,096 tokens. The probe
+reports that window as the model's context limit in every case, so the planner
+and the meter plan against what Ollama actually loads. The cap exists because Ollama
+allocates the whole window's KV cache when it loads a model, whatever the
+prompt's length: an 8B model needs about 4 GiB of it at 32K and 16 GiB at a
+trained 128K, and a model trained for 1M would not load on most Macs. A
+Modelfile `num_ctx` is not capped, since it is a deliberate choice and what
+Ollama loads anyway. A window set on the model's catalogue entry (the Settings
+Context window box) wins and outlives every probe, held to the trained window
+the probe also reports as `trainedContextWindow`: Ollama clamps `num_ctx` to
+it, so a larger setting would let the planner and the meter count room the
+model never loads. When Ollama reports no window, Octant assumes and asks for
+4,096 tokens, Ollama's own default on a machine with little GPU memory, rather
+than guessing larger.
+Verify tools sends the same window, so the check does not make Ollama reload
+the model at another size.
 
 - **Loop.** `createNativeHarnessConnection` is the harness's agent loop and
   the `ProviderConnection` every direct-endpoint driver hands out. Each driver
@@ -4210,11 +4292,19 @@ so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
   (an Ollama vision model) is admitted such a turn. A request that outgrows the
   endpoint is shrunk in the request only — older tool results first, then
   whole earlier exchanges behind a note — and refused if the latest message
-  alone does not fit. On a Code connection, before any whole exchange is left
-  out, the loop first compacts: it summarizes the turns before the running
-  turn exactly as the connection's `compact` does (below), journals the
-  marker, emits `context-compacted` with `trigger: "automatic"`, and rebuilds
-  the request from the summary and the turns after it. It sends at most one
+  alone does not fit. On a Chat, Work, or Code connection, before any whole
+  exchange is left out, the loop first compacts: it summarizes the turns before
+  the running turn exactly as a Code connection's `compact` does (below),
+  journals the marker, emits `context-compacted` with `trigger: "automatic"`,
+  and rebuilds the request from the summary and the turns after it. Every
+  mode's session continues its journaled conversation, so every mode
+  summarizes the same way: on the session's own endpoint, provider and model,
+  with no tools, so a Chat summary request has no file, shell, or network
+  reach. A fresh Chat or Work session carries the host's planned history,
+  which the host already compacted when it dropped any, inside its first
+  message; that is the running turn and is never summarized, and a continued
+  session whose plan would leave conversation out is rebuilt fresh by the host
+  instead, so one overflow is never summarized by both. It sends at most one
   summary request per turn, so a summary that failed is not paid for again on
   every later step, and only on the lead's own model (a fallback model's window
   may differ), and never summarizes the running turn's own prompt or steps,
@@ -4222,8 +4312,8 @@ so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
   before the running turn, or the summary does not come back, the ladder
   continues as before. The summary's text and reasoning never reach the
   turn's events, but its streaming is forwarded as content-free `liveness`
-  (at most once every five seconds), because the Code turn runner interrupts
-  a turn that is silent for its inactivity window and a summary over a long
+  (at most once every five seconds), because the Chat, Work, and Code turn
+  runners interrupt a turn that is silent for its inactivity window and a summary over a long
   session can stream for longer. The summary request's usage joins the turn's total and
   cost (an endpoint retry of it leaves the turn's estimated cost unknown, as
   for any request), and the turn runner journals the compaction as an automatic receipt
@@ -4231,33 +4321,54 @@ so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
   first-class runtime's own. Rationale: a cut exchange is gone from the
   model's view with only the note in its place, while a summary keeps the
   task, decisions and open work in view at the cost of one tool-less
-  request, so a long Code session survives an overflow more often than a
-  single ladder step lets it. When the ladder still cuts exchanges, the note tells the lead that its task list and the
-  files on disk still reflect that work, and the journal keeps the full
-  conversation for people, replay, and export. A Code lead can also read a
-  cut exchange back: it is offered `journal-lookup`, a read-only harness read
-  of its own `native-harness-transcript`. The note then names the journal
+  request, so a long session survives an overflow more often than a
+  single ladder step lets it. When the ladder still cuts exchanges, the note tells the lead that its task list (and,
+  in Work and Code, the files on disk; a Chat thread has no folder) still
+  reflects that work, and the journal keeps the full
+  conversation for people, replay, and export. A lead in any mode can also
+  read a cut exchange back: it is offered `journal-lookup`, a read-only
+  harness read of its own `native-harness-transcript`. The note then names the journal
   message numbers before the first message it kept (`Messages 0 to N`), and
   only numbers already journaled, so it never hands out a handle the model
   cannot fetch; the numbering is the journal's, so a compaction summary
   (requested, restored on resume, or made automatically part-way through the
   running turn) or an earlier cut does not shift it. A lookup takes `from` (and an optional
-  `count`, at most 20) and nothing else: it cannot name a thread or a session.
-  The host reads the conversation of the session the thread's newest turn
-  recorded in its own journal, and refuses (`journal-unavailable`) when that
-  session is not a harness session of the thread's provider in Code; a number
-  past the end refuses as `journal-message-missing`. A result is bounded (32k
-  characters in all, a long text or payload clipped with a marker saying how
-  much was left out) and says the next number when more follows. The turn's
+  `count`, at most 20, and `offset`) and nothing else: it cannot name a thread or a session.
+  The host reads the conversation of the session the thread's running turn
+  recorded in its own journal (a Chat thread's newest attempt, which a
+  regenerated earlier turn may hold rather than the tail; a Work thread's
+  newest turn; a Code thread's newest `provider-session-ready`), and refuses
+  (`journal-unavailable`) when that session is not a harness session of the
+  thread's provider in the thread's own mode; a number past the end refuses
+  as `journal-message-missing`. A Chat or Work session the host rebuilt
+  because the previous one could not continue (a host compaction, a retry
+  or edit, a regenerated earlier turn, or a model or provider change) is a
+  new conversation, so a lookup reads only the one the
+  running turn uses; an earlier one stays in the journal for people, replay,
+  and export but is not reachable from the tool. Rationale: the rebuilt
+  session began from the host's planned history of those turns, and reaching
+  an older session would need a handle the call cannot name. A result is bounded (32k
+  characters in all, each text or payload at most 8k, less when one message
+  carries many) and says the next number when more follows. A longer text or
+  payload is clipped with a marker saying how much was left out and where to
+  read on, and its message carries `nextOffset`: the same `from` with that
+  `offset` returns the next part of message `from`'s text and every payload
+  (later messages start at their beginning), so all of a long message,
+  such as a rebuilt session's first message carrying the planned history,
+  is readable in bounded parts. An offset at or past the end of every text
+  and payload of that message refuses as `journal-offset-past-end`. The turn's
   resolved credential values are redacted from it exactly as a fork's copy
-  redacts them, plain and JSON-escaped; nothing but the conversation's own
-  messages leaves, so no approval or other journal record rides along. The
-  lead is not offered the tool without that secret list. Chat and Work now
-  continue one session across turns, but the catalog still offers
-  `journal-lookup` in Code only, so their note names no numbers. When the endpoint still rejects a request as too large,
+  redacts them, plain and JSON-escaped, before a message is split into parts,
+  so a value straddling two parts never leaves a piece at a time; nothing but the conversation's own
+  messages leaves, so no approval or other journal record rides along. A
+  Code lead is not offered the tool without that secret list; Chat and Work
+  turns resolve no credential values, so theirs is empty. The read is
+  `thread-local` in the catalog, so it needs no approval, is allowed in Plan,
+  and gives a Chat thread no file, shell, or network reach. A Side Chat, not
+  being a lead, is not offered it. When the endpoint still rejects a request as too large,
   the loop recognises the refusal as a filled context window (OpenAI's
   `context_length_exceeded`, Anthropic's "prompt is too long", or the 400 or
-  413 shape from an OpenAI-compatible host). A Code connection that has not
+  413 shape from an OpenAI-compatible host). A connection that has not
   yet tried to compact for that request, nor sent a summary request earlier in
   the turn, summarizes earlier turns as above
   and sends the rebuilt request; otherwise, or when that request is refused
@@ -4287,30 +4398,42 @@ so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
   input for one of its models. It has no `acquire`: `runOnNativeHarness` turns
   it into a `ProviderDriver` whose connections the host builds with
   `createNativeHarnessConnection`, refusing a connection with no product mode,
-  and whose conversations are host-owned. Before the driver's `admitTurn` is
+  and whose conversations are host-owned (`host-resumable` when the host
+  wiring says so: the OpenAI-compatible, Anthropic-compatible, and Azure AI
+  Foundry endpoints continue a Chat or Work follow-up in its session, while
+  Ollama stays `host`). Every product caller names a mode; the packaged
+  OpenAI-compatible smoke sends its turns as Chat. These drivers once read a
+  missing mode as Chat, and the port refuses it instead because the harness
+  scopes its tools by mode. Before the driver's `admitTurn` is
   asked, the host refuses a turn offering tools to a model without a Verify
   tools record on the instance, so a driver's own verdict cannot hand tools
   to an unverified model. The host wraps the transport in its
-  retry policy (below), registers that retrying endpoint in the
-  `NativeHarnessEndpointRegistry` with the driver's `admitTurn`, wires lead
-  fallback and the shared transcript store, and keeps the instance's session
-  count. `runHarnessEndpointConformance` proves an endpoint refuses unverified
-  tools, rejects a cancel as `interrupted`, and stops sending after release.
-  Ollama is the port's first driver: it imports nothing from the harness or the
-  retry module, and the provider factory runs it with `runOnNativeHarness`. The
-  OpenAI-compatible, Anthropic-compatible, and Azure AI Foundry drivers predate
-  the port and still build their connection, registration, and retries
-  themselves from host modules; they are queued to move onto it, and no new
-  driver takes that path. Moving them needs the port to carry what a response
-  teaches about the model's context window and served model, which only those
-  drivers learn today.
+  retry policy (below), dropping any `retrying` event the driver streams
+  itself because retry notices are the host's, registers that retrying
+  endpoint in the `NativeHarnessEndpointRegistry` with the driver's
+  `admitTurn`, wires lead
+  fallback and the shared transcript store, keeps the instance's session
+  count, and keeps what each attempt teaches about the model's context window
+  ([Context and usage accounting](#context-and-usage-accounting)).
+  `runHarnessEndpointConformance` proves
+  an endpoint refuses unverified tools, rejects a cancel as `interrupted`, and
+  stops sending after release. Every direct endpoint is on the port: Ollama,
+  OpenAI-compatible, Anthropic-compatible, and Azure AI Foundry import nothing
+  from the harness or the retry module, keep their credential gate inside
+  `open`, and are run with `runOnNativeHarness` (Ollama by the provider
+  factory, the other three by the server's provider wiring). The overflow
+  wording the wire parsers write and the host reads back lives in its own
+  module, apart from the retry policy. Verify tools sends its capability echo
+  outside any session, so a session never offers an unverified model even the
+  echo.
 - **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
   each step as it happens (`native-harness-transcript`, one aggregate per
   session): the user message once the request is known to fit, each reply,
   and each tool call the moment it settles. Sessions therefore report
   `resume: supported` and return a resume cursor, which is how a Code thread
-  continues the same conversation on its next turn. `start` under an existing
-  id begins a new generation. A resume first closes any call the process
+  continues the same conversation on its next turn. A single-use `start`
+  journals nothing and returns no cursor: its conversation lives only as long
+  as the session. `start` under an existing id begins a new generation. A resume first closes any call the process
   stopped in the middle of with a journaled interrupted result that says
   whether the tool only reads (`replay: "safe"`, call it again) or may have
   taken effect (`replay: "unsafe"`, check before repeating); nothing is
@@ -4496,10 +4619,20 @@ so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
   `verifiedToolModelIds` on the observed state, which the journal persists with
   the catalog and a configuration change clears; a model that answers in text
   leaves it out, and a transport failure (authentication, timeout) is reported
-  rather than recorded as "unsupported". Admission, the AgentRun transport
-  check, and the Chat preflight read that set per model, so verifying one model
-  never offers tools to its siblings; the only tool an unverified model is
-  admitted with is that echo. A tool call in a real turn widens nothing either:
+  rather than recorded as "unsupported". Only this host-run command writes the
+  record: the provider runtime registry keeps it apart from each observation and
+  drops any `verifiedToolModelIds` a driver's probe or observation reports, so
+  a driver that misreports cannot widen tool admission, and the registry view a
+  driver is given has no writer for it. An "unsupported" result also removes the
+  model from the persisted record when the current observation is a failed check
+  with no catalog to persist, or was cleared during the run, so the next
+  successful check cannot restore it. A probe or a Chat turn after a restart
+  restores the record from a catalog that no configuration change invalidated.
+  Admission, the AgentRun transport check, the harness endpoint port, and the
+  Chat preflight read that set per model, so verifying one model
+  never offers tools to its siblings; an unverified model is admitted with no
+  tool, the echo included, since Verify tools sends it outside any session. A
+  tool call in a real turn widens nothing either:
   the provider-level `appManagedTools` flag of an OpenAI-compatible,
   Anthropic-compatible, Foundry, or Ollama profile stays "unsupported", because a tool
   call proves only the model that made it. The command accepts only the models
@@ -4538,8 +4671,8 @@ so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
   and the `default` slot decides only where it continues once that model has
   failed (below).
 - **Endpoint failures.** Every direct-endpoint request goes through
-  `sendWithEndpointRetry`, one policy for every wire protocol; for a driver on
-  the endpoint port the host applies it around the driver's single attempt. Retryable are
+  `sendWithEndpointRetry`, one policy for every wire protocol, which the host
+  applies around each endpoint driver's single attempt. Retryable are
   HTTP 408, 429, 500, 502, 503, 504, and 529 (classified `unavailable` or
   `rate-limited`, with a provider's `Retry-After` carried on the failure), a
   refused or reset connection, an idle stream, a stream that closes before its
@@ -4748,8 +4881,9 @@ so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
   Harness parity while any item is open.
   1. **Offered tools.** Always offered: `todo-write`, `context-remaining`,
      and `second-opinion` in every mode; `read`, `grep`, `glob`, `edit`, and
-     `write` in Work and Code; `bash`, `goal-check`, and `journal-lookup`
-     in Code only. Offered
+     `write` in Work and Code; `bash` and `goal-check` in Code only;
+     `journal-lookup` in every mode when the host supplies the journal (and,
+     in Code, the turn's secret list). Offered
      when the host supplies the port: `delegate`, `ask-user`, and `goal`
      (every mode), and `web-fetch` and `web-search` (Work and Code; Chat only
      while its research is on, and `web-search` only with a search
@@ -5379,7 +5513,8 @@ proofs that suite already holds:
 `@octant/plugin-host` is the pure model: normalized component kinds
 (`skill-instructions`, `mcp-server`, `mcp-tool`, `mcp-prompt`, `mcp-resource`,
 `hook`, `app`, `agent`, `apple-development-adapter`, `board`, `integration`,
-`ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`), composer addressing
+`ui-surface`, `appearance-pack`, `preview-viewer`, `provider-driver`, `replica-store`,
+`desktop-provider`), composer addressing
 (`@plugin`, `@plugin/component`, `$skill`), and the activation ladder. The
 manifest and component schemas themselves (`ExtensionPackageManifest`,
 component kinds, declared capabilities, and renderer contribution points)
@@ -5720,6 +5855,13 @@ same. This holds in Chat, Work, and Code.
   observe/execute/cleanup. A host with no destination reports the capability
   absent and refuses actions as a value rather than throwing. See
   [decisions/0053-computer-use-destinations.md](decisions/0053-computer-use-destinations.md).
+  Thread-leased disposable Linux desktops, their provider seam, artifact
+  transfer, and verified lease teardown are post-preview design, accepted on
+  2026-10-26, in
+  [Disposable desktops](design/disposable-desktops.md). The lease contract,
+  the `desktop-provider` seam with its conformance suite, and the host lease
+  service are built; no desktop provider, recipe storage, transfer, agent
+  binding, or Desktop pane is, so every lease command refuses as a value.
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host
@@ -6008,10 +6150,9 @@ feature is already an independently packaged plugin:
 | Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                          |
 
 A direct-endpoint provider driver supplies a transport through the provider-sdk
-harness endpoint port; the harness loop, endpoint registry, lead fallback, and
-retries stay host-owned. The OpenAI-compatible, Anthropic-compatible, and Azure
-AI Foundry drivers still wire those host modules directly and are queued to move
-onto the port ([Native harness](#native-harness)).
+harness endpoint port; the harness loop, endpoint registry, lead fallback,
+retries, and context-window memory stay host-owned
+([Native harness](#native-harness)).
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
@@ -6325,7 +6466,42 @@ mechanisms are:
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
   The child runs `--unshare-all`, regains the network only when egress
   resolves to `allow`, dies with its parent, and gets a new session except for
-  interactive terminals. The synthetic root is read-only, deny paths are
+  interactive terminals. Every confined launch passes `--cap-drop ALL`, so the
+  capsule's effective capability set is empty whether or not the server runs
+  as root. Bubblewrap started by uid 0 otherwise keeps every capability:
+  measured on bwrap 0.9.0, a root capsule remounted a read-only bind writable
+  and wrote the host file through it, and unmounted a deny overlay to read
+  what it hid, so read-only binds of `/etc` and `/usr` bounded nothing.
+  Unprivileged Bubblewrap already drops them. A root host's confined command
+  therefore cannot write what only root's privileges would allow, such as
+  another user's file in the bound root. `--cap-drop` arrived in bubblewrap
+  0.2.0; an older one exits on the unknown option before starting the
+  command, so the launch fails closed rather than running with capabilities.
+  Dropping capabilities does not stop uid 0 writing sysctls by their owner
+  bits, and Bubblewrap's own `/proc/sys` cover never applies, so the capsule
+  binds `/proc/sys` read-only: measured on bwrap 0.9.0, a root capsule without
+  capabilities still wrote `kernel.core_pattern`, which runs a program as host
+  root on the next crash. A capsule cannot regain capabilities through a
+  nested user namespace: its inherited mounts stay locked, and mapping the
+  host's uid 0 needs a capability it no longer has.
+  Full access's deny-only host-root bind keeps the host's own authority and
+  does not drop them. On a root host its extension and host-auth denials are
+  therefore not a boundary: the runtime is host root and shares the host's
+  process namespace, so it can read a denied file through another process's
+  `/proc/<pid>/root`. Measured on bwrap 0.9.0, that worked with no
+  capabilities at all, and dropping `CAP_SYS_ADMIN` stopped only `umount`;
+  hiding host processes would take away what Full access grants. The capsule
+  binds `/etc` and `/sys` read-only because
+  workloads read them: resolver and `nsswitch` files, TLS roots, `passwd`,
+  the dynamic linker cache, `alternatives` links, and login shell startup
+  files from `/etc`; cgroup limits and CPU topology from `/sys`, which
+  runtimes use to size themselves. A root capsule could still read
+  credentials under `/etc` through their owner bits, so `/etc/shadow`,
+  `/etc/gshadow`, their `-` backups, `/etc/security/opasswd`,
+  `/etc/ssl/private`, and `/etc/ssh/ssh_host_*_key` are covered like read
+  denials when they exist, a symlinked one at its target. `/sys` still shows the host's interface names;
+  narrowing it to the cgroup and CPU trees needs measurement against real
+  runtimes first. The synthetic root is read-only, deny paths are
   covered by empty read-only tmpfs mounts, and a launch carrying Seatbelt
   `extraRules` is refused as `incompatible`.
   Plan and Chat also load a seccomp filter that denies process-creating
@@ -6392,6 +6568,31 @@ mechanisms are:
   change that, and nothing requires it. Claude's unwrapped postures rest on
   the runtime's own sandbox for the same reason: its sign-in and tools need
   reach that a deny-default profile would have to re-grant.
+  Codex's `read-only` sandbox reads the whole disk, so `~/.aws`, `~/.ssh`,
+  and every other file under `HOME` is reachable from a Codex command in
+  every posture. Octant therefore gives the Codex runtime no reusable cloud
+  credential the person did not configure for that account. The environment
+  Octant launches it with carries no AWS profile, shared-config location, or
+  IAM key (Codex still loads the account home's own `.env`, which is that
+  account's configuration), and an Amazon Bedrock sign-in is traced in
+  Codex's own order (`auth_source` in codex-rs
+  `model-provider/src/amazon_bedrock/auth.rs`, rust-v0.162.1): the provider's
+  `auth` command, `aws.credential_export`, `aws.profile`, a key or access
+  keys stored in the account's Codex home, `AWS_BEARER_TOKEN_BEDROCK`, then
+  the AWS SDK default chain. A credential export, a profile, and the default
+  chain are refused: each reads the AWS shared config or hands the runtime
+  general-purpose AWS keys, whether or not a profile variable names them.
+  The probe reports `incompatible` with the reason and the recovery (a
+  Bedrock API key), and acquiring a session fails the same way, so a caller
+  that did not probe cannot start a thread on it either. A token command, a
+  sign-in stored in the account's Codex home, and the bearer token are the
+  person's configuration for that account and are admitted. Codex reports
+  the stored sign-in only as `usesCodexManagedCredentials`, and Octant never
+  reads Codex's credential store, so stored access keys count as that
+  account's own sign-in just as a stored Bedrock key does. An AWS profile
+  was the documented Bedrock route until 2026-10-26; nothing kept its files
+  from the commands, and admitting it again needs Codex wrapped or its
+  sandbox's readable roots narrowed.
   `providerProcessConfinement.test.ts` refuses a new module that launches
   without the shared builder unless it is named here. The ACP/OpenCode/Pi row has one
   carve-out from "no exec or fork". On macOS, an OpenCode 2 Chat, Plan or Work
@@ -8058,9 +8259,22 @@ Public links on and approves a publish, and a self-hosted service URL is a
 Settings choice. Deploying it, its DNS and TLS, and its operator contact are
 release steps of their own.
 
-The start gates for the full LSP / extension host / debugger hold are in
-[release-boundary holds](release-boundary-holds.md); that hold is not opened by
-plugin work, a first-party Integration, or Monaco and external-editor handoff.
+The maintainer authorized the previously held post-preview tracks on
+2026-10-26: mobile maturity (Android internal builds, redacted push, capture
+and voice, public store distribution), a ciphertext-only hosted relay, a full
+LSP / extension host / debugger companion, Apple physical devices and then
+TestFlight and App Store distribution of a person's own apps, enterprise
+directory OAuth and cloud-IAM provider identity, disposable Linux desktops for
+headless hosts, remote SSH development environments, third-party
+provider-driver plugins, and the EU/GDPR compliance package (pending legal
+review). None of them is part of the technical preview, whose ship boundary
+above is unchanged. Each is design-first: implementation starts only once its
+owning specification documents its authority, privacy, and release
+boundaries. The authorization covers design and implementation; creating an
+account, spending money, submitting to a store, deploying a hosted service, or
+weakening an invariant in this document each still needs a separate explicit
+maintainer action. The earlier holds and their start gates
+remain as rationale in [release-boundary holds](release-boundary-holds.md).
 The connector / OAuth marketplace hold was lifted on 2026-10-20 under the
 [Connectors and user-added MCP servers](#extensions-and-skills) rules: a
 bundled first-party catalog, sign-in through the MCP authorization flow, and

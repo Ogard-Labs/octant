@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { readFile, rename, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -126,4 +127,54 @@ describe("live Work filesystem directory chain", () => {
       await proven.close();
     }
   });
+});
+
+describe("live Work filesystem file open", () => {
+  // A file swapped for a FIFO between the containment check and the open used
+  // to block the open until a writer appeared, stalling the read for good.
+  it.skipIf(process.platform === "win32")(
+    "opens a FIFO without waiting for a writer, so the caller can refuse it",
+    async () => {
+      const fifo = join(fixture(), "notes.md");
+      execFileSync("mkfifo", [fifo]);
+
+      const opened = await Promise.race([
+        liveWorkFilesystem.openFile(fifo),
+        new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 2_000)),
+      ]);
+
+      expect(opened).not.toBe("blocked");
+      if (opened === "blocked") return;
+      try {
+        expect((await opened.stat()).isFile).toBe(false);
+      } finally {
+        await opened.close();
+      }
+    },
+  );
+});
+
+describe("live Work filesystem file overwrite", () => {
+  // An overwrite opens an existing name without O_CREAT, so a FIFO swapped in
+  // after the containment check used to hold the open until a reader appeared.
+  it.skipIf(process.platform === "win32")(
+    "refuses to overwrite a FIFO without waiting for a reader",
+    async () => {
+      const fifo = join(fixture(), "notes.md");
+      execFileSync("mkfifo", [fifo]);
+
+      const opened = await Promise.race([
+        liveWorkFilesystem.openWriteFile(fifo, { exclusiveCreate: false }).then(
+          async (file) => {
+            await file.close();
+            return "opened" as const;
+          },
+          () => "refused" as const,
+        ),
+        new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 2_000)),
+      ]);
+
+      expect(opened).toBe("refused");
+    },
+  );
 });

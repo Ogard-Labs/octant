@@ -11,6 +11,8 @@
     "./computer-use": "./src/computerUse.ts",
     "./canvas-export": "./src/canvasExport.ts",
     "./replica-store": "./src/replicaStore.ts",
+    "./desktop-provider": "./src/desktopProvider.ts",
+    "./desktop-provider-conformance": "./src/desktopProviderConformance.ts",
     "./provider-driver-catalog": "./src/providerDriverCatalog.ts"
   },
   "scripts": {

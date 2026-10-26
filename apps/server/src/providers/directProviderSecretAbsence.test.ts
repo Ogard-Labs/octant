@@ -5,8 +5,10 @@ import {
   type ProviderRuntimeEvent,
   type ProviderSessionId,
 } from "@octant/contracts";
+import type { HarnessEndpointDriver } from "@octant/provider-sdk/harness-endpoint";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import type { AnthropicCompatibleFetch } from "./anthropicCompatibleEndpoint";
 import { makeAnthropicCompatibleDriver } from "./anthropicCompatibleDriver";
 import { makeAzureFoundryDriver } from "./azureFoundryDriver";
@@ -63,10 +65,15 @@ describe("Direct-provider secret-absence harness", () => {
         resolve: async () => SENTINEL_SECRET,
       },
       fetch,
-      onConnectionReleased: () => {},
     });
 
-    const events = await runTurnAndCollectEvents(driver, instanceId, sessionId, modelId);
+    const events = await runTurnAndCollectEvents(
+      driver,
+      runtimeRegistry,
+      instanceId,
+      sessionId,
+      modelId,
+    );
     assertSecretAbsent("OpenAI-compatible events", events);
 
     const observed = runtimeRegistry.observedState(instanceId);
@@ -129,10 +136,15 @@ describe("Direct-provider secret-absence harness", () => {
         resolve: async () => SENTINEL_SECRET,
       },
       fetch,
-      onConnectionReleased: () => {},
     });
 
-    const events = await runTurnAndCollectEvents(driver, instanceId, sessionId, modelId);
+    const events = await runTurnAndCollectEvents(
+      driver,
+      runtimeRegistry,
+      instanceId,
+      sessionId,
+      modelId,
+    );
     assertSecretAbsent("Anthropic-compatible events", events);
 
     const observed = runtimeRegistry.observedState(instanceId);
@@ -160,10 +172,15 @@ describe("Direct-provider secret-absence harness", () => {
         resolve: async () => SENTINEL_SECRET,
       },
       fetch,
-      onConnectionReleased: () => {},
     });
 
-    const events = await runTurnAndCollectEvents(driver, instanceId, sessionId, modelId);
+    const events = await runTurnAndCollectEvents(
+      driver,
+      runtimeRegistry,
+      instanceId,
+      sessionId,
+      modelId,
+    );
     assertSecretAbsent("Azure Foundry events", events);
 
     const observed = runtimeRegistry.observedState(instanceId);
@@ -207,16 +224,18 @@ describe("Direct-provider secret-absence harness", () => {
 });
 
 async function runTurnAndCollectEvents(
-  driver: ReturnType<typeof makeOpenAiCompatibleDriver>,
+  endpointDriver: HarnessEndpointDriver,
+  runtimeRegistry: ProviderRuntimeRegistry,
   instanceId: ReturnType<typeof decodeProviderInstanceId>,
   sessionId: ProviderSessionId,
   modelId: ProviderModelId,
 ): Promise<ProviderRuntimeEvent[]> {
+  const driver = runOnNativeHarness(endpointDriver, { instanceId, runtimeRegistry });
   const events: ProviderRuntimeEvent[] = [];
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp" });
+        const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp", mode: "chat" });
         yield* connection.start({
           sessionId,
           modelId,

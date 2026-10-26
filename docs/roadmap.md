@@ -108,6 +108,10 @@ Hardening in progress for the preview:
   delivery-target sync is next, with the same authority model as GitHub. Chat or Work Linear browsing is a separate
   host mode-policy change, not a plugin side effect. Not a connector/OAuth
   marketplace.
+- **Connectors** — opened on 2026-10-20: MCP servers added by hand, imported
+  from other tools on this Mac, or chosen from a bundled catalog, with sign-in
+  through the MCP authorization flow, under the architecture's
+  [connector rules](architecture.md#extensions-and-skills).
 - **Headless host and multi-host federation** — run the server and web client
   without Electron on macOS or Linux; pair desktop and web clients with several
   hosts, show an `All Hosts` view, and choose the destination host per new
@@ -116,7 +120,8 @@ Hardening in progress for the preview:
   - Per-thread isolation on a Linux Station is not built: Code threads on a
     Linux host run under the same Bubblewrap confinement as every other
     confined process. Station provisioning, Devices and Machines navigation,
-    and E2B Disposable Desktops remain separate follow-up deliveries.
+    and [disposable desktops](design/disposable-desktops.md) remain separate
+    follow-up deliveries.
 - **Canvas artifacts** — provider-neutral interactive reports, dashboards, and
   agent controls with journaled lifecycle; sharing only after secure local use.
 - **Native agent harness** — Octant-owned agent loop for direct and local
@@ -126,9 +131,12 @@ Hardening in progress for the preview:
 
 ## Later
 
-Explicitly deferred by the [Current Release Boundary](../AGENTS.md#current-release-boundary), except where a later
-decision opens a slice. Each remaining item needs its own design before work
-starts.
+Outside the technical preview. Except for Windows, which stays sequenced
+behind the preview, these are post-preview tracks the maintainer authorized on
+2026-10-26 under the
+[Current Release Boundary](../AGENTS.md#current-release-boundary). Each is
+design-first: work starts only once its owning specification documents its
+authority, privacy, and release boundaries.
 
 - **Windows desktop confinement, credentials, and packaging** — the identical
   desktop app (0058) sequences Windows after the macOS technical preview and
@@ -140,26 +148,31 @@ starts.
   push notifications, native capture, voice input, and public store
   distribution for the Expo client. Design:
   [mobile-maturity-phases.md](mobile-maturity-phases.md).
-- **Hosted relay** — only if LAN, Tailscale, or SSH cannot satisfy a concrete
-  reachability need; local-first remote access comes first. Research:
+- **Hosted relay** — ciphertext-only and holding no authority; LAN, Tailscale,
+  and SSH stay the default remote paths. Research:
   [remote-path-sufficiency.md](remote-path-sufficiency.md).
-- **Connector / OAuth marketplace** — OAuth, revocation, publisher trust, and
-  data boundaries are much larger than plugin distribution. Start gates:
-  [release-boundary holds](release-boundary-holds.md#connector--oauth-marketplace).
 - **Full LSP / extension host / debugger** — Monaco and explicit external-editor
   handoff remain primary; a full IDE would run as a separately launched
-  companion. Start gates:
+  companion. Design gates:
   [release-boundary holds](release-boundary-holds.md#full-lsp--extension-host--debugger).
-- **Apple devices and public distribution** — deeper physical-device tooling
-  and App Store submission beyond the internal TestFlight remote-client track. Design:
-  [apple-devices-distribution.md](apple-devices-distribution.md).
+- **Apple devices and distribution** — paired physical devices, then
+  person-confirmed upload, App Review submission, and release of a person's own
+  app through App Store Connect, beyond the
+  internal TestFlight remote-client track (authorized post-preview, 2026-10-26). Design:
+  [Apple physical devices and distribution](design/apple-devices.md).
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:
-  [enterprise-provider-identity.md](enterprise-provider-identity.md).
+  [Enterprise provider identity](design/enterprise-provider-identity.md).
+- **Disposable Linux desktops for headless hosts** — short-lived desktops a
+  headless host can drive.
 - **Remote SSH development environments** — a Code Project on a machine reached
   over SSH, with this host keeping authority. Design:
   [Remote SSH environments](design/remote-ssh-environments.md).
-- **Live guest sharing** — waits on the foundation named in its own design note.
+- **Third-party provider-driver plugins** — outside drivers admitted to the
+  provider catalog through the published seams.
+- **EU/GDPR compliance package** — pending legal review.
+- **Live guest sharing** — waits on the foundation named in its own design
+  note; not among the 2026-10-26 tracks.
 
 ## Not planned
 

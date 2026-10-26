@@ -403,8 +403,10 @@ guidance instead.
     that secrets reach a process only as named references resolved at launch. This record states
     the mechanism rather than settling which clause governs.
   - _Files._ 0009's wrapped profile enumerates the rest of the user's home as denied. An unwrapped
-    runtime gets none of that. Both forward `HOME`, and Codex also forwards the AWS locators
-    (`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`). So `~/.aws/credentials`,
+    runtime gets none of that. Both forward `HOME`. Codex no longer forwards the AWS locators
+    (`AWS_PROFILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_CONFIG_FILE`), and a Codex Bedrock sign-in
+    that would read the AWS shared config is refused as `incompatible` (see the architecture's
+    confinement matrix), but the files themselves stay readable. So `~/.aws/credentials`,
     `~/.config/gh/hosts.yml`, `~/.ssh` and anything else the user can read is reachable by the
     runtime process, limited only by what the provider's own sandbox blocks. That is nothing on
     Full access for either runtime. A Claude Plan turn instead uses Octant's deny-default profile,
@@ -522,8 +524,8 @@ guidance instead.
 
 ### Consumer subscription OAuth delta (0111)
 
-Design only for directory and cloud-IAM, which stay a different note
-([`enterprise-provider-identity.md`](../enterprise-provider-identity.md)).
+Directory and cloud-IAM identity have their own threat controls (E1–E8) in
+[Enterprise provider identity](../design/enterprise-provider-identity.md#threat-model).
 Host-driven `subscription-oauth` plumbing runs in the credential broker:
 generic PKCE and device-code runners, broker-stored refresh, and a terms
 acknowledgment gate. Direct endpoint drivers refresh through that host
