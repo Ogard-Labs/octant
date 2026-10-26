@@ -115,6 +115,11 @@ describe("SSH target admission", () => {
       ],
       ["no executor answered", { connection: { state: "executor-missing" } }, "executor-missing"],
       [
+        "the executor that answered introduced itself as another build",
+        { connection: { state: "executor-version-mismatch" } },
+        "executor-version-mismatch",
+      ],
+      [
         "the executor is another build",
         {
           attestation: attested(

@@ -91,19 +91,40 @@ export const SshRemotePath = Schema.String.pipe(
 );
 export type SshRemotePath = typeof SshRemotePath.Type;
 
+/**
+ * The path of the headless `octant` command on the target. It is the one
+ * piece of the remote command the target's login shell parses, so it is
+ * limited to characters no shell treats specially.
+ */
+export const SshExecutorPath = SshRemotePath.pipe(Schema.pattern(/^(?:\/[A-Za-z0-9._+-]+)+$/u));
+export type SshExecutorPath = typeof SshExecutorPath.Type;
+
 /** The two platforms the confinement port supports; every other is refused. */
 export const SshTargetPlatform = Schema.Literal("linux", "macos");
 export type SshTargetPlatform = typeof SshTargetPlatform.Type;
 
+/**
+ * A registered target: where to connect, the key it must present, and the
+ * executor to start. The remote user and platform are not part of it: they are
+ * attested facts of each connection, never remembered from an earlier one.
+ */
 export const SshTarget = Schema.Struct({
   id: SshTargetId,
   destination: SshDestination,
   hostKey: SshPinnedHostKey,
-  remoteUser: SshRemoteUser,
-  platform: SshTargetPlatform,
-  executorPath: SshRemotePath,
+  executorPath: SshExecutorPath,
 }).annotations(strict);
 export type SshTarget = typeof SshTarget.Type;
+
+/** A host key's SHA-256 fingerprint as OpenSSH prints it. */
+export const SshHostKeyFingerprint = Schema.String.pipe(
+  Schema.pattern(/^SHA256:[A-Za-z0-9+/]{43}$/u),
+);
+export type SshHostKeyFingerprint = typeof SshHostKeyFingerprint.Type;
+
+/** One host key this host saw a destination present, held until the person confirms it. */
+export const SshHostKeyProbeId = brandedUuid("SshHostKeyProbeId");
+export type SshHostKeyProbeId = typeof SshHostKeyProbeId.Type;
 
 const ReportedName = Schema.String.pipe(
   Schema.minLength(1),
@@ -261,3 +282,107 @@ export type SshAdmissionRefusalReason = Extract<
   SshAdmissionDecision,
   { readonly status: "refused" }
 >["reason"];
+
+/**
+ * Local administration of SSH targets. Only a local window or the local CLI
+ * reaches these; a paired device can neither register a target nor accept a
+ * host key.
+ */
+
+/** Connect once to read the host key `destination` presents, without trusting it. */
+export const SshHostKeyProbeRequest = Schema.Struct({
+  destination: SshDestination,
+}).annotations(strict);
+export type SshHostKeyProbeRequest = typeof SshHostKeyProbeRequest.Type;
+
+/** The key a destination presented, for the person to compare before pinning it. */
+export const SshHostKeyProbe = Schema.Struct({
+  probeId: SshHostKeyProbeId,
+  destination: SshDestination,
+  hostKey: SshPinnedHostKey,
+  fingerprint: SshHostKeyFingerprint,
+}).annotations(strict);
+export type SshHostKeyProbe = typeof SshHostKeyProbe.Type;
+
+/**
+ * Pins the probed key and registers the target. `fingerprint` is the one the
+ * person confirmed; a probe whose key has another fingerprint is refused.
+ */
+export const SshTargetRegisterRequest = Schema.Struct({
+  probeId: SshHostKeyProbeId,
+  fingerprint: SshHostKeyFingerprint,
+  executorPath: SshExecutorPath,
+}).annotations(strict);
+export type SshTargetRegisterRequest = typeof SshTargetRegisterRequest.Type;
+
+/** Replaces a target's pin with a newly probed key of the same destination. */
+export const SshTargetRepinRequest = Schema.Struct({
+  targetId: SshTargetId,
+  probeId: SshHostKeyProbeId,
+  fingerprint: SshHostKeyFingerprint,
+}).annotations(strict);
+export type SshTargetRepinRequest = typeof SshTargetRepinRequest.Type;
+
+export const SshTargetRequest = Schema.Struct({ targetId: SshTargetId }).annotations(strict);
+export type SshTargetRequest = typeof SshTargetRequest.Type;
+
+/**
+ * The connection as this host sees it now. It lives in memory only and is
+ * never journaled: a restart begins every target at `not-connected`.
+ */
+export const SshTargetConnectionState = Schema.Literal(
+  "not-connected",
+  "unreachable",
+  "host-key-changed",
+  "executor-missing",
+  "executor-version-mismatch",
+  "connected",
+);
+export type SshTargetConnectionState = typeof SshTargetConnectionState.Type;
+
+export const SshTargetPostureAdmission = Schema.Struct({
+  posture: SshConfinedPosture,
+  decision: SshAdmissionDecision,
+}).annotations(strict);
+export type SshTargetPostureAdmission = typeof SshTargetPostureAdmission.Type;
+
+/**
+ * A target and what this host would admit on it now, for Octant's own launches
+ * in each confined posture. The remote user and platform appear only while the
+ * current connection's attestation reports them.
+ */
+export const SshTargetStatus = Schema.Struct({
+  target: SshTarget,
+  fingerprint: SshHostKeyFingerprint,
+  connection: SshTargetConnectionState,
+  remoteUser: Schema.optional(SshRemoteUser),
+  platform: Schema.optional(SshTargetPlatform),
+  admission: Schema.Array(SshTargetPostureAdmission).pipe(Schema.maxItems(8)),
+}).annotations(strict);
+export type SshTargetStatus = typeof SshTargetStatus.Type;
+
+export const SshTargetList = Schema.Struct({
+  targets: Schema.Array(SshTargetStatus),
+}).annotations(strict);
+export type SshTargetList = typeof SshTargetList.Type;
+
+/** Why an administration request changed nothing. */
+export const SshTargetAdministrationRefusalReason = Schema.Literal(
+  /** The probe expired, was already used, or never existed. */
+  "unknown-probe",
+  /** The confirmed fingerprint is not the probed key's. */
+  "fingerprint-not-confirmed",
+  /** The destination could not be reached, or presented no key this host can read. */
+  "host-key-unavailable",
+  "unknown-target",
+  /** A re-pin probe was made for another destination than the target's. */
+  "destination-mismatch",
+);
+export type SshTargetAdministrationRefusalReason = typeof SshTargetAdministrationRefusalReason.Type;
+
+export const SshTargetAdministrationRefusal = Schema.Struct({
+  status: Schema.Literal("refused"),
+  reason: SshTargetAdministrationRefusalReason,
+  message: Schema.String,
+}).annotations(strict);
+export type SshTargetAdministrationRefusal = typeof SshTargetAdministrationRefusal.Type;
