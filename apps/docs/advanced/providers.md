@@ -465,8 +465,10 @@ dialog walks through five steps:
 
 Supported profiles:
 
-- **OpenAI-compatible** HTTP (`auto`, `responses`, or `chat-completions`)
-- **Anthropic-compatible** HTTP (`auto` or `messages`)
+- **OpenAI-compatible** HTTP (`auto`, `responses`, or `chat-completions`;
+  an API key, none on this Mac, or your organization account)
+- **Anthropic-compatible** HTTP (`auto` or `messages`; an API key, none on
+  this Mac, or your organization account)
 - **Azure AI Foundry** (OpenAI-compatible v1 profile; base URL must end with
   `/openai/v1/`; an API key or your organization account; at least one
   deployment)
@@ -666,6 +668,46 @@ your organization session continues until your organization ends it. A device
 paired for remote use can run turns on an endpoint you have signed in, but it
 cannot sign in or out. The sign-in itself stays in Octant's credential broker;
 each request carries only a short-lived token for that one endpoint.
+
+### Your organization's own gateway
+
+An OpenAI-compatible or Anthropic-compatible endpoint that your organization
+runs behind its own sign-in (Okta, Keycloak, Auth0, Ping, Microsoft Entra ID,
+or another OpenID Connect provider) can sign in with your organization account
+instead of a key.
+
+Your organization's administrator prepares this once:
+
+1. Registers a public client for Octant with the sign-in provider: it uses
+   the authorization code flow with PKCE, allows the loopback redirect URI
+   `http://127.0.0.1/oauth/callback` on any port, and has no client secret.
+2. Makes the gateway accept that provider's access tokens for one scope, such
+   as `gateway.models`, and lets the client request it together with
+   `openid`, `profile`, and `offline_access`.
+
+The administrator gives you the **issuer** (exactly as the provider's sign-in
+tokens name it, such as `https://login.example.com/oauth2/default`), the
+**client ID**, and the **scope**. Then:
+
+1. In **Add endpoint**, choose **OpenAI-compatible** or
+   **Anthropic-compatible**, enter a name and the gateway's `https` address,
+   and set **Sign in with** to **Organization account (your sign-in
+   provider)**.
+2. Enter the issuer, the client ID, and the scope, and choose **Check and
+   add**. The endpoint reads **Sign in to use**.
+3. Open the endpoint and choose **Sign in with your organization**. Your
+   browser opens your organization's sign-in page; when you finish there, the
+   endpoint shows who is signed in and checks itself.
+
+Octant finds the sign-in page from the issuer's own discovery document and
+uses it only when the issuer's sign-in, token, and key addresses are all on the
+issuer's own host. The issuer is fixed once the endpoint is added: to sign in
+somewhere else, add a new endpoint. Changing the client ID, the scope, or the
+address signs the endpoint out. The row reads **Sign in again**, **Signed out**,
+**No access** (the gateway refused your account), or **Sign-in doesn't match**
+just as for Azure AI Foundry above, and **Sign out** likewise removes the
+sign-in from this computer only. A gateway signs in through the browser only:
+`octant provider sign-in` with a code is for Azure AI Foundry.
 
 ### Presets added with a key
 
