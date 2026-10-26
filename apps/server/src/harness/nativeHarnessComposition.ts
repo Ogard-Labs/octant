@@ -12,7 +12,6 @@ import {
   type ProjectId,
   type ProviderExecutionPolicy,
   type ProviderInstanceId,
-  type ProviderResumeCursor,
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
@@ -35,7 +34,10 @@ import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
-import { createCodeJournalLookup } from "./nativeHarnessJournalLookup";
+import {
+  createThreadJournalLookup,
+  type NativeHarnessJournaledSession,
+} from "./nativeHarnessJournalLookup";
 import type { NativeHarnessTranscriptStore } from "./nativeHarnessTranscriptStore";
 import type {
   NativeHarnessApprovalStore,
@@ -94,19 +96,23 @@ export interface NativeHarnessCompositionOptions {
   readonly webFetch?: NativeHarnessToolPorts["webFetch"];
   readonly contextHarness?: Pick<ContextHarnessService, "inspect">;
   /**
-   * Code only: where a Code thread's harness conversation is journaled, read
-   * back by `journal-lookup`. Chat and Work start a fresh harness session each
-   * turn, so they have no conversation to read and the tool is not offered.
+   * Where a thread's harness conversation is journaled, read back by
+   * `journal-lookup`. Each mode continues one harness session across turns,
+   * so each resolves the session its running turn uses from the thread's own
+   * journal: a Chat thread's attempts, a Work thread's turns, a Code thread's
+   * `provider-session-ready`.
    */
-  readonly codeJournal?: {
+  readonly journal?: {
     readonly transcripts: Pick<NativeHarnessTranscriptStore, "load">;
-    /** The provider session the thread's newest turn ran on, from its own journal. */
-    readonly latestSession: (threadId: CodeThread["id"]) =>
-      | {
-          readonly providerInstanceId: ProviderInstanceId;
-          readonly resumeCursor?: ProviderResumeCursor | undefined;
-        }
-      | undefined;
+    readonly latestChatSession: (
+      threadId: ChatThread["id"],
+    ) => NativeHarnessJournaledSession | undefined;
+    readonly latestWorkSession: (
+      threadId: WorkThread["id"],
+    ) => NativeHarnessJournaledSession | undefined;
+    readonly latestCodeSession: (
+      threadId: CodeThread["id"],
+    ) => NativeHarnessJournaledSession | undefined;
   };
   /**
    * The advisor behind `second-opinion` for a lead thread; absent on a host
@@ -472,6 +478,26 @@ export function createNativeHarnessComposition(
     readonly lead: NativeHarnessSlotCandidate;
   }): Pick<NativeHarnessToolPorts, "delegate"> =>
     options.delegate === undefined ? {} : { delegate: options.delegate(scope) };
+  /**
+   * `journal-lookup` for a lead, reading the session `latestSession` names
+   * when a call runs. Chat and Work turns resolve no credential values, so
+   * nothing of theirs needs redacting; a Code turn passes the values it
+   * resolved, and without them its lead is not offered the tool.
+   */
+  const journalLookupFor = (input: {
+    readonly mode: OctantMode;
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly latestSession: () => NativeHarnessJournaledSession | undefined;
+    readonly secrets: ReadonlyArray<string>;
+  }): Pick<NativeHarnessToolPorts, "journalLookup"> =>
+    options.journal === undefined
+      ? {}
+      : {
+          journalLookup: createThreadJournalLookup({
+            ...input,
+            transcripts: options.journal.transcripts,
+          }),
+        };
   return {
     forChat: ({ thread, windowId, sideChat = false }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
@@ -502,6 +528,15 @@ export function createNativeHarnessComposition(
           // whether by fetching a page or by searching.
           ...(thread.researchEnabled ? webPorts() : {}),
           ...contextRemainingFor("chat-thread", threadId),
+          // A Side Chat is not a lead, so it is not handed its journal either.
+          ...(sideChat
+            ? {}
+            : journalLookupFor({
+                mode: "chat",
+                providerInstanceId: thread.providerInstanceId,
+                latestSession: () => options.journal?.latestChatSession(thread.id),
+                secrets: [],
+              })),
           ...secondOpinion({
             threadId,
             mode: "chat",
@@ -535,6 +570,12 @@ export function createNativeHarnessComposition(
           filesystem: new NativeHarnessFileSystem({ root: projectRoot }),
           ...webPorts(),
           ...contextRemainingFor("work-thread", threadId),
+          ...journalLookupFor({
+            mode: "work",
+            providerInstanceId: thread.providerInstanceId,
+            latestSession: () => options.journal?.latestWorkSession(thread.id),
+            secrets: [],
+          }),
           ...secondOpinion({
             threadId,
             mode: "work",
@@ -547,16 +588,6 @@ export function createNativeHarnessComposition(
     forCode: ({ thread, checkoutRoot, windowId, secrets }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
-      const codeJournal = options.codeJournal;
-      const journalLookup =
-        codeJournal === undefined || secrets === undefined
-          ? undefined
-          : createCodeJournalLookup({
-              transcripts: codeJournal.transcripts,
-              latestSession: () => codeJournal.latestSession(thread.id),
-              providerInstanceId: thread.providerInstanceId,
-              secrets,
-            });
       const shell = codeShell({ threadId, projectId: String(thread.projectId) }, windowId);
       // Plan is the floor: a thread stored as Plan, or a turn narrowed to it,
       // is offered only the tools Plan allows.
@@ -590,7 +621,14 @@ export function createNativeHarnessComposition(
           ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
           ...contextRemainingFor("code-thread", threadId),
-          ...(journalLookup === undefined ? {} : { journalLookup }),
+          ...(secrets === undefined
+            ? {}
+            : journalLookupFor({
+                mode: "code",
+                providerInstanceId: thread.providerInstanceId,
+                latestSession: () => options.journal?.latestCodeSession(thread.id),
+                secrets,
+              })),
           ...secondOpinion({
             threadId,
             mode: "code",

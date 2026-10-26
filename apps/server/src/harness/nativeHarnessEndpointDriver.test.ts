@@ -11,6 +11,7 @@ import type {
   HarnessEndpointDriver,
   HarnessEndpointRequest,
   HarnessEndpointResponse,
+  HarnessEndpointStreamEvent,
 } from "@octant/provider-sdk/harness-endpoint";
 import { Effect, Exit, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
@@ -36,7 +37,10 @@ const readTool: ProviderToolDefinition = {
  */
 function portDriver(
   script: Array<HarnessEndpointResponse | ProviderFailure>,
-  options: { readonly admitsEveryTurn?: boolean } = {},
+  options: {
+    readonly admitsEveryTurn?: boolean;
+    readonly emits?: ReadonlyArray<HarnessEndpointStreamEvent>;
+  } = {},
 ): {
   readonly driver: HarnessEndpointDriver;
   readonly requests: HarnessEndpointRequest[];
@@ -50,8 +54,9 @@ function portDriver(
       harnessEndpoint: {
         open: async () => ({
           fits: () => true,
-          send: async (request) => {
+          send: async (request, stream) => {
             requests.push(request);
+            for (const event of options.emits ?? []) stream.onEvent(event);
             const next = script.shift();
             if (next === undefined) throw new Error("The script ran out of responses.");
             if ("category" in next) throw next;
@@ -92,9 +97,9 @@ function verifiedToolsOn(model: ProviderModelId): ProviderRuntimeRegistry {
     processState: "stopped",
     models: [],
     capabilities: honestDirectEndpointCapabilities,
-    verifiedToolModelIds: [model],
     observedAt: "2026-10-26T09:00:00.000Z",
   });
+  runtimeRegistry.setVerifiedToolModels(instanceId, [model]);
   return runtimeRegistry;
 }
 
@@ -148,6 +153,29 @@ describe("native harness endpoint port", () => {
       ["user", expect.stringContaining("Say hello")],
       ["assistant", "Hello."],
     ]);
+  });
+
+  it("announces only the host's own retries, never a retry notice the driver streams itself", async () => {
+    const { driver } = portDriver([{ text: "Hello.", toolCalls: [] }], {
+      emits: [
+        { kind: "retrying", attempt: 2, maxAttempts: 9, delayMs: 1, reason: "unavailable" },
+        { kind: "text-delta", text: "Hello." },
+      ],
+    });
+    const composed = runOnNativeHarness(driver, host(new MemoryNativeHarnessTranscriptStore()));
+
+    const events = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* composed.acquire({ instanceId, projectRoot, mode: "chat" });
+          yield* connection.start({ sessionId, modelId, executionPolicy: "plan" });
+          return yield* runTurn(connection, []);
+        }),
+      ),
+    );
+
+    expect(events.map((event) => event.kind)).not.toContain("retrying");
+    expect(events.at(-1)?.kind).toBe("completed");
   });
 
   it("refuses a turn the driver does not admit before any request is sent or recorded", async () => {
@@ -221,6 +249,136 @@ describe("native harness endpoint port", () => {
 
     expect(response?.text).toBe("Picked up.");
     expect(requests).toHaveLength(2);
+  });
+
+  it("keeps what a port endpoint's requests teach about its model's window and the model it served", async () => {
+    const { driver } = portDriver([
+      {
+        category: "provider-failed",
+        message:
+          "This model's maximum context length is 2048 tokens. However, your messages resulted in 3100 tokens.",
+      },
+      {
+        text: "Fits now.",
+        toolCalls: [],
+        usage: { inputTokens: 2_000, outputTokens: 500 },
+        servedModelId: "served-model-2026-10-01",
+      },
+    ]);
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState({
+      instanceId,
+      readiness: "ready",
+      processState: "stopped",
+      models: [
+        {
+          id: modelId,
+          displayName: "Port model",
+          source: "manual",
+          verification: "unverified",
+          reasoning: "unavailable",
+          inputModalities: ["text"],
+          options: [],
+        },
+      ],
+      capabilities: honestDirectEndpointCapabilities,
+      observedAt: "2026-10-26T09:00:00.000Z",
+    });
+    const remembered: unknown[] = [];
+    const endpoints = new NativeHarnessEndpointRegistry();
+    runOnNativeHarness(driver, {
+      ...host(new MemoryNativeHarnessTranscriptStore(), endpoints, runtimeRegistry),
+      harness: {
+        endpoints,
+        retry: { sleep: async () => undefined, random: () => 0.5 },
+        contextWindows: { remember: (...lesson) => remembered.push(lesson) },
+      },
+    });
+    const session = await endpoints.get(instanceId)?.open(modelId);
+    const request: HarnessEndpointRequest = {
+      sessionId,
+      modelId,
+      system: undefined,
+      history: [{ role: "user", text: "go" }],
+      tools: [],
+    };
+    const stream = { signal: new AbortController().signal, onEvent: () => undefined };
+
+    await expect(session?.send(request, stream)).rejects.toMatchObject({
+      category: "provider-failed",
+    });
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]?.learnedContextWindow).toBe(2_048);
+
+    await session?.send(request, stream);
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]).toMatchObject({
+      learnedContextWindow: 2_500,
+      servedModelId: "served-model-2026-10-01",
+    });
+    expect(remembered).toEqual([
+      [instanceId, modelId, { learnedContextWindow: 2_048 }],
+      [
+        instanceId,
+        modelId,
+        { servedModelId: "served-model-2026-10-01", learnedContextWindow: 2_500 },
+      ],
+    ]);
+  });
+
+  it("answers with a port endpoint's response even when what it reports about its model cannot be kept", async () => {
+    const { driver } = portDriver([
+      {
+        text: "Answered.",
+        toolCalls: [],
+        usage: { inputTokens: 2_000.5, outputTokens: 500 },
+        servedModelId: "   ",
+      },
+      { text: "Answered again.", toolCalls: [], servedModelId: "x".repeat(300) },
+      { text: "Named.", toolCalls: [], servedModelId: "  served-model-2026-10-01 " },
+    ]);
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState({
+      instanceId,
+      readiness: "ready",
+      processState: "stopped",
+      models: [
+        {
+          id: modelId,
+          displayName: "Port model",
+          source: "manual",
+          verification: "unverified",
+          reasoning: "unavailable",
+          inputModalities: ["text"],
+          options: [],
+          learnedContextWindow: 1_500,
+        },
+      ],
+      capabilities: honestDirectEndpointCapabilities,
+      observedAt: "2026-10-26T09:00:00.000Z",
+    });
+    const endpoints = new NativeHarnessEndpointRegistry();
+    runOnNativeHarness(driver, {
+      ...host(new MemoryNativeHarnessTranscriptStore(), endpoints, runtimeRegistry),
+      harness: { endpoints, retry: { sleep: async () => undefined, random: () => 0.5 } },
+    });
+    const session = await endpoints.get(instanceId)?.open(modelId);
+    const request: HarnessEndpointRequest = {
+      sessionId,
+      modelId,
+      system: undefined,
+      history: [{ role: "user", text: "go" }],
+      tools: [],
+    };
+    const stream = { signal: new AbortController().signal, onEvent: () => undefined };
+
+    await expect(session?.send(request, stream)).resolves.toMatchObject({ text: "Answered." });
+    await expect(session?.send(request, stream)).resolves.toMatchObject({
+      text: "Answered again.",
+    });
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]?.servedModelId).toBeUndefined();
+    await expect(session?.send(request, stream)).resolves.toMatchObject({ text: "Named." });
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]?.servedModelId).toBe(
+      "served-model-2026-10-01",
+    );
   });
 
   it("refuses a connection without a product mode", async () => {

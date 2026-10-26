@@ -1494,31 +1494,6 @@ export class ProviderService implements ProviderServiceApi {
         if (result.instanceId !== instance.id) {
           throw { category: "protocol", message: "Provider returned an invalid probe result." };
         }
-        // The driver probe carries verifiedToolModelIds forward from the prior
-        // runtime observation. On a fresh restart the runtime is empty, so
-        // also check the persisted catalog and merge any saved verifications
-        // so users do not need to rerun the generating verification after
-        // restart. Skip invalidated catalogs: a config change invalidates
-        // prior verification evidence, and reviving stale IDs could enable
-        // tools for a deployment that now points at a different endpoint or
-        // capability set.
-        const persistedCatalog = this.#persistence.readProviderCatalog?.(instanceId);
-        const persistedVerified =
-          persistedCatalog?.invalidated === false
-            ? persistedCatalog.verifiedToolModelIds
-            : undefined;
-        const mergedResult =
-          persistedVerified === undefined || persistedVerified.length === 0
-            ? result
-            : {
-                ...result,
-                verifiedToolModelIds: [
-                  ...new Set([
-                    ...(result.verifiedToolModelIds ?? []),
-                    ...persistedVerified.map((id) => String(id) as ProviderModelId),
-                  ]),
-                ].map((id) => id as ProviderModelId),
-              };
         // Order the observed models so configured deployments (manual IDs)
         // appear first in the configured order. The web defaults Chat/Code
         // selection to models[0], so a discovered-first catalog would select a
@@ -1529,13 +1504,13 @@ export class ProviderService implements ProviderServiceApi {
           instance.configuration.kind === "anthropic-compatible-http" ||
           instance.configuration.kind === "azure-foundry-openai-http"
             ? instance.configuration.manualModelIds
-            : mergedResult.models.filter(({ source }) => source === "manual").map(({ id }) => id);
+            : result.models.filter(({ source }) => source === "manual").map(({ id }) => id);
         const orderedResult =
           manualModelOrder.length === 0
-            ? mergedResult
+            ? result
             : {
-                ...mergedResult,
-                models: orderProviderModels(mergedResult.models, manualModelOrder),
+                ...result,
+                models: orderProviderModels(result.models, manualModelOrder),
               };
         const taggedCatalog = this.#persistence.readProviderCatalog?.(instanceId);
         const observed = this.#runtime.setObservedState(
@@ -1561,6 +1536,18 @@ export class ProviderService implements ProviderServiceApi {
             ...observed,
             models: carryModelContextWindowFacts(observed.models, taggedCatalog.models),
           });
+        }
+        // The registry keeps the host's Verify tools record and ignores any
+        // the driver's probe claims. After a restart that record is empty, so
+        // the one the catalogue saved is restored, unless a configuration
+        // change invalidated it: its models may now name a different endpoint.
+        const persistedVerified =
+          taggedCatalog?.invalidated === false ? taggedCatalog.verifiedToolModelIds : undefined;
+        if (persistedVerified !== undefined && persistedVerified.length > 0) {
+          this.#runtime.setVerifiedToolModels(
+            instanceId,
+            withModelIds(observed.verifiedToolModelIds ?? [], persistedVerified),
+          );
         }
         const withFacts = this.#runtime.observedState(instanceId) ?? observed;
         this.#persistCatalog(withFacts);
@@ -1643,16 +1630,16 @@ export class ProviderService implements ProviderServiceApi {
           return result.appManagedTools;
         }
         const priorVerified = current.verifiedToolModelIds ?? [];
-        const verifiedToolModelIds =
+        const updated = this.#runtime.setVerifiedToolModels(
+          instanceId,
           result.appManagedTools === "supported"
-            ? [...new Set([...priorVerified, String(modelId)])].map((id) => id as ProviderModelId)
-            : priorVerified.filter((id) => String(id) !== String(modelId));
-        const updated = { ...current, verifiedToolModelIds };
-        this.#runtime.setObservedState(updated);
+            ? withModelIds(priorVerified, [modelId])
+            : priorVerified.filter((id) => String(id) !== String(modelId)),
+        );
         // Persist the verification evidence so it survives app restart/replay.
         // Without this, verifiedToolModelIds disappears after restart and users
         // must rerun the generating verification before Chat research works.
-        this.#persistCatalog(updated);
+        if (updated !== undefined) this.#persistCatalog(updated);
         return result.appManagedTools;
       } catch (error) {
         // Map the raw ProviderFailure (401, 403, 429, unsupported protocol,
@@ -2301,6 +2288,17 @@ export class ProviderService implements ProviderServiceApi {
       message: "Octant Provider service is unavailable.",
     });
   }
+}
+
+/** The models of `prior` and then any of `added` it does not already hold. */
+function withModelIds(
+  prior: ReadonlyArray<ProviderModelId>,
+  added: ReadonlyArray<ProviderModelId>,
+): ReadonlyArray<ProviderModelId> {
+  return [
+    ...prior,
+    ...added.filter((id) => !prior.some((candidate) => String(candidate) === String(id))),
+  ];
 }
 
 /** Whether two catalogue snapshots say the same thing, whenever they were written. */

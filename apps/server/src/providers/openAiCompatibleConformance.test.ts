@@ -1,6 +1,7 @@
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
+  decodeProviderToolDefinition,
   type OpenAiCompatibleProtocol,
   type ProviderModelId,
 } from "@octant/contracts";
@@ -9,8 +10,10 @@ import {
   runSessionCompactionConformance,
 } from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
+import { runHarnessEndpointConformance } from "@octant/provider-sdk/harness-endpoint-conformance";
 import { describe, expect, it } from "vitest";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import {
   recordProviderChatConformanceEvidence,
@@ -47,23 +50,30 @@ describe("OpenAI-compatible provider conformance", () => {
     const runtimeRegistry = new ProviderRuntimeRegistry();
     let released = false;
     const fetch = profile.fixture();
-    const driver = makeOpenAiCompatibleDriver({
-      instanceId,
-      configuration: configuration(profile.protocol),
-      runtimeRegistry,
-      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
-      fetch,
-      onConnectionReleased: () => {
-        released = true;
+    const driver = runOnNativeHarness(
+      makeOpenAiCompatibleDriver({
+        instanceId,
+        configuration: configuration(profile.protocol),
+        runtimeRegistry,
+        credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+        fetch,
+        clock: () => "2026-07-15T12:00:00.000Z",
+      }),
+      {
+        instanceId,
+        runtimeRegistry,
+        onConnectionReleased: () => {
+          released = true;
+        },
+        clock: () => "2026-07-15T12:00:00.000Z",
+        correlationId: () => "80000000-0000-4000-8000-000000000513",
       },
-      clock: () => "2026-07-15T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000513",
-    });
+    );
 
     const evidence = await runProviderConformance({
       driver,
       probeInput: { instanceId },
-      acquireInput: { instanceId, projectRoot: "/tmp/octant-compatible-conformance" },
+      acquireInput: { instanceId, projectRoot: "/tmp/octant-compatible-conformance", mode: "chat" },
       successfulTurn: {
         sessionStart: {
           sessionId: successfulSessionId,
@@ -118,7 +128,7 @@ describe("OpenAI-compatible provider conformance", () => {
     const chatEvidence = await runProviderChatConformance({
       driver,
       probeInput: { instanceId },
-      acquireInput: { instanceId, projectRoot: "/tmp/octant-compatible-conformance" },
+      acquireInput: { instanceId, projectRoot: "/tmp/octant-compatible-conformance", mode: "chat" },
       sessionStart: { sessionId: successfulSessionId, modelId, executionPolicy: "approval-gated" },
       turn: {
         sessionId: successfulSessionId,
@@ -152,6 +162,51 @@ describe("OpenAI-compatible provider conformance", () => {
   });
 });
 
+describe("OpenAI-compatible harness endpoint conformance", () => {
+  it.each(["responses", "chat-completions"] as const)(
+    "keeps the provider-sdk harness endpoint promises the host's loop relies on over %s",
+    async (protocol) => {
+      const endpoint = makeOpenAiCompatibleDriver({
+        instanceId,
+        configuration: configuration(protocol),
+        runtimeRegistry: new ProviderRuntimeRegistry(),
+        credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+        fetch: async (_url, init) =>
+          init?.signal?.aborted === true
+            ? Promise.reject(new DOMException("The request was aborted.", "AbortError"))
+            : protocol === "responses"
+              ? responsesTextStream("responses answer")
+              : chatStream("chat answer"),
+      }).harnessEndpoint;
+
+      await expect(
+        runHarnessEndpointConformance({
+          endpoint,
+          modelId,
+          request: {
+            sessionId: successfulSessionId,
+            modelId,
+            system: undefined,
+            history: [{ role: "user", text: "successful fixture prompt" }],
+            tools: [],
+          },
+          unverifiedToolTurn: {
+            sessionId: successfulSessionId,
+            prompt: "Read the file",
+            attachments: [],
+            tools: [
+              decodeProviderToolDefinition({
+                name: "read_file",
+                inputSchema: { type: "object", properties: {} },
+              }),
+            ],
+          },
+        }),
+      ).resolves.toMatchObject({ cancelledRequestInterrupted: true, releasedSessionRefused: true });
+    },
+  );
+});
+
 describe("OpenAI-compatible session compaction conformance", () => {
   it.each(["code", "work"] as const)(
     "holds Octant Harness to its %s-mode compaction claim",
@@ -161,23 +216,31 @@ describe("OpenAI-compatible session compaction conformance", () => {
       // The third request is the summary; it is held open so the harness can
       // offer a turn while the compaction is pending.
       const hold = Promise.withResolvers<void>();
-      const driver = makeOpenAiCompatibleDriver({
-        instanceId,
-        configuration: configuration("chat-completions"),
-        runtimeRegistry: new ProviderRuntimeRegistry(),
-        credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
-        fetch: async (url) => {
-          if (String(url).endsWith("/models")) return models();
-          requests += 1;
-          if (requests === 3) await hold.promise;
-          return chatStream("noted");
+      const runtimeRegistry = new ProviderRuntimeRegistry();
+      const driver = runOnNativeHarness(
+        makeOpenAiCompatibleDriver({
+          instanceId,
+          configuration: configuration("chat-completions"),
+          runtimeRegistry,
+          credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+          fetch: async (url) => {
+            if (String(url).endsWith("/models")) return models();
+            requests += 1;
+            if (requests === 3) await hold.promise;
+            return chatStream("noted");
+          },
+          clock: () => "2026-07-15T12:00:00.000Z",
+        }),
+        {
+          instanceId,
+          runtimeRegistry,
+          onConnectionReleased: () => {
+            released = true;
+          },
+          clock: () => "2026-07-15T12:00:00.000Z",
+          correlationId: () => "80000000-0000-4000-8000-000000000515",
         },
-        onConnectionReleased: () => {
-          released = true;
-        },
-        clock: () => "2026-07-15T12:00:00.000Z",
-        correlationId: () => "80000000-0000-4000-8000-000000000515",
-      });
+      );
       await expect(
         runSessionCompactionConformance({
           driver,

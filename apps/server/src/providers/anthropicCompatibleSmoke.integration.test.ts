@@ -8,6 +8,7 @@ import {
 } from "@octant/contracts";
 import { Effect, Fiber, Option, Stream } from "effect";
 import { describe, expect, it } from "vitest";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeAnthropicCompatibleDriver } from "./anthropicCompatibleDriver";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -34,27 +35,37 @@ describe("real Anthropic-compatible endpoint", () => {
       const runtimeRegistry = new ProviderRuntimeRegistry();
       let connectionReleased = false;
       let credentialResolutions = 0;
-      const driver = makeAnthropicCompatibleDriver({
-        instanceId,
-        configuration: configuration(baseUrl, model),
-        runtimeRegistry,
-        credentialResolver: {
-          has: async () => true,
-          resolve: async () => {
-            credentialResolutions += 1;
-            return apiKey;
+      const driver = runOnNativeHarness(
+        makeAnthropicCompatibleDriver({
+          instanceId,
+          configuration: configuration(baseUrl, model),
+          runtimeRegistry,
+          credentialResolver: {
+            has: async () => true,
+            resolve: async () => {
+              credentialResolutions += 1;
+              return apiKey;
+            },
+          },
+        }),
+        {
+          instanceId,
+          runtimeRegistry,
+          onConnectionReleased: () => {
+            connectionReleased = true;
           },
         },
-        onConnectionReleased: () => {
-          connectionReleased = true;
-        },
-      });
+      );
       await Effect.runPromise(
         Effect.scoped(
           Effect.gen(function* () {
             const probe = yield* driver.probe({ instanceId });
             expect(probe.models.length).toBeGreaterThan(0);
-            const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp" });
+            const connection = yield* driver.acquire({
+              instanceId,
+              projectRoot: "/tmp",
+              mode: "chat",
+            });
             yield* connection.start({
               sessionId,
               modelId: model,

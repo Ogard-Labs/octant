@@ -9,9 +9,11 @@ import {
 } from "@octant/contracts";
 import { runProviderConformance } from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
+import { runHarnessEndpointConformance } from "@octant/provider-sdk/harness-endpoint-conformance";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import type { AnthropicCompatibleFetch } from "./anthropicCompatibleEndpoint";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeAnthropicCompatibleDriver } from "./anthropicCompatibleDriver";
 import {
   recordProviderChatConformanceEvidence,
@@ -43,23 +45,30 @@ describe("Anthropic-compatible provider conformance", () => {
     const runtimeRegistry = new ProviderRuntimeRegistry();
     let released = false;
     const fetch = profile.fixture();
-    const driver = makeAnthropicCompatibleDriver({
-      instanceId,
-      configuration: configuration(profile.protocol),
-      runtimeRegistry,
-      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
-      fetch,
-      onConnectionReleased: () => {
-        released = true;
+    const driver = runOnNativeHarness(
+      makeAnthropicCompatibleDriver({
+        instanceId,
+        configuration: configuration(profile.protocol),
+        runtimeRegistry,
+        credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+        fetch,
+        clock: () => "2026-07-15T12:00:00.000Z",
+      }),
+      {
+        instanceId,
+        runtimeRegistry,
+        onConnectionReleased: () => {
+          released = true;
+        },
+        clock: () => "2026-07-15T12:00:00.000Z",
+        correlationId: () => "80000000-0000-4000-8000-000000000613",
       },
-      clock: () => "2026-07-15T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000613",
-    });
+    );
 
     const evidence = await runProviderConformance({
       driver,
       probeInput: { instanceId },
-      acquireInput: { instanceId, projectRoot: "/tmp/octant-anthropic-conformance" },
+      acquireInput: { instanceId, projectRoot: "/tmp/octant-anthropic-conformance", mode: "chat" },
       successfulTurn: {
         sessionStart: {
           sessionId: successfulSessionId,
@@ -114,7 +123,7 @@ describe("Anthropic-compatible provider conformance", () => {
     const chatEvidence = await runProviderChatConformance({
       driver,
       probeInput: { instanceId },
-      acquireInput: { instanceId, projectRoot: "/tmp/octant-anthropic-conformance" },
+      acquireInput: { instanceId, projectRoot: "/tmp/octant-anthropic-conformance", mode: "chat" },
       sessionStart: { sessionId: successfulSessionId, modelId, executionPolicy: "approval-gated" },
       turn: {
         sessionId: successfulSessionId,
@@ -148,27 +157,35 @@ describe("Anthropic-compatible provider conformance", () => {
   });
 
   it("reports the quota buckets a Messages response disclosed in its headers", async () => {
-    const driver = makeAnthropicCompatibleDriver({
-      instanceId,
-      configuration: configuration("messages"),
-      runtimeRegistry: new ProviderRuntimeRegistry(),
-      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
-      fetch: async (url) =>
-        String(url).endsWith("/models")
-          ? models()
-          : new Response(messagesStream("messages answer").body, {
-              headers: {
-                "content-type": "text/event-stream",
-                "anthropic-ratelimit-requests-limit": "50",
-                "anthropic-ratelimit-requests-remaining": "49",
-                "anthropic-ratelimit-requests-reset": "2026-07-15T12:01:00Z",
-                "anthropic-ratelimit-tokens-limit": "40000",
-                "anthropic-ratelimit-tokens-remaining": "39000",
-              },
-            }),
-      clock: () => "2026-07-15T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000613",
-    });
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    const driver = runOnNativeHarness(
+      makeAnthropicCompatibleDriver({
+        instanceId,
+        configuration: configuration("messages"),
+        runtimeRegistry,
+        credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+        fetch: async (url) =>
+          String(url).endsWith("/models")
+            ? models()
+            : new Response(messagesStream("messages answer").body, {
+                headers: {
+                  "content-type": "text/event-stream",
+                  "anthropic-ratelimit-requests-limit": "50",
+                  "anthropic-ratelimit-requests-remaining": "49",
+                  "anthropic-ratelimit-requests-reset": "2026-07-15T12:01:00Z",
+                  "anthropic-ratelimit-tokens-limit": "40000",
+                  "anthropic-ratelimit-tokens-remaining": "39000",
+                },
+              }),
+        clock: () => "2026-07-15T12:00:00.000Z",
+      }),
+      {
+        instanceId,
+        runtimeRegistry,
+        clock: () => "2026-07-15T12:00:00.000Z",
+        correlationId: () => "80000000-0000-4000-8000-000000000613",
+      },
+    );
 
     const events = await Effect.runPromise(
       Effect.scoped(
@@ -176,6 +193,7 @@ describe("Anthropic-compatible provider conformance", () => {
           const connection = yield* driver.acquire({
             instanceId,
             projectRoot: "/tmp/octant-anthropic-conformance",
+            mode: "chat",
           });
           yield* connection.start({
             sessionId: successfulSessionId,
@@ -217,23 +235,31 @@ describe("Anthropic-compatible provider conformance", () => {
   });
 
   it("carries the cache buckets of a Messages response onto the runtime usage event", async () => {
-    const driver = makeAnthropicCompatibleDriver({
-      instanceId,
-      configuration: configuration("messages"),
-      runtimeRegistry: new ProviderRuntimeRegistry(),
-      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
-      fetch: async (url) =>
-        String(url).endsWith("/models")
-          ? models()
-          : messagesStream("cached answer", {
-              input_tokens: 12,
-              output_tokens: 0,
-              cache_read_input_tokens: 800,
-              cache_creation_input_tokens: 150,
-            }),
-      clock: () => "2026-07-15T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000613",
-    });
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    const driver = runOnNativeHarness(
+      makeAnthropicCompatibleDriver({
+        instanceId,
+        configuration: configuration("messages"),
+        runtimeRegistry,
+        credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+        fetch: async (url) =>
+          String(url).endsWith("/models")
+            ? models()
+            : messagesStream("cached answer", {
+                input_tokens: 12,
+                output_tokens: 0,
+                cache_read_input_tokens: 800,
+                cache_creation_input_tokens: 150,
+              }),
+        clock: () => "2026-07-15T12:00:00.000Z",
+      }),
+      {
+        instanceId,
+        runtimeRegistry,
+        clock: () => "2026-07-15T12:00:00.000Z",
+        correlationId: () => "80000000-0000-4000-8000-000000000613",
+      },
+    );
 
     const events = await Effect.runPromise(
       Effect.scoped(
@@ -241,6 +267,7 @@ describe("Anthropic-compatible provider conformance", () => {
           const connection = yield* driver.acquire({
             instanceId,
             projectRoot: "/tmp/octant-anthropic-conformance",
+            mode: "chat",
           });
           yield* connection.start({
             sessionId: successfulSessionId,
@@ -277,10 +304,11 @@ describe("Anthropic-compatible provider conformance", () => {
 
   it("verifies tool use on demand with one forced tool request", async () => {
     const bodies: Array<Record<string, unknown>> = [];
+    const runtimeRegistry = new ProviderRuntimeRegistry();
     const driver = makeAnthropicCompatibleDriver({
       instanceId,
       configuration: configuration("messages"),
-      runtimeRegistry: new ProviderRuntimeRegistry(),
+      runtimeRegistry,
       credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
       fetch: async (_url, init) => {
         bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
@@ -315,10 +343,50 @@ describe("Anthropic-compatible provider conformance", () => {
     );
     expect(result.appManagedTools).toBe("unsupported");
 
-    const probed = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
-    registry.setObservedState({ ...probed, verifiedToolModelIds: [modelId] });
+    await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
+    registry.setVerifiedToolModels(instanceId, [modelId]);
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
     expect(registry.observedState(instanceId)?.verifiedToolModelIds).toEqual([modelId]);
+  });
+});
+
+describe("Anthropic-compatible harness endpoint conformance", () => {
+  it("keeps the provider-sdk harness endpoint promises the host's loop relies on", async () => {
+    const endpoint = makeAnthropicCompatibleDriver({
+      instanceId,
+      configuration: configuration("messages"),
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+      fetch: async (_url, init) =>
+        init?.signal?.aborted === true
+          ? Promise.reject(new DOMException("The request was aborted.", "AbortError"))
+          : messagesStream("messages answer"),
+    }).harnessEndpoint;
+
+    await expect(
+      runHarnessEndpointConformance({
+        endpoint,
+        modelId,
+        request: {
+          sessionId: successfulSessionId,
+          modelId,
+          system: undefined,
+          history: [{ role: "user", text: "successful fixture prompt" }],
+          tools: [],
+        },
+        unverifiedToolTurn: {
+          sessionId: successfulSessionId,
+          prompt: "Read the file",
+          attachments: [],
+          tools: [
+            decodeProviderToolDefinition({
+              name: "read_file",
+              inputSchema: { type: "object", properties: {} },
+            }),
+          ],
+        },
+      }),
+    ).resolves.toMatchObject({ cancelledRequestInterrupted: true, releasedSessionRefused: true });
   });
 });
 
@@ -331,24 +399,31 @@ describe("Anthropic-compatible per-model tool verification", () => {
 
   function makeDriver(turn: () => Response) {
     const runtimeRegistry = new ProviderRuntimeRegistry();
-    const driver = makeAnthropicCompatibleDriver({
-      instanceId,
-      configuration: configuration("messages"),
-      runtimeRegistry,
-      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
-      fetch: async (url) =>
-        String(url).endsWith("/models")
-          ? Response.json({ data: [{ id: modelId }, { id: siblingModelId }] })
-          : turn(),
-      clock: () => "2026-07-15T12:00:00.000Z",
-    });
+    const driver = runOnNativeHarness(
+      makeAnthropicCompatibleDriver({
+        instanceId,
+        configuration: configuration("messages"),
+        runtimeRegistry,
+        credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+        fetch: async (url) =>
+          String(url).endsWith("/models")
+            ? Response.json({ data: [{ id: modelId }, { id: siblingModelId }] })
+            : turn(),
+        clock: () => "2026-07-15T12:00:00.000Z",
+      }),
+      {
+        instanceId,
+        runtimeRegistry,
+        clock: () => "2026-07-15T12:00:00.000Z",
+      },
+    );
     return { driver, runtimeRegistry };
   }
 
   function verify(runtimeRegistry: ProviderRuntimeRegistry, verified: ProviderModelId) {
     const observed = runtimeRegistry.observedState(instanceId);
     if (observed === undefined) throw new Error("The driver was not probed.");
-    runtimeRegistry.setObservedState({ ...observed, verifiedToolModelIds: [verified] });
+    runtimeRegistry.setVerifiedToolModels(instanceId, [verified]);
   }
 
   async function sendWithTools(
@@ -362,6 +437,7 @@ describe("Anthropic-compatible per-model tool verification", () => {
           const connection = yield* driver.acquire({
             instanceId,
             projectRoot: "/tmp/octant-anthropic-conformance",
+            mode: "chat",
           });
           yield* connection.start({
             sessionId: successfulSessionId,
@@ -392,10 +468,10 @@ describe("Anthropic-compatible per-model tool verification", () => {
     expect(runtimeRegistry.observedState(instanceId)?.capabilities.appManagedTools).toBe(
       "unsupported",
     );
-    // The capability echo that Verify tools sends is the one tool an
-    // unverified model may be offered.
+    // Verify tools sends its capability echo outside any session, so a
+    // session offers an unverified model not even the echo.
     expect((await sendWithTools(driver, modelId, [capabilityEchoToolDefinition()]))._tag).toBe(
-      "Right",
+      "Left",
     );
 
     verify(runtimeRegistry, modelId);
@@ -415,6 +491,7 @@ describe("Anthropic-compatible per-model tool verification", () => {
           const connection = yield* driver.acquire({
             instanceId,
             projectRoot: "/tmp/octant-anthropic-conformance",
+            mode: "chat",
           });
           yield* connection.start({
             sessionId: successfulSessionId,
