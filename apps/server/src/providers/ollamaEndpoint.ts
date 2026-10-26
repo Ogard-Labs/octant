@@ -230,7 +230,11 @@ export async function probeOllama(endpoint: OllamaEndpoint): Promise<OllamaProbe
   for (const name of names) {
     const { capabilities, modelInfo, parameters } = await showModel(endpoint, name);
     if (!capabilities.has("completion")) continue;
-    const contextLimit = ollamaContextWindow(modelInfo, parameters);
+    // A window Ollama does not name is still the one each request asks it to
+    // load, so it is reported too: the planner and the meter otherwise plan
+    // against their own far larger estimate.
+    const contextLimit =
+      ollamaContextWindow(modelInfo, parameters) ?? OLLAMA_UNKNOWN_CONTEXT_WINDOW;
     const inputModalities: ProviderInputModality[] = capabilities.has("vision")
       ? ["text", "image"]
       : ["text"];
@@ -240,7 +244,7 @@ export async function probeOllama(endpoint: OllamaEndpoint): Promise<OllamaProbe
         displayName: name,
         source: "discovered",
         verification: "verified",
-        ...(contextLimit === undefined ? {} : { contextLimit }),
+        contextLimit,
         reasoning: capabilities.has("thinking") ? "supported" : "unsupported",
         inputModalities,
         // Ollama reports an explicit capability list per model, so both the
@@ -348,9 +352,19 @@ function findConfiguredContextWindow(value: unknown): number | undefined {
   return windows.length === 1 ? windows[0] : undefined;
 }
 
+/**
+ * The `<architecture>.context_length` of a model's `model_info`, the key
+ * Ollama itself reads the trained window from. Without an architecture, the
+ * one `.context_length` key the detail carries; several name nothing.
+ */
 function findTrainedContextWindow(value: unknown): number | undefined {
   const info = record(value);
   if (info === undefined) return undefined;
+  const architecture = boundedString(info["general.architecture"], 64);
+  if (architecture !== undefined) {
+    const limit = positiveInteger(info[`${architecture}.context_length`]);
+    if (limit !== undefined) return limit;
+  }
   const limits = Object.entries(info)
     .filter(([key]) => key.endsWith(".context_length"))
     .flatMap(([, candidate]) => {

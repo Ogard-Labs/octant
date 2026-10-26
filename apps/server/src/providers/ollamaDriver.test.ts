@@ -342,6 +342,8 @@ describe("Ollama provider driver", () => {
           ...probed,
           models: probed.models.map((model) => ({ ...model, contextWindowOverride })),
         });
+        // Every turn probes first; the person's window outlives that probe.
+        await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
       }
       const scope = await Effect.runPromise(Scope.make());
       const connection = await Effect.runPromise(

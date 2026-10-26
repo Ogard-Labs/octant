@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   makeOllamaEndpoint,
   OLLAMA_CONTEXT_WINDOW_CAP,
+  OLLAMA_UNKNOWN_CONTEXT_WINDOW,
   probeOllama,
   sendOllamaChat,
   type OllamaFetch,
@@ -126,6 +127,13 @@ describe("Ollama native endpoint", () => {
       "ambiguous:latest": {
         model_info: { "llama.context_length": 8192, "clip.context_length": 4096 },
       },
+      "architecture:latest": {
+        model_info: {
+          "general.architecture": "llama",
+          "llama.context_length": 8192,
+          "clip.context_length": 4096,
+        },
+      },
     };
     const fetch = vi.fn<OllamaFetch>(async (input, init) => {
       const url = String(input);
@@ -149,8 +157,12 @@ describe("Ollama native endpoint", () => {
       "configured:latest": 65536,
       // Ollama loads no more than the trained window, whatever num_ctx says.
       "overconfigured:latest": 16384,
-      "unreported:latest": undefined,
-      "ambiguous:latest": undefined,
+      // A window Ollama does not name is the small one Octant asks for, so the
+      // planner and the meter measure what Ollama loads.
+      "unreported:latest": OLLAMA_UNKNOWN_CONTEXT_WINDOW,
+      "ambiguous:latest": OLLAMA_UNKNOWN_CONTEXT_WINDOW,
+      // Ollama reads the window under the model's own architecture.
+      "architecture:latest": 8192,
     });
   });
 

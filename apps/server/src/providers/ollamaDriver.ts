@@ -33,6 +33,7 @@ import {
   isCapabilityEchoToolCall,
   OCTANT_CAPABILITY_ECHO_TOOL_NAME,
 } from "./openAiToolEncoding";
+import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
 import { outputStopReason } from "./outputStopReason";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -84,14 +85,16 @@ export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointD
           const observedAt = clock() as UtcTimestamp;
           // A person's tool verification outlives routine probes, which run
           // no generating request of their own.
-          const priorVerified =
-            options.runtimeRegistry.observedState(instanceId)?.verifiedToolModelIds;
+          const prior = options.runtimeRegistry.observedState(instanceId);
+          const priorVerified = prior?.verifiedToolModelIds;
           const result = decodeProviderProbeResult({
             instanceId,
             readiness: observed.readiness,
             processState: "stopped",
             detectedVersion: observed.version,
-            models: observed.models,
+            // A person's window for a model is the `num_ctx` each request
+            // sends, so it outlives the probe every turn runs first.
+            models: carryModelContextWindowFacts(observed.models, prior?.models),
             capabilities: observed.capabilities,
             ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
             ...(observed.models.length === 0
