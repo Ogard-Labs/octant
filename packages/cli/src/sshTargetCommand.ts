@@ -430,7 +430,7 @@ const READ_REFUSAL: Readonly<
   "root-unavailable": "that folder does not exist on the target, or is not a folder.",
   "root-moved": "that folder moved since it was bound.",
   "root-not-confinable":
-    "Octant binds no folder that is /, holds your ~/.ssh, or holds its own runtime; choose the project folder itself.",
+    "Octant binds no folder that is /, or holds or sits inside your ~/.ssh or its own runtime; choose the project folder itself.",
   "outside-root": "that path leads outside the folder.",
   "not-found": "that path does not exist.",
   "not-a-directory": "that path is not a folder.",

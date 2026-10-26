@@ -505,6 +505,87 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
     });
   }, 180_000);
 
+  it("runs no program a hostile checkout's Git configuration names when it reads status and diff", async () => {
+    const checkout = join(root, "hostile-app");
+    mkdirSync(checkout);
+    const git = (...args: ReadonlyArray<string>) =>
+      run("git", [
+        "-C",
+        checkout,
+        "-c",
+        "user.name=O",
+        "-c",
+        "user.email=o@example.invalid",
+        ...args,
+      ]);
+    git("init", "-q", "--initial-branch=main");
+    writeFileSync(join(checkout, "notes.txt"), "kept\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "initial");
+    // Each program lives in the root, which the confined Git can read, and
+    // prints what a diff would show if it ran.
+    const program = join(checkout, "hostile.sh");
+    writeFileSync(program, "#!/bin/sh\ncat\necho HOSTILE-PROGRAM-RAN\n", { mode: 0o755 });
+    writeFileSync(join(checkout, ".gitattributes"), "* filter=hostile diff=hostile\n");
+    const included = join(checkout, "included.config");
+    writeFileSync(included, `[core]\n\tpager = ${program}\n`);
+    writeFileSync(
+      join(checkout, ".git", "config"),
+      [
+        "[core]",
+        "\trepositoryformatversion = 0",
+        "\tbare = false",
+        `\tfsmonitor = ${program}`,
+        `\tpager = ${program}`,
+        `\thooksPath = ${checkout}`,
+        `\tsshCommand = ${program}`,
+        "[diff]",
+        `\texternal = ${program}`,
+        '[diff "hostile"]',
+        `\tcommand = ${program}`,
+        `\ttextconv = ${program}`,
+        '[filter "hostile"]',
+        `\tclean = ${program}`,
+        `\tsmudge = ${program}`,
+        "[pager]",
+        `\tdiff = ${program}`,
+        `\tstatus = ${program}`,
+        "[include]",
+        `\tpath = ${included}`,
+        '[includeIf "gitdir:/"]',
+        `\tpath = ${included}`,
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(join(checkout, "notes.txt"), "kept\nchanged\n");
+    run("chown", ["-R", `${String(NOBODY)}:${String(NOBODY)}`, checkout]);
+
+    const connections = service();
+    const status = await register(connections, target("hostile-reads", asNobody()));
+    expect(reasons(status)).toEqual(["admitted", "admitted", "admitted"]);
+    const projects = projectsOn(connections);
+    const bound = await projects.bind({
+      targetId: status.target.id,
+      remoteRoot: remotePath(checkout),
+      name: "Hostile",
+    });
+    if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+    const projectId = bound.value.id;
+    try {
+      const gitStatus = await projects.gitStatus({ projectId });
+      expect(gitStatus).toMatchObject({ status: "ok", value: { head: { name: "main" } } });
+      expect(JSON.stringify(gitStatus)).not.toContain("HOSTILE-PROGRAM-RAN");
+      for (const path of [undefined, decodeCodeRelativePath("notes.txt")]) {
+        const diff = await projects.gitDiff({ projectId, ...(path === undefined ? {} : { path }) });
+        expect(diff.status === "ok" && diff.value.text).toContain("+changed");
+        expect(JSON.stringify(diff)).not.toContain("HOSTILE-PROGRAM-RAN");
+      }
+    } finally {
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 180_000);
+
   it("refuses to bind or read a remote root on a target whose canary escaped", async () => {
     const connections = service();
     const status = await register(

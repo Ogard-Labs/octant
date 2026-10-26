@@ -80,10 +80,6 @@ export const HostExportSettingsSummary = Schema.Struct({
 export type HostExportSettingsSummary = typeof HostExportSettingsSummary.Type;
 
 /**
- * One usage export row: reference ids, token counts, quality, and the
- * attribution categories. Prompt text and credential material are absent.
- */
-/**
  * One SSH target this host holds, without its destination, host key, or
  * executor path: the destination names a machine and a remote user as a
  * Project root names a folder, and the key is key material. What remains is
@@ -104,6 +100,10 @@ export const HostExportSshTarget = Schema.Struct({
 }).annotations(strict);
 export type HostExportSshTarget = typeof HostExportSshTarget.Type;
 
+/**
+ * One usage export row: reference ids, token counts, quality, and the
+ * attribution categories. Prompt text and credential material are absent.
+ */
 export const HostExportUsageRow = Schema.Struct({
   reconciliationId: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(256)),
   subjectType: Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(128)),

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Schema } from "effect";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { decodeCodeRelativePath } from "@octant/contracts/code";
+import { SshExecutorReadReply } from "@octant/contracts/ssh-executor-protocol";
 import { SshRemotePath } from "@octant/contracts/ssh-target";
 import type { ProcessConfinementPort } from "../process/seatbeltProfile";
 import {
@@ -24,12 +25,14 @@ const remotePath = Schema.decodeUnknownSync(SshRemotePath);
 let directory: string;
 let checkout: string;
 let environment: ExecutorReadEnvironment;
-const grants: Array<{ writeBoundRoot?: boolean; networkEgress: unknown }> = [];
+const grants: Array<Record<string, unknown>> = [];
 
 const passThrough: ProcessConfinementPort = {
   prepare: (input) => {
     grants.push({
-      ...(input.writeBoundRoot === undefined ? {} : { writeBoundRoot: input.writeBoundRoot }),
+      writeBoundRoot: input.writeBoundRoot,
+      allowProcessExec: input.allowProcessExec,
+      allowProcessFork: input.allowProcessFork,
       networkEgress: input.networkEgress,
     });
     return { command: input.executable, args: input.args };
@@ -48,7 +51,7 @@ function git(...args: ReadonlyArray<string>): void {
 beforeEach(() => {
   directory = realpathSync(mkdtempSync(join(tmpdir(), "octant-executor-reads-")));
   checkout = join(directory, "app");
-  mkdirSync(join(directory, "home", ".ssh"), { recursive: true });
+  mkdirSync(join(directory, "home", ".ssh", "keys"), { recursive: true });
   mkdirSync(join(directory, "runtime", "session"), { recursive: true });
   mkdirSync(join(checkout, "src"), { recursive: true });
   writeFileSync(join(checkout, "README.md"), "hello\n");
@@ -71,7 +74,7 @@ afterEach(() => {
 });
 
 describe("executor reads of a bound remote root", () => {
-  it("resolves the folder to bind to its canonical path and refuses one holding the SSH keys or the executor's runtime", async () => {
+  it("resolves the folder to bind to its canonical path and refuses one holding or inside the SSH keys or the executor's runtime", async () => {
     expect(
       await answerExecutorRead(environment, {
         kind: "resolve-root",
@@ -81,6 +84,7 @@ describe("executor reads of a bound remote root", () => {
     for (const root of [
       directory,
       join(directory, "home"),
+      join(directory, "home", ".ssh", "keys"),
       "/",
       join(directory, "runtime", "session"),
     ]) {
@@ -92,6 +96,15 @@ describe("executor reads of a bound remote root", () => {
       await answerExecutorRead(environment, {
         kind: "resolve-root",
         root: remotePath(join(directory, "app", "README.md")),
+      }),
+    ).toEqual({ kind: "refused", reason: "root-unavailable" });
+    // A canonical path the host's schema refuses would end the session.
+    mkdirSync(join(directory, "line\nbreak"));
+    symlinkSync(join(directory, "line\nbreak"), join(directory, "plain-link"));
+    expect(
+      await answerExecutorRead(environment, {
+        kind: "resolve-root",
+        root: remotePath(join(directory, "plain-link")),
       }),
     ).toEqual({ kind: "refused", reason: "root-unavailable" });
   });
@@ -189,8 +202,26 @@ describe("executor reads of a bound remote root", () => {
     expect(diff.kind === "git-diff" && diff.diff.text).toContain("+changed");
     expect(grants.length).toBeGreaterThan(0);
     for (const grant of grants) {
-      expect(grant).toEqual({ writeBoundRoot: false, networkEgress: "none" });
+      expect(grant).toEqual({
+        writeBoundRoot: false,
+        allowProcessExec: false,
+        allowProcessFork: false,
+        networkEgress: "none",
+      });
     }
+  });
+
+  it("cuts a diff whose text outgrows its bound once decoded, rather than sending a reply the host refuses", async () => {
+    const root = remotePath(checkout);
+    git("init", "-q", "--initial-branch=main");
+    git("add", "README.md");
+    git("commit", "-q", "-m", "initial");
+    // Latin-1 text: each byte that is not UTF-8 decodes to a three-byte
+    // replacement character, so 120 KiB of output is past 256 KiB as text.
+    writeFileSync(join(checkout, "README.md"), Buffer.alloc(120 * 1_024, "\xe9\n", "latin1"));
+    const diff = await answerExecutorRead(environment, { kind: "git-diff", root });
+    expect(Schema.is(SshExecutorReadReply)(diff)).toBe(true);
+    expect(diff).toMatchObject({ kind: "git-diff", diff: { truncated: true } });
   });
 
   it("reads renamed and unmerged entries from porcelain status and drops a record a bound cut", () => {

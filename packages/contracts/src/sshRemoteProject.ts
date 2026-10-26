@@ -181,7 +181,7 @@ export const SshRemoteReadRefusalReason = Schema.Literal(
   "root-unavailable",
   /** The remote root now resolves somewhere other than where it was bound. */
   "root-moved",
-  /** `/`, or a folder holding the remote user's `~/.ssh` or the executor's own runtime. */
+  /** `/`, or a folder holding or inside the remote user's `~/.ssh` or the executor's own runtime. */
   "root-not-confinable",
   "outside-root",
   "not-found",

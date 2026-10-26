@@ -489,20 +489,26 @@ direction:
   and a listing leaves such an entry and `.git` out. A file is read from a
   handle that must be the object containment resolved. A root that now
   resolves elsewhere than where it was bound is refused `root-moved`.
-- **Some folders are never a root.** `/`, a folder that holds the remote user's
-  `~/.ssh` or the executor's runtime folder, and a folder inside that runtime
-  folder are refused `root-not-confinable`. Reads are confined by containment
-  rather than the sandbox, so a root that held the SSH keys would let Files
-  read them.
+- **Some folders are never a root.** `/`, and a folder that holds or sits
+  inside the remote user's `~/.ssh` or the executor's runtime folder, are
+  refused `root-not-confinable`. Reads are confined by containment rather than
+  the sandbox, so a root that held the SSH keys would let Files read them.
+  Other credential folders (`~/.aws`, `~/.config/gh`) are not listed: the home
+  folder that holds them is already refused, only a local window or the local
+  CLI binds, and no list of credential folders can be complete.
 - **Git runs with Plan's grants and starts nothing else.** Git status and diff
   run through the executor's `ProcessConfinementPort` with Plan's grants: no
   write to the root, no process after Git itself, and no network. The
   file-system monitor, external diff drivers, text conversion, the pager, and
   submodule recursion are off, because each would start another program, and
-  every path is a literal name, never pathspec magic.
+  every path is a literal name, never pathspec magic. A clean filter the
+  checkout names cannot be turned off by name; the no-process grant is what
+  keeps it from running, and the loopback smoke test reads a checkout whose
+  configuration names a program for each of these.
 - **Every read is bounded.** A listing is one directory level and at most
   1,000 entries; a file at most 256 KiB, sent base64-encoded; a diff at most
-  256 KiB; a status at most 2,000 entries. A cut listing, diff, or status says
+  256 KiB of text after decoding, since bytes that are not UTF-8 grow as they
+  decode; a status at most 2,000 entries. A cut listing, diff, or status says
   it is truncated; a larger file is refused `too-large`.
 - **No paired device reads a target in this slice.** The reads sit on the local
   administration routes, beside binding, until remote-bound Projects join the

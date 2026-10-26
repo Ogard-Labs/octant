@@ -18,6 +18,7 @@ import type {
   SshExecutorReadReply,
   SshExecutorReadRequest,
 } from "@octant/contracts/ssh-executor-protocol";
+import { SshRemotePath } from "@octant/contracts/ssh-target";
 import { classifyPathContainment } from "@octant/domain";
 import { liveCodeDirectoryPort, liveCodeTestSourcePort } from "../code/codeDirectoryPort";
 import { readConfinedCodeFile } from "../code/codeConfinedFileRead";
@@ -49,11 +50,14 @@ import { postureGrants } from "./executorAttestation";
  * posture whose canaries this connection attested: no write to the root, no
  * process started after Git itself, and no network. External diff drivers,
  * text conversion, the file-system monitor, and submodule recursion are all
- * off, because each would start another program.
+ * off, because each would start another program. A checkout's clean filter
+ * cannot be turned off by name, since the checkout names it; it is the
+ * no-process grant that keeps one from running.
  */
 
 const SKIPPED_NAMES: ReadonlySet<string> = new Set([".git"]);
 const decodeDirectoryEntry = Schema.decodeUnknownOption(SshRemoteDirectoryEntry);
+const isRemotePath = Schema.is(SshRemotePath);
 /** A listing stops adding paths past this many bytes, so its frame stays bounded. */
 const MAX_LISTING_PATH_BYTES = 512 * 1_024;
 /** Raw `git status` output read before the rest is reported as truncated. */
@@ -127,9 +131,8 @@ type ResolvedRoot =
   | { readonly status: "refused"; readonly reason: SshRemoteReadRefusalReason };
 
 /**
- * A root is a directory that is not `/`, does not hold the remote user's
- * `~/.ssh`, and neither holds nor sits inside the executor's own runtime
- * folder. Reads of a root are not confined by the sandbox, only by
+ * A root is a directory that is not `/`, and neither holds nor sits inside
+ * the remote user's `~/.ssh` or the executor's own runtime folder. Reads of a root are not confined by the sandbox, only by
  * containment, so a root that held the SSH keys would let Files read them.
  */
 async function resolveRoot(
@@ -144,6 +147,10 @@ async function resolveRoot(
   } catch {
     return { status: "refused", reason: "root-unavailable" };
   }
+  // The reply carries the canonical path, and a reply the host's schema
+  // refuses ends the whole session: a link to a folder whose name holds a
+  // control character is not a root this host can name.
+  if (!isRemotePath(canonical)) return { status: "refused", reason: "root-unavailable" };
   if (classifyPathContainment(canonical, canonical) === "escapes-root") {
     return { status: "refused", reason: "root-not-confinable" };
   }
@@ -154,15 +161,12 @@ async function resolveRoot(
       : [canonicalOrSelf(environment.sessionParent)]),
   ];
   for (const path of protectedPaths) {
-    if (classifyPathContainment(canonical, path) === "contained") {
+    if (
+      classifyPathContainment(canonical, path) === "contained" ||
+      classifyPathContainment(path, canonical) === "contained"
+    ) {
       return { status: "refused", reason: "root-not-confinable" };
     }
-  }
-  if (
-    environment.sessionParent !== undefined &&
-    classifyPathContainment(canonicalOrSelf(environment.sessionParent), canonical) === "contained"
-  ) {
-    return { status: "refused", reason: "root-not-confinable" };
   }
   return { status: "resolved", canonical };
 }
@@ -321,11 +325,17 @@ async function gitDiff(
   );
   if (ran.status === "refused") return refused(ran.reason);
   if (!ran.truncated && ran.exitCode !== 0) return refused(gitFailure(ran));
-  const text = wholeUtf8(ran.stdout);
-  return {
-    kind: "git-diff",
-    diff: { text, byteLength: Buffer.byteLength(text), truncated: ran.truncated },
-  };
+  let text = wholeUtf8(ran.stdout);
+  let truncated = ran.truncated;
+  // Bytes that are not UTF-8 decode to three-byte replacement characters, so
+  // text from output within the bound can still outgrow it; the host refuses
+  // such a reply and ends the session, so the text is cut here instead.
+  const encoded = Buffer.from(text, "utf8");
+  if (encoded.byteLength > SSH_REMOTE_MAX_DIFF_BYTES) {
+    text = wholeUtf8(encoded.subarray(0, SSH_REMOTE_MAX_DIFF_BYTES));
+    truncated = true;
+  }
+  return { kind: "git-diff", diff: { text, byteLength: Buffer.byteLength(text), truncated } };
 }
 
 function gitFailure(ran: { readonly exitCode: number | null; readonly stderr: string }) {
