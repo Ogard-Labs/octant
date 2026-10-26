@@ -82,10 +82,6 @@ export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointD
         try: async () => {
           const observed = await probeOllama(endpoint);
           const observedAt = clock() as UtcTimestamp;
-          // A person's tool verification outlives routine probes, which run
-          // no generating request of their own.
-          const priorVerified =
-            options.runtimeRegistry.observedState(instanceId)?.verifiedToolModelIds;
           const result = decodeProviderProbeResult({
             instanceId,
             readiness: observed.readiness,
@@ -93,7 +89,6 @@ export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointD
             detectedVersion: observed.version,
             models: observed.models,
             capabilities: observed.capabilities,
-            ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
             ...(observed.models.length === 0
               ? { message: "Ollama is reachable but has no installed models." }
               : {}),

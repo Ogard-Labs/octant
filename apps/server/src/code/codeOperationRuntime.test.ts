@@ -7433,7 +7433,7 @@ describe("sibling-threads tool on Code turns", () => {
     );
     // A person verified that this model calls tools, which is what lets a
     // direct endpoint carry any app-managed tool.
-    registry.setObservedState({ ...probed, verifiedToolModelIds: [thread().modelId] });
+    registry.setVerifiedToolModels(probed.instanceId, [thread().modelId]);
     const fixture = runtimeFixture({
       provider: driver,
       supportsAppManagedTools: true,
@@ -8291,7 +8291,7 @@ async function functionCallingEndpoint(
   const probed = await Effect.runPromise(
     Effect.scoped(driver.probe({ instanceId: thread().providerInstanceId })),
   );
-  registry.setObservedState({ ...probed, verifiedToolModelIds: [thread().modelId] });
+  registry.setVerifiedToolModels(probed.instanceId, [thread().modelId]);
   /** Each call's answer, in call order, as the provider received it. */
   const answers = (): ReadonlyArray<string | undefined> => {
     const byCall = new Map<string, string>();

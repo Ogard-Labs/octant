@@ -119,7 +119,15 @@ function retryingTransport(
             signal: stream.signal,
             onEvent: stream.onEvent,
             options: retry,
-            attempt: (attempt) => session.send(request, attempt),
+            // The host announces its own retries; a notice the driver streams
+            // would report a retry the host never ran, or report one twice.
+            attempt: (attempt) =>
+              session.send(request, {
+                signal: attempt.signal,
+                onEvent: (event) => {
+                  if (event.kind !== "retrying") attempt.onEvent(event);
+                },
+              }),
           }),
         release: () => session.release(),
       };

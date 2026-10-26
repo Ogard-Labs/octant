@@ -143,9 +143,9 @@ function harnessDriver(bodies: string[]): ProviderDriver {
       appManagedTools: "unsupported",
       citations: "unsupported",
     },
-    verifiedToolModelIds: [modelId],
     observedAt: "2026-09-05T12:00:00.000Z",
   } as never);
+  runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]);
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     if (String(url).endsWith("/models")) return new Response(null, { status: 404 });
     bodies.push(String(init?.body));

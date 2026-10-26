@@ -611,10 +611,10 @@ async function sendSelectedSkillToGenericProvider(
   const observed = await Effect.runPromise(
     Effect.scoped(driver.probe({ instanceId: providerInstanceId })),
   );
-  runtimeRegistry.setObservedState({
-    ...observed,
-    verifiedToolModelIds: observed.models.map((model) => model.id),
-  });
+  runtimeRegistry.setVerifiedToolModels(
+    observed.instanceId,
+    observed.models.map((model) => model.id),
+  );
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -1484,10 +1484,10 @@ describe("extensions marketplace integrated exit gate", () => {
     const observed = await Effect.runPromise(
       Effect.scoped(driver.probe({ instanceId: providerInstanceId })),
     );
-    runtimeRegistry.setObservedState({
-      ...observed,
-      verifiedToolModelIds: observed.models.map((model) => model.id),
-    });
+    runtimeRegistry.setVerifiedToolModels(
+      observed.instanceId,
+      observed.models.map((model) => model.id),
+    );
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {

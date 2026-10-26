@@ -4687,9 +4687,8 @@ describe("ProviderService", () => {
         withCatalogPersistence: true,
         driver: toolDriver("unsupported") as never,
       });
-      fixture.runtime.setObservedState(
-        observation({ verifiedToolModelIds: [decodeProviderModelId("model-1")] }),
-      );
+      fixture.runtime.setObservedState(observation());
+      fixture.runtime.setVerifiedToolModels(instanceId, [decodeProviderModelId("model-1")]);
 
       await fixture.service.execute(windowId, {
         kind: "verify-model-tools",
@@ -4698,6 +4697,73 @@ describe("ProviderService", () => {
       });
 
       expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds).toEqual([]);
+    });
+
+    it("offers no tools to a model a driver's own probe claims verified until a host Verify tools run succeeds", async () => {
+      const model = decodeProviderModelId("model-1");
+      const claimed = observation({ instanceId, verifiedToolModelIds: [model] });
+      let runtime: ProviderRuntimeRegistry | undefined;
+      const fixture = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        driver: toolDriver("supported") as never,
+        // The driver writes its claim into the shared observation, as a
+        // driver that probes into the registry can, and returns it too.
+        probe: async () => {
+          runtime?.setObservedState(claimed);
+          return claimed;
+        },
+      });
+      runtime = fixture.runtime;
+
+      const probed = await fixture.service.probe(windowId, instanceId);
+
+      expect(probed.verifiedToolModelIds ?? []).toEqual([]);
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds ?? []).toEqual([]);
+      expect(fixture.catalogs()[0]?.verifiedToolModelIds ?? []).toEqual([]);
+
+      await fixture.service.execute(windowId, {
+        kind: "verify-model-tools",
+        instanceId,
+        modelId: model,
+      });
+
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String)).toEqual([
+        "model-1",
+      ]);
+    });
+
+    it("keeps a host Verify tools record across probe refreshes and a restart", async () => {
+      const model = decodeProviderModelId("model-1");
+      const fixture = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        driver: toolDriver("supported") as never,
+      });
+      await fixture.service.probe(windowId, instanceId);
+      await fixture.service.execute(windowId, {
+        kind: "verify-model-tools",
+        instanceId,
+        modelId: model,
+      });
+
+      await fixture.service.probe(windowId, instanceId);
+      expect(fixture.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String)).toEqual([
+        "model-1",
+      ]);
+
+      const restarted = serviceFixture({
+        instances: [ollamaProvider()],
+        withCatalogPersistence: true,
+        initialCatalog: decodeProviderCatalogSnapshot(fixture.catalogs()[0]),
+        driver: toolDriver("supported") as never,
+      });
+      const probed = await restarted.service.probe(windowId, instanceId);
+
+      expect(probed.verifiedToolModelIds?.map(String)).toEqual(["model-1"]);
+      expect(
+        restarted.runtime.observedState(instanceId)?.verifiedToolModelIds?.map(String),
+      ).toEqual(["model-1"]);
     });
 
     it("refuses a model the endpoint does not list and never calls the driver", async () => {
