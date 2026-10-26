@@ -180,6 +180,24 @@ describe("remote access policy", () => {
     ).toEqual({ kind: "deny", reason: "local-host-required" });
   });
 
+  it("lets a paired device read a Code thread's language results but not open the host's editor", () => {
+    // A language read answers from a confined server for a thread the device
+    // already reaches; handing a file to the person's editor drives the host.
+    expect(classifyRemoteAction("code.language.read")).toEqual({ kind: "remote-approvable" });
+    expect(
+      authorizePrincipalAction({ principalKind: "remote-device", action: "code.language.read" }),
+    ).toEqual({ kind: "allow" });
+    expect(
+      authorizePrincipalAction({ principalKind: "local-window", action: "code.language.read" }),
+    ).toEqual({ kind: "allow" });
+    expect(
+      authorizePrincipalAction({
+        principalKind: "remote-device",
+        action: "code.open-external-editor",
+      }),
+    ).toEqual({ kind: "deny", reason: "local-host-required" });
+  });
+
   it("lets a remote device perform ordinary Automation Center mutations", () => {
     // Design §4.3/§10: a RemoteDevicePrincipal may run the ordinary Automation
     // commands on the owning host; it never gains local-window authority.

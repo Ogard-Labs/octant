@@ -95,7 +95,15 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/persistence/sqlitePort.conformance.ts",
     "Conformance kit that sqlitePort.test.ts and sqlitePort.smoke.ts run against the SQLite port; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port's last conformance test is retired.",
   ],
+  [
+    "packages/domain/src/languageServerLaunchPolicy.ts",
+    "Language-server launch policy delivered with its seam before the companion supervisor that applies it (docs/design/language-services.md, delivery plan slice 2). Remove once the server launches a language server through it.",
+  ],
   // ── Reached only through another island, so an island with it ──
+  [
+    "packages/contracts/src/codeLanguage.ts",
+    "Language read and refusal wire schemas whose only consumer today is languageServerLaunchPolicy.ts. Remove once the server answers a language read (docs/design/language-services.md, delivery plan slice 2).",
+  ],
   [
     "packages/contracts/src/auditEvents.ts",
     "Audit event schemas whose only consumer is evaluateEscapeSuite.ts. Remove once a product runner reaches the escape suite or the suite is retired.",

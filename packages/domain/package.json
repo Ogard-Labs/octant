@@ -67,6 +67,7 @@
     "./mode-policy": "./src/modePolicy.ts",
     "./multi-model-pool-policy": "./src/multiModelPoolPolicy.ts",
     "./composer-pool-policy": "./src/composerPoolPolicy.ts",
+    "./language-server-launch-policy": "./src/languageServerLaunchPolicy.ts",
     "./remote-access-policy": "./src/remoteAccessPolicy.ts",
     "./remote-pairing-code": "./src/remotePairingCode.ts",
     "./remote-clock-recovery-policy": "./src/remoteClockRecoveryPolicy.ts",
