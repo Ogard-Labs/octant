@@ -1804,6 +1804,10 @@ function makeConnection(
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
               ...(assignedSessionId === undefined ? {} : { sessionId: assignedSessionId }),
+              // Nothing resumes a single-use session, so the runtime's own
+              // transcript of it would only be a copy of the request left in
+              // the account's configuration directory.
+              ...(input.singleUse === true ? { persistSession: false as const } : {}),
               tools: executionOptions.tools,
               ...(sandbox === undefined ? {} : { sandbox }),
               canUseTool,

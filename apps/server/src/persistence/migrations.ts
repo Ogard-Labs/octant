@@ -2252,6 +2252,21 @@ CREATE INDEX validation_evidence_authority_idx
         ON extension_project_pin_projection(extension_id);
     `,
   },
+  {
+    version: 84,
+    name: "queue_unrecorded_session_sweep",
+    // Single-use sessions once journaled a Claude resume identity and an
+    // Octant Harness transcript under a random id no thread records, so no
+    // purge reaches them. The sweep needs a scan SQL cannot express, so this
+    // only queues it; startup runs it once and clears the row in the same
+    // transaction as its erasure.
+    sql: `
+      CREATE TABLE pending_session_sweep (
+        sweep TEXT PRIMARY KEY CHECK(sweep = 'unrecorded-sessions')
+      ) STRICT;
+      INSERT INTO pending_session_sweep (sweep) VALUES ('unrecorded-sessions');
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

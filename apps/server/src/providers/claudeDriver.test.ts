@@ -4038,6 +4038,28 @@ describe("Claude single-use sessions", () => {
     await acquired.close();
   });
 
+  it("asks Claude to keep no transcript of a session nothing will resume", async () => {
+    const f = harness();
+    const acquired = await acquire(f.driver);
+
+    for (const [id, singleUse] of [
+      [sessionId, true],
+      [otherSessionId, false],
+    ] as const) {
+      await Effect.runPromise(
+        acquired.connection.start({
+          sessionId: id,
+          modelId,
+          executionPolicy: "approval-gated",
+          ...(singleUse ? { singleUse } : {}),
+        }),
+      );
+    }
+
+    expect(f.opens.map((open) => open.persistSession)).toEqual([false, undefined]);
+    await acquired.close();
+  });
+
   it("leaves no resume identity behind for a hand-off, context or compaction summary, git draft, or advisor call", async () => {
     const f = harness();
     const scratchSessionId = decodeProviderSessionId("80000000-0000-4000-8000-000000000705");
