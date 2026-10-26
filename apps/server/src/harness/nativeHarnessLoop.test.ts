@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
+  type CodeConversationTurn,
+  type CodeThread,
   type ProviderFailure,
   type ProviderModelId,
   type ProviderResumeCursor,
@@ -18,6 +20,7 @@ import { Persistence, makePersistenceLive } from "../persistence/persistenceServ
 import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { buildUsageDashboard } from "../usageDashboardModel";
+import { seedCodeForkHarnessSession } from "./nativeHarnessFork";
 import { createCodeJournalLookup } from "./nativeHarnessJournalLookup";
 import { createNativeHarnessConnection, fitRequest } from "./nativeHarnessLoop";
 import {
@@ -30,6 +33,7 @@ import type {
   NativeHarnessLeadFallback,
   NativeHarnessRequest,
   NativeHarnessResponse,
+  NativeHarnessStreamEvent,
   NativeHarnessTransport,
   NativeHarnessTransportSession,
 } from "./nativeHarnessTransport";
@@ -126,6 +130,14 @@ function sendAndCollect(
 
 const isTerminal = (event: ProviderRuntimeEvent) =>
   event.kind === "completed" || event.kind === "failed" || event.kind === "interrupted";
+
+/** How the model is told that a compaction summary stands for the session's first turns. */
+const summaryLead = (turns: number) =>
+  `${
+    turns === 1
+      ? "The first turn of this session was summarized and is"
+      : `The first ${turns} turns of this session were summarized and are`
+  } no longer shown in full; the files on disk still reflect that work. Summary:`;
 
 describe("native harness loop", () => {
   it.each([
@@ -1309,6 +1321,20 @@ async function whenRequested(
   }
 }
 
+/** The first tool call not yet answered, or undefined once the turn ended. */
+async function nextUnanswered(
+  events: ReadonlyArray<ProviderRuntimeEvent>,
+  answered: ReadonlySet<string>,
+): Promise<string | undefined> {
+  for (;;) {
+    for (const event of events) {
+      if (event.kind === "tool-request" && !answered.has(event.requestId)) return event.requestId;
+    }
+    if (events.some(isTerminal)) return undefined;
+    await new Promise((resolve) => setTimeout(resolve, 2));
+  }
+}
+
 describe("recovering from a request the endpoint refuses as too large", () => {
   const overflow: ProviderFailure = {
     category: "provider-failed",
@@ -1749,7 +1775,7 @@ describe("compacting an Octant Harness session", () => {
     expect(summaryRequest?.history[0]?.text).toContain("Assistant: answer 2");
     expect(summaryRequest?.history[0]?.text).not.toContain("third");
     expect(requests[4]?.history.map((message) => message.text)).toEqual([
-      "Summary of the earlier turns of this session:\n\nThe parser was rewritten; tests still fail on Windows paths.",
+      `${summaryLead(2)}\n\nThe parser was rewritten; tests still fail on Windows paths.`,
       "third",
       "answer 3",
       "fourth",
@@ -1807,7 +1833,7 @@ describe("compacting an Octant Harness session", () => {
       ),
     );
     expect(requests.at(-1)?.history.map((message) => message.text)).toEqual([
-      "Summary of the earlier turns of this session:\n\nEarlier: chose the queue design.",
+      `${summaryLead(1)}\n\nEarlier: chose the queue design.`,
       "second",
       "answer 2",
       "third",
@@ -1909,7 +1935,7 @@ describe("compacting an Octant Harness session", () => {
       }),
     );
     expect(requests.at(-1)?.history.map((message) => message.text)).toEqual([
-      "Summary of the earlier turns of this session:\n\nChose the queue design.",
+      `${summaryLead(1)}\n\nChose the queue design.`,
       "second",
       "answer 2",
       "third",
@@ -1959,6 +1985,251 @@ describe("compacting an Octant Harness session", () => {
     });
     expect(requests).toHaveLength(3);
     expect(transcripts.load(sessionId)?.compactions).toEqual([]);
+  });
+
+  describe("when a long session no longer fits", () => {
+    const overflow: ProviderFailure = {
+      category: "provider-failed",
+      message:
+        "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens (context_length_exceeded).",
+    };
+    const taskList = '{"items":[{"content":"Fix the parser","status":"in_progress"}]}';
+    const offered = [...tools, tool("todo-write")];
+
+    /**
+     * Three turns; the first writes a task list. `refuses` decides which
+     * requests the endpoint turns away as too large, `fits` what its own size
+     * estimate admits, `summarize` how the summary request (the one without
+     * tools) is answered, and `thirdTurn` the third turn's replies. Every tool
+     * call is answered as it arrives.
+     */
+    const runLongSession = async (input: {
+      readonly refuses: (request: NativeHarnessRequest) => boolean;
+      readonly fits?: (request: NativeHarnessRequest) => boolean;
+      readonly summarize?: (
+        onEvent: (event: NativeHarnessStreamEvent) => void,
+      ) => Promise<NativeHarnessResponse>;
+      readonly thirdTurn?: ReadonlyArray<NativeHarnessResponse>;
+    }) => {
+      const transcripts = new MemoryNativeHarnessTranscriptStore();
+      const requests: NativeHarnessRequest[] = [];
+      let refusals = 0;
+      const replies: NativeHarnessResponse[] = [
+        {
+          text: "",
+          toolCalls: [{ toolCallId: "plan", toolName: "todo-write", argumentsJson: taskList }],
+        },
+        { text: "answer 1", toolCalls: [] },
+        { text: "answer 2", toolCalls: [] },
+        ...(input.thirdTurn ?? [
+          { text: "answer 3", toolCalls: [], usage: { inputTokens: 100, outputTokens: 10 } },
+        ]),
+      ];
+      const transport: NativeHarnessTransport = {
+        open: async () => ({
+          fits: input.fits ?? (() => true),
+          send: async (request, stream) => {
+            requests.push(request);
+            if (request.tools.length === 0) {
+              if (input.summarize !== undefined) return await input.summarize(stream.onEvent);
+              return {
+                text: "Planned the parser fix and chose the queue design.",
+                toolCalls: [],
+                usage: { inputTokens: 500, outputTokens: 50 },
+              };
+            }
+            if (input.refuses(request)) {
+              refusals += 1;
+              throw overflow;
+            }
+            const next = replies.shift();
+            if (next === undefined) throw new Error("The script ran out of responses.");
+            return next;
+          },
+          release: () => undefined,
+        }),
+      };
+      const events = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(transport, transcripts);
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            const seen: ProviderRuntimeEvent[] = [];
+            const answered = new Set<string>();
+            for (const prompt of ["first", "second", "third"]) {
+              seen.length = 0;
+              const turn = yield* Effect.fork(
+                Stream.runForEach(
+                  (yield* connection.subscribe).pipe(Stream.takeUntil(isTerminal)),
+                  (event) => Effect.sync(() => seen.push(event)),
+                ),
+              );
+              yield* connection.send({ sessionId, prompt, attachments: [], tools: offered });
+              for (;;) {
+                const requestId = yield* Effect.promise(() => nextUnanswered(seen, answered));
+                if (requestId === undefined) break;
+                answered.add(requestId);
+                yield* connection.answerTool({
+                  sessionId,
+                  requestId,
+                  resultJson: '{"status":"recorded","items":1}',
+                  isError: false,
+                });
+              }
+              yield* Fiber.join(turn);
+            }
+            return seen;
+          }),
+        ),
+      );
+      return { events, requests, refusals: () => refusals, transcripts };
+    };
+
+    it("summarizes earlier turns after an overflow refusal and continues without a second refusal", async () => {
+      // The real window refuses any request that still carries the first turn
+      // beside the third, although the endpoint's estimate admitted it.
+      const run = await runLongSession({
+        refuses: (request) => {
+          const texts = request.history.map((message) => message.text);
+          return texts.includes("first") && texts.includes("third");
+        },
+      });
+
+      expect(run.events.at(-1)?.kind).toBe("completed");
+      expect(run.refusals()).toBe(1);
+      expect(run.events.filter((event) => event.kind === "context-compacted")).toMatchObject([
+        { trigger: "automatic" },
+      ]);
+      const continued = run.requests.at(-1);
+      expect(continued?.history.map((message) => message.text)).toEqual([
+        `${summaryLead(2)}\n\nPlanned the parser fix and chose the queue design.\n\nYour task list as you last wrote it with todo-write in those turns:\n${taskList}`,
+        "third",
+      ]);
+      // The third turn read the summary itself, so it was made after two turns.
+      expect(run.transcripts.load(sessionId)?.compactions).toMatchObject([
+        { turns: 2, afterTurns: 2 },
+      ]);
+      // The turn paid for its summary request, so its closing total says so.
+      expect(run.events.filter((event) => event.kind === "usage").at(-1)).toMatchObject({
+        inputTokens: 600,
+        outputTokens: 60,
+      });
+    });
+
+    it("keeps the turn alive while a summary streams without showing the summary's text", async () => {
+      const run = await runLongSession({
+        refuses: (request) => {
+          const texts = request.history.map((message) => message.text);
+          return texts.includes("first") && texts.includes("third");
+        },
+        summarize: async (onEvent) => {
+          onEvent({ kind: "reasoning-delta", text: "Weighing what to keep." });
+          onEvent({ kind: "text-delta", text: "Planned the parser fix." });
+          return { text: "Planned the parser fix.", toolCalls: [] };
+        },
+      });
+
+      expect(run.events.at(-1)?.kind).toBe("completed");
+      expect(run.events.filter((event) => event.kind === "liveness").length).toBeGreaterThan(0);
+      const shown = run.events.flatMap((event) =>
+        event.kind === "text-delta" || event.kind === "reasoning-delta" ? [event.text] : [],
+      );
+      expect(shown).not.toContain("Weighing what to keep.");
+      expect(shown).not.toContain("Planned the parser fix.");
+    });
+
+    it("hands a fork through the compacted turn the summary that turn read", async () => {
+      const run = await runLongSession({
+        refuses: (request) => {
+          const texts = request.history.map((message) => message.text);
+          return texts.includes("first") && texts.includes("third");
+        },
+      });
+      const turns = ["op-1", "op-2", "op-3"].map((operationId) => ({
+        operationId,
+        sessionId: "asked",
+        status: "completed",
+      })) as never as ReadonlyArray<CodeConversationTurn>;
+      const fork = decodeProviderSessionId("80000000-0000-4000-8000-000000000903");
+
+      await seedCodeForkHarnessSession(
+        {
+          transcripts: run.transcripts,
+          harnessDriverKind: () => "anthropic-compatible",
+          sourceTurns: () => turns,
+          sourceConversations: () =>
+            new Map(turns.map((turn) => [String(turn.operationId), String(sessionId)])),
+        },
+        {
+          fork: { providerInstanceId: instanceId, modelId } as never as CodeThread,
+          origin: { threadId: "source-thread", throughOperationId: "op-3" } as never,
+          sessionId: fork,
+          checkoutRoot: "/tmp/octant-harness-fork",
+          secrets: [],
+        },
+      );
+
+      expect(run.transcripts.load(fork)?.compactions).toEqual(
+        run.transcripts.load(sessionId)?.compactions,
+      );
+    });
+
+    it("summarizes earlier turns instead of leaving them out when the estimate says they no longer fit", async () => {
+      const run = await runLongSession({
+        refuses: () => false,
+        fits: (request) => {
+          const texts = request.history.map((message) => message.text);
+          return !(texts.includes("first") && texts.includes("third"));
+        },
+      });
+
+      expect(run.events.at(-1)?.kind).toBe("completed");
+      expect(run.events.some((event) => event.kind === "context-compacted")).toBe(true);
+      const sent = run.requests.filter((request) => request.tools.length > 0);
+      expect(
+        sent.some((request) => request.history[0]?.text.includes("left out to fit") === true),
+      ).toBe(false);
+      expect(sent.at(-1)?.history[0]?.text).toContain(taskList);
+    });
+
+    it("falls back to leaving earlier exchanges out when the summary fails, and does not pay for it again on later steps", async () => {
+      let summaries = 0;
+      const run = await runLongSession({
+        refuses: () => false,
+        fits: (request) => {
+          const texts = request.history.map((message) => message.text);
+          return !(texts.includes("first") && texts.includes("third"));
+        },
+        summarize: async () => {
+          summaries += 1;
+          throw { category: "provider-failed", message: "The summary request failed." };
+        },
+        thirdTurn: [
+          {
+            text: "",
+            toolCalls: [{ toolCallId: "look-1", toolName: "read", argumentsJson: "{}" }],
+          },
+          {
+            text: "",
+            toolCalls: [{ toolCallId: "look-2", toolName: "read", argumentsJson: "{}" }],
+          },
+          { text: "answer 3", toolCalls: [] },
+        ],
+      });
+
+      expect(run.events.at(-1)?.kind).toBe("completed");
+      expect(summaries).toBe(1);
+      expect(run.events.some((event) => event.kind === "context-compacted")).toBe(false);
+      expect(run.transcripts.load(sessionId)?.compactions).toEqual([]);
+      const thirdTurnSteps = run.requests.filter(
+        (request) =>
+          request.tools.length > 0 && request.history.some((message) => message.text === "third"),
+      );
+      expect(thirdTurnSteps).toHaveLength(3);
+      for (const step of thirdTurnSteps) {
+        expect(step.history[0]?.text).toContain("left out to fit");
+      }
+    });
   });
 
   it("offers no compaction on a Chat or Work connection, whose history the host plans", async () => {
