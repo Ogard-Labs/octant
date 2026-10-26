@@ -136,8 +136,9 @@ const NAMED_KEYS: Readonly<Record<string, string>> = {
 
 /** The keysym for a key name, or undefined for one this desktop does not map. */
 export function hostLocalKeysym(key: string): string | undefined {
-  const named = NAMED_KEYS[key];
-  if (named !== undefined) return named;
+  // An own property only: `constructor` or `toString` would otherwise name
+  // an inherited function, whose source text would reach the shell.
+  if (Object.hasOwn(NAMED_KEYS, key)) return NAMED_KEYS[key];
   if (/^[A-Za-z0-9]$/.test(key)) return key;
   if (/^F([1-9]|1[0-2])$/.test(key)) return key;
   return undefined;
@@ -161,7 +162,8 @@ export function translateHostLocalInput(
   const point = (x: number, y: number): string | undefined => {
     const column = Math.floor(x);
     const row = Math.floor(y);
-    if (column >= screen.width || row >= screen.height) return undefined;
+    if (!Number.isSafeInteger(column) || !Number.isSafeInteger(row)) return undefined;
+    if (column < 0 || row < 0 || column >= screen.width || row >= screen.height) return undefined;
     return `${column} ${row}`;
   };
   switch (event.kind) {
@@ -184,6 +186,8 @@ export function translateHostLocalInput(
     case "scroll": {
       const at = point(event.x, event.y);
       if (at === undefined) return { kind: "refused", reason: "outside-screen" };
+      if (!Number.isSafeInteger(event.deltaX) || !Number.isSafeInteger(event.deltaY))
+        return { kind: "refused", reason: "invalid-scroll" };
       const clicks = (delta: number) =>
         Math.min(
           MAX_SCROLL_CLICKS,

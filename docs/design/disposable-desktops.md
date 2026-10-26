@@ -62,7 +62,9 @@ somewhere that holds neither.
   macOS (`apps/desktop/src/computerUseDesktopService.ts`). A headless host has
   no broker, so `apps/server/src/wiring/computerUse.ts` builds no tool service
   and the runtime reports the lease service's destination: `no-destination` on
-  a Mac without a screen, `no-provider-configured` elsewhere.
+  a Mac without a screen and on a Linux host whose host-local provider is
+  ready (a leasable provider is not a screen the runtime drives),
+  `no-provider-configured` elsewhere.
 - **Command set.** `ComputerControlCommand` has `apps`, `launch`, `windows`,
   `observe`, `click` (by element index, or by `x`/`y` on a screenshot for an
   image-capable model), `type`, `press`, `scroll`, and `stop`. The older
@@ -535,7 +537,12 @@ Rules this slice resolved:
   lease directory are absent. The namespace and the tag a desktop was made
   under are recorded in its lease directory beside `home` and `inbox`, never
   inside them, so the desktop cannot rewrite what the host trusts to find and
-  reap it. `stop` opens up directories a desktop made unwritable before it
+  reap it. The namespace is recorded with its init's PID, start time, and boot,
+  and counts as the desktop's only while that init runs: namespace numbers are
+  reused once freed (one recurred many times over 300 Bubblewrap launches), so
+  a number alone could make `stop` kill, or wait forever on, another program's
+  processes after a crash or reboot. The kernel kills every process in a PID
+  namespace before its init exits. `stop` opens up directories a desktop made unwritable before it
   deletes them.
 - **No clock of its own.** A host-local desktop does not bill and has no
   provider-side expiry. `extend` succeeds while it is running and fails once it
@@ -543,8 +550,9 @@ Rules this slice resolved:
 - **Frames and input are bounded.** A frame's PNG header is read before
   anything else, and a frame wider or taller than the screen is refused. A
   reply line over 64 bytes, a frame over the screen's uncompressed size, a
-  reply nobody asked for, or a request unanswered for 10 seconds breaks the
-  channel for good. Pointer input outside the screen and keys outside a closed
+  reply nobody asked for (only the desktop's first `ready` line may arrive
+  unasked, and a frame's buffer is allocated only for a waiting request), or a
+  request unanswered for 10 seconds breaks the channel for good. Pointer input outside the screen and keys outside a closed
   keysym map refuse; typed text crosses as base64.
 - **Control and delivery refuse.** Every `octant_computer` command refuses
   `unsupported` until slice 4 binds agent control, and `deliver` refuses until

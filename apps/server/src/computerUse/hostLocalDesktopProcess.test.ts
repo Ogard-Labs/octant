@@ -11,6 +11,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { spawn } from "node:child_process";
 import { createServer, type AddressInfo } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
@@ -127,12 +128,40 @@ async function capsuleOutput(
   return output;
 }
 
+/** The PID namespace the host recorded for a desktop, without its init's identity. */
+function recordedNamespace(directory: string, leaseId: DesktopLeaseId): string {
+  const record = readFileSync(
+    join(directory, "desktops", String(leaseId), "pid-namespace"),
+    "utf8",
+  );
+  return /^pid:\[[0-9]+\]/.exec(record)?.[0] ?? "";
+}
+
+/** The PID namespace of the child `pid` started in its own namespace. */
+function otherNamespaceOf(pid: number | undefined): string | undefined {
+  for (const name of readdirSync("/proc")) {
+    if (!/^[0-9]+$/.test(name)) continue;
+    try {
+      const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+      if (stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1] === String(pid)) {
+        return readlinkSync(`/proc/${name}/ns/pid`);
+      }
+    } catch {
+      // exited
+    }
+  }
+  return undefined;
+}
+
+/** Processes still running in a PID namespace; a zombie waiting to be reaped runs nothing. */
 function namespaceMembers(namespace: string): number {
   let members = 0;
   for (const name of readdirSync("/proc")) {
     if (!/^[0-9]+$/.test(name)) continue;
     try {
-      if (readlinkSync(`/proc/${name}/ns/pid`) === namespace) members += 1;
+      if (readlinkSync(`/proc/${name}/ns/pid`) !== namespace) continue;
+      const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+      if (stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0] !== "Z") members += 1;
     } catch {
       // exited, or another user's
     }
@@ -227,6 +256,72 @@ describe("host-local desktop capsule under real Bubblewrap", () => {
     }
   });
 
+  it.runIf(canRunBwrap)(
+    "never stops a process in another namespace that reuses a dead desktop's namespace number",
+    async () => {
+      const { directory, port } = fixture();
+      const leaseId = decodeDesktopLeaseId(randomUUID());
+      const launched = await port.launch({
+        leaseId,
+        hostTag,
+        program: "sh",
+        args: ["-c", "read -r go"],
+        output: () => undefined,
+        signal: new AbortController().signal,
+      });
+      if (launched.status !== "launched") throw new Error("not launched");
+      // The host dies: its desktop dies with it, and its lease directory and
+      // receipt are left for the next start to clean up.
+      const [receiptName] = readdirSync(join(directory, "receipts"));
+      const receipt = JSON.parse(
+        readFileSync(join(directory, "receipts", receiptName ?? ""), "utf8"),
+      ) as { readonly pid: number };
+      process.kill(-receipt.pid, "SIGKILL");
+      await launched.desktop.exited;
+      // Namespace numbers are reused once freed. Another program's namespace
+      // now carries the number recorded for the dead desktop.
+      const other = spawn(
+        DEFAULT_BWRAP_PATH,
+        [
+          "--unshare-all",
+          "--die-with-parent",
+          "--ro-bind",
+          "/",
+          "/",
+          "--proc",
+          "/proc",
+          "sleep",
+          "60",
+        ],
+        { stdio: "ignore" },
+      );
+      try {
+        let reused: string | undefined;
+        for (let tries = 0; tries < 100 && reused === undefined; tries += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          reused = otherNamespaceOf(other.pid);
+        }
+        if (reused === undefined) throw new Error("the other program never entered a namespace");
+        const record = join(directory, "desktops", String(leaseId), "pid-namespace");
+        writeFileSync(record, readFileSync(record, "utf8").replace(/pid:\[[0-9]+\]/, reused));
+
+        const again = createHostLocalDesktopLaunch({
+          directory,
+          hostTag,
+          platform: "linux",
+          provisioning: () => false,
+          stopTimeoutMs: 2_000,
+        });
+        await expect(again.stop(leaseId)).resolves.toEqual({ status: "released" });
+        await expect(again.inspect(leaseId)).resolves.toEqual({ status: "gone" });
+        expect(namespaceMembers(reused)).toBeGreaterThan(0);
+        expect(other.exitCode).toBeNull();
+      } finally {
+        other.kill("SIGKILL");
+      }
+    },
+  );
+
   it.runIf(process.platform === "linux")(
     "refuses to launch for a lease the host is not provisioning",
     async () => {
@@ -311,10 +406,7 @@ describe("host-local desktop under real Bubblewrap and Xvfb", () => {
       });
       expect(acquired.status).toBe("acquired");
       if (acquired.status !== "acquired") return;
-      const namespace = readFileSync(
-        join(directory, "desktops", String(leaseId), "pid-namespace"),
-        "utf8",
-      );
+      const namespace = recordedNamespace(directory, leaseId);
       expect(namespaceMembers(namespace)).toBeGreaterThan(1);
 
       const opened = await provider.screen(acquired.handle);
@@ -358,10 +450,7 @@ describe("host-local desktop under real Bubblewrap and Xvfb", () => {
       expect(acquired.status).toBe("acquired");
       if (acquired.status !== "acquired") return;
       const leaseId = acquired.lease.leaseId;
-      const namespace = readFileSync(
-        join(directory, "desktops", String(leaseId), "pid-namespace"),
-        "utf8",
-      );
+      const namespace = recordedNamespace(directory, leaseId);
       expect(namespaceMembers(namespace)).toBeGreaterThan(1);
 
       const after = hostOver(connection, directory);

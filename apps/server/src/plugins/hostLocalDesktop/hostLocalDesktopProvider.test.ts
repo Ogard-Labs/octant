@@ -278,10 +278,25 @@ describe("host-local desktop provider", () => {
       status: "refused",
       reason: "outside-screen",
     });
-    await expect(screen.input({ kind: "key", action: "down", key: "$(reboot)" })).resolves.toEqual({
-      status: "refused",
-      reason: "unsupported-key",
-    });
+    for (const key of ["$(reboot)", "constructor", "__proto__", "toString"]) {
+      await expect(screen.input({ kind: "key", action: "down", key })).resolves.toEqual({
+        status: "refused",
+        reason: "unsupported-key",
+      });
+    }
+    for (const [x, y] of [
+      [-1, 0],
+      [0, Number.NaN],
+      [Number.POSITIVE_INFINITY, 0],
+    ] as const) {
+      await expect(screen.input({ kind: "pointer", action: "move", x, y })).resolves.toEqual({
+        status: "refused",
+        reason: "outside-screen",
+      });
+    }
+    await expect(
+      screen.input({ kind: "scroll", x: 1, y: 1, deltaX: 0, deltaY: Number.NaN }),
+    ).resolves.toEqual({ status: "refused", reason: "invalid-scroll" });
     expect(desktop?.lines).toHaveLength(5);
     expect(hostLocalKeysym("F12")).toBe("F12");
     expect(hostLocalKeysym("F13")).toBeUndefined();
@@ -313,6 +328,18 @@ describe("host-local desktop provider", () => {
     await expect(screen.input({ kind: "pointer", action: "move", x: 1, y: 1 })).resolves.toEqual({
       status: "not-connected",
     });
+  });
+
+  it("stops trusting a desktop that answers a request twice", async () => {
+    const { port } = fakeLaunchPort({
+      reply: (line) => (line.startsWith("move") ? encoder.encode("ok\nok\n") : undefined),
+    });
+    const screen = await screenOf(createHostLocalDesktopProvider(port));
+    await expect(screen.input({ kind: "pointer", action: "move", x: 1, y: 1 })).resolves.toEqual({
+      status: "delivered",
+    });
+    // The extra reply would otherwise answer the next request in its place.
+    await expect(screen.frame()).resolves.toEqual({ status: "not-connected" });
   });
 
   it("refuses every agent command and every delivery until those slices bind them", async () => {

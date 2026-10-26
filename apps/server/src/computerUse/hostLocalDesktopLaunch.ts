@@ -221,9 +221,9 @@ export function createHostLocalDesktopLaunch(
       const receipt = await persistProcessReceipt(receipts, String(request.leaseId), pid);
       await receipt.ready;
       running.set(String(request.leaseId), { pid, identity, receipt });
-      const namespace = await ownNamespaceOf(pid, request.signal);
+      const namespace = await ownNamespaceOf(pid, request.signal, () => hasExited);
       if (namespace === undefined) throw new Error("The desktop never entered its own namespace.");
-      writeFileSync(namespaceFile(request.leaseId), namespace, { mode: 0o600 });
+      writeFileSync(namespaceFile(request.leaseId), formatNamespace(namespace), { mode: 0o600 });
     } catch {
       await stop(request.leaseId);
       return request.signal.aborted
@@ -278,12 +278,13 @@ export function createHostLocalDesktopLaunch(
         );
       }
       // The capsule's PID namespace dies with its init, which Bubblewrap
-      // kills with its parent. Anything left in it is killed directly, and a
-      // namespace that still holds a process keeps the lease unreleased.
+      // kills with its parent, and the kernel kills everything left in it,
+      // nested namespaces included. An init that outlives that is killed
+      // directly, and one that survives keeps the lease unreleased.
       const namespace = readNamespace(namespaceFile(leaseId));
-      if (namespace !== undefined && !(await namespaceEmpties(namespace, stopTimeoutMs))) {
-        for (const pid of namespaceMembers(namespace)) killQuietly(pid);
-        if (!(await namespaceEmpties(namespace, stopTimeoutMs))) {
+      if (namespace !== undefined && !(await namespaceEnds(namespace, stopTimeoutMs))) {
+        if (namespaceAlive(namespace)) killQuietly(namespace.init);
+        if (!(await namespaceEnds(namespace, stopTimeoutMs))) {
           return { status: "failed", reason: "still-running" };
         }
       }
@@ -304,8 +305,7 @@ export function createHostLocalDesktopLaunch(
       if (running.has(String(leaseId))) return { status: "present" };
       if ((await receiptsFor(leaseId)).length > 0) return { status: "present" };
       const namespace = readNamespace(namespaceFile(leaseId));
-      if (namespace !== undefined && namespaceMembers(namespace).length > 0)
-        return { status: "present" };
+      if (namespace !== undefined && namespaceAlive(namespace)) return { status: "present" };
       if (existsSync(leaseDirectory(leaseId))) return { status: "present" };
       return { status: "gone" };
     } catch {
@@ -357,36 +357,71 @@ function removeLeaseDirectory(directory: string): void {
   rmSync(directory, { recursive: true, force: true });
 }
 
-function readNamespace(path: string): string | undefined {
+/**
+ * A desktop's PID namespace, named by its init process. Namespace numbers are
+ * reused once freed (measured: the same `pid:[N]` recurred many times over 300
+ * Bubblewrap launches, and every boot restarts them), so the number alone can
+ * name another program's namespace after the desktop is gone. Its init's start
+ * time and the boot it started in say whether the namespace is still the
+ * desktop's: a PID namespace lives exactly as long as its init.
+ */
+interface DesktopNamespace {
+  readonly namespace: string;
+  readonly init: number;
+  readonly started: string;
+  readonly boot: string;
+}
+
+function formatNamespace(namespace: DesktopNamespace): string {
+  return `${namespace.namespace} ${namespace.init} ${namespace.started} ${namespace.boot}\n`;
+}
+
+function readNamespace(path: string): DesktopNamespace | undefined {
+  let value: string;
   try {
-    const value = readFileSync(path, "utf8").trim();
-    return /^pid:\[[0-9]+\]$/.test(value) ? value : undefined;
+    value = readFileSync(path, "utf8").trim();
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
+  const match = /^(pid:\[[0-9]+\]) ([0-9]+) ([0-9]+) ([0-9a-f-]{36})$/.exec(value);
+  if (match === null) return undefined;
+  const [, namespace = "", init = "", started = "", boot = ""] = match;
+  return { namespace, init: Number(init), started, boot };
 }
 
-function processEntries(): ReadonlyArray<string> {
-  return readdirSync("/proc").filter((name) => /^[0-9]+$/.test(name));
+function bootId(): string {
+  return readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim();
 }
 
-/** Processes in a PID namespace. Unreadable entries belong to other users, never to a desktop. */
-function namespaceMembers(namespace: string): ReadonlyArray<number> {
-  const members: Array<number> = [];
-  for (const name of processEntries()) {
-    try {
-      if (readlinkSync(`/proc/${name}/ns/pid`) === namespace) members.push(Number(name));
-    } catch {
-      // exited, or not ours
-    }
+/** A process's `/proc` stat fields after its command name, or undefined once it is reaped. */
+function statFields(pid: number | string): ReadonlyArray<string> | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    return stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ESRCH") return undefined;
+    throw error;
   }
-  return members;
 }
 
-async function namespaceEmpties(namespace: string, timeoutMs: number): Promise<boolean> {
+/**
+ * Whether a process of the desktop's namespace still runs. The kernel kills
+ * every other process in it before its init exits, so an init that is gone or
+ * a zombie means none does. A zombie waits on whichever process adopted it,
+ * which on a host whose init never reaps would otherwise hold every release.
+ */
+function namespaceAlive(namespace: DesktopNamespace): boolean {
+  if (namespace.boot !== bootId()) return false;
+  const fields = statFields(namespace.init);
+  if (fields === undefined || fields[0] === "Z" || fields[0] === "X") return false;
+  return fields[19] === namespace.started;
+}
+
+async function namespaceEnds(namespace: DesktopNamespace, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
-  while (namespaceMembers(namespace).length > 0) {
+  while (namespaceAlive(namespace)) {
     if (Date.now() >= deadline) return false;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -396,19 +431,26 @@ async function namespaceEmpties(namespace: string, timeoutMs: number): Promise<b
 /**
  * The PID namespace of the launch's capsule: Bubblewrap's child, which is the
  * namespace's init. A launch whose child shares the host's namespace never
- * entered a capsule, and counts as failed.
+ * entered a capsule, and counts as failed. Once the launch has exited its PID
+ * may be reused, so the search stops there rather than adopt a stranger's child.
  */
-async function ownNamespaceOf(pid: number, signal: AbortSignal): Promise<string | undefined> {
+async function ownNamespaceOf(
+  pid: number,
+  signal: AbortSignal,
+  hasExited: () => boolean,
+): Promise<DesktopNamespace | undefined> {
   const host = readlinkSync("/proc/self/ns/pid");
+  const boot = bootId();
   const deadline = Date.now() + NAMESPACE_TIMEOUT_MS;
-  while (Date.now() < deadline && !signal.aborted) {
-    for (const name of processEntries()) {
+  while (Date.now() < deadline && !signal.aborted && !hasExited()) {
+    for (const name of readdirSync("/proc").filter((entry) => /^[0-9]+$/.test(entry))) {
       try {
-        const stat = readFileSync(`/proc/${name}/stat`, "utf8");
-        const parent = stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1];
-        if (parent !== String(pid)) continue;
+        const fields = statFields(name);
+        if (fields?.[1] !== String(pid)) continue;
+        const started = fields[19];
         const namespace = readlinkSync(`/proc/${name}/ns/pid`);
-        return namespace === host ? undefined : namespace;
+        if (namespace === host || started === undefined) return undefined;
+        return { namespace, init: Number(name), started, boot };
       } catch {
         // exited while being read
       }

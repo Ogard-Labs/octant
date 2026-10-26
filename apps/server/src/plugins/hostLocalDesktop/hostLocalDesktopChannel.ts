@@ -12,8 +12,6 @@
 
 /** No reply line is longer than this, including its newline. */
 const MAX_LINE_BYTES = 64;
-/** The desktop's unsolicited `ready` line is the only reply that may wait unclaimed. */
-const MAX_UNCLAIMED_REPLIES = 1;
 
 export type DesktopReply =
   | { readonly kind: "line"; readonly words: ReadonlyArray<string> }
@@ -29,7 +27,10 @@ export class DesktopStreamChannel {
   readonly #write: (bytes: Uint8Array) => Promise<{ readonly status: "written" | "closed" }>;
   readonly #maxFrameBytes: number;
   readonly #waiters: Array<Waiter> = [];
-  readonly #unclaimed: Array<DesktopReply> = [];
+  /** The desktop's unsolicited `ready` line, the only reply that may wait unclaimed. */
+  #unclaimed: DesktopReply | undefined;
+  /** Whether a reply has been claimed; after that every reply needs a request waiting. */
+  #claimed = false;
   #line: Uint8Array = new Uint8Array(0);
   #frame: { readonly bytes: Uint8Array; filled: number } | undefined;
   #broken = false;
@@ -96,7 +97,7 @@ export class DesktopStreamChannel {
     this.#broken = true;
     this.#line = new Uint8Array(0);
     this.#frame = undefined;
-    this.#unclaimed.length = 0;
+    this.#unclaimed = undefined;
     for (const waiter of this.#waiters.splice(0)) waiter(BROKEN);
   }
 
@@ -113,7 +114,8 @@ export class DesktopStreamChannel {
       return;
     }
     const size = words.length === 2 && /^[0-9]{1,9}$/.test(words[1] ?? "") ? Number(words[1]) : 0;
-    if (size < 1 || size > this.#maxFrameBytes) {
+    // A frame nobody asked for is refused before its buffer is allocated.
+    if (size < 1 || size > this.#maxFrameBytes || this.#waiters.length === 0) {
       this.close();
       return;
     }
@@ -122,8 +124,10 @@ export class DesktopStreamChannel {
 
   #await(timeoutMs: number, send: () => void): Promise<DesktopReply> {
     if (this.#broken) return Promise.resolve(BROKEN);
-    const unclaimed = this.#unclaimed.shift();
+    const unclaimed = this.#unclaimed;
     if (unclaimed !== undefined) {
+      this.#unclaimed = undefined;
+      this.#claimed = true;
       send();
       return Promise.resolve(unclaimed);
     }
@@ -149,14 +153,15 @@ export class DesktopStreamChannel {
   #deliver(reply: DesktopReply): void {
     const waiter = this.#waiters.shift();
     if (waiter !== undefined) {
+      this.#claimed = true;
       waiter(reply);
       return;
     }
-    if (this.#unclaimed.length >= MAX_UNCLAIMED_REPLIES) {
+    if (this.#claimed || this.#unclaimed !== undefined) {
       this.close();
       return;
     }
-    this.#unclaimed.push(reply);
+    this.#unclaimed = reply;
   }
 }
 
