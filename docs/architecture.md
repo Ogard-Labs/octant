@@ -2421,7 +2421,7 @@ The provider layer is defined by `@octant/provider-sdk` and implemented in
 - **Registry.** Providers are multi-instance: each instance has a stable id,
   driver kind, configuration, readiness state, model list, capability report,
   and environment policy. A selected model is `{ hostId, providerInstanceId,
-  modelId }`, and the model picker is provider-first. Each Claude instance is
+modelId }`, and the model picker is provider-first. Each Claude instance is
   one account. An account is a provider instance with a display name, an
   accent, an Octant-assigned provider-owned state directory, and a
   sign-in command. Each CLI driver that supports more than one account
@@ -7542,7 +7542,7 @@ mechanisms are:
       the method and path are exactly one of these pairs, the path and query
       being already in canonical form (no scheme, authority, second slash, dot
       segment, backslash, control character, or fragment): `GET
-      /api/remote/hello`; `POST` `/api/remote/pairing`,
+/api/remote/hello`; `POST` `/api/remote/pairing`,
       `/api/remote/pairing/status`, `/api/remote/negotiate`,
       `/api/remote/auth/challenge`, `/api/remote/auth/session`,
       `/api/remote/auth/server-proxy-session`, `/api/remote/auth/sign-out`,
@@ -8315,7 +8315,7 @@ bun run verify     # paths:check, wiring:check, decisions:check, fmt:check, lint
   are newer,
   and hands the host it starts `OCTANT_WEB_DIST_PATH=apps/web/dist`, so an
   agent's Canvas preview returns a picture on a development host; `octant web
-  --dev` does both as well.
+--dev` does both as well.
 - The server is composed by a root in `apps/server/src/server.ts` that calls
   the per-area wiring modules under `apps/server/src/wiring/` in a fixed
   order, and every module declares the reach it has as a `Pick` of the
