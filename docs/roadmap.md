@@ -108,6 +108,10 @@ Hardening in progress for the preview:
   delivery-target sync is next, with the same authority model as GitHub. Chat or Work Linear browsing is a separate
   host mode-policy change, not a plugin side effect. Not a connector/OAuth
   marketplace.
+- **Connectors** — opened on 2026-10-20: MCP servers added by hand, imported
+  from other tools on this Mac, or chosen from a bundled catalog, with sign-in
+  through the MCP authorization flow, under the architecture's
+  [connector rules](architecture.md#extensions-and-skills).
 - **Headless host and multi-host federation** — run the server and web client
   without Electron on macOS or Linux; pair desktop and web clients with several
   hosts, show an `All Hosts` view, and choose the destination host per new
@@ -126,9 +130,12 @@ Hardening in progress for the preview:
 
 ## Later
 
-Explicitly deferred by the [Current Release Boundary](../AGENTS.md#current-release-boundary), except where a later
-decision opens a slice. Each remaining item needs its own design before work
-starts.
+Outside the technical preview. Except for Windows, which stays sequenced
+behind the preview, these are post-preview tracks the maintainer authorized on
+2026-10-26 under the
+[Current Release Boundary](../AGENTS.md#current-release-boundary). Each is
+design-first: work starts only once its owning specification documents its
+authority, privacy, and release boundaries.
 
 - **Windows desktop confinement, credentials, and packaging** — the identical
   desktop app (0058) sequences Windows after the macOS technical preview and
@@ -140,24 +147,28 @@ starts.
   push notifications, native capture, voice input, and public store
   distribution for the Expo client. Design:
   [mobile-maturity-phases.md](mobile-maturity-phases.md).
-- **Hosted relay** — only if LAN, Tailscale, or SSH cannot satisfy a concrete
-  reachability need; local-first remote access comes first. Research:
+- **Hosted relay** — ciphertext-only and holding no authority; LAN, Tailscale,
+  and SSH stay the default remote paths. Research:
   [remote-path-sufficiency.md](remote-path-sufficiency.md).
-- **Connector / OAuth marketplace** — OAuth, revocation, publisher trust, and
-  data boundaries are much larger than plugin distribution. Start gates:
-  [release-boundary holds](release-boundary-holds.md#connector--oauth-marketplace).
 - **Full LSP / extension host / debugger** — Monaco and explicit external-editor
   handoff remain primary; a full IDE would run as a separately launched
-  companion. Start gates:
+  companion. Design gates:
   [release-boundary holds](release-boundary-holds.md#full-lsp--extension-host--debugger).
-- **Apple devices and public distribution** — deeper physical-device tooling
-  and App Store submission beyond the internal TestFlight remote-client track. Design:
+- **Apple devices and distribution of a person's own apps** — physical-device
+  tooling first, then TestFlight and App Store submission, beyond Octant's own
+  internal TestFlight remote-client track. Design:
   [apple-devices-distribution.md](apple-devices-distribution.md).
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:
   [enterprise-provider-identity.md](enterprise-provider-identity.md).
-- **Remote SSH development environments** and **live guest sharing** — each
-  waits on the foundation named in its own design note.
+- **Disposable Linux desktops for headless hosts** — short-lived desktops a
+  headless host can drive.
+- **Remote SSH development environments**.
+- **Third-party provider-driver plugins** — outside drivers admitted to the
+  provider catalog through the published seams.
+- **EU/GDPR compliance package** — pending legal review.
+- **Live guest sharing** — waits on the foundation named in its own design
+  note; not among the 2026-10-26 tracks.
 
 ## Not planned
 
