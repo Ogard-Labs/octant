@@ -138,6 +138,7 @@ export function wireAuthority(deps: AuthorityDependencies) {
         browserAuthority.canAccessWindow(windowId, thread, project.type)
       );
     },
+    onChanged: () => machineChangeFeed.publish(["tool-approvals"]),
   });
   const codeSessionAuthority = new CodeSessionAuthorityStore();
   const agentRunExecutionWindows = new Map<

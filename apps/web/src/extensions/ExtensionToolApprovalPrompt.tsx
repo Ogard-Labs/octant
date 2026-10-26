@@ -1,8 +1,12 @@
 import type { ExtensionClient } from "@octant/client-runtime/extension-client";
 import type { ExtensionToolApproval } from "@octant/contracts/extension-rpc";
-import { useEffect, useState } from "react";
-import { documentIsVisible, scheduleVisibleInterval } from "../polling/documentVisibility";
+import { useCallback, useEffect, useState } from "react";
+import {
+  THREAD_ACTIVITY_RECOVERY_MS,
+  useThreadActivityRevision,
+} from "../polling/ThreadActivityRevisions";
 import { samePollingData } from "../polling/samePollingData";
+import { useVisibleRefresh } from "../polling/useVisibleRefresh";
 import { ApprovalOutsideContentNote } from "../composer/ApprovalOutsideContentNote";
 import { OctantApprovalCard } from "../ui/base/OctantApprovalCard";
 import { OctantButton } from "../ui/base/OctantButton";
@@ -28,40 +32,38 @@ export function ExtensionToolApprovalPrompt(props: {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string>();
   const [pluginName, setPluginName] = useState<string>();
+  const revision = useThreadActivityRevision("toolApprovals");
+
+  // A different client or thread starts clean; a notice never clears the list.
   useEffect(() => {
-    if (client === undefined || threadId === undefined) {
-      setApprovals([]);
-      return;
-    }
-    const controller = new AbortController();
-    let inFlight = false;
-    const refresh = async () => {
-      if (!documentIsVisible() || inFlight) return;
-      inFlight = true;
+    setApprovals([]);
+  }, [client, threadId]);
+
+  const refresh = useCallback(
+    async (signal: AbortSignal) => {
+      if (client === undefined || threadId === undefined) return;
       try {
-        const listed = await client.listToolApprovals(controller.signal);
-        if (!controller.signal.aborted) {
-          const next = listed.filter((approval) => String(approval.threadId) === threadId);
-          setApprovals((current) => (samePollingData(current, next) ? current : next));
-        }
+        const listed = await client.listToolApprovals(signal);
+        if (signal.aborted) return;
+        const next = listed.filter((approval) => String(approval.threadId) === threadId);
+        setApprovals((current) => (samePollingData(current, next) ? current : next));
       } catch {
-        if (!controller.signal.aborted) {
+        if (!signal.aborted) {
           setApprovals((current) => (current.length === 0 ? current : []));
         }
-      } finally {
-        inFlight = false;
       }
-    };
-    const stop = scheduleVisibleInterval(
-      () => void refresh(),
-      turnActive ? ACTIVE_TOOL_APPROVAL_POLL_MS : IDLE_TOOL_APPROVAL_POLL_MS,
-      { runImmediately: true },
-    );
-    return () => {
-      controller.abort();
-      stop();
-    };
-  }, [client, threadId, turnActive]);
+    },
+    [client, threadId],
+  );
+  useVisibleRefresh(
+    refresh,
+    revision,
+    revision === undefined
+      ? turnActive
+        ? ACTIVE_TOOL_APPROVAL_POLL_MS
+        : IDLE_TOOL_APPROVAL_POLL_MS
+      : THREAD_ACTIVITY_RECOVERY_MS,
+  );
 
   const pending = approvals[0];
   const pendingPackageId = pending === undefined ? undefined : String(pending.packageId);

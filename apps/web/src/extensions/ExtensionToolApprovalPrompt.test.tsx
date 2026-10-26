@@ -5,6 +5,7 @@ import { decodeApprovalOutsideContent } from "@octant/contracts";
 import type { ExtensionToolApproval } from "@octant/contracts/extension-rpc";
 import { describe, expect, it, vi } from "vitest";
 import { ExtensionToolApprovalPrompt } from "./ExtensionToolApprovalPrompt";
+import { ThreadActivityRevisionsContext } from "../polling/ThreadActivityRevisions";
 
 const threadId = "44000000-0000-4000-8000-000000000001";
 const approvalId = "44000000-0000-4000-8000-000000000010";
@@ -189,5 +190,54 @@ describe("ExtensionToolApprovalPrompt", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("could not be sent");
     expect(screen.getByRole("button", { name: "Approve once" })).toBeEnabled();
+  });
+
+  it("re-reads on a tool-approval notice without waiting for its idle beat", async () => {
+    const extensionClient = client([]);
+    const second = approval({ approvalId: "44000000-0000-4000-8000-000000000099" });
+    const view = render(
+      <ThreadActivityRevisionsContext.Provider
+        value={{
+          browserCaptures: 0,
+          toolApprovals: 1,
+          threadFollowUps: 0,
+          threadMessageQueue: 0,
+        }}
+      >
+        <ExtensionToolApprovalPrompt
+          className="thread-column"
+          client={extensionClient}
+          threadId={threadId}
+          turnActive={false}
+        />
+      </ThreadActivityRevisionsContext.Provider>,
+    );
+    await waitFor(() =>
+      expect(vi.mocked(extensionClient.listToolApprovals)).toHaveBeenCalledTimes(1),
+    );
+
+    vi.mocked(extensionClient.listToolApprovals).mockResolvedValue([second]);
+    view.rerender(
+      <ThreadActivityRevisionsContext.Provider
+        value={{
+          browserCaptures: 0,
+          toolApprovals: 2,
+          threadFollowUps: 0,
+          threadMessageQueue: 0,
+        }}
+      >
+        <ExtensionToolApprovalPrompt
+          className="thread-column"
+          client={extensionClient}
+          threadId={threadId}
+          turnActive={false}
+        />
+      </ThreadActivityRevisionsContext.Provider>,
+    );
+
+    await waitFor(() =>
+      expect(vi.mocked(extensionClient.listToolApprovals)).toHaveBeenCalledTimes(2),
+    );
+    expect(await screen.findByRole("button", { name: "Approve once" })).toBeInTheDocument();
   });
 });

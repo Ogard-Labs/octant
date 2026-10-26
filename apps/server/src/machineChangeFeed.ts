@@ -1,8 +1,12 @@
 import {
+  BROWSER_CAPTURE_AGGREGATE_TYPE,
   CONTEXT_COMPACTION_EVENT_NAMES,
   IMAGE_JOB_AGGREGATE_TYPE,
   NATIVE_HARNESS_SESSION_AGGREGATE_TYPE,
   NATIVE_HARNESS_SESSION_EVENT_NAMES,
+  THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE,
+  THREAD_RETENTION_EVENT_NAMES,
+  THREAD_SIDE_TASKS_AGGREGATE_TYPE,
 } from "@octant/contracts";
 import {
   decodeMachineChangeFrame,
@@ -56,6 +60,11 @@ export class MachineChangeFeed {
     const topics = new Set<MachineChangeTopic>();
     for (const event of input.events) {
       for (const topic of topicsForEvent(event)) topics.add(topic);
+      if (this.#auxiliaryDurableListsChanged(event)) {
+        topics.add("browser-captures");
+        topics.add("thread-follow-ups");
+        topics.add("thread-message-queue");
+      }
       if (this.#approvalChanged(event)) {
         topics.add("chat-navigation");
         topics.add("work-navigation");
@@ -66,6 +75,22 @@ export class MachineChangeFeed {
       }
     }
     this.publish([...topics]);
+  }
+
+  /**
+   * Whether this event removes a thread's durable captures, follow-up offers,
+   * or message queue. A delete or purge must not leave those lists serving a
+   * thread that is gone; ordinary text deltas never land here, so they stay
+   * off the auxiliary topics.
+   */
+  #auxiliaryDurableListsChanged(event: {
+    readonly aggregateType: string;
+    readonly eventName?: string;
+  }): boolean {
+    return (
+      event.eventName === "chat.deleted@1" ||
+      event.eventName === THREAD_RETENTION_EVENT_NAMES.threadPurged
+    );
   }
 
   /**
@@ -212,6 +237,19 @@ function topicsForEvent(event: {
   readonly payload?: unknown;
 }): ReadonlyArray<MachineChangeTopic> {
   const { aggregateType } = event;
+  if (aggregateType === BROWSER_CAPTURE_AGGREGATE_TYPE) return ["browser-captures"];
+  if (
+    aggregateType === THREAD_SIDE_TASKS_AGGREGATE_TYPE ||
+    aggregateType === THREAD_FOLLOW_UP_SUGGESTIONS_AGGREGATE_TYPE
+  )
+    return ["thread-follow-ups"];
+  if (
+    aggregateType === NATIVE_HARNESS_SESSION_AGGREGATE_TYPE &&
+    (event.eventName === NATIVE_HARNESS_SESSION_EVENT_NAMES.followUpsSuggested ||
+      event.eventName === NATIVE_HARNESS_SESSION_EVENT_NAMES.followUpActivated)
+  )
+    return ["thread-follow-ups"];
+  if (aggregateType === "thread-message-queue") return ["thread-message-queue"];
   if (aggregateType === "project") {
     return ["projects", "chat-navigation", "work-navigation", "code-navigation"];
   }
