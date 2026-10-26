@@ -137,7 +137,10 @@ target. A changed key refuses every connection `host-key-changed` until the
 person confirms the new key from a local window. A destination may not begin
 with `-` or hold whitespace or a control character, because it is one argument
 of the SSH client and a leading `-` would be read as an option such as
-`-oProxyCommand`.
+`-oProxyCommand`. Its user and host may not begin with `-` either, and it holds
+no shell metacharacter such as `;`, `$`, `|`, a quote, or a backtick, because
+the client substitutes the host into a configured `ProxyCommand`; OpenSSH 9.6
+refuses the same names itself, and older clients pass them on.
 
 ### Transport
 

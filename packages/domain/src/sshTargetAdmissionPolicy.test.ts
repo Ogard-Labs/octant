@@ -426,8 +426,12 @@ describe("SSH target admission", () => {
 
   it("never admits on an attestation made on an earlier connection", () => {
     const stale: SshAttestation = { connectionId: previousConnection, facts: linuxFacts() };
-    for (const posture of CONFINED_POSTURES) {
-      expect(decideSshAdmission(request({ attestation: stale, posture }))).toEqual({
+    for (const posture of [...CONFINED_POSTURES, "full-access"] as const) {
+      expect(
+        decideSshAdmission(
+          request({ attestation: stale, posture, permissionPersistence: "project-default" }),
+        ),
+      ).toEqual({
         status: "refused",
         reason: "not-attested",
         posture,
@@ -435,13 +439,18 @@ describe("SSH target admission", () => {
     }
   });
 
-  it("refuses a connected target that holds no attestation yet", () => {
-    const { attestation: _attestation, ...withoutAttestation } = request();
-    expect(decideSshAdmission(withoutAttestation)).toEqual({
-      status: "refused",
-      reason: "not-attested",
-      posture: "approval-gated",
-    });
+  it("refuses a connected target that holds no attestation yet, remembered Full access included", () => {
+    for (const posture of [...CONFINED_POSTURES, "full-access"] as const) {
+      const { attestation: _attestation, ...withoutAttestation } = request({
+        posture,
+        permissionPersistence: "project-default",
+      });
+      expect(decideSshAdmission(withoutAttestation)).toEqual({
+        status: "refused",
+        reason: "not-attested",
+        posture,
+      });
+    }
   });
 
   it("refuses Full access unless it is remembered for the Project", () => {

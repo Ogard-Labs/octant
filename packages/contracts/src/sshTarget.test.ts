@@ -15,10 +15,32 @@ const target = {
 };
 
 describe("SSH target contracts", () => {
-  it("refuses a destination the SSH client would read as an option or split", () => {
+  it("accepts destinations as people type them and refuses one the SSH client would read as an option or hand to a shell", () => {
     const decode = Schema.decodeUnknownEither(SshTarget);
-    expect(decode(target)._tag).toBe("Right");
-    for (const destination of ["-oProxyCommand=sh", "dev box", "devbox\u0007", ""]) {
+    for (const destination of [
+      "devbox",
+      "build@devbox.example",
+      "build@dev-box-2.example",
+      "ssh://build@devbox.example:2222",
+      "ssh://[::1]:2222",
+      "fe80::1%eth0",
+    ]) {
+      expect(decode({ ...target, destination })._tag).toBe("Right");
+    }
+    for (const destination of [
+      "-oProxyCommand=sh",
+      "build@-oProxyCommand=sh",
+      "ssh://-oProxyCommand=sh",
+      "ssh://build@-oProxyCommand=sh",
+      "ssh://[-oProxyCommand=sh]",
+      "devbox$(id)",
+      "devbox;id",
+      "dev`id`box",
+      "dev box",
+      " devbox",
+      "devbox\u0007",
+      "",
+    ]) {
       expect(decode({ ...target, destination })._tag).toBe("Left");
     }
     expect(decode({ ...target, executorPath: "octant" })._tag).toBe("Left");

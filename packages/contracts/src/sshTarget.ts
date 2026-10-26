@@ -38,13 +38,18 @@ export type SshConnectionId = typeof SshConnectionId.Type;
  * The destination as the person would type it after `ssh`: an alias from
  * their SSH configuration, `user@host`, or an `ssh://` URI. It becomes one
  * argument of the SSH client, so it may not begin with `-`, where the client
- * would read it as an option such as `-oProxyCommand=…`, and it holds no
- * whitespace or control character.
+ * would read it as an option such as `-oProxyCommand=…`. Its user and host may
+ * not begin with `-` either, and it holds no whitespace, control character, or
+ * shell metacharacter: the client substitutes the host into a configured
+ * `ProxyCommand` through `%h`, where `user@-oX` or `host;id` would reach a
+ * shell or another program's options. OpenSSH 9.6 refuses the same names
+ * itself; older clients pass them on.
  */
 export const SshDestination = Schema.String.pipe(
   Schema.minLength(1),
   Schema.maxLength(512),
-  Schema.pattern(/^[^\s-]\S*$/u),
+  Schema.pattern(/^[^\s'"`$\\;&<>|(){}]+$/u),
+  Schema.filter((destination) => !/(?:^|[@/[])-/u.test(destination)),
   Schema.filter(holdsNoControlCharacter),
 );
 export type SshDestination = typeof SshDestination.Type;
