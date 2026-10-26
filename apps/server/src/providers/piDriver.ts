@@ -1032,11 +1032,14 @@ function makeConnection(
                 modelId: binding.modelId,
                 tools: input.tools ?? resumeIdentities.get(input.resumeCursor.value)?.tools ?? [],
               };
+        // Pi keeps the model a session was opened with, so a resume onto
+        // another one is refused rather than run on the old model unseen.
         if (
           identity === undefined ||
           identity.root !== projectRoot ||
           identity.mode !== mode ||
-          input.resumeCursor.value !== input.sessionId
+          input.resumeCursor.value !== input.sessionId ||
+          (input.modelId !== undefined && String(input.modelId) !== String(identity.modelId))
         ) {
           return Effect.fail(
             failure("stale-resume", "Pi resume identity does not match this Project."),

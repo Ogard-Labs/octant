@@ -3095,15 +3095,24 @@ refused as invalid usage. Unknown fields in a response are ignored; a known fiel
 the wrong type still fails the turn. The input tokens a request reports also
 calibrate the native harness's next size estimate: a model's real bytes-per-token,
 measured from the last call, is preferred over a flat four-bytes-per-token guess, so
-a filled window is caught before the endpoint has to refuse the request. ACP and Pi resume cursors carry a durable
-task binding, and resume supplies the currently allowed tool catalogue without
+a filled window is caught before the endpoint has to refuse the request. ACP, Pi,
+Claude Code, Codex, and OpenCode resume cursors carry a durable task binding
+(provider instance, Octant session, Project root, mode, and the model the session
+started on), written by the driver when the session starts and journaled with the
+turn, and resume supplies the currently allowed tool catalogue without
 reconstructing native history. Chat and Work reuse provider-owned sessions across
 follow-ups; Chat retries retain that identity and native scratch files. Native
 Chat editing refuses where rollback is unavailable, so it cannot replace the
 conversation behind the user's back. Resume refuses as `stale-resume` when the
 cursor's binding names another provider instance, Octant session, Project
-root, mode, or native id, and at most one live or starting process may own a
-native session per provider instance, refused before spawn otherwise
+root, mode, or native id, or, on OpenCode and Pi, whose sessions keep the model
+they started on, another model; the check runs before the runtime is asked or any live
+session is retired. A cursor written before its driver recorded a binding is
+still checked by the driver against the runtime's own session (its folder and
+history). A child run's completed turn restates the native id without the
+binding; the run keeps the bound cursor it started with. At most one live or
+starting process may own a native session per provider instance, refused before
+spawn otherwise
 ([0157](decisions/0157-native-resume-keeps-a-durable-identity.md)). A separate replay checkpoint imports existing Code reports on
 upgrade without replaying unrelated purged usage. The provider and model are
 those recorded when the turn started, including after a later handoff. These
@@ -3717,9 +3726,15 @@ prompt is therefore built to be appended, never rewritten:
   held. A session opened by `start` holds nothing. A compaction, automatic
   (`context-compacted`, or a usage report with `promptRetention: "compacted"`)
   or requested, drops the record, because the runtime keeps only a share of
-  earlier prompts Octant cannot see. The record lives in memory, so after a
-  restart the first turn sends the standing context once more: one extra copy,
-  never a missing one.
+  earlier prompts Octant cannot see. The record is kept in the host data
+  directory (`providers/held-turn-context.json`, owner-only): provider session
+  ids and SHA-256 digests of standing blocks, never their text, for at most the
+  256 most recently changed sessions. A resumed session's first turn after a
+  restart therefore sends only what is new, as the runtime's own history
+  survived the restart too. Every change that drops a holding (a fresh start, a
+  failed restatement, a compaction) is written synchronously before the next turn is sent, and a write
+  that fails removes the file; a missing, unreadable, or malformed file holds
+  nothing, which costs one extra copy, never a missing one.
 - **What the journal and meter say.** The Chat and Work context plans still list
   a held block as included: it is in the window, delivered by an earlier turn. A
   Code turn's window breakdown counts only the copy this turn actually sent, so
@@ -3729,6 +3744,13 @@ Turn usage keeps the provider's cache-read and cache-write counters
 (`cacheReadInputTokens`, `cacheWriteInputTokens`), so the effect is measurable
 on the existing turn metrics: on a multi-turn Claude or Codex thread, each
 later turn's uncached input no longer carries the standing context again.
+`apps/server/src/providers/heldTurnContext.benchmark.test.ts` measures it on a
+real Code session (opt-in, it spends the signed-in account's turns): the same
+four Plan turns, with a resume before the third, are run once sending the whole
+standing context every turn and once sending only what the session does not
+hold, and each turn's time to first text, turn time, input, uncached input,
+cache hit, and standing characters sent are printed side by side. No figures
+are recorded here until that run has been made on a maintainer's machine.
 
 Agent runs and host-owned conversations (direct endpoints, the native harness,
 Ollama) are unchanged apart from the framing: a host-owned conversation is

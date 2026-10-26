@@ -796,7 +796,18 @@ export function createAgentRunSessionRuntime(
       if (cursor === undefined) return true;
       if (!validResumeCursor(cursor, { driver, run, projectRoot, sessionId: providerSessionId }))
         return false;
-      record = { ...record, resumeCursor: cursor };
+      // A completed turn restates the native id without the binding the start
+      // recorded; keeping the bound cursor for that same session is what lets
+      // a later resume refuse one carried to another task.
+      const held = record.resumeCursor;
+      const kept =
+        cursor.binding === undefined &&
+        held?.binding !== undefined &&
+        held.driverKind === cursor.driverKind &&
+        held.value === cursor.value
+          ? held
+          : cursor;
+      record = { ...record, resumeCursor: kept };
       try {
         return options.sessionStore?.write(run, record) ?? true;
       } catch {

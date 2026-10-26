@@ -36,6 +36,7 @@ import {
 } from "./openCodeManagedTools";
 import type { OpenCodeProcessPort, OpenCodeServerConnection } from "./openCodeProcess";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
 export interface OpenCodeSessionRecord {
   readonly id: string;
@@ -1807,7 +1808,17 @@ function makeConnection(
               pendingBySource.delete(session.id);
               return Effect.succeed({
                 sessionId: input.sessionId,
-                resumeCursor: { driverKind: "opencode" as const, value: session.id },
+                resumeCursor: {
+                  driverKind: "opencode" as const,
+                  value: session.id,
+                  binding: providerResumeBinding({
+                    instanceId: options.instanceId,
+                    sessionId: input.sessionId,
+                    projectRoot,
+                    mode,
+                    modelId: input.modelId,
+                  }),
+                },
               });
             }),
             Effect.tapError(() => Effect.promise(() => releaseManagedTools(state))),
@@ -1822,6 +1833,23 @@ function makeConnection(
         input.resumeCursor.driverKind !== "opencode"
           ? Effect.fail(fail("stale-resume", "Provider resume cursor does not belong to OpenCode."))
           : Effect.suspend(() => {
+              // The session id alone names no Octant session, folder, mode, or
+              // model; the binding recorded at start does. OpenCode sessions
+              // keep the model they were opened with, so a cursor carried to
+              // another one is refused before anything is retired or started.
+              if (
+                resumeBindingRefuses(input.resumeCursor, {
+                  instanceId: options.instanceId,
+                  sessionId: input.sessionId,
+                  projectRoot,
+                  mode,
+                  fixedModelId: input.modelId,
+                })
+              ) {
+                return Effect.fail(
+                  fail("stale-resume", "The saved session belongs to another task or Project."),
+                );
+              }
               if (
                 sessionSetupInFlight ||
                 [...sessionsBySource.values()].some(
@@ -1898,10 +1926,21 @@ function makeConnection(
                       fail("stale-resume", "Provider session belongs to a different Project root."),
                     );
                   }
+                  // Every prompt names its model, so the resumed session runs
+                  // on the thread's. The session's own record is only a
+                  // fallback: 1.x does not report one, and a placeholder would
+                  // send each prompt to a model that does not exist.
                   const resumedModel =
-                    session.model === undefined
-                      ? "unknown/unknown"
-                      : `${session.model.providerID}/${session.model.id}`;
+                    input.modelId ??
+                    input.resumeCursor.binding?.modelId ??
+                    (session.model === undefined
+                      ? undefined
+                      : `${session.model.providerID}/${session.model.id}`);
+                  if (resumedModel === undefined) {
+                    return Effect.fail(
+                      fail("stale-resume", "Provider session does not say which model it runs."),
+                    );
+                  }
                   state.modelId = resumedModel;
                   state.sourceId = session.id;
                   sessionsBySource.set(session.id, state);

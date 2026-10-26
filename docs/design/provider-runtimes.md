@@ -167,6 +167,13 @@ runtime that cannot answer (observed with 2.0.22 on macOS as HTTP 500
 without the stand-in) reports `incompatible` with its models listed and
 every capability unsupported, and no turn is offered.
 
+Every OpenCode prompt names its model, so a resumed session runs on the
+thread's model, the one its cursor's binding records. The session record is
+only a fallback: 1.x does not report a model on it, and the adapter once sent
+each prompt of such a resumed session to a placeholder model that does not
+exist. When neither the resume, its binding, nor the session names a model,
+the resume is refused as `stale-resume` rather than guessed.
+
 ## Pi
 
 Octant launches Pi in RPC mode with `--no-extensions`, which since Pi 0.99
@@ -179,7 +186,9 @@ tool attestation, approval bridge, and confinement Octant verified: 0.85.1 and
 unsupported, and a session that offers tools on it is refused. Only 0.85.1 is
 verified for warm reuse of a settled process; other releases close it and
 cold-resume the native history. Pi 1.1.0 adds `aborted` to `agent_settled`:
-an aborted run is reported as interrupted, never as completed. Pi 1.0.3
+an aborted run is reported as interrupted, never as completed. A Pi session
+runs on the model it was opened with, so a resume that names another is refused
+as `stale-resume` rather than run on the old model unseen. Pi 1.0.3
 renamed the Azure provider from `azure-openai-responses` to `azure` and kept
 its `AZURE_OPENAI_*` variables, so a thread holds them under either name.
 
@@ -433,6 +442,10 @@ failing the check with their typed states.
   `packages/domain/src/providerRuntimeIntegration.test.ts` for the derived
   context facts, and `apps/web/src/providers/ProviderRuntimeIntegrationFacts.test.tsx`
   and `apps/web/src/context/ComposerContextMeter.test.tsx` for how they show.
+- Held standing context, before and after on a real Claude Code or Codex Code
+  session: `apps/server/src/providers/heldTurnContext.benchmark.test.ts`
+  (opt-in through `OCTANT_HELD_CONTEXT_MEASURE_CLAUDE=1` or
+  `OCTANT_HELD_CONTEXT_MEASURE_CODEX=1`, run with `bun run test:evidence`).
 - Sign-in dialects: `apps/server/src/providers/directEndpointSubscriptionOAuth.test.ts`,
   `chatGptPlanProfile.test.ts`, `packages/domain/src/subscriptionOAuthCatalog.test.ts`,
   and `packages/provider-sdk/src/subscriptionOAuthConformance.test.ts`.

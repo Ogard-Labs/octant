@@ -258,6 +258,8 @@ function fakeProvider(options?: {
   /** Makes teardown asynchronous, as a real control-channel round trip is. */
   readonly shutdownDelayMs?: number;
   readonly resumable?: boolean;
+  /** The start's cursor records what the session was opened for, as first-class drivers do. */
+  readonly boundCursor?: boolean;
   readonly steerable?: boolean;
   readonly completeOnSteer?: boolean;
   readonly changedResumeIdentity?: boolean;
@@ -285,9 +287,26 @@ function fakeProvider(options?: {
     start: (input: ProviderSessionStart) => {
       starts.push(input);
       executionPolicies.push(input.executionPolicy);
+      const acquiredFor = acquired.at(-1);
+      const started =
+        options?.boundCursor && acquiredFor !== undefined
+          ? {
+              ...cursor,
+              binding: {
+                instanceId: acquiredFor.instanceId,
+                sessionId: input.sessionId,
+                projectRoot: acquiredFor.projectRoot,
+                mode: acquiredFor.mode ?? ("code" as const),
+                modelId: input.modelId,
+              },
+            }
+          : cursor;
       return wedge === "start"
         ? Effect.never
-        : Effect.succeed({ sessionId, ...(options?.resumable ? { resumeCursor: cursor } : {}) });
+        : Effect.succeed({
+            sessionId,
+            ...(options?.resumable ? { resumeCursor: started } : {}),
+          });
     },
     resume: (input: ProviderSessionResume) => {
       resumes.push(input);
@@ -2117,6 +2136,31 @@ describe("durable child provider identity", () => {
     store.sessions.write(run, legacyRecord);
     expect(await second.checkResume?.(run)).toMatchObject({ status: "refused" });
     expect(nextProvider.acquired).toEqual([]);
+    connection.close();
+  });
+
+  it("keeps the binding a child session was started with when its turn restates the native id", async () => {
+    const path = databasePath();
+    const connection = openSqlite(path);
+    applyMigrations(connection, MIGRATIONS, () => now);
+    const run = agentRun();
+    const durable = new AgentRunSessionStore({ connection, getById: () => run });
+    const provider = fakeProvider({ resumable: true, boundCursor: true });
+    const runtime = createAgentRunSessionRuntime(
+      runtimeOptions(provider, { sessionStore: durable.sessions, supportsResume: () => true }),
+    );
+    const result = settled(runtime.start(run));
+    await vi.waitFor(() => expect(provider.turns).toHaveLength(1));
+    const started = durable.sessions.read(run)?.resumeCursor;
+    expect(started?.binding).toBeDefined();
+    await provider.emit({ kind: "text-delta", sessionId, text: "Report", occurredAt: now });
+    await provider.emit({
+      kind: "completed",
+      sessionId,
+      resumeCursor: { driverKind: "codex", value: "private-provider-session" },
+    });
+    expect((await result).kind).toBe("completed");
+    expect(durable.sessions.read(run)?.resumeCursor).toEqual(started);
     connection.close();
   });
 
