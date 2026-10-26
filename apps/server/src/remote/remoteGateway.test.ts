@@ -1331,6 +1331,14 @@ describe("RemoteGateway — approval for a window that never finished", () => {
       deviceId: device.deviceId,
       platform: "android",
       token,
+      notificationPublicKey: "MJaD3ARvNKlDGKOdP1uw2ORQnq9V7CJeVRT9Xg09h3E",
+      preferences: {
+        approvalNeeded: true,
+        waiting: true,
+        failure: true,
+        completion: true,
+        threadTitles: false,
+      },
       now: nowIso,
     });
 

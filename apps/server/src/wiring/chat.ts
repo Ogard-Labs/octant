@@ -370,6 +370,13 @@ export function wireChat(deps: ChatDependencies) {
     ): void => {
       chatToolContributors.push(contributor);
     };
+    // Side Chat lanes and the navigator assistant's own threads, which no
+    // thread list shows and no notification names.
+    const chatHiddenThreadIds = (): ReadonlySet<string> => {
+      const hidden = new Set(sideChatSidecars.hiddenThreadIds());
+      for (const threadId of navigatorAssistantBindings.hiddenThreadIds()) hidden.add(threadId);
+      return hidden;
+    };
     const chatService = new ChatService({
       liveTurns,
       awaitsHarnessApproval: threadAwaitsHarnessApproval,
@@ -418,11 +425,7 @@ export function wireChat(deps: ChatDependencies) {
       issueContext: githubIssueContextService,
       linearIssueContext: linearIssueContextService,
       reviewedModelManifest,
-      hiddenThreadIds: () => {
-        const hidden = new Set(sideChatSidecars.hiddenThreadIds());
-        for (const threadId of navigatorAssistantBindings.hiddenThreadIds()) hidden.add(threadId);
-        return hidden;
-      },
+      hiddenThreadIds: chatHiddenThreadIds,
       // A Side Chat sidecar is a lane *about* one source thread, so that
       // thread rides every one of its turns without the user having to add a
       // `#thread` chip. The host resolves it: the link comes from the sidecar
@@ -780,6 +783,7 @@ export function wireChat(deps: ChatDependencies) {
     // starts.
     yield* Effect.promise(() => agentMessageService.reconcileStoredBodies().catch(() => undefined));
     return {
+      chatHiddenThreadIds,
       chatRoutes,
       chatService,
       codeThreadMentionDirectory,

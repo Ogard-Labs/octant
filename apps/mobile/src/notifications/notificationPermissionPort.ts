@@ -5,6 +5,12 @@ export interface MobileNotificationPermissionPort {
   readonly getStatus: () => Promise<NotificationPermissionStatus>;
   readonly request: () => Promise<NotificationPermissionStatus>;
   readonly getDevicePushToken: () => Promise<string | undefined>;
+  /**
+   * The public half of this phone's notification key for one host, made and
+   * kept in secure storage on first use. Undefined when the build has no key
+   * storage for notifications.
+   */
+  readonly getNotificationPublicKey: (hostId: string) => Promise<string | undefined>;
   readonly platform: "ios" | "android";
 }
 
@@ -22,6 +28,9 @@ export function createUnavailableNotificationPermissionPort(
       return "denied";
     },
     async getDevicePushToken() {
+      return undefined;
+    },
+    async getNotificationPublicKey() {
       return undefined;
     },
   };

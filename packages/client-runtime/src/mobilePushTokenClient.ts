@@ -1,5 +1,6 @@
 import {
   type RemotePushPlatform,
+  type RemotePushPreferencesV1,
   RemotePushTokenReceiptV1,
   decodeHostAnswer,
 } from "@octant/contracts";
@@ -9,11 +10,19 @@ export async function registerMobilePushToken(input: {
   readonly transport: MobileRemoteTransport;
   readonly platform: RemotePushPlatform;
   readonly token: string;
+  /** The public half of the notification key this phone made for this host. */
+  readonly notificationPublicKey: string;
+  readonly preferences: RemotePushPreferencesV1;
 }): Promise<RemotePushTokenReceiptV1> {
   const response = await input.transport.authenticatedFetch({
     method: "PUT",
     path: "/api/remote/auth/push-token",
-    body: JSON.stringify({ platform: input.platform, token: input.token }),
+    body: JSON.stringify({
+      platform: input.platform,
+      token: input.token,
+      notificationPublicKey: input.notificationPublicKey,
+      preferences: input.preferences,
+    }),
   });
   if (!response.ok) {
     throw new MobileInboxFailure(

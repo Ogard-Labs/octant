@@ -133,9 +133,11 @@ import {
   ProjectTerminalEnded,
   ProjectTerminalStarted,
   ProductFeedbackDiscarded,
+  REMOTE_PUSH_DELIVERY_EVENT_NAMES,
   REMOTE_PUSH_REGISTRATION_EVENT_NAMES,
   REMOTE_SERVER_GRANT_CLOSED,
   REMOTE_SERVER_GRANT_OPENED,
+  RemotePushDeliveryRecordedV1,
   RemotePushRegistrationClearedV1,
   RemotePushRegistrationRecordedV1,
   RemoteServerGrantClosedPayload,
@@ -455,6 +457,7 @@ export function createPhase1RuntimeRegistries(): Phase1RuntimeRegistries {
     .register(REMOTE_ACCESS_EVENT_NAMES.securityAuditRecorded, 1, SecurityAuditRecordedV1)
     .register(REMOTE_PUSH_REGISTRATION_EVENT_NAMES.recorded, 1, RemotePushRegistrationRecordedV1)
     .register(REMOTE_PUSH_REGISTRATION_EVENT_NAMES.cleared, 1, RemotePushRegistrationClearedV1)
+    .register(REMOTE_PUSH_DELIVERY_EVENT_NAMES.recorded, 1, RemotePushDeliveryRecordedV1)
     .register(PRODUCT_FEEDBACK_CAPTURED, 1, ProductFeedbackCaptured)
     .register(PRODUCT_FEEDBACK_DISCARDED, 1, ProductFeedbackDiscarded)
     .register(PRODUCT_FEEDBACK_DELIVERED, 1, ProductFeedbackDelivered)
