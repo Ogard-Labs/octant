@@ -3764,17 +3764,24 @@ describe("ProviderService", () => {
         persistence: fixture.persistence,
         runtimeRegistry: runtime,
         driver: (instance) =>
-          makeOpenAiCompatibleDriver({
-            instanceId: instance.id,
-            configuration: instance.configuration as never,
-            runtimeRegistry: runtime,
-            credentialResolver: {
-              has: async () => true,
-              resolve: async () => "secret-api-key",
+          runOnNativeHarness(
+            makeOpenAiCompatibleDriver({
+              instanceId: instance.id,
+              configuration: instance.configuration as never,
+              runtimeRegistry: runtime,
+              credentialResolver: {
+                has: async () => true,
+                resolve: async () => "secret-api-key",
+              },
+              fetch: async () => response(),
+              clock: () => now,
+            }),
+            {
+              instanceId: instance.id,
+              runtimeRegistry: runtime,
+              clock: () => now,
             },
-            fetch: async () => response(),
-            clock: () => now,
-          }),
+          ),
         uuid: () => crypto.randomUUID(),
         clock: () => now,
       });
@@ -5269,13 +5276,20 @@ describe("a stored provider key and the base URL it was entered for", () => {
         persistence: fixture.persistence,
         runtimeRegistry: runtime,
         driver: (instance) =>
-          makeOpenAiCompatibleDriver({
-            instanceId: instance.id,
-            configuration: instance.configuration as never,
-            runtimeRegistry: runtime,
-            credentialResolver: credentials,
-            clock: () => now,
-          }),
+          runOnNativeHarness(
+            makeOpenAiCompatibleDriver({
+              instanceId: instance.id,
+              configuration: instance.configuration as never,
+              runtimeRegistry: runtime,
+              credentialResolver: credentials,
+              clock: () => now,
+            }),
+            {
+              instanceId: instance.id,
+              runtimeRegistry: runtime,
+              clock: () => now,
+            },
+          ),
         clearProviderCredential: credentials.delete,
         uuid: () => crypto.randomUUID(),
         clock: () => now,

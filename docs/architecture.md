@@ -2844,13 +2844,17 @@ the `reviewed-catalog` source, so it is also labelled "Profile". Profiles match 
 prefix, a `:` tag, a release date, and `-latest` are ignored; a version is
 not), and also on the `model` a direct endpoint names in its responses, so an
 Azure AI Foundry or OpenAI-compatible deployment with a name of its own takes
-its model's profile from its first completed request. A direct endpoint
-(OpenAI-compatible, Azure AI Foundry, Anthropic-compatible) learns from each
-request: an overflow refusal that names the limit ("maximum context length is
-N tokens", "prompt is too long: X tokens > N maximum", and similar) lowers the
-learned window before the harness's shrink-once recovery resends a smaller
-request, and a completed request that used more than the learned window raises
-it. A refusal that names no limit teaches nothing; the shrink-once recovery
+its model's profile from its first completed request. The host learns from
+each request a direct endpoint sends through the harness endpoint port, for
+every such endpoint alike: an overflow refusal whose message names the limit
+("maximum context length is N tokens", "prompt is too long: X tokens > N
+maximum", and similar) lowers the learned window before the harness's
+shrink-once recovery resends a smaller request, a completed request whose
+reported usage went past the learned window raises it, and the model a
+response names (`servedModelId`) is recorded. The endpoint only reports these
+in what its request settles with; the host keeps them. Ollama names no served
+model, so an Ollama model learns a window only once a refusal names its limit.
+A refusal that names no limit teaches nothing; the shrink-once recovery
 still runs and the person sees at most the normal compaction notice. The
 override, the learned window, and the served model are kept per provider
 instance and model on the provider's model catalogue, so they survive probes
@@ -3982,8 +3986,9 @@ depends only on the provider it is sent to, decided by the pure
 (`providerKeepsConversation` false) is sent the history again every turn, from
 whatever provider wrote it, so moving to one needs nothing handed over and no
 longer refuses when the previous provider kept a session or is gone. Octant
-Harness on a direct endpoint is host-owned in this sense but keeps every
-session durably (`conversationOwnership: "host-resumable"`), so a new message
+Harness on an OpenAI-compatible, Anthropic-compatible, or Azure AI Foundry
+endpoint is host-owned in this sense but keeps every session durably
+(`conversationOwnership: "host-resumable"`; Ollama stays `host`), so a new message
 continues the previous attempt's session and sends only itself: the same
 session id, which is the endpoint's prompt cache key, and the lead's own
 messages, tool calls and results. It continues only the same provider instance
@@ -4314,24 +4319,34 @@ the model at another size.
   input for one of its models. It has no `acquire`: `runOnNativeHarness` turns
   it into a `ProviderDriver` whose connections the host builds with
   `createNativeHarnessConnection`, refusing a connection with no product mode,
-  and whose conversations are host-owned. Before the driver's `admitTurn` is
+  and whose conversations are host-owned (`host-resumable` when the host
+  wiring says so: the OpenAI-compatible, Anthropic-compatible, and Azure AI
+  Foundry endpoints continue a Chat or Work follow-up in its session, while
+  Ollama stays `host`). Every product caller names a mode; the packaged
+  OpenAI-compatible smoke sends its turns as Chat. These drivers once read a
+  missing mode as Chat, and the port refuses it instead because the harness
+  scopes its tools by mode. Before the driver's `admitTurn` is
   asked, the host refuses a turn offering tools to a model without a Verify
   tools record on the instance, so a driver's own verdict cannot hand tools
   to an unverified model. The host wraps the transport in its
   retry policy (below), dropping any `retrying` event the driver streams
   itself because retry notices are the host's, registers that retrying
-  endpoint in the `NativeHarnessEndpointRegistry` with the driver's `admitTurn`, wires lead
-  fallback and the shared transcript store, and keeps the instance's session
-  count. `runHarnessEndpointConformance` proves an endpoint refuses unverified
-  tools, rejects a cancel as `interrupted`, and stops sending after release.
-  Ollama is the port's first driver: it imports nothing from the harness or the
-  retry module, and the provider factory runs it with `runOnNativeHarness`. The
-  OpenAI-compatible, Anthropic-compatible, and Azure AI Foundry drivers predate
-  the port and still build their connection, registration, and retries
-  themselves from host modules; they are queued to move onto it, and no new
-  driver takes that path. Moving them needs the port to carry what a response
-  teaches about the model's context window and served model, which only those
-  drivers learn today.
+  endpoint in the `NativeHarnessEndpointRegistry` with the driver's
+  `admitTurn`, wires lead
+  fallback and the shared transcript store, keeps the instance's session
+  count, and keeps what each attempt teaches about the model's context window
+  ([Context and usage accounting](#context-and-usage-accounting)).
+  `runHarnessEndpointConformance` proves
+  an endpoint refuses unverified tools, rejects a cancel as `interrupted`, and
+  stops sending after release. Every direct endpoint is on the port: Ollama,
+  OpenAI-compatible, Anthropic-compatible, and Azure AI Foundry import nothing
+  from the harness or the retry module, keep their credential gate inside
+  `open`, and are run with `runOnNativeHarness` (Ollama by the provider
+  factory, the other three by the server's provider wiring). The overflow
+  wording the wire parsers write and the host reads back lives in its own
+  module, apart from the retry policy. Verify tools sends its capability echo
+  outside any session, so a session never offers an unverified model even the
+  echo.
 - **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
   each step as it happens (`native-harness-transcript`, one aggregate per
   session): the user message once the request is known to fit, each reply,
@@ -4571,8 +4586,8 @@ the model at another size.
   and the `default` slot decides only where it continues once that model has
   failed (below).
 - **Endpoint failures.** Every direct-endpoint request goes through
-  `sendWithEndpointRetry`, one policy for every wire protocol; for a driver on
-  the endpoint port the host applies it around the driver's single attempt. Retryable are
+  `sendWithEndpointRetry`, one policy for every wire protocol, which the host
+  applies around each endpoint driver's single attempt. Retryable are
   HTTP 408, 429, 500, 502, 503, 504, and 529 (classified `unavailable` or
   `rate-limited`, with a provider's `Retry-After` carried on the failure), a
   refused or reset connection, an idle stream, a stream that closes before its
@@ -6042,10 +6057,9 @@ feature is already an independently packaged plugin:
 | Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                          |
 
 A direct-endpoint provider driver supplies a transport through the provider-sdk
-harness endpoint port; the harness loop, endpoint registry, lead fallback, and
-retries stay host-owned. The OpenAI-compatible, Anthropic-compatible, and Azure
-AI Foundry drivers still wire those host modules directly and are queued to move
-onto the port ([Native harness](#native-harness)).
+harness endpoint port; the harness loop, endpoint registry, lead fallback,
+retries, and context-window memory stay host-owned
+([Native harness](#native-harness)).
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a

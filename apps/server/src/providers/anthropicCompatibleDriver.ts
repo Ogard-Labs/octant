@@ -1,10 +1,7 @@
-import { randomUUID } from "node:crypto";
-import { isAbsolute, resolve } from "node:path";
 import {
   decodeProviderFailure,
   decodeProviderObservedState,
   type AnthropicCompatibleProviderConfiguration,
-  type OctantMode,
   type ProviderCapabilities,
   type ProviderFailure,
   type ProviderInstanceId,
@@ -12,28 +9,21 @@ import {
   type ProviderTurnInput,
   type UtcTimestamp,
 } from "@octant/contracts";
-import type { ProviderConnection, ProviderDriver } from "@octant/provider-sdk/driver";
 import {
   unsupportedChatCapabilities,
   validateChatTurnInput,
 } from "@octant/provider-sdk/chat-conformance";
+import type {
+  HarnessEndpointDriver,
+  HarnessEndpointRequest,
+  HarnessEndpointTransport,
+} from "@octant/provider-sdk/harness-endpoint";
 import { Effect } from "effect";
 import {
   resolveModelContextWindow,
   resolveModelInputModalities,
 } from "@octant/domain/model-context-window";
-import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
-import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
-import type {
-  NativeHarnessRequest,
-  NativeHarnessTransport,
-} from "../harness/nativeHarnessTransport";
-import {
-  MemoryNativeHarnessTranscriptStore,
-  type NativeHarnessTranscriptStore,
-} from "../harness/nativeHarnessTranscriptStore";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
-import { sendWithEndpointRetry } from "./endpointRetry";
 import { runProviderEffect } from "./runProviderEffect";
 import { capabilityEchoToolDefinition, isCapabilityEchoToolCall } from "./openAiToolEncoding";
 import {
@@ -54,11 +44,7 @@ import {
   type AnthropicTurnEvent,
   type AnthropicTurnResult,
 } from "./anthropicMessages";
-import {
-  carryModelContextWindowFacts,
-  learnFromEndpointRequest,
-  type EndpointRequestOutcome,
-} from "./modelContextWindowFacts";
+import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
 
@@ -95,32 +81,27 @@ export interface AnthropicCompatibleDriverOptions {
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: AnthropicCompatibleFetch;
   readonly clock?: () => string;
-  readonly correlationId?: () => string;
-  readonly onConnectionReleased?: () => void;
-  /** Where harness sessions keep their conversation; see the OpenAI-compatible driver. */
-  readonly transcripts?: NativeHarnessTranscriptStore;
-  /** How the harness retries this endpoint and where its lead goes when it stays down. */
-  readonly harness?: NativeHarnessEndpointHooks;
   /** Host refresh and access for a subscription-oauth credential. */
   readonly subscriptionOAuth?: SubscriptionOAuthHost;
 }
 
+/**
+ * An Anthropic-compatible Messages endpoint as an Octant Harness endpoint,
+ * through the provider-sdk harness endpoint port. The host's harness loop owns
+ * the conversation, every tool call, retries, and what each request teaches
+ * about its model's window; this driver supplies one request attempt, its
+ * credential gate, and the per-model Verify tools check.
+ */
 export function makeAnthropicCompatibleDriver(
   options: AnthropicCompatibleDriverOptions,
-): ProviderDriver {
+): HarnessEndpointDriver {
   const clock = options.clock ?? (() => new Date().toISOString());
-  const makeCorrelation = options.correlationId ?? randomUUID;
-  const transcripts = options.transcripts ?? new MemoryNativeHarnessTranscriptStore();
-  const transport = anthropicCompatibleTransport(options, clock);
-  options.harness?.endpoints?.register(options.instanceId, {
-    open: transport.open,
-    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
-  });
   return {
-    // Harness sessions are journaled, so a Chat or Work follow-up resumes the
-    // last one, and the host can always rebuild the history when it cannot.
-    conversationOwnership: "host-resumable",
     kind: "anthropic-compatible",
+    harnessEndpoint: {
+      ...anthropicCompatibleTransport(options, clock),
+      admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
+    },
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId
         ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
@@ -228,53 +209,7 @@ export function makeAnthropicCompatibleDriver(
             },
             catch: sanitizeFailure,
           }),
-    acquire: ({ instanceId, projectRoot, mode }) =>
-      instanceId !== options.instanceId
-        ? Effect.fail(failure("invalid-configuration", "Provider instance does not match driver."))
-        : !isAbsolute(projectRoot) || resolve(projectRoot) !== projectRoot
-          ? Effect.fail(
-              failure(
-                "invalid-configuration",
-                "Provider Project root must be an absolute normalized path.",
-              ),
-            )
-          : makeConnection(options, transport, clock, makeCorrelation, transcripts, {
-              projectRoot,
-              mode: mode ?? "chat",
-            }),
   };
-}
-
-function makeConnection(
-  options: AnthropicCompatibleDriverOptions,
-  transport: NativeHarnessTransport,
-  clock: () => string,
-  makeCorrelation: () => string,
-  transcripts: NativeHarnessTranscriptStore,
-  input: { readonly projectRoot: string; readonly mode: OctantMode },
-): Effect.Effect<ProviderConnection, never, import("effect").Scope.Scope> {
-  return createNativeHarnessConnection({
-    instanceId: options.instanceId,
-    driverKind: "anthropic-compatible",
-    projectRoot: input.projectRoot,
-    mode: input.mode,
-    transport,
-    transcripts,
-    ...(options.harness?.leadFallback === undefined
-      ? {}
-      : { leadFallback: options.harness.leadFallback }),
-    admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
-    onSessionCountChange: (delta) =>
-      options.runtimeRegistry.setActiveSessionCount(
-        options.instanceId,
-        Math.max(0, options.runtimeRegistry.activeSessionCount(options.instanceId) + delta),
-      ),
-    ...(options.onConnectionReleased === undefined
-      ? {}
-      : { onReleased: options.onConnectionReleased }),
-    clock,
-    correlationId: makeCorrelation,
-  });
 }
 
 /** Whether the endpoint accepts this turn's input for the session's model. */
@@ -303,14 +238,16 @@ function admitTurn(
 }
 
 /**
- * The endpoint as the harness loop sees it. The Messages API takes the whole
- * conversation, results included, so the request is the loop's history as is;
- * the system prompt goes in its cached system block.
+ * The endpoint as the harness loop sees it, one request attempt sent once.
+ * The Messages API takes the whole conversation, results included, so the
+ * request is the loop's history as is; the system prompt goes in its cached
+ * system block. The host retries a failure that usually passes and keeps
+ * what the response or refusal teaches about the model's window.
  */
 function anthropicCompatibleTransport(
   options: AnthropicCompatibleDriverOptions,
   clock: () => string,
-): NativeHarnessTransport {
+): HarnessEndpointTransport {
   return {
     open: async () => {
       const observedAt = clock();
@@ -348,71 +285,46 @@ function anthropicCompatibleTransport(
         send: async (request, stream) => {
           const active = endpoint;
           if (active === undefined) throw failure("protocol", "Provider session is not active.");
-          const learn = (outcome: EndpointRequestOutcome) =>
-            learnFromEndpointRequest({
-              runtimeRegistry: options.runtimeRegistry,
-              instanceId: options.instanceId,
-              modelId: request.modelId,
-              outcome,
-              memory: options.harness?.contextWindows,
-            });
-          return sendWithEndpointRetry({
-            signal: stream.signal,
-            onEvent: stream.onEvent,
-            options: options.harness?.retry,
-            attempt: async (attempt) => {
-              let result: AnthropicTurnResult;
-              try {
-                result = await runProviderEffect(
-                  sendAnthropicMessagesTurn({
-                    endpoint: active,
-                    modelId: request.modelId,
-                    history: request.history,
-                    prompt: "",
-                    ...(request.system === undefined ? {} : { system: request.system }),
-                    tools: request.tools,
-                    toolAnswers: [],
-                    signal: attempt.signal,
-                    onEvent: (event: AnthropicTurnEvent) => {
-                      if (event.kind === "usage") {
-                        const { sequence: _sequence, ...usage } = event;
-                        attempt.onEvent(usage);
-                        return;
-                      }
-                      attempt.onEvent({ kind: event.kind, text: event.text });
-                    },
-                  }),
-                );
-              } catch (error) {
-                if (attempt.signal.aborted) {
-                  throw failure("interrupted", "The provider request was cancelled.");
-                }
-                // Learned before the harness shrinks and resends, so the
-                // shrink is measured against the window the endpoint named.
-                learn({ kind: "refused", failure: sanitizeFailure(error) });
-                throw error;
-              }
-              recordObservedTurn(options, result, clock);
-              learn({
-                kind: "completed",
-                usedTokens:
-                  result.usage === undefined
-                    ? undefined
-                    : result.usage.inputTokens + result.usage.outputTokens,
-              });
-              return {
-                text: result.text,
-                toolCalls: result.toolCalls,
-                ...(result.usage === undefined ? {} : { usage: result.usage }),
-                ...(result.rateLimitBuckets === undefined
-                  ? {}
-                  : { rateLimitBuckets: result.rateLimitBuckets }),
-                ...(result.outputStopReason === undefined
-                  ? {}
-                  : { outputStopReason: result.outputStopReason }),
-              };
-            },
-          });
+          let result: AnthropicTurnResult;
+          try {
+            result = await runProviderEffect(
+              sendAnthropicMessagesTurn({
+                endpoint: active,
+                modelId: request.modelId,
+                history: request.history,
+                prompt: "",
+                ...(request.system === undefined ? {} : { system: request.system }),
+                tools: request.tools,
+                toolAnswers: [],
+                signal: stream.signal,
+                onEvent: (event: AnthropicTurnEvent) => {
+                  if (event.kind === "usage") {
+                    const { sequence: _sequence, ...usage } = event;
+                    stream.onEvent(usage);
+                    return;
+                  }
+                  stream.onEvent({ kind: event.kind, text: event.text });
+                },
+              }),
+            );
+          } catch (error) {
+            if (stream.signal.aborted) {
+              throw failure("interrupted", "The provider request was cancelled.");
+            }
+            throw error;
+          }
+          recordObservedTurn(options, result, clock);
+          return {
+            text: result.text,
+            toolCalls: result.toolCalls,
+            ...(result.usage === undefined ? {} : { usage: result.usage }),
+            ...(result.rateLimitBuckets === undefined
+              ? {}
+              : { rateLimitBuckets: result.rateLimitBuckets }),
+            ...(result.outputStopReason === undefined
+              ? {}
+              : { outputStopReason: result.outputStopReason }),
+          };
         },
         release: () => {
           endpoint = undefined;
@@ -498,7 +410,7 @@ function manualModels(modelIds: readonly ProviderModelId[]) {
 function requestFits(
   options: AnthropicCompatibleDriverOptions,
   endpoint: AnthropicCompatibleEndpoint,
-  request: NativeHarnessRequest,
+  request: HarnessEndpointRequest,
 ): boolean {
   const body = JSON.stringify(
     buildAnthropicMessagesBody({

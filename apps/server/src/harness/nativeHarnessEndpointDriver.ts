@@ -1,13 +1,23 @@
 import { randomUUID } from "node:crypto";
 import { isAbsolute, resolve } from "node:path";
-import type { ProviderFailure, ProviderInstanceId, ProviderModelId } from "@octant/contracts";
+import {
+  decodeProviderFailure,
+  type ProviderFailure,
+  type ProviderInstanceId,
+  type ProviderModelId,
+} from "@octant/contracts";
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type {
   HarnessEndpointDriver,
+  HarnessEndpointResponse,
   HarnessEndpointTransport,
 } from "@octant/provider-sdk/harness-endpoint";
 import { Effect } from "effect";
-import { sendWithEndpointRetry, type EndpointRetryOptions } from "../providers/endpointRetry";
+import { sendWithEndpointRetry } from "../providers/endpointRetry";
+import {
+  learnFromEndpointRequest,
+  type EndpointRequestOutcome,
+} from "../providers/modelContextWindowFacts";
 import type { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import type { NativeHarnessEndpointHooks } from "./nativeHarnessEndpointRegistry";
 import { createNativeHarnessConnection } from "./nativeHarnessLoop";
@@ -22,8 +32,18 @@ export interface NativeHarnessEndpointHost {
   readonly runtimeRegistry: ProviderRuntimeRegistry;
   /** Where the sessions keep their conversation; shared so a later turn resumes an earlier one. */
   readonly transcripts?: NativeHarnessTranscriptStore;
-  /** How requests are retried and where the lead goes when its model stays down. */
+  /**
+   * How requests are retried, where the lead goes when its model stays down,
+   * and where what a request teaches about its model's window is kept.
+   */
   readonly harness?: NativeHarnessEndpointHooks;
+  /**
+   * `host-resumable` lets a Chat or Work follow-up continue the previous
+   * turn's session instead of rebuilding its history (see the provider-sdk
+   * `conversationOwnership`). The OpenAI-compatible, Anthropic-compatible and
+   * Azure AI Foundry endpoints continue; Ollama has stayed `host`, the default.
+   */
+  readonly conversationOwnership?: "host" | "host-resumable";
   readonly clock?: () => string;
   readonly correlationId?: () => string;
   readonly onConnectionReleased?: () => void;
@@ -32,9 +52,10 @@ export interface NativeHarnessEndpointHost {
 /**
  * Runs a driver that supplies only an endpoint through the provider-sdk
  * harness endpoint port. The host owns what the driver cannot reach: the
- * agent loop and its journal, retries around each request, the registry
- * another instance's lead falls back through, and the instance's session
- * count. The driver keeps its probe, verification, and authentication.
+ * agent loop and its journal, retries around each request, what each request
+ * teaches about its model's window, the registry another instance's lead
+ * falls back through, and the instance's session count. The driver keeps its
+ * probe, verification, and authentication.
  */
 export function runOnNativeHarness(
   driver: HarnessEndpointDriver,
@@ -44,7 +65,7 @@ export function runOnNativeHarness(
   const clock = host.clock ?? (() => new Date().toISOString());
   const correlationId = host.correlationId ?? randomUUID;
   const transcripts = host.transcripts ?? new MemoryNativeHarnessTranscriptStore();
-  const transport = retryingTransport(harnessEndpoint, host.harness?.retry);
+  const transport = hostedTransport(harnessEndpoint, host);
   // The host refuses tools for a model it holds no Verify tools record for
   // before the driver is asked, so a driver whose own verdict admits every
   // turn still cannot hand Octant's tools to an unverified model.
@@ -57,7 +78,7 @@ export function runOnNativeHarness(
 
   return {
     ...ownCapabilities,
-    conversationOwnership: "host",
+    conversationOwnership: host.conversationOwnership ?? "host",
     acquire: ({ instanceId, projectRoot, mode }) => {
       if (String(instanceId) !== String(host.instanceId)) {
         return Effect.fail(
@@ -104,35 +125,93 @@ export function runOnNativeHarness(
   };
 }
 
-/** The endpoint with every request sent again, on the host's policy, while its failure usually passes. */
-function retryingTransport(
+/**
+ * The endpoint as the host runs it: every request sent again, on the host's
+ * policy, while its failure usually passes, and what each attempt teaches
+ * about its model's window kept in the live observation and the host's
+ * memory. A refusal is learned from before the loop shrinks and resends, so
+ * the shrink is measured against the window the endpoint named.
+ */
+function hostedTransport(
   endpoint: HarnessEndpointTransport,
-  retry: EndpointRetryOptions | undefined,
+  host: NativeHarnessEndpointHost,
 ): HarnessEndpointTransport {
   return {
     open: async (modelId) => {
       const session = await endpoint.open(modelId);
       return {
         fits: (request) => session.fits(request),
-        send: (request, stream) =>
-          sendWithEndpointRetry({
+        send: (request, stream) => {
+          // What the endpoint reports is untrusted and the observation it
+          // lands in is schema-checked, so a lesson the host cannot keep (a
+          // blank or overlong model name, a fractional token count) is
+          // dropped; it never turns the request it came with into a failure.
+          const learn = (outcome: EndpointRequestOutcome) => {
+            try {
+              learnFromEndpointRequest({
+                runtimeRegistry: host.runtimeRegistry,
+                instanceId: host.instanceId,
+                modelId: request.modelId,
+                outcome,
+                memory: host.harness?.contextWindows,
+              });
+            } catch {
+              // The request's own outcome stands without the lesson.
+            }
+          };
+          return sendWithEndpointRetry({
             signal: stream.signal,
             onEvent: stream.onEvent,
-            options: retry,
-            // The host announces its own retries; a notice the driver streams
-            // would report a retry the host never ran, or report one twice.
-            attempt: (attempt) =>
-              session.send(request, {
-                signal: attempt.signal,
-                onEvent: (event) => {
-                  if (event.kind !== "retrying") attempt.onEvent(event);
-                },
-              }),
-          }),
+            options: host.harness?.retry,
+            attempt: async (attempt) => {
+              let response: HarnessEndpointResponse;
+              try {
+                // The host announces its own retries; a notice the driver
+                // streams would report a retry the host never ran, or report
+                // one twice.
+                response = await session.send(request, {
+                  signal: attempt.signal,
+                  onEvent: (event) => {
+                    if (event.kind !== "retrying") attempt.onEvent(event);
+                  },
+                });
+              } catch (error) {
+                const refusal = decodedFailure(error);
+                if (refusal !== undefined) learn({ kind: "refused", failure: refusal });
+                throw error;
+              }
+              learn({
+                kind: "completed",
+                servedModelId: servedModelName(response.servedModelId),
+                usedTokens:
+                  response.usage === undefined
+                    ? undefined
+                    : response.usage.inputTokens + response.usage.outputTokens,
+              });
+              return response;
+            },
+          });
+        },
         release: () => session.release(),
       };
     },
   };
+}
+
+/** The served model name as the catalogue keeps it, or undefined when it is blank or longer than 256 characters. */
+function servedModelName(reported: string | undefined): string | undefined {
+  const trimmed = reported?.trim();
+  return trimmed === undefined || trimmed.length === 0 || trimmed.length > 256
+    ? undefined
+    : trimmed;
+}
+
+function decodedFailure(error: unknown): ProviderFailure | undefined {
+  try {
+    return decodeProviderFailure(error);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

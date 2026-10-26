@@ -111,6 +111,7 @@ import {
   createStoredExtensionMaterialLoader,
   UNAVAILABLE_EXTENSION_TOOL_EXECUTION,
 } from "../extensions/extensionChatResolver";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeOpenAiCompatibleDriver } from "../providers/openAiCompatibleDriver";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
 import { ResearchRouter } from "./research/researchRouter";
@@ -3799,15 +3800,23 @@ describe("ChatService", () => {
       protocol: "chat-completions",
       manualModelIds: ["model-a" as never],
     };
-    const driver = makeOpenAiCompatibleDriver({
-      instanceId: decodeProviderInstanceId(ids.provider),
-      configuration,
-      runtimeRegistry,
-      credentialResolver: { has: async () => true, resolve: async () => "private-key" },
-      fetch,
-      clock: () => now,
-      correlationId: () => ids.correlation,
-    });
+    const driver = runOnNativeHarness(
+      makeOpenAiCompatibleDriver({
+        instanceId: decodeProviderInstanceId(ids.provider),
+        configuration,
+        runtimeRegistry,
+        credentialResolver: { has: async () => true, resolve: async () => "private-key" },
+        fetch,
+        clock: () => now,
+      }),
+      {
+        instanceId: decodeProviderInstanceId(ids.provider),
+        runtimeRegistry,
+        conversationOwnership: "host-resumable",
+        clock: () => now,
+        correlationId: () => ids.correlation,
+      },
+    );
     const observed = await Effect.runPromise(
       Effect.scoped(driver.probe({ instanceId: decodeProviderInstanceId(ids.provider) })),
     );
