@@ -15,6 +15,7 @@ import {
   type EventActor,
   type ProviderExecutionPolicy,
 } from "@octant/contracts";
+import { decodeComputerControlCommand } from "@octant/contracts/computer-use-plugin";
 import type { DesktopProvider } from "@octant/plugin-api/desktop-provider";
 import {
   createFakeDesktopProvider,
@@ -751,7 +752,80 @@ describe("desktop lease service", () => {
     });
     expect(runningDesktops(first.backend)).toBe(1);
   });
+
+  it("journals each input an agent sends with the agent as actor, before the driver, and never the text", async () => {
+    const fake = createFakeDesktopProvider();
+    const seenBeforeDriver: Array<number> = [];
+    const watching: DesktopProvider = {
+      ...fake.provider,
+      control: async (handle, command) => {
+        seenBeforeDriver.push(operatedEvents(harness.connection).length);
+        return fake.provider.control(handle, command);
+      },
+    };
+    const harness = host({ providers: [{ provider: watching }] });
+    const leaseId = await acquired(harness.service, threadA);
+    const caller = { owner: code(threadA), actor: agentOf(threadA), leaseId };
+    const observationId = randomUUID();
+
+    for (const command of [
+      { operation: "launch", appId: "notes-app" },
+      { operation: "observe", appId: "notes-app", windowId: 1 },
+      { operation: "type", observationId, text: "a secret the agent typed" },
+      { operation: "press", observationId, key: "Enter" },
+      { operation: "apps" },
+    ]) {
+      await expect(
+        harness.service.control({ ...caller, command: decodeComputerControlCommand(command) }),
+      ).resolves.toMatchObject({ status: "answered" });
+    }
+
+    const operated = operatedEvents(harness.connection);
+    expect(operated).toEqual([
+      {
+        actor: "agent",
+        payload: {
+          leaseId,
+          owner: code(threadA),
+          providerId: "fake-desktop",
+          operation: "launch",
+          appId: "notes-app",
+        },
+      },
+      {
+        actor: "agent",
+        payload: { leaseId, owner: code(threadA), providerId: "fake-desktop", operation: "type" },
+      },
+      {
+        actor: "agent",
+        payload: { leaseId, owner: code(threadA), providerId: "fake-desktop", operation: "press" },
+      },
+    ]);
+    expect(seenBeforeDriver).toEqual([1, 1, 2, 3, 3]);
+    expect(JSON.stringify(operated)).not.toContain("secret");
+
+    // Another thread's agent reaches nothing and leaves nothing on record.
+    await expect(
+      harness.service.control({
+        owner: code(threadB),
+        actor: agentOf(threadB),
+        leaseId,
+        command: { operation: "launch", appId: "notes-app" },
+      }),
+    ).resolves.toEqual({ status: "refused", reason: "leased-by-another-thread" });
+    expect(operatedEvents(harness.connection)).toHaveLength(3);
+  });
 });
+
+function operatedEvents(connection: SqliteConnection) {
+  return (
+    connection
+      .prepare(
+        "SELECT actor_kind, payload_json FROM event_journal WHERE event_name = ? ORDER BY global_sequence",
+      )
+      .all("desktop.operated@1") as Array<{ actor_kind: string; payload_json: string }>
+  ).map((row) => ({ actor: row.actor_kind, payload: JSON.parse(row.payload_json) as unknown }));
+}
 
 const sha256 = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
 
@@ -900,6 +974,37 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
       reason: "plan-mode",
     });
     expect(state.askedTransfers).toHaveLength(2);
+  });
+
+  it("asks an agent's transfer where the agent's turn asks, and only there", async () => {
+    const { service, state, checkout, connection } = host({ executionPolicy: "approval-gated" });
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    const leaseId = await acquired(service, threadA);
+    const askedInThread: Array<string> = [];
+    const fromAgent = {
+      owner: code(threadA),
+      actor: agentOf(threadA),
+      leaseId,
+      path: "app.bin",
+      confirm: async (request: DesktopTransferConfirmation) => {
+        askedInThread.push(`${request.artifact.path} ${request.artifact.sha256}`);
+        return "declined" as const;
+      },
+    };
+
+    await expect(service.transfer(fromAgent)).resolves.toEqual({
+      status: "refused",
+      reason: "declined",
+    });
+    expect(askedInThread).toEqual([`app.bin ${sha256("built app")}`]);
+    expect(state.askedTransfers).toEqual([]);
+    expect(sentEvents(connection)).toEqual([]);
+
+    await expect(
+      service.transfer({ ...fromAgent, confirm: async () => "approved" }),
+    ).resolves.toMatchObject({ status: "delivered" });
+    expect(sentEvents(connection)).toMatchObject([{ actor: "agent" }]);
+    expect(state.askedTransfers).toEqual([]);
   });
 
   it("always asks before a file leaves the machine for a cloud desktop, Full access included", async () => {

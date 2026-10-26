@@ -25,13 +25,15 @@ import type {
   LaunchedDesktop,
 } from "@octant/plugin-api/desktop-provider";
 import { DesktopStreamChannel, type DesktopReply } from "./hostLocalDesktopChannel";
+import { HostLocalDesktopControl } from "./hostLocalDesktopControl";
 
 export const HOST_LOCAL_DESKTOP_PROVIDER_ID = decodeDesktopProviderId("host-local");
 
 /**
  * What the desktop runs inside the capsule: the shell that speaks the
- * protocol, the virtual X server, the input tool, the screen grabber, and the
- * decoder for typed text. Readiness requires every one.
+ * protocol, the virtual X server, the input tool, the screen grabber, the
+ * decoder for typed text, and what copies a sent app out of the read-only
+ * inbox so it can run. Readiness requires every one.
  */
 export const HOST_LOCAL_DESKTOP_PROGRAMS: ReadonlyArray<string> = [
   "sh",
@@ -39,6 +41,10 @@ export const HOST_LOCAL_DESKTOP_PROGRAMS: ReadonlyArray<string> = [
   "xdotool",
   "import",
   "base64",
+  "mkdir",
+  "rm",
+  "cp",
+  "chmod",
 ];
 
 /** Xvfb can take a few seconds on a loaded host; past this the acquire fails. */
@@ -72,9 +78,20 @@ done
 echo "ready $width $height"
 frame=/tmp/octant-frame.png
 text=/tmp/octant-text
+inbox="\${HOME%/*}/inbox"
+apps="$HOME/.octant-apps"
 answer() { if "$@" >/dev/null 2>&1 </dev/null; then echo ok; else echo "error input"; fi; }
 while read -r verb a b c d; do
   case "$verb" in
+    launch)
+      if [ -f "$inbox/$a" ] && mkdir -p "$apps" && rm -f "$apps/$a" &&
+        cp "$inbox/$a" "$apps/$a" && chmod 0500 "$apps/$a"; then
+        pid=$(cd "$HOME" && { "$apps/$a" </dev/null >/dev/null 2>&1 & echo "$!"; })
+        echo "launched $pid"
+      else
+        echo "error launch"
+      fi ;;
+    alive) if kill -0 "$a" 2>/dev/null; then echo ok; else echo "error gone"; fi ;;
     frame)
       if import -silent -window root "png:$frame" >/dev/null 2>&1 </dev/null; then
         printf 'frame %d\\n' "$(($(wc -c < "$frame")))"
@@ -238,6 +255,7 @@ interface Session {
   readonly screen: DesktopRecipe["screen"];
   readonly desktop: LaunchedDesktop;
   readonly channel: DesktopStreamChannel;
+  readonly control: HostLocalDesktopControl;
   exited: boolean;
 }
 
@@ -333,7 +351,19 @@ export function createHostLocalDesktopProvider(launch: DesktopLaunchPort): Deskt
       });
       if (earlyBytes > MAX_EARLY_OUTPUT_BYTES) channel.close();
       for (const chunk of early.splice(0)) channel.receive(chunk);
-      const session: Session = { screen, desktop, channel, exited: false };
+      const opened = channel;
+      const session: Session = {
+        screen,
+        desktop,
+        channel: opened,
+        control: new HostLocalDesktopControl({
+          screen,
+          request: (line) => opened.request(line, REQUEST_TIMEOUT_MS),
+          frame: () => frameOf(session),
+          input: (event) => inputTo(session, event),
+        }),
+        exited: false,
+      };
       void desktop.exited.then(() => {
         session.exited = true;
         session.channel.close();
@@ -378,19 +408,21 @@ export function createHostLocalDesktopProvider(launch: DesktopLaunchPort): Deskt
       };
       return { status: "ready", screen };
     },
-    // Agent control arrives with the agent's lease binding; until then every
-    // command refuses rather than degrading.
-    control: async (): Promise<ComputerControlResult> => ({
-      kind: "refused",
-      reason: "unsupported",
-      message: "This desktop does not take agent commands yet.",
-    }),
+    control: async (handle, command): Promise<ComputerControlResult> => {
+      const session = running(handle.leaseId);
+      return session === undefined
+        ? { kind: "failed", reason: "not-running", message: "The desktop is not running." }
+        : session.control.control(command);
+    },
     // The host owns the inbox; the file reaches it only through the launch
-    // port, and only while this desktop runs.
-    deliver: async (handle, name, bytes) =>
-      running(handle.leaseId) === undefined
-        ? unavailable("not-running")
-        : launch.deliver(handle.leaseId, name, bytes),
+    // port, and only while this desktop runs. Only a file that landed may launch.
+    deliver: async (handle, name, bytes) => {
+      const session = running(handle.leaseId);
+      if (session === undefined) return unavailable("not-running");
+      const delivered = await launch.deliver(handle.leaseId, name, bytes);
+      if (delivered.status === "delivered") session.control.sent(name);
+      return delivered;
+    },
     release: async (handle) => {
       sessions.get(String(handle.leaseId))?.channel.close();
       sessions.delete(String(handle.leaseId));

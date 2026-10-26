@@ -1,5 +1,8 @@
 import { createDesktopComputerUsePort } from "../computerUse/desktopComputerUsePort";
-import { createComputerUseToolService } from "../computerUse/computerUseToolService";
+import {
+  createComputerUseToolService,
+  type ComputerUseThreadAsk,
+} from "../computerUse/computerUseToolService";
 import type { ComputerUseOwner } from "@octant/contracts/computer-use-plugin";
 import { randomUUID } from "node:crypto";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -22,7 +25,10 @@ import { readFile as readFileFromDisk, stat as statFromDisk } from "node:fs/prom
 import { linkSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { decodeDesktopHostTag, type DesktopHostTag } from "@octant/contracts";
 import { defaultShellSettings } from "@octant/domain";
-import { createDesktopLeaseService } from "../computerUse/desktopLeaseService";
+import {
+  createDesktopLeaseService,
+  createLeasedComputerUsePort,
+} from "../computerUse/desktopLeaseService";
 import { createHostLocalDesktopLaunch } from "../computerUse/hostLocalDesktopLaunch";
 import {
   createHostLocalDesktopProvider,
@@ -31,7 +37,10 @@ import {
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { withToolFamilyHelp } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
-import { COMPUTER_USE_TOOL_HELP } from "../plugins/computerUse/computerUsePlugin";
+import {
+  COMPUTER_USE_TOOL_HELP,
+  DISPOSABLE_DESKTOP_TOOL_HELP,
+} from "../plugins/computerUse/computerUsePlugin";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
 import type { AgentRunsWiring } from "./agentRuns";
@@ -101,11 +110,155 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   });
   const computerUseDesktop =
     options.computerUseDesktop ?? createDesktopComputerUsePort(process.env);
+  // No Project stores a recipe yet, so every lease command refuses as a
+  // value; the service still reconciles and sweeps so a lease journaled by any
+  // later build is torn down on start. An agent's turn bound to one of its
+  // thread's leases operates it as that thread's agent and asks in its thread
+  // through the Computer tool. A person's window or device brings its own
+  // authority and approval surface with the Desktop pane, so until then no
+  // person may open a thread here and their confirmations decline.
+  //
+  // On Linux the bundled host-local driver is always loaded, so teardown and
+  // restart reconciliation can reap its desktops even after the programs it
+  // needs were removed; it is offered for leasing only when its readiness
+  // reported ready as the host started.
+  const desktopLeaseDirectory = join(persistence.dataDirectory, "desktop-leases");
+  const desktopHostTag = readOrMintDesktopHostTag(desktopLeaseDirectory);
+  const hostLocalDesktopLaunch =
+    process.platform === "linux"
+      ? createHostLocalDesktopLaunch({
+          directory: desktopLeaseDirectory,
+          hostTag: desktopHostTag,
+          platform: process.platform,
+          provisioning: (leaseId) =>
+            persistence.desktopLeaseProjection.get(leaseId)?.lease.state === "provisioning",
+        })
+      : undefined;
+  const hostLocalDesktops =
+    hostLocalDesktopLaunch === undefined
+      ? []
+      : [
+          {
+            provider: createHostLocalDesktopProvider(hostLocalDesktopLaunch),
+            effective:
+              hostLocalDesktopLaunch.readiness(HOST_LOCAL_DESKTOP_PROGRAMS).status === "ready",
+          },
+        ];
+  const desktopLeases = createDesktopLeaseService({
+    journal: persistence.journal,
+    projection: persistence.desktopLeaseProjection,
+    hostTag: desktopHostTag,
+    platform: process.platform,
+    hasScreen: computerUseDesktop !== undefined || options.computerUseAdapter !== undefined,
+    providers: () => hostLocalDesktops,
+    recipe: () => undefined,
+    thread: (owner) => {
+      const current =
+        owner.mode === "code"
+          ? persistence.readCodeThread(decodeCodeThreadId(owner.threadId))
+          : workThreadProjection.read(decodeWorkThreadId(owner.threadId));
+      if (current === undefined) return undefined;
+      return {
+        active:
+          current.lifecycle !== "archived" &&
+          current.lifecycle !== "deleting" &&
+          current.lifecycle !== "deleted" &&
+          current.completedAt === undefined,
+        executionPolicy:
+          "executionPolicy" in current
+            ? current.executionPolicy
+            : current.access === "auto-accept-edits"
+              ? "auto-accept-edits"
+              : "approval-gated",
+      };
+    },
+    // The lease service already refuses an agent naming another thread. The
+    // agent must also be the thread's current provider: one the thread has
+    // since switched away from no longer speaks for it.
+    callerMayOpen: (actor, owner) => {
+      if (actor.kind !== "agent") return false;
+      const current =
+        owner.mode === "code"
+          ? persistence.readCodeThread(decodeCodeThreadId(owner.threadId))
+          : workThreadProjection.read(decodeWorkThreadId(owner.threadId));
+      return (
+        current !== undefined &&
+        String(current.providerInstanceId) === String(actor.providerInstanceId)
+      );
+    },
+    computerUseEnabled: () =>
+      (persistence.readShellSettings()?.settings ?? defaultShellSettings()).computerUse.enabled,
+    confirm: async () => "declined",
+    // A thread bound to an older revision of its Project has no root, so a
+    // transfer never reads from a folder the Project has since left.
+    threadRoot: async (owner) => {
+      if (owner.mode === "work") {
+        const thread = workThreadProjection.read(decodeWorkThreadId(owner.threadId));
+        const project =
+          thread === undefined ? undefined : persistence.readProject(thread.projectId);
+        if (thread === undefined || project?.type !== "work" || project.lifecycle !== "active") {
+          return undefined;
+        }
+        const revision = project.bindingHistory.at(-1)?.revisionId;
+        return thread.bindingRevisionId !== undefined &&
+          String(thread.bindingRevisionId) === String(revision)
+          ? project.binding.canonicalRoot
+          : undefined;
+      }
+      const thread = persistence.readCodeThread(decodeCodeThreadId(owner.threadId));
+      const project = thread === undefined ? undefined : persistence.readProject(thread.projectId);
+      if (
+        thread === undefined ||
+        project?.type !== "code" ||
+        project.lifecycle !== "active" ||
+        String(thread.bindingRevisionId) !== String(project.bindingHistory.at(-1)?.revisionId)
+      ) {
+        return undefined;
+      }
+      const checkout = persistence.readCodeCheckout(thread.checkoutId);
+      if (checkout === undefined || checkout.availability !== "available") return undefined;
+      if (checkout.kind !== "managed-worktree") return project.binding.canonicalRoot;
+      const receipt = await managedWorktreeReceipts.load(String(checkout.ownershipReceiptId));
+      return receipt !== undefined &&
+        receipt.state === "ready" &&
+        String(receipt.threadId) === String(thread.id) &&
+        String(receipt.checkoutId) === String(checkout.id) &&
+        receipt.canonicalRepositoryPath === project.binding.canonicalRoot
+        ? receipt.canonicalWorktreePath
+        : undefined;
+    },
+    confirmTransfer: async () => "declined",
+    systemActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
+    now: () => Date.now(),
+    uuid: randomUUID,
+  });
+  void desktopLeases.start().catch(() => undefined);
+  const sweepDesktopLeases = () => void desktopLeases.sweep().catch(() => undefined);
+  const stopDesktopLeaseCommits = persistence.journal.subscribeCommitted(() =>
+    queueMicrotask(sweepDesktopLeases),
+  );
+  const desktopLeaseTimer = setInterval(sweepDesktopLeases, DESKTOP_LEASE_SWEEP_INTERVAL_MS);
+  desktopLeaseTimer.unref();
+  const stopDesktopLeases = () => {
+    stopDesktopLeaseCommits();
+    clearInterval(desktopLeaseTimer);
+  };
+  // The tool service exists wherever a send can bind a destination: this
+  // Mac's screen, or a desktop a Linux host can lease.
   const computerUseTools =
-    computerUseDesktop === undefined
+    computerUseDesktop === undefined && hostLocalDesktops.length === 0
       ? undefined
       : createComputerUseToolService({
-          desktop: computerUseDesktop,
+          ...(computerUseDesktop === undefined ? {} : { desktop: computerUseDesktop }),
+          ...(hostLocalDesktops.length === 0
+            ? {}
+            : {
+                leases: createLeasedComputerUsePort(
+                  desktopLeases,
+                  persistence.desktopLeaseProjection,
+                ),
+              }),
+          destination: () => desktopLeases.destination(),
           settings: () =>
             (persistence.readShellSettings()?.settings ?? defaultShellSettings()).computerUse,
           authority: (owner) =>
@@ -165,7 +318,11 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   onWindowRevoked((windowId) => {
     void computerUseTools?.revokeWindow(windowId);
   });
-  const computerToolsFor = (owner: ComputerUseOwner, selection: unknown) => {
+  const computerToolsFor = (
+    owner: ComputerUseOwner,
+    selection: unknown,
+    ask?: ComputerUseThreadAsk,
+  ) => {
     const model = providerRuntimeRegistry
       .observedState(owner.providerInstanceId)
       ?.models.find((candidate) => String(candidate.id) === String(owner.modelId));
@@ -173,6 +330,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
       owner,
       selection,
       model?.inputModalities.includes("image") === true,
+      ask,
     );
     // Help is the plugin's own static guidance, not application content, so
     // it is answered outside the taint wrapper and never marks the thread.
@@ -185,7 +343,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
             recordExternalContentIngestion: (input) => externalContentIngestionStore.record(input),
             uuid: randomUUID,
           }),
-          COMPUTER_USE_TOOL_HELP,
+          owner.leaseId === undefined ? COMPUTER_USE_TOOL_HELP : DISPOSABLE_DESKTOP_TOOL_HELP,
         );
   };
   let lastComputerSettings = "";
@@ -208,125 +366,6 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     queueMicrotask(syncComputerUseSettings),
   );
   syncComputerUseSettings();
-  // No Project stores a recipe yet, so every lease command refuses as a
-  // value; the service still reconciles and sweeps so a lease journaled by any
-  // later build is torn down on start. Callers bring their own authority and
-  // approval surface when the Desktop pane and the agent's lease binding
-  // arrive, so until then no caller may open a thread here and every lease or
-  // transfer confirmation declines.
-  //
-  // On Linux the bundled host-local driver is always loaded, so teardown and
-  // restart reconciliation can reap its desktops even after the programs it
-  // needs were removed; it is offered for leasing only when its readiness
-  // reported ready as the host started.
-  const desktopLeaseDirectory = join(persistence.dataDirectory, "desktop-leases");
-  const desktopHostTag = readOrMintDesktopHostTag(desktopLeaseDirectory);
-  const hostLocalDesktopLaunch =
-    process.platform === "linux"
-      ? createHostLocalDesktopLaunch({
-          directory: desktopLeaseDirectory,
-          hostTag: desktopHostTag,
-          platform: process.platform,
-          provisioning: (leaseId) =>
-            persistence.desktopLeaseProjection.get(leaseId)?.lease.state === "provisioning",
-        })
-      : undefined;
-  const hostLocalDesktops =
-    hostLocalDesktopLaunch === undefined
-      ? []
-      : [
-          {
-            provider: createHostLocalDesktopProvider(hostLocalDesktopLaunch),
-            effective:
-              hostLocalDesktopLaunch.readiness(HOST_LOCAL_DESKTOP_PROGRAMS).status === "ready",
-          },
-        ];
-  const desktopLeases = createDesktopLeaseService({
-    journal: persistence.journal,
-    projection: persistence.desktopLeaseProjection,
-    hostTag: desktopHostTag,
-    platform: process.platform,
-    hasScreen: computerUseDesktop !== undefined || options.computerUseAdapter !== undefined,
-    providers: () => hostLocalDesktops,
-    recipe: () => undefined,
-    thread: (owner) => {
-      const current =
-        owner.mode === "code"
-          ? persistence.readCodeThread(decodeCodeThreadId(owner.threadId))
-          : workThreadProjection.read(decodeWorkThreadId(owner.threadId));
-      if (current === undefined) return undefined;
-      return {
-        active:
-          current.lifecycle !== "archived" &&
-          current.lifecycle !== "deleting" &&
-          current.lifecycle !== "deleted" &&
-          current.completedAt === undefined,
-        executionPolicy:
-          "executionPolicy" in current
-            ? current.executionPolicy
-            : current.access === "auto-accept-edits"
-              ? "auto-accept-edits"
-              : "approval-gated",
-      };
-    },
-    callerMayOpen: () => false,
-    computerUseEnabled: () =>
-      (persistence.readShellSettings()?.settings ?? defaultShellSettings()).computerUse.enabled,
-    confirm: async () => "declined",
-    // A thread bound to an older revision of its Project has no root, so a
-    // transfer never reads from a folder the Project has since left.
-    threadRoot: async (owner) => {
-      if (owner.mode === "work") {
-        const thread = workThreadProjection.read(decodeWorkThreadId(owner.threadId));
-        const project =
-          thread === undefined ? undefined : persistence.readProject(thread.projectId);
-        if (thread === undefined || project?.type !== "work" || project.lifecycle !== "active") {
-          return undefined;
-        }
-        const revision = project.bindingHistory.at(-1)?.revisionId;
-        return thread.bindingRevisionId !== undefined &&
-          String(thread.bindingRevisionId) === String(revision)
-          ? project.binding.canonicalRoot
-          : undefined;
-      }
-      const thread = persistence.readCodeThread(decodeCodeThreadId(owner.threadId));
-      const project = thread === undefined ? undefined : persistence.readProject(thread.projectId);
-      if (
-        thread === undefined ||
-        project?.type !== "code" ||
-        project.lifecycle !== "active" ||
-        String(thread.bindingRevisionId) !== String(project.bindingHistory.at(-1)?.revisionId)
-      ) {
-        return undefined;
-      }
-      const checkout = persistence.readCodeCheckout(thread.checkoutId);
-      if (checkout === undefined || checkout.availability !== "available") return undefined;
-      if (checkout.kind !== "managed-worktree") return project.binding.canonicalRoot;
-      const receipt = await managedWorktreeReceipts.load(String(checkout.ownershipReceiptId));
-      return receipt !== undefined &&
-        receipt.state === "ready" &&
-        String(receipt.threadId) === String(thread.id) &&
-        String(receipt.checkoutId) === String(checkout.id) &&
-        receipt.canonicalRepositoryPath === project.binding.canonicalRoot
-        ? receipt.canonicalWorktreePath
-        : undefined;
-    },
-    confirmTransfer: async () => "declined",
-    systemActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
-    now: () => Date.now(),
-    uuid: randomUUID,
-  });
-  void desktopLeases.start().catch(() => undefined);
-  const sweepDesktopLeases = () => void desktopLeases.sweep().catch(() => undefined);
-  const stopDesktopLeaseCommits = persistence.journal.subscribeCommitted(() =>
-    queueMicrotask(sweepDesktopLeases),
-  );
-  const desktopLeaseTimer = setInterval(sweepDesktopLeases, DESKTOP_LEASE_SWEEP_INTERVAL_MS);
-  desktopLeaseTimer.unref();
-  const stopDesktopLeases = () => {
-    stopDesktopLeaseCommits();
-    clearInterval(desktopLeaseTimer);
-  };
   const computerUseRuntime =
     options.computerUseRuntime ??
     computerUseTools?.runtime ??

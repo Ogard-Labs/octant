@@ -20,6 +20,7 @@ import {
   decodeCodeThread,
   decodeCodeTerminalId,
   decodeCodeThreadId,
+  decodeDesktopLeaseId,
   decodeProjectId,
   decodeProviderInstanceId,
   decodeProviderSessionId,
@@ -7669,6 +7670,86 @@ it("keeps the selected Computer tool instead of the refusal stub when @Computer 
 
   expect(unattachedCalls).toHaveLength(0);
   expect(starts[0]?.tools?.map((tool) => tool.name)).toContain("octant_computer");
+  fixture.close();
+});
+
+it("binds the Computer tool to the desktop the send named and asks its approvals in the thread", async () => {
+  const queue = Effect.runSync(Queue.unbounded<ProviderRuntimeEvent>());
+  const connection = providerConnection(queue);
+  const bindings: Array<
+    Parameters<NonNullable<Parameters<typeof createCodeOperationRuntime>[0]["computerUseTools"]>>[0]
+  > = [];
+  const fixture = runtimeFixture({
+    provider: providerDriver(connection),
+    supportsAppManagedTools: true,
+    computerUseTools: (input) => {
+      bindings.push(input);
+      return {
+        definitions: [{ name: "octant_computer", inputSchema: { type: "object" } }],
+        execute: async () => ({ result: { kind: "apps", apps: [] } }),
+      };
+    },
+  });
+  const destination = {
+    kind: "desktop-lease" as const,
+    leaseId: decodeDesktopLeaseId("95000000-0000-4000-8000-000000000001"),
+  };
+
+  // A destination names where the selected tool acts; without the selection it binds nothing.
+  await expect(
+    fixture.runtime.execute(windowId, {
+      kind: "start-provider-turn",
+      operationId: operationId(87),
+      threadId,
+      checkoutId,
+      sessionId,
+      prompt: fixture.prompt,
+      computerUseDestination: destination,
+    }),
+  ).resolves.toMatchObject({
+    state: "failed",
+    failure: {
+      message: "A Computer destination needs the Computer selection in the same message.",
+    },
+  });
+  expect(bindings).toEqual([]);
+
+  const startOperation = operationId(88);
+  await fixture.runtime.execute(windowId, {
+    kind: "start-provider-turn",
+    operationId: startOperation,
+    threadId,
+    checkoutId,
+    sessionId,
+    prompt: fixture.prompt,
+    computerUseSelection: computerUseSelection("selected"),
+    computerUseDestination: destination,
+  });
+  await vi.waitFor(() => expect(connection.send).toHaveBeenCalledOnce());
+  expect(bindings.map((binding) => binding.destination)).toEqual([destination, destination]);
+
+  const answer = bindings.at(-1)?.ask("Send dist/notes-app into the desktop?");
+  let approvalId: string | undefined;
+  await vi.waitFor(async () => {
+    const frames = await fixture.runtime.subscribe(windowId, threadId, startOperation, 0, 20);
+    const requested = frames.find((frame) => frame.event.kind === "approval-requested");
+    if (requested?.event.kind === "approval-requested") {
+      expect(requested.event.summary).toBe("Send dist/notes-app into the desktop?");
+      approvalId = requested.event.approvalId;
+    }
+    expect(approvalId).toBeDefined();
+  });
+  if (approvalId === undefined) throw new Error("The turn never asked.");
+  await fixture.runtime.execute(windowId, {
+    kind: "answer-provider-approval",
+    operationId: operationId(89),
+    threadId,
+    checkoutId,
+    approvalId,
+    decision: "approved",
+  });
+  await expect(answer).resolves.toBe("approved");
+  await fixture.runtime.close();
   fixture.close();
 });
 
