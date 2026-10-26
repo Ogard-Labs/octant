@@ -55,7 +55,11 @@ export interface NativeHarnessTranscriptCompaction {
   readonly summary: string;
   /** How many turns, from the transcript's first, the summary stands for. */
   readonly turns: number;
-  /** How many turns the session had run when it was compacted. */
+  /**
+   * How many turns ran before the first one that reads the summary: every
+   * turn so far for a compaction between turns, all but the running one for a
+   * compaction part-way through a turn.
+   */
   readonly afterTurns: number;
 }
 

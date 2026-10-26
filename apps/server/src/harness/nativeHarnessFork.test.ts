@@ -167,19 +167,24 @@ describe("forking a harness conversation", () => {
 
   it.each([
     // Compacted after its first turn: the fork's second turn already read the summary.
-    { afterTurns: 1, throughOperationId: "op-2", copied: true },
+    { turns: 1, afterTurns: 1, throughOperationId: "op-2", copied: true },
     // Compacted only after the second turn, so the fork point had not read it.
-    { afterTurns: 2, throughOperationId: "op-2", copied: false },
+    { turns: 1, afterTurns: 2, throughOperationId: "op-2", copied: false },
+    // Compacted part-way through the third turn, which read the summary of
+    // the two before it: a fork through that turn carries what it read.
+    { turns: 2, afterTurns: 2, throughOperationId: "op-3", copied: true },
+    // The second turn never read that summary, and it stands for that turn.
+    { turns: 2, afterTurns: 2, throughOperationId: "op-2", copied: false },
   ])(
-    "copies a compaction into the fork only when its source read it by the fork point (after $afterTurns)",
-    async ({ afterTurns, throughOperationId, copied }) => {
+    "copies a compaction into the fork only when its source read it by the fork point ($turns turns after $afterTurns, through $throughOperationId)",
+    async ({ turns: summarized, afterTurns, throughOperationId, copied }) => {
       const store = new MemoryNativeHarnessTranscriptStore();
       twoTurnSource(store);
       store.append(session("source"), user("Third."));
       store.append(session("source"), reply("Thrice."));
       store.compact(session("source"), {
         summary: `Read ${sourceRoot}/config.json; it held sk-live-123.`,
-        turns: 1,
+        turns: summarized,
         afterTurns,
       });
       const turns = ["op-1", "op-2", "op-3"].map((operationId) => ({
@@ -210,8 +215,8 @@ describe("forking a harness conversation", () => {
           ? [
               {
                 summary: `Read ${forkRoot}/config.json; it held [REDACTED].`,
-                turns: 1,
-                afterTurns: 1,
+                turns: summarized,
+                afterTurns,
               },
             ]
           : [],

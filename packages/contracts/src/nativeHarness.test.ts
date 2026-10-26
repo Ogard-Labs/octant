@@ -449,7 +449,7 @@ describe("a compacted harness transcript", () => {
   });
 
   it.each([
-    ["covers the latest turn", { ...compacted, turns: 3 }],
+    ["covers a turn its first reader had not run before", { ...compacted, turns: 4 }],
     ["has no summary", { ...compacted, summary: "" }],
     ["covers no turn", { ...compacted, turns: 0 }],
   ])("refuses a compaction that %s", (_, value) => {
