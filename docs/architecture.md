@@ -4228,6 +4228,32 @@ native harness in `apps/server/src/harness`:
   step are answered as not run, so the conversation stays valid for the next
   send. An unknown stream event type is
   ignored and logged, never fatal.
+- **Endpoint port.** A direct endpoint reaches the harness through the
+  provider-sdk harness endpoint port (`@octant/provider-sdk/harness-endpoint`),
+  the same seam a third-party driver would use. The port is types only: the
+  request, message, stream-event, response, and transport shapes the loop
+  consumes (the server's `NativeHarness*` transport names are aliases of them,
+  so there is one definition), and a `HarnessEndpointDriver` that keeps its own
+  probe, Verify tools, and authentication and supplies a `harnessEndpoint`: an
+  `open` that sends one request attempt and an `admitTurn` verdict on a turn's
+  input for one of its models. It has no `acquire`: `runOnNativeHarness` turns
+  it into a `ProviderDriver` whose connections the host builds with
+  `createNativeHarnessConnection`, refusing a connection with no product mode,
+  and whose conversations are host-owned. Before the driver's `admitTurn` is
+  asked, the host refuses a turn offering tools to a model without a Verify
+  tools record on the instance, so a driver's own verdict cannot hand tools
+  to an unverified model. The host wraps the transport in its
+  retry policy (below), registers that retrying endpoint in the
+  `NativeHarnessEndpointRegistry` with the driver's `admitTurn`, wires lead
+  fallback and the shared transcript store, and keeps the instance's session
+  count. `runHarnessEndpointConformance` proves an endpoint refuses unverified
+  tools, rejects a cancel as `interrupted`, and stops sending after release. The
+  OpenAI-compatible, Anthropic-compatible, and Azure AI Foundry drivers predate
+  the port and still build their connection, registration, and retries
+  themselves from host modules; they are queued to move onto it, and no new
+  driver takes that path. Moving them needs the port to carry what a response
+  teaches about the model's context window and served model, which only those
+  drivers learn today.
 - **Durable conversation.** `JournalNativeHarnessTranscriptStore` journals
   each step as it happens (`native-harness-transcript`, one aggregate per
   session): the user message once the request is known to fit, each reply,
@@ -4458,8 +4484,9 @@ native harness in `apps/server/src/harness`:
   subagent. The lead is the exception: it runs on the model its thread chose,
   and the `default` slot decides only where it continues once that model has
   failed (below).
-- **Endpoint failures.** Each direct-endpoint transport sends through
-  `sendWithEndpointRetry`, one policy for both wire protocols. Retryable are
+- **Endpoint failures.** Every direct-endpoint request goes through
+  `sendWithEndpointRetry`, one policy for every wire protocol; for a driver on
+  the endpoint port the host applies it around the driver's single attempt. Retryable are
   HTTP 408, 429, 500, 502, 503, 504, and 529 (classified `unavailable` or
   `rate-limited`, with a provider's `Retry-After` carried on the failure), a
   refused or reset connection, an idle stream, a stream that closes before its
@@ -4493,8 +4520,9 @@ native harness in `apps/server/src/harness`:
   turn's Project (a Project's table may only narrow the host's; turns of
   different Projects that would pick different models get no fallback), journals
   that decision on the thread's harness session, and opens the next model's
-  endpoint through the `NativeHarnessEndpointRegistry` that every direct-endpoint
-  driver fills as it is built. The target may belong to another provider
+  endpoint through the `NativeHarnessEndpointRegistry`, filled for every
+  direct endpoint as its driver is built (by the host for a driver on the
+  endpoint port). The target may belong to another provider
   instance; it must be a harness endpoint and must admit the turn's input, or
   the fallback is refused. The turn continues on it for its remaining steps and
   the next turn starts on the thread's own model. With no other ready model the
@@ -5924,6 +5952,12 @@ feature is already an independently packaged plugin:
 | Marketplace and plugin registry                                       | Stay in the host because they admit and activate other components                                                              |
 | Provider drivers                                                      | Bundled vendor plugins through provider-sdk; generic ACP transport and honest-capability enforcement stay host-owned           |
 | Image adapters (OpenAI, Gemini, BFL, Ideogram)                        | All four extracted behind the provider-sdk image seam and bundled in-tree; image jobs stay host-owned                          |
+
+A direct-endpoint provider driver supplies a transport through the provider-sdk
+harness endpoint port; the harness loop, endpoint registry, lead fallback, and
+retries stay host-owned. The OpenAI-compatible, Anthropic-compatible, and Azure
+AI Foundry drivers still wire those host modules directly and are queued to move
+onto the port ([Native harness](#native-harness)).
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a

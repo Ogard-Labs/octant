@@ -12,6 +12,8 @@
     "./child-observations": "./src/childObservations.ts",
     "./driver": "./src/driver.ts",
     "./driver-plugins": "./src/driverPlugins.ts",
+    "./harness-endpoint": "./src/harnessEndpoint.ts",
+    "./harness-endpoint-conformance": "./src/harnessEndpointConformance.ts",
     "./subscription-oauth": "./src/subscriptionOAuth.ts",
     "./image-generation": "./src/imageGeneration.ts",
     "./image-generation-conformance": "./src/imageGenerationConformance.ts"

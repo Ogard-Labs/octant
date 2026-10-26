@@ -5,6 +5,8 @@ export * from "./contextFactsConformance";
 export * from "./discovery";
 export * from "./driver";
 export * from "./driverPlugins";
+export * from "./harnessEndpoint";
+export * from "./harnessEndpointConformance";
 export * from "./acpClientCapabilities";
 export * from "./subscriptionOAuth";
 export * from "./childObservations";
