@@ -5661,7 +5661,11 @@ same. This holds in Chat, Work, and Code.
   `<prefix>/etc/openssl@3`, never the rest of the prefix. It also grants
   `/` and metadata of every parent folder of those roots, because a runtime
   such as node will not start without them. Metadata names a folder; it does
-  not read its contents.
+  not read its contents. An outside provider driver's process takes a stricter
+  profile from the shared confinement builder (no network, no exec but its
+  runtime, no fork, a read-only package, one temporary folder, and a fixed
+  environment), and on any host but macOS its component is `host-prohibited`
+  ([Outside provider drivers](design/outside-provider-drivers.md#driver-process-rules)).
 - Skills are discovered only from valid `.agents/skills/` and `.claude/skills/`
   packages between the working directory and the Project or repository root
   (the closed `PROJECT_SKILL_ROOTS` allow-list), plus the user-global
@@ -6257,7 +6261,8 @@ that harness-endpoint shape is a design accepted on 2026-10-26, in
 their inspection and quarantined install from a local folder, and the host
 proxy that runs one over the harness endpoint wire protocol (closed failures,
 a capability ceiling, and a brokered request with this instance's key to its
-configured origin only) are built; nothing admits one yet.
+configured origin only), and the confined process per instance that carries
+that protocol on macOS are built; nothing admits one yet.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
