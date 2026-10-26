@@ -84,8 +84,14 @@ export function wireAutomation(deps: AutomationDependencies) {
     }) === "ok";
   // A6: shared device destinations, opt-in preferences, durable delivery
   // receipts. Credentialed APNs/FCM remains a named validation residual —
-  // the default transport reports unavailable honestly.
-  const pushNotificationTokenStore = createPushNotificationTokenStore();
+  // the default transport reports unavailable honestly. Registrations are
+  // kept owner-only under the data directory and survive a restart.
+  const pushNotificationTokenStore = createPushNotificationTokenStore({
+    dataDirectory: persistence.dataDirectory,
+    journal: persistence.journal,
+    uuid: randomUUID,
+    hostActorId: OCTANT_LOCAL_ACTOR_ID,
+  });
   const automationNotificationPreferencesStore = new AutomationNotificationPreferencesStore({
     journal: persistence.journal,
     uuid: randomUUID,

@@ -275,7 +275,7 @@ function readUsableCertificate(
  * a link, flushes it, renames it over the target, and flushes the directory,
  * so a crash leaves either the old file or the complete new one.
  */
-function writeOwnerOnly(path: string, contents: string): void {
+export function writeOwnerOnly(path: string, contents: string): void {
   const staging = `${path}.${process.pid}.tmp`;
   const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW;
   let descriptor: number;

@@ -38,6 +38,7 @@ import {
 } from "./remoteGateway";
 import { canonicalDeviceKeyFacts } from "./deviceKeyFacts";
 import { executeFinalizationSequence } from "./remoteGatewayFinalization";
+import { createPushNotificationTokenStore } from "./pushNotificationTokenStore";
 
 const hostId = decodeStableHostId("11111111-1111-4111-8111-111111111111");
 const nowMs = Date.parse("2026-07-29T09:00:00.000Z");
@@ -161,6 +162,13 @@ function setup(options: SetupOptions = {}) {
   };
   const webAssets =
     options.webAssets ?? (() => Promise.resolve(new Response("web-assets", { status: 200 })));
+  let pushUuidCounter = 0;
+  const pushRegistrations = createPushNotificationTokenStore({
+    dataDirectory: directory,
+    journal,
+    uuid: () => `99999999-9999-4999-8999-${String(++pushUuidCounter).padStart(12, "0")}`,
+    hostActorId: "33333333-3333-4333-8333-333333333333",
+  });
   const baseOptions: RemoteGatewayOptions = {
     connection,
     journal,
@@ -175,10 +183,11 @@ function setup(options: SetupOptions = {}) {
     now: options.now ?? (() => nowMs),
     uuid,
     clock: () => nowIso,
+    pushTokenStore: pushRegistrations,
     config: options.config ?? makeConfig(),
   };
   const gateway = createRemoteGateway(baseOptions);
-  return { gateway, connection, journal, signing, serveCalls, directory };
+  return { gateway, connection, journal, signing, serveCalls, directory, pushRegistrations };
 }
 
 /**
@@ -1307,6 +1316,42 @@ describe("RemoteGateway — approval for a window that never finished", () => {
         )
         .get(),
     ).toEqual({ n: 1 });
+    await gateway.stop();
+  });
+
+  it("deletes a push registration held for the abandoned device and journals the clear without the token", async () => {
+    vi.useFakeTimers();
+    const wall = { value: nowMs };
+    const { gateway, device, connection, pushRegistrations } = await approveForWindow(wall);
+    // No route lets a device that never signed in register; the store is
+    // written directly to show the abandoned device's removal reaches it.
+    const token = "abandoned-device-push-token";
+    pushRegistrations.register({
+      hostId,
+      deviceId: device.deviceId,
+      platform: "android",
+      token,
+      now: nowIso,
+    });
+
+    wall.value += TICKET_LIFE_MS + 1_000;
+    await vi.advanceTimersByTimeAsync(TICKET_LIFE_MS + 2 * 60_000);
+
+    expect(pushRegistrations.get({ hostId, deviceId: device.deviceId })).toBeUndefined();
+    const events = connection
+      .prepare(
+        "SELECT event_name, payload_json FROM event_journal WHERE aggregate_type = 'remote-push-registration' ORDER BY global_sequence",
+      )
+      .all() as ReadonlyArray<{ readonly event_name: string; readonly payload_json: string }>;
+    expect(events.map((event) => event.event_name)).toEqual([
+      "remote.push-registration-recorded@1",
+      "remote.push-registration-cleared@1",
+    ]);
+    expect(JSON.parse(events[1]?.payload_json ?? "{}")).toMatchObject({
+      deviceId: device.deviceId,
+      reason: "pairing-abandoned",
+    });
+    expect(JSON.stringify(events)).not.toContain(token);
     await gateway.stop();
   });
 
