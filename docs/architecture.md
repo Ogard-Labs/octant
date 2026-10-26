@@ -4541,8 +4541,9 @@ the model at another size.
   leaves it out, and a transport failure (authentication, timeout) is reported
   rather than recorded as "unsupported". Admission, the AgentRun transport
   check, and the Chat preflight read that set per model, so verifying one model
-  never offers tools to its siblings; the only tool an unverified model is
-  admitted with is that echo. A tool call in a real turn widens nothing either:
+  never offers tools to its siblings; an unverified model is admitted with no
+  tool, the echo included, since Verify tools sends it outside any session. A
+  tool call in a real turn widens nothing either:
   the provider-level `appManagedTools` flag of an OpenAI-compatible,
   Anthropic-compatible, Foundry, or Ollama profile stays "unsupported", because a tool
   call proves only the model that made it. The command accepts only the models

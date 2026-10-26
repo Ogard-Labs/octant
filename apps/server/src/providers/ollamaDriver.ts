@@ -149,8 +149,7 @@ export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointD
  * Whether Ollama accepts this turn's input for the session's model. Image
  * attachments follow the model's own vision report; Octant's tools follow
  * the per-model Verify tools result, so one verified model never unlocks
- * tools for its siblings, and the echo Verify tools sends is the only tool an
- * unverified model is admitted with.
+ * tools for its siblings.
  */
 function admitTurn(
   options: OllamaDriverOptions,
@@ -159,15 +158,13 @@ function admitTurn(
 ): ProviderFailure | undefined {
   const observed = options.runtimeRegistry.observedState(options.instanceId);
   const model = observed?.models.find((candidate) => String(candidate.id) === String(modelId));
-  const isCapabilityEchoProbe =
-    turn.tools.length > 0 && turn.tools.every((tool) => isCapabilityEchoToolCall(tool.name));
   const isVerifiedModel =
     observed?.verifiedToolModelIds?.some((id) => String(id) === String(modelId)) ?? false;
   return validateChatTurnInput(
     turn,
     {
       nativeAttachments: observed?.capabilities.nativeAttachments ?? "unsupported",
-      appManagedTools: isCapabilityEchoProbe || isVerifiedModel ? "supported" : "unsupported",
+      appManagedTools: isVerifiedModel ? "supported" : "unsupported",
     },
     model,
   );
