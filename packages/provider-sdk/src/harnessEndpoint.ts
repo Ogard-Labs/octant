@@ -121,18 +121,32 @@ export interface HarnessEndpointResponse {
    * finish and for a step that continued into tool calls.
    */
   readonly outputStopReason?: ProviderOutputStopReason;
+  /**
+   * The model the endpoint said it served, when it named one: a deployment
+   * with a name of its own may run a model whose window and inputs Octant
+   * knows. The host keeps it with the requested model, trimmed, as it keeps
+   * the window a completed request proved from `usage`; a blank name or one
+   * longer than 256 characters is ignored, and the response stands either way.
+   */
+  readonly servedModelId?: string;
 }
 
 /**
  * A direct endpoint reduced to what the loop needs from it for one session:
  * send one request and stream its output. The endpoint owns its wire protocol,
- * credentials, size limits, and what it learns about the model; it owns no
+ * credentials, size limits, and what it records about the endpoint; it owns no
  * conversation, tools, or recovery.
  *
  * `send` rejects with a `ProviderFailure`. Behind the port it is one attempt:
  * the host sends it again after a failure that usually passes (a rate limit,
  * unavailability, a stream cut short, an empty completion) and after an abort
  * the endpoint must reject with category `interrupted`.
+ *
+ * What a request teaches about the model's context window reaches the host
+ * through what `send` settles with, and the host keeps it for every endpoint
+ * alike: a refusal because the request outgrew the window says so in its
+ * message, naming the window when the endpoint did ("maximum context length
+ * is N tokens"), and a response reports its `usage` and `servedModelId`.
  */
 export interface HarnessEndpointSession {
   /** Whether a request fits the endpoint's bounds as it would be sent. */

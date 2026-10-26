@@ -8,6 +8,7 @@ import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 import { makeAnthropicCompatibleDriver } from "../providers/anthropicCompatibleDriver";
+import { runOnNativeHarness } from "./nativeHarnessEndpointDriver";
 import type { EndpointRetryOptions } from "../providers/endpointRetry";
 import { makeOpenAiCompatibleDriver } from "../providers/openAiCompatibleDriver";
 import { ProviderRuntimeRegistry } from "../providers/providerRuntimeRegistry";
@@ -33,25 +34,39 @@ interface EndpointKind {
   readonly emptyAnswer: () => Response;
 }
 
+/** The host's harness around a direct endpoint, retrying on the test's clock. */
+function onHarness(runtimeRegistry: ProviderRuntimeRegistry, retry: EndpointRetryOptions) {
+  return {
+    instanceId,
+    runtimeRegistry,
+    harness: { retry },
+    clock: () => "2026-10-06T12:00:00.000Z",
+    correlationId: () => "80000000-0000-4000-8000-000000000703",
+  };
+}
+
 const openAiDriver =
   (protocol: "chat-completions" | "responses") =>
-  (fetch: Fetch, retry: EndpointRetryOptions): ProviderDriver =>
-    makeOpenAiCompatibleDriver({
-      instanceId,
-      configuration: {
-        kind: "openai-compatible-http",
-        baseUrl: "https://provider.example/v1",
-        authentication: "bearer",
-        protocol,
-        manualModelIds: [modelId],
-      },
-      credentialResolver: resolver,
-      fetch,
-      runtimeRegistry: new ProviderRuntimeRegistry(),
-      harness: { retry },
-      clock: () => "2026-10-06T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000703",
-    });
+  (fetch: Fetch, retry: EndpointRetryOptions): ProviderDriver => {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    return runOnNativeHarness(
+      makeOpenAiCompatibleDriver({
+        instanceId,
+        configuration: {
+          kind: "openai-compatible-http",
+          baseUrl: "https://provider.example/v1",
+          authentication: "bearer",
+          protocol,
+          manualModelIds: [modelId],
+        },
+        credentialResolver: resolver,
+        fetch,
+        runtimeRegistry,
+        clock: () => "2026-10-06T12:00:00.000Z",
+      }),
+      onHarness(runtimeRegistry, retry),
+    );
+  };
 
 const openAi: EndpointKind = {
   name: "OpenAI-compatible",
@@ -77,24 +92,27 @@ const openAi: EndpointKind = {
 
 const anthropic: EndpointKind = {
   name: "Anthropic-compatible",
-  driver: (fetch, retry) =>
-    makeAnthropicCompatibleDriver({
-      instanceId,
-      configuration: {
-        kind: "anthropic-compatible-http",
-        baseUrl: "https://provider.example/v1",
-        authentication: "api-key",
-        protocol: "messages",
-        protocolVersion: "2023-06-01",
-        manualModelIds: [modelId],
-      },
-      credentialResolver: resolver,
-      fetch,
-      runtimeRegistry: new ProviderRuntimeRegistry(),
-      harness: { retry },
-      clock: () => "2026-10-06T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000703",
-    }),
+  driver: (fetch, retry) => {
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    return runOnNativeHarness(
+      makeAnthropicCompatibleDriver({
+        instanceId,
+        configuration: {
+          kind: "anthropic-compatible-http",
+          baseUrl: "https://provider.example/v1",
+          authentication: "api-key",
+          protocol: "messages",
+          protocolVersion: "2023-06-01",
+          manualModelIds: [modelId],
+        },
+        credentialResolver: resolver,
+        fetch,
+        runtimeRegistry,
+        clock: () => "2026-10-06T12:00:00.000Z",
+      }),
+      onHarness(runtimeRegistry, retry),
+    );
+  },
   answer: (text) => namedSse(messagesEvents(text)),
   truncatedBeforeOutput: () => namedSse(messagesEvents("").slice(0, 1)),
   resetAfterOutput: (text) => breakingStream(namedBody(messagesEvents(text).slice(0, 3))),
@@ -198,7 +216,7 @@ function runTurn(
       Effect.gen(function* () {
         const connection = yield* kind
           .driver(fetch, retry)
-          .acquire({ instanceId, projectRoot: "/tmp/octant-endpoint-retry" });
+          .acquire({ instanceId, projectRoot: "/tmp/octant-endpoint-retry", mode: "chat" });
         yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
         const events: ProviderRuntimeEvent[] = [];
         const collected = yield* Effect.fork(

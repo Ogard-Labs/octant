@@ -9,7 +9,7 @@ import {
 import { Effect } from "effect";
 import { type OpenAiCompatibleEndpoint, requestGeneration } from "./openAiCompatibleEndpoint";
 import { decodeSse } from "./openAiCompatibleSse";
-import { contextOverflowFromBody } from "./endpointRetry";
+import { contextOverflowFromBody } from "./contextOverflowRefusal";
 import {
   encodeChatCompletionsTools,
   encodeChatCompletionsToolResults,

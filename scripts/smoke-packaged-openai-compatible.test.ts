@@ -69,10 +69,18 @@ describe("packaged compatible smoke configuration", () => {
 
   it("uses packaged-server turn commands and has no source-tree test fallback", async () => {
     expect(compatibleSmokeTurnRequests("fixture-model")).toEqual([
-      expect.objectContaining({ protocol: "responses", action: "complete" }),
-      expect.objectContaining({ protocol: "responses", action: "cancel-after-output" }),
-      expect.objectContaining({ protocol: "chat-completions", action: "complete" }),
-      expect.objectContaining({ protocol: "chat-completions", action: "cancel-after-output" }),
+      expect.objectContaining({ protocol: "responses", action: "complete", mode: "chat" }),
+      expect.objectContaining({
+        protocol: "responses",
+        action: "cancel-after-output",
+        mode: "chat",
+      }),
+      expect.objectContaining({ protocol: "chat-completions", action: "complete", mode: "chat" }),
+      expect.objectContaining({
+        protocol: "chat-completions",
+        action: "cancel-after-output",
+        mode: "chat",
+      }),
     ]);
     const source = await readFile(
       new URL("./smoke-packaged-openai-compatible.ts", import.meta.url),
