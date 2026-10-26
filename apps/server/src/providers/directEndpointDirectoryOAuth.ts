@@ -1,4 +1,6 @@
 import type {
+  AnthropicCompatibleProviderConfiguration,
+  OpenAiCompatibleProviderConfiguration,
   ProviderCredentialStatus,
   ProviderFailure,
   ProviderObservedDirectoryBinding,
@@ -19,9 +21,10 @@ import type { CompatibleRequestAuthorization } from "./openAiCompatibleEndpoint"
 
 /**
  * A direct endpoint that signs in with the organization's directory: where it
- * may send a directory bearer, and the broker it asks for one. The driver
- * kind fixes the audience and host list; the instance names tenant, client,
- * and base URL.
+ * may send a directory bearer, and the broker it asks for one. A tenant
+ * driver kind fixes the audience and host list and the instance names
+ * tenant, client, and base URL; an organization's gateway names its own
+ * issuer, client, scope, and base URL.
  */
 export interface DirectEndpointDirectoryOAuth {
   readonly endpoint: DirectoryOAuthEndpoint;
@@ -30,9 +33,32 @@ export interface DirectEndpointDirectoryOAuth {
 }
 
 /**
- * Error codes an endpoint answers a token from another tenant with. Only the
- * code is read, never the message, which could echo a claim. The real-tenant
- * smoke confirms the set the Foundry endpoint uses.
+ * Where a gateway that signs in with its organization's own issuer may send
+ * its bearer; undefined for a gateway that signs in another way. A gateway
+ * configuration that names a sign-in always gets one, even without a broker,
+ * so a stored value is never sent in its place.
+ */
+export function gatewayDirectorySignIn(
+  configuration: OpenAiCompatibleProviderConfiguration | AnthropicCompatibleProviderConfiguration,
+  host: DirectoryOAuthHost | undefined,
+): DirectEndpointDirectoryOAuth | undefined {
+  if (configuration.authentication !== "directory-oauth") return undefined;
+  return {
+    endpoint: {
+      issuer: configuration.directory.issuer,
+      clientId: configuration.directory.clientId,
+      scope: configuration.directory.scope,
+      baseUrl: configuration.baseUrl,
+    },
+    host,
+  };
+}
+
+/**
+ * Error codes a tenant kind's endpoint answers a token from another tenant
+ * with. Only the code is read, never the message, which could echo a claim.
+ * The real-tenant smoke confirms the set the Foundry endpoint uses. An
+ * organization's gateway has no documented codes, so only its status is read.
  */
 const TENANT_MISMATCH_CODES: ReadonlySet<string> = new Set(["InvalidAuthenticationTokenTenant"]);
 /**
@@ -96,7 +122,12 @@ export function directoryRequestAuthorization(input: {
         host: input.directory.host,
         now: input.now,
       },
-      async (bearer) => classifyAnswer(await send({ authorization: `Bearer ${bearer}` })),
+      async (bearer) => {
+        const response = await send({ authorization: `Bearer ${bearer}` });
+        return "tenantId" in input.directory.endpoint
+          ? classifyTenantAnswer(response)
+          : classifyStatus(response);
+      },
     );
     if (outcome.kind === "answered") return outcome.value;
     throw refusedFailure(outcome);
@@ -152,17 +183,32 @@ export function observedDirectoryBinding(
   } catch {
     return undefined;
   }
-  return { tenantId: endpoint.tenantId, clientId: endpoint.clientId, endpointOrigin: origin };
+  return "tenantId" in endpoint
+    ? { tenantId: endpoint.tenantId, clientId: endpoint.clientId, endpointOrigin: origin }
+    : { issuer: endpoint.issuer, clientId: endpoint.clientId, endpointOrigin: origin };
 }
 
 const refusals = new WeakMap<object, DirectoryOAuthRefusal>();
 
 /**
- * What one send answered. A 401 is a refused token unless its code names the
- * missing role or another tenant; a 403 is the missing role unless its code
- * names another tenant. Every other status is the caller's to read.
+ * What one send to an organization's gateway answered: a 401 is a refused
+ * token, a 403 an account without access. The body is the caller's to read.
  */
-async function classifyAnswer(response: Response): Promise<DirectoryOAuthAttempt<Response>> {
+function classifyStatus(response: Response): DirectoryOAuthAttempt<Response> {
+  if (response.status === 401 || response.status === 403) {
+    void response.body?.cancel().catch(() => undefined);
+    return { kind: response.status === 401 ? "unauthorized" : "forbidden" };
+  }
+  return { kind: "answered", value: response };
+}
+
+/**
+ * What one send to a tenant kind's endpoint answered. A 401 is a refused
+ * token unless its code names the missing role or another tenant; a 403 is
+ * the missing role unless its code names another tenant. Every other status
+ * is the caller's to read.
+ */
+async function classifyTenantAnswer(response: Response): Promise<DirectoryOAuthAttempt<Response>> {
   if (response.status !== 401 && response.status !== 403) {
     return { kind: "answered", value: response };
   }

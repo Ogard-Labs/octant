@@ -5597,6 +5597,73 @@ describe("a stored provider key and the base URL it was entered for", () => {
     expect(clearProviderCredential).toHaveBeenCalledTimes(6);
   });
 
+  it("removes a gateway's organization sign-in when its client, scope, or address changes, or it is removed, and refuses another issuer", async () => {
+    const signedIn = {
+      kind: "openai-compatible-http",
+      baseUrl: "https://gateway.example/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["model-a"],
+      directory: {
+        issuer: "https://login.gateway.example/oauth2/default",
+        clientId: "0oa1octantDesktop",
+        scope: "gateway.models",
+      },
+    } as const;
+    const clearProviderCredential = vi.fn(async () => undefined);
+    const fixture = serviceFixture({
+      instances: [httpProvider({ configuration: signedIn })],
+      clearProviderCredential,
+    });
+    let version = 1;
+    const change = async (configuration: unknown) => {
+      await fixture.service.execute(windowId, {
+        kind: "change-openai-compatible-configuration",
+        instanceId,
+        expectedVersion: version,
+        configuration,
+      } as never);
+      version += 1;
+      return clearProviderCredential.mock.calls.length;
+    };
+    const directory = signedIn.directory;
+
+    // Only the models changed: the sign-in still holds.
+    expect(await change({ ...signedIn, manualModelIds: ["model-b"] })).toBe(0);
+    // Another client, scope, or address drops the grant; it is never rebound.
+    expect(await change({ ...signedIn, directory: { ...directory, clientId: "0oa1other" } })).toBe(
+      1,
+    );
+    expect(
+      await change({
+        ...signedIn,
+        directory: { ...directory, clientId: "0oa1other", scope: "gateway.chat" },
+      }),
+    ).toBe(2);
+    expect(
+      await change({
+        ...signedIn,
+        baseUrl: "https://gateway-2.example/v1/",
+        directory: { ...directory, clientId: "0oa1other", scope: "gateway.chat" },
+      }),
+    ).toBe(3);
+    // The issuer is fixed: the change is refused before anything is removed.
+    await expect(
+      change({
+        ...signedIn,
+        directory: { ...directory, issuer: "https://login.elsewhere.example/oauth2/default" },
+      }),
+    ).rejects.toMatchObject({ failure: { message: expect.stringContaining("issuer is fixed") } });
+    expect(clearProviderCredential).toHaveBeenCalledTimes(3);
+
+    await fixture.service.execute(windowId, {
+      kind: "remove-provider",
+      instanceId,
+      expectedVersion: version,
+    } as never);
+    expect(clearProviderCredential).toHaveBeenCalledTimes(4);
+  });
+
   it("keeps an Azure AI Foundry organization sign-in when its removal is refused for active sessions", async () => {
     const clearProviderCredential = vi.fn(async () => undefined);
     const fixture = serviceFixture({

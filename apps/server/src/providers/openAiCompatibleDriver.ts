@@ -34,11 +34,13 @@ import {
   honestDirectEndpointCapabilities,
   inspectDirectEndpointCredential,
 } from "./directEndpointSubscriptionOAuth";
+import { subscriptionDescriptorIdOf } from "@octant/domain";
 import { chatGptPlanModelsListing, isChatGptPlanDescriptor } from "./chatGptPlanProfile";
 import {
   directoryRefusalOf,
   directoryRefusalReport,
   directoryRequestAuthorization,
+  gatewayDirectorySignIn,
   observedDirectoryBinding,
   readDirectoryPointer,
   refusedFailure,
@@ -50,6 +52,7 @@ import {
   markCompatibleModelVerified,
   probeModels,
   type CompatibleFetch,
+  openAiCompatibleAuthStrategy,
   type CompatibleRequestAuthorization,
   type OpenAiCompatibleAuthStrategy,
   type OpenAiCompatibleEndpoint,
@@ -70,12 +73,13 @@ import { capabilityEchoToolDefinition } from "./openAiToolEncoding";
 import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import type { SubscriptionOAuthHost } from "@octant/provider-sdk/subscription-oauth";
+import type { DirectoryOAuthHost } from "@octant/provider-sdk/directory-oauth";
 
 /** The request profile the resolved credential selects, when it selects one. */
 type CompatiblePlanProfile = "chatgpt-plan" | undefined;
 
 function planProfileOf(options: OpenAiCompatibleDriverOptions): CompatiblePlanProfile {
-  return isChatGptPlanDescriptor(options.configuration.oauthDescriptorId)
+  return isChatGptPlanDescriptor(subscriptionDescriptorIdOf(options.configuration))
     ? "chatgpt-plan"
     : undefined;
 }
@@ -141,10 +145,27 @@ export interface OpenAiCompatibleDriverOptions {
    */
   readonly subscriptionOAuth?: SubscriptionOAuthHost;
   /**
-   * Organization sign-in in place of a stored key. When present the instance
-   * sends only a directory bearer resolved per request, never a stored value.
+   * A tenant kind's organization sign-in in place of a stored key, with the
+   * kind's own audience and host list (Azure AI Foundry). When present the
+   * instance sends only a directory bearer resolved per request, never a
+   * stored value.
    */
-  readonly directoryOAuth?: DirectEndpointDirectoryOAuth;
+  readonly directorySignIn?: DirectEndpointDirectoryOAuth;
+  /**
+   * The broker as a gateway's organization sign-in reaches it. A gateway
+   * configured to sign in with its organization's own issuer sends only that
+   * bearer; without a broker it reads `unavailable`, never a stored value.
+   */
+  readonly directoryOAuth?: DirectoryOAuthHost;
+}
+
+/** The organization sign-in this instance uses, if it uses one. */
+function directorySignInOf(
+  options: OpenAiCompatibleDriverOptions,
+): DirectEndpointDirectoryOAuth | undefined {
+  return (
+    options.directorySignIn ?? gatewayDirectorySignIn(options.configuration, options.directoryOAuth)
+  );
 }
 
 type CompatibleTurnResult = ProtocolTurnResult | ChatCompletionsTurnResult;
@@ -163,8 +184,9 @@ export function makeOpenAiCompatibleDriver(
   const clock = options.clock ?? (() => new Date().toISOString());
   const profile: OpenAiCompatibleDriverProfile = options.profile ?? {
     driverKind: "openai-compatible",
-    authStrategy: options.configuration.authentication,
+    authStrategy: openAiCompatibleAuthStrategy(options.configuration),
   };
+  const directory = directorySignInOf(options);
   return {
     kind: profile.driverKind,
     harnessEndpoint: {
@@ -177,18 +199,12 @@ export function makeOpenAiCompatibleDriver(
         : Effect.tryPromise({
             try: async () => {
               const observedAt = clock() as UtcTimestamp;
-              if (options.directoryOAuth !== undefined) {
-                return probeDirectoryEndpoint(
-                  options,
-                  options.directoryOAuth,
-                  profile,
-                  instanceId,
-                  observedAt,
-                );
+              if (directory !== undefined) {
+                return probeDirectoryEndpoint(options, directory, profile, instanceId, observedAt);
               }
               const gate = await inspectDirectEndpointCredential({
                 authentication: profile.authStrategy,
-                expectedDescriptorId: options.configuration.oauthDescriptorId,
+                expectedDescriptorId: subscriptionDescriptorIdOf(options.configuration),
                 credentialResolver: options.credentialResolver,
                 instanceId,
                 host: options.subscriptionOAuth,
@@ -247,13 +263,13 @@ export function makeOpenAiCompatibleDriver(
         : Effect.tryPromise({
             try: async () => {
               const endpoint =
-                options.directoryOAuth === undefined
+                directory === undefined
                   ? endpointFor(
                       options,
                       directEndpointRequestResolver(oauthResolverInput(options, profile, clock)),
                       profile,
                     )
-                  : await directoryEndpointFor(options, options.directoryOAuth, profile, clock);
+                  : await directoryEndpointFor(options, directory, profile, clock);
               // Propagate transport failures (auth, timeout, provider error)
               // so the user sees the actual error instead of a false
               // "unsupported" result.
@@ -310,15 +326,11 @@ function openAiCompatibleTransport(
   return {
     open: async () => {
       const observedAt = clock();
-      if (options.directoryOAuth !== undefined) {
+      const directory = directorySignInOf(options);
+      if (directory !== undefined) {
         // The pointer is read once per session; the bearer is resolved for
         // every send, since a session outlives a token.
-        const directoryEndpoint = await directoryEndpointFor(
-          options,
-          options.directoryOAuth,
-          profile,
-          clock,
-        );
+        const directoryEndpoint = await directoryEndpointFor(options, directory, profile, clock);
         return sessionOver(options, directoryEndpoint, clock, {
           profile: undefined,
           subscriptionUsageGranted: undefined,
@@ -326,7 +338,7 @@ function openAiCompatibleTransport(
       }
       const gate = await inspectDirectEndpointCredential({
         authentication: profile.authStrategy,
-        expectedDescriptorId: options.configuration.oauthDescriptorId,
+        expectedDescriptorId: subscriptionDescriptorIdOf(options.configuration),
         credentialResolver: options.credentialResolver,
         instanceId: options.instanceId,
         host: options.subscriptionOAuth,
@@ -579,7 +591,7 @@ function oauthResolverInput(
 ) {
   return {
     authentication: profile.authStrategy,
-    expectedDescriptorId: options.configuration.oauthDescriptorId,
+    expectedDescriptorId: subscriptionDescriptorIdOf(options.configuration),
     credentialResolver: options.credentialResolver,
     instanceId: options.instanceId,
     host: options.subscriptionOAuth,
@@ -589,7 +601,7 @@ function oauthResolverInput(
 }
 
 function authStrategyOf(options: OpenAiCompatibleDriverOptions): OpenAiCompatibleAuthStrategy {
-  return options.profile?.authStrategy ?? options.configuration.authentication;
+  return options.profile?.authStrategy ?? openAiCompatibleAuthStrategy(options.configuration);
 }
 
 function endpointFor(

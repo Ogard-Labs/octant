@@ -43,10 +43,13 @@ function storedCredential(value: string | undefined) {
 describe("Azure AI Foundry organization sign-in", () => {
   it("passes every directory sign-in conformance case through the Foundry driver", async () => {
     const evidence = await runDirectoryOAuthConformance({
+      signsInTo: "tenant",
       audience: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.audience,
       baseUrl: "https://fixture.openai.azure.com/openai/v1/",
       otherBaseUrl: "https://other.services.ai.azure.com/openai/v1/",
       makeSubject: (input) => {
+        const configured = input.configuration;
+        if (!("tenantId" in configured)) throw new Error("expected a tenant configuration");
         const runtimeRegistry = new ProviderRuntimeRegistry();
         // The runner's endpoint answers a generation with a plain completion;
         // the Foundry transport reads a stream, so a 200 is re-encoded as one.
@@ -62,11 +65,8 @@ describe("Azure AI Foundry organization sign-in", () => {
           instanceId,
           configuration: {
             ...foundryDirectoryConfiguration(),
-            baseUrl: input.configuration.baseUrl,
-            directory: {
-              tenantId: input.configuration.tenantId,
-              clientId: input.configuration.clientId,
-            },
+            baseUrl: configured.baseUrl,
+            directory: { tenantId: configured.tenantId, clientId: configured.clientId },
           },
           runtimeRegistry,
           credentialResolver: storedCredential(input.storedCredential),
@@ -224,7 +224,7 @@ describe("Azure AI Foundry organization sign-in", () => {
 
     expect(observed).toMatchObject({ readiness: "incompatible", models: [] });
     expect(observed.message).toBe(
-      "This endpoint's organization sign-in does not match its tenant, client, or address. Sign in again for this endpoint.",
+      "This endpoint's organization sign-in does not match its directory, client, or address. Sign in again for this endpoint.",
     );
     expect(JSON.stringify(observed)).not.toContain(broker.current());
     expect(broker.refreshes).toBe(0);

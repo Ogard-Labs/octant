@@ -1,5 +1,8 @@
 import {
   decodeDirectoryClientId,
+  decodeDirectoryIssuer,
+  decodeDirectoryIssuerClientId,
+  decodeDirectoryResourceScope,
   decodeDirectoryTenantId,
   decodeProviderInstance,
   decodeWindowId,
@@ -9,7 +12,11 @@ import {
   decodeHostOAuthDescriptor,
   decodeHostOAuthTermsAcknowledgment,
 } from "@octant/contracts/host-oauth";
-import { AZURE_FOUNDRY_DIRECTORY_SIGN_IN, azureFoundryDirectoryDescriptor } from "@octant/domain";
+import {
+  AZURE_FOUNDRY_DIRECTORY_SIGN_IN,
+  GATEWAY_DIRECTORY_SIGN_IN,
+  azureFoundryDirectoryDescriptor,
+} from "@octant/domain";
 import {
   encodeDirectoryOAuthCredential,
   readDirectoryOAuthCredential,
@@ -48,6 +55,41 @@ const foundry = decodeProviderInstance({
   createdAt: "2026-10-26T10:00:00.000Z",
   updatedAt: "2026-10-26T10:00:00.000Z",
 });
+
+const ISSUER = decodeDirectoryIssuer("https://login.example.test/oauth2/gateway");
+const ISSUER_CLIENT = decodeDirectoryIssuerClientId("0oa1octantDesktop");
+const SCOPE = decodeDirectoryResourceScope("gateway.models");
+
+const gatewayInstance = (driverKind: "openai-compatible" | "anthropic-compatible") =>
+  decodeProviderInstance({
+    id: instanceId,
+    displayName: "Gateway",
+    driverKind,
+    configuration:
+      driverKind === "openai-compatible"
+        ? {
+            kind: "openai-compatible-http",
+            baseUrl: "https://openrouter.ai/api/v1/",
+            authentication: "directory-oauth",
+            protocol: "auto",
+            manualModelIds: [],
+            directory: { issuer: ISSUER, clientId: ISSUER_CLIENT, scope: SCOPE },
+          }
+        : {
+            kind: "anthropic-compatible-http",
+            baseUrl: "https://openrouter.ai/api/v1/",
+            authentication: "directory-oauth",
+            protocol: "auto",
+            protocolVersion: "2023-06-01",
+            manualModelIds: [],
+            directory: { issuer: ISSUER, clientId: ISSUER_CLIENT, scope: SCOPE },
+          },
+    enabled: true,
+    environmentPolicy: "inherit-host",
+    version: 1,
+    createdAt: "2026-10-26T10:00:00.000Z",
+    updatedAt: "2026-10-26T10:00:00.000Z",
+  });
 
 const pointerFor = (credentialRef: string) =>
   encodeDirectoryOAuthCredential({
@@ -153,6 +195,72 @@ describe("organization sign-in routes", () => {
     expect(scene.calls).toEqual([]);
   });
 
+  it.each(["openai-compatible", "anthropic-compatible"] as const)(
+    "signs an organization gateway (%s) in at its own issuer for its client, scope, and origin, and keeps a pointer named for the account",
+    async (driverKind) => {
+      const scene = fixture({
+        instance: gatewayInstance(driverKind),
+        descriptorId: GATEWAY_DIRECTORY_SIGN_IN.descriptorId,
+      });
+      expect(await scene.send("status")).toMatchObject({
+        kind: "signed-out",
+        termsRequired: true,
+        termsSummary: GATEWAY_DIRECTORY_SIGN_IN.termsSummary,
+      });
+      await scene.send("acknowledge");
+      expect(await scene.send("begin")).toMatchObject({ kind: "awaiting-consent", attemptId });
+      // The descriptor comes from the instance, never from the request.
+      expect(scene.calls[0]).toEqual({
+        name: "begin",
+        descriptor: {
+          descriptorId: "gateway-directory",
+          dialect: "issuer-oidc",
+          flow: "authorization-code-pkce",
+          clientId: ISSUER_CLIENT,
+          issuer: ISSUER,
+          endpointOrigin: "https://openrouter.ai",
+          scopes: [SCOPE],
+          termsId: GATEWAY_DIRECTORY_SIGN_IN.termsId,
+        },
+      });
+
+      expect(await scene.send("poll")).toEqual({
+        kind: "signed-in",
+        accountLabel: "person@contoso.example",
+      });
+      expect(readDirectoryOAuthCredential(scene.stored() ?? "")).toEqual({
+        kind: "directory-oauth",
+        credentialRef: NEW_GRANT,
+        issuer: ISSUER,
+        clientId: ISSUER_CLIENT,
+        scope: SCOPE,
+        endpointOrigin: "https://openrouter.ai",
+        accountLabel: "person@contoso.example",
+      });
+    },
+  );
+
+  it("refuses a command that names another kind's sign-in for the instance, or a catalog sign-in over an organization one", async () => {
+    const gateway = fixture({ instance: gatewayInstance("openai-compatible"), acknowledged: true });
+    expect(await gateway.send("begin")).toEqual({ kind: "refused", reason: "invalid" });
+    const foundryWithGatewayId = fixture({ descriptorId: GATEWAY_DIRECTORY_SIGN_IN.descriptorId });
+    expect(await foundryWithGatewayId.send("begin")).toEqual({
+      kind: "refused",
+      reason: "invalid",
+    });
+    // The gateway sits at the catalog offer's own address, yet a catalog
+    // sign-in would store its pointer over the organization sign-in's.
+    const catalog = fixture({
+      instance: gatewayInstance("openai-compatible"),
+      descriptorId: "openrouter",
+      stored: pointerFor(OLD_GRANT),
+    });
+    expect(await catalog.send("begin")).toEqual({ kind: "refused", reason: "unsupported-driver" });
+
+    expect([...gateway.calls, ...foundryWithGatewayId.calls, ...catalog.calls]).toEqual([]);
+    expect(catalog.stored()).toBe(pointerFor(OLD_GRANT));
+  });
+
   it("refuses a remote principal's organization sign-in before any broker call", async () => {
     const calls: string[] = [];
     const service = createHostOAuthService({
@@ -201,8 +309,10 @@ function fixture(
     readonly refresh?: "interaction-required" | "revoked";
     readonly acknowledged?: boolean;
     readonly instance?: typeof foundry;
+    readonly descriptorId?: string;
   } = {},
 ) {
+  const descriptorId = options.descriptorId ?? AZURE_FOUNDRY_DIRECTORY_SIGN_IN.descriptorId;
   const calls: Call[] = [];
   let stored = options.stored;
   const credentials: ProviderCredentialStore = {
@@ -224,7 +334,7 @@ function fixture(
       return {
         kind: "awaiting-consent",
         attemptId,
-        descriptorId: "azure-foundry-directory",
+        descriptorId,
         flow: "authorization-code-pkce",
         authorizationUrl: `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/authorize`,
         expiresAt: "2026-10-26T10:15:00.000Z",
@@ -233,7 +343,7 @@ function fixture(
     status: async () => ({
       kind: "signed-in",
       attemptId,
-      descriptorId: "azure-foundry-directory",
+      descriptorId,
       credentialRef: NEW_GRANT,
       accountLabel: "person@contoso.example",
     }),
@@ -249,8 +359,11 @@ function fixture(
   if (options.acknowledged === true) {
     service.restoreAcknowledgment(
       decodeHostOAuthTermsAcknowledgment({
-        descriptorId: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.descriptorId,
-        termsId: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.termsId,
+        descriptorId,
+        termsId:
+          descriptorId === GATEWAY_DIRECTORY_SIGN_IN.descriptorId
+            ? GATEWAY_DIRECTORY_SIGN_IN.termsId
+            : AZURE_FOUNDRY_DIRECTORY_SIGN_IN.termsId,
         actorId: windowId,
         acknowledgedAt: "2026-10-26T09:00:00.000Z",
       }),
@@ -282,7 +395,7 @@ function fixture(
           body: JSON.stringify({
             kind,
             instanceId,
-            descriptorId: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.descriptorId,
+            descriptorId,
             ...(kind === "poll" ? { attemptId } : {}),
           }),
         }),

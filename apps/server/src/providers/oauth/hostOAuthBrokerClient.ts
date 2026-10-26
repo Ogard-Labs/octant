@@ -7,7 +7,8 @@ export interface HostOAuthBrokerDescriptor {
     | "openrouter-pkce"
     | "chatgpt-plan-siwc"
     | "mcp-authorization"
-    | "directory-oidc";
+    | "directory-oidc"
+    | "issuer-oidc";
   readonly flow: "authorization-code-pkce" | "device-code";
   readonly authorizationEndpoint?: string;
   /** Absent only for the directory dialect, whose authority the broker builds. */
@@ -26,15 +27,27 @@ export interface HostOAuthBrokerDescriptor {
   readonly tenantId?: string;
   readonly audience?: string;
   readonly endpointOrigin?: string;
+  /** Issuer dialect: the organization's own issuer; its one scope is the gateway's. */
+  readonly issuer?: string;
 }
 
-/** What a directory grant was signed in for; its token is released only under this binding. */
-export interface HostOAuthBrokerBinding {
-  readonly tenantId: string;
-  readonly clientId: string;
-  readonly audience: string;
-  readonly endpointOrigin: string;
-}
+/**
+ * What a directory or issuer grant was signed in for; its token is released
+ * only under this binding.
+ */
+export type HostOAuthBrokerBinding =
+  | {
+      readonly tenantId: string;
+      readonly clientId: string;
+      readonly audience: string;
+      readonly endpointOrigin: string;
+    }
+  | {
+      readonly issuer: string;
+      readonly clientId: string;
+      readonly scope: string;
+      readonly endpointOrigin: string;
+    };
 
 export interface HostOAuthBrokerPort {
   readonly begin: (input: {
@@ -154,19 +167,27 @@ export function makeHostOAuthBrokerClient(options: {
       if (!UUID_PATTERN.test(credentialRef)) {
         return Promise.reject(new Error("Octant host OAuth broker refused the request."));
       }
-      // Exactly the four binding fields: the broker refuses any other shape.
+      // Exactly one kind's four binding fields: the broker refuses any other shape.
       return post(
         "/v1/oauth/access",
         binding === undefined
           ? { credentialRef }
           : {
               credentialRef,
-              binding: {
-                tenantId: binding.tenantId,
-                clientId: binding.clientId,
-                audience: binding.audience,
-                endpointOrigin: binding.endpointOrigin,
-              },
+              binding:
+                "tenantId" in binding
+                  ? {
+                      tenantId: binding.tenantId,
+                      clientId: binding.clientId,
+                      audience: binding.audience,
+                      endpointOrigin: binding.endpointOrigin,
+                    }
+                  : {
+                      issuer: binding.issuer,
+                      clientId: binding.clientId,
+                      scope: binding.scope,
+                      endpointOrigin: binding.endpointOrigin,
+                    },
             },
       );
     },

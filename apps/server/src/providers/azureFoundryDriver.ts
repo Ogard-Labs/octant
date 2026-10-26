@@ -70,7 +70,7 @@ export function makeAzureFoundryDriver(options: AzureFoundryDriverOptions): Harn
       : { credentialResolver: options.credentialResolver }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
-    ...(directory === undefined ? {} : { directoryOAuth: directory }),
+    ...(directory === undefined ? {} : { directorySignIn: directory }),
     profile: FOUNDRY_PROFILE,
   });
   // Per the approved Foundry profile design, treat missing/incomplete model discovery as

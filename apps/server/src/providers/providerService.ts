@@ -834,7 +834,9 @@ export class ProviderService implements ProviderServiceApi {
             // It is forgotten only once the removal is allowed, so a removal
             // refused for active sessions keeps the sign-in.
             if (
-              current.driverKind === "azure-foundry" &&
+              (current.driverKind === "azure-foundry" ||
+                current.driverKind === "openai-compatible" ||
+                current.driverKind === "anthropic-compatible") &&
               current.configuration.authentication === "directory-oauth"
             ) {
               await this.#forgetCredentialForOldEndpoint(current.id);
@@ -2136,13 +2138,26 @@ function sameCatalogContent(
  * What a stored credential is bound to, for the endpoint profiles whose
  * credential the host keeps by instance: the base URL a key is sent to and,
  * for Azure AI Foundry, how it signs in and the tenant and client a sign-in
- * holds. Ollama also has a base URL but sends no key.
+ * holds, or for a gateway, the issuer, client, and scope its sign-in holds.
+ * Ollama also has a base URL but sends no key.
  */
 function credentialBinding(instance: ProviderInstance): string | undefined {
   switch (instance.driverKind) {
     case "openai-compatible":
-    case "anthropic-compatible":
-      return instance.configuration.baseUrl;
+    case "anthropic-compatible": {
+      // A gateway's organization sign-in is held for one issuer, client,
+      // scope, and address; a key only for its address.
+      const configuration = instance.configuration;
+      return configuration.authentication === "directory-oauth"
+        ? [
+            configuration.baseUrl,
+            "directory-oauth",
+            String(configuration.directory.issuer),
+            String(configuration.directory.clientId),
+            String(configuration.directory.scope),
+          ].join("\n")
+        : configuration.baseUrl;
+    }
     case "azure-foundry": {
       const configuration = instance.configuration;
       return configuration.authentication === "directory-oauth"
