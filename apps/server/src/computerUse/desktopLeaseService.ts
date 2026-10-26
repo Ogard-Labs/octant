@@ -1,6 +1,7 @@
 import {
   AggregateId,
   CorrelationId,
+  DESKTOP_ARTIFACT_MAXIMUM_BYTES,
   DESKTOP_LEASE_AGGREGATE_TYPE,
   DESKTOP_LEASE_EVENT_NAMES,
   EventId,
@@ -9,6 +10,8 @@ import {
   decodeUtcTimestamp,
   type ComputerControlCommand,
   type ComputerControlResult,
+  type DesktopArtifactRefusal,
+  type DesktopArtifactSent,
   type DesktopHostTag,
   type DesktopLease,
   type DesktopLeaseEndReason,
@@ -28,6 +31,7 @@ import {
 } from "@octant/contracts";
 import {
   cacheBackoffHolds,
+  decideDesktopArtifactTransfer,
   decideDesktopLeaseAcquire,
   decideDesktopLeaseExtension,
   desktopLeaseClockEnds,
@@ -49,6 +53,7 @@ import {
   reportComputerUseDestination,
   type ComputerUseDestinationReport,
 } from "./computerUseDestination";
+import { readDesktopArtifact, type DesktopArtifact } from "./desktopArtifactRead";
 import type { DesktopLeaseProjection, DesktopLeaseRecord } from "./desktopLeaseProjection";
 
 /**
@@ -86,6 +91,16 @@ export interface DesktopLeaseConfirmation {
   readonly leaseMinutes: number;
 }
 
+/** What a person sees before a file is sent: the file, its hash, and where it goes. */
+export interface DesktopTransferConfirmation {
+  readonly owner: DesktopLeaseOwner;
+  readonly leaseId: DesktopLeaseId;
+  readonly provider: LeasableDesktopProvider;
+  /** `off-machine` asks a person in every posture; `in-thread` follows the thread's approvals. */
+  readonly asks: "in-thread" | "off-machine";
+  readonly artifact: DesktopArtifact;
+}
+
 export interface DesktopLeaseServiceOptions {
   readonly journal: Pick<Journal, "append">;
   readonly projection: DesktopLeaseProjection;
@@ -100,6 +115,11 @@ export interface DesktopLeaseServiceOptions {
   readonly callerMayOpen: (actor: EventActor, owner: DesktopLeaseOwner) => boolean;
   readonly computerUseEnabled: () => boolean;
   readonly confirm: (request: DesktopLeaseConfirmation) => Promise<"approved" | "declined">;
+  /** The thread's bound root now: its Code checkout, or its Work Project root. */
+  readonly threadRoot: (owner: DesktopLeaseOwner) => Promise<string | undefined>;
+  readonly confirmTransfer: (
+    request: DesktopTransferConfirmation,
+  ) => Promise<"approved" | "declined">;
   readonly systemActor: EventActor;
   readonly now: () => number;
   readonly uuid: () => string;
@@ -132,6 +152,13 @@ export type DesktopLeaseExtendResult =
 export type DesktopLeaseControlResult =
   | { readonly status: "answered"; readonly result: ComputerControlResult }
   | DesktopLeaseRefusal;
+
+export type DesktopLeaseTransferResult =
+  | { readonly status: "delivered"; readonly artifact: DesktopArtifact }
+  /** Journaled as sent, but the driver did not confirm the desktop has it. */
+  | { readonly status: "not-delivered"; readonly artifact: DesktopArtifact }
+  | DesktopLeaseRefusal
+  | DesktopArtifactRefusal;
 
 export interface DesktopLeaseReconciliation {
   /** Unreleased leases verified gone. */
@@ -171,6 +198,13 @@ export interface DesktopLeaseService {
       readonly command: ComputerControlCommand;
     },
   ) => Promise<DesktopLeaseControlResult>;
+  /**
+   * Sends one checkout-relative file into the lease's inbox. The bytes the
+   * host hashed, showed, and journaled are the bytes the driver receives.
+   */
+  readonly transfer: (
+    caller: DesktopLeaseCaller & { readonly leaseId: DesktopLeaseId; readonly path: string },
+  ) => Promise<DesktopLeaseTransferResult>;
   /** A Desktop tab opened or closed on a lease; an open tab holds idle release off. */
   readonly markTab: (leaseId: DesktopLeaseId, change: "opened" | "closed") => void;
   /** Ends leases whose clock, thread, recipe, provider, or setting ended them; retries failed releases. */
@@ -732,6 +766,7 @@ export function createDesktopLeaseService(
     readonly record: DesktopLeaseRecord;
     readonly handle: DesktopHandle;
     readonly provider: DesktopProvider;
+    readonly thread: DesktopLeaseThread;
   };
 
   /** Every operating command: the lease is the caller's thread's, ready, and still authorized. */
@@ -756,7 +791,7 @@ export function createDesktopLeaseService(
     const loaded = registered(String(record.lease.providerId));
     if (loaded === undefined || !loaded.effective) return refused("provider-disabled");
     if (!options.computerUseEnabled()) return refused("computer-use-off");
-    return { status: "operating", record, handle, provider: loaded.provider };
+    return { status: "operating", record, handle, provider: loaded.provider, thread };
   }
 
   const control: DesktopLeaseService["control"] = async (caller) => {
@@ -820,6 +855,85 @@ export function createDesktopLeaseService(
       if (entry !== undefined) entry.lastActivityAt = options.now();
       return { status: "extended", lease: read(caller.leaseId).lease };
     });
+
+  /**
+   * The file is read and hashed once, before anyone is asked, and those bytes
+   * are what the person approves, what the journal records, and what the
+   * driver receives; a file changed while a person decides is not re-read.
+   * Authority, posture, provider, and root are checked again after the answer.
+   * The send itself runs in the lease's order and is bounded like a teardown
+   * call, so a driver that never answers cannot hold a release behind it.
+   */
+  const transfer: DesktopLeaseService["transfer"] = async (caller) => {
+    const first = admitOperating(caller);
+    if (first.status === "refused") return first;
+    const gate = decideDesktopArtifactTransfer({
+      executionPolicy: first.thread.executionPolicy,
+      locality: first.provider.locality,
+      initiator: caller.actor.kind,
+    });
+    if (gate.kind === "refused") return refused(gate.reason);
+    const owner = first.record.lease.owner;
+    const root = await options.threadRoot(owner).catch(() => undefined);
+    if (root === undefined) return { status: "refused", reason: "no-root" };
+    const read = await readDesktopArtifact({
+      root,
+      path: caller.path,
+      maximumBytes: DESKTOP_ARTIFACT_MAXIMUM_BYTES,
+    });
+    if (read.status === "refused") return read;
+    const { artifact, bytes } = read;
+    if (gate.kind === "ask") {
+      const answer = await options
+        .confirmTransfer({
+          owner,
+          leaseId: caller.leaseId,
+          provider: leasableOf(first.provider),
+          asks: gate.asks,
+          artifact,
+        })
+        .catch(() => "declined" as const);
+      if (answer !== "approved") return refused("declined");
+    }
+    const rootNow = await options.threadRoot(owner).catch(() => undefined);
+    return inOrder(caller.leaseId, async (): Promise<DesktopLeaseTransferResult> => {
+      const admitted = admitOperating(caller);
+      if (admitted.status === "refused") return admitted;
+      // An answer given for one provider, posture, or checkout never covers another.
+      if (
+        String(admitted.provider.id) !== String(first.provider.id) ||
+        admitted.provider.locality !== first.provider.locality ||
+        admitted.thread.executionPolicy !== first.thread.executionPolicy ||
+        rootNow !== root
+      ) {
+        return refused("declined");
+      }
+      const sent: DesktopArtifactSent = {
+        leaseId: caller.leaseId,
+        owner,
+        providerId: admitted.record.lease.providerId,
+        ...artifact,
+      };
+      // Journaled before the bytes leave, so a send cut off midway is on record.
+      append(
+        admitted.record,
+        caller.leaseId,
+        DESKTOP_LEASE_EVENT_NAMES.artifactSent,
+        sent,
+        caller.actor,
+      );
+      const entry = live.get(String(caller.leaseId));
+      if (entry !== undefined) entry.lastActivityAt = options.now();
+      const { provider, handle } = admitted;
+      const delivered = await bounded(() => provider.deliver(handle, artifact.name, bytes), {
+        status: "failed" as const,
+        reason: "timed-out",
+      });
+      return delivered.status === "delivered"
+        ? { status: "delivered", artifact }
+        : { status: "not-delivered", artifact };
+    });
+  };
 
   const release: DesktopLeaseService["release"] = async (caller) => {
     const record = projection.get(caller.leaseId);
@@ -929,5 +1043,16 @@ export function createDesktopLeaseService(
         .map((entry) => leasableOf(entry.provider)),
     });
 
-  return { start, destination, acquire, release, retryRelease, extend, control, markTab, sweep };
+  return {
+    start,
+    destination,
+    acquire,
+    release,
+    retryRelease,
+    extend,
+    control,
+    transfer,
+    markTab,
+    sweep,
+  };
 }

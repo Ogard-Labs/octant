@@ -317,6 +317,7 @@ export function startOctantServer(
       browserAuthority,
       externalContentIngestionStore,
       machineChangeFeed,
+      managedWorktreeReceipts,
       options,
       persistence,
       processAuthorityNow,

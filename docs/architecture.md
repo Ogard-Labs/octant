@@ -5863,9 +5863,10 @@ same. This holds in Chat, Work, and Code.
   2026-10-26, in
   [Disposable desktops](design/disposable-desktops.md). The lease contract,
   the `desktop-provider` seam with its conformance suite, the host lease
-  service, and the host-local provider (a virtual X display in a dedicated
-  Bubblewrap launch, Linux only) are built; no recipe storage, transfer, agent
-  binding, or Desktop pane is, so every lease command refuses as a value.
+  service, the host-local provider (a virtual X display in a dedicated
+  Bubblewrap launch, Linux only), and artifact transfer are built; no recipe
+  storage, agent binding, or Desktop pane is, so every lease command refuses
+  as a value.
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host

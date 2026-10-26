@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  DESKTOP_ARTIFACT_MAXIMUM_BYTES,
+  decodeDesktopArtifactSent,
   decodeDesktopLeaseRequested,
   decodeDesktopLeaseTransitioned,
   decodeDesktopRecipe,
@@ -65,5 +67,24 @@ describe("desktop lease contract", () => {
       requestedBy: { kind: "local-user", actorId: "d1000000-0000-4000-8000-000000000005" },
     });
     expect(transitioned.requestedBy?.kind).toBe("local-user");
+  });
+
+  it("journals a transfer's path, size, and SHA-256 and nothing of its contents", () => {
+    const sent = {
+      leaseId,
+      owner: { mode: "code", threadId },
+      providerId: "host-local",
+      path: "dist/app.AppImage",
+      name: "app.AppImage",
+      size: 1_024,
+      sha256: "a".repeat(64),
+    } as const;
+    expect(decodeDesktopArtifactSent(sent).sha256).toBe("a".repeat(64));
+    expect(() => decodeDesktopArtifactSent({ ...sent, bytes: "AAAA" })).toThrow();
+    expect(() => decodeDesktopArtifactSent({ ...sent, sha256: "A".repeat(64) })).toThrow();
+    expect(() => decodeDesktopArtifactSent({ ...sent, name: "dist/app" })).toThrow();
+    expect(() =>
+      decodeDesktopArtifactSent({ ...sent, size: DESKTOP_ARTIFACT_MAXIMUM_BYTES + 1 }),
+    ).toThrow();
   });
 });

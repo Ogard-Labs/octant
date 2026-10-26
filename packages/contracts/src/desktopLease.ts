@@ -167,6 +167,7 @@ export const DESKTOP_LEASE_EVENT_NAMES = {
   requested: "desktop.lease-requested@1",
   transitioned: "desktop.lease-transitioned@1",
   extended: "desktop.lease-extended@1",
+  artifactSent: "desktop.artifact-sent@1",
 } as const;
 
 /**
@@ -215,6 +216,62 @@ export const DesktopLeaseExtended = Schema.Struct({
 }).annotations(strict);
 export type DesktopLeaseExtended = typeof DesktopLeaseExtended.Type;
 
+/**
+ * The largest file one transfer moves. The host holds the bytes it hashed
+ * from the read through the person's answer to delivery, so what lands is
+ * exactly what was shown; the bound keeps that in memory.
+ */
+export const DESKTOP_ARTIFACT_MAXIMUM_BYTES = 128 * 1024 * 1024;
+
+/** Why the host would not read a file for a transfer. Authority refusals stay the lease's own. */
+export const DesktopArtifactRefusalReason = Schema.Literal(
+  "no-root",
+  "path-invalid",
+  "path-absolute",
+  "path-escapes-root",
+  "path-in-git",
+  "path-symlink",
+  "not-found",
+  "not-a-file",
+  "too-large",
+  "changed-while-read",
+);
+export type DesktopArtifactRefusalReason = typeof DesktopArtifactRefusalReason.Type;
+
+export const DesktopArtifactRefusal = Schema.Struct({
+  status: Schema.Literal("refused"),
+  reason: DesktopArtifactRefusalReason,
+}).annotations(strict);
+export type DesktopArtifactRefusal = typeof DesktopArtifactRefusal.Type;
+
+/** One file name: no separator, no NUL, not `.` or `..`. */
+export const DesktopArtifactName = Schema.String.pipe(
+  Schema.minLength(1),
+  Schema.maxLength(255),
+  Schema.filter(
+    (name) =>
+      (!name.includes("/") && !name.includes("\0") && name !== "." && name !== "..") ||
+      "An artifact name is one file name.",
+  ),
+);
+
+/**
+ * Journaled before the bytes are handed to the driver, so a transfer that
+ * fails or is cut off midway is still on record. The contents never are.
+ */
+export const DesktopArtifactSent = Schema.Struct({
+  leaseId: DesktopLeaseId,
+  owner: DesktopLeaseOwner,
+  providerId: DesktopProviderId,
+  /** Relative to the thread's checkout (Work: its Project root), `/`-separated. */
+  path: Schema.String.pipe(Schema.minLength(1), Schema.maxLength(4_096)),
+  /** The base name the file lands under in the desktop's inbox. */
+  name: DesktopArtifactName,
+  size: Schema.Int.pipe(Schema.between(0, DESKTOP_ARTIFACT_MAXIMUM_BYTES)),
+  sha256: Schema.String.pipe(Schema.pattern(/^[0-9a-f]{64}$/)),
+}).annotations(strict);
+export type DesktopArtifactSent = typeof DesktopArtifactSent.Type;
+
 const screenCoordinate = Schema.Number.pipe(Schema.finite(), Schema.nonNegative());
 
 /** Input for a desktop's screen, from a person in a Desktop tab or the host. */
@@ -253,4 +310,5 @@ export const decodeDesktopLease = Schema.decodeUnknownSync(DesktopLease);
 export const decodeDesktopLeaseRequested = Schema.decodeUnknownSync(DesktopLeaseRequested);
 export const decodeDesktopLeaseTransitioned = Schema.decodeUnknownSync(DesktopLeaseTransitioned);
 export const decodeDesktopLeaseExtended = Schema.decodeUnknownSync(DesktopLeaseExtended);
+export const decodeDesktopArtifactSent = Schema.decodeUnknownSync(DesktopArtifactSent);
 export const decodeDesktopInputEvent = Schema.decodeUnknownSync(DesktopInputEvent);

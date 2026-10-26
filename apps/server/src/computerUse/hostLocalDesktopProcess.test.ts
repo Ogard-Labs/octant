@@ -9,6 +9,7 @@ import {
   readlinkSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { spawn } from "node:child_process";
@@ -322,6 +323,70 @@ describe("host-local desktop capsule under real Bubblewrap", () => {
     },
   );
 
+  it.runIf(canRunBwrap)(
+    "lands a delivered file read-only in a running desktop's inbox and nowhere else",
+    async () => {
+      const { directory, port } = fixture();
+      const leaseId = decodeDesktopLeaseId(randomUUID());
+      const lease = join(directory, "desktops", String(leaseId));
+      const inbox = join(lease, "inbox");
+      const bytes = new TextEncoder().encode("built app\n");
+      await expect(port.deliver(leaseId, "app.bin", bytes)).resolves.toEqual({
+        status: "refused",
+        reason: "not-running",
+      });
+
+      let output = "";
+      const launched = await port.launch({
+        leaseId,
+        hostTag,
+        program: "sh",
+        args: [
+          "-c",
+          [
+            "read -r go",
+            'cat "$1/app.bin"',
+            'ls "$1" | tr "\\n" " "; echo',
+            'echo again >> "$1/app.bin" 2>/dev/null || echo file-read-only',
+            'rm -f "$1/app.bin" 2>/dev/null; test -e "$1/app.bin" && echo still-there',
+          ].join("\n"),
+          "probe",
+          inbox,
+        ],
+        output: (chunk) => {
+          output += new TextDecoder().decode(chunk);
+        },
+        signal: new AbortController().signal,
+      });
+      if (launched.status !== "launched") throw new Error("not launched");
+      for (const name of ["", ".", "..", "../escape.bin", "dist/app.bin", "a\0b"]) {
+        await expect(port.deliver(leaseId, name, bytes)).resolves.toEqual({
+          status: "refused",
+          reason: "invalid-name",
+        });
+      }
+      await expect(
+        port.deliver(leaseId, "app.bin", new TextEncoder().encode("old")),
+      ).resolves.toEqual({ status: "delivered" });
+      // A second transfer under the same name replaces the first.
+      await expect(port.deliver(leaseId, "app.bin", bytes)).resolves.toEqual({
+        status: "delivered",
+      });
+      expect(readdirSync(lease).sort()).toEqual(["home", "host-tag", "inbox", "pid-namespace"]);
+      expect(statSync(join(inbox, "app.bin")).mode & 0o777).toBe(0o444);
+      await launched.desktop.write(new TextEncoder().encode("go\n"));
+      await launched.desktop.exited;
+
+      expect(output).toBe("built app\napp.bin \nfile-read-only\nstill-there\n");
+      await expect(port.stop(leaseId)).resolves.toEqual({ status: "released" });
+      await expect(port.deliver(leaseId, "app.bin", bytes)).resolves.toEqual({
+        status: "refused",
+        reason: "not-running",
+      });
+      expect(existsSync(lease)).toBe(false);
+    },
+  );
+
   it.runIf(process.platform === "linux")(
     "refuses to launch for a lease the host is not provisioning",
     async () => {
@@ -361,7 +426,7 @@ function openJournal(connection: SqliteConnection) {
 }
 
 /** One host process over a data directory: its journal, launch port, driver, and lease service. */
-function hostOver(connection: SqliteConnection, directory: string) {
+function hostOver(connection: SqliteConnection, directory: string, checkout?: string) {
   const { journal, projection } = openJournal(connection);
   const port = createHostLocalDesktopLaunch({
     directory,
@@ -383,6 +448,8 @@ function hostOver(connection: SqliteConnection, directory: string) {
     callerMayOpen: () => true,
     computerUseEnabled: () => true,
     confirm: async () => "approved",
+    threadRoot: async () => checkout,
+    confirmTransfer: async () => "approved",
     systemActor: decodeEventActor({ kind: "system", actorId: randomUUID() }),
     now: () => Date.now(),
     uuid: randomUUID,
@@ -464,6 +531,41 @@ describe("host-local desktop under real Bubblewrap and Xvfb", () => {
         endReason: "host-restart",
       });
       expect(namespaceMembers(namespace)).toBe(0);
+      expect(existsSync(join(directory, "desktops", String(leaseId)))).toBe(false);
+      connection.close();
+    },
+  );
+
+  it.runIf(canRunDesktop)(
+    "sends a checkout file through the lease service into the running desktop's inbox",
+    async () => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "octant-host-desktop-")));
+      directories.push(root);
+      const directory = join(root, "desktop-leases");
+      const checkout = join(root, "checkout");
+      mkdirSync(join(checkout, "dist"), { recursive: true });
+      writeFileSync(join(checkout, "dist", "app.bin"), "built app");
+      const connection = openSqlite(join(root, "octant.sqlite3"));
+      applyMigrations(connection, MIGRATIONS, () => new Date(START).toISOString());
+      const { service } = hostOver(connection, directory, checkout);
+      const caller = {
+        owner: { mode: "code" as const, threadId: randomUUID() },
+        actor: decodeEventActor({ kind: "local-user", actorId: randomUUID() }),
+      };
+      const acquired = await service.acquire(caller);
+      if (acquired.status !== "acquired") throw new Error("not acquired");
+      const leaseId = acquired.lease.leaseId;
+
+      await expect(
+        service.transfer({ ...caller, leaseId, path: "dist/app.bin" }),
+      ).resolves.toMatchObject({ status: "delivered", artifact: { name: "app.bin", size: 9 } });
+      const landed = join(directory, "desktops", String(leaseId), "inbox", "app.bin");
+      expect(readFileSync(landed, "utf8")).toBe("built app");
+      expect(statSync(landed).mode & 0o777).toBe(0o444);
+
+      await expect(service.release({ ...caller, leaseId })).resolves.toMatchObject({
+        status: "released",
+      });
       expect(existsSync(join(directory, "desktops", String(leaseId)))).toBe(false);
       connection.close();
     },

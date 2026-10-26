@@ -8,16 +8,18 @@ app-managed ([Architecture: extensions and skills](../architecture.md#extensions
 launches go through the shared confinement port, and authority is checked on the
 server ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
-**Delivery state.** Accepted 2026-10-26; slices 1 and 2 are built and slices
-3–6 are not. The maintainer authorized this scope as post-preview work and
+**Delivery state.** Accepted 2026-10-26; slices 1–3 are built and slices
+4–6 are not. The maintainer authorized this scope as post-preview work and
 accepted the [maintainer decisions](#maintainer-decisions) below on 2026-10-26;
 it is not part of the first release, and the
 [Current Release Boundary](../../AGENTS.md#current-release-boundary) is
 unchanged by this document. The lease contract, the `desktop-provider` seam
-and its conformance suite, the host lease service, and the host-local provider
-exist; no recipe storage, transfer, agent binding, or Desktop pane does, so a
-running host refuses every lease command as a value (see
-[Built in slice 1](#built-in-slice-1) and [Built in slice 2](#built-in-slice-2)).
+and its conformance suite, the host lease service, the host-local provider,
+and artifact transfer exist; no recipe storage, agent binding, or Desktop pane
+does, so a running host refuses every lease and transfer command as a value
+(see [Built in slice 1](#built-in-slice-1),
+[Built in slice 2](#built-in-slice-2), and
+[Built in slice 3](#built-in-slice-3)).
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -554,9 +556,9 @@ Rules this slice resolved:
   unasked, and a frame's buffer is allocated only for a waiting request), or a
   request unanswered for 10 seconds breaks the channel for good. Pointer input outside the screen and keys outside a closed
   keysym map refuse; typed text crosses as base64.
-- **Control and delivery refuse.** Every `octant_computer` command refuses
-  `unsupported` until slice 4 binds agent control, and `deliver` refuses until
-  slice 3's transfer.
+- **Control refuses.** Every `octant_computer` command refuses `unsupported`
+  until slice 4 binds agent control. `deliver` refused too until
+  [slice 3](#built-in-slice-3) gave it the launch port's inbox write.
 - **A cancelled acquisition records its cause.** When a lease ends while its
   provider is creating it and the driver honours the cancellation, the
   `failed` transition carries the end reason and who asked.
@@ -568,6 +570,80 @@ loopback; that release and a restarted host's reconciliation leave no process
 in the desktop's namespace and no lease directory; and that the driver passes
 the conformance suite over the real launch port. Its desktop tests need
 `Xvfb`, `xdotool`, and ImageMagick and skip on a host without them.
+
+### Built in slice 3
+
+- **Contract.** `desktop.artifact-sent@1` on the `desktop-lease` aggregate
+  carries the lease, owner, provider, the root-relative path, the base name,
+  the size, and the SHA-256, never the contents.
+  `DesktopArtifactRefusalReason` names why a file is not read: `no-root`,
+  `path-invalid`, `path-absolute`, `path-escapes-root`, `path-in-git`,
+  `path-symlink`, `not-found`, `not-a-file`, `too-large`, and
+  `changed-while-read`. Authority refusals stay the lease's own closed set.
+- **Policy.** `decideDesktopArtifactPath` and `decideDesktopArtifactTransfer`
+  in `packages/domain/src/desktopLeasePolicy.ts`.
+- **Seam.** `DesktopLaunchPort.deliver` writes one file into a running
+  desktop's inbox; the host-local driver's `deliver` uses it while its
+  desktop runs and fails `not-running` otherwise.
+- **Host.** `transfer` on the lease service, with the read in
+  `apps/server/src/computerUse/desktopArtifactRead.ts`. The wiring resolves
+  the thread's root; the slice 1 placeholders stay, so no caller may open a
+  thread and every transfer confirmation declines until slices 4 and 5 bring
+  their callers.
+
+Rules this slice resolved:
+
+- **Read once, before asking.** The host reads and hashes the file before
+  anyone is asked. Those bytes are what the person approves, what the journal
+  records, and what the driver receives; a file changed while a person decides
+  is not re-read. After the answer the host checks the lease's authority
+  again, and a changed provider, posture, or root refuses `declined`.
+- **Size limit 128 MiB.** The host holds the bytes from the read to delivery,
+  so the bound is a memory bound. An Electron AppImage fits; a larger file
+  refuses `too-large`.
+- **Nothing is followed.** A symlink refuses at any component, even one whose
+  target is inside the root, and any `..` refuses, even one that lands back
+  inside. `.git` matches without case, because a case-insensitive volume opens
+  `.GIT` as the same directory. The canonical path must be the root joined
+  with exactly the path's components. The file is opened with no-follow and
+  non-blocking, must be the object the walk saw, and is read for exactly its
+  size plus one probe byte; a handle whose size, modification, or change time
+  moved during the read refuses `changed-while-read`.
+- **Hard links are accepted.** A file with more than one name is sent. Only
+  something that already reaches a file can link it into the checkout, and it
+  could as well copy it there; Cargo links its build outputs, so refusing
+  would block Rust builds without protecting anything.
+- **Journaled before the bytes leave.** `desktop.artifact-sent@1` is written
+  with the caller as actor before the driver is called, so a transfer cut off
+  midway is still on record. The result says `delivered` or `not-delivered`.
+  The send runs in the lease's order and is bounded at 60 seconds like a
+  teardown call, so a driver that never answers cannot hold a release behind
+  it.
+- **Who is asked.** Plan refuses. Below Full access an agent's transfer asks
+  in the thread, auto-accept-edits included: that posture covers edits to the
+  checkout, not sending a file out of it. Full access proceeds to a host-local
+  desktop, and a person sending a file to one is not asked again. A transfer
+  to a cloud desktop asks a person every time (`off-machine`).
+- **Where it lands.** The file is written whole beside the lease's `home` and
+  `inbox`, made read-only (`0444`), and renamed into the inbox under its base
+  name, so the desktop never sees a partial file and a later transfer under
+  the same name replaces the earlier one. It carries no execute bit; how a
+  transferred app is launched is slice 4's to settle.
+- **The root.** A Code thread's root is its checkout: its managed worktree,
+  or the Project root it works in place. A Work thread's root is its Project
+  root. Either counts only while the thread is bound to its Project's current
+  revision and the checkout is available; otherwise the transfer refuses
+  `no-root`.
+
+Evidence: `desktopLeaseService.test.ts` covers the journaled path, size, and
+hash, every path refusal, Plan, approval-gated asking, the cloud ask, the
+approved bytes winning over a file changed during the answer, and authority
+changes during the answer. `desktopArtifactRead.test.ts` covers files that
+grow or shrink during the read. Under real Bubblewrap,
+`hostLocalDesktopProcess.test.ts` shows the delivered file is read-only
+inside the capsule and cannot be removed, that the port refuses names that
+leave the inbox and leases with no running desktop, and that a transfer
+through the lease service lands in a running desktop's inbox.
 
 ## Rationale
 
@@ -589,6 +665,7 @@ Source entry points: `apps/server/src/computerUse/desktopLeaseService.ts` and
 `packages/plugin-api/src/desktopProvider.ts` and `desktopProviderConformance.ts`
 (the seam), `apps/server/src/computerUse/hostLocalDesktopLaunch.ts` (the
 host-local launch through `apps/server/src/process/linuxConfinement.ts`),
+`apps/server/src/computerUse/desktopArtifactRead.ts` (the transfer's read),
 `apps/server/src/plugins/hostLocalDesktop/` (the host-local driver), and, once
 built, the web Desktop pane. Each slice above lists its
 evidence. Lease negatives, restart reconciliation, and real-`bwrap` permission
