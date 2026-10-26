@@ -46,18 +46,17 @@ export async function resolveContainedPath(
 /**
  * Names of the one directory containment proved, read from a single handle.
  *
- * The handle refuses a symlinked final component, and the object it reports
- * must be the object containment resolved, so a directory swapped in after
- * that proof is refused rather than enumerated. `O_NOFOLLOW` alone would not
- * catch a swapped *ancestor*, which is why the device and inode equality —
- * not the open — is what closes that window.
+ * The port's open must land on the canonical path itself, so an ancestor
+ * swapped for a link after containment is refused, and the object it reports
+ * must be the object containment resolved, so a directory replaced after that
+ * proof is refused rather than enumerated.
  *
- * The port cannot make that guarantee absolute: enumerating and identifying
- * are two path resolutions, so a precisely timed swap can still be identified
- * as the resolved object while yielding another directory's names. Every name
- * a caller acts on must be re-resolved through `resolveContainedPath`, which is
- * what keeps a foreign entry out; the residual is that a name existing in both
- * directories is indistinguishable from one that only exists here.
+ * On Linux the names come from the held directory. On macOS the enumeration
+ * resolves the path once more, so a precisely timed swap can still yield
+ * another directory's names. Every name a caller acts on must be re-resolved
+ * through `resolveContainedPath`, which is what keeps a foreign entry out; the
+ * residual there is that a name existing in both directories is
+ * indistinguishable from one that only exists here.
  *
  * The read is capped at the caller's remaining budget, so a directory far
  * larger than the caller can report costs that budget rather than its own size,

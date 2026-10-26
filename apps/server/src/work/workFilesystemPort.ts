@@ -14,6 +14,7 @@ import {
   type FileHandle,
 } from "node:fs/promises";
 import type { Dir } from "node:fs";
+import { confinedEnumerationPath, openConfinedPath } from "../confinedPathOpen";
 
 /**
  * Filesystem metadata for a Work-confined path. The port exposes only the
@@ -164,15 +165,12 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
   stat: async (path) => toStat(await stat(path, { bigint: true })),
   readlink,
   openFile: async (path) => {
-    // O_NOFOLLOW refuses a final component that is a symlink. It says nothing
-    // about the ancestors, which is why the caller must still have run the
-    // containment sequence — this only closes the window after it. O_NONBLOCK
-    // keeps a FIFO swapped in after that sequence from holding the open until a
-    // writer appears; the caller's isFile check on the handle then refuses it.
-    const handle = await open(
-      path,
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
-    );
+    // The caller must still have run the containment sequence; the open then
+    // proves it landed on the path that sequence resolved, so an ancestor
+    // swapped for a link in between is refused. O_NONBLOCK keeps a FIFO swapped
+    // in after that sequence from holding the open until a writer appears; the
+    // caller's isFile check on the handle then refuses it.
+    const handle = await openConfinedPath(path, constants.O_RDONLY | constants.O_NONBLOCK);
     return {
       stat: async () => {
         const info = await handle.stat({ bigint: true });
@@ -201,12 +199,12 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
       close: () => handle.close(),
     };
   },
-  openWriteFile: async (path, options) => openLiveWriteFile(path, options),
+  // A write's parent directory and an overwritten file are reached by the same
+  // repeated path resolution as a read, so they take the same proved open.
+  openWriteFile: async (path, options) =>
+    liveWriteFile(await openConfinedPath(path, writeFlags(options), 0o600)),
   openDirectory: async (path) =>
-    liveDirectory(
-      await open(path, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW),
-      path,
-    ),
+    liveDirectory(await openConfinedPath(path, constants.O_RDONLY | constants.O_DIRECTORY), path),
   readFile: async (path) => await readFile(path),
   writeFile: async (path, bytes) => {
     await writeFile(path, bytes);
@@ -270,12 +268,11 @@ function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirec
       };
     },
     read: async (maximumEntries) => {
-      // `opendir` resolves the path again, which is a second resolution the
-      // held handle cannot make atomic. What closes that window is the
-      // caller's identity comparison against `stat()` above — the handle pins
-      // the inode for as long as the enumeration runs, so a directory swapped
-      // in under the same name is refused rather than enumerated.
-      stream ??= await opendir(directoryPath);
+      // On Linux this enumerates the held directory itself. On macOS `opendir`
+      // resolves the path again, a second resolution the held handle cannot
+      // make atomic, so every name a caller acts on is re-resolved through
+      // confinement.
+      stream ??= await opendir(confinedEnumerationPath(handle, directoryPath));
       const names: { readonly name: string }[] = [];
       while (names.length < maximumEntries) {
         const entry = await stream.read();
@@ -318,7 +315,13 @@ function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirec
       await created.close();
     },
     openWriteFile: async (name, options) =>
-      openLiveWriteFile(childOpenPath(handle, directoryPath, name), options, childNoFollow),
+      liveWriteFile(
+        await open(
+          childOpenPath(handle, directoryPath, name),
+          writeFlags(options) | childNoFollow,
+          0o600,
+        ),
+      ),
     close: async () => {
       await stream?.close().catch(() => undefined);
       await handle.close();
@@ -326,19 +329,18 @@ function liveDirectory(handle: FileHandle, directoryPath: string): WorkOpenDirec
   };
 }
 
-async function openLiveWriteFile(
-  path: string,
-  options: { readonly exclusiveCreate: boolean },
-  noFollow: number = constants.O_NOFOLLOW,
-): Promise<WorkOpenWriteFile> {
+/** Open flags for a confined write, without the link guard its opener adds. */
+function writeFlags(options: { readonly exclusiveCreate: boolean }): number {
   // An overwrite opens an existing name, so a FIFO swapped in after the
   // containment check would hold a blocking open until a reader appeared.
   // O_NONBLOCK refuses it with ENXIO instead; with a reader present the open
   // succeeds and the caller's isFile check on the handle refuses it.
-  const flags = options.exclusiveCreate
-    ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow
-    : constants.O_WRONLY | constants.O_NONBLOCK | noFollow;
-  const handle = await open(path, flags, 0o600);
+  return options.exclusiveCreate
+    ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL
+    : constants.O_WRONLY | constants.O_NONBLOCK;
+}
+
+function liveWriteFile(handle: FileHandle): WorkOpenWriteFile {
   return {
     stat: async () => {
       const info = await handle.stat({ bigint: true });

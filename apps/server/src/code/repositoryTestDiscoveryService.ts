@@ -136,9 +136,9 @@ export class RepositoryTestDiscoveryService {
    * capped at the length the handle reported and must return exactly that, so
    * an object that grows after it was measured is refused rather than read.
    *
-   * `O_NOFOLLOW` guards only the final component; the ancestor directories are
-   * still the confinement sequence's `realpath` to check, which is why this is
-   * only ever called on a path that sequence already resolved.
+   * The port's open must land on the canonical path itself, so an ancestor
+   * swapped for a link after the sequence resolved it is refused; that is why
+   * this is only ever called on a path that sequence already resolved.
    */
   async #readContained(
     canonical: string,

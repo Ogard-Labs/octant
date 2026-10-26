@@ -22,10 +22,12 @@ export interface WorkConfinedReadRequest {
  * the length the handle reported and must return exactly that, so an object
  * that grows after it was measured is refused rather than read.
  *
- * The device and inode equality is what closes the window: `O_NOFOLLOW` guards
- * only the final component, so the ancestor directories are still the
- * confinement sequence's `realpath` to check. That is why this is only ever
- * called on a path that sequence already resolved, with the identity it saw.
+ * The device and inode equality refuses an object replaced after the proof.
+ * An ancestor swapped for a link is refused by the port's open, which must
+ * land on the canonical path itself (`openConfinedPath`): the `stat` that
+ * produced the identity and the open could otherwise both follow the same
+ * link. That is why this is only ever called on a path the confinement
+ * sequence already resolved, with the identity it saw.
  *
  * `undefined` means refuse. Every caller maps it to its own surface's existing
  * failure vocabulary; none of them may fall back to a second read, truncate, or

@@ -7008,6 +7008,30 @@ mechanisms are:
   assign outside the static blocks; the conformance harness covers the
   compaction claim, and the rest is reviewed with the driver.
 
+- **Host reads of a bound root.** Every read, listing, and search the host
+  process makes in a Code checkout or Work folder (file reads, search,
+  repository-test discovery, ACP client reads, file mentions, the Files panel,
+  Side Chat reads, Canvas design images) and every Work write runs one confinement
+  sequence: `lstat` the candidate, check a link's target, `realpath`, check the
+  canonical path against the canonical root, then open that canonical path and
+  require the handle's device and inode to be the ones resolution saw. Each
+  step resolves the path afresh and `O_NOFOLLOW` guards only the final
+  component, so an agent that flips an ancestor between a directory and a link
+  to a host folder can make `stat` and the open both reach the host object; a
+  rename loop on Linux read host bytes in roughly one attempt in fifty to one
+  in a hundred on every such surface. The open must therefore itself land on
+  the canonical path. On Linux the kernel's path for the handle
+  (`/proc/self/fd/N`) must equal it. On macOS the open carries `O_NOFOLLOW_ANY`
+  (macOS 11+, so every supported Apple Silicon host), and the kernel refuses a
+  link in any component; a canonical path holds none. Any other platform
+  refuses the open. Canvas refresh opens its source through the same open, so
+  a link anywhere in that path refuses it too. A Linux listing enumerates the held directory through
+  `/proc/self/fd/N`; a macOS listing resolves the path once more, so every name
+  it yields is re-resolved and a name present in both the root and the
+  swapped-in folder is the remaining residual there. Hard links are not
+  refused. On Linux a top-level exclusive create that loses the race can leave
+  one empty file at the swapped-in location; it never receives bytes.
+
 - **ACP client capabilities.** ACP client filesystem and terminal effects are
   executed by Octant inside the Code confinement, with bounded reads, writes,
   terminal lifetimes, and output. Terminal requests with direct `args` use
