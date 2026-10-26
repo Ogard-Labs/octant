@@ -1,10 +1,48 @@
 import type { ChatMessagePart } from "@octant/contracts/chat";
 import { resolveChatMessageParts } from "@octant/domain/chat-message-parts";
 import { ChevronRight } from "lucide-react";
-import { createContext, useContext, useMemo } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { ChatRichText } from "../chat/ChatRichText";
 
 export const StreamRepliesContext = createContext(true);
+
+function useStreamingBody(body: string, streaming: boolean): string {
+  const [shown, setShown] = useState(body);
+  const latest = useRef(body);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // A replacement or finished answer is current in this render, even before
+  // the effect cancels a pending streaming beat.
+  const immediate = !streaming || shown.length === 0 || !body.startsWith(shown);
+  useEffect(() => {
+    latest.current = body;
+    if (immediate) {
+      if (timer.current !== undefined) {
+        clearTimeout(timer.current);
+        timer.current = undefined;
+      }
+      setShown(body);
+    } else if (body !== shown && timer.current === undefined) {
+      // Do not restart on each delta: a continuous stream must still paint.
+      timer.current = setTimeout(
+        () => {
+          timer.current = undefined;
+          setShown(latest.current);
+        },
+        body.length >= 16_000 ? 100 : 50,
+      );
+    }
+  }, [body, immediate, shown]);
+  useEffect(
+    () => () => {
+      if (timer.current !== undefined) {
+        clearTimeout(timer.current);
+        timer.current = undefined;
+      }
+    },
+    [],
+  );
+  return immediate ? body : shown;
+}
 
 /** The same assistant prose and inline disclosures in Chat, Work, and Code. */
 export function AssistantMessageBody(props: {
@@ -13,10 +51,8 @@ export function AssistantMessageBody(props: {
 }) {
   const streamReplies = useContext(StreamRepliesContext);
   const hidePartialAnswer = props.streaming === true && !streamReplies;
-  const parts = useMemo(
-    () => resolveChatMessageParts({ role: "assistant", body: props.body }),
-    [props.body],
-  );
+  const body = useStreamingBody(props.body, props.streaming === true);
+  const parts = useMemo(() => resolveChatMessageParts({ role: "assistant", body }), [body]);
   // The parts, not the raw body: the parser leaves out what a person should
   // not read, such as a reply's follow-up suggestion block.
   const prose = parts.flatMap((part) => (part.kind === "markdown" ? [part.text] : []));
