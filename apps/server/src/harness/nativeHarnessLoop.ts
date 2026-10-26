@@ -25,10 +25,11 @@ import { Effect, PubSub, Stream, type Scope } from "effect";
 import { isContextOverflowFailure, isEndpointRetriesExhausted } from "../providers/endpointRetry";
 import type { ObservedRateLimitBucket } from "../providers/rateLimitHeaders";
 import { nativeHarnessToolGuide } from "./nativeHarnessInstructions";
-import type {
-  NativeHarnessTranscript,
-  NativeHarnessTranscriptCompaction,
-  NativeHarnessTranscriptStore,
+import {
+  MemoryNativeHarnessTranscriptStore,
+  type NativeHarnessTranscript,
+  type NativeHarnessTranscriptCompaction,
+  type NativeHarnessTranscriptStore,
 } from "./nativeHarnessTranscriptStore";
 import type {
   NativeHarnessLeadFallback,
@@ -145,6 +146,12 @@ interface SessionState {
   readonly sessionId: ProviderSessionId;
   /** The journal aggregate this session appends to; a resumed session keeps its original one. */
   readonly transcriptId: ProviderSessionId;
+  /**
+   * Where the conversation is kept: the connection's journal, or for a
+   * single-use session a store that ends with it, since no thread records a
+   * single-use session and a purge could never find its journaled transcript.
+   */
+  readonly transcripts: NativeHarnessTranscriptStore;
   readonly modelId: ProviderModelId;
   readonly correlationId: CorrelationId;
   readonly endpoint: NativeHarnessTransportSession;
@@ -296,6 +303,7 @@ export function createNativeHarnessConnection(
     const newState = (input: {
       readonly sessionId: ProviderSessionId;
       readonly transcriptId: ProviderSessionId;
+      readonly transcripts: NativeHarnessTranscriptStore;
       readonly modelId: ProviderModelId;
       readonly endpoint: NativeHarnessTransportSession;
       readonly messages: NativeHarnessMessage[];
@@ -305,6 +313,7 @@ export function createNativeHarnessConnection(
     }): SessionState => ({
       sessionId: input.sessionId,
       transcriptId: input.transcriptId,
+      transcripts: input.transcripts,
       modelId: input.modelId,
       correlationId: options.correlationId() as CorrelationId,
       endpoint: input.endpoint,
@@ -377,7 +386,7 @@ export function createNativeHarnessConnection(
       });
       try {
         for (const { message } of retained) {
-          options.transcripts.append(state.transcriptId, message);
+          state.transcripts.append(state.transcriptId, message);
           state.messages.push(message);
         }
       } catch (error) {
@@ -627,7 +636,7 @@ export function createNativeHarnessConnection(
       if (pending === undefined) return;
       const unanswered = pending.calls.filter((call) => !pending.answers.has(call.toolCallId));
       for (const result of interruptedResults(unanswered)) {
-        options.transcripts.settle(state.transcriptId, result);
+        state.transcripts.settle(state.transcriptId, result);
         pending.answers.set(result.toolCallId, {
           sessionId: state.sessionId,
           requestId: result.toolCallId,
@@ -709,7 +718,7 @@ export function createNativeHarnessConnection(
           text: response.text,
           toolCalls: calls,
         };
-        options.transcripts.append(state.transcriptId, message);
+        state.transcripts.append(state.transcriptId, message);
         state.messages.push(message);
         const answers = new Map<string, ProviderToolAnswer>();
         const malformed = new Set<string>();
@@ -727,7 +736,7 @@ export function createNativeHarnessConnection(
             resultJson: problem,
             isError: true,
           });
-          options.transcripts.settle(state.transcriptId, {
+          state.transcripts.settle(state.transcriptId, {
             toolCallId: call.toolCallId,
             resultJson: problem,
             isError: true,
@@ -742,7 +751,7 @@ export function createNativeHarnessConnection(
             // the next send do not carry calls without results.
             for (const call of calls) {
               if (malformed.has(call.toolCallId)) continue;
-              options.transcripts.settle(state.transcriptId, {
+              state.transcripts.settle(state.transcriptId, {
                 toolCallId: call.toolCallId,
                 resultJson: NOT_RUN_RESULT_JSON,
                 isError: true,
@@ -784,7 +793,7 @@ export function createNativeHarnessConnection(
         return;
       }
       const message: NativeHarnessMessage = { role: "assistant", text: response.text };
-      options.transcripts.append(state.transcriptId, message);
+      state.transcripts.append(state.transcriptId, message);
       state.messages.push(message);
       const steered = takeSteeringRequest(state);
       if (steered !== undefined) {
@@ -919,7 +928,7 @@ export function createNativeHarnessConnection(
         afterTurns: hidden + (keepFrom === undefined ? starts.length : latest),
       };
       try {
-        options.transcripts.compact(state.transcriptId, compaction);
+        state.transcripts.compact(state.transcriptId, compaction);
       } catch {
         // The marker never reached the journal, so the session still reads
         // the turns it would have replaced.
@@ -1033,8 +1042,12 @@ export function createNativeHarnessConnection(
             refuseCancelledOpening(signal);
             const endpoint = await options.transport.open(input.modelId);
             refuseCancelledOpening(signal, endpoint);
+            const transcripts =
+              input.singleUse === true
+                ? new MemoryNativeHarnessTranscriptStore()
+                : options.transcripts;
             try {
-              options.transcripts.open(input.sessionId, {
+              transcripts.open(input.sessionId, {
                 instanceId: options.instanceId,
                 modelId: input.modelId,
                 projectRoot: options.projectRoot,
@@ -1047,13 +1060,16 @@ export function createNativeHarnessConnection(
             const state = newState({
               sessionId: input.sessionId,
               transcriptId: input.sessionId,
+              transcripts,
               modelId: input.modelId,
               endpoint,
               messages: [],
               tools: input.tools,
             });
             admit(state);
-            return { sessionId: input.sessionId, resumeCursor: cursorFor(state) };
+            return input.singleUse === true
+              ? { sessionId: input.sessionId }
+              : { sessionId: input.sessionId, resumeCursor: cursorFor(state) };
           },
           catch: sanitizeFailure,
         }),
@@ -1101,6 +1117,7 @@ export function createNativeHarnessConnection(
             const state = newState({
               sessionId: input.sessionId,
               transcriptId,
+              transcripts: options.transcripts,
               modelId: transcript.binding.modelId,
               endpoint,
               messages: compacted.messages,
@@ -1143,7 +1160,7 @@ export function createNativeHarnessConnection(
                 "The provider request exceeded the configured size limit.",
               );
             }
-            options.transcripts.append(state.transcriptId, user);
+            state.transcripts.append(state.transcriptId, user);
             state.messages.splice(0, state.messages.length, ...earlier, live);
             state.pending = undefined;
             state.answered.clear();
@@ -1263,7 +1280,7 @@ export function createNativeHarnessConnection(
             }
             pending.answers.set(input.requestId, input);
             state.answered.add(input.requestId);
-            options.transcripts.settle(state.transcriptId, {
+            state.transcripts.settle(state.transcriptId, {
               toolCallId: input.requestId,
               resultJson: input.resultJson,
               isError: input.isError,

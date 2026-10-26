@@ -2127,7 +2127,8 @@ flowchart LR
   a context or compaction summary, a commit or pull-request draft, an
   advisor review) starts single-use under a random id no thread records, so
   a purge could never find what it kept; Claude therefore records no resume
-  identity for it, and nothing is left behind to purge.
+  identity for it, Octant Harness keeps its transcript in memory only, and
+  nothing is left behind to purge.
   The thread's child runs are erased with it, so their `agent-run` rows
   are de-linked the same way; replay treats a run whose
   `agent.run-requested@1` event is gone as purged.
@@ -4309,8 +4310,9 @@ so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
   session): the user message once the request is known to fit, each reply,
   and each tool call the moment it settles. Sessions therefore report
   `resume: supported` and return a resume cursor, which is how a Code thread
-  continues the same conversation on its next turn. `start` under an existing
-  id begins a new generation. A resume first closes any call the process
+  continues the same conversation on its next turn. A single-use `start`
+  journals nothing and returns no cursor: its conversation lives only as long
+  as the session. `start` under an existing id begins a new generation. A resume first closes any call the process
   stopped in the middle of with a journaled interrupted result that says
   whether the tool only reads (`replay: "safe"`, call it again) or may have
   taken effect (`replay: "unsafe"`, check before repeating); nothing is
