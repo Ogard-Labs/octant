@@ -273,8 +273,12 @@ export async function runExecutorCommand(
     proxyPath = await egress.open(session);
     if (proxyPath === undefined) return unavailable;
   }
-  const directory = await mkdtemp(join(scripts, "octant-harness-"));
+  // Once the forwarder is open, every path below must close it and answer:
+  // a failure that escaped here would leave no reply, the forwarder and its
+  // `resolve` and `dial` answering until the host timed the session out.
+  let directory: string | undefined;
   try {
+    directory = await mkdtemp(join(scripts, "octant-harness-"));
     const script = join(directory, "command.sh");
     await writeFile(script, `${request.command}\n`, { mode: 0o600 });
     const base =
@@ -321,7 +325,7 @@ export async function runExecutorCommand(
     return unavailable;
   } finally {
     egress.close();
-    await rm(directory, { recursive: true, force: true });
+    if (directory !== undefined) await rm(directory, { recursive: true, force: true });
   }
 }
 

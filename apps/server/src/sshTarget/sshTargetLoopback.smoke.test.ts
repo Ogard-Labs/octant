@@ -561,6 +561,19 @@ function remoteHarnessHost(input: {
   };
 }
 
+/** Whether a launch summary has an entry for exactly this host. */
+function summarizesHost(payload: unknown, host: string): boolean {
+  if (typeof payload !== "object" || payload === null || !("entries" in payload)) return false;
+  const { entries } = payload;
+  return (
+    Array.isArray(entries) &&
+    entries.some(
+      (entry: unknown) =>
+        typeof entry === "object" && entry !== null && "host" in entry && entry.host === host,
+    )
+  );
+}
+
 function reasons(status: SshTargetStatus): ReadonlyArray<string> {
   return status.admission.map((entry) =>
     entry.decision.status === "admitted" ? "admitted" : entry.decision.reason,
@@ -1084,7 +1097,7 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
       const summary = recorded.find(
         (event) =>
           event.eventName === "thread.egress-launch-summarized@1" &&
-          JSON.stringify(event.payload).includes("allowed.example.com"),
+          summarizesHost(event.payload, "allowed.example.com"),
       );
       expect(summary?.payload).toMatchObject({
         entries: expect.arrayContaining([

@@ -179,10 +179,6 @@ export class ExecutorStreams {
     this.#maxStreams = options.maxStreams;
   }
 
-  get size(): number {
-    return this.#streams.size;
-  }
-
   /** Whether a stream with this id was ever opened here or adopted, open or closed now. */
   opened(id: number): boolean {
     return this.#known(id);
