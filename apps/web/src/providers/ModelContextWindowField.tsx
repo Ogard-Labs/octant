@@ -21,7 +21,10 @@ export function ModelContextWindowField(props: {
   readonly disabled: boolean;
   readonly onChange: (contextWindow: number | undefined) => Promise<boolean>;
 }) {
-  const saved = props.model.contextWindowOverride;
+  // A window stored above the trained one (set before the runtime named it)
+  // shows as the window that takes effect, so the box never claims more room
+  // than the planner, the meter and the request use.
+  const saved = effectiveContextWindowOverride(props.model);
   const [draft, setDraft] = useState(saved === undefined ? "" : String(saved));
   // Enter and the blur that follows it are one edit, sent once.
   const sent = useRef(saved);

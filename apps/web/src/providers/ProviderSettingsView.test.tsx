@@ -1758,6 +1758,44 @@ describe("ProviderSettingsView", () => {
     expect(field).toHaveValue("131072");
   });
 
+  it("shows a stored Ollama window above the trained one as the window that takes effect", async () => {
+    const user = userEvent.setup();
+    const onModelContextWindowChange = vi.fn(async () => true);
+    renderExpanded(
+      <ModelEndpointSettingsView
+        {...fixture({
+          instance: ollamaProvider(),
+          observed: observation({
+            models: [
+              {
+                id: "qwen3:latest" as never,
+                displayName: "qwen3:latest",
+                source: "discovered",
+                verification: "verified",
+                contextLimit: 32_768,
+                // Saved before Ollama named the trained window, or by an
+                // earlier pull of the same tag with a longer one.
+                contextWindowOverride: 262_144,
+                trainedContextWindow: 131_072,
+                reasoning: "unsupported",
+                inputModalities: ["text"],
+                options: [],
+              },
+            ],
+          }),
+        })}
+        onModelContextWindowChange={onModelContextWindowChange}
+      />,
+    );
+
+    const field = screen.getByLabelText("Context window for qwen3:latest");
+    expect(field).toHaveValue("131072");
+    // Passing through the box is not an edit, so nothing is saved.
+    await user.click(field);
+    await user.tab();
+    expect(onModelContextWindowChange).not.toHaveBeenCalled();
+  });
+
   it("asks for no context window on a provider that runs its own model", () => {
     renderExpanded(
       <ProviderSettingsView
