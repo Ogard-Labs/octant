@@ -57,7 +57,11 @@ import { makeProviderApiKeyPool } from "../providers/providerApiKeyPool";
 import { createHostOAuthService, extAgentHostIdFor } from "../providers/oauth/hostOAuthService";
 import { makeHostOAuthBrokerClient } from "../providers/oauth/hostOAuthBrokerClient";
 import { hostOAuthEventJournal } from "../providers/oauth/hostOAuthEventJournal";
-import { createProviderOAuthRouteHandler } from "../providers/oauth/providerOAuthRoutes";
+import { createProviderDeviceSignInRouteHandler } from "../providers/oauth/providerDeviceSignInRoutes";
+import {
+  createProviderOAuthRouteHandler,
+  type ProviderOAuthRouteDependencies,
+} from "../providers/oauth/providerOAuthRoutes";
 import { retireClaudeHelperTokens } from "../providers/claudeHelperTokenRetirement";
 import { subscriptionOAuthHostFromBroker } from "../providers/oauth/subscriptionOAuthHost";
 import { directoryOAuthHostFromBroker } from "../providers/oauth/directoryOAuthHost";
@@ -1165,10 +1169,10 @@ export function wireProviders(deps: ProvidersDependencies) {
       maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
       packagedProviderSmokeControl: options.packagedProviderSmokeControl === true,
     });
-    const providerOAuthRoutes =
+    const providerSignInDependencies: ProviderOAuthRouteDependencies | undefined =
       hostOAuth === undefined
-        ? async () => undefined
-        : createProviderOAuthRouteHandler({
+        ? undefined
+        : {
             service: hostOAuth,
             windowAuthorityStore,
             ...(credentialResolver === undefined ? {} : { credentials: credentialResolver }),
@@ -1200,7 +1204,22 @@ export function wireProviders(deps: ProvidersDependencies) {
                 });
               }
             },
-          });
+          };
+    const browserSignInRoutes =
+      providerSignInDependencies === undefined
+        ? async () => undefined
+        : createProviderOAuthRouteHandler(providerSignInDependencies);
+    // The host-local device-code sign-in shares the organization sign-in's
+    // dependencies; it answers only the bridge-secret caller `octant provider
+    // sign-in` is, and says so even when no broker is running.
+    const deviceSignInRoutes = createProviderDeviceSignInRouteHandler({
+      desktopBridgeSecret: options.desktopBridgeSecret,
+      windowAuthorityStore,
+      readProviderInstances: () => persistence.readProviderInstances(),
+      signIn: providerSignInDependencies,
+    });
+    const providerOAuthRoutes = async (request: Request): Promise<Response | undefined> =>
+      (await deviceSignInRoutes(request)) ?? (await browserSignInRoutes(request));
     const discoveryService = makeDiscoveryService({ hostId: LOCAL_HOST_ID });
     const createProviderFromDiscovery = async (
       candidate: DiscoveryCandidate,
