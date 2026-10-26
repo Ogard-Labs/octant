@@ -30,8 +30,13 @@ set (`forRemoteCode` in `apps/server/src/harness/nativeHarnessComposition.ts`,
 file tools, and streams. The Code turn runtime does not yet compose that tool
 set for a thread, and no thread can be created in a remote-bound Project, so
 no product route reaches a target's tools; that step, reconnecting on its own,
-and restart recovery of remote turns are not built. Slices 6 to 8 are not
-built. Remote SSH
+and restart recovery of remote turns are not built. Slice 6 is built in part:
+the provider-sdk process-placement seam, its conformance harness, and this
+host's admission of a placed runtime from its driver's declaration
+([Provider runtimes on a target](#provider-runtimes-on-a-target)). No
+driver declares remote placement yet, the executor cannot yet start a
+runtime process, and so no runtime has been launched on a target. Slices 7
+and 8 are not built. Remote SSH
 environments are authorized post-preview work as of 2026-10-26, when the
 maintainer unlocked the parked backlog and accepted the
 [maintainer decisions](#maintainer-decisions) below. That authorizes this design
@@ -93,7 +98,8 @@ host in multi-host views and a thread's execution summary.
   `packages/provider-sdk/src/driver.ts` is a host path, and each runtime module
   (`apps/server/src/providers/claudeProcess.ts`, `codexProcess.ts`,
   `acpProcess.ts`, `openCodeProcess.ts`, `piProcess.ts`) spawns a local process
-  itself. The provider-sdk has no process-placement port.
+  itself. Since slice 6 the acquisition can carry a remote placement that a
+  driver declares support for; no in-tree driver declares it.
 - **Code environment reads.** `apps/server/src/codeEnvironmentService.ts` and
   `gitEnvironmentPort.ts` observe a checkout through a local Git process.
 - **Harness egress.** The native harness runs commands on `proxied` egress: a
@@ -647,6 +653,55 @@ A driver that does not declare remote support reports the capability unsupported
 for remote-bound Projects. Nothing falls back to running the provider locally
 against remote files.
 
+Slice 6 built the seam in `packages/provider-sdk/src/driver.ts` and
+`processPlacement.ts`, its conformance in `processPlacementConformance.ts`,
+and this host's admission of a placed runtime
+(`admitProviderRuntime` in `apps/server/src/sshTarget/sshTargetConnectionService.ts`).
+These rules settle what the seam needs, each in the fail-closed direction:
+
+- **The placement rides the acquisition.** `ProviderAcquireInput.placement`
+  is a host-supplied remote placement; absent means this host, as every
+  driver launches today. With a placement, `projectRoot` is the bound root as
+  the target names it, never a folder on this host.
+- **A driver declares, and the host reads only the declaration.**
+  `ProviderDriver.remotePlacement` names the postures in which the runtime
+  runs under Octant's confinement and how app-managed tools reach it (`stdio`,
+  `loopback-listener`, or `none`). The executor wraps every placed launch, so
+  the runtime counts as Octant-wrapped exactly in the postures it declares;
+  Full access is not a posture it can name. A driver without the declaration,
+  a posture it leaves out, and a loopback listener all refuse
+  `runtime-not-attestable` before the connection is asked about.
+- **An undeclared driver never sees a placement.** Every acquisition that
+  carries one goes through `acquireProviderConnection`, which refuses it
+  `unsupported` before the driver is called when the driver declares no
+  posture, or when the mode is not Code. The Code turn runtime already
+  acquires through it (`codeOperationRuntime.ts`). A driver written before the seam
+  reads `projectRoot` as a folder on this host, so handed a remote root it
+  would run the runtime here against a path that names something else.
+- **A placed launch names a program and its arguments, nothing more.** The
+  driver gives the runtime's absolute path on the target and its arguments.
+  The working directory is the bound root and the environment is built on the
+  target, so the seam has no field through which a folder or a credential of
+  this host could cross. A placed process is its standard streams and how it
+  ended (exited, or lost with its session); it stops when the scope it was
+  launched in closes.
+- **Conformance holds the claim.** A driver that declares nothing must be
+  refused `unsupported` with nothing launched on the target or this host. A
+  driver that declares placement must run a turn whose runtime started only
+  through the placement, at an absolute path; must fail the turn, not run
+  here, when the target refuses the launch; and must stop every process it
+  placed when its scope closes. A declaration that names no posture fails.
+
+The executor does not yet start a runtime process, and no in-tree driver
+declares placement. Starting one is its own change: a protocol request for a
+long-lived confined process whose standard streams are a session stream, the
+grants a runtime needs beyond a command's (its own home on the target, its
+binary's folder, and the target's own account state, read-only), and the
+network a placed runtime gets, which locally is open under the
+provider-endpoint policy and on a target is not yet decided. A wrapped
+runtime's driver (ACP, OpenCode, or Pi) then declares placement and passes
+this conformance against the loopback target before the real-provider smoke.
+
 ### Credential custody
 
 - **SSH keys.** Octant never reads, stores, or asks for an SSH private key or
@@ -871,7 +926,20 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    tests; real-provider smoke needs provider sign-in on a target (maintainer).
    Extend `ProviderAcquireInput` with a host-supplied placement that drivers
    declare support for; drivers without it report remote unsupported. Accepted by
-   provider-sdk conformance and one wrapped runtime launched on a target.
+   provider-sdk conformance and one wrapped runtime launched on a target. Built
+   2026-10-26 in part: the seam, its conformance, and admission from a driver's
+   declaration. Its evidence is `processPlacementConformance.test.ts` (a driver
+   that places its runtime passes; one that runs here, falls back here on a
+   refusal, leaks a placed process, or declares no posture fails; an undeclared
+   driver and a Chat or Work acquisition are refused before anything
+   launches), `acpConformance.test.ts` (each ACP profile reports placement
+   unsupported and launches nothing), and `sshTargetConnectionService.test.ts`
+   (a placed runtime admitted only in a declared posture, and refused
+   `runtime-not-attestable` for no declaration, an undeclared posture, Full
+   access, or a loopback tool listener). Launching a wrapped runtime on a
+   target remains, as the executor's own change before a driver declares
+   placement; see
+   [Provider runtimes on a target](#provider-runtimes-on-a-target).
 7. **Terminals, managed worktrees, and Settings.** Container for behavior and
    rendered QA in a browser; desktop packaged smoke needs a Mac (maintainer).
    Remote terminals and worktrees under the same admission, the SSH targets
