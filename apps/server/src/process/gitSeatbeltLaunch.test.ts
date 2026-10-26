@@ -1,5 +1,14 @@
-import { describe, expect, it } from "vitest";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -11,6 +20,41 @@ import {
   resolveGitExecutable,
 } from "./gitSeatbeltLaunch";
 import { makeProcessConfinementLive, type ProcessConfinementPort } from "./seatbeltProfile";
+
+/** Runs just after the host first looks at a path, so a test can swap it for a link then. */
+const looked = vi.hoisted(() => ({ at: (_path: string): void => undefined }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const after =
+    <Args extends ReadonlyArray<unknown>, Result>(read: (...args: Args) => Result) =>
+    (...args: Args): Result => {
+      const result = read(...args);
+      looked.at(String(args[0]));
+      return result;
+    };
+  return {
+    ...actual,
+    lstatSync: after(actual.lstatSync),
+    openSync: after(actual.openSync),
+    readFileSync: after(actual.readFileSync),
+  };
+});
+afterEach(() => {
+  looked.at = () => undefined;
+});
+
+/** A linked worktree record as Git writes it, with the marker and its reciprocal gitdir. */
+function linkedWorktree(base: string, name: string) {
+  const checkout = join(base, `${name}-checkout`);
+  const common = join(base, `${name}-repository`, ".git");
+  const gitdir = join(common, "worktrees", name);
+  mkdirSync(checkout, { recursive: true });
+  mkdirSync(gitdir, { recursive: true });
+  writeFileSync(join(checkout, ".git"), `gitdir: ${gitdir}\n`);
+  writeFileSync(join(gitdir, "gitdir"), `${join(checkout, ".git")}\n`);
+  writeFileSync(join(gitdir, "commondir"), "../..\n");
+  return { checkout, common, gitdir };
+}
 
 describe("git Seatbelt launch", () => {
   it("grants confined git no read reach into the user's global config", () => {
@@ -210,6 +254,33 @@ describe("git Seatbelt launch", () => {
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  // The marker sits in the agent-writable checkout. It passed the first look as
+  // a regular file, was then swapped for a link to another repository's
+  // linked-worktree marker, and the pointer read and the reciprocity check both
+  // followed the link, so a mutation launch got write access to that
+  // repository's refs, objects, and hooks.
+  it("never grants another repository's metadata when the marker is swapped for a link after the first look", () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "octant-git-marker-swap-")));
+    try {
+      const own = linkedWorktree(base, "own");
+      const host = linkedWorktree(base, "host");
+      const marker = join(own.checkout, ".git");
+      let swapped = false;
+      looked.at = (path) => {
+        if (swapped || path !== marker) return;
+        swapped = true;
+        renameSync(marker, join(own.checkout, ".git-real"));
+        symlinkSync(join(host.checkout, ".git"), marker);
+      };
+      const granted = gitLinkedWorktreeMetadataPaths(own.checkout, { writable: true });
+      expect(granted.readPaths).not.toContain(host.common);
+      expect(granted.writePaths).not.toContain(host.common);
+      expect(granted.writePaths).not.toContain(host.gitdir);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
     }
   });
 
