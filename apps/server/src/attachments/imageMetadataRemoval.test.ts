@@ -112,6 +112,70 @@ describe("removing identifying metadata from an uploaded image", () => {
     expect([...result.bytes.subarray(-2)]).toEqual([0xff, 0xd9]);
   });
 
+  it("keeps which way up a photo is shown but drops the rest of its EXIF and any JFIF thumbnail", () => {
+    // Little-endian TIFF: Make, then Orientation 6 (rotate 90°), in IFD0.
+    const tiff = [
+      ...ascii("II*\0"),
+      8,
+      0,
+      0,
+      0,
+      2,
+      0,
+      // Make: ASCII, 6 bytes, at offset 38.
+      0x0f,
+      0x01,
+      2,
+      0,
+      6,
+      0,
+      0,
+      0,
+      38,
+      0,
+      0,
+      0,
+      // Orientation: SHORT, 1, value 6.
+      0x12,
+      0x01,
+      3,
+      0,
+      1,
+      0,
+      0,
+      0,
+      6,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      ...ascii("Apple\0"),
+    ];
+    const jpeg = concat(
+      [0xff, 0xd8],
+      // A 1x1 thumbnail of the original picture, before any crop.
+      jpegSegment(0xe0, [...ascii("JFIF\0"), 1, 1, 0, 0, 1, 0, 1, 1, 1, ...ascii("ORG")]),
+      jpegSegment(0xe1, [...ascii("Exif\0\0"), ...tiff]),
+      jpegSegment(0xda, [1, 1, 0, 0, 0x3f, 0]),
+      JPEG_SCAN_DATA,
+      [0xff, 0xd9],
+    );
+
+    const result = removeImageMetadata(jpeg, "image/jpeg");
+
+    expect(result.status).toBe("stripped");
+    if (result.status !== "stripped") return;
+    expect(contains(result.bytes, "Apple")).toBe(false);
+    expect(contains(result.bytes, "ORG")).toBe(false);
+    expect(contains(result.bytes, "JFIF")).toBe(true);
+    const orientation = Buffer.from(result.bytes).indexOf(Buffer.from([0x01, 0x12, 0x00, 0x03]));
+    expect(orientation).toBeGreaterThan(0);
+    expect(result.bytes[orientation + 9]).toBe(6);
+  });
+
   it("drops a PNG's text, EXIF, time, and unknown ancillary chunks", () => {
     const png = concat(
       PNG_SIGNATURE,

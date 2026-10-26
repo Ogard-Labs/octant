@@ -6,7 +6,8 @@
  * they strip, so the host does it once for every image a paired device sends.
  *
  * Each format keeps an allow-list of the structures that draw the picture (and
- * its colour profile), and drops everything else, including bytes after the
+ * its colour profile and, for JPEG, which way up it is shown), and drops
+ * everything else, including bytes after the
  * image's end marker, where some cameras append their own metadata. An image
  * whose structure cannot be walked to its end is refused rather than passed on
  * partly read.
@@ -65,33 +66,132 @@ const CLEANERS: Readonly<
   "image/gif": cleanGif,
 };
 
-function joined(parts: ReadonlyArray<Uint8Array>): Uint8Array<ArrayBuffer> {
-  const result = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
-  let offset = 0;
-  for (const part of parts) {
-    result.set(part, offset);
-    offset += part.byteLength;
+/**
+ * What a cleaner keeps, copied into one buffer as it is walked. Holding a view
+ * per kept piece instead cost an object per segment: a 10 MiB upload of empty
+ * JPEG markers grew the host by about 470 MB and held it for over a second.
+ */
+class KeptBytes {
+  readonly #buffer: Uint8Array<ArrayBuffer>;
+  #length = 0;
+
+  constructor(capacity: number) {
+    this.#buffer = new Uint8Array(capacity);
   }
-  return result;
+
+  get length(): number {
+    return this.#length;
+  }
+
+  keep(part: Uint8Array): void {
+    this.#buffer.set(part, this.#length);
+    this.#length += part.byteLength;
+  }
+
+  setByte(offset: number, value: number): void {
+    this.#buffer[offset] = value;
+  }
+
+  bytes(): Uint8Array<ArrayBuffer> {
+    return this.#buffer.subarray(0, this.#length);
+  }
 }
 
 // JPEG: APP0 JFIF (density only), APP2 ICC profile, and APP14 Adobe (the
 // colour transform a CMYK decoder needs) are kept; every other APPn and COM
-// segment is metadata. JFXX (an APP0 thumbnail of the original) is dropped.
-function keepsJpegSegment(marker: number, payload: Uint8Array): boolean {
-  if (marker === 0xfe) return false;
-  if (marker < 0xe0 || marker > 0xef) return true;
-  if (marker === 0xe0) return ascii(payload, 0, 5) === "JFIF\0";
-  if (marker === 0xe2) return ascii(payload, 0, 12) === "ICC_PROFILE\0";
-  if (marker === 0xee) return ascii(payload, 0, 5) === "Adobe";
-  return false;
+// segment is metadata. A JFIF thumbnail and JFXX are pictures of the original
+// before any crop, so they are dropped. Of EXIF only the orientation survives,
+// rewritten on its own: without it a photo picked from Files whose pixels are
+// stored sideways is shown sideways.
+function keptJpegSegment(
+  marker: number,
+  segment: Uint8Array,
+  payload: Uint8Array,
+): Uint8Array | undefined {
+  if (marker === 0xfe) return undefined;
+  if (marker < 0xe0 || marker > 0xef) return segment;
+  if (marker === 0xe0) {
+    return ascii(payload, 0, 5) === "JFIF\0" && payload.byteLength >= JFIF_HEADER_BYTES
+      ? jfifWithoutThumbnail(payload)
+      : undefined;
+  }
+  if (marker === 0xe1) {
+    const orientation = exifOrientation(payload);
+    return orientation === undefined ? undefined : orientationSegment(orientation);
+  }
+  if (marker === 0xe2) return ascii(payload, 0, 12) === "ICC_PROFILE\0" ? segment : undefined;
+  if (marker === 0xee) return ascii(payload, 0, 5) === "Adobe" ? segment : undefined;
+  return undefined;
 }
 
+/** Identifier, version, units, and densities; the thumbnail's size follows. */
+const JFIF_HEADER_BYTES = 14;
+
+function jfifWithoutThumbnail(payload: Uint8Array): Uint8Array {
+  return Uint8Array.from([
+    0xff,
+    0xe0,
+    0x00,
+    JFIF_HEADER_BYTES + 2,
+    ...payload.subarray(0, JFIF_HEADER_BYTES - 2),
+    0,
+    0,
+  ]);
+}
+
+/** The EXIF orientation when it turns or flips the picture (2 to 8). */
+function exifOrientation(payload: Uint8Array): number | undefined {
+  if (ascii(payload, 0, 6) !== "Exif\0\0") return undefined;
+  const tiff = payload.subarray(6);
+  const order = ascii(tiff, 0, 2);
+  if (order !== "II" && order !== "MM") return undefined;
+  const little = order === "II";
+  if (tiff.byteLength < 8) return undefined;
+  const view = new DataView(tiff.buffer, tiff.byteOffset, tiff.byteLength);
+  if (view.getUint16(2, little) !== 42) return undefined;
+  const directory = view.getUint32(4, little);
+  if (directory + 2 > tiff.byteLength) return undefined;
+  const entries = view.getUint16(directory, little);
+  for (let index = 0; index < entries; index += 1) {
+    const entry = directory + 2 + index * 12;
+    if (entry + 12 > tiff.byteLength) return undefined;
+    if (view.getUint16(entry, little) !== 0x0112) continue;
+    // One SHORT, held in the entry itself.
+    if (view.getUint16(entry + 2, little) !== 3 || view.getUint32(entry + 4, little) !== 1) {
+      return undefined;
+    }
+    const orientation = view.getUint16(entry + 8, little);
+    return orientation >= 2 && orientation <= 8 ? orientation : undefined;
+  }
+  return undefined;
+}
+
+/** An APP1 holding a big-endian TIFF with one tag, Orientation, and no next directory. */
+function orientationSegment(orientation: number): Uint8Array {
+  const segment = Uint8Array.from(ORIENTATION_SEGMENT);
+  segment[ORIENTATION_VALUE_OFFSET] = orientation;
+  return segment;
+}
+
+const ORIENTATION_SEGMENT = [
+  // APP1, length 34, "Exif\0\0".
+  0xff, 0xe1, 0x00, 0x22, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+  // "MM", 42, the first directory at offset 8, holding one entry.
+  0x4d, 0x4d, 0x00, 0x2a, 0x00, 0x00, 0x00, 0x08, 0x00, 0x01,
+  // Orientation, SHORT, count 1, value 1 until set; then no next directory.
+  0x01, 0x12, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+] as const;
+const ORIENTATION_VALUE_OFFSET = 29;
+const ORIENTATION_SEGMENT_BYTES = ORIENTATION_SEGMENT.length;
+
 function cleanJpeg(bytes: Uint8Array): Uint8Array<ArrayBuffer> | undefined {
-  const kept: Uint8Array[] = [];
-  kept.push(bytes.subarray(0, 2));
+  // The orientation segment can be a few bytes longer than the EXIF it
+  // replaces, and only one is kept; everything else only shrinks.
+  const kept = new KeptBytes(bytes.byteLength + ORIENTATION_SEGMENT_BYTES);
+  kept.keep(bytes.subarray(0, 2));
   let position = 2;
   let sawScan = false;
+  let keptOrientation = false;
   while (position < bytes.byteLength) {
     if (bytes[position] !== 0xff) return undefined;
     // Fill bytes may pad a marker.
@@ -100,11 +200,11 @@ function cleanJpeg(bytes: Uint8Array): Uint8Array<ArrayBuffer> | undefined {
     if (marker === undefined) return undefined;
     if (marker === 0xd9) {
       if (!sawScan) return undefined;
-      kept.push(bytes.subarray(position, position + 2));
-      return joined(kept);
+      kept.keep(bytes.subarray(position, position + 2));
+      return kept.bytes();
     }
     if ((marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
-      kept.push(bytes.subarray(position, position + 2));
+      kept.keep(bytes.subarray(position, position + 2));
       position += 2;
       continue;
     }
@@ -113,14 +213,20 @@ function cleanJpeg(bytes: Uint8Array): Uint8Array<ArrayBuffer> | undefined {
     if (length === undefined || length < 2) return undefined;
     const end = position + 2 + length;
     if (end > bytes.byteLength) return undefined;
-    if (keepsJpegSegment(marker, bytes.subarray(position + 4, end))) {
-      kept.push(bytes.subarray(position, end));
+    const segment = keptJpegSegment(
+      marker,
+      bytes.subarray(position, end),
+      bytes.subarray(position + 4, end),
+    );
+    if (segment !== undefined && !(marker === 0xe1 && keptOrientation)) {
+      kept.keep(segment);
+      keptOrientation ||= marker === 0xe1;
     }
     position = end;
     if (marker === 0xda) {
       sawScan = true;
       const scanEnd = entropyCodedEnd(bytes, position);
-      kept.push(bytes.subarray(position, scanEnd));
+      kept.keep(bytes.subarray(position, scanEnd));
       position = scanEnd;
     }
   }
@@ -172,8 +278,8 @@ const KEPT_PNG_CHUNKS: ReadonlySet<string> = new Set([
 ]);
 
 function cleanPng(bytes: Uint8Array): Uint8Array<ArrayBuffer> | undefined {
-  const kept: Uint8Array[] = [];
-  kept.push(bytes.subarray(0, PNG_SIGNATURE.length));
+  const kept = new KeptBytes(bytes.byteLength);
+  kept.keep(bytes.subarray(0, PNG_SIGNATURE.length));
   let position: number = PNG_SIGNATURE.length;
   let first = true;
   while (position + 12 <= bytes.byteLength) {
@@ -187,11 +293,11 @@ function cleanPng(bytes: Uint8Array): Uint8Array<ArrayBuffer> | undefined {
     if (end > bytes.byteLength) return undefined;
     const critical = type.charCodeAt(0) < 0x61;
     if (KEPT_PNG_CHUNKS.has(type)) {
-      kept.push(bytes.subarray(position, end));
+      kept.keep(bytes.subarray(position, end));
     } else if (critical) {
       return undefined;
     }
-    if (type === "IEND") return joined(kept);
+    if (type === "IEND") return kept.bytes();
     position = end;
   }
   return undefined;
@@ -216,8 +322,8 @@ function cleanWebp(bytes: Uint8Array): Uint8Array<ArrayBuffer> | undefined {
   if (riffSize === undefined || riffSize < 4) return undefined;
   const riffEnd = 8 + riffSize;
   if (riffEnd > bytes.byteLength) return undefined;
-  const chunks: Uint8Array[] = [];
-  let keptLength = 0;
+  const kept = new KeptBytes(riffEnd);
+  kept.keep(bytes.subarray(0, 12));
   let sawImage = false;
   let position = 12;
   while (position < riffEnd) {
@@ -228,23 +334,18 @@ function cleanWebp(bytes: Uint8Array): Uint8Array<ArrayBuffer> | undefined {
     const end = position + 8 + size + (size % 2);
     if (end > riffEnd) return undefined;
     if (KEPT_WEBP_CHUNKS.has(type)) {
-      const chunk = bytes.slice(position, end);
-      if (type === "VP8X") {
-        if (size < 10) return undefined;
-        chunk[8] = (chunk[8] ?? 0) & ~WEBP_METADATA_FLAGS;
-      }
+      if (type === "VP8X" && size < 10) return undefined;
+      const flags = kept.length + 8;
+      kept.keep(bytes.subarray(position, end));
+      if (type === "VP8X") kept.setByte(flags, (bytes[position + 8] ?? 0) & ~WEBP_METADATA_FLAGS);
       if (type === "VP8 " || type === "VP8L" || type === "ANMF") sawImage = true;
-      chunks.push(chunk);
-      keptLength += chunk.byteLength;
     }
     position = end;
   }
   if (!sawImage) return undefined;
-  const header = new Uint8Array(12);
-  header.set(bytes.subarray(0, 4), 0);
-  new DataView(header.buffer).setUint32(4, keptLength + 4, true);
-  header.set(bytes.subarray(8, 12), 8);
-  return joined([header, ...chunks]);
+  const cleaned = kept.bytes();
+  new DataView(cleaned.buffer, cleaned.byteOffset).setUint32(4, cleaned.byteLength - 8, true);
+  return cleaned;
 }
 
 // GIF: graphic control and plain-text extensions draw frames, and the
@@ -253,21 +354,21 @@ function cleanWebp(bytes: Uint8Array): Uint8Array<ArrayBuffer> | undefined {
 const KEPT_GIF_APPLICATIONS: ReadonlySet<string> = new Set(["NETSCAPE2.0", "ANIMEXTS1.0"]);
 
 function cleanGif(bytes: Uint8Array): Uint8Array<ArrayBuffer> | undefined {
-  const kept: Uint8Array[] = [];
+  const kept = new KeptBytes(bytes.byteLength);
   const screenEnd = 13;
   const screenPacked = bytes[10];
   if (screenPacked === undefined || bytes.byteLength < screenEnd) return undefined;
   const headerEnd = screenEnd + colorTableBytes(screenPacked);
   if (headerEnd > bytes.byteLength) return undefined;
-  kept.push(bytes.subarray(0, headerEnd));
+  kept.keep(bytes.subarray(0, headerEnd));
   let position = headerEnd;
   let sawImage = false;
   while (position < bytes.byteLength) {
     const introducer = bytes[position];
     if (introducer === 0x3b) {
       if (!sawImage) return undefined;
-      kept.push(bytes.subarray(position, position + 1));
-      return joined(kept);
+      kept.keep(bytes.subarray(position, position + 1));
+      return kept.bytes();
     }
     if (introducer === 0x2c) {
       const packed = bytes[position + 9];
@@ -276,7 +377,7 @@ function cleanGif(bytes: Uint8Array): Uint8Array<ArrayBuffer> | undefined {
       const dataStart = position + 10 + colorTableBytes(packed) + 1;
       const end = subBlocksEnd(bytes, dataStart);
       if (end === undefined) return undefined;
-      kept.push(bytes.subarray(position, end));
+      kept.keep(bytes.subarray(position, end));
       sawImage = true;
       position = end;
       continue;
@@ -291,7 +392,7 @@ function cleanGif(bytes: Uint8Array): Uint8Array<ArrayBuffer> | undefined {
         (label === 0xff &&
           bytes[position + 2] === 11 &&
           KEPT_GIF_APPLICATIONS.has(ascii(bytes, position + 3, 11)));
-      if (keeps) kept.push(bytes.subarray(position, end));
+      if (keeps) kept.keep(bytes.subarray(position, end));
       position = end;
       continue;
     }

@@ -239,12 +239,6 @@ async function readNewestCodeTurns(
   return { turns, hasEarlier: listed > turns.length };
 }
 
-/**
- * Send a follow-up on an existing Code thread: stage the prompt as evidence,
- * then start a provider turn on the thread's own checkout. The posture is the
- * thread's; the phone asks for nothing wider, and approvals the turn raises
- * stay on the host.
- */
 function stagedCodeAttachmentIds(ids: ReadonlyArray<string>): ReadonlyArray<CodeAttachmentId> {
   try {
     return ids.map((id) => decodeCodeAttachmentId(id));
@@ -253,6 +247,12 @@ function stagedCodeAttachmentIds(ids: ReadonlyArray<string>): ReadonlyArray<Code
   }
 }
 
+/**
+ * Send a follow-up on an existing Code thread: stage the prompt as evidence,
+ * then start a provider turn on the thread's own checkout. The posture is the
+ * thread's; the phone asks for nothing wider, and approvals the turn raises
+ * stay on the host.
+ */
 export async function sendMobileCodeTurn(input: {
   readonly transport: MobileRemoteTransport;
   readonly threadId: string;

@@ -339,9 +339,12 @@ sender holding it. The sender is a minimal Octant push gateway
   product routes (after its proof and action are checked, before any route
   sees the body), for every request whose media type is an image. Each format
   keeps an allow-list of what draws the picture and its colour: JPEG keeps
-  JFIF, the ICC profile, and Adobe's colour transform and drops every other
-  APPn segment and comment; PNG keeps its image, colour, scale, and animation
-  chunks and drops text, EXIF, time, and every unknown ancillary chunk; WebP
+  JFIF's density (never its thumbnail, a picture of the original before any
+  crop), the ICC profile, Adobe's colour transform, and EXIF's orientation
+  alone, rewritten on its own so a photo stored sideways is not shown
+  sideways, and drops every other APPn segment and comment; PNG keeps its
+  image, colour, scale, and animation chunks and drops text, EXIF, time, and
+  every unknown ancillary chunk; WebP
   drops EXIF and XMP and clears the header flags that named them; GIF drops
   comments and every application block but looping. Bytes after the image's
   end are dropped, since some cameras append metadata there. An image whose
