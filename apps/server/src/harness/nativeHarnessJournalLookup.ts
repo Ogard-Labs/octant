@@ -199,8 +199,9 @@ export function createThreadJournalLookup(input: {
   const unavailable: NativeHarnessJournalLookup = {
     status: "refused",
     reason: "journal-unavailable",
-    message:
-      "This thread has no journaled harness conversation to read back. Continue from your task list and the files on disk.",
+    // A Chat lead has no folder, so pointing it at files on disk would send it
+    // looking for something it cannot reach.
+    message: `This thread has no journaled harness conversation to read back. Continue from your task list${input.mode === "chat" ? "" : " and the files on disk"}.`,
   };
   return (args) => {
     const session = input.latestSession();
