@@ -5,6 +5,7 @@ import {
   existsSync,
   lstatSync,
   mkdtempSync,
+  readdirSync,
   realpathSync,
   statSync,
   writeFileSync,
@@ -193,6 +194,14 @@ export function buildBubblewrapLaunch(
     args.push("--new-session");
   }
   args.push("--die-with-parent");
+  // Bubblewrap keeps every capability when it is started by uid 0. Measured on
+  // bwrap 0.9.0 as root: the capsule could `mount -o remount,bind,rw` a
+  // read-only bind and write through it, and `umount` a deny overlay to read
+  // what it hid, so a root host's capsule was no boundary at all. Unprivileged
+  // Bubblewrap already drops them; this makes both cases the same. A bwrap
+  // older than 0.2.0 has no `--cap-drop` and exits on the unknown option
+  // before starting the command, so the launch fails closed.
+  args.push("--cap-drop", "ALL");
 
   args.push("--proc", "/proc", "--dev", "/dev");
 
@@ -399,6 +408,9 @@ export function buildBubblewrapLaunch(
   for (const path of input.additionalDenyReadPaths ?? []) {
     bindAdditionalDenyPath(path, "read");
   }
+  for (const path of hostSecretPaths()) {
+    bindAdditionalDenyPath(path, "read");
+  }
 
   const sorted = [...mounts.values()].sort(
     (left, right) => depth(left.target) - depth(right.target),
@@ -458,6 +470,38 @@ export function buildBubblewrapLaunch(
   }
 
   return { command: bwrapPath, args };
+}
+
+/**
+ * Credentials under the bound `/etc` that no confined workload reads. Their
+ * owner bits let a root host's capsule read them even without capabilities,
+ * so each is covered like a read denial. The rest of `/etc` stays bound:
+ * resolvers, TLS roots, `passwd`, the dynamic linker cache, `alternatives`
+ * links, and login shell startup files are all read from it.
+ */
+const HOST_SECRET_PATHS: ReadonlyArray<string> = [
+  "/etc/shadow",
+  "/etc/shadow-",
+  "/etc/gshadow",
+  "/etc/gshadow-",
+  "/etc/security/opasswd",
+  "/etc/ssl/private",
+];
+
+function hostSecretPaths(): ReadonlyArray<string> {
+  let sshEntries: ReadonlyArray<string> = [];
+  try {
+    sshEntries = readdirSync("/etc/ssh");
+  } catch {
+    // No SSH server configuration on this host.
+  }
+  const sshHostKeys = sshEntries
+    .filter((name) => /^ssh_host_.+_key$/.test(name))
+    .map((name) => join("/etc/ssh", name));
+  // Bubblewrap would have to create a missing path's mount point inside the
+  // read-only `/etc` bind, which fails the launch; a missing path hides
+  // nothing anyway.
+  return [...HOST_SECRET_PATHS, ...sshHostKeys].filter(pathExists);
 }
 
 interface Mount {

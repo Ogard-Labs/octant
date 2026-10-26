@@ -487,6 +487,74 @@ describe("Linux Bubblewrap confinement", () => {
     },
   );
 
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "leaves a confined process no capability to remount, unmount, or write through a read-only bind",
+    () => {
+      const { boundRoot, temporaryDirectory } = fixture();
+      const sentinel = join(boundRoot, "sentinel");
+      const secret = join(boundRoot, "secret");
+      writeFileSync(sentinel, "host");
+      writeFileSync(secret, "hidden");
+      // Measured on bwrap 0.9.0 as uid 0 before capabilities were dropped: the
+      // capsule kept every capability, so the remount below made the
+      // read-only bind writable and the write reached the host file.
+      const launch = buildBubblewrapLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          [
+            "cd /",
+            'while read -r key value; do [ "$key" = CapEff: ] && echo "effective=$value"; done < /proc/self/status',
+            'mount -o remount,bind,rw "$1" 2>/dev/null && echo remounted',
+            'printf escaped 2>/dev/null > "$1/sentinel" && echo wrote',
+            'umount "$1/secret" 2>/dev/null && echo unmounted',
+            'grep -q hidden "$1/secret" 2>/dev/null && echo revealed',
+            "exit 0",
+          ].join("\n"),
+          "sh",
+          boundRoot,
+        ],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+        writeBoundRoot: false,
+        additionalDenyReadPaths: [secret],
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim().split("\n")).toEqual(["effective=0000000000000000"]);
+      expect(readFileSync(sentinel, "utf8")).toBe("host");
+    },
+  );
+
+  it.runIf(process.platform === "linux" && canRunHostBwrap())(
+    "hides the host's password hashes and private keys while the rest of /etc stays readable",
+    () => {
+      const { boundRoot, temporaryDirectory } = fixture();
+      const launch = buildBubblewrapLaunch({
+        executable: "/bin/sh",
+        args: [
+          "-c",
+          [
+            "for path in /etc/shadow /etc/gshadow /etc/ssh/ssh_host_*_key /etc/ssl/private/*; do",
+            '  [ -s "$path" ] && echo "exposed $path"',
+            "done",
+            "test -r /etc/passwd && echo passwd",
+            "exit 0",
+          ].join("\n"),
+        ],
+        boundRoot,
+        temporaryDirectory,
+        networkEgress: "none",
+      });
+      const result = spawnSync(launch.command, [...launch.args], { encoding: "utf8" });
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim().split("\n")).toEqual(["passwd"]);
+    },
+  );
+
   it("keeps a proxied launch in its private network and starts it behind the forwarder", () => {
     const { root, boundRoot, temporaryDirectory, bwrapPath } = fixture();
     const sockets = join(root, "egress-launch");

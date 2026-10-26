@@ -89,7 +89,10 @@ preserve its data until cleanup is explicitly authorized.
   Without it a provider reports **Incompatible**, and a task terminal says
   that bubblewrap is missing and how to install it
   (`sudo apt-get install -y bubblewrap`); Octant never runs an unconfined
-  shell instead.
+  shell instead. Bubblewrap 0.2.0 or later is needed; an older one refuses
+  the launch. A confined command has no root privileges even when Octant
+  runs as root: it cannot write a file only root's privileges would let it
+  write, such as another user's file in the Project.
 - **`lsof`.** Running services and Local servers use it to find the servers
   your projects started. A stock Ubuntu install lacks it; without it the card
   says Octant could not check this computer for local servers.

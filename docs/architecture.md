@@ -6422,7 +6422,29 @@ mechanisms are:
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
   The child runs `--unshare-all`, regains the network only when egress
   resolves to `allow`, dies with its parent, and gets a new session except for
-  interactive terminals. The synthetic root is read-only, deny paths are
+  interactive terminals. Every confined launch passes `--cap-drop ALL`, so the
+  capsule's effective capability set is empty whether or not the server runs
+  as root. Bubblewrap started by uid 0 otherwise keeps every capability:
+  measured on bwrap 0.9.0, a root capsule remounted a read-only bind writable
+  and wrote the host file through it, and unmounted a deny overlay to read
+  what it hid, so read-only binds of `/etc` and `/usr` bounded nothing.
+  Unprivileged Bubblewrap already drops them. A root host's confined command
+  therefore cannot write what only root's privileges would allow, such as
+  another user's file in the bound root. `--cap-drop` arrived in bubblewrap
+  0.2.0; an older one exits on the unknown option before starting the
+  command, so the launch fails closed rather than running with capabilities.
+  Full access's deny-only host-root bind keeps the host's own authority and
+  does not drop them. The capsule binds `/etc` and `/sys` read-only because
+  workloads read them: resolver and `nsswitch` files, TLS roots, `passwd`,
+  the dynamic linker cache, `alternatives` links, and login shell startup
+  files from `/etc`; cgroup limits and CPU topology from `/sys`, which
+  runtimes use to size themselves. A root capsule could still read
+  credentials under `/etc` through their owner bits, so `/etc/shadow`,
+  `/etc/gshadow`, their `-` backups, `/etc/security/opasswd`,
+  `/etc/ssl/private`, and `/etc/ssh/ssh_host_*_key` are covered like read
+  denials when they exist. `/sys` still shows the host's interface names;
+  narrowing it to the cgroup and CPU trees needs measurement against real
+  runtimes first. The synthetic root is read-only, deny paths are
   covered by empty read-only tmpfs mounts, and a launch carrying Seatbelt
   `extraRules` is refused as `incompatible`.
   Plan and Chat also load a seccomp filter that denies process-creating
