@@ -123,8 +123,9 @@ const CODEX_NATIVE_VARIABLES = new Set([
 ]);
 // The auth variables the CLI itself names when no stored credential is found,
 // plus the bearer token its built-in Bedrock provider takes: scoped to model
-// access, so the same class as `OPENAI_API_KEY`. `codex login` has no Bedrock
-// flow, so without it a Bedrock configuration authenticates by nothing. A
+// access, so the same class as `OPENAI_API_KEY`. Without it, a Bedrock
+// account signs in only through its token command or a sign-in stored in its
+// own Codex home; every other route is refused (`codexBedrockSignIn`). A
 // `config.toml` model provider may declare any other variable as its
 // `env_key`; that variable does not cross, and `codex doctor` names the
 // refusal ("active model provider auth env var is missing") rather than

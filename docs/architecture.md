@@ -6392,9 +6392,11 @@ mechanisms are:
   Codex's `read-only` sandbox reads the whole disk, so `~/.aws`, `~/.ssh`,
   and every other file under `HOME` is reachable from a Codex command in
   every posture. Octant therefore gives the Codex runtime no reusable cloud
-  credential the person did not configure for that account. Its environment
-  carries no AWS profile, shared-config location, or IAM key, and an Amazon
-  Bedrock sign-in is traced in Codex's own order (`auth_source` in codex-rs
+  credential the person did not configure for that account. The environment
+  Octant launches it with carries no AWS profile, shared-config location, or
+  IAM key (Codex still loads the account home's own `.env`, which is that
+  account's configuration), and an Amazon Bedrock sign-in is traced in
+  Codex's own order (`auth_source` in codex-rs
   `model-provider/src/amazon_bedrock/auth.rs`, rust-v0.162.1): the provider's
   `auth` command, `aws.credential_export`, `aws.profile`, a key or access
   keys stored in the account's Codex home, `AWS_BEARER_TOKEN_BEDROCK`, then
