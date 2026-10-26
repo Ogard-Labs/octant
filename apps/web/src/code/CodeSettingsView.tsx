@@ -15,6 +15,7 @@ export interface CodeSettingsUpdate {
   readonly externalEditor?: NonNullable<CodeSettings["externalEditor"]>;
   readonly requireGitRepository?: boolean;
   readonly defaultDiffLayout?: CodeDiffLayout;
+  readonly bundledLanguageServer?: boolean;
 }
 
 interface CodeSettingsDraft {
@@ -53,6 +54,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
   const [defaultDiffLayout, setDefaultDiffLayout] = useState(
     props.settings.defaultDiffLayout ?? "unified",
   );
+  const [bundledLanguageServer, setBundledLanguageServer] = useState(
+    props.settings.bundledLanguageServer !== false,
+  );
   const [executable, setExecutable] = useState(props.settings.externalEditor?.executable ?? "");
   const [argumentsText, setArgumentsText] = useState(
     props.settings.externalEditor?.arguments.join("\n") ?? "",
@@ -80,6 +84,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         ? (props.settings.defaultDiffLayout ?? "unified")
         : current,
     );
+    setBundledLanguageServer((current) =>
+      current === (previousSettings.bundledLanguageServer !== false)
+        ? props.settings.bundledLanguageServer !== false
+        : current,
+    );
     setExecutable((current) =>
       current === (previousSettings.externalEditor?.executable ?? "")
         ? (props.settings.externalEditor?.executable ?? "")
@@ -99,7 +108,9 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
    * text commits when it is finished, because a path is not valid halfway
    * through typing it.
    */
-  async function commit(change: Partial<CodeSettingsDraft>) {
+  async function commit(
+    change: Partial<CodeSettingsDraft> & { readonly bundledLanguageServer?: boolean },
+  ) {
     const draft: CodeSettingsDraft = {
       executionPolicy,
       permissionPersistence,
@@ -129,6 +140,11 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
         defaultPermissionPersistence: draft.permissionPersistence,
         requireGitRepository: draft.requireGitRepository,
         defaultDiffLayout: draft.defaultDiffLayout,
+        // The host keeps the stored switch when a change leaves it out, so
+        // only the change that flips it carries it.
+        ...(change.bundledLanguageServer === undefined
+          ? {}
+          : { bundledLanguageServer: change.bundledLanguageServer }),
         ...(trimmedExecutable === ""
           ? {}
           : {
@@ -227,6 +243,26 @@ export function CodeSettingsView(props: CodeSettingsViewProps) {
               <OctantToggleGroupItem value="unified">Unified</OctantToggleGroupItem>
               <OctantToggleGroupItem value="side-by-side">Side by side</OctantToggleGroupItem>
             </OctantToggleGroup>
+          </SettingRow>
+        </div>
+      </SettingsSection>
+      <SettingsSection title="Editor">
+        <div className="setgroup">
+          <SettingRow
+            description="Type errors and go to definition across the checkout, from the TypeScript server bundled with Octant. It reads the checkout and cannot write, run other programs, or reach the network."
+            label="Language services"
+            focused={props.focusedSetting === "code-language-services"}
+            scope="mode"
+            settingId="code-language-services"
+          >
+            <OctantSwitch
+              checked={bundledLanguageServer}
+              label="Language services"
+              onCheckedChange={(checked) => {
+                setBundledLanguageServer(checked);
+                void commit({ bundledLanguageServer: checked });
+              }}
+            />
           </SettingRow>
         </div>
       </SettingsSection>
