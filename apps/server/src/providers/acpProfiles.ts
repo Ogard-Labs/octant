@@ -1,35 +1,29 @@
 /**
- * Provider profiles for ACP-speaking coding agents that share one driver,
+ * Runtime profiles for ACP-speaking coding agents that share one driver,
  * process, protocol, and event-mapper stack (`acpDriver.ts`, `acpProcess.ts`,
  * `acpProtocol.ts`, `acpEventMapper.ts`).
  *
- * A profile is data plus a few small pure functions describing where the four
+ * A profile is data plus a few small pure functions describing where the
  * agents genuinely differ: binary version contract, launch argv, environment
  * guards, managed-home layout, Seatbelt strategy, ACP mode mapping, and
- * capability quirks. Everything else is shared behavior.
+ * capability quirks. Everything else is shared behavior. Each agent's other
+ * half, what the rest of Octant knows about it before it runs, is its row in
+ * `@octant/contracts/acp-agent-profiles`; the record below must hold a runtime
+ * profile for every row there.
  */
 import { existsSync, lstatSync, readdirSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ProviderModel, ProviderDriverKind, ProviderExecutionPolicy } from "@octant/contracts";
+import type {
+  AcpAgentKind,
+  ProviderModel,
+  ProviderDriverKind,
+  ProviderExecutionPolicy,
+} from "@octant/contracts";
 import type { AcpInitializeResult } from "./acpProtocol";
 
-export type AcpProviderKind = Extract<
-  ProviderDriverKind,
-  | "kilo"
-  | "opencode"
-  | "devin"
-  | "mistral-vibe"
-  | "kimi-code"
-  | "grok"
-  | "goose"
-  | "glm"
-  | "gemini"
-  | "copilot"
-  | "cline"
-  | "qwen"
-  | "fx"
->;
+/** Every ACP agent, plus OpenCode, whose 2.x turns run on this stack. */
+export type AcpProviderKind = AcpAgentKind | "opencode";
 export type AcpSessionMode = "chat" | "work" | "code";
 
 export interface AcpManagedFile {

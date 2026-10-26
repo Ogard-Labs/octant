@@ -466,6 +466,7 @@ export function startOctantServer(
       turnMetrics,
       windowAuthorityStore,
       workThreadProjection,
+      workTurnProjection,
     });
     const {
       agentProfileRoutes,

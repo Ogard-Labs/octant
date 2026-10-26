@@ -131,7 +131,12 @@ export async function readVerifiedPluginFile(
 ): Promise<Uint8Array> {
   let handle: FileHandle;
   try {
-    handle = await open(absolutePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // O_NONBLOCK keeps a FIFO swapped in after discovery from holding the open
+    // until a writer appears; the snapshot check below then refuses it.
+    handle = await open(
+      absolutePath,
+      constants.O_RDONLY | constants.O_NOFOLLOW | (constants.O_NONBLOCK ?? 0),
+    );
   } catch {
     fail("unsafe-path", `Package file changed or became a symlink: ${relativePath}`);
   }

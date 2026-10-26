@@ -51,7 +51,11 @@ import {
 } from "./acpProtocol";
 import type { ManagedToolAnswer, ManagedToolCallContext } from "./managedMcpTools";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
-import { type ProviderRuntimeRegistry, trackProviderProcess } from "./providerRuntimeRegistry";
+import {
+  type ProviderRuntimeRegistry,
+  type ProviderDriverRuntimeRegistry,
+  trackProviderProcess,
+} from "./providerRuntimeRegistry";
 
 /** The subset of the ACP client the driver depends on (fakeable in tests). */
 export interface AcpClientPort {
@@ -100,7 +104,7 @@ export interface AcpDriverOptions {
   readonly binaryPath: string;
   readonly managedHome: string;
   readonly process: AcpProcessPort;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   /** Instance authentication mode for profiles with delegated browser sign-in. */
   readonly authentication?: "provider-owned" | "subscription" | "api-key";
   readonly credentialResolver?: ProviderCredentialResolver;

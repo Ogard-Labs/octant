@@ -211,24 +211,14 @@ function ImageProviderSettings(props: { readonly controller: ProviderController 
         onChangeBinary={controller.changeBinary}
         onChangeClaudeConfiguration={controller.changeClaudeConfiguration}
         onChangeCodexConfiguration={controller.changeCodexConfiguration}
-        onChangeClineConfiguration={controller.changeClineConfiguration}
-        onChangeCopilotConfiguration={controller.changeCopilotConfiguration}
-        onChangeDevinConfiguration={controller.changeDevinConfiguration}
-        onChangeGeminiConfiguration={controller.changeGeminiConfiguration}
+        onChangeAcpAgentConfiguration={controller.changeAcpAgentConfiguration}
         onChangeGeminiImageConfiguration={controller.changeGeminiImageConfiguration}
-        onChangeGlmConfiguration={controller.changeGlmConfiguration}
-        onChangeGooseConfiguration={controller.changeGooseConfiguration}
-        onChangeGrokConfiguration={controller.changeGrokConfiguration}
         onChangeIdeogramImageConfiguration={controller.changeIdeogramImageConfiguration}
-        onChangeKiloConfiguration={controller.changeKiloConfiguration}
-        onChangeMistralVibeConfiguration={controller.changeMistralVibeConfiguration}
         onChangeOhMyPiConfiguration={controller.changeOhMyPiConfiguration}
         onChangeOllamaConfiguration={controller.changeOllamaConfiguration}
         onChangeOpenAiCompatibleConfiguration={controller.changeOpenAiCompatibleConfiguration}
         onChangeOpenAiImageConfiguration={controller.changeOpenAiImageConfiguration}
         onChangePiConfiguration={controller.changePiConfiguration}
-        onChangeQwenConfiguration={controller.changeQwenConfiguration}
-        onChangeFxConfiguration={controller.changeFxConfiguration}
         onClearProviderCredential={controller.clearProviderCredential}
         onCompleteProviderAuthentication={controller.completeProviderAuthentication}
         onHiddenModelsChange={controller.updateHiddenModels}
@@ -271,19 +261,13 @@ function ImageProviderCreateForm(props: { readonly controller: ProviderControlle
       onCreateAnthropicCompatible={controller.createAnthropicCompatible}
       onCreateAzureFoundry={controller.createAzureFoundry}
       onCreateBflImage={controller.createBflImage}
+      onCreateAcpAgent={controller.createAcpAgent}
       onCreateClaude={controller.createClaude}
-      onCreateGemini={controller.createGemini}
       onCreateGeminiImage={controller.createGeminiImage}
-      onCreateGrok={controller.createGrok}
-      onCreateGlm={controller.createGlm}
-      onCreateCline={controller.createCline}
       onCreateIdeogramImage={controller.createIdeogramImage}
-      onCreateMistralVibe={controller.createMistralVibe}
       onCreateOllama={controller.createOllama}
       onCreateOpenAiCompatible={controller.createOpenAiCompatible}
       onCreateOpenAiImage={controller.createOpenAiImage}
-      onCreateQwen={controller.createQwen}
-      onCreateFx={controller.createFx}
       triggerLabel="Add image provider"
     />
   );

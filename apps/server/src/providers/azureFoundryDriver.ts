@@ -6,28 +6,22 @@ import type {
   ProviderObservedState,
 } from "@octant/contracts";
 import { Effect } from "effect";
-import type { ProviderDriver } from "@octant/provider-sdk/driver";
+import type { HarnessEndpointDriver } from "@octant/provider-sdk/harness-endpoint";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import {
   makeOpenAiCompatibleDriver,
   type OpenAiCompatibleDriverProfile,
 } from "./openAiCompatibleDriver";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
-import type { NativeHarnessEndpointHooks } from "../harness/nativeHarnessEndpointRegistry";
-import type { NativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
+import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 
 export interface AzureFoundryDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly configuration: AzureFoundryProviderConfiguration;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
   readonly clock?: () => string;
-  readonly correlationId?: () => string;
-  readonly onConnectionReleased?: () => void;
-  readonly transcripts?: NativeHarnessTranscriptStore;
-  readonly harness?: NativeHarnessEndpointHooks;
 }
 
 const FOUNDRY_PROFILE: OpenAiCompatibleDriverProfile = {
@@ -42,7 +36,7 @@ const FOUNDRY_PROFILE: OpenAiCompatibleDriverProfile = {
  * documented `api-key` header. Foundry deployments are exposed as manual model
  * IDs so the catalog orders them exactly as configured.
  */
-export function makeAzureFoundryDriver(options: AzureFoundryDriverOptions): ProviderDriver {
+export function makeAzureFoundryDriver(options: AzureFoundryDriverOptions): HarnessEndpointDriver {
   const compatibleConfiguration: OpenAiCompatibleProviderConfiguration = {
     kind: "openai-compatible-http",
     baseUrl: options.configuration.baseUrl,
@@ -62,12 +56,6 @@ export function makeAzureFoundryDriver(options: AzureFoundryDriverOptions): Prov
       : { credentialResolver: options.credentialResolver }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
-    ...(options.correlationId === undefined ? {} : { correlationId: options.correlationId }),
-    ...(options.onConnectionReleased === undefined
-      ? {}
-      : { onConnectionReleased: options.onConnectionReleased }),
-    ...(options.transcripts === undefined ? {} : { transcripts: options.transcripts }),
-    ...(options.harness === undefined ? {} : { harness: options.harness }),
     profile: FOUNDRY_PROFILE,
   });
   // Per the approved Foundry profile design, treat missing/incomplete model discovery as

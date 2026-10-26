@@ -10,6 +10,7 @@ import {
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import { Effect, Fiber, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -143,23 +144,30 @@ function harnessDriver(bodies: string[]): ProviderDriver {
       appManagedTools: "unsupported",
       citations: "unsupported",
     },
-    verifiedToolModelIds: [modelId],
     observedAt: "2026-09-05T12:00:00.000Z",
   } as never);
+  runtimeRegistry.setVerifiedToolModels(instanceId, [modelId]);
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     if (String(url).endsWith("/models")) return new Response(null, { status: 404 });
     bodies.push(String(init?.body));
     return chatStream(bodies.length === 1 ? "first answer" : "second answer");
   });
-  return makeOpenAiCompatibleDriver({
-    instanceId,
-    configuration,
-    credentialResolver: { has: async () => true, resolve: async () => "private-key" },
-    fetch: fetch as never,
-    runtimeRegistry,
-    clock: () => "2026-09-05T12:00:00.000Z",
-    correlationId: () => "80000000-0000-4000-8000-000000000603",
-  });
+  return runOnNativeHarness(
+    makeOpenAiCompatibleDriver({
+      instanceId,
+      configuration,
+      credentialResolver: { has: async () => true, resolve: async () => "private-key" },
+      fetch: fetch as never,
+      runtimeRegistry,
+      clock: () => "2026-09-05T12:00:00.000Z",
+    }),
+    {
+      instanceId,
+      runtimeRegistry,
+      clock: () => "2026-09-05T12:00:00.000Z",
+      correlationId: () => "80000000-0000-4000-8000-000000000603",
+    },
+  );
 }
 
 async function runTurns(
@@ -170,7 +178,11 @@ async function runTurns(
   await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+        const connection = yield* driver.acquire({
+          instanceId,
+          projectRoot: "/tmp/project",
+          mode: "chat",
+        });
         yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
         for (const prompt of prompts) {
           const events = yield* Effect.fork(

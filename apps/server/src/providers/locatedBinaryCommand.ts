@@ -1,4 +1,9 @@
-import type { ProviderInstance, ProviderRegistryCommand } from "@octant/contracts";
+import {
+  acpAgentChangeCommandKind,
+  type ProviderInstance,
+  type ProviderRegistryCommand,
+} from "@octant/contracts";
+import { isAcpAgentInstance } from "@octant/domain";
 
 /**
  * The registry command that points an existing runtime at a binary the host
@@ -11,74 +16,20 @@ export function locatedBinaryCommand(
   binaryPath: string,
 ): ProviderRegistryCommand | undefined {
   const target = { instanceId: instance.id, expectedVersion: instance.version } as const;
+  if (isAcpAgentInstance(instance)) {
+    return {
+      kind: acpAgentChangeCommandKind(instance.driverKind),
+      ...target,
+      configuration: { ...instance.configuration, binaryPath },
+    };
+  }
   switch (instance.driverKind) {
     case "codex":
     case "opencode":
-    case "kimi-code":
       return { kind: "change-provider-binary", ...target, binaryPath };
     case "claude":
       return {
         kind: "change-claude-configuration",
-        ...target,
-        configuration: { ...instance.configuration, binaryPath },
-      };
-    case "mistral-vibe":
-      return {
-        kind: "change-mistral-vibe-configuration",
-        ...target,
-        configuration: { ...instance.configuration, binaryPath },
-      };
-    case "grok":
-      return {
-        kind: "change-grok-configuration",
-        ...target,
-        configuration: { ...instance.configuration, binaryPath },
-      };
-    case "goose":
-      return {
-        kind: "change-goose-configuration",
-        ...target,
-        configuration: { ...instance.configuration, binaryPath },
-      };
-    case "gemini":
-      return {
-        kind: "change-gemini-configuration",
-        ...target,
-        configuration: { ...instance.configuration, binaryPath },
-      };
-    case "copilot":
-      return {
-        kind: "change-copilot-configuration",
-        ...target,
-        configuration: { ...instance.configuration, binaryPath },
-      };
-    case "cline":
-      return {
-        kind: "change-cline-configuration",
-        ...target,
-        configuration: { ...instance.configuration, binaryPath },
-      };
-    case "qwen":
-      return {
-        kind: "change-qwen-configuration",
-        ...target,
-        configuration: { ...instance.configuration, binaryPath },
-      };
-    case "fx":
-      return {
-        kind: "change-fx-configuration",
-        ...target,
-        configuration: { ...instance.configuration, binaryPath },
-      };
-    case "devin":
-      return {
-        kind: "change-devin-configuration",
-        ...target,
-        configuration: { ...instance.configuration, binaryPath },
-      };
-    case "kilo":
-      return {
-        kind: "change-kilo-configuration",
         ...target,
         configuration: { ...instance.configuration, binaryPath },
       };

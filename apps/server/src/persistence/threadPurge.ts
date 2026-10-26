@@ -389,51 +389,19 @@ function collectOwnedAggregates(
   ]) {
     add(NATIVE_HARNESS_TRANSCRIPT_AGGREGATE_TYPE, sessionId);
     add(OLLAMA_SESSION_HISTORY_AGGREGATE_TYPE, sessionId);
+    add(CLAUDE_RESUME_IDENTITY_AGGREGATE_TYPE, sessionId);
     for (const match of aggregatesMatching(connection, ["$.sessionId"], sessionId)) {
       add(match.aggregateType, match.aggregateId);
     }
-  }
-  for (const identity of claudeResumeIdentityAggregates(connection, keys)) {
-    add(identity.aggregateType, identity.aggregateId);
   }
   return [...keys.values()];
 }
 
 /**
- * A Claude resume identity is keyed by the Octant session, not by a thread, so
- * no ownership path names the thread. The thread's own events name the session
- * they ran in, which is the only link; an identity whose session a purged
- * thread recorded goes with it.
+ * A Claude resume identity is keyed by the Octant session it resumes and never
+ * names a thread, so it follows the same session ownership as a transcript.
  */
-function claudeResumeIdentityAggregates(
-  connection: SqliteConnection,
-  keys: ReadonlyMap<string, AggregateKey>,
-): ReadonlyArray<AggregateKey> {
-  const identities = connection
-    .prepare(
-      `SELECT DISTINCT aggregate_id FROM event_journal WHERE aggregate_type = 'claude-resume-identity'`,
-    )
-    .all() as ReadonlyArray<{ readonly aggregate_id: string }>;
-  const mentions = connection.prepare(
-    `SELECT aggregate_type, aggregate_id FROM event_journal WHERE instr(payload_json, ?) > 0`,
-  );
-  const owned: AggregateKey[] = [];
-  for (const { aggregate_id: sessionId } of identities) {
-    const named = mentions.all(sessionId) as ReadonlyArray<{
-      readonly aggregate_type: string;
-      readonly aggregate_id: string;
-    }>;
-    if (
-      named.some(
-        (row) =>
-          row.aggregate_type !== "claude-resume-identity" &&
-          keys.has(`${row.aggregate_type}:${row.aggregate_id}`),
-      )
-    )
-      owned.push({ aggregateType: "claude-resume-identity", aggregateId: sessionId });
-  }
-  return owned;
-}
+const CLAUDE_RESUME_IDENTITY_AGGREGATE_TYPE = "claude-resume-identity";
 
 function followLinkedAggregates(
   connection: SqliteConnection,
@@ -530,13 +498,17 @@ const SESSION_RECORDING_AGGREGATE_TYPES = ["chat-thread", "work-turn", "code-ope
  * Chat attempt, Work turn, or Code operation ran, not under the
  * native-harness session record's own id, and its events never name a
  * thread. The thread's own records are the only link: a Chat attempt or Work
- * turn names `providerSessionId`, and a Code operation records
- * `provider-session-ready`.
+ * turn names `providerSessionId`, and a Code operation names it when its turn
+ * starts and again at `provider-session-ready`. The start alone counts:
+ * Claude records a resume identity as its session opens, and a turn that fails
+ * to journal `provider-session-ready` afterwards names the session nowhere
+ * else.
  *
  * A session belongs to the thread that recorded it first. A Chat branch copies
  * its source's completed attempts with their real session ids, so the branch
  * names a session it never ran; purging the branch must not take the source's
- * transcript, and purging the source still takes it.
+ * transcript or Claude resume identity, which would break the source's resume,
+ * and purging the source still takes both.
  */
 function providerSessionsStartedBy(
   connection: SqliteConnection,
@@ -551,7 +523,8 @@ function providerSessionsStartedBy(
      SELECT json_extract(payload_json, '$.event.sessionId') AS session_id
      FROM event_journal
      WHERE aggregate_type = ? AND aggregate_id = ?
-       AND json_extract(payload_json, '$.event.kind') = 'provider-session-ready'`,
+       AND json_extract(payload_json, '$.event.kind') IN
+         ('conversation-turn-started', 'provider-session-ready')`,
   );
   const firstRecorder = connection.prepare(
     `SELECT aggregate_type, aggregate_id FROM event_journal
@@ -750,7 +723,7 @@ function eraseReplicaArtifactCopies(
   }
 }
 
-function deleteJournalEvents(
+export function deleteJournalEvents(
   connection: SqliteConnection,
   aggregates: ReadonlyArray<AggregateKey>,
 ): void {

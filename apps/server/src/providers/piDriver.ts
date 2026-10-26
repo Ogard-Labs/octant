@@ -37,7 +37,11 @@ import {
   type PiManagedToolAnswer,
   type PiManagedToolsBridge,
 } from "./piManagedTools";
-import { type ProviderRuntimeRegistry, trackProviderProcess } from "./providerRuntimeRegistry";
+import {
+  type ProviderRuntimeRegistry,
+  type ProviderDriverRuntimeRegistry,
+  trackProviderProcess,
+} from "./providerRuntimeRegistry";
 
 export interface PiClientPort {
   readonly request: (
@@ -60,7 +64,7 @@ export interface PiDriverOptions {
   readonly binaryPath: string;
   readonly piHome: string;
   readonly process: PiProcessPort;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly clientFactory?: (connection: PiRpcConnection) => PiClientPort;
   readonly clock?: () => string;
   readonly correlationId?: () => string;

@@ -173,7 +173,19 @@ it instead of imitating it.
   reports no usage rather than waiting for a figure that will not come.
 - **Ollama** runs Octant Harness against the Ollama service on this computer:
   Octant tools reach only models you verified, and it reports no file changes
-  or approvals of its own.
+  or approvals of its own. Octant asks Ollama for each model's window
+  explicitly, so a long request is shortened or refused rather than cut off
+  by Ollama without a word: the `num_ctx` in the model's Modelfile when it
+  sets one, else the model's own window up to 32,768 tokens (a larger window
+  costs memory whether or not the conversation uses it), else 4,096 tokens
+  when Ollama reports no window. To give a model more, type a larger window
+  into its **Context window** box: open your Ollama endpoint under
+  **Settings → Octant Harness → Model endpoints**, and the box sits beside
+  each model. A variant with a larger `num_ctx` (`PARAMETER num_ctx 65536` in
+  a Modelfile) works too. Octant asks Ollama for the window you type, up to
+  the window the model was trained for: Ollama never loads more, so a larger
+  number is saved as that window. Ollama sets aside memory for the whole
+  window when it loads the model, so choose what your conversations need.
 - **Model endpoints** (OpenAI-compatible, Anthropic-compatible, Azure AI
   Foundry) run Octant Harness. They show reasoning and usage only once a reply
   carries them, and Octant tools reach only models you verified.
@@ -341,7 +353,8 @@ command, including `CODEX_HOME` for an extra account. Octant never reads
 settings into your config. The first account still uses an API key
 already in your environment. Extra accounts do not inherit that key, and
 keep their thread state in their own directory even when `CODEX_SQLITE_HOME`
-is set. An AWS profile from your environment still applies to every account.
+is set. No account receives an AWS profile from your environment; see the
+Amazon Bedrock note under Readiness and capabilities.
 An API key you store in Octant for that provider still reaches only
 that account. Each account runs its own
 Codex app-server. A thread stays on the account it started with. Octant
@@ -762,13 +775,19 @@ connection check refuses, Settings names an Octant-authored reason and the
 next action instead of a generic incompatibility sentence. Detected versions
 stay visible when the probe read them. Raw provider output never appears here.
 
-A Codex CLI configured for Amazon Bedrock authenticates with
-`AWS_BEARER_TOKEN_BEDROCK` (plus `AWS_REGION`) or an `AWS_PROFILE` whose keys
-are in the AWS shared config. Octant deliberately does not pass static IAM
-keys exported in the environment (`AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) to the Codex runtime, so a host
-that relies on them shows Codex as not ready with that reason. This is
-intended, not a bug: move the keys into a profile or use the bearer token.
+A Codex CLI configured for Amazon Bedrock works in Octant only with a Bedrock
+API key: one you signed that Codex account in to Bedrock with, or, for the
+first Codex account, `AWS_BEARER_TOKEN_BEDROCK` (plus `AWS_REGION`) in the
+environment Octant starts from. A provider `auth` command in the Codex config
+also works. Octant refuses every route that signs in from your AWS identity:
+an `aws.profile` or `aws.credential_export` in the Codex config, an
+`AWS_PROFILE`, the AWS shared config under `~/.aws`, SSO, and static IAM keys
+(`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`). Codex runs
+its commands outside Octant's sandbox, and its own sandbox lets them read any
+file in your home, so those credentials would be within reach of every
+command the model runs. Codex then shows as incompatible, with the reason and
+the next step. This is intended, not a bug: create a Bedrock API key and use
+it instead.
 
 ## Next steps
 

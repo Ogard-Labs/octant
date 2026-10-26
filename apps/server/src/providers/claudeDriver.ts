@@ -72,7 +72,7 @@ import {
   type ClaudeProcessPort,
 } from "./claudeProcess";
 import { claudeProcessPlanUsageLimits, decodeClaudeProcessPlanUsage } from "./claudeProcessUsage";
-import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
+import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 import { providerResumeBinding, resumeBindingRefuses } from "./resumeBinding";
 
 const CLAUDE_TOOLS = [
@@ -288,7 +288,7 @@ export interface ClaudeDriverOptions {
   readonly process: ClaudeProcessPort;
   readonly sdk: ClaudeAgentSdkPort;
   readonly credentialResolver?: ProviderCredentialResolver;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  readonly runtimeRegistry: ProviderDriverRuntimeRegistry;
   readonly resumeIdentityPort: ClaudeResumeIdentityPort;
   readonly permissionPersistence?: () => PermissionPersistence;
   readonly makeEnvironmentScope?: ClaudeEnvironmentFactory;
@@ -1405,6 +1405,7 @@ function makeConnection(
         readonly executionPolicy: ProviderExecutionPolicy;
         readonly autoApprove?: boolean;
         readonly modelOptionValues?: ProviderModelOptionValues;
+        readonly singleUse?: boolean;
       },
       signal: AbortSignal,
       resumeSessionId?: string,
@@ -1803,6 +1804,10 @@ function makeConnection(
               ...(input.autoApprove === undefined ? {} : { autoApprove: input.autoApprove }),
               ...(resumeSessionId === undefined ? {} : { resumeSessionId }),
               ...(assignedSessionId === undefined ? {} : { sessionId: assignedSessionId }),
+              // Nothing resumes a single-use session, so the runtime's own
+              // transcript of it would only be a copy of the request left in
+              // the account's configuration directory.
+              ...(input.singleUse === true ? { persistSession: false as const } : {}),
               tools: executionOptions.tools,
               ...(sandbox === undefined ? {} : { sandbox }),
               canUseTool,
@@ -1876,6 +1881,10 @@ function makeConnection(
         if (state.terminal && !state.outputAccepted) {
           throw failure("protocol", "Claude session failed during startup.");
         }
+        // A single-use session is never resumed, and its random session id is
+        // named by no thread's journal, so a recorded identity (with the
+        // thread's scratch folder in it) would outlive every purge.
+        if (input.singleUse === true) return state;
         const identity = {
           providerInstanceId: options.instanceId,
           octantSessionId: input.sessionId,
@@ -1915,20 +1924,24 @@ function makeConnection(
       subscribe: Stream.fromPubSub(events, { scoped: true }),
       start: (input) =>
         withSessionReservation(input.sessionId, (signal) => open(input, signal)).pipe(
-          Effect.map((state) => ({
-            sessionId: state.sessionId,
-            resumeCursor: {
-              driverKind: "claude" as const,
-              value: state.claudeSessionId!,
-              binding: providerResumeBinding({
-                instanceId: options.instanceId,
-                sessionId: state.sessionId,
-                projectRoot,
-                mode,
-                modelId: input.modelId,
-              }),
-            },
-          })),
+          Effect.map((state) =>
+            input.singleUse === true
+              ? { sessionId: state.sessionId }
+              : {
+                  sessionId: state.sessionId,
+                  resumeCursor: {
+                    driverKind: "claude" as const,
+                    value: state.claudeSessionId!,
+                    binding: providerResumeBinding({
+                      instanceId: options.instanceId,
+                      sessionId: state.sessionId,
+                      projectRoot,
+                      mode,
+                      modelId: input.modelId,
+                    }),
+                  },
+                },
+          ),
         ),
       resume: (input) => {
         if (input.resumeCursor.driverKind !== "claude") {

@@ -1,3 +1,4 @@
+import { ACP_AGENT_KINDS } from "@octant/contracts";
 import { describe, expect, it } from "vitest";
 import { DISCOVERY_DESCRIPTORS } from "./discovery";
 import {
@@ -40,20 +41,7 @@ describe("provider-driver host runtime", () => {
       DISCOVERY_DESCRIPTORS.filter((descriptor) =>
         isAcpHostProfileDriver(descriptor.driverKind),
       ).map((descriptor) => descriptor.driverKind),
-    ).toEqual([
-      "kimi-code",
-      "devin",
-      "kilo",
-      "mistral-vibe",
-      "grok",
-      "goose",
-      "glm",
-      "gemini",
-      "copilot",
-      "cline",
-      "qwen",
-      "fx",
-    ]);
+    ).toEqual([...ACP_AGENT_KINDS]);
   });
 
   it("omits models from discovery when a driver plugin is not admitted", () => {

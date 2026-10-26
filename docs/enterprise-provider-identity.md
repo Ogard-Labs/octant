@@ -1,8 +1,10 @@
 # Enterprise provider identity and cloud-IAM endpoints
 
-Design only. Does not authorize implementation. Connector/OAuth marketplace
-stays Later per the Current Release Boundary in `AGENTS.md` and
-[roadmap Later](roadmap.md#later).
+Enterprise directory OAuth and cloud-IAM provider identity were authorized by
+the maintainer on 2026-10-26 as post-preview work, design-first: implementation
+starts only once the owning specification documents its authority, privacy,
+and release boundaries, per the Current Release Boundary in `AGENTS.md` and
+[roadmap Later](roadmap.md#later). It is not part of the technical preview.
 
 Today Octant authenticates providers two ways ([0005](decisions/0005-provider-sdk-contract.md)):
 
@@ -68,11 +70,11 @@ and the credential rules in 0005 / 0054:
 
 No new trust boundary moves credentials into `apps/server` or the renderer.
 
-## Start gate (parent Later item)
+## Start gate
 
 Implementation may leave Backlog only when:
 
-1. A Proposed or Accepted ADR names the auth-kind vocabulary and which broker
+1. The owning specification names the auth-kind vocabulary and which broker
    operations drivers may call, without superseding 0005's "Octant never stores
    provider-native OAuth tokens" rule for CLI subscription flows that stay
    provider-owned.
@@ -81,7 +83,7 @@ Implementation may leave Backlog only when:
    `incompatible`. `unavailable` covers missing/unreachable IAM or directory
    material; `unauthenticated` covers present-but-rejected credentials.
 3. Threat model controls E1–E5 have owners in an implementation child.
-4. An explicit maintainer request authorizes scoped work against that ADR.
+4. An explicit maintainer request authorizes scoped work against that
+   specification. The maintainer gave it on 2026-10-26.
 
-Until then the Later roadmap line for provider identity extensions remains a
-hold.
+Until gates 1–3 are met, this track is design work, not implementation.

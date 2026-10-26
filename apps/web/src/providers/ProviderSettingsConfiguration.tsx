@@ -6,21 +6,10 @@ export {
 } from "./configuration/ProviderCreateForm";
 export { ClaudeConfigurationForm } from "./configuration/ClaudeConfigurationForm";
 export { CodexConfigurationForm } from "./configuration/CodexConfigurationForm";
-export { DevinConfigurationForm } from "./configuration/DevinConfigurationForm";
 export { OhMyPiConfigurationForm, PiConfigurationForm } from "./configuration/PiConfigurationForms";
 export {
-  ApiKeyAcpConfigurationForm,
-  ClineConfigurationForm,
-  CopilotConfigurationForm,
-  FxConfigurationForm,
-  GeminiConfigurationForm,
-  GlmConfigurationForm,
-  GooseConfigurationForm,
-  GrokConfigurationForm,
-  KiloConfigurationForm,
+  AcpAgentConfigurationForm,
   OllamaConfigurationForm,
-  QwenConfigurationForm,
-  VibeConfigurationForm,
 } from "./configuration/AcpConfigurationForms";
 export {
   AnthropicConfigurationForm,
