@@ -22,11 +22,16 @@ import type {
  * the reason whose recovery the person can perform.
  */
 
-/** What this host's connection service knows about the session right now. */
+/**
+ * What this host's connection service knows about the session right now. An
+ * executor whose introduction names another build or protocol is never asked
+ * to attest, because this host cannot rely on it to read the request.
+ */
 export type SshTargetConnection =
   | { readonly state: "unreachable" }
   | { readonly state: "host-key-changed" }
   | { readonly state: "executor-missing" }
+  | { readonly state: "executor-version-mismatch" }
   | { readonly state: "connected"; readonly connectionId: SshConnectionId };
 
 /**
@@ -151,6 +156,9 @@ export function decideSshAdmission(request: SshAdmissionRequest): SshAdmissionDe
   if (connection.state === "unreachable") return refused("target-unreachable");
   if (connection.state === "host-key-changed") return refused("host-key-changed");
   if (connection.state === "executor-missing") return refused("executor-missing");
+  if (connection.state === "executor-version-mismatch") {
+    return refused("executor-version-mismatch");
+  }
 
   // Evidence is for one connection: a reconnect starts from nothing.
   const { attestation } = request;
