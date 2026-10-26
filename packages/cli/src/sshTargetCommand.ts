@@ -1,5 +1,14 @@
 import { decodeHostAnswer } from "@octant/contracts";
 import {
+  SshRemoteDirectoryListing,
+  SshRemoteFileContent,
+  SshRemoteGitDiff,
+  SshRemoteGitStatus,
+  SshRemoteProject,
+  SshRemoteProjectList,
+  SshRemoteProjectRefusal,
+} from "@octant/contracts/ssh-remote-project";
+import {
   SshHostKeyProbe,
   SshTargetList,
   SshTargetStatus,
@@ -9,7 +18,9 @@ import { failureMessage, type OpenedLocalControlSession } from "./localControl";
 
 /**
  * `octant ssh-target`: register, re-pin, connect, list, and remove SSH targets
- * from this machine. Canonical: docs/design/remote-ssh-environments.md.
+ * from this machine, bind a Code Project to a folder on one, and read that
+ * folder's files, Git status, and diff. Canonical:
+ * docs/design/remote-ssh-environments.md.
  *
  * A host key is pinned only after the person confirms the fingerprint the
  * destination presented: typed at the prompt, or given beforehand with
@@ -26,7 +37,18 @@ export type SshTargetCliCommand =
     }
   | { readonly action: "repin"; readonly targetId: string; readonly fingerprint?: string }
   | { readonly action: "connect"; readonly targetId: string }
-  | { readonly action: "remove"; readonly targetId: string };
+  | { readonly action: "remove"; readonly targetId: string }
+  | {
+      readonly action: "bind";
+      readonly targetId: string;
+      readonly remoteRoot: string;
+      readonly name: string;
+    }
+  | { readonly action: "projects" }
+  | { readonly action: "files"; readonly projectId: string; readonly directory?: string }
+  | { readonly action: "read"; readonly projectId: string; readonly path: string }
+  | { readonly action: "status"; readonly projectId: string }
+  | { readonly action: "diff"; readonly projectId: string; readonly path?: string };
 
 /** A host answer decoded as clients decode them, or undefined when it does not read. */
 function answer<A, I>(
@@ -50,6 +72,27 @@ export function resolveSshTargetCliCommand(
   if (flags.fingerprint !== undefined && fingerprint === undefined) return undefined;
   if (action === "list" || action === undefined) {
     return rest.length === 0 && flagNames.length === 0 ? { action: "list" } : undefined;
+  }
+  if (action === "projects") {
+    return rest.length === 0 && flagNames.length === 0 ? { action: "projects" } : undefined;
+  }
+  if (action === "files" || action === "read" || action === "status" || action === "diff") {
+    return resolveReadCommand(action, rest, flagNames);
+  }
+  if (action === "bind") {
+    const [targetId, remoteRoot] = rest;
+    const { name } = flags;
+    if (
+      targetId === undefined ||
+      remoteRoot === undefined ||
+      rest.length !== 2 ||
+      typeof name !== "string" ||
+      flagNames.some((flag) => flag !== "name")
+    ) {
+      return undefined;
+    }
+    // The host checks each against its schemas before anything runs.
+    return { action: "bind", targetId, remoteRoot, name };
   }
   if (action === "add") {
     if (
@@ -80,6 +123,22 @@ export function resolveSshTargetCliCommand(
   return undefined;
 }
 
+/** The reads of a remote-bound Project; the host checks each path against its schema. */
+function resolveReadCommand(
+  action: "files" | "read" | "status" | "diff",
+  rest: readonly string[],
+  flagNames: readonly string[],
+): SshTargetCliCommand | undefined {
+  const [projectId, path, ...extra] = rest;
+  if (projectId === undefined || extra.length > 0 || flagNames.length > 0) return undefined;
+  if (action === "status") return path === undefined ? { action, projectId } : undefined;
+  if (action === "read") return path === undefined ? undefined : { action, projectId, path };
+  if (action === "files") {
+    return { action, projectId, ...(path === undefined ? {} : { directory: path }) };
+  }
+  return { action, projectId, ...(path === undefined ? {} : { path }) };
+}
+
 export interface RunSshTargetCliCommandInput {
   readonly command: SshTargetCliCommand;
   readonly session: OpenedLocalControlSession;
@@ -91,6 +150,38 @@ export interface RunSshTargetCliCommandInput {
 
 export async function runSshTargetCliCommand(input: RunSshTargetCliCommandInput): Promise<number> {
   const { command, session } = input;
+  if (command.action === "projects") {
+    const listed = await session.send({ path: "/api/desktop/ssh-targets/projects", method: "GET" });
+    const decoded = listed.status === 200 ? answer(SshRemoteProjectList, listed.body) : undefined;
+    if (decoded === undefined) {
+      input.stderr.write(`${failureMessage(listed, "Octant refused to list remote Projects.")}\n`);
+      return 1;
+    }
+    if (decoded.projects.length === 0) input.stdout.write("No remote-bound Projects.\n");
+    for (const project of decoded.projects) writeProject(input.stdout, project);
+    return 0;
+  }
+  if (command.action === "bind") {
+    const sent = await session.send({
+      path: "/api/desktop/ssh-targets/projects/bind",
+      method: "POST",
+      body: { targetId: command.targetId, remoteRoot: command.remoteRoot, name: command.name },
+    });
+    const bound = sent.status === 200 ? answer(SshRemoteProject, sent.body) : undefined;
+    if (bound !== undefined) {
+      writeProject(input.stdout, bound);
+      return 0;
+    }
+    return writeRefusal(input.stderr, sent, "Not bound");
+  }
+  if (
+    command.action === "files" ||
+    command.action === "read" ||
+    command.action === "status" ||
+    command.action === "diff"
+  ) {
+    return runReadCommand(input, command);
+  }
   if (command.action === "list") {
     const listed = await session.send({ path: "/api/desktop/ssh-targets", method: "GET" });
     const decoded = listed.status === 200 ? answer(SshTargetList, listed.body) : undefined;
@@ -233,6 +324,133 @@ const RECOVERY: Readonly<Record<SshAdmissionRefusalReason, string>> = {
   "full-access-not-remembered":
     "Remember Full access for this Project from a local window, or choose a narrower posture.",
 };
+
+async function runReadCommand(
+  input: RunSshTargetCliCommandInput,
+  command: Extract<SshTargetCliCommand, { readonly action: "files" | "read" | "status" | "diff" }>,
+): Promise<number> {
+  const { stdout } = input;
+  if (command.action === "files") {
+    const sent = await input.session.send({
+      path: "/api/desktop/ssh-targets/projects/files",
+      method: "POST",
+      body: {
+        projectId: command.projectId,
+        ...(command.directory === undefined ? {} : { directory: command.directory }),
+      },
+    });
+    const listing = sent.status === 200 ? answer(SshRemoteDirectoryListing, sent.body) : undefined;
+    if (listing === undefined) return writeRefusal(input.stderr, sent, "Not listed");
+    for (const entry of listing.entries) {
+      stdout.write(
+        entry.kind === "directory"
+          ? `${entry.path}/\n`
+          : `${entry.path}  ${String(entry.byteLength)} bytes\n`,
+      );
+    }
+    if (listing.truncated) input.stderr.write("The folder holds more than this listing shows.\n");
+    return 0;
+  }
+  if (command.action === "read") {
+    const sent = await input.session.send({
+      path: "/api/desktop/ssh-targets/projects/file",
+      method: "POST",
+      body: { projectId: command.projectId, path: command.path },
+    });
+    const file = sent.status === 200 ? answer(SshRemoteFileContent, sent.body) : undefined;
+    if (file === undefined) return writeRefusal(input.stderr, sent, "Not read");
+    stdout.write(Buffer.from(file.contentBase64, "base64").toString("utf8"));
+    return 0;
+  }
+  if (command.action === "status") {
+    const sent = await input.session.send({
+      path: "/api/desktop/ssh-targets/projects/git-status",
+      method: "POST",
+      body: { projectId: command.projectId },
+    });
+    const status = sent.status === 200 ? answer(SshRemoteGitStatus, sent.body) : undefined;
+    if (status === undefined) return writeRefusal(input.stderr, sent, "No status");
+    const { head } = status;
+    stdout.write(
+      head.kind === "detached"
+        ? `HEAD detached at ${head.oid}\n`
+        : head.kind === "unborn"
+          ? `On ${head.name}, no commits yet\n`
+          : `On ${head.name} at ${head.oid}\n`,
+    );
+    for (const entry of status.entries) {
+      stdout.write(
+        `${entry.index}${entry.worktree} ${entry.originalPath === undefined ? "" : `${entry.originalPath} -> `}${entry.path}\n`,
+      );
+    }
+    if (status.truncated) input.stderr.write("The checkout has more changes than this shows.\n");
+    return 0;
+  }
+  const sent = await input.session.send({
+    path: "/api/desktop/ssh-targets/projects/git-diff",
+    method: "POST",
+    body: {
+      projectId: command.projectId,
+      ...(command.path === undefined ? {} : { path: command.path }),
+    },
+  });
+  const diff = sent.status === 200 ? answer(SshRemoteGitDiff, sent.body) : undefined;
+  if (diff === undefined) return writeRefusal(input.stderr, sent, "No diff");
+  stdout.write(diff.text);
+  if (diff.truncated) input.stderr.write("The diff is longer than Octant reads at once.\n");
+  return 0;
+}
+
+/** Says why a bind or read did nothing, with the recovery for an admission refusal. */
+function writeRefusal(
+  stderr: { readonly write: (chunk: string) => unknown },
+  response: { readonly status: number; readonly body: unknown },
+  what: string,
+): number {
+  const refused = answer(SshRemoteProjectRefusal, response.body);
+  if (refused === undefined) {
+    stderr.write(`${failureMessage(response, `${what}: Octant refused the request.`)}\n`);
+    return 1;
+  }
+  if (refused.reason === "not-admitted") {
+    stderr.write(`${what}: the target admits no reads now, ${refused.decision.reason}.\n`);
+    if (refused.decision.status === "refused") {
+      stderr.write(`  ${RECOVERY[refused.decision.reason]}\n`);
+    }
+    return 1;
+  }
+  stderr.write(`${what}: ${READ_REFUSAL[refused.reason]}\n`);
+  return 1;
+}
+
+/** Why a bind or read did nothing, for each refusal the executor or this host can give. */
+const READ_REFUSAL: Readonly<
+  Record<Exclude<SshRemoteProjectRefusal["reason"], "not-admitted">, string>
+> = {
+  "root-unavailable": "that folder does not exist on the target, or is not a folder.",
+  "root-moved": "that folder moved since it was bound.",
+  "root-not-confinable":
+    "Octant binds no folder that is /, holds your ~/.ssh, or holds its own runtime; choose the project folder itself.",
+  "outside-root": "that path leads outside the folder.",
+  "not-found": "that path does not exist.",
+  "not-a-directory": "that path is not a folder.",
+  "not-a-file": "that path is not a file.",
+  "too-large": "the answer is too large to read.",
+  "not-a-repository": "that folder is not a Git repository.",
+  "git-unavailable": "Git is not installed on the target.",
+  "read-failed": "the target could not read it.",
+  "unknown-project": "no such Project.",
+  "executor-unavailable": "the session to the target ended; reconnect and try again.",
+};
+
+function writeProject(
+  stdout: { readonly write: (chunk: string) => unknown },
+  project: SshRemoteProject,
+): void {
+  stdout.write(
+    `${String(project.id)}  ${project.name}  ${project.remoteRoot} on ${String(project.targetId)}\n`,
+  );
+}
 
 function writeStatus(
   stdout: { readonly write: (chunk: string) => unknown },

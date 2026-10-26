@@ -42,8 +42,9 @@ import { createPrivateListenerAdministrationRouteHandler } from "../remote/priva
 import { createPrivateListenerSetting } from "../remote/privateListenerSetting";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
 import { createSshTargetAdministrationRouteHandler } from "../sshTarget/sshTargetAdministrationRoutes";
+import { SshRemoteProjectService } from "../sshTarget/sshRemoteProjectService";
 import { SshTargetConnectionService } from "../sshTarget/sshTargetConnectionService";
-import { SshTargetRegistry } from "../sshTarget/sshTargetRegistry";
+import { SshTargetStore } from "../sshTarget/sshTargetStore";
 import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -323,14 +324,28 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   // SSH targets are administered from this machine alone, like the listener:
   // the routes sit on the loopback chain beside it, never in product dispatch.
+  const sshTargetStore = new SshTargetStore({
+    journal: persistence.journal,
+    connection: persistence.connection,
+    dataDirectory: providerDataDirectory,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
+  });
   const sshTargetConnections = new SshTargetConnectionService({
-    registry: new SshTargetRegistry(providerDataDirectory),
+    store: sshTargetStore,
     buildVersion: version,
   });
   const sshTargetAdministrationRoutes = createSshTargetAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
     connections: sshTargetConnections,
+    projects: new SshRemoteProjectService({
+      store: sshTargetStore,
+      connections: sshTargetConnections,
+      uuid: randomUUID,
+      clock: () => new Date().toISOString(),
+    }),
     maxRequestBodySize: MAX_JSON_REQUEST_BODY_SIZE,
   });
   // One diagnostics composer is shared by the owner control socket (through
@@ -493,14 +508,24 @@ export function wireRemote(deps: RemoteDependencies) {
       threads: threadExportService,
       connection: persistence.connection,
       listWorkThreadIds: () => workThreadProjection.list().map((thread) => String(thread.id)),
-      listProjects: () =>
-        persistence.readProjects().map((project) => ({
+      listProjects: () => [
+        ...persistence.readProjects().map((project) => ({
           projectId: project.id,
           name: project.name,
           type: project.type,
           lifecycle: project.lifecycle,
           ...(project.type === "chat" ? {} : { canonicalRoot: project.binding.canonicalRoot }),
         })),
+        // A remote-bound Code Project is exported as any Project is: its
+        // identity, never its folder.
+        ...sshTargetStore.listProjects().map((project) => ({
+          projectId: project.id,
+          name: project.name,
+          type: "code" as const,
+          lifecycle: "active" as const,
+        })),
+      ],
+      listSshTargets: () => sshTargetStore.exportTargets(),
       listProjectIds: () => persistence.readProjects().map((project) => String(project.id)),
       readProjectMemory: (projectId) => persistence.readProjectMemory(decodeProjectId(projectId)),
       listCanvases: () =>

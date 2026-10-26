@@ -125,6 +125,121 @@ describe("octant ssh-target", () => {
     expect(run.sent[1]?.body).toEqual({ destination: "build@devbox" });
   });
 
+  it("binds a folder on a target and says why the host refused one", async () => {
+    const project = {
+      id: "66666666-6666-4666-8666-666666666666",
+      name: "App",
+      targetId: status.target.id,
+      remoteRoot: "/home/build/app",
+      boundAt: "2026-10-26T10:00:00.000Z",
+    };
+    const bound = harness();
+    const command = resolveSshTargetCliCommand(["bind", status.target.id, "/home/build/app"], {
+      name: "App",
+    });
+    if (command === undefined) throw new Error("unresolved");
+    const out: string[] = [];
+    const err: string[] = [];
+    const run = (body: unknown, code: number) =>
+      runSshTargetCliCommand({
+        command,
+        session: {
+          kind: "opened",
+          windowId: "11111111-1111-4111-8111-111111111111",
+          send: async (request) => {
+            bound.sent.push(request);
+            return { status: code, body };
+          },
+          close: async () => undefined,
+        },
+        stdout: { write: (chunk) => out.push(chunk) },
+        stderr: { write: (chunk) => err.push(chunk) },
+        ask: undefined,
+      });
+    expect(await run(project, 200)).toBe(0);
+    expect(bound.sent[0]).toMatchObject({
+      path: "/api/desktop/ssh-targets/projects/bind",
+      body: { targetId: status.target.id, remoteRoot: "/home/build/app", name: "App" },
+    });
+    expect(out.join("")).toContain("/home/build/app");
+    expect(
+      await run(
+        {
+          status: "refused",
+          reason: "not-admitted",
+          decision: { status: "refused", reason: "target-unreachable" },
+        },
+        409,
+      ),
+    ).toBe(1);
+    expect(err.join("")).toContain("target-unreachable");
+    expect(err.join("")).toContain("octant ssh-target connect");
+  });
+
+  it("reads a remote-bound Project's files, status, and diff through the local routes", async () => {
+    const replies: Record<string, unknown> = {
+      "/api/desktop/ssh-targets/projects/files": {
+        entries: [
+          { kind: "directory", path: "src" },
+          { kind: "file", path: "README.md", byteLength: 6 },
+        ],
+        truncated: false,
+      },
+      "/api/desktop/ssh-targets/projects/file": {
+        path: "README.md",
+        byteLength: 6,
+        contentBase64: Buffer.from("hello\n").toString("base64"),
+      },
+      "/api/desktop/ssh-targets/projects/git-status": {
+        head: { kind: "unborn", name: "main" },
+        entries: [{ path: "README.md", index: "?", worktree: "?" }],
+        truncated: false,
+      },
+      "/api/desktop/ssh-targets/projects/git-diff": {
+        text: "+hello\n",
+        byteLength: 7,
+        truncated: false,
+      },
+    };
+    const out: string[] = [];
+    const sent: LocalControlRequest[] = [];
+    for (const argv of [
+      ["files", "p"],
+      ["read", "p", "README.md"],
+      ["status", "p"],
+      ["diff", "p", "README.md"],
+    ]) {
+      const command = resolveSshTargetCliCommand(argv, {});
+      if (command === undefined) throw new Error("unresolved");
+      expect(
+        await runSshTargetCliCommand({
+          command,
+          session: {
+            kind: "opened",
+            windowId: "11111111-1111-4111-8111-111111111111",
+            send: async (request) => {
+              sent.push(request);
+              return { status: 200, body: replies[request.path] };
+            },
+            close: async () => undefined,
+          },
+          stdout: { write: (chunk) => out.push(chunk) },
+          stderr: { write: () => undefined },
+          ask: undefined,
+        }),
+      ).toBe(0);
+    }
+    expect(sent.map((request) => request.body)).toEqual([
+      { projectId: "p" },
+      { projectId: "p", path: "README.md" },
+      { projectId: "p" },
+      { projectId: "p", path: "README.md" },
+    ]);
+    expect(out.join("")).toBe(
+      "src/\nREADME.md  6 bytes\nhello\nOn main, no commits yet\n?? README.md\n+hello\n",
+    );
+  });
+
   it("reads only the arguments each action takes", () => {
     expect(resolveSshTargetCliCommand([], {})).toEqual({ action: "list" });
     expect(resolveSshTargetCliCommand(["add", "devbox"], {})).toBeUndefined();
@@ -133,5 +248,16 @@ describe("octant ssh-target", () => {
     ).toBeUndefined();
     expect(resolveSshTargetCliCommand(["connect"], {})).toBeUndefined();
     expect(resolveSshTargetCliCommand(["remove", "id", "extra"], {})).toBeUndefined();
+    expect(resolveSshTargetCliCommand(["bind", "id", "/srv/app"], {})).toBeUndefined();
+    expect(
+      resolveSshTargetCliCommand(["bind", "id", "/srv/app"], { name: "App", force: true }),
+    ).toBeUndefined();
+    expect(resolveSshTargetCliCommand(["projects"], {})).toEqual({ action: "projects" });
+    expect(resolveSshTargetCliCommand(["read", "id"], {})).toBeUndefined();
+    expect(resolveSshTargetCliCommand(["status", "id", "extra"], {})).toBeUndefined();
+    expect(resolveSshTargetCliCommand(["diff", "id"], {})).toEqual({
+      action: "diff",
+      projectId: "id",
+    });
   });
 });

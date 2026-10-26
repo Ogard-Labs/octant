@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -27,8 +27,8 @@ import {
 } from "@octant/contracts/ssh-target";
 import {
   SSH_EXECUTOR_PROTOCOL_VERSION,
-  SshExecutorFrame,
-  type SshExecutorHostFrame,
+  type SshExecutorReadReply,
+  type SshExecutorReadRequest,
 } from "@octant/contracts/ssh-executor-protocol";
 import {
   SSH_CANARY_PROBES_BY_POSTURE,
@@ -37,14 +37,14 @@ import {
   type SshTargetConnection,
 } from "@octant/domain/ssh-target-admission-policy";
 import { childProcessEnvironment } from "../childProcessEnvironment";
-import { encodeExecutorFrame, ExecutorFrameReader } from "./executorFrames";
+import { ExecutorChannel } from "./executorChannel";
 import {
   SYSTEM_SSH_CLIENT,
   sshClientEnvironment,
   sshExecutorSessionArguments,
   sshHostKeyProbeArguments,
 } from "./sshClientArguments";
-import type { SshTargetRegistry } from "./sshTargetRegistry";
+import type { SshTargetStore } from "./sshTargetStore";
 
 /**
  * This host's connections to its SSH targets: one SSH session per target, the
@@ -55,7 +55,8 @@ import type { SshTargetRegistry } from "./sshTargetRegistry";
  * The service owns every session and decides admission with the domain policy
  * from what it holds now. Evidence belongs to one connection: a session that
  * ends takes its attestation with it, and a new one starts from nothing.
- * Connection state lives in memory and is never journaled.
+ * Connection state lives in memory and is never journaled; each attestation's
+ * digest and the decisions made from it are.
  */
 
 const CONFINED_POSTURES: ReadonlyArray<SshConfinedPosture> = [
@@ -65,19 +66,18 @@ const CONFINED_POSTURES: ReadonlyArray<SshConfinedPosture> = [
 ];
 const HELLO_TIMEOUT_MS = 60_000;
 const ATTESTATION_TIMEOUT_MS = 180_000;
+const READ_TIMEOUT_MS = 60_000;
 const HOST_KEY_PROBE_TIMEOUT_MS = 30_000;
 const PROBE_LIFETIME_MS = 10 * 60_000;
 const MAX_HELD_PROBES = 32;
-const MAX_STDERR_BYTES = 16_384;
 
 const decodeConnectionId = Schema.decodeUnknownSync(SshConnectionId);
 const decodeTargetId = Schema.decodeUnknownSync(SshTargetId);
 const decodeProbeId = Schema.decodeUnknownSync(SshHostKeyProbeId);
 const decodePinnedHostKey = Schema.decodeUnknownEither(SshPinnedHostKey);
-const decodeExecutorFrame = Schema.decodeUnknownEither(SshExecutorFrame);
 
 export interface SshTargetConnectionServiceOptions {
-  readonly registry: SshTargetRegistry;
+  readonly store: SshTargetStore;
   /** This host's build; an executor of any other build is refused. */
   readonly buildVersion: string;
   /** The OpenSSH client to run. Defaults to the system client. */
@@ -90,6 +90,7 @@ export interface SshTargetConnectionServiceOptions {
   readonly now?: () => number;
   readonly helloTimeoutMs?: number;
   readonly attestationTimeoutMs?: number;
+  readonly readTimeoutMs?: number;
 }
 
 export type SshTargetAdministrationResult<T> =
@@ -102,6 +103,15 @@ export interface SshTargetAdmissionRequest {
   readonly permissionPersistence: PermissionPersistence;
   readonly subject: SshAdmissionSubject;
 }
+
+/** A read on a target: refused by admission, lost with its session, or answered. */
+export type SshTargetReadOutcome =
+  | {
+      readonly status: "refused";
+      readonly decision: Extract<SshAdmissionDecision, { readonly status: "refused" }>;
+    }
+  | { readonly status: "unavailable" }
+  | { readonly status: "replied"; readonly reply: SshExecutorReadReply };
 
 interface HeldProbe {
   readonly destination: SshDestination;
@@ -116,12 +126,12 @@ type ConnectionRecord =
   | {
       readonly state: "connecting";
       readonly connectionId: SshConnectionId;
-      readonly child: ChildProcessWithoutNullStreams;
+      readonly channel: ExecutorChannel;
     }
   | {
       readonly state: "connected";
       readonly connectionId: SshConnectionId;
-      readonly child: ChildProcessWithoutNullStreams;
+      readonly channel: ExecutorChannel;
       readonly attestation: SshAttestation;
       readonly remoteUser: SshRemoteUser | undefined;
       readonly platform: SshTargetPlatform | undefined;
@@ -153,18 +163,19 @@ export function sshHostKeyFingerprint(hostKey: SshPinnedHostKey): SshHostKeyFing
 }
 
 export class SshTargetConnectionService {
-  readonly #registry: SshTargetRegistry;
+  readonly #store: SshTargetStore;
   readonly #buildVersion: string;
   readonly #sshExecutable: string;
   readonly #environment: NodeJS.ProcessEnv;
   readonly #now: () => number;
   readonly #helloTimeoutMs: number;
   readonly #attestationTimeoutMs: number;
+  readonly #readTimeoutMs: number;
   readonly #connections = new Map<string, ConnectionRecord>();
   readonly #probes = new Map<string, HeldProbe>();
 
   constructor(options: SshTargetConnectionServiceOptions) {
-    this.#registry = options.registry;
+    this.#store = options.store;
     this.#buildVersion = options.buildVersion;
     this.#sshExecutable = options.sshExecutable ?? SYSTEM_SSH_CLIENT;
     this.#environment = childProcessEnvironment(
@@ -173,10 +184,11 @@ export class SshTargetConnectionService {
     this.#now = options.now ?? Date.now;
     this.#helloTimeoutMs = options.helloTimeoutMs ?? HELLO_TIMEOUT_MS;
     this.#attestationTimeoutMs = options.attestationTimeoutMs ?? ATTESTATION_TIMEOUT_MS;
+    this.#readTimeoutMs = options.readTimeoutMs ?? READ_TIMEOUT_MS;
   }
 
   list(): ReadonlyArray<SshTargetStatus> {
-    return this.#registry.list().map((target) => this.#status(target));
+    return this.#store.list().map((target) => this.#status(target));
   }
 
   /**
@@ -184,7 +196,7 @@ export class SshTargetConnectionService {
    * on a target and every file operation on its remote root asks this first.
    */
   admit(targetId: SshTargetId, request: SshTargetAdmissionRequest): SshAdmissionDecision {
-    const registered = this.#registry.get(targetId) !== undefined;
+    const registered = this.#store.get(targetId) !== undefined;
     const record = this.#connections.get(String(targetId));
     return decideSshAdmission({
       host: { buildVersion: this.#buildVersion, protocolVersion: SSH_EXECUTOR_PROTOCOL_VERSION },
@@ -198,6 +210,29 @@ export class SshTargetConnectionService {
   }
 
   /**
+   * Asks the target's executor for one read, after the admission policy
+   * admitted it on the current connection. The decision and the request are
+   * made in one step, so the request travels only on the session whose
+   * attestation admitted it; a session that ends before it answers takes the
+   * request with it.
+   */
+  async read(
+    targetId: SshTargetId,
+    admission: SshTargetAdmissionRequest,
+    request: SshExecutorReadRequest,
+  ): Promise<SshTargetReadOutcome> {
+    const decision = this.admit(targetId, admission);
+    if (decision.status !== "admitted") return { status: "refused", decision };
+    const record = this.#connections.get(String(targetId));
+    if (record?.state !== "connected") return { status: "unavailable" };
+    const outcome = await record.channel.request(request, this.#readTimeoutMs);
+    if (outcome.status !== "replied") return { status: "unavailable" };
+    const { reply } = outcome;
+    if (reply.kind === "attested" || reply.kind === "busy") return { status: "unavailable" };
+    return { status: "replied", reply };
+  }
+
+  /**
    * Connects once to read the key `destination` presents. The key is held for
    * the person to confirm and trusted by nothing until they do.
    */
@@ -205,7 +240,7 @@ export class SshTargetConnectionService {
     destination: SshDestination,
   ): Promise<SshTargetAdministrationResult<SshHostKeyProbe>> {
     const probeName = randomUUID();
-    const directory = this.#registry.probeDirectory(probeName);
+    const directory = this.#store.probeDirectory(probeName);
     const knownHostsFile = join(directory, "known_hosts");
     try {
       const child = spawn(
@@ -258,7 +293,7 @@ export class SshTargetConnectionService {
       hostKey: probe.value.hostKey,
       executorPath: request.executorPath,
     };
-    this.#registry.save(target);
+    journaled(this.#store.register(target));
     return this.connect(target.id);
   }
 
@@ -266,7 +301,7 @@ export class SshTargetConnectionService {
   async repin(
     request: SshTargetRepinRequest,
   ): Promise<SshTargetAdministrationResult<SshTargetStatus>> {
-    const target = this.#registry.get(request.targetId);
+    const target = this.#store.get(request.targetId);
     if (target === undefined) return refusal("unknown-target", "No such SSH target.");
     const held = this.#probes.get(String(request.probeId));
     if (held !== undefined && held.destination !== target.destination) {
@@ -279,70 +314,78 @@ export class SshTargetConnectionService {
     const probe = this.#takeProbe(request.probeId, request.fingerprint);
     if (probe.status !== "ok") return probe;
     this.#disconnect(target.id);
-    this.#registry.save({ ...target, hostKey: probe.value.hostKey });
+    journaled(this.#store.repin(target.id, probe.value.hostKey));
     return this.connect(target.id);
   }
 
   /** Ends any session to the target and its attestation, then connects and attests anew. */
   async connect(targetId: SshTargetId): Promise<SshTargetAdministrationResult<SshTargetStatus>> {
-    const target = this.#registry.get(targetId);
+    const target = this.#store.get(targetId);
     if (target === undefined) return refusal("unknown-target", "No such SSH target.");
     this.#disconnect(targetId);
     const connectionId = decodeConnectionId(randomUUID());
+    // The pin is written from the journal each time, so the client trusts
+    // exactly the key the person confirmed, whatever the file held before.
+    const knownHostsFile = this.#store.writePin(target);
     const child = spawn(
       this.#sshExecutable,
       [
         ...sshExecutorSessionArguments({
           destination: target.destination,
-          knownHostsFile: this.#registry.knownHostsFile(target.id),
+          knownHostsFile,
           executorPath: target.executorPath,
         }),
       ],
       { env: this.#environment, stdio: ["pipe", "pipe", "pipe"] },
     );
+    const channel = new ExecutorChannel(child, { helloTimeoutMs: this.#helloTimeoutMs });
     const key = String(targetId);
-    this.#connections.set(key, { state: "connecting", connectionId, child });
-    const established = await this.#establish(child, connectionId);
+    this.#connections.set(key, { state: "connecting", connectionId, channel });
+    const established = await this.#establish(channel, connectionId);
     const current = this.#connections.get(key);
     // A later connect or a removal replaced this session while it attested.
     if (current?.state !== "connecting" || current.connectionId !== connectionId) {
-      child.kill("SIGKILL");
+      channel.close();
       return { status: "ok", value: this.#status(target) };
     }
     if (established.state !== "connected") {
-      child.kill("SIGKILL");
+      channel.close();
       this.#connections.set(key, { state: established.state });
       return { status: "ok", value: this.#status(target) };
     }
     // The session can end in the moment between the reply and this line.
-    if (child.exitCode !== null || child.signalCode !== null) {
+    if (channel.ended) {
       this.#connections.set(key, { state: "unreachable" });
       return { status: "ok", value: this.#status(target) };
     }
     this.#connections.set(key, {
       state: "connected",
       connectionId,
-      child,
+      channel,
       attestation: established.attestation,
       remoteUser: established.remoteUser,
       platform: supportedPlatform(established.attestation.facts.platform.operatingSystem),
     });
-    child.once("close", () => {
+    channel.onEnd(() => {
       const latest = this.#connections.get(key);
       if (latest?.state === "connected" && latest.connectionId === connectionId) {
         this.#connections.set(key, { state: "unreachable" });
       }
     });
-    return { status: "ok", value: this.#status(target) };
+    const status = this.#status(target);
+    // The digest and the decisions are journaled so a refusal can be
+    // explained after the connection is gone; they never admit anything.
+    journaled(this.#store.recordAttestation(target.id, established.attestation, status.admission));
+    return { status: "ok", value: status };
   }
 
   remove(targetId: SshTargetId): SshTargetAdministrationResult<null> {
-    if (this.#registry.get(targetId) === undefined) {
+    if (this.#store.get(targetId) === undefined) {
       return refusal("unknown-target", "No such SSH target.");
     }
     this.#disconnect(targetId);
     this.#connections.delete(String(targetId));
-    this.#registry.remove(targetId);
+    journaled(this.#store.remove(targetId));
     return { status: "ok", value: null };
   }
 
@@ -380,10 +423,7 @@ export class SshTargetConnectionService {
     const key = String(targetId);
     const record = this.#connections.get(key);
     if (record === undefined) return;
-    if (record.state === "connecting" || record.state === "connected") {
-      record.child.stdin.end();
-      record.child.kill("SIGTERM");
-    }
+    if (record.state === "connecting" || record.state === "connected") record.channel.close();
     this.#connections.set(key, { state: "unreachable" });
   }
 
@@ -424,90 +464,54 @@ export class SshTargetConnectionService {
    * asking it anything, then asks for the attestation of every confined
    * posture with the probes the admission policy requires.
    */
-  #establish(
-    child: ChildProcessWithoutNullStreams,
+  async #establish(
+    channel: ExecutorChannel,
     connectionId: SshConnectionId,
   ): Promise<Establishment> {
-    return new Promise((resolve) => {
-      const reader = new ExecutorFrameReader({ expectPreamble: true });
-      const requestId = 1;
-      let introduced = false;
-      let stderr = "";
-      let settled = false;
-      const finish = (outcome: Establishment) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        child.stdout.removeListener("data", onData);
-        resolve(outcome);
+    const introduction = await channel.introduction();
+    if (introduction.status === "timed-out") return { state: "unreachable" };
+    if (introduction.status === "violated") return { state: "executor-version-mismatch" };
+    if (introduction.status === "ended") {
+      return { state: lostStateFromExit(introduction.code, introduction.stderr) };
+    }
+    const { identity } = introduction.hello;
+    if (
+      identity.buildVersion !== this.#buildVersion ||
+      identity.protocolVersion !== SSH_EXECUTOR_PROTOCOL_VERSION ||
+      !identity.installVerified
+    ) {
+      return { state: "executor-version-mismatch" };
+    }
+    const outcome = await channel.request(
+      {
+        kind: "attest",
+        postures: CONFINED_POSTURES.map((posture) => ({
+          posture,
+          probes: SSH_CANARY_PROBES_BY_POSTURE[posture],
+        })),
+      },
+      this.#attestationTimeoutMs,
+    );
+    // Once a matching executor has introduced itself, the key held and the
+    // program is the right one, so a session lost before its reply is not a
+    // reason to reinstall; a reply that breaks the protocol is.
+    if (outcome.status === "lost") {
+      return {
+        state: outcome.cause === "violated" ? "executor-version-mismatch" : "unreachable",
       };
-      let timer = setTimeout(() => finish({ state: "unreachable" }), this.#helloTimeoutMs);
-
-      const onFrame = (value: unknown) => {
-        const decoded = decodeExecutorFrame(value);
-        if (decoded._tag === "Left") return finish({ state: "executor-version-mismatch" });
-        const frame = decoded.right;
-        if (!introduced) {
-          if (frame.type !== "hello") return finish({ state: "executor-version-mismatch" });
-          const { identity } = frame;
-          if (
-            identity.buildVersion !== this.#buildVersion ||
-            identity.protocolVersion !== SSH_EXECUTOR_PROTOCOL_VERSION ||
-            !identity.installVerified
-          ) {
-            return finish({ state: "executor-version-mismatch" });
-          }
-          introduced = true;
-          clearTimeout(timer);
-          timer = setTimeout(() => finish({ state: "unreachable" }), this.#attestationTimeoutMs);
-          const request: SshExecutorHostFrame = {
-            type: "request",
-            id: requestId,
-            request: {
-              kind: "attest",
-              postures: CONFINED_POSTURES.map((posture) => ({
-                posture,
-                probes: SSH_CANARY_PROBES_BY_POSTURE[posture],
-              })),
-            },
-          };
-          const encoded = encodeExecutorFrame(request);
-          if (encoded.status !== "encoded") return finish({ state: "unreachable" });
-          child.stdin.write(encoded.bytes);
-          return;
-        }
-        if (frame.type !== "reply" || frame.id !== requestId) {
-          return finish({ state: "executor-version-mismatch" });
-        }
-        if (frame.reply.kind !== "attested") return finish({ state: "unreachable" });
-        return finish({
-          state: "connected",
-          attestation: { connectionId, facts: frame.reply.facts },
-          remoteUser: frame.reply.remoteUser,
-        });
-      };
-      const onData = (chunk: Buffer) => {
-        const reading = reader.push(chunk);
-        if (reading.status === "violated") return finish({ state: "executor-version-mismatch" });
-        for (const value of reading.frames) {
-          onFrame(value);
-          if (settled) return;
-        }
-      };
-      child.stdout.on("data", onData);
-      child.stderr.on("data", (chunk: Buffer) => {
-        if (stderr.length < MAX_STDERR_BYTES) stderr += chunk.toString("utf8");
-      });
-      child.stdin.on("error", () => undefined);
-      child.once("error", () => finish({ state: "unreachable" }));
-      // Once a matching executor has introduced itself, the key held and the
-      // program is the right one, so an exit before its reply is a lost
-      // session, not a reason to reinstall.
-      child.once("close", (code) =>
-        finish({ state: introduced ? "unreachable" : lostStateFromExit(code, stderr) }),
-      );
-    });
+    }
+    if (outcome.reply.kind !== "attested") return { state: "unreachable" };
+    return {
+      state: "connected",
+      attestation: { connectionId, facts: outcome.reply.facts },
+      remoteUser: outcome.reply.remoteUser,
+    };
   }
+}
+
+/** The store refuses only a record whose own payload did not decode: a broken invariant. */
+function journaled(write: "recorded" | "refused"): void {
+  if (write === "refused") throw new Error("The SSH target journal refused a decoded record.");
 }
 
 /**
