@@ -162,7 +162,10 @@ export interface HarnessEndpointSession {
 }
 
 export interface HarnessEndpointTransport {
-  /** Resolves the endpoint and its credential for one session. */
+  /**
+   * Resolves the endpoint for one session. Its credential is resolved for
+   * each `send`, never once here: a session outlives a short-lived token.
+   */
   readonly open: (modelId: ProviderModelId) => Promise<HarnessEndpointSession>;
 }
 
