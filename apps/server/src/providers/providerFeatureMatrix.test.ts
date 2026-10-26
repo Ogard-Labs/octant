@@ -181,6 +181,19 @@ const COLUMN_SOURCES: Readonly<Record<string, ReadonlyArray<ColumnSource>>> = {
       anchors: ["const initialCapabilities: ProviderCapabilities = {"],
     },
   ],
+  // An outside driver package ships no capability block Octant can read; its
+  // column is a ceiling equal to the bundled harness endpoints' declarations,
+  // so those blocks are what the column is held to.
+  "Outside harness endpoints": [
+    {
+      file: "openAiCompatibleDriver.ts",
+      anchors: ["const initialCapabilities: ProviderCapabilities = {"],
+    },
+    {
+      file: "anthropicCompatibleDriver.ts",
+      anchors: ["const initialCapabilities: ProviderCapabilities = {"],
+    },
+  ],
   "Oh My Pi": [{ file: "ohMyPiDriver.ts", anchors: ["const capabilities = {"] }],
 };
 

@@ -1,5 +1,12 @@
 import { Schema } from "effect";
 import { AggregateVersion, CorrelationId, UtcTimestamp } from "./events";
+import {
+  ExtensionComponentId,
+  ExtensionContentDigest,
+  ExtensionPackageId,
+  ExtensionPackageVersion,
+  ToolExtensionId,
+} from "./extensionIdentity";
 import { OctantMode } from "./modes";
 import {
   ACP_AGENT_KINDS,
@@ -51,6 +58,10 @@ export const ProviderDriverKind = Schema.Literal(
   "gemini-native-image",
   "bfl-image",
   "ideogram-image",
+  // The one family for every driver package that does not ship with Octant.
+  // Which driver an instance runs is package data in its configuration, never
+  // a new value here, so the exhaustive checks over this set stay closed.
+  "outside-harness-endpoint",
 );
 export type ProviderDriverKind = typeof ProviderDriverKind.Type;
 
@@ -410,6 +421,26 @@ export const AzureFoundryProviderConfiguration = Schema.Union(
 export type AzureFoundryProviderConfiguration = typeof AzureFoundryProviderConfiguration.Type;
 
 /**
+ * The exact package an outside driver instance runs. The instance binds the
+ * version and content digest it was added with: a package with any other
+ * digest is not the driver this instance names, whatever its name.
+ */
+export const OutsideProviderDriverReference = Schema.Struct({
+  extensionId: ToolExtensionId,
+  packageId: ExtensionPackageId,
+  componentId: ExtensionComponentId,
+  version: ExtensionPackageVersion,
+  digest: ExtensionContentDigest,
+}).annotations(strict);
+export type OutsideProviderDriverReference = typeof OutsideProviderDriverReference.Type;
+export const OutsideHarnessEndpointProviderConfiguration = Schema.Struct({
+  kind: Schema.Literal("outside-harness-endpoint"),
+  driver: OutsideProviderDriverReference,
+}).annotations(strict);
+export type OutsideHarnessEndpointProviderConfiguration =
+  typeof OutsideHarnessEndpointProviderConfiguration.Type;
+
+/**
  * Suggested GPT Image model IDs for Settings. Image allowlists are
  * manual-entry; these names are not the only values Octant accepts and are
  * never rewritten on save.
@@ -719,6 +750,14 @@ export const IdeogramImageProviderInstance = Schema.Struct({
 }).annotations(strict);
 export type IdeogramImageProviderInstance = typeof IdeogramImageProviderInstance.Type;
 
+export const OutsideHarnessEndpointProviderInstance = Schema.Struct({
+  ...ProviderInstanceFields,
+  driverKind: Schema.Literal("outside-harness-endpoint"),
+  configuration: OutsideHarnessEndpointProviderConfiguration,
+}).annotations(strict);
+export type OutsideHarnessEndpointProviderInstance =
+  typeof OutsideHarnessEndpointProviderInstance.Type;
+
 export const ProviderInstance = Schema.Union(
   OpenCodeProviderInstance,
   CodexProviderInstance,
@@ -734,6 +773,7 @@ export const ProviderInstance = Schema.Union(
   GeminiImageProviderInstance,
   BflImageProviderInstance,
   IdeogramImageProviderInstance,
+  OutsideHarnessEndpointProviderInstance,
 );
 export type ProviderInstance = typeof ProviderInstance.Type;
 
@@ -1226,12 +1266,15 @@ export type ProviderProcessDiagnostic = typeof ProviderProcessDiagnostic.Type;
 /**
  * Octant-authored probe refusal. The client maps this closed set to copy and
  * next-step guidance. Free-form driver or provider text is not representable.
+ * `driver-not-admitted`: the instance's driver package is not effective on the
+ * activation ladder, so the instance contributes no models or capabilities.
  */
 export const ProviderRefusalReason = Schema.Literal(
   "runtime-incompatible",
   "authentication-required",
   "runtime-unavailable",
   "no-usable-model",
+  "driver-not-admitted",
 );
 export type ProviderRefusalReason = typeof ProviderRefusalReason.Type;
 

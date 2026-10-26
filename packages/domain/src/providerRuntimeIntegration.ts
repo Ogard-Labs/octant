@@ -37,6 +37,7 @@ export function providerToolTransport(
     case "anthropic-compatible":
     case "azure-foundry":
     case "ollama":
+    case "outside-harness-endpoint":
       return "request-tool-calls";
     case "claude":
       return "sdk-tool-server";

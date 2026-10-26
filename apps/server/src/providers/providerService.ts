@@ -327,15 +327,7 @@ export class ProviderService implements ProviderServiceApi {
         .map((state) => {
           const instance = instanceById.get(String(state.instanceId));
           if (instance === undefined || !this.#isDriverKindAvailable(instance.driverKind)) {
-            const unavailable = decodeProviderObservedState({
-              instanceId: state.instanceId,
-              readiness: "unavailable",
-              processState: "stopped",
-              models: [],
-              capabilities: unavailableCapabilities,
-              message: "This provider driver is not available.",
-              observedAt: state.observedAt,
-            });
+            const unavailable = driverNotAdmittedObservation(state.instanceId, state.observedAt);
             return instance === undefined
               ? unavailable
               : withRuntimeIntegration(instance.driverKind, unavailable);
@@ -1258,7 +1250,10 @@ export class ProviderService implements ProviderServiceApi {
           throw this.#invalid("Enable this provider before probing it.");
         }
         if (!this.#isDriverKindAvailable(instance.driverKind)) {
-          this.#runtime.clearObservedState(instanceId);
+          // Keep the block visible rather than leaving the instance unobserved.
+          this.#runtime.setObservedState(
+            driverNotAdmittedObservation(instanceId, decodeTimestamp(this.#clock())),
+          );
           this.#clearRuntimeUsageLimits?.(instanceId);
           throw this.#unsupported("This provider driver is not available.");
         }
@@ -1457,6 +1452,12 @@ export class ProviderService implements ProviderServiceApi {
     if (isImageProfileDriverKind(instance.driverKind)) {
       this.#runtime.clearObservedState(instance.id);
       return undefined;
+    }
+    // Decided before the factory runs: a driver the activation ladder does not
+    // admit (every outside driver, until its package is admitted) is never
+    // built, so no driver code runs to describe its own block.
+    if (!this.#isDriverKindAvailable(instance.driverKind)) {
+      return driverNotAdmittedObservation(instance.id, decodeTimestamp(this.#clock()));
     }
     if (this.#claudeAccountNeedsOwnConfigDirectory(instance)) {
       return decodeProviderObservedState({
@@ -2608,6 +2609,26 @@ function probeFailureReadiness(
   return "degraded";
 }
 
+/**
+ * What an instance reports while its driver is not effective on the activation
+ * ladder: a closed reason, Octant's own words, and nothing it could offer.
+ */
+function driverNotAdmittedObservation(
+  instanceId: ProviderInstanceId,
+  observedAt: ProviderObservedState["observedAt"],
+): ProviderObservedState {
+  return decodeProviderObservedState({
+    instanceId,
+    readiness: "unavailable",
+    processState: "stopped",
+    models: [],
+    capabilities: unavailableCapabilities,
+    message: "This provider driver is not available.",
+    reason: "driver-not-admitted",
+    observedAt,
+  });
+}
+
 function probeFailureMessage(
   readiness: Exclude<ProviderObservedState["readiness"], "ready" | "checking">,
   reason?: ProviderObservedState["reason"],
@@ -2616,6 +2637,7 @@ function probeFailureMessage(
   if (reason === "authentication-required") return "Provider authentication is required.";
   if (reason === "runtime-unavailable") return "Provider runtime is unavailable.";
   if (reason === "no-usable-model") return "No usable model is available.";
+  if (reason === "driver-not-admitted") return "This provider driver is not available.";
   if (readiness === "unauthenticated") return "Provider authentication is required.";
   if (readiness === "unavailable") return "Provider runtime is unavailable.";
   if (readiness === "incompatible") return "Provider configuration is incompatible.";

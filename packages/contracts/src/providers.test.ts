@@ -7,6 +7,7 @@ import {
   decodeProviderDefaults,
   decodeProviderFailure,
   decodeProviderInstance,
+  decodeProviderInstanceCreated,
   decodeProviderInstanceBinaryChanged,
   decodeProviderInstanceConfigurationChanged,
   decodeOllamaHistoryRecorded,
@@ -1496,6 +1497,112 @@ describe("provider registry contracts", () => {
         }),
       ).toThrow();
     }
+  });
+
+  it("decodes an outside driver instance only with the exact package it binds", () => {
+    const outside = {
+      id: ids.instance,
+      displayName: "Local chat server",
+      driverKind: "outside-harness-endpoint",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000911",
+          packageId: "00000000-0000-4000-8000-000000000912",
+          componentId: "provider-driver",
+          version: "1.2.0",
+          digest: `sha256:${"a".repeat(64)}`,
+        },
+      },
+      enabled: false,
+      environmentPolicy: "inherit-host",
+      version: 1,
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    } as const;
+
+    expect(decodeProviderInstance(outside)).toEqual(outside);
+    expect(decodeProviderInstanceCreated({ instance: outside })).toEqual({ instance: outside });
+
+    const { digest: _digest, ...withoutDigest } = outside.configuration.driver;
+    for (const driver of [
+      withoutDigest,
+      { ...outside.configuration.driver, digest: "sha256:abc" },
+      { ...outside.configuration.driver, version: "latest" },
+      { ...outside.configuration.driver, componentId: "Provider Driver" },
+      { ...outside.configuration.driver, entryPoint: "index.js" },
+    ]) {
+      expect(() =>
+        decodeProviderInstance({
+          ...outside,
+          configuration: { ...outside.configuration, driver },
+        }),
+      ).toThrow();
+    }
+    for (const excessField of ["apiKey", "authorization", "binaryPath", "capabilities"] as const) {
+      expect(() =>
+        decodeProviderInstance({
+          ...outside,
+          configuration: { ...outside.configuration, [excessField]: "forbidden" },
+        }),
+      ).toThrow();
+    }
+    // The family cannot borrow a bundled kind, and a bundled kind cannot carry
+    // a package reference.
+    expect(() => decodeProviderInstance({ ...outside, driverKind: "ollama" })).toThrow();
+    expect(() =>
+      decodeProviderInstance({
+        ...outside,
+        configuration: { kind: "ollama-native-http", baseUrl: "http://127.0.0.1:11434" },
+      }),
+    ).toThrow();
+    // Nothing admits an outside driver yet: no command creates or reconfigures one.
+    expect(() =>
+      decodeProviderRegistryCommand({
+        kind: "create-outside-harness-endpoint-provider",
+        instanceId: ids.instance,
+        expectedVersion: 0,
+        displayName: outside.displayName,
+        configuration: outside.configuration,
+      }),
+    ).toThrow();
+    expect(() => decodeProviderInstanceConfigurationChanged({ instance: outside })).toThrow();
+  });
+
+  it("reports a driver the activation ladder does not admit as a closed refusal with no models", () => {
+    const blocked = {
+      instanceId: ids.instance,
+      readiness: "unavailable",
+      processState: "stopped",
+      models: [],
+      capabilities: Object.fromEntries(
+        [
+          "streaming",
+          "resume",
+          "interruption",
+          "approvals",
+          "userQuestions",
+          "reasoning",
+          "usage",
+          "toolActivity",
+          "fileChanges",
+          "diffs",
+          "taskProgress",
+          "nativeChildAgents",
+          "harnessAutoReview",
+          "nativeAttachments",
+          "nativeWebResearch",
+          "appManagedTools",
+          "citations",
+        ].map((capability) => [capability, "unavailable"]),
+      ),
+      reason: "driver-not-admitted",
+      observedAt: occurredAt,
+    } as const;
+    expect(decodeProviderObservedState(blocked)).toMatchObject({
+      reason: "driver-not-admitted",
+      models: [],
+    });
   });
 
   it("decodes bounded Octant-owned Ollama history snapshots for journal replay", () => {

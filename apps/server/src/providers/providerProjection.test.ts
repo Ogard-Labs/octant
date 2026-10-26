@@ -286,6 +286,52 @@ describe("ProviderProjection", () => {
     connection.close();
   });
 
+  it("applies and replays an outside driver instance with the package reference it binds", () => {
+    const connection = openConnection();
+    const { runtime, projection } = providerProjection();
+    const journal = new Journal({
+      connection,
+      registry: runtime.events,
+      projections: runtime.projections,
+      clock: () => now,
+    });
+    const existing = instance();
+    const outsideId = "70000000-0000-4000-8000-000000000004";
+    const outside = instance({
+      id: outsideId,
+      displayName: "Local chat server",
+      driverKind: "outside-harness-endpoint",
+      configuration: {
+        kind: "outside-harness-endpoint",
+        driver: {
+          extensionId: "00000000-0000-4000-8000-000000000911",
+          packageId: "00000000-0000-4000-8000-000000000912",
+          componentId: "provider-driver",
+          version: "1.2.0",
+          digest: `sha256:${"a".repeat(64)}`,
+        },
+      },
+      enabled: false,
+    });
+    journal.append({
+      aggregate: { aggregateType: "provider-instance", aggregateId: ids.instance },
+      expectedVersion: 0,
+      events: [pending("provider.instance-created@1", { instance: existing })],
+    });
+    journal.append({
+      aggregate: { aggregateType: "provider-instance", aggregateId: outsideId },
+      expectedVersion: 0,
+      events: [pending("provider.instance-created@1", { instance: outside })],
+    });
+
+    expect(readProviderInstances(connection)).toEqual([existing, outside]);
+    projection.reset(connection);
+    rebuildProjection({ connection, journal, projection, clock: () => now });
+    expect(readProviderInstances(connection)).toEqual([existing, outside]);
+    expect(readProviderInstance(connection, outside.id)).toEqual(outside);
+    connection.close();
+  });
+
   it("applies and replays non-secret Claude creation and configuration changes", () => {
     const connection = openConnection();
     const { runtime, projection } = providerProjection();

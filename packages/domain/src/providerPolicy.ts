@@ -157,16 +157,25 @@ export function canLocateRuntimeBinary(driverKind: ProviderDriverKind): boolean 
 /**
  * The providers Octant drives with its own agent loop. They are inference
  * transports only: every tool they are offered is app-managed and every call
- * passes the server's authority choke point before it runs.
+ * passes the server's authority choke point before it runs. The outside family
+ * is one of them by construction: an outside driver supplies only a transport
+ * through the harness endpoint port, so it is held to the same verified-model
+ * tool reach as a bundled endpoint, never more.
  */
 export function isNativeHarnessDriverKind(
   driverKind: ProviderDriverKind,
-): driverKind is "openai-compatible" | "anthropic-compatible" | "azure-foundry" | "ollama" {
+): driverKind is
+  | "openai-compatible"
+  | "anthropic-compatible"
+  | "azure-foundry"
+  | "ollama"
+  | "outside-harness-endpoint" {
   return (
     driverKind === "openai-compatible" ||
     driverKind === "anthropic-compatible" ||
     driverKind === "azure-foundry" ||
-    driverKind === "ollama"
+    driverKind === "ollama" ||
+    driverKind === "outside-harness-endpoint"
   );
 }
 

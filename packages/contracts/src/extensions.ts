@@ -4,9 +4,22 @@ import { HostId } from "./host";
 import { OctantMode } from "./modes";
 import { ProjectId } from "./projects";
 import { ToolExtensionId } from "./toolActions";
+import {
+  ExtensionComponentId,
+  ExtensionContentDigest,
+  ExtensionPackageId,
+  ExtensionPackageVersion,
+  extensionSemverPattern,
+} from "./extensionIdentity";
+
+export {
+  ExtensionComponentId,
+  ExtensionContentDigest,
+  ExtensionPackageId,
+  ExtensionPackageVersion,
+} from "./extensionIdentity";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
-const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
 const boundedToken = (maximumLength: number) =>
   Schema.NonEmptyTrimmedString.pipe(
     Schema.maxLength(maximumLength),
@@ -23,10 +36,6 @@ const entryPointReference = Schema.NonEmptyTrimmedString.pipe(
   Schema.pattern(/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/),
 );
 
-export const ExtensionPackageId = brandedUuid("ExtensionPackageId");
-export type ExtensionPackageId = typeof ExtensionPackageId.Type;
-export const ExtensionComponentId = boundedToken(64).pipe(Schema.brand("ExtensionComponentId"));
-export type ExtensionComponentId = typeof ExtensionComponentId.Type;
 export const ExtensionSlug = boundedToken(64).pipe(Schema.brand("ExtensionSlug"));
 export type ExtensionSlug = typeof ExtensionSlug.Type;
 export const ExtensionCatalogId = boundedToken(96).pipe(Schema.brand("ExtensionCatalogId"));
@@ -39,19 +48,6 @@ export const ExtensionSourceReference = opaqueReference.pipe(
   Schema.brand("ExtensionSourceReference"),
 );
 export type ExtensionSourceReference = typeof ExtensionSourceReference.Type;
-const semverPattern =
-  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
-export const ExtensionPackageVersion = Schema.NonEmptyTrimmedString.pipe(
-  Schema.maxLength(64),
-  Schema.pattern(semverPattern),
-  Schema.brand("ExtensionPackageVersion"),
-);
-export type ExtensionPackageVersion = typeof ExtensionPackageVersion.Type;
-export const ExtensionContentDigest = Schema.String.pipe(
-  Schema.pattern(/^sha256:[a-f0-9]{64}$/),
-  Schema.brand("ExtensionContentDigest"),
-);
-export type ExtensionContentDigest = typeof ExtensionContentDigest.Type;
 export const ExtensionCatalogEpoch = Schema.String.pipe(
   Schema.pattern(/^sha256:[a-f0-9]{64}$/),
   Schema.brand("ExtensionCatalogEpoch"),
@@ -190,7 +186,7 @@ function compareNumericIdentifiers(left: string, right: string): number {
 
 function comparePackageVersions(left: string, right: string): number {
   const parse = (version: string) => {
-    const match = semverPattern.exec(version)!;
+    const match = extensionSemverPattern.exec(version)!;
     return {
       core: [match[1]!, match[2]!, match[3]!],
       prerelease: match[4]?.split("."),
