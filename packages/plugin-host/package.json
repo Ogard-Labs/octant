@@ -6,6 +6,7 @@
     ".": "./src/index.ts",
     "./activation": "./src/activation.ts",
     "./provider-drivers": "./src/bundledProviderDrivers.ts",
+    "./language-servers": "./src/bundledLanguageServers.ts",
     "./agent-plugins": "./src/agentPlugins/index.ts",
     "./canvas-skill-contributions": "./src/canvasSkillContributions.ts",
     "./canvas-export-contributions": "./src/canvasExportContributions.ts",

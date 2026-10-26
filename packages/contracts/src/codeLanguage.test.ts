@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   CodeLanguageRefusalReason,
+  decodeCodeLanguageDocumentRequest,
+  decodeCodeLanguageDocumentResult,
   decodeCodeLanguageReadRequest,
   decodeCodeLanguageReadResult,
   MAX_CODE_LANGUAGE_DEFINITION_TARGETS,
   MAX_CODE_LANGUAGE_DIAGNOSTIC_MESSAGE_LENGTH,
   MAX_CODE_LANGUAGE_DIAGNOSTICS,
+  MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH,
 } from "./codeLanguage";
 
 const scope = {
@@ -145,6 +148,58 @@ describe("Code language read contracts", () => {
     ).toThrow();
     expect(() =>
       decodeCodeLanguageReadResult({ status: "unavailable", reason: "plan-read-only" }),
+    ).toThrow();
+  });
+
+  it("opens a document by checkout-relative path and names it by reference afterwards", () => {
+    const opened = decodeCodeLanguageDocumentRequest({
+      kind: "open",
+      threadId: scope.threadId,
+      checkoutId: scope.checkoutId,
+      path: "src/main.ts",
+      text: "export const a = 1;\n",
+    });
+    expect(opened.kind).toBe("open");
+    expect(decodeCodeLanguageDocumentRequest({ kind: "change", ...scope, text: "" }).kind).toBe(
+      "change",
+    );
+    expect(decodeCodeLanguageDocumentRequest({ kind: "close", ...scope }).kind).toBe("close");
+
+    for (const request of [
+      { kind: "open", ...scope, path: "src/main.ts", text: "" },
+      {
+        kind: "open",
+        threadId: scope.threadId,
+        checkoutId: scope.checkoutId,
+        path: "/etc/passwd",
+        text: "",
+      },
+      {
+        kind: "open",
+        threadId: scope.threadId,
+        checkoutId: scope.checkoutId,
+        path: "../outside.ts",
+        text: "",
+      },
+      { kind: "change", ...scope, path: "src/main.ts", text: "" },
+      { kind: "change", ...scope, text: "x".repeat(MAX_CODE_LANGUAGE_DOCUMENT_TEXT_LENGTH + 1) },
+      { kind: "save", ...scope },
+    ]) {
+      expect(() => decodeCodeLanguageDocumentRequest(request)).toThrow();
+    }
+  });
+
+  it("answers a document request as synced, too large, unavailable, or refused", () => {
+    expect(decodeCodeLanguageDocumentResult({ status: "synced", ...scope }).status).toBe("synced");
+    expect(decodeCodeLanguageDocumentResult({ status: "too-large", ...scope }).status).toBe(
+      "too-large",
+    );
+    expect(
+      decodeCodeLanguageDocumentResult({ status: "refused", reason: "path-outside-checkout" })
+        .status,
+    ).toBe("refused");
+    expect(() =>
+      decodeCodeLanguageDocumentResult({ status: "synced", ...scope, path: "src/main.ts" }),
     ).toThrow();
   });
 });
