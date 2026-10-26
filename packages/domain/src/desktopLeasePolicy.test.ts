@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { DesktopLeaseOwner } from "@octant/contracts";
 import {
+  decideDesktopArtifactPath,
+  decideDesktopArtifactTransfer,
   decideDesktopLeaseAcquire,
   decideDesktopLeaseExtension,
   desktopLeaseClockEnds,
@@ -131,5 +133,75 @@ describe("desktop lease policy", () => {
     expect(
       desktopProviderExpiryHolds({ billed: false, expiresAt: 100, providerExpiresAt: undefined }),
     ).toBe(true);
+  });
+
+  it("names a transfer by one checkout-relative path and refuses absolute, escaping, and .git paths", () => {
+    expect(decideDesktopArtifactPath("./dist//app.AppImage")).toEqual({
+      kind: "relative",
+      path: "dist/app.AppImage",
+      segments: ["dist", "app.AppImage"],
+      name: "app.AppImage",
+    });
+    expect(decideDesktopArtifactPath("/etc/passwd")).toEqual({
+      kind: "refused",
+      reason: "path-absolute",
+    });
+    for (const escaping of ["../secret", "dist/../../secret", "dist/../app"]) {
+      expect(decideDesktopArtifactPath(escaping)).toEqual({
+        kind: "refused",
+        reason: "path-escapes-root",
+      });
+    }
+    for (const inGit of [".git/config", "vendor/lib/.git/HEAD", ".GIT/config", ".git"]) {
+      expect(decideDesktopArtifactPath(inGit)).toEqual({ kind: "refused", reason: "path-in-git" });
+    }
+    for (const invalid of ["", ".", "./", "dist/app\u0000x", `${"a".repeat(256)}`]) {
+      expect(decideDesktopArtifactPath(invalid)).toEqual({
+        kind: "refused",
+        reason: "path-invalid",
+      });
+    }
+  });
+
+  it("refuses a transfer in Plan, asks below Full access, and always asks before data leaves the machine", () => {
+    expect(
+      decideDesktopArtifactTransfer({
+        executionPolicy: "plan",
+        locality: "host-local",
+        initiator: "local-user",
+      }),
+    ).toEqual({ kind: "refused", reason: "plan-mode" });
+    for (const executionPolicy of ["approval-gated", "auto-accept-edits"] as const) {
+      expect(
+        decideDesktopArtifactTransfer({
+          executionPolicy,
+          locality: "host-local",
+          initiator: "agent",
+        }),
+      ).toEqual({ kind: "ask", asks: "in-thread" });
+    }
+    expect(
+      decideDesktopArtifactTransfer({
+        executionPolicy: "full-access",
+        locality: "host-local",
+        initiator: "agent",
+      }),
+    ).toEqual({ kind: "proceed" });
+    expect(
+      decideDesktopArtifactTransfer({
+        executionPolicy: "approval-gated",
+        locality: "host-local",
+        initiator: "remote-device",
+      }),
+    ).toEqual({ kind: "proceed" });
+    for (const initiator of ["agent", "local-user"] as const) {
+      expect(
+        decideDesktopArtifactTransfer({
+          executionPolicy: "full-access",
+          locality: "cloud",
+          initiator,
+        }),
+      ).toEqual({ kind: "ask", asks: "off-machine" });
+    }
   });
 });

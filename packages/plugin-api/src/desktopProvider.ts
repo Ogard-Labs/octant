@@ -138,7 +138,12 @@ export interface DesktopProvider {
     handle: DesktopHandle,
     command: ComputerControlCommand,
   ) => Promise<ComputerControlResult>;
-  /** Writes one read-only file into the desktop's inbox under `name`. */
+  /**
+   * Writes one read-only file into the desktop's inbox under `name`, replacing
+   * a file an earlier transfer left there. `name` is one file name the host
+   * already checked; the bytes are exactly the ones the host hashed and
+   * journaled.
+   */
   readonly deliver: (
     handle: DesktopHandle,
     name: string,
@@ -200,7 +205,7 @@ export type DesktopLaunchListResult =
  * at most one desktop per lease, and only as the host's dedicated desktop
  * capsule. `stop` destroys the launch and deletes its lease directory; `inspect`
  * reports `gone` only once no process of the desktop and none of its files
- * remain.
+ * remain. `deliver` is the only way a file reaches the desktop's inbox.
  */
 export interface DesktopLaunchPort {
   /** Whether this host can run a desktop that needs `programs`. Performs no work. */
@@ -208,6 +213,16 @@ export interface DesktopLaunchPort {
   readonly launch: (request: DesktopLaunchRequest) => Promise<DesktopLaunchResult>;
   readonly stop: (leaseId: DesktopLeaseId) => Promise<DesktopReleaseResult>;
   readonly inspect: (leaseId: DesktopLeaseId) => Promise<DesktopVerifyGoneResult>;
+  /**
+   * Writes one file, read-only, into a running desktop's inbox under `name`,
+   * which must be one plain file name. It never writes anywhere else, and it
+   * refuses a lease with no running desktop.
+   */
+  readonly deliver: (
+    leaseId: DesktopLeaseId,
+    name: string,
+    bytes: Uint8Array,
+  ) => Promise<DesktopDeliverResult>;
   /** Leases with a desktop, or what is left of one, made under `hostTag`. */
   readonly listOwned: (hostTag: DesktopHostTag) => Promise<DesktopLaunchListResult>;
 }

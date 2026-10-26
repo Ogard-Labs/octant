@@ -30,9 +30,17 @@ export interface FakeDesktop {
   readonly providerExpiresAt: UtcTimestamp | undefined;
 }
 
+/** One file a transfer wrote into a desktop's inbox. */
+export interface FakeDelivery {
+  readonly resource: string;
+  readonly name: string;
+  readonly bytes: Uint8Array;
+}
+
 export interface FakeDesktopBackend {
   readonly behaviour: FakeDesktopBehaviour;
   readonly desktops: () => ReadonlyArray<FakeDesktop>;
+  readonly delivered: () => ReadonlyArray<FakeDelivery>;
   readonly calls: () => ReadonlyArray<string>;
   /** A desktop left behind by an earlier host process. */
   readonly plant: (desktop: FakeDesktop) => void;
@@ -61,6 +69,7 @@ export function createFakeDesktopProvider(
   };
   const desktops = new Map<string, FakeDesktop>();
   const calls: Array<string> = [];
+  const delivered: Array<FakeDelivery> = [];
   let sequence = 0;
 
   const providerExpiry = (expiresAt: string): UtcTimestamp | undefined =>
@@ -119,9 +128,11 @@ export function createFakeDesktopProvider(
         message: "This desktop does not support that command.",
       };
     },
-    deliver: async () => {
+    deliver: async (handle, name, bytes) => {
       calls.push("deliver");
-      return { status: "refused", reason: "unsupported" };
+      if (!desktops.has(handle.resource)) return { status: "failed", reason: "not-found" };
+      delivered.push({ resource: handle.resource, name, bytes: bytes.slice() });
+      return { status: "delivered" };
     },
     release: async (handle) => {
       calls.push("release");
@@ -151,6 +162,7 @@ export function createFakeDesktopProvider(
     backend: {
       behaviour,
       desktops: () => [...desktops.values()],
+      delivered: () => [...delivered],
       calls: () => [...calls],
       plant: (desktop) => {
         desktops.set(desktop.handle.resource, desktop);
