@@ -11,6 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative } from "node:path";
+import type { ExtensionProcessSandbox } from "./extensionSupervisor";
 import type { InspectedExtensionPackage } from "./packageInspector";
 import { calculateExtensionPackageDigest, type ExtensionArchiveEntry } from "./packageInspector";
 
@@ -315,6 +316,7 @@ export class ExtensionPackageStore {
     readonly command: string;
     readonly args?: ReadonlyArray<string>;
     readonly cwd: string;
+    readonly sandbox?: ExtensionProcessSandbox | undefined;
   }): Promise<boolean> {
     const target: ExtensionVersionReference = {
       extensionId: input.extensionId,
@@ -340,7 +342,10 @@ export class ExtensionPackageStore {
       if (component?.kind === "provider-driver") {
         // A stored provider driver is an outside driver: the package ships no
         // executable, so the host's own runtime runs its one entry module, in
-        // the package root, with nothing else on the command line.
+        // the package root, with nothing else on the command line, and only
+        // under the driver profile bound to that root: the same entry launched
+        // with no sandbox, or the MCP server's, would run unconfined or with
+        // network, on Linux as well.
         if (relativeEntryPoint === undefined || this.#outsideDriverRuntime === undefined) {
           return false;
         }
@@ -352,7 +357,9 @@ export class ExtensionPackageStore {
           input.command === this.#outsideDriverRuntime &&
           input.args?.length === 1 &&
           input.args[0] === expectedEntryPoint &&
-          input.cwd === contentRoot
+          input.cwd === contentRoot &&
+          input.sandbox?.kind === "outside-driver" &&
+          input.sandbox.packageRoot === contentRoot
         );
       }
       if (relativeEntryPoint !== undefined) {

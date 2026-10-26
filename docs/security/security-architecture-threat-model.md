@@ -229,8 +229,9 @@ The proxy's tests run the harness endpoint conformance kit against it with a mis
 driver, and cover hostile failure text, over-claims, protocol violations, and the brokered call's
 origin, lease, header, and redirect negatives. The confined process's escape tests
 (`outsideDriverProcess.escape.test.ts`) try the network, files outside the package and its folder,
-another program, and the host's environment from a real Seatbelt process; they run on macOS only,
-and until they pass there the process control is built but not accepted.
+the home folder and its keychains, another program, and the host's environment from a real Seatbelt
+process; they run on macOS only, and until they pass there the process control is built but not
+accepted.
 
 ## Server-Side Tool-Call Policy Engine
 

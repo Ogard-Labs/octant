@@ -222,6 +222,17 @@ describe("outside driver processes", () => {
     channelOf(await context.start(instanceA));
   });
 
+  it("starts no process and leaves no folder when the instance is stopped while its start is still under way", async () => {
+    const context = await processes();
+    const starting = context.start();
+    await context.owner.stop(instanceA);
+
+    expect(await starting).toEqual({ status: "refused", reason: "start-failed" });
+    expect(context.processes.filter((process) => !process.exited())).toEqual([]);
+    expect(await readdir(context.root)).toEqual([]);
+    channelOf(await context.start());
+  });
+
   it("refuses an entry module outside the package before anything starts", async () => {
     const context = await processes();
     const start = await context.owner.start({

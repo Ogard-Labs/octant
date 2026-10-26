@@ -371,6 +371,12 @@ describe("host-private immutable extension package store", () => {
       command: runtime,
       args: [entryPoint],
       cwd: contentRoot,
+      sandbox: {
+        kind: "outside-driver" as const,
+        instanceId: "instance-a",
+        packageRoot: contentRoot,
+        temporaryDirectory: join(tmpdir(), "octant-driver-instance-a"),
+      },
     };
 
     await expect(store.authorizeRuntimeLaunch(launch)).resolves.toBe(true);
@@ -382,6 +388,25 @@ describe("host-private immutable extension package store", () => {
       { ...launch, cwd: join(contentRoot, "driver") },
       { ...launch, cwd: store.pluginDataRoot() },
       { ...launch, entryPoint: "/tmp/attacker.mjs", args: ["/tmp/attacker.mjs"] },
+      // Only the driver profile confines it, bound to this package's own root.
+      { ...launch, sandbox: undefined },
+      { ...launch, sandbox: { ...launch.sandbox, packageRoot: "/" } },
+      {
+        ...launch,
+        sandbox: {
+          kind: "macos-seatbelt" as const,
+          scope: {
+            hostId: "local",
+            mode: "chat" as const,
+            projectId: null,
+            threadId: null,
+            providerFamily: "claude",
+          },
+          allowRead: [],
+          allowWrite: [],
+          allowNetwork: true,
+        },
+      },
     ]) {
       await expect(store.authorizeRuntimeLaunch(refused)).resolves.toBe(false);
     }
@@ -397,6 +422,7 @@ describe("host-private immutable extension package store", () => {
         command: runtime,
         args: [entry],
         cwd: root,
+        sandbox: { ...launch.sandbox, packageRoot: root },
       }),
     ).resolves.toBe(false);
   });

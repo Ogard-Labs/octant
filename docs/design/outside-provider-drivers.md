@@ -248,11 +248,12 @@ the fail-closed option.
 - **The runtime.** Only the Bun that runs the server
   ([decision 6](#maintainer-decisions)). The package store authorizes a
   driver launch only as that runtime with the entry module as its one
-  argument, in the package root, for an entry the receipt records as not
-  executable. A server on any other runtime starts no driver: the packaged app
-  runs its server on Electron's Node today, so a packaged build refuses every
-  driver start as `runtime-unavailable` until the maintainer chooses to ship a
-  Bun with it or to measure a profile for Electron's Node.
+  argument, in the package root, under the `outside-driver` sandbox bound to
+  that root, for an entry the receipt records as not executable. A server on
+  any other runtime starts no driver: the packaged app runs its server on
+  Electron's Node today, so a packaged build refuses every driver start as
+  `runtime-unavailable` until the maintainer chooses to ship a Bun with it or
+  to measure a profile for Electron's Node.
 - **Platforms.** On any host but macOS the component is `host-prohibited` on
   the activation ladder, which the ladder reports before quarantine or trust,
   and both the process owner and the process port refuse before a folder or

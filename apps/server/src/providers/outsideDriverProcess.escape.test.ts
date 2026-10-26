@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:net";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodeProviderInstanceId, type OutsideProviderDriverReference } from "@octant/contracts";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -29,6 +29,8 @@ const driver = {
 interface EscapeOutcome {
   readonly readPackage: string;
   readonly readOutside: string;
+  readonly readHome: string;
+  readonly readKeychains: string;
   readonly writeTemporary: string;
   readonly writePackage: string;
   readonly writeOutside: string;
@@ -42,10 +44,11 @@ function escapeProbe(paths: {
   readonly packageRoot: string;
   readonly secret: string;
   readonly outside: string;
+  readonly home: string;
   readonly port: number;
 }): string {
   return `
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { connect } from "node:net";
 import { join } from "node:path";
@@ -75,6 +78,8 @@ try {
 const outcome = {
   readPackage: attempt(() => readFileSync(join(paths.packageRoot, "own.txt"))),
   readOutside: attempt(() => readFileSync(paths.secret)),
+  readHome: attempt(() => readdirSync(paths.home)),
+  readKeychains: attempt(() => readdirSync(join(paths.home, "Library", "Keychains"))),
   writeTemporary: attempt(() => writeFileSync(join(process.env.TMPDIR, "scratch"), "ok")),
   writePackage: attempt(() => writeFileSync(join(paths.packageRoot, "planted"), "x")),
   writeOutside: attempt(() => writeFileSync(join(paths.outside, "planted"), "x")),
@@ -114,7 +119,7 @@ onMacos("an outside driver's confined process", () => {
     await rm(root, { recursive: true, force: true });
   });
 
-  it("reaches no network, no file outside its package and folder, no program, and no host variable", async () => {
+  it("reaches no network, no file outside its package and folder, not the home folder or its keychains, no program, and no host variable", async () => {
     const address = server?.address();
     if (address === null || address === undefined || typeof address === "string") {
       throw new Error("expected a listening loopback server");
@@ -127,7 +132,10 @@ onMacos("an outside driver's confined process", () => {
     await writeFile(secret, "host secret");
     await writeFile(join(packageRoot, "own.txt"), "package file");
     const entryPoint = join(packageRoot, "main.mjs");
-    await writeFile(entryPoint, escapeProbe({ packageRoot, secret, outside, port: address.port }));
+    await writeFile(
+      entryPoint,
+      escapeProbe({ packageRoot, secret, outside, home: homedir(), port: address.port }),
+    );
     // A variable the server holds must not reach the driver.
     process.env.OCTANT_ESCAPE_CANARY = "sk-host-canary";
     const supervisor = new ExtensionSupervisor({
@@ -154,6 +162,8 @@ onMacos("an outside driver's confined process", () => {
       expect(outcome).toEqual({
         readPackage: "allowed",
         readOutside: "refused",
+        readHome: "refused",
+        readKeychains: "refused",
         writeTemporary: "allowed",
         writePackage: "refused",
         writeOutside: "refused",

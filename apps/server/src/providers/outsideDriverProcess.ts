@@ -151,7 +151,14 @@ export class OutsideDriverProcesses {
     this.#running.set(instanceKey, running);
 
     try {
-      temporaryDirectory = await mkdtemp(join(this.#temporaryRoot, "octant-driver-"));
+      const folder = await mkdtemp(join(this.#temporaryRoot, "octant-driver-"));
+      // A stop during that await already ran the cleanup, before this folder
+      // or any process existed; starting now would leave both with no owner.
+      if (stopRequested) {
+        await rm(folder, { recursive: true, force: true }).catch(() => undefined);
+        return refused("start-failed");
+      }
+      temporaryDirectory = folder;
       runtimeInput = {
         extensionId: input.driver.extensionId,
         packageId: input.driver.packageId,
