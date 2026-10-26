@@ -2804,7 +2804,8 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   cloud-IAM request signing (`directory-oauth`, `cloud-iam`) are an accepted
   design (2026-10-26) in [Enterprise provider identity](design/enterprise-provider-identity.md).
   Only the `directory-oauth` contract and provider-sdk seam exist; no broker
-  dialect or driver speaks it, so such an instance reads `incompatible`.
+  dialect or driver speaks it, so provider policy refuses to configure such an
+  instance and one read from storage reads `incompatible`.
   Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics

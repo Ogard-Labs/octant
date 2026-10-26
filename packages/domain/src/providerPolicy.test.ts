@@ -753,7 +753,7 @@ describe("provider instance policy", () => {
     ).toThrow("Azure AI Foundry base URL must end with the /openai/v1/ path.");
   });
 
-  it("rejects non-API-key Azure AI Foundry authentication in the technical preview", () => {
+  it("refuses an Azure AI Foundry directory sign-in until a driver can speak it", () => {
     expect(() =>
       createAzureFoundryProvider({
         id: ids.local,
@@ -761,7 +761,7 @@ describe("provider instance policy", () => {
         configuration: {
           kind: "azure-foundry-openai-http",
           baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
-          authentication: "bearer" as never,
+          authentication: "directory-oauth",
           protocol: "auto",
           manualModelIds: ["deployment-a"],
         },

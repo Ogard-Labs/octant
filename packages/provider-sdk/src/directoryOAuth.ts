@@ -221,6 +221,9 @@ export async function resolveDirectoryOAuthBearer(
  * it once and sends once more inside the same attempt: renewing a credential
  * is the transport's own business, apart from the host's outage retries. A
  * second 401 is unauthenticated, which the host does not retry.
+ *
+ * `attempt` may run twice, so it builds its request, body included, on each
+ * call: a stream body consumed by the refused send cannot be sent again.
  */
 export async function withDirectoryOAuthBearer<T>(
   input: DirectoryOAuthResolveInput,

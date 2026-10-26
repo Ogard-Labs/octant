@@ -13,9 +13,10 @@ Add endpoint flow.
 Status: authorized post-preview scope, and its decisions accepted by the
 maintainer, on 2026-10-26. Slice 1a (the seam and its conformance) is built;
 slices 1b and 1c are next. Nothing here changes what ships today: no broker
-dialect or driver speaks `directory-oauth` yet, and an instance configured
-with it reads `incompatible`. Each slice below lands with its own
-implementation, tests, and the edits to this file that record what it built.
+dialect or driver speaks `directory-oauth` yet: provider policy refuses to
+configure an instance with it, and one read from storage is `incompatible`.
+Each slice below lands with its own implementation, tests, and the edits to
+this file that record what it built.
 
 ## Outcome
 
@@ -169,10 +170,11 @@ Rules slice 1a resolved, each the stricter reading of the text above:
   an audience with a query is not read at all.
 - **Host list form.** A suffix starts with a dot and matches only a subdomain;
   the base URL must be https without embedded credentials.
-- **Until the driver exists.** The Azure AI Foundry driver refuses to build
-  for a `directory-oauth` configuration, so the instance reads `incompatible`
-  and no stored key is sent in place of the sign-in. Slice 1c replaces the
-  refusal with the directory transport.
+- **Until the driver exists.** Provider policy refuses to create or change an
+  Azure AI Foundry instance to `directory-oauth`, and the driver refuses to
+  build for one read from storage, so such an instance reads `incompatible`
+  and no stored key is sent in place of the sign-in. Slice 1c replaces both
+  refusals with the directory transport.
 
 ## Expiry, refresh, and revocation
 
@@ -308,8 +310,8 @@ three layers:
   written only against the seam passes every driver-facing case, and drivers
   that bind to the pointer instead of their configuration, give up on a 401,
   or echo the bearer in a failure each fail the runner; the contract refuses
-  multi-tenant aliases and secrets; the Foundry driver refuses a
-  `directory-oauth` configuration until 1c.
+  multi-tenant aliases and secrets; provider policy and the Foundry driver
+  refuse a `directory-oauth` configuration until 1c.
 - **1b. Broker dialect.** `directory-oidc` in the host OAuth runner: closed
   issuer host, tenant-specific authority, identity-token validation, binding on
   `access`, error-code mapping, local revoke. _Acceptance:_ a fake directory
