@@ -8,16 +8,16 @@ app-managed ([Architecture: extensions and skills](../architecture.md#extensions
 launches go through the shared confinement port, and authority is checked on the
 server ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
-**Delivery state.** Accepted 2026-10-26; slice 1 is built and slices 2–6 are
-not. The maintainer authorized this scope as post-preview work and accepted the
-[maintainer decisions](#maintainer-decisions) below on 2026-10-26; it is not
-part of the first release, and the
+**Delivery state.** Accepted 2026-10-26; slices 1 and 2 are built and slices
+3–6 are not. The maintainer authorized this scope as post-preview work and
+accepted the [maintainer decisions](#maintainer-decisions) below on 2026-10-26;
+it is not part of the first release, and the
 [Current Release Boundary](../../AGENTS.md#current-release-boundary) is
 unchanged by this document. The lease contract, the `desktop-provider` seam
-and its conformance suite, and the host lease service exist; no provider,
-recipe storage, transfer, agent binding, or Desktop pane does, so a running
-host refuses every lease command as a value (see
-[Built in slice 1](#built-in-slice-1)).
+and its conformance suite, the host lease service, and the host-local provider
+exist; no recipe storage, transfer, agent binding, or Desktop pane does, so a
+running host refuses every lease command as a value (see
+[Built in slice 1](#built-in-slice-1) and [Built in slice 2](#built-in-slice-2)).
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -336,7 +336,10 @@ translation to its provider.
 The host gives the driver capability-scoped ports, never raw handles: a confined
 launch port for a host-local provider, and an authenticated HTTPS call port for a
 cloud provider. Each port is added to the seam with the slice whose driver
-needs it (2 and 6); slice 1 defines no port. A driver the host keeps only for
+needs it (2 and 6). The confined launch port, `DesktopLaunchPort`, launches one
+named program only for a lease the host is provisioning and only once per
+lease, always as the host's dedicated desktop launch; the driver chooses the
+program and its arguments and nothing about the capsule. A driver the host keeps only for
 teardown is held as `DesktopTeardownPort` (`id`, `release`, `verifyGone`,
 `listOwned`), so it cannot be asked to do anything else. A conformance suite
 (`@octant/plugin-api/desktop-provider-conformance`), modelled on
@@ -486,6 +489,78 @@ binding (slice 4) bring their own caller authority and approval surface. Recipe
 storage and its Project settings editor are not yet assigned to a slice; a
 Project's recipe will take decision 4's limits as defaults.
 
+### Built in slice 2
+
+- **Seam.** `DesktopLaunchPort` in `packages/plugin-api/src/desktopProvider.ts`:
+  `readiness`, `launch`, `stop`, `inspect`, and `listOwned`. A launch names a
+  program, never a path, and receives its standard output through a callback.
+- **Driver.** `apps/server/src/plugins/hostLocalDesktop/`: the `host-local`
+  provider and its standard-stream channel. It imports only
+  `@octant/contracts` and the seam, which a test enforces. Inside the capsule
+  it runs a shell that starts `Xvfb` at the recipe's screen size and answers
+  one-line requests: a frame (ImageMagick's `import` of the root window, as
+  PNG), or input through `xdotool`. Readiness requires `sh`, `Xvfb`,
+  `xdotool`, `import`, and `base64` on the capsule's search path.
+- **Host launch.** `apps/server/src/computerUse/hostLocalDesktopLaunch.ts`
+  builds each desktop through `ProcessConfinementPort` with no checkout, a
+  writable `home` and a read-only `inbox` as its only host paths, `/tmp` as a
+  private tmpfs, network egress `none`, and the environment `PATH`, `HOME`,
+  `TMPDIR`, and `LANG` only. It is a detached process group with a
+  `desktop-lease` process receipt beside the host tag. Restart reconciliation
+  lists desktops through those receipts and lease directories, and `stop`
+  deletes the lease directory once nothing of the desktop runs.
+- **Wiring.** `apps/server/src/wiring/computerUse.ts` loads the driver on every
+  Linux host and offers it for leasing when readiness reported ready at start.
+  Slice 1's placeholders stay: no recipe, no caller may open a thread, and
+  confirmation declines, so production still refuses every lease command.
+
+Rules this slice resolved:
+
+- **Network `allow` is refused for now.** Bubblewrap gives a launch network
+  only by sharing the host's network namespace, which would reach host
+  loopback and the Octant server, against the [isolation](#isolation) rule.
+  The host-local driver refuses a recipe whose network is `allow`
+  (`network-allow-unsupported`) until a desktop gets egress that keeps its own
+  namespace, as proxied tool launches do through the host's egress proxy.
+  Decision 5's per-recipe `allow` stays the target; no recipe can set it yet.
+- **Loaded for teardown, offered when ready.** The driver is loaded on every
+  Linux host, so teardown and restart reconciliation can reap its desktops
+  after its programs were removed. It is effective, and so leasable and
+  reported as a destination, only when readiness reported ready as the host
+  started; a host that installs the programs later offers it after its next
+  start. Off Linux nothing is loaded.
+- **What `gone` means.** Bubblewrap's `--die-with-parent` ends a desktop with
+  the host process. `inspect` answers `gone` only when the launch's process
+  group, every process in the desktop's own PID namespace, its receipt, and its
+  lease directory are absent. The namespace and the tag a desktop was made
+  under are recorded in its lease directory beside `home` and `inbox`, never
+  inside them, so the desktop cannot rewrite what the host trusts to find and
+  reap it. `stop` opens up directories a desktop made unwritable before it
+  deletes them.
+- **No clock of its own.** A host-local desktop does not bill and has no
+  provider-side expiry. `extend` succeeds while it is running and fails once it
+  is not; the host's lease clock and its death with the host end it.
+- **Frames and input are bounded.** A frame's PNG header is read before
+  anything else, and a frame wider or taller than the screen is refused. A
+  reply line over 64 bytes, a frame over the screen's uncompressed size, a
+  reply nobody asked for, or a request unanswered for 10 seconds breaks the
+  channel for good. Pointer input outside the screen and keys outside a closed
+  keysym map refuse; typed text crosses as base64.
+- **Control and delivery refuse.** Every `octant_computer` command refuses
+  `unsupported` until slice 4 binds agent control, and `deliver` refuses until
+  slice 3's transfer.
+- **A cancelled acquisition records its cause.** When a lease ends while its
+  provider is creating it and the driver honours the cancellation, the
+  `failed` transition carries the end reason and who asked.
+
+A real-`bwrap` suite (`hostLocalDesktopProcess.test.ts`) proves the capsule
+cannot read the checkout, home, keyring, or session bus, has no `OCTANT_*`,
+SSH agent, or bus address in its environment, and cannot connect to host
+loopback; that release and a restarted host's reconciliation leave no process
+in the desktop's namespace and no lease directory; and that the driver passes
+the conformance suite over the real launch port. Its desktop tests need
+`Xvfb`, `xdotool`, and ImageMagick and skip on a host without them.
+
 ## Rationale
 
 The original plan leaned on execution capsules for isolation and a cloud
@@ -504,7 +579,9 @@ Source entry points: `apps/server/src/computerUse/desktopLeaseService.ts` and
 `computerUseDestination.ts` (lease service, destination reporting),
 `packages/contracts/src/desktopLease.ts`, `packages/domain/src/desktopLeasePolicy.ts`,
 `packages/plugin-api/src/desktopProvider.ts` and `desktopProviderConformance.ts`
-(the seam); once built, `apps/server/src/process/linuxConfinement.ts` (the
-host-local launch) and the web Desktop pane. Each slice above lists its
+(the seam), `apps/server/src/computerUse/hostLocalDesktopLaunch.ts` (the
+host-local launch through `apps/server/src/process/linuxConfinement.ts`),
+`apps/server/src/plugins/hostLocalDesktop/` (the host-local driver), and, once
+built, the web Desktop pane. Each slice above lists its
 evidence. Lease negatives, restart reconciliation, and real-`bwrap` permission
 negatives are the load-bearing checks; a cloud smoke is maintainer-run.
