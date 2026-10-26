@@ -10,11 +10,12 @@ and [plugin boundaries](../architecture.md#plugin-boundaries-and-remaining-extra
 and credentials and confinement
 ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
-**Delivery state.** Approved design, not built. The maintainer authorized this
-scope as post-preview work on 2026-10-26; the release boundary in `AGENTS.md`
-and the architecture is updated separately. Today only bundled drivers are
-admitted. Slices and their evidence are tracked in Linear; this file states the
-rules they implement and the [decisions still open](#maintainer-decisions).
+**Delivery state.** Accepted 2026-10-26; slice 1 is starting. The maintainer
+authorized this scope as post-preview work and accepted the
+[maintainer decisions](#maintainer-decisions) below on 2026-10-26; the release
+boundary in `AGENTS.md` and the architecture is updated separately. Today only
+bundled drivers are admitted. Slices and their evidence are tracked in Linear;
+this file states the rules they implement.
 
 ## Outcome
 
@@ -154,8 +155,8 @@ confirmation.
   memory, credential lease, or request channel.
 - **Runtime.** The host runs the package's single ESM entry with the Bun
   runtime that runs the server; the package ships no executable, native addon,
-  or install script (refused at inspection), unless
-  [decision 6](#maintainer-decisions) chooses otherwise.
+  or install script (refused at inspection;
+  [decision 6](#maintainer-decisions)).
 - **Seatbelt profile**, stricter than the MCP server profile: deny default; read
   the system roots, the runtime's install, and the package root only; write a
   per-process temporary folder only, removed at stop; **no network**; no
@@ -217,8 +218,7 @@ none were given, leaving overflow to the host's existing ladder.
   signature over its manifest and digest; first trust pins the publisher key,
   and a later version signed by another key is refused until the person
   re-trusts it as a new publisher. A local-folder package is unsigned developer
-  input, labelled so in review. The final rule depends on
-  [decision 3](#maintainer-decisions).
+  input, labelled so in review ([decision 3](#maintainer-decisions)).
 - **Updates are never automatic.** No background check runs. An update is an
   inspect and install of the new digest, which arrives quarantined while the
   trusted version keeps serving; trusting it switches the instances, restarts
@@ -332,33 +332,36 @@ explicit in review copy.
 
 ## Maintainer decisions
 
-1. **Driver shapes admitted.** (a) Harness endpoints only; (b) also outside ACP
-   profiles over the host's ACP stack; (c) also managed processes.
-   **Recommend (a).** (b) and (c) launch agent CLIs with filesystem and shell
-   reach and need their own confinement design.
-2. **Egress.** (a) Only the configured base URL origin; (b) also fixed hosts
-   the manifest declares, shown in review. **Recommend (a)** for the first
-   release; (b) only with a concrete driver that needs it.
-3. **Signing.** (a) Digest pinning only; (b) publisher Ed25519 signature with
-   the key pinned at first trust; (c) an Octant-signed allow-list, which needs
-   an Octant review operation and signing key; (d) npm provenance attestations,
-   which need a transparency-log client. **Recommend (b)** for marketplace
-   sources and digest-only local folders labelled as developer input; (c) and
-   (d) deferred.
-4. **Sources.** (a) Local folder only; (b) plus npm packages; (c) plus a curated
-   driver catalog. **Recommend (a) then (b)** once signing lands; (c) deferred.
-5. **Platforms.** (a) macOS only; (b) Linux with a new confinement. **Recommend
-   (a)**; Linux follows a Linux extension-process confinement design.
-6. **Driver runtime.** (a) One ESM entry on the server's Bun runtime, no
-   executables; (b) any executable the package ships. **Recommend (a)**: one
-   measured profile, no native code to review.
-7. **Modes.** (a) Chat, Work, and Code with verified-model tools, like bundled
-   harness endpoints; (b) Chat only at first. **Recommend (a)**: the driver
-   cannot reach anything the configured endpoint does not already receive.
-8. **Author kit publication.** Publishing the protocol schemas and
-   out-of-process conformance kit to npm needs an npm organization and account.
-   **Recommend** keeping them in-repo until slice 7 and treating publication as
-   a maintainer action then.
+The maintainer accepted these on 2026-10-26. Each states the rule; the
+alternatives considered and the reason for the choice follow it.
+
+1. **Driver shapes admitted.** Harness endpoints only. Rejected for now: outside
+   ACP profiles over the host's ACP stack, and managed processes. Both launch
+   agent CLIs with filesystem and shell reach and need their own confinement
+   design.
+2. **Egress.** Only the configured base URL origin, for the first release.
+   Deferred: fixed hosts the manifest declares, shown in review; considered only
+   with a concrete driver that needs them.
+3. **Signing.** Marketplace sources carry a publisher Ed25519 signature with the
+   key pinned at first trust; local folders are digest-pinned only and labelled
+   as developer input. Rejected: digest pinning alone for marketplace sources.
+   Deferred: an Octant-signed allow-list, which needs an Octant review
+   operation and signing key; and npm provenance attestations, which need a
+   transparency-log client.
+4. **Sources.** Local folders first, then npm packages once signing lands.
+   Deferred: a curated driver catalog.
+5. **Platforms.** macOS only. Linux follows a Linux extension-process
+   confinement design; until then Linux reports `host-prohibited`.
+6. **Driver runtime.** One ESM entry on the server's Bun runtime, with no
+   executables. This keeps one measured profile and no native code to review.
+   Rejected: any executable the package ships.
+7. **Modes.** Chat, Work, and Code with verified-model tools, like bundled
+   harness endpoints. The driver cannot reach anything the configured endpoint
+   does not already receive. Rejected: Chat only at first.
+8. **Author kit publication.** The protocol schemas and out-of-process
+   conformance kit stay in this repository until slice 7. Publishing them to
+   npm then needs an npm organization and account, and stays a maintainer
+   action.
 
 ## Delivery slices
 
@@ -373,9 +376,9 @@ and verify it without macOS, accounts, or hardware.
 | 3   | Wire protocol and host proxy           | Protocol schemas; proxy implementing `HarnessEndpointDriver` over an in-memory channel; brokered `http/request` with per-instance lease and origin check; ceiling clamp; closed reasons                                                              | `runHarnessEndpointConformance` against the proxy with a misbehaving fixture; credential and origin negatives | Yes                                                                          |
 | 4   | Confined driver process                | Supervisor launch with the driver profile and minimal environment; one process per instance; Linux reports `host-prohibited`                                                                                                                         | Escape tests on macOS: network, files outside the package, exec, environment; crash-limit test                | Code and Linux refusal yes; acceptance needs a macOS host                    |
 | 5   | Admission end to end                   | Trust, enable, add provider, connection check, host-run Verify tools, digest-bound records, disable and uninstall behaviour; Settings catalog group                                                                                                  | Server integration test with the fixture driver; rendered Settings QA; live loopback smoke on macOS           | Server and rendered QA yes; live smoke needs macOS with a local model server |
-| 6   | Provenance                             | Publisher signature verification, key pin at first trust, quarantined updates that clear verification, rollback                                                                                                                                      | Signature and update tests; journal replay                                                                    | Yes, after decision 3                                                        |
+| 6   | Provenance                             | Publisher signature verification, key pin at first trust, quarantined updates that clear verification, rollback                                                                                                                                      | Signature and update tests; journal replay                                                                    | Yes (decision 3)                                                             |
 | 7   | Author kit and example driver          | Out-of-process conformance kit and serve helper; the example loopback driver passes it                                                                                                                                                               | Kit tests; example driver in CI                                                                               | Yes; npm publication is a maintainer action (decision 8)                     |
-| 8   | npm source                             | Ingestion of signed `provider-driver` packages from npm with exact `name@version` and digest                                                                                                                                                         | Ingestion tests; pinned-fetch integration test                                                                | Yes, after decision 4                                                        |
+| 8   | npm source                             | Ingestion of signed `provider-driver` packages from npm with exact `name@version` and digest                                                                                                                                                         | Ingestion tests; pinned-fetch integration test                                                                | Yes, once slice 6 has landed signing (decision 4)                            |
 
 Slice 1 depends only on this design. Slices 2 and 3 can proceed in parallel
 after it; 4 needs 3; 5 needs 2 to 4; 6 to 8 follow 5. Slice 1 lands after, or

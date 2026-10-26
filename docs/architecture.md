@@ -6008,8 +6008,8 @@ harness endpoint port; the harness loop, endpoint registry, lead fallback, and
 retries stay host-owned. The OpenAI-compatible, Anthropic-compatible, and Azure
 AI Foundry drivers still wire those host modules directly and are queued to move
 onto the port ([Native harness](#native-harness)). Admitting outside (non-bundled) drivers in
-that harness-endpoint shape is designed, not built, in
-[Outside provider drivers](design/outside-provider-drivers.md).
+that harness-endpoint shape is a design accepted on 2026-10-26, not yet
+built, in [Outside provider drivers](design/outside-provider-drivers.md).
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a
