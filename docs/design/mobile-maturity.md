@@ -16,10 +16,10 @@ architecture describes it; this specification adds to that client and does
 not redesign it.
 
 **Status.** Accepted 2026-10-26; slice 1 (the host keeps push registrations
-and drops them with the device) and slice 2 (the host builds sealed, redacted
-thread notifications) are implemented; slice 3 (camera and file capture) is
-implemented and verified in the container, and its physical-device camera pass
-is a maintainer gate; slices 4 to 9 are not started. The
+and drops them with the device), slice 2 (the host builds sealed, redacted
+thread notifications), slice 3 (camera and file capture), and slice 4 (voice
+input through the host) are implemented and verified in the container; their
+physical-device passes are maintainer gates; slices 5 to 9 are not started. The
 maintainer authorized this scope as post-preview work and accepted the
 [maintainer decisions](#maintainer-decisions) below on 2026-10-26. That
 authorizes design, planning, and implementation of the slices below that need
@@ -70,8 +70,9 @@ These rules hold for every phase and are not reopened by any slice:
   JavaScript. An update channel is a code-delivery channel and would need its
   own signing design.
 - Optional native pieces (push transport, recorders, pickers) reach the app
-  through the existing ports in `apps/mobile/src/notifications/` and
-  `apps/mobile/src/security/` and the host through `PushDeliveryTransport`;
+  through the ports in `apps/mobile/src/notifications/`,
+  `apps/mobile/src/security/`, and `apps/mobile/src/voice/` (the recorder) and
+  the host through `PushDeliveryTransport`;
   vendor wire formats stop at those adapters. Per the
   [plugin boundary table](../architecture.md#plugin-boundaries-and-remaining-extraction),
   only presentation and optional adapters are extraction candidates; push
@@ -88,7 +89,7 @@ These rules hold for every phase and are not reopened by any slice:
 | Push on the host  | `PUT`/`DELETE /api/remote/auth/push-token` (`remoteHttpAuthentication.ts`) store a registration per `{hostId, deviceId}` in the owner-only `remote/push-registrations.json` (`apps/server/src/remote/pushNotificationTokenStore.ts`), as [What the host keeps](#what-the-host-keeps) describes: it survives a restart and is cleared with the device. Ordinary threads in every mode (`threadNotificationDeliveryService.ts`) and Automation runs (`automationNotificationDeliveryService.ts`) seal each notification to the phone (`pushNotificationSealing.ts`) as [Sealing](#sealing) and [Sending](#sending) describe, and hand the envelope to `createUnavailablePushDeliveryTransport`, which never sends, until slice 7 |
 | Push on the phone | `notificationPermissionPort.ts` is the unavailable stub; `PushNotificationsPanel.tsx` offers only clearing a registered token; `deepLinks.ts` parses `octant://hosts/{hostId}/threads/[{mode}/]{threadId}`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Capture           | Chat, Work, and Code threads attach a camera photo, a library image, or a document-picker file (`apps/mobile/src/inbox/thread/pickAttachment.ts`, `useThreadAttachments.ts`) through each mode's own attachment route (`packages/client-runtime/src/mobileAttachmentClient.ts`), offered only for media the thread's model takes. The listener admits those routes for a paired device (`remoteRoutePolicy.ts`), and the host removes image metadata from every paired upload before a route sees it (`apps/server/src/attachments/imageMetadataRemoval.ts`, applied in `authenticatedProductRoutes.ts`). The camera and photo-library permission strings name both uses; the physical-device camera pass is a maintainer gate |
-| Voice             | Host speech routes (`/api/speech/*`) require window authority and are not admitted for paired devices; the phone composer shows a disabled microphone (`apps/mobile/src/ui/FloatingComposer.tsx`); `app.config.ts` disables the microphone permission                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Voice             | The listener forwards `/api/speech/status` and `/api/speech/transcriptions` to a paired device and never `/api/speech/synthesis`; `speechRoutes.ts` holds each device to its own budget and clip bound, as [Voice](#voice) describes. The phone composers draw a microphone only while the host reports transcription `ready` (`apps/mobile/src/voice/`), recording through `expo-audio`; `app.config.ts` names the one microphone use                                                                                                                                                                                                                                                                                         |
 | Hardening ports   | Screenshot privacy and device integrity are unavailable stubs (`screenshotPrivacyPort.ts`, `deviceIntegrityPort.ts`) disclosed in Settings                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 
 ## Phase B (Android): internal builds of the same client
@@ -380,6 +381,56 @@ sender holding it. The sender is a minimal Octant push gateway
 - The transcript is appended to the draft; the person still sends. Read-aloud
   stays desktop-only. The system keyboard's own dictation is outside Octant's
   control and unaffected.
+
+#### How the host admits a phone clip
+
+- The listener forwards only `GET /api/speech/status` (classified
+  `settings.read-non-secret`) and `POST /api/speech/transcriptions`
+  (`speech.transcribe`, remote-approvable), the latter only as
+  `multipart/form-data` within the listener's 1 MiB body budget.
+  `/api/speech/synthesis` is classified `speech.synthesize`, local-host
+  required, and is not forwarded; the route itself also refuses it to a paired
+  device (403), and the status a paired device reads reports synthesis
+  `unavailable` ("Read-aloud is available only on the computer itself.")
+  whatever Settings holds.
+- A phone clip carries at most 1,000,000 bytes of audio (the listener's 1 MiB
+  less the multipart framing), sniffed exactly as the desktop's. The phone
+  records mono AAC at 64 kbit/s, about 480 kB a minute.
+- The per-device budget is thirty clips in any rolling hour, counted when a
+  clip is admitted and before its body is read, so a malformed upload spends
+  budget too; the refusal is `429` `rate-limited` with the time until the
+  oldest clip ages out. A device sends one clip at a time; a second while the
+  first is transcribing is refused (`503`), so one phone cannot hold both host
+  slots. The local window has no such budget. Reason: thirty one-minute clips
+  bound a device to half an hour of audio an hour, which is ample for
+  dictation and caps what a lost phone can spend before the owner revokes it.
+- The budget lives in memory and starts afresh when the host restarts; the
+  host stores no clip, transcript, or count, and journals nothing for
+  dictation. Reason: a durable counter would be the only thing written for a
+  route that persists nothing, and a restart is the owner's own act.
+- The transcript answer is `no-store` for every caller.
+- A paired browser is a paired device and is held to the same routes, bound,
+  and budget; its remote product fetch encodes the composer's form itself so
+  the device proof covers the bytes sent. Its recorder keeps the desktop's
+  two-minute cap, so a long clip from a paired browser can exceed the phone
+  bound and is refused.
+
+#### How the phone records
+
+- The microphone is drawn only while the host answers `ready`, the composer
+  could send, and the build has a recorder; the readiness is read when the
+  host changes and when the app returns to the foreground. Any failure to read
+  it hides the microphone.
+- Tap starts a clip and the control becomes a red stop control beside a
+  "Recording" label; tap again stops it and sends it. A clip stops itself at
+  sixty seconds and is sent. Leaving the foreground, leaving the screen, or the
+  host ceasing to be `ready` stops the clip and discards it unsent. Reason: the
+  person did not finish the act, and a clip sent from the background would be
+  a microphone use they did not see end.
+- The clip file is written to the app's cache directory and deleted after
+  every clip, whether the transcript returned, the host refused it, or the
+  upload failed. The microphone permission string names this one use; there is
+  no background audio mode or foreground recording service.
 
 ## Phase E: public store distribution
 
