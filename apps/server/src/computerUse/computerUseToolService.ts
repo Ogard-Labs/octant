@@ -502,15 +502,20 @@ export function createComputerUseToolService(options: {
         "unavailable",
         "Computer use is unavailable for this task's current authority.",
       );
-    return options.leases.sendFile(owner, path, async (request) => {
-      const { artifact, provider } = request;
-      const offMachine =
-        request.asks === "off-machine"
-          ? ` This sends the file off this machine to ${provider.displayName}.`
-          : "";
-      const summary = `Send ${artifact.path.slice(0, 512)} (${artifact.size} bytes, SHA-256 ${artifact.sha256}) into ${DESKTOP_LABEL} on ${provider.displayName.slice(0, 128)} for "${options.threadTitle(owner).slice(0, 100)}"?${offMachine}`;
-      return (await ask(summary, signal)) === "approved" ? "approved" : "declined";
-    });
+    return options.leases.sendFile(
+      owner,
+      path,
+      async (request) => {
+        const { artifact, provider } = request;
+        const offMachine =
+          request.asks === "off-machine"
+            ? ` This sends the file off this machine to ${provider.displayName}.`
+            : "";
+        const summary = `Send ${artifact.path.slice(0, 512)} (${artifact.size} bytes, SHA-256 ${artifact.sha256}) into ${DESKTOP_LABEL} on ${provider.displayName.slice(0, 128)} for "${options.threadTitle(owner).slice(0, 100)}"?${offMachine}`;
+        return (await ask(summary, signal)) === "approved" ? "approved" : "declined";
+      },
+      options.externalContentIngested(owner),
+    );
   }
 
   return {

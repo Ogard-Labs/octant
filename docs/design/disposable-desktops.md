@@ -643,7 +643,9 @@ Rules this slice resolved:
 - **Who is asked.** Plan refuses. Below Full access an agent's transfer asks
   in the thread, auto-accept-edits included: that posture covers edits to the
   checkout, not sending a file out of it. Full access proceeds to a host-local
-  desktop, and a person sending a file to one is not asked again. A transfer
+  desktop unless the agent's thread has read outside content
+  ([slice 4](#built-in-slice-4)), and a person sending a file to one is not
+  asked again. A transfer
   to a cloud desktop asks a person every time (`off-machine`).
 - **Where it lands.** The file is written whole beside the lease's `home` and
   `inbox`, made read-only (`0444`), and renamed into the inbox under its base
@@ -746,7 +748,11 @@ Rules this slice resolved:
   local approval card, decides and withdraws the other. This Mac's approvals
   stay local. An agent's transfer asks in the thread, with its path, size,
   SHA-256, and destination, below Full access; a cloud desktop asks every
-  time.
+  time. The posture is the turn's, which may sit below the thread's, so a
+  turn sent at approval-gated on a Full access thread asks. Once the thread
+  has read outside content, an agent's transfer asks under Full access too:
+  `send-file` is a Computer use action, and taint stops standing approvals,
+  which Full access is.
 - **Agent input is journaled.** `desktop.operated@1` is written before the
   driver gets the input, with the agent as actor. Reading the screen (apps,
   windows, observe) is not journaled, and typed text and keys never are.
@@ -764,10 +770,12 @@ journal holds `desktop.artifact-sent@1` and `launch`, `click`, `type`, and
 `press` inputs, all with actor `agent` and none with the typed text, and the
 conformance suite still passes over the real launch port, refusing an
 element-addressed click as `unsupported`. `computerUseToolService.test.ts`
-covers binding, the approval asked in the thread, the one-action rule under
+covers binding, the approval asked in the thread, the first of the thread's
+and the local card's answers withdrawing the other, the one-action rule under
 taint, Plan refusal, `needs-image-model`, the transfer question, and this Mac
 refusing keyboard-focus input; `desktopLeaseService.test.ts` covers the
-journaled input and the caller's own confirmation; `codeOperationRuntime.test.ts`
+journaled input, the caller's own confirmation, and a transfer asked at the
+turn's lower posture or under taint; `codeOperationRuntime.test.ts`
 covers a destination reaching the turn's tool set and its approval in the
 thread. `computerUseRuntime.test.ts` and the earlier tool-service tests pass.
 Owed by the maintainer: a real-provider smoke, a turn on a provider

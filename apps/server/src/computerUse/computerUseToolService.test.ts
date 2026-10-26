@@ -659,6 +659,7 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
         _owner: ComputerUseOwner,
         path: string,
         confirm: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">,
+        _externalContentIngested: boolean,
       ): Promise<ComputerControlResult> => {
         transfers.push(path);
         const answer = await confirm({
@@ -814,6 +815,54 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
     }
   });
 
+  it("lets the first answer decide, withdraws the other question, and never carries a late answer to the next action", async () => {
+    const f = desktop();
+    const questions: Array<{
+      readonly signal: AbortSignal | undefined;
+      readonly answer: (value: "approved" | "denied") => void;
+    }> = [];
+    const ask = vi.fn(
+      (_summary: string, signal?: AbortSignal) =>
+        new Promise<"approved" | "denied" | "cancelled" | "expired">((resolve) => {
+          questions.push({ signal, answer: resolve });
+        }),
+    );
+    try {
+      const tools = f.service.toolSet(onDesktop, computerUseSelection("desktop"), true, ask);
+      if (tools === undefined) throw new Error("Expected the desktop to bind.");
+      const launched = tools.execute(call({ operation: "launch", appId: "notes-app" }));
+      await vi.waitFor(() => expect(questions).toHaveLength(1));
+      const view = f.service.runtime.list(onDesktop.windowId)[0];
+      if (view?.pendingApproval === undefined) throw new Error("Expected approval.");
+      // The local card answers first.
+      await f.service.runtime.decide({
+        ownerWindowId: onDesktop.windowId,
+        threadId: onDesktop.threadId,
+        authority: codeAuthority,
+        sessionId: view.sessionId,
+        actionId: view.pendingApproval.actionId,
+        approvalId: view.pendingApproval.approvalId,
+        decision: "approved",
+      });
+      await expect(launched).resolves.toMatchObject({ isError: false });
+      expect(questions[0]?.signal?.aborted).toBe(true);
+
+      // The withdrawn thread question answering late reaches nothing, and the
+      // next app still asks for itself.
+      questions[0]?.answer("approved");
+      const other = tools.execute(call({ operation: "launch", appId: "other-app" }));
+      await vi.waitFor(() => expect(questions).toHaveLength(2));
+      questions[1]?.answer("denied");
+      await expect(other).resolves.toMatchObject({
+        isError: true,
+        result: { kind: "refused", reason: "not-approved" },
+      });
+      expect(f.control).toHaveBeenCalledOnce();
+    } finally {
+      await f.service.close();
+    }
+  });
+
   it("asks again for every action once the thread has read outside content", async () => {
     const f = desktop();
     try {
@@ -825,6 +874,9 @@ describe("Computer use bound to one of the thread's disposable desktops", () => 
         `Allow this one action in notes-app on this thread's disposable desktop for "Notes app".`,
         `Allow this one action in notes-app on this thread's disposable desktop for "Notes app".`,
       ]);
+      // The lease service asks for the file even under Full access once tainted.
+      await tools.execute(call({ operation: "send-file", path: "dist/notes-app" }));
+      expect(f.sendFile.mock.calls[0]?.[3]).toBe(true);
     } finally {
       await f.service.close();
     }

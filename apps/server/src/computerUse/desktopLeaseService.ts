@@ -34,6 +34,7 @@ import {
 } from "@octant/contracts";
 import {
   cacheBackoffHolds,
+  clampTurnAccessPosture,
   decideDesktopArtifactTransfer,
   decideDesktopLeaseAcquire,
   decideDesktopLeaseExtension,
@@ -215,6 +216,15 @@ export interface DesktopLeaseService {
        * agent's turn asks in its thread. Otherwise `confirmTransfer` asks.
        */
       readonly confirm?: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">;
+      /**
+       * An agent's turn as it runs now. A turn may sit below its thread's
+       * posture, and a thread that read outside content no longer lets Full
+       * access carry the agent's transfer; either only adds a question.
+       */
+      readonly turn?: {
+        readonly executionPolicy: ProviderExecutionPolicy;
+        readonly externalContentIngested: boolean;
+      };
     },
   ) => Promise<DesktopLeaseTransferResult>;
   /** A Desktop tab opened or closed on a lease; an open tab holds idle release off. */
@@ -936,9 +946,13 @@ export function createDesktopLeaseService(
     const first = admitOperating(caller);
     if (first.status === "refused") return first;
     const gate = decideDesktopArtifactTransfer({
-      executionPolicy: first.thread.executionPolicy,
+      executionPolicy: clampTurnAccessPosture({
+        ...(caller.turn === undefined ? {} : { requested: caller.turn.executionPolicy }),
+        thread: first.thread.executionPolicy,
+      }),
       locality: first.provider.locality,
       initiator: caller.actor.kind,
+      externalContentIngested: caller.turn?.externalContentIngested === true,
     });
     if (gate.kind === "refused") return refused(gate.reason);
     const owner = first.record.lease.owner;
@@ -1142,6 +1156,8 @@ export interface LeasedComputerUsePort {
     owner: ComputerUseOwner,
     path: string,
     confirm: (request: DesktopTransferConfirmation) => Promise<"approved" | "declined">,
+    /** Whether the owner's thread has read outside content, which stops Full access carrying the send. */
+    externalContentIngested: boolean,
   ) => Promise<ComputerControlResult>;
 }
 
@@ -1194,10 +1210,15 @@ export function createLeasedComputerUsePort(
         ? answered.result
         : { kind: "refused", reason: answered.reason, message: LEASE_REFUSAL_MESSAGE };
     },
-    sendFile: async (owner, path, confirm) => {
+    sendFile: async (owner, path, confirm, externalContentIngested) => {
       const caller = callerOf(owner);
       if (caller === undefined) return unbound;
-      const sent = await service.transfer({ ...caller, path, confirm });
+      const sent = await service.transfer({
+        ...caller,
+        path,
+        confirm,
+        turn: { executionPolicy: owner.executionPolicy, externalContentIngested },
+      });
       switch (sent.status) {
         case "delivered":
           return {

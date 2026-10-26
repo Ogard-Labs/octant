@@ -1007,6 +1007,49 @@ describe.runIf(process.platform === "linux")("desktop artifact transfer", () => 
     expect(state.askedTransfers).toEqual([]);
   });
 
+  it("asks an agent's transfer on a Full access thread when its turn runs lower or the thread read outside content", async () => {
+    const { service, checkout, connection } = host({ executionPolicy: "full-access" });
+    writeFileSync(join(checkout, "app.bin"), "built app");
+    const leaseId = await acquired(service, threadA);
+    const asked: Array<string> = [];
+    const fromAgent = (
+      executionPolicy: ProviderExecutionPolicy,
+      externalContentIngested: boolean,
+    ) => ({
+      owner: code(threadA),
+      actor: agentOf(threadA),
+      leaseId,
+      path: "app.bin",
+      turn: { executionPolicy, externalContentIngested },
+      confirm: async () => {
+        asked.push(`${executionPolicy} ${String(externalContentIngested)}`);
+        return "declined" as const;
+      },
+    });
+
+    for (const [executionPolicy, tainted] of [
+      ["approval-gated", false],
+      ["auto-accept-edits", false],
+      ["full-access", true],
+    ] as const) {
+      await expect(service.transfer(fromAgent(executionPolicy, tainted))).resolves.toEqual({
+        status: "refused",
+        reason: "declined",
+      });
+    }
+    await expect(service.transfer(fromAgent("plan", false))).resolves.toEqual({
+      status: "refused",
+      reason: "plan-mode",
+    });
+    expect(asked).toEqual(["approval-gated false", "auto-accept-edits false", "full-access true"]);
+    expect(sentEvents(connection)).toEqual([]);
+
+    await expect(service.transfer(fromAgent("full-access", false))).resolves.toMatchObject({
+      status: "delivered",
+    });
+    expect(asked).toHaveLength(3);
+  });
+
   it("always asks before a file leaves the machine for a cloud desktop, Full access included", async () => {
     const cloud = createFakeDesktopProvider({
       id: "cloud.example",
