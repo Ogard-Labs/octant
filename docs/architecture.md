@@ -2586,11 +2586,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   properties (no install, trust, enable, credential, or capability claims),
   declared capabilities, contributions, a second component, an entry point
   other than `builtin:provider-driver/<kind>`, and any source other than
-  `bundled`. Outside drivers need their own design before the schema admits
-  them; third-party provider-driver plugins are an authorized post-preview
-  track whose design is
-  [Outside provider drivers](design/outside-provider-drivers.md), and the
-  schema refuses them until its slices land. The catalog repeats installed and trusted from the activation context
+  `bundled`. That schema stays closed: an outside driver has its own public
+  `OutsideProviderDriverEntry` schema in `@octant/plugin-api`, read from a
+  local folder and installed quarantined, with nothing yet admitting it;
+  third-party provider-driver plugins are an authorized post-preview track
+  under [Outside provider drivers](design/outside-provider-drivers.md). The catalog repeats installed and trusted from the activation context
   that admits the driver; it never sets them. `resolveProviderCatalogState` in
   `@octant/domain` derives available, enabled, signed in, and ready separately.
   It reads the registry, the last observations, and the last scan, with each
@@ -6242,8 +6242,10 @@ A direct-endpoint provider driver supplies a transport through the provider-sdk
 harness endpoint port; the harness loop, endpoint registry, lead fallback,
 retries, and context-window memory stay host-owned
 ([Native harness](#native-harness)). Admitting outside (non-bundled) drivers in
-that harness-endpoint shape is a design accepted on 2026-10-26, not yet
-built, in [Outside provider drivers](design/outside-provider-drivers.md).
+that harness-endpoint shape is a design accepted on 2026-10-26, in
+[Outside provider drivers](design/outside-provider-drivers.md). Their identity
+and their inspection and quarantined install from a local folder are built;
+nothing admits one yet.
 
 The schema API, renderer contribution registry, vendor driver admission,
 Integration port, and plugin-module Settings/sidebar seams exist. The API is a

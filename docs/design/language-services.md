@@ -384,7 +384,8 @@ design left a choice open.
   identity from the folder and the slug, so a folder can never take the
   bundled server's identity or another package's, and records it unreviewed.
   A folder with the document is read as a language server and as nothing
-  else. Other sources are refused until a marketplace package can carry a
+  else; one that also holds an outside provider driver's
+  `octant-provider-driver.json` is refused as neither. Other sources are refused until a marketplace package can carry a
   publisher signature.
 - **What a package may hold.** Exactly one `language-server` component of the
   `static` class, Code only, for no provider family, declaring at most the
