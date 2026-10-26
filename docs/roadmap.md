@@ -156,8 +156,10 @@ starts.
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:
   [enterprise-provider-identity.md](enterprise-provider-identity.md).
-- **Remote SSH development environments** and **live guest sharing** — each
-  waits on the foundation named in its own design note.
+- **Remote SSH development environments** — a Code Project on a machine reached
+  over SSH, with this host keeping authority. Design:
+  [Remote SSH environments](design/remote-ssh-environments.md).
+- **Live guest sharing** — waits on the foundation named in its own design note.
 
 ## Not planned
 
