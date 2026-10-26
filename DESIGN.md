@@ -1418,7 +1418,13 @@ the Inbox and Board rows are left out because their tiles go to the same
 place. Settings › Sidebar › Count tiles turns them off and brings the rows
 back. Tiles are neutral faces in the Default style; under Vivid each takes a
 palette hue, as a solid face with primary-foreground text in the light theme
-and as a tint with a coloured count in the dark one.
+and as a tint with a coloured count in the dark one. In the narrow drawer
+(under 681px) the four destinations are compact rows instead: icon, name, and
+the count at the trailing edge, with no fill and no hue in any style, so they
+sit quieter than the thread list under them. Each row keeps its name with its
+count and its destination. The drawer itself paints the opaque sidebar surface
+in every material, since it overlays the page and a transparent drawer let the
+page's text show through it.
 
 Primary sidebar destinations are Board and Pull requests when valid for the
 active mode. The destinations a person placed under Menu

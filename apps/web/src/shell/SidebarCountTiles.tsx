@@ -1,5 +1,6 @@
 import { CircleCheck, CirclePlay, Eye, Inbox, type LucideIcon } from "lucide-react";
 import { OctantButton } from "../ui/base/OctantButton";
+import { useSidebarDrawerViewport } from "./useShellPresentation";
 
 export type SidebarTileId = "inbox" | "running" | "review" | "done";
 
@@ -32,8 +33,15 @@ const TILE_ICONS: Readonly<Record<SidebarTileId, LucideIcon>> = {
  * than a bare number beside a label.
  */
 export function SidebarCountTiles(props: { readonly tiles: ReadonlyArray<SidebarTile> }) {
+  // In the phone drawer four saturated blocks outweighed the thread list under
+  // them, so the same destinations read as plain rows there.
+  const rows = useSidebarDrawerViewport();
   return (
-    <div aria-label="Thread counts" className="sidebar-tiles" role="group">
+    <div
+      aria-label="Thread counts"
+      className={rows ? "sidebar-tiles sidebar-tiles--rows" : "sidebar-tiles"}
+      role="group"
+    >
       {props.tiles.map((tile) => {
         const Icon = TILE_ICONS[tile.id];
         const label = TILE_LABELS[tile.id];
@@ -52,13 +60,21 @@ export function SidebarCountTiles(props: { readonly tiles: ReadonlyArray<Sidebar
             type="button"
             variant="link"
           >
-            <span aria-hidden="true" className="sidebar-tile__face">
-              <span className="sidebar-tile__top">
+            {rows ? (
+              <span aria-hidden="true" className="sidebar-tile__face">
                 <Icon className="sidebar-tile__icon" size={16} strokeWidth={1.8} />
+                <span className="sidebar-tile__label">{label}</span>
                 <span className="sidebar-tile__count">{tile.count}</span>
               </span>
-              <span className="sidebar-tile__label">{label}</span>
-            </span>
+            ) : (
+              <span aria-hidden="true" className="sidebar-tile__face">
+                <span className="sidebar-tile__top">
+                  <Icon className="sidebar-tile__icon" size={16} strokeWidth={1.8} />
+                  <span className="sidebar-tile__count">{tile.count}</span>
+                </span>
+                <span className="sidebar-tile__label">{label}</span>
+              </span>
+            )}
           </OctantButton>
         );
       })}
