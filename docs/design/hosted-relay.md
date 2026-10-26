@@ -10,10 +10,11 @@ host-initiated network calls
 ([Overview and principles](../architecture.md#overview-and-principles)), and
 release scope ([Current Release Boundary](../architecture.md#current-release-boundary)).
 
-**Status: approved design, not built.** The maintainer unlocked this parked
-workstream as authorized post-preview work on 2026-10-26. Nothing below is in
-force until its slice lands; until then the private-network-only rules in
-Architecture are the whole behavior. Opening hosted-relay scope in `AGENTS.md`
+**Status: accepted 2026-10-26; slice 1 is starting.** The maintainer unlocked
+this parked workstream as authorized post-preview work and accepted the
+decisions below on 2026-10-26. Nothing below is in force until its slice
+lands; until then the private-network-only rules in Architecture are the whole
+behavior. Opening hosted-relay scope in `AGENTS.md`
 and the architecture's Current Release Boundary is a separate change, and no
 implementation slice merges before it.
 
@@ -34,9 +35,9 @@ cause:
 
 The evidence that would justify operating a relay is written dogfood showing
 an already-paired device and an awake host with no ciphertext path between
-them after a mesh and SSH were each tried. Until it exists, the recommended
-default (Maintainer decisions, 1) is self-hosting only: a person who has the
-problem runs their own relay, and Octant operates nothing.
+them after a mesh and SSH were each tried. Until it exists, the rule
+(Maintainer decisions, 1) is self-hosting only: a person who has the problem
+runs their own relay, and Octant operates nothing.
 
 ## Outcome
 
@@ -212,9 +213,9 @@ key, not the path, carries authority (Maintainer decisions, 4).
 ### Settings and administration
 
 - **Host.** Settings › Remote access › **Reach this computer through a relay**
-  is off by default, with a relay URL field, empty unless the maintainer
-  chooses an Octant-run default (Maintainer decisions, 1). The switch requires
-  a running listener with a self-made certificate. `octant relay enable --url
+  is off by default, with a relay URL field that starts empty: Octant offers no
+  relay of its own (Maintainer decisions, 1). The switch requires a running
+  listener with a self-made certificate. `octant relay enable --url
 <origin> [--pin <sha256-…>]`, `octant relay disable`, and `octant relay
 status` use the same loopback administration channel. A paired device can
   read whether a relay is on but can never turn it on, change its URL, or ask
@@ -307,39 +308,42 @@ per host in v1.
 
 ## Maintainer decisions
 
-1. **Who operates a relay.**
-   - (a) Self-host only: the URL field starts empty and user docs show how to
-     run the relay.
-   - (b) Octant runs one, offered as the default URL when the switch is turned
-     on (deployment, DNS, TLS, operator contact, terms, abuse handling, and
-     cost become release steps).
-   - (c) Both, with the Octant-run relay only after written evidence.
+The maintainer accepted these on 2026-10-26. Each states the rule; the
+alternatives considered and the reason for the choice follow it.
 
-   Recommended: **(a)**, revisited as (c) only with the evidence above. An
-   Octant-run relay makes Octant the custodian of who connects to whose
-   computer and when, for no demonstrated need.
+1. **Who operates a relay.** Self-host only: the URL field starts empty and
+   user docs show how to run the relay. An Octant-run relay makes Octant the
+   custodian of who connects to whose computer and when, for no demonstrated
+   need. Considered:
+   - Octant runs one, offered as the default URL when the switch is turned on
+     (deployment, DNS, TLS, operator contact, terms, abuse handling, and cost
+     become release steps). Rejected.
+   - Both, with the Octant-run relay only after written evidence. This is the
+     only way the decision is revisited, and only with the evidence above;
+     operating a relay would still need its own maintainer action for
+     deployment, accounts, and spending.
 
-2. **Where the relay service lives.** (a) In this repository as `apps/relay`,
-   with the frame contract in `@octant/contracts` and end-to-end tests in one
-   CI; (b) in `octant-webapp` beside the Canvas share service; (c) its own
-   repository. Recommended: **(a)**; the protocol is coupled to the host and
-   client, and self-hosters build from the release they run. The slice that
-   creates it adds the ownership row to `AGENTS.md`.
+2. **Where the relay service lives.** In this repository as `apps/relay`, with
+   the frame contract in `@octant/contracts` and end-to-end tests in one CI.
+   The protocol is coupled to the host and client, and self-hosters build from
+   the release they run. The slice that creates it adds the ownership row to
+   `AGENTS.md`. Rejected: `octant-webapp` beside the Canvas share service, and
+   a repository of its own.
 
-3. **How far to build before evidence.** (a) Design only; (b) contracts and pure
-   policy only; (c) the self-hostable path end to end (slices 1–4), off by
-   default. Recommended: **(c)**; self-hosting adds no Octant cloud dependency,
+3. **How far to build before evidence.** The self-hostable path end to end
+   (slices 1–4), off by default. Self-hosting adds no Octant cloud dependency,
    and the slices are independently reviewable. Slice 6 waits on decision 1.
+   Rejected: design only, and contracts and pure policy only.
 
-4. **Authority of a relayed device.** (a) The device session's full authority,
-   minus pairing; (b) narrower (for example, no terminal or dev-server
-   relaying). Recommended: **(a)**; authority is bound to the device key, and
-   narrowing by path would make the same device behave differently by network
-   without stopping a thief, who can also use a mesh.
+4. **Authority of a relayed device.** The device session's full authority,
+   minus pairing. Authority is bound to the device key; narrowing by path would
+   make the same device behave differently by network without stopping a
+   thief, who can also use a mesh. Rejected: narrower authority (for example,
+   no terminal or dev-server relaying).
 
-5. **Pairing over a relay.** (a) Never; (b) later, with a pairing code that
-   carries a grant. Recommended: **(a)**; first contact stays on a network the
-   person controls, and SSH covers a headless remote host.
+5. **Pairing over a relay.** Never. First contact stays on a network the person
+   controls, and SSH covers a headless remote host. Rejected: a later pairing
+   code that carries a grant.
 
 ## Delivery plan
 
@@ -386,14 +390,14 @@ slice 1. No implementation slice merges before the release-boundary change.
    phone reaches its host through a relay off the home network, and a pin
    mismatch refuses before any request byte. Verification: module tests and
    a device run. **Needs macOS, Xcode, and physical devices (maintainer).**
-6. **Octant-run relay (only if decision 1 is b or c).** Deployment, DNS, TLS,
+6. **Octant-run relay (only if decision 1 is revisited on evidence).** Deployment, DNS, TLS,
    limits, operator contact, terms, and the default URL. Acceptance: the
    service runs the slice 2 build unchanged and keeps no per-connection logs.
    **Needs accounts, spending, and deployment authority (maintainer).**
 
 Evidence gate, in parallel and maintainer-owned: a written dogfood run that
-records a reachability failure with LAN, mesh, and SSH results, which decision
-1 (b) or (c) needs.
+records a reachability failure with LAN, mesh, and SSH results, which revisiting
+decision 1 needs.
 
 ## Verification
 
