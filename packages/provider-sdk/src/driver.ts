@@ -63,6 +63,14 @@ export interface ProviderSessionStart {
   readonly modelOptionValues?: ProviderModelOptionValues;
   /** App-managed tools made available when the provider session starts. */
   readonly tools?: ReadonlyArray<ProviderToolDefinition>;
+  /**
+   * The host sends this session one request and stops it, and never resumes
+   * it: a hand-off, a context or compaction summary, a commit or pull-request
+   * draft, an advisor review. A driver keeps nothing durable that would only
+   * serve a later resume and returns no resume cursor; no thread's journal
+   * names such a session, so nothing a purge follows would reach what it kept.
+   */
+  readonly singleUse?: boolean;
 }
 
 export interface ProviderSessionHandle {

@@ -45,7 +45,14 @@ import {
   type CodexAppServerConnection,
   type CodexProcessPort,
 } from "./codexProcess";
-import { codexProviderCredential, type CodexProviderCredential } from "./codexProviderCredential";
+import {
+  codexBedrockSignIn,
+  codexConfiguresBedrock,
+  codexProviderCredential,
+  codexSelectedProviderConfig,
+  type CodexBedrockSignIn,
+  type CodexProviderCredential,
+} from "./codexProviderCredential";
 import {
   decodeAccountRateLimitsReadResult,
   decodeAccountReadResult,
@@ -325,7 +332,8 @@ export interface CodexClientPort {
   accountRead(): Promise<CodexAccountReadResult>;
   rateLimitsRead(): Promise<CodexRateLimitsReadResult>;
   modelList(cursor?: string): Promise<CodexModelListResult>;
-  configRead(input: { readonly cwd: string }): Promise<CodexConfigReadResult>;
+  /** Without `cwd`, the effective config of every layer but a Project's. */
+  configRead(input: { readonly cwd?: string }): Promise<CodexConfigReadResult>;
   skillsList(input: {
     readonly cwds: readonly [string];
     readonly forceReload: true;
@@ -817,6 +825,11 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
             const accountResult = yield* request(runtime.client.accountRead);
             const models = yield* readModels(runtime.client);
             const environment = yield* Effect.promise(() => resolveCodexLaunchEnvironment(options));
+            const bedrockSignIn = yield* readCodexBedrockSignIn(
+              runtime.client,
+              accountResult,
+              options.environment ?? process.env,
+            );
             const result = normalizeProbe(
               instanceId,
               runtime.version,
@@ -824,6 +837,7 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
               models,
               clock(),
               codexProviderCredential(environment ?? process.env),
+              bedrockSignIn,
             );
             // Publish the fresh catalog like the other drivers do, so a caller
             // that probes before opening a session (Chat probes before every
@@ -848,6 +862,17 @@ export function makeCodexDriver(options: CodexDriverOptions): ProviderDriver {
       }
       return Effect.gen(function* () {
         const runtime = yield* acquireRuntime(options, clientFactory);
+        // Turn starts probe first, but not every caller does (compaction,
+        // summaries, agent runs), so the session itself refuses too.
+        const accountResult = yield* request(runtime.client.accountRead);
+        const bedrockSignIn = yield* readCodexBedrockSignIn(
+          runtime.client,
+          accountResult,
+          options.environment ?? process.env,
+        );
+        if (bedrockSignIn?.status === "refused") {
+          return yield* Effect.fail(failure("incompatible", codexBedrockRefusal(bedrockSignIn)));
+        }
         return yield* makeConnection(options, runtime.client, runtime.version, projectRoot, mode, {
           instanceId: options.instanceId,
           clock,
@@ -928,6 +953,51 @@ function readModels(
   });
 }
 
+/**
+ * The Bedrock sign-in the runtime would use, or `undefined` when its active
+ * provider is not Bedrock. Codex reports a Bedrock account itself; an older
+ * runtime that does not is recognised from the account's `config.toml`. The
+ * provider table comes from the effective config without a `cwd`, which is
+ * complete for this question: Codex ignores `model_provider` and
+ * `model_providers` in a Project's own config (`PROJECT_LOCAL_CONFIG_DENYLIST`
+ * in codex-rs `config/src/loader/mod.rs`, rust-v0.162.1).
+ */
+function readCodexBedrockSignIn(
+  client: CodexClientPort,
+  accountResult: CodexAccountReadResult,
+  environment: NodeJS.ProcessEnv,
+): Effect.Effect<CodexBedrockSignIn | undefined, ProviderFailure> {
+  const reported = accountResult.account?.type === "amazonBedrock" ? accountResult.account : null;
+  if (reported === null && !codexConfiguresBedrock(environment)) {
+    return Effect.succeed(undefined);
+  }
+  return request(() => client.configRead({})).pipe(
+    Effect.map(({ config }) =>
+      codexBedrockSignIn({
+        providerConfig: codexSelectedProviderConfig(config),
+        usesCodexManagedCredentials: reported?.usesCodexManagedCredentials === true,
+        environment,
+      }),
+    ),
+  );
+}
+
+const CODEX_BEDROCK_RECOVERY =
+  "Use a Bedrock API key for this account instead: sign this Codex account in to Bedrock with an API key, or, for the first Codex account, set AWS_BEARER_TOKEN_BEDROCK and AWS_REGION where Octant starts.";
+
+function codexBedrockRefusal(
+  signIn: Extract<CodexBedrockSignIn, { readonly status: "refused" }>,
+): string {
+  switch (signIn.source) {
+    case "aws-profile":
+      return `This Codex account signs in to Amazon Bedrock with the AWS profile its config names in aws.profile. The Codex runtime is not confined, so its commands could read that profile's reusable keys in the AWS shared config. Remove aws.profile. ${CODEX_BEDROCK_RECOVERY}`;
+    case "credential-export":
+      return `This Codex account signs in to Amazon Bedrock through the aws.credential_export command in its config, which hands the runtime general-purpose AWS keys. The Codex runtime is not confined, so its commands could use them. Remove aws.credential_export. ${CODEX_BEDROCK_RECOVERY}`;
+    case "aws-default-chain":
+      return `This Codex account has no Bedrock API key, so Codex would sign in to Amazon Bedrock from the AWS shared config, an AWS profile, SSO, or AWS IAM keys. The Codex runtime is not confined, so its commands could read those reusable credentials. ${CODEX_BEDROCK_RECOVERY}`;
+  }
+}
+
 function normalizeProbe(
   instanceId: ProviderInstanceId,
   version: string,
@@ -935,6 +1005,7 @@ function normalizeProbe(
   sourceModels: ReadonlyArray<CodexModelListResult["data"][number]>,
   observedAt: string,
   providerCredential?: CodexProviderCredential,
+  bedrockSignIn?: CodexBedrockSignIn,
 ): ProviderProbeResult {
   const models = sourceModels
     .filter((source) => !source.hidden && source.id.trim().length > 0)
@@ -989,21 +1060,23 @@ function normalizeProbe(
     });
   // account/read answers requiresOpenaiAuth: false for a provider that
   // authenticates outside the OpenAI login without checking whether that
-  // credential exists — Bedrock's answer is byte-identical with or without a
-  // credential in the environment. The provider's own env_key, absent from
-  // the runtime's allowlisted environment, is the missing piece the probe has
-  // to name itself.
+  // credential exists. The provider's own env_key, absent from the runtime's
+  // allowlisted environment, is the missing piece the probe has to name
+  // itself.
   const missingCredential =
     !accountResult.requiresOpenaiAuth && providerCredential?.present === false
       ? providerCredential.envKey
       : undefined;
+  const refusal =
+    bedrockSignIn?.status === "refused" ? codexBedrockRefusal(bedrockSignIn) : undefined;
   const ready =
+    refusal === undefined &&
     models.length > 0 &&
     missingCredential === undefined &&
     (accountResult.account !== null || !accountResult.requiresOpenaiAuth);
   return decodeProviderProbeResult({
     instanceId,
-    readiness: ready ? "ready" : "unauthenticated",
+    readiness: ready ? "ready" : refusal === undefined ? "unauthenticated" : "incompatible",
     processState: "running",
     detectedVersion: version,
     models,
@@ -1012,13 +1085,10 @@ function normalizeProbe(
       ? { lastSuccessfulProbeAt: observedAt as UtcTimestamp }
       : {
           message:
-            missingCredential === undefined
+            refusal ??
+            (missingCredential === undefined
               ? "Authenticate Codex and make at least one usable model available."
-              : providerCredential?.withheldStaticKeys === true
-                ? "Octant does not pass static AWS IAM keys (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) to the Codex runtime. Set AWS_BEARER_TOKEN_BEDROCK, or an AWS_PROFILE whose keys are in the AWS shared config."
-                : missingCredential === "AWS_BEARER_TOKEN_BEDROCK"
-                  ? "The Bedrock provider needs AWS_BEARER_TOKEN_BEDROCK, or an AWS profile or shared credentials file, in the Codex runtime."
-                  : `The active model provider's credential variable ${missingCredential} is not available to the Codex runtime.`,
+              : `The active model provider's credential variable ${missingCredential} is not available to the Codex runtime.`),
         }),
     observedAt: observedAt as UtcTimestamp,
   });

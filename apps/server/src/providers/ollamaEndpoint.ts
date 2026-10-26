@@ -52,6 +52,8 @@ export interface OllamaChatInput {
   /** Ends with a user message or with the results of the previous step's calls. */
   readonly history: ReadonlyArray<HarnessEndpointMessage>;
   readonly tools?: ReadonlyArray<ProviderToolDefinition> | undefined;
+  /** The window, in tokens, Ollama is asked to load the model with (`num_ctx`). */
+  readonly contextWindow?: number | undefined;
   readonly signal?: AbortSignal;
   readonly onEvent?: (event: OllamaTurnEvent) => void;
 }
@@ -73,6 +75,27 @@ const DEFAULT_LIMITS: OllamaHttpLimits = {
   maximumFrames: 16_384,
   maximumHistoryMessages: 256,
 };
+
+/**
+ * The largest window Octant asks Ollama to load on its own judgement. Ollama
+ * allocates the whole window's KV cache when it loads a model, whatever the
+ * prompt's length, and that cache grows linearly with the window: Llama 3.1
+ * 8B at f16 needs about 4 GiB of it at 32K tokens and 16 GiB at its trained
+ * 128K. Asking for every model's trained window would exhaust a laptop's
+ * memory, while 32K still holds the harness's instructions, tool definitions
+ * and a working conversation. A model whose Modelfile sets `num_ctx` keeps
+ * that window instead: it is a deliberate choice, and the window Ollama
+ * loads for the model anyway, so honoring it costs no memory Ollama would
+ * not already use.
+ */
+export const OLLAMA_CONTEXT_WINDOW_CAP = 32_768;
+
+/**
+ * The window Octant assumes, and asks for, when Ollama reports none for a
+ * model: Ollama's documented default for a machine with little GPU memory.
+ * Guessing larger would let a long prompt be cut without an error.
+ */
+export const OLLAMA_UNKNOWN_CONTEXT_WINDOW = 4_096;
 
 const unsupportedCapabilities = {
   approvals: "unsupported",
@@ -205,9 +228,14 @@ export async function probeOllama(endpoint: OllamaEndpoint): Promise<OllamaProbe
     vision: boolean;
   }>;
   for (const name of names) {
-    const { capabilities, modelInfo } = await showModel(endpoint, name);
+    const { capabilities, modelInfo, parameters } = await showModel(endpoint, name);
     if (!capabilities.has("completion")) continue;
-    const contextLimit = findContextLimit(modelInfo);
+    // A window Ollama does not name is still the one each request asks it to
+    // load, so it is reported too: the planner and the meter otherwise plan
+    // against their own far larger estimate.
+    const trainedContextWindow = findTrainedContextWindow(modelInfo);
+    const contextLimit =
+      ollamaContextWindow(trainedContextWindow, parameters) ?? OLLAMA_UNKNOWN_CONTEXT_WINDOW;
     const inputModalities: ProviderInputModality[] = capabilities.has("vision")
       ? ["text", "image"]
       : ["text"];
@@ -217,7 +245,9 @@ export async function probeOllama(endpoint: OllamaEndpoint): Promise<OllamaProbe
         displayName: name,
         source: "discovered",
         verification: "verified",
-        ...(contextLimit === undefined ? {} : { contextLimit }),
+        contextLimit,
+        // The ceiling on a window a person sets: Ollama never loads more.
+        ...(trainedContextWindow === undefined ? {} : { trainedContextWindow }),
         reasoning: capabilities.has("thinking") ? "supported" : "unsupported",
         inputModalities,
         // Ollama reports an explicit capability list per model, so both the
@@ -273,7 +303,11 @@ export async function ollamaModelTakesTools(
 async function showModel(
   endpoint: OllamaEndpoint,
   name: string,
-): Promise<{ readonly capabilities: ReadonlySet<string>; readonly modelInfo: unknown }> {
+): Promise<{
+  readonly capabilities: ReadonlySet<string>;
+  readonly modelInfo: unknown;
+  readonly parameters: unknown;
+}> {
   const detail = record(await requestJson(endpoint, "show", "POST", { model: name }));
   const capabilityValues = detail?.capabilities;
   if (
@@ -282,12 +316,57 @@ async function showModel(
   ) {
     throw failure("protocol", "Ollama returned invalid model capabilities.");
   }
-  return { capabilities: new Set(capabilityValues as string[]), modelInfo: detail?.model_info };
+  return {
+    capabilities: new Set(capabilityValues as string[]),
+    modelInfo: detail?.model_info,
+    parameters: detail?.parameters,
+  };
 }
 
-function findContextLimit(value: unknown): number | undefined {
+/**
+ * The window Octant loads a model with, from its trained window and its
+ * `/api/show` parameters: the model's own `num_ctx` parameter when it sets
+ * one, else its trained window held to `OLLAMA_CONTEXT_WINDOW_CAP`. Ollama
+ * itself never loads more than the trained window, so a `num_ctx` above it
+ * is read as the trained window. Undefined when Ollama names neither.
+ */
+function ollamaContextWindow(trained: number | undefined, parameters: unknown): number | undefined {
+  const configured = findConfiguredContextWindow(parameters);
+  if (configured !== undefined) {
+    return trained === undefined ? configured : Math.min(configured, trained);
+  }
+  return trained === undefined ? undefined : Math.min(trained, OLLAMA_CONTEXT_WINDOW_CAP);
+}
+
+/**
+ * The `num_ctx` line of a model's Modelfile parameters, which `/api/show`
+ * returns as text such as `num_ctx    8192`. A malformed or repeated value
+ * names nothing.
+ */
+function findConfiguredContextWindow(value: unknown): number | undefined {
+  if (typeof value !== "string") return undefined;
+  const windows = value.split("\n").flatMap((line) => {
+    const [key, setting, ...rest] = line.trim().split(/\s+/);
+    if (key !== "num_ctx" || setting === undefined || rest.length > 0) return [];
+    const window = /^\d+$/.test(setting) ? positiveInteger(Number(setting)) : undefined;
+    return window === undefined ? [] : [window];
+  });
+  return windows.length === 1 ? windows[0] : undefined;
+}
+
+/**
+ * The `<architecture>.context_length` of a model's `model_info`, the key
+ * Ollama itself reads the trained window from. Without an architecture, the
+ * one `.context_length` key the detail carries; several name nothing.
+ */
+function findTrainedContextWindow(value: unknown): number | undefined {
   const info = record(value);
   if (info === undefined) return undefined;
+  const architecture = boundedString(info["general.architecture"], 64);
+  if (architecture !== undefined) {
+    const limit = positiveInteger(info[`${architecture}.context_length`]);
+    if (limit !== undefined) return limit;
+  }
   const limits = Object.entries(info)
     .filter(([key]) => key.endsWith(".context_length"))
     .flatMap(([, candidate]) => {
@@ -424,6 +503,7 @@ export function buildOllamaChatBody(input: OllamaChatInput): Record<string, unkn
     ],
     stream: true,
     ...(tools === undefined ? {} : { tools }),
+    ...(input.contextWindow === undefined ? {} : { options: { num_ctx: input.contextWindow } }),
   };
 }
 

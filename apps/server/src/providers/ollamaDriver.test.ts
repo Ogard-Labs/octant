@@ -10,7 +10,11 @@ import { describe, expect, it, vi } from "vitest";
 import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { MemoryNativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
 import { makeOllamaDriver } from "./ollamaDriver";
-import type { OllamaFetch } from "./ollamaEndpoint";
+import {
+  OLLAMA_CONTEXT_WINDOW_CAP,
+  OLLAMA_UNKNOWN_CONTEXT_WINDOW,
+  type OllamaFetch,
+} from "./ollamaEndpoint";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 const instanceId = decodeProviderInstanceId("90000000-0000-4000-8000-000000000711");
@@ -30,6 +34,12 @@ function ndjson(values: readonly unknown[]) {
     status: 200,
     headers: { "content-type": "application/x-ndjson" },
   });
+}
+
+function record(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" && value !== null
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
 }
 
 function reply(message: Record<string, unknown>) {
@@ -118,7 +128,7 @@ describe("Ollama provider driver", () => {
       readiness: "ready",
       processState: "stopped",
       detectedVersion: "0.31.2",
-      models: [{ id: modelId, reasoning: "supported", contextLimit: 131072 }],
+      models: [{ id: modelId, reasoning: "supported", contextLimit: 32768 }],
       capabilities: {
         streaming: "unavailable",
         reasoning: "unavailable",
@@ -306,6 +316,99 @@ describe("Ollama provider driver", () => {
     await Effect.runPromise(Scope.close(scope, Exit.void));
   });
 
+  it("measures each request against the window it asks Ollama to load", async () => {
+    /**
+     * One turn with a prompt of the given length against a model whose
+     * `/api/show` detail is given; the window a person set, when one is.
+     */
+    async function turn(
+      detail: Readonly<Record<string, unknown>>,
+      promptLength: number,
+      contextWindowOverride?: number,
+    ) {
+      const bodies: Array<Readonly<Record<string, unknown>>> = [];
+      const fetch = vi.fn<OllamaFetch>(async (input, init) => {
+        const url = String(input);
+        if (url.endsWith("/version")) return json({ version: "0.31.2" });
+        if (url.endsWith("/tags")) return json({ models: [{ model: "qwen3:latest" }] });
+        if (url.endsWith("/show")) return json({ capabilities: ["completion"], ...detail });
+        bodies.push(JSON.parse(String(init?.body)));
+        return reply({ content: "done" });
+      });
+      const fixture = driver(fetch);
+      const probed = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+      if (contextWindowOverride !== undefined) {
+        fixture.registry.setObservedState({
+          ...probed,
+          models: probed.models.map((model) => ({ ...model, contextWindowOverride })),
+        });
+        // Every turn probes first; the person's window outlives that probe.
+        await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+      }
+      const scope = await Effect.runPromise(Scope.make());
+      const connection = await Effect.runPromise(
+        fixture.driver
+          .acquire({ instanceId, projectRoot: root, mode: "chat" })
+          .pipe(Effect.provideService(Scope.Scope, scope)),
+      );
+      await Effect.runPromise(
+        connection.start({ sessionId, modelId, executionPolicy: "approval-gated" }),
+      );
+      const events = terminal(Stream.unwrapScoped(connection.subscribe));
+      const sent = await Effect.runPromise(
+        Effect.either(
+          connection.send({
+            sessionId,
+            prompt: "x".repeat(promptLength),
+            attachments: [],
+            tools: [],
+          }),
+        ),
+      );
+      const outcome = sent._tag === "Left" ? sent.left.message : (await events).at(-1)?.kind;
+      await Effect.runPromise(connection.stop(sessionId));
+      await Effect.runPromise(Scope.close(scope, Exit.void));
+      return { outcome, numCtx: bodies.map((body) => record(body.options)?.num_ctx) };
+    }
+    const trained = { model_info: { "qwen3.context_length": 131072 } };
+    // About four characters a token, so these prompts sit either side of each window.
+    const tokens = (count: number) => count * 4;
+
+    // A trained 128K window is loaded and measured at the cap, not at 128K.
+    expect(await turn(trained, tokens(OLLAMA_CONTEXT_WINDOW_CAP - 1024))).toEqual({
+      outcome: "completed",
+      numCtx: [OLLAMA_CONTEXT_WINDOW_CAP],
+    });
+    expect(await turn(trained, tokens(OLLAMA_CONTEXT_WINDOW_CAP + 1024))).toEqual({
+      outcome: "The provider request exceeded the configured size limit.",
+      numCtx: [],
+    });
+    // A window Ollama does not report is assumed small rather than guessed large.
+    expect(await turn({}, tokens(OLLAMA_UNKNOWN_CONTEXT_WINDOW - 512))).toEqual({
+      outcome: "completed",
+      numCtx: [OLLAMA_UNKNOWN_CONTEXT_WINDOW],
+    });
+    expect(await turn({}, tokens(OLLAMA_UNKNOWN_CONTEXT_WINDOW + 512))).toEqual({
+      outcome: "The provider request exceeded the configured size limit.",
+      numCtx: [],
+    });
+    // A person's own window for the model is both the measure and the request.
+    expect(await turn(trained, tokens(65536 - 1024), 65536)).toEqual({
+      outcome: "completed",
+      numCtx: [65536],
+    });
+    // Ollama loads no more than the trained window, so a larger setting is
+    // held to it rather than measured against room the model never has.
+    expect(await turn(trained, tokens(131072 - 1024), 262144)).toEqual({
+      outcome: "completed",
+      numCtx: [131072],
+    });
+    expect(await turn(trained, tokens(131072 + 1024), 262144)).toEqual({
+      outcome: "The provider request exceeded the configured size limit.",
+      numCtx: [],
+    });
+  });
+
   it("never declares usage unsupported because one response carried no counts", async () => {
     const replies = [
       { prompt_eval_count: 4, eval_count: 2 },
@@ -430,6 +533,8 @@ describe("Ollama Verify tools", () => {
     expect(bodies[0]).toMatchObject({
       model: "qwen3:latest",
       tools: [{ type: "function", function: { name: "octant_capability_echo" } }],
+      // Turns ask for the same window, so the check does not reload the model.
+      options: { num_ctx: OLLAMA_UNKNOWN_CONTEXT_WINDOW },
     });
   });
 
@@ -441,8 +546,8 @@ describe("Ollama Verify tools", () => {
     );
     expect(result.appManagedTools).toBe("unsupported");
 
-    const probed = await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
-    fixture.registry.setObservedState({ ...probed, verifiedToolModelIds: [modelId] });
+    await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
+    fixture.registry.setVerifiedToolModels(instanceId, [modelId]);
     await Effect.runPromise(Effect.scoped(fixture.driver.probe({ instanceId })));
     expect(fixture.registry.observedState(instanceId)?.verifiedToolModelIds).toEqual([modelId]);
   });

@@ -38,7 +38,14 @@ export const decodeInitializeResult = decode(InitializeResult);
 const Account = Schema.Union(
   Schema.Struct({ type: Schema.Literal("apiKey") }),
   Schema.Struct({ type: Schema.Literal("chatgpt") }),
-  Schema.Struct({ type: Schema.Literal("amazonBedrock") }),
+  // Codex reports `usesCodexManagedCredentials` when the Bedrock key or access
+  // keys it signs in with are the ones stored in this account's own home
+  // (`account_state` in codex-rs `model-provider/src/amazon_bedrock/mod.rs`,
+  // rust-v0.162.1). Releases before that send no field, which reads as false.
+  Schema.Struct({
+    type: Schema.Literal("amazonBedrock"),
+    usesCodexManagedCredentials: Schema.optional(Schema.Boolean),
+  }),
 );
 
 const AccountReadResult = Schema.Struct({
@@ -131,13 +138,20 @@ export const decodeSkillsListResult = decode(SkillsListResult);
 
 /**
  * Of the effective config only the configured MCP server names are read: a
- * Chat thread switches each one off by name.
+ * Chat thread switches each one off by name. The selected model provider and
+ * the provider tables are read too, so a Bedrock sign-in can be traced to its
+ * source; they stay unknown values that `codexBedrockSignIn` inspects.
  */
 const ConfigReadResult = Schema.Struct({
   config: Schema.Struct({
     mcp_servers: Schema.optionalWith(Schema.Record({ key: Schema.String, value: Schema.Unknown }), {
       nullable: true,
     }),
+    model_provider: Schema.optionalWith(Schema.String, { nullable: true }),
+    model_providers: Schema.optionalWith(
+      Schema.Record({ key: Schema.String, value: Schema.Unknown }),
+      { nullable: true },
+    ),
   }),
 });
 export type CodexConfigReadResult = typeof ConfigReadResult.Type;

@@ -8,7 +8,7 @@ import {
 } from "@octant/contracts";
 import { Effect } from "effect";
 import { type OpenAiCompatibleEndpoint, requestGeneration } from "./openAiCompatibleEndpoint";
-import { contextOverflowFromBody } from "./endpointRetry";
+import { contextOverflowFromBody } from "./contextOverflowRefusal";
 import { decodeSse } from "./openAiCompatibleSse";
 import {
   responsesToolImages,

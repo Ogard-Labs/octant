@@ -21,7 +21,7 @@ import { usageFromRuntimeEvent } from "../providers/providerContextFacts";
 import { OCTANT_LOCAL_ACTOR_ID } from "../shellService";
 import { buildUsageDashboard } from "../usageDashboardModel";
 import { seedCodeForkHarnessSession } from "./nativeHarnessFork";
-import { createCodeJournalLookup } from "./nativeHarnessJournalLookup";
+import { createThreadJournalLookup } from "./nativeHarnessJournalLookup";
 import { createNativeHarnessConnection, fitRequest } from "./nativeHarnessLoop";
 import {
   JournalNativeHarnessTranscriptStore,
@@ -577,6 +577,30 @@ describe("native harness loop", () => {
     ]);
   });
 
+  it("journals no conversation and offers no resume cursor for a session nothing will resume", async () => {
+    const transcripts = new MemoryNativeHarnessTranscriptStore();
+    const { transport, requests } = scriptedTransport([{ text: "the summary", toolCalls: [] }]);
+    const { handle, events } = await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const connection = yield* connect(transport, transcripts);
+          const handle = yield* connection.start({
+            sessionId,
+            modelId,
+            executionPolicy: "approval-gated",
+            singleUse: true,
+          });
+          const events = yield* sendAndCollect(connection, "Summarize the thread.", isTerminal);
+          return { handle, events };
+        }),
+      ),
+    );
+    expect(events.at(-1)?.kind).toBe("completed");
+    expect(requests[0]?.history.map((message) => message.text)).toEqual(["Summarize the thread."]);
+    expect(handle.resumeCursor).toBeUndefined();
+    expect(transcripts.load(sessionId)).toBeUndefined();
+  });
+
   it("sends instructions as the system prompt and names the Octant tools on offer", async () => {
     const { transport, requests } = scriptedTransport([{ text: "ok", toolCalls: [] }]);
     await Effect.runPromise(
@@ -881,7 +905,9 @@ describe("fitting a request to the endpoint", () => {
       "second question",
     ]);
     expect(note).toContain("Messages 0 to 1 are kept in the journal");
-    const lookup = createCodeJournalLookup({
+    expect(note).toContain("the files on disk");
+    const lookup = createThreadJournalLookup({
+      mode: "code",
       transcripts,
       latestSession: () => ({
         providerInstanceId: instanceId,
@@ -898,6 +924,71 @@ describe("fitting a request to the endpoint", () => {
       ],
     });
   });
+
+  it.each(["chat", "work"] as const)(
+    "names the journaled messages a cut left out of a continued %s session, and journal-lookup reads one back",
+    async (mode) => {
+      const transcripts = new MemoryNativeHarnessTranscriptStore();
+      const { transport, requests } = scriptedTransport(
+        [
+          { text: "first answer", toolCalls: [] },
+          { text: "second answer", toolCalls: [] },
+        ],
+        (request) => request.tools.length > 0 && JSON.stringify(request.history).length <= 700,
+      );
+      const firstPrompt = `first question ${"a".repeat(620)}`;
+      const cursor = { driverKind: "openai-compatible", value: String(sessionId) } as const;
+      // A Chat or Work follow-up acquires a fresh connection and resumes the
+      // session its previous turn ran on, as the turn runners do.
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(transport, transcripts, undefined, mode);
+            yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
+            yield* sendAndCollect(connection, firstPrompt, isTerminal, [], withLookup);
+          }),
+        ),
+      );
+      await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const connection = yield* connect(transport, transcripts, undefined, mode);
+            yield* connection.resume({
+              sessionId,
+              resumeCursor: cursor,
+              executionPolicy: "approval-gated",
+            });
+            yield* sendAndCollect(connection, "second question", isTerminal, [], withLookup);
+          }),
+        ),
+      );
+
+      const cut = requests[1]?.history ?? [];
+      expect(cut.map((message) => message.text).slice(1)).toEqual(["second question"]);
+      expect(cut[0]?.text).toContain("Messages 0 to 1 are kept in the journal");
+      // A Chat thread has no folder, so its note names only the task list and the lookup.
+      if (mode === "chat") {
+        expect(cut[0]?.text).toContain("Your task list still reflects that work.");
+        expect(cut[0]?.text).not.toContain("disk");
+      } else {
+        expect(cut[0]?.text).toContain("the files on disk");
+      }
+      const lookup = createThreadJournalLookup({
+        mode,
+        transcripts,
+        latestSession: () => ({ providerInstanceId: instanceId, resumeCursor: cursor }),
+        providerInstanceId: instanceId,
+        secrets: [],
+      });
+      expect(lookup({ from: 0, count: 2 })).toMatchObject({
+        status: "found",
+        messages: [
+          { number: 0, role: "user", text: firstPrompt },
+          { number: 1, role: "assistant", text: "first answer" },
+        ],
+      });
+    },
+  );
 
   it("names no message numbers when the lead is not offered journal-lookup", () => {
     const fitted = fitRequest(fitsUnder(260), base, { journalNumberOf: () => 4 });
@@ -2247,7 +2338,8 @@ describe("compacting an Octant Harness session", () => {
       const cut = thirdTurnSteps[1]?.history ?? [];
       expect(cut[0]?.text).toContain("Messages 0 to 5 are kept in the journal");
       expect(cut[1]?.text).toBe("third");
-      const lookup = createCodeJournalLookup({
+      const lookup = createThreadJournalLookup({
+        mode: "code",
         transcripts: run.transcripts,
         latestSession: () => ({
           providerInstanceId: instanceId,

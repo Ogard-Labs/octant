@@ -1,18 +1,22 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import type {
-  ChatThread,
-  CodeThread,
-  ProviderExecutionPolicy,
-  ToolActionAuthority,
-  WorkThread,
+import {
+  decodeProviderInstanceId,
+  decodeProviderModelId,
+  decodeProviderSessionId,
+  type ChatThread,
+  type CodeThread,
+  type ProviderExecutionPolicy,
+  type ToolActionAuthority,
+  type WorkThread,
 } from "@octant/contracts";
 import { childAgentTools } from "../chat/sideChatDelegation";
 import { combineAppManagedToolSets, type AppManagedToolSet } from "../providers/appManagedToolSet";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { createNativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { createNativeHarnessComposition } from "./nativeHarnessComposition";
+import { MemoryNativeHarnessTranscriptStore } from "./nativeHarnessTranscriptStore";
 import { searxngHarnessWebSearch } from "./nativeHarnessWebSearch";
 
 const authority = {
@@ -487,11 +491,15 @@ describe("native harness composition", () => {
       resolveWebSearch: () => (async () => undefined) as never,
     };
 
+    const noJournal = {
+      transcripts: { load: () => undefined },
+      latestChatSession: () => undefined,
+      latestWorkSession: () => undefined,
+      latestCodeSession: () => undefined,
+    };
+
     it("offers the full conditional matrix per mode when every production port is supplied", () => {
-      const { composition } = harness(false, {
-        ...productionPorts,
-        codeJournal: { transcripts: { load: () => undefined }, latestSession: () => undefined },
-      });
+      const { composition } = harness(false, { ...productionPorts, journal: noJournal });
       const chat = names(composition.forChat({ thread: chatThread, windowId: "window-1" })!);
       const work = names(
         composition.forWork({
@@ -509,24 +517,22 @@ describe("native harness composition", () => {
         })!,
       );
       // Chat's web tools wait on its research grant, so they are absent here by design.
+      // Every mode continues one harness conversation across turns, so every lead can
+      // read a cut exchange back with journal-lookup.
       const lead = [
         "todo-write",
         "context-remaining",
+        "journal-lookup",
         "second-opinion",
         "delegate",
         "ask-user",
         "goal",
       ];
       const web = ["web-fetch", "web-search"];
-      // Only Code keeps a durable harness conversation to read back; Chat and
-      // Work are not offered journal-lookup until theirs is.
-      const codeLead = lead.flatMap((name) =>
-        name === "context-remaining" ? [name, "journal-lookup"] : [name],
-      );
       expect({ chat, work, code }).toEqual({
         chat: lead,
         work: ["read", "grep", "glob", "edit", "write", ...web, ...lead],
-        code: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...codeLead, "goal-check"],
+        code: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...lead, "goal-check"],
       });
     });
 
@@ -629,8 +635,8 @@ describe("native harness composition", () => {
       ).toMatchObject({ isError: true, result: { error: "plan-mode-denied" } });
     });
 
-    it("offers a Side Chat only the advice tools and the web, never a task list, goal, question or delegation", () => {
-      const { composition } = harness(false, productionPorts);
+    it("offers a Side Chat only the advice tools and the web, never a task list, goal, question, delegation or journal read", () => {
+      const { composition } = harness(false, { ...productionPorts, journal: noJournal });
       const sideChat = composition.forChat({
         thread: { ...chatThread, researchEnabled: true } as ChatThread,
         windowId: "window-1",
@@ -685,6 +691,7 @@ describe("native harness composition", () => {
         "resolveWebSearch:",
         "webFetch:",
         "contextHarness",
+        "journal:",
       ]) {
         expect(block, port).toContain(port);
       }
@@ -728,6 +735,78 @@ describe("native harness composition", () => {
           result: { answer: "advice on Is this plan sound?" },
         });
         expect(asked).toEqual([expect.objectContaining({ mode })]);
+      },
+    );
+
+    it.each(["chat", "work", "code"] as const)(
+      "reads back only the conversation the %s thread's own journal names, and never another mode's",
+      async (mode) => {
+        const transcripts = new MemoryNativeHarnessTranscriptStore();
+        const own = decodeProviderSessionId("00000000-0000-4000-8000-000000000a21");
+        const otherMode = decodeProviderSessionId("00000000-0000-4000-8000-000000000a22");
+        const bind = (bound: "chat" | "work" | "code") => ({
+          instanceId: decodeProviderInstanceId(providerInstanceId),
+          modelId: decodeProviderModelId("harness-model"),
+          projectRoot: "/nonexistent",
+          mode: bound,
+        });
+        transcripts.open(own, bind(mode));
+        transcripts.append(own, { role: "user", text: `the ${mode} thread's first question` });
+        transcripts.open(otherMode, bind(mode === "chat" ? "work" : "chat"));
+        transcripts.append(otherMode, { role: "user", text: "another mode's question" });
+        let current = own;
+        const asked: Array<string> = [];
+        const session = (threadId: string) => {
+          asked.push(threadId);
+          return {
+            providerInstanceId: decodeProviderInstanceId(providerInstanceId),
+            resumeCursor: { driverKind: "openai-compatible", value: String(current) },
+          };
+        };
+        const { composition } = harness(false, {
+          journal: {
+            transcripts,
+            latestChatSession: session,
+            latestWorkSession: session,
+            latestCodeSession: session,
+          },
+        });
+        const tools =
+          mode === "chat"
+            ? composition.forChat({ thread: chatThread, windowId: "window-1" })
+            : mode === "work"
+              ? composition.forWork({
+                  thread: workThread,
+                  projectRoot: "/nonexistent",
+                  windowId: "window-1",
+                })
+              : composition.forCode({
+                  thread: codeThread,
+                  checkoutRoot: "/nonexistent",
+                  windowId: "window-1",
+                  secrets: [],
+                });
+        const lookUp = () =>
+          tools?.execute({
+            name: "journal-lookup",
+            inputJson: JSON.stringify({ from: 0 }),
+            signal: new AbortController().signal,
+          });
+
+        expect(await lookUp()).toMatchObject({
+          isError: false,
+          result: {
+            total: 1,
+            messages: [{ number: 0, text: `the ${mode} thread's first question` }],
+          },
+        });
+        const thread = { chat: chatThread, work: workThread, code: codeThread }[mode];
+        expect(asked).toEqual([String(thread.id)]);
+        current = otherMode;
+        expect(await lookUp()).toMatchObject({
+          isError: true,
+          result: { error: "journal-unavailable" },
+        });
       },
     );
 

@@ -8,7 +8,7 @@ import {
   learnContextWindow,
   resolveModelInputModalities,
 } from "@octant/domain/model-context-window";
-import { contextWindowFromRefusal, isContextOverflowFailure } from "./endpointRetry";
+import { contextWindowFromRefusal, isContextOverflowFailure } from "./contextOverflowRefusal";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 /**

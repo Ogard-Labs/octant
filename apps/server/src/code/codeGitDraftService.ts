@@ -108,6 +108,7 @@ function runDraft(
       // Plan keeps the drafting session read-only at the provider as well as
       // in this prompt, so a model that decides to act cannot.
       executionPolicy: "plan",
+      singleUse: true,
     });
     const events = yield* subscribeThenSend({
       connection,

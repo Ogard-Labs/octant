@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 import type { ModelContextWindowMemory } from "./modelContextWindowFacts";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeOpenAiCompatibleDriver } from "./openAiCompatibleDriver";
 import { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
@@ -67,7 +68,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           yield* connection.stop(sessionId);
         }),
@@ -111,7 +116,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
 
           const firstEvents = yield* Effect.fork(
@@ -164,7 +173,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     const firstEvents = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const first = yield* Effect.fork(
             Stream.runCollect(
@@ -200,7 +213,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     const [firstEvents, secondEvents] = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           yield* connection.start({
             sessionId: otherSessionId,
@@ -286,7 +303,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const rejected = yield* Effect.exit(
             connection.send({
@@ -330,7 +351,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     const events = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const collected = yield* Effect.fork(
             collectSessionEvents(yield* connection.subscribe, sessionId),
@@ -383,7 +408,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const first = yield* Effect.fork(
             collectSessionEvents(yield* connection.subscribe, sessionId),
@@ -457,7 +486,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* Effect.fork(
             collectSessionEvents(yield* connection.subscribe, sessionId),
@@ -477,7 +510,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     const exit = await Effect.runPromiseExit(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           return yield* connection.resume({
             sessionId,
             resumeCursor: { driverKind: "openai-compatible", value: "never-started" },
@@ -498,7 +535,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           for (const operation of [
             connection.answerApproval({ sessionId, requestId: "request", approved: false }),
@@ -533,7 +574,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     const events = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const collected = yield* Effect.fork(
             collectSessionEvents(yield* connection.subscribe, sessionId),
@@ -582,7 +627,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     const events = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const collected = yield* Effect.fork(
             collectSessionEvents(yield* connection.subscribe, sessionId),
@@ -616,7 +665,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const events = yield* Effect.fork(
             collectSessionEvents(yield* connection.subscribe, sessionId),
@@ -689,7 +742,11 @@ describe("makeOpenAiCompatibleDriver", () => {
     const events = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const first = yield* Effect.fork(
             collectSessionEvents(yield* connection.subscribe, sessionId),
@@ -879,7 +936,11 @@ function runTurns(
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+        const connection = yield* driver.acquire({
+          instanceId,
+          projectRoot: "/tmp/project",
+          mode: "chat",
+        });
         yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
         const outcomes: Array<string | undefined> = [];
         for (const prompt of prompts) {
@@ -911,14 +972,15 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
     readonly protocol?: OpenAiCompatibleProviderConfiguration["protocol"];
     readonly manualModelIds?: ReadonlyArray<ProviderModelId>;
   }) {
-    return makeOpenAiCompatibleDriver({
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    const driver = makeOpenAiCompatibleDriver({
       instanceId,
       configuration: {
         ...planConfiguration,
         ...(options.protocol === undefined ? {} : { protocol: options.protocol }),
         ...(options.manualModelIds === undefined ? {} : { manualModelIds: options.manualModelIds }),
       },
-      runtimeRegistry: new ProviderRuntimeRegistry(),
+      runtimeRegistry,
       credentialResolver: {
         has: async () => true,
         resolve: async () =>
@@ -938,6 +1000,11 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
         }),
       },
       fetch: options.fetch,
+      clock: () => "2026-10-06T18:00:00.000Z",
+    });
+    return runOnNativeHarness(driver, {
+      instanceId,
+      runtimeRegistry,
       clock: () => "2026-10-06T18:00:00.000Z",
     });
   }
@@ -1228,7 +1295,11 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
         Effect.gen(function* () {
           const probe = yield* driver.probe({ instanceId });
           expect(probe.models.map((model) => model.id)).toEqual([modelId]);
-          const connection = yield* driver.acquire({ instanceId, projectRoot: "/tmp/project" });
+          const connection = yield* driver.acquire({
+            instanceId,
+            projectRoot: "/tmp/project",
+            mode: "chat",
+          });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const collected = yield* Effect.fork(
             collectSessionEvents(yield* connection.subscribe, sessionId),
@@ -1256,6 +1327,7 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
           const connection = yield* driver.acquire({
             instanceId,
             projectRoot: "/tmp/project",
+            mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const collected = yield* Effect.fork(
@@ -1289,6 +1361,7 @@ describe("makeOpenAiCompatibleDriver under the ChatGPT plan profile", () => {
           const connection = yield* driver.acquire({
             instanceId,
             projectRoot: "/tmp/project",
+            mode: "chat",
           });
           yield* connection.start({ sessionId, modelId, executionPolicy: "approval-gated" });
           const collected = yield* Effect.fork(
@@ -1339,17 +1412,21 @@ function makeDriver(options: {
   const runtimeRegistry = options.runtimeRegistry ?? new ProviderRuntimeRegistry();
   const driver = makeOpenAiCompatibleDriver({
     instanceId,
-    ...(options.contextWindows === undefined
-      ? {}
-      : { harness: { contextWindows: options.contextWindows } }),
     configuration: options.configuration ?? configuration,
     credentialResolver: options.credentialResolver ?? resolver(),
     fetch: options.fetch,
     runtimeRegistry,
     clock: () => "2026-07-15T12:00:00.000Z",
+  });
+  return runOnNativeHarness(driver, {
+    instanceId,
+    runtimeRegistry,
+    ...(options.contextWindows === undefined
+      ? {}
+      : { harness: { contextWindows: options.contextWindows } }),
+    clock: () => "2026-07-15T12:00:00.000Z",
     correlationId: () => "80000000-0000-4000-8000-000000000503",
   });
-  return driver;
 }
 
 function resolver(): ProviderCredentialResolver {

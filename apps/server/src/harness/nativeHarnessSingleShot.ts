@@ -60,6 +60,7 @@ export async function completeOnceOutcome(input: OneShotInput): Promise<OneShotO
       sessionId: input.sessionId,
       modelId: input.modelId,
       executionPolicy: "approval-gated",
+      singleUse: true,
     });
     let text = "";
     let completed = false;

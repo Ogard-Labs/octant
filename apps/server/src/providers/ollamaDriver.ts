@@ -14,13 +14,14 @@ import type {
   HarnessEndpointRequest,
   HarnessEndpointTransport,
 } from "@octant/provider-sdk/harness-endpoint";
-import { resolveModelContextWindow } from "@octant/domain/model-context-window";
+import { effectiveContextWindowOverride } from "@octant/domain/model-context-window";
 import { Effect } from "effect";
 import {
   buildOllamaChatBody,
   makeOllamaEndpoint,
   ollamaChatInputFits,
   ollamaModelTakesTools,
+  OLLAMA_UNKNOWN_CONTEXT_WINDOW,
   probeOllama,
   sendOllamaChat,
   type OllamaChatResult,
@@ -33,13 +34,19 @@ import {
   isCapabilityEchoToolCall,
   OCTANT_CAPABILITY_ECHO_TOOL_NAME,
 } from "./openAiToolEncoding";
+import { carryModelContextWindowFacts } from "./modelContextWindowFacts";
 import { outputStopReason } from "./outputStopReason";
 import type { ProviderRuntimeRegistry } from "./providerRuntimeRegistry";
 
 export interface OllamaDriverOptions {
   readonly instanceId: ProviderInstanceId;
   readonly configuration: OllamaProviderConfiguration;
-  readonly runtimeRegistry: ProviderRuntimeRegistry;
+  /**
+   * What the driver reads and reports about its instance. The Verify tools
+   * record is the host's, so a driver behind the endpoint port holds no way to
+   * write it.
+   */
+  readonly runtimeRegistry: Pick<ProviderRuntimeRegistry, "observedState" | "setObservedState">;
   readonly fetch?: OllamaFetch;
   readonly limits?: Partial<OllamaHttpLimits>;
   readonly clock?: () => string;
@@ -82,18 +89,16 @@ export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointD
         try: async () => {
           const observed = await probeOllama(endpoint);
           const observedAt = clock() as UtcTimestamp;
-          // A person's tool verification outlives routine probes, which run
-          // no generating request of their own.
-          const priorVerified =
-            options.runtimeRegistry.observedState(instanceId)?.verifiedToolModelIds;
+          const prior = options.runtimeRegistry.observedState(instanceId);
           const result = decodeProviderProbeResult({
             instanceId,
             readiness: observed.readiness,
             processState: "stopped",
             detectedVersion: observed.version,
-            models: observed.models,
+            // A person's window for a model is the `num_ctx` each request
+            // sends, so it outlives the probe every turn runs first.
+            models: carryModelContextWindowFacts(observed.models, prior?.models),
             capabilities: observed.capabilities,
-            ...(priorVerified === undefined ? {} : { verifiedToolModelIds: priorVerified }),
             ...(observed.models.length === 0
               ? { message: "Ollama is reachable but has no installed models." }
               : {}),
@@ -123,6 +128,9 @@ export function makeOllamaDriver(options: OllamaDriverOptions): HarnessEndpointD
                 modelId: String(modelId),
                 history: [{ role: "user", text: TOOL_CHECK_PROMPT }],
                 tools: [capabilityEchoToolDefinition()],
+                // The window turns use, so the check does not make Ollama
+                // reload the model at another size.
+                contextWindow: requestContextWindow(options, String(modelId)),
               });
               return {
                 instanceId,
@@ -191,6 +199,7 @@ function ollamaTransport(
               system: request.system,
               history: request.history,
               tools: request.tools,
+              contextWindow: requestContextWindow(options, String(request.modelId)),
               signal: stream.signal,
               onEvent: stream.onEvent,
             });
@@ -219,25 +228,41 @@ function ollamaTransport(
   };
 }
 
-/** Whether a request fits the endpoint and the model's reported window, measured as it would be sent. */
+/**
+ * The one window a request to this model is both measured against and sent
+ * with as `num_ctx`. Ollama cuts a prompt longer than the window it loaded
+ * without an error, which can drop the harness's instructions and tools, so
+ * the two must never differ: a person's own window for the model, held to
+ * the trained window Ollama would clamp it to, else the one the probe
+ * settled from Ollama's report, else the small window Octant assumes when
+ * Ollama reports none. The planner and the meter hold the person's window
+ * to the trained one by the same rule.
+ */
+function requestContextWindow(options: OllamaDriverOptions, modelId: string): number {
+  const model = options.runtimeRegistry
+    .observedState(options.instanceId)
+    ?.models.find((candidate) => String(candidate.id) === modelId);
+  if (model === undefined) return OLLAMA_UNKNOWN_CONTEXT_WINDOW;
+  return (
+    effectiveContextWindowOverride(model) ?? model.contextLimit ?? OLLAMA_UNKNOWN_CONTEXT_WINDOW
+  );
+}
+
+/** Whether a request fits the endpoint and the window it is sent with, measured as it would be sent. */
 function requestFits(
   options: OllamaDriverOptions,
   endpoint: OllamaEndpoint,
   request: HarnessEndpointRequest,
 ): boolean {
+  const contextWindow = requestContextWindow(options, String(request.modelId));
   const input = {
     modelId: String(request.modelId),
     system: request.system,
     history: request.history,
     tools: request.tools,
+    contextWindow,
   };
   if (!ollamaChatInputFits(endpoint, input)) return false;
-  const model = options.runtimeRegistry
-    .observedState(options.instanceId)
-    ?.models.find((candidate) => String(candidate.id) === String(request.modelId));
-  const contextLimit =
-    model === undefined ? undefined : resolveModelContextWindow(model)?.contextWindow;
-  if (contextLimit === undefined) return true;
   // Roughly four bytes per token of the body as sent, less its images: Ollama
   // reads an image as a fixed embedding, not as base64 text, and measuring a
   // raw byte array serialized as JSON refused a 300 KB photo against a 128K
@@ -251,7 +276,7 @@ function requestFits(
         },
   );
   const text = JSON.stringify(buildOllamaChatBody({ ...input, history: withoutImages }));
-  return text.length / 4 <= contextLimit;
+  return text.length / 4 <= contextWindow;
 }
 
 /**

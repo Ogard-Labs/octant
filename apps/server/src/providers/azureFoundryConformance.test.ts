@@ -1,15 +1,18 @@
 import {
   decodeProviderInstanceId,
   decodeProviderSessionId,
+  decodeProviderToolDefinition,
   type OpenAiCompatibleProtocol,
   type ProviderModelId,
   type ProviderRuntimeEvent,
 } from "@octant/contracts";
 import { runProviderConformance } from "@octant/provider-sdk/conformance";
 import { runProviderChatConformance } from "@octant/provider-sdk/chat-conformance";
+import { runHarnessEndpointConformance } from "@octant/provider-sdk/harness-endpoint-conformance";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
+import { runOnNativeHarness } from "../harness/nativeHarnessEndpointDriver";
 import { makeAzureFoundryDriver } from "./azureFoundryDriver";
 import {
   recordProviderChatConformanceEvidence,
@@ -27,25 +30,32 @@ describe("Azure AI Foundry provider conformance", () => {
     const runtimeRegistry = new ProviderRuntimeRegistry();
     let released = false;
     const fetch = responsesFixture();
-    const driver = makeAzureFoundryDriver({
-      instanceId,
-      configuration: configuration("responses"),
-      runtimeRegistry,
-      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
-      fetch,
-      onConnectionReleased: () => {
-        released = true;
+    const driver = runOnNativeHarness(
+      makeAzureFoundryDriver({
+        instanceId,
+        configuration: configuration("responses"),
+        runtimeRegistry,
+        credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+        fetch,
+        clock: () => "2026-07-19T12:00:00.000Z",
+      }),
+      {
+        instanceId,
+        runtimeRegistry,
+        onConnectionReleased: () => {
+          released = true;
+        },
+        clock: () => "2026-07-19T12:00:00.000Z",
+        correlationId: () => "80000000-0000-4000-8000-000000000623",
       },
-      clock: () => "2026-07-19T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000623",
-    });
+    );
 
     expect(driver.kind).toBe("azure-foundry");
 
     const evidence = await runProviderConformance({
       driver,
       probeInput: { instanceId },
-      acquireInput: { instanceId, projectRoot: "/tmp/octant-foundry-conformance" },
+      acquireInput: { instanceId, projectRoot: "/tmp/octant-foundry-conformance", mode: "chat" },
       successfulTurn: {
         sessionStart: {
           sessionId: successfulSessionId,
@@ -100,7 +110,7 @@ describe("Azure AI Foundry provider conformance", () => {
     const chatEvidence = await runProviderChatConformance({
       driver,
       probeInput: { instanceId },
-      acquireInput: { instanceId, projectRoot: "/tmp/octant-foundry-conformance" },
+      acquireInput: { instanceId, projectRoot: "/tmp/octant-foundry-conformance", mode: "chat" },
       sessionStart: { sessionId: successfulSessionId, modelId, executionPolicy: "approval-gated" },
       turn: {
         sessionId: successfulSessionId,
@@ -143,7 +153,6 @@ describe("Azure AI Foundry provider conformance", () => {
       credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
       fetch,
       clock: () => "2026-07-19T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000625",
     });
 
     await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
@@ -164,7 +173,6 @@ describe("Azure AI Foundry provider conformance", () => {
       credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
       fetch,
       clock: () => "2026-07-19T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000626",
     });
 
     const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
@@ -191,7 +199,6 @@ describe("Azure AI Foundry provider conformance", () => {
       credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
       fetch,
       clock: () => "2026-07-19T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000626",
     });
 
     const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
@@ -215,7 +222,6 @@ describe("Azure AI Foundry provider conformance", () => {
       credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
       fetch,
       clock: () => "2026-07-19T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000626",
     });
 
     const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
@@ -239,7 +245,6 @@ describe("Azure AI Foundry provider conformance", () => {
       credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
       fetch,
       clock: () => "2026-07-19T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000626",
     });
 
     const probe = await Effect.runPromise(Effect.scoped(driver.probe({ instanceId })));
@@ -257,7 +262,6 @@ describe("Azure AI Foundry provider conformance", () => {
       credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
       fetch,
       clock: () => "2026-07-19T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000626",
     });
 
     const result = await Effect.runPromise(
@@ -279,7 +283,6 @@ describe("Azure AI Foundry provider conformance", () => {
       credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
       fetch,
       clock: () => "2026-07-19T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000626",
     });
 
     const exit = await Effect.runPromiseExit(
@@ -312,7 +315,6 @@ describe("Azure AI Foundry provider conformance", () => {
       credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
       fetch,
       clock: () => "2026-07-19T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000626",
     });
 
     const result = await Effect.runPromise(
@@ -322,27 +324,35 @@ describe("Azure AI Foundry provider conformance", () => {
   });
 
   it("reports the quota buckets a Foundry response disclosed in its headers", async () => {
-    const driver = makeAzureFoundryDriver({
-      instanceId,
-      configuration: configuration("responses"),
-      runtimeRegistry: new ProviderRuntimeRegistry(),
-      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
-      fetch: async (url) =>
-        String(url).endsWith("/models")
-          ? models()
-          : new Response(responsesTextStream("responses answer").body, {
-              headers: {
-                "content-type": "text/event-stream",
-                "x-ratelimit-limit-requests": "120",
-                "x-ratelimit-remaining-requests": "118",
-                "x-ratelimit-reset-requests": "60s",
-                "x-ratelimit-limit-tokens": "20000",
-                "x-ratelimit-remaining-tokens": "19750",
-              },
-            }),
-      clock: () => "2026-07-19T12:00:00.000Z",
-      correlationId: () => "80000000-0000-4000-8000-000000000627",
-    });
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    const driver = runOnNativeHarness(
+      makeAzureFoundryDriver({
+        instanceId,
+        configuration: configuration("responses"),
+        runtimeRegistry,
+        credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+        fetch: async (url) =>
+          String(url).endsWith("/models")
+            ? models()
+            : new Response(responsesTextStream("responses answer").body, {
+                headers: {
+                  "content-type": "text/event-stream",
+                  "x-ratelimit-limit-requests": "120",
+                  "x-ratelimit-remaining-requests": "118",
+                  "x-ratelimit-reset-requests": "60s",
+                  "x-ratelimit-limit-tokens": "20000",
+                  "x-ratelimit-remaining-tokens": "19750",
+                },
+              }),
+        clock: () => "2026-07-19T12:00:00.000Z",
+      }),
+      {
+        instanceId,
+        runtimeRegistry,
+        clock: () => "2026-07-19T12:00:00.000Z",
+        correlationId: () => "80000000-0000-4000-8000-000000000627",
+      },
+    );
 
     const events = await Effect.runPromise(
       Effect.scoped(
@@ -350,6 +360,7 @@ describe("Azure AI Foundry provider conformance", () => {
           const connection = yield* driver.acquire({
             instanceId,
             projectRoot: "/tmp/octant-foundry-conformance",
+            mode: "chat",
           });
           yield* connection.start({
             sessionId: successfulSessionId,
@@ -383,6 +394,46 @@ describe("Azure AI Foundry provider conformance", () => {
     ]);
     expect(events[2]).toMatchObject({ bucket: "requests", limit: 120, remaining: 118 });
     expect(events[3]).toMatchObject({ bucket: "tokens", limit: 20_000, remaining: 19_750 });
+  });
+});
+
+describe("Azure AI Foundry harness endpoint conformance", () => {
+  it("keeps the provider-sdk harness endpoint promises the host's loop relies on", async () => {
+    const endpoint = makeAzureFoundryDriver({
+      instanceId,
+      configuration: configuration("responses"),
+      runtimeRegistry: new ProviderRuntimeRegistry(),
+      credentialResolver: { has: async () => true, resolve: async () => "fixture-secret" },
+      fetch: async (_url, init) =>
+        init?.signal?.aborted === true
+          ? Promise.reject(new DOMException("The request was aborted.", "AbortError"))
+          : responsesTextStream("responses answer"),
+    }).harnessEndpoint;
+
+    await expect(
+      runHarnessEndpointConformance({
+        endpoint,
+        modelId,
+        request: {
+          sessionId: successfulSessionId,
+          modelId,
+          system: undefined,
+          history: [{ role: "user", text: "successful fixture prompt" }],
+          tools: [],
+        },
+        unverifiedToolTurn: {
+          sessionId: successfulSessionId,
+          prompt: "Read the file",
+          attachments: [],
+          tools: [
+            decodeProviderToolDefinition({
+              name: "read_file",
+              inputSchema: { type: "object", properties: {} },
+            }),
+          ],
+        },
+      }),
+    ).resolves.toMatchObject({ cancelledRequestInterrupted: true, releasedSessionRefused: true });
   });
 });
 

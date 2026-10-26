@@ -305,7 +305,7 @@ describe("Ollama harness tool round trip", () => {
   function verify(fixture: ReturnType<typeof toolService>) {
     const observed = fixture.registry.observedState(instanceId);
     if (observed === undefined) throw new Error("The driver was not probed.");
-    fixture.registry.setObservedState({ ...observed, verifiedToolModelIds: [modelId] });
+    fixture.registry.setVerifiedToolModels(instanceId, [modelId]);
   }
 
   it("refuses Octant tools for a model nobody verified, before any request", async () => {
