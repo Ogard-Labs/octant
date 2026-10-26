@@ -2,6 +2,7 @@ import {
   decodeProviderSessionId,
   type NativeHarnessJournalLookupArguments,
   type NativeHarnessTranscriptMessage,
+  type OctantMode,
   type ProviderInstanceId,
   type ProviderResumeCursor,
   type ProviderSessionId,
@@ -145,28 +146,62 @@ function excerptMessage(
   return { message: excerpt, characters };
 }
 
+/** The provider session a thread's running turn uses, as the thread's own journal recorded it. */
+export interface NativeHarnessJournaledSession {
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly resumeCursor?: ProviderResumeCursor | undefined;
+}
+
 /**
- * A Code thread's lookup. The conversation is the one the thread's newest
- * turn ran on, read from the thread's own journal when the call runs, so a
- * call can only ever reach that thread's conversation; one on another
- * provider, mode, or a session the harness did not run refuses.
+ * The session a Chat thread's running attempt uses: the attempt created last.
+ * That is not always the last turn's: regenerating an earlier turn appends its
+ * attempt to that turn after the tail ran, on a session of its own.
  */
-export function createCodeJournalLookup(input: {
-  readonly transcripts: Pick<NativeHarnessTranscriptStore, "load">;
-  readonly latestSession: () =>
-    | {
-        readonly providerInstanceId: ProviderInstanceId;
-        readonly resumeCursor?: ProviderResumeCursor | undefined;
+export function newestChatAttemptSession(
+  turns: ReadonlyArray<{
+    readonly attempts: ReadonlyArray<
+      NativeHarnessJournaledSession & { readonly createdAt: string }
+    >;
+  }>,
+): NativeHarnessJournaledSession | undefined {
+  let newest: (NativeHarnessJournaledSession & { readonly createdAt: string }) | undefined;
+  for (const turn of turns) {
+    for (const attempt of turn.attempts) {
+      if (newest === undefined || Date.parse(attempt.createdAt) >= Date.parse(newest.createdAt)) {
+        newest = attempt;
       }
-    | undefined;
+    }
+  }
+  return newest === undefined
+    ? undefined
+    : {
+        providerInstanceId: newest.providerInstanceId,
+        ...(newest.resumeCursor === undefined ? {} : { resumeCursor: newest.resumeCursor }),
+      };
+}
+
+/**
+ * A thread's lookup. The conversation is the one the thread's running turn
+ * uses, read from the thread's own journal when the call runs (a Chat
+ * thread's attempts, a Work thread's turns, a Code thread's
+ * `provider-session-ready`), so a call can only ever reach that thread's
+ * conversation; one on another provider, mode, or a session the harness did
+ * not run refuses. A session the thread rebuilt is a new conversation, so an
+ * earlier one it replaced is not read.
+ */
+export function createThreadJournalLookup(input: {
+  readonly mode: OctantMode;
+  readonly transcripts: Pick<NativeHarnessTranscriptStore, "load">;
+  readonly latestSession: () => NativeHarnessJournaledSession | undefined;
   readonly providerInstanceId: ProviderInstanceId;
   readonly secrets: ReadonlyArray<string>;
 }): (args: NativeHarnessJournalLookupArguments) => NativeHarnessJournalLookup {
   const unavailable: NativeHarnessJournalLookup = {
     status: "refused",
     reason: "journal-unavailable",
-    message:
-      "This thread has no journaled harness conversation to read back. Continue from your task list and the files on disk.",
+    // A Chat lead has no folder, so pointing it at files on disk would send it
+    // looking for something it cannot reach.
+    message: `This thread has no journaled harness conversation to read back. Continue from your task list${input.mode === "chat" ? "" : " and the files on disk"}.`,
   };
   return (args) => {
     const session = input.latestSession();
@@ -188,7 +223,7 @@ export function createCodeJournalLookup(input: {
     const transcript = input.transcripts.load(transcriptId);
     if (
       transcript === undefined ||
-      transcript.binding.mode !== "code" ||
+      transcript.binding.mode !== input.mode ||
       String(transcript.binding.instanceId) !== String(input.providerInstanceId)
     ) {
       return unavailable;

@@ -173,7 +173,13 @@ it instead of imitating it.
   reports no usage rather than waiting for a figure that will not come.
 - **Ollama** runs Octant Harness against the Ollama service on this computer:
   Octant tools reach only models you verified, and it reports no file changes
-  or approvals of its own.
+  or approvals of its own. Octant asks Ollama for each model's window
+  explicitly, so a long request is shortened or refused rather than cut off
+  by Ollama without a word: the `num_ctx` in the model's Modelfile when it
+  sets one, else the model's own window up to 32,768 tokens (a larger window
+  costs memory whether or not the conversation uses it), else 4,096 tokens
+  when Ollama reports no window. To give a model more, create a variant
+  with a larger `num_ctx` (`PARAMETER num_ctx 65536` in a Modelfile).
 - **Model endpoints** (OpenAI-compatible, Anthropic-compatible, Azure AI
   Foundry) run Octant Harness. They show reasoning and usage only once a reply
   carries them, and Octant tools reach only models you verified.
