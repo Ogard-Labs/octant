@@ -129,6 +129,13 @@ export function useCodeLanguageServices(
       if (live() && !answered) show({ kind: "starting" });
     }, STARTING_NOTICE_MS);
 
+    /**
+     * Text typed while a sync was in flight, sent once it settles. Its own
+     * timer: a starting server's poll shares `later`, and replacing this send
+     * left the host reading the older text (observed with a slow first open).
+     */
+    let resend: ReturnType<typeof setTimeout> | undefined;
+
     const later = (run: () => void, delay: number) => {
       clearTimer();
       timer.current = setTimeout(() => {
@@ -215,7 +222,10 @@ export function useCodeLanguageServices(
           readDiagnostics();
           // Text typed while this was in flight has not been sent yet.
           if (textRef.current !== sentText) {
-            later(() => syncRef.current?.(textRef.current), debounceMs);
+            clearTimeout(resend);
+            resend = setTimeout(() => {
+              if (live()) syncRef.current?.(textRef.current);
+            }, debounceMs);
           }
           return;
         case "too-large":
@@ -242,6 +252,10 @@ export function useCodeLanguageServices(
     function open() {
       if (sync === undefined) return;
       fileId.current = undefined;
+      // Opening is the host's retry and resets a crashed server's budget, so
+      // an edit reopens only what the host answered `too-large`; any other
+      // answer to this open stands until the person retries.
+      syncedText.current = undefined;
       const sentText = textRef.current;
       void sync({ kind: "open", threadId, checkoutId, path, text: sentText })
         .then((result) => {
@@ -274,6 +288,7 @@ export function useCodeLanguageServices(
     return () => {
       session.current += 1;
       clearTimeout(startingNotice);
+      clearTimeout(resend);
       clearTimer();
       const held = fileId.current;
       fileId.current = undefined;

@@ -531,6 +531,70 @@ describe("MonacoEditorPane language services", () => {
       "open",
     ]);
   });
+
+  it("sends text typed while the file opened even when the server is still starting", async () => {
+    const code = languageClient({
+      diagnostics: [
+        { status: "unavailable", reason: "starting" },
+        { status: "diagnostics", ...scope, diagnostics: [], truncated: false },
+      ],
+    });
+    let settleOpen: (value: unknown) => void = () => undefined;
+    code.syncLanguageDocument.mockImplementationOnce(
+      () => new Promise((resolve) => (settleOpen = resolve)),
+    );
+    const fixture = languageRuntime();
+    render(
+      <MonacoEditorPane
+        client={code}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={fixture.loadRuntime}
+      />,
+    );
+    await waitFor(() => expect(code.syncLanguageDocument).toHaveBeenCalledOnce());
+
+    act(() => fixture.options?.onChange("const answer: number = 42;\n"));
+    await act(async () => settleOpen({ status: "synced", ...scope }));
+
+    await waitFor(() =>
+      expect(code.syncLanguageDocument).toHaveBeenLastCalledWith({
+        kind: "change",
+        ...scope,
+        text: "const answer: number = 42;\n",
+      }),
+    );
+    expect(await screen.findByText("No problems found")).toBeVisible();
+  });
+
+  it("leaves a server that stopped on reopening to the person's Retry while they type", async () => {
+    const code = languageClient({
+      open: [
+        { status: "synced", ...scope },
+        { status: "unavailable", reason: "crashed" },
+      ],
+      diagnostics: [{ status: "refused", reason: "file-outside-thread" }],
+    });
+    const fixture = languageRuntime();
+    render(
+      <MonacoEditorPane
+        client={code}
+        file={textFile()}
+        languageTiming={timing}
+        loadRuntime={fixture.loadRuntime}
+      />,
+    );
+    expect(await screen.findByText("The language server stopped.")).toBeVisible();
+
+    // Opening is the host's retry and resets the crash budget, so an edit
+    // must not reopen a server the person has not asked to retry.
+    act(() => fixture.options?.onChange("const answer = 43;\n"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(code.syncLanguageDocument.mock.calls.map(([request]) => request.kind)).toEqual([
+      "open",
+      "open",
+    ]);
+  });
 });
 
 const ids = {

@@ -328,8 +328,9 @@ design left a choice open.
   While the server serves a file its markers are the only ones on that model:
   Monaco's worker reads one file without the Project, and its errors (an
   import it cannot resolve) would contradict the server's. The worker's
-  markers are cleared each time it sets them, and come back when the server
-  stops serving the file. A read-only editor draws them too: Monaco's default
+  markers are cleared each time it sets them; once the server stops serving
+  the file they come back with the worker's next check, on the next edit,
+  since Monaco offers no way to ask it for one model. A read-only editor draws them too: Monaco's default
   hid every diagnostic in Plan.
 - **Definitions.** Monaco merges every provider's definitions, and the worker's
   answer for an imported name (the import's own binding) turned each jump into
@@ -352,7 +353,9 @@ design left a choice open.
 - **States.** `starting` shows only when the first answer takes over 400 ms; a
   server still `starting` is asked again each second, and after 30 tries is
   shown as not answering. `crashed` and `timed-out` offer Retry, which closes
-  and reopens the document, the retry the companion already honours. A
+  and reopens the document, the retry the companion already honours. Because
+  opening resets the crash budget, an edit never reopens a document on its
+  own; only a `too-large` file is opened again when its text changes. A
   document the host no longer holds (after a restart or the idle close) is
   reopened once on its own before it is reported. Any other refusal stands:
   the editor sends no more text until a retry, and focus coming back to an
