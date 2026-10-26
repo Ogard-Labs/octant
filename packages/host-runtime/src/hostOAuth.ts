@@ -170,7 +170,9 @@ export interface HostOAuthDirectoryBinding {
 /**
  * `interaction-required` (directory dialect): the directory wants the person
  * present again, for multi-factor or a consent prompt. Unlike the others it
- * keeps the grant, which a new sign-in in person renews.
+ * keeps the grant, because a later refresh can pass once the person has met
+ * the prompt elsewhere. A new sign-in does not renew that grant: it creates
+ * another, and the server forgets the kept one when it stores the new pointer.
  */
 export type HostOAuthSignInAgainReason =
   | "revoked"
@@ -211,6 +213,11 @@ export type HostOAuthPublicState =
       readonly attemptId: string;
       readonly descriptorId: string;
       readonly credentialRef: string;
+      /**
+       * Directory dialect only: the account the validated identity token
+       * named, when it named one in plain text. A label, never a claim set.
+       */
+      readonly accountLabel?: string;
     }
   | {
       readonly kind: "refused";
@@ -1814,6 +1821,12 @@ export function createHostOAuthRuntime(options: {
           attemptId: session.attemptId,
           descriptorId: session.descriptor.descriptorId,
           credentialRef,
+          // Settings shows who signed in; only the directory dialect's grant
+          // keeps a label, taken from the identity token it validated.
+          ...(exchanged.grant.dialect === DIRECTORY_DIALECT &&
+          exchanged.grant.accountLabel !== undefined
+            ? { accountLabel: exchanged.grant.accountLabel }
+            : {}),
         });
         replyCallback(response, 200);
       } catch {
@@ -2021,8 +2034,9 @@ export function createHostOAuthRuntime(options: {
       }
       if (exchanged.kind === "refused") {
         const reason = exchanged.signInAgain ?? refreshRefusal(exchanged.reason, exchanged.error);
-        // The person can satisfy the directory's prompt by signing in again
-        // in person; until then the grant is kept, not dropped.
+        // The grant is kept, not dropped: a later refresh can pass once the
+        // person has met the directory's prompt elsewhere. Signing in again
+        // creates a new grant, and the server forgets this one then.
         if (reason === "interaction-required") return { kind: "sign-in-again", reason };
         try {
           await options.store.delete(credentialRef);
@@ -2360,6 +2374,7 @@ function publicStatus(status: HostOAuthPublicState): HostOAuthPublicState {
       attemptId: status.attemptId,
       descriptorId: status.descriptorId,
       credentialRef: status.credentialRef,
+      ...(status.accountLabel === undefined ? {} : { accountLabel: status.accountLabel }),
     };
   }
   if (status.flow === "device-code") {

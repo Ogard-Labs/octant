@@ -828,6 +828,17 @@ export class ProviderService implements ProviderServiceApi {
               activeSessionCount: this.#runtime.activeSessionCount(current.id),
               updatedAt,
             });
+            // An organization sign-in's grant lives in the broker under a
+            // reference only this instance names; removing the instance
+            // without it would leave a live refresh token nobody can sign out.
+            // It is forgotten only once the removal is allowed, so a removal
+            // refused for active sessions keeps the sign-in.
+            if (
+              current.driverKind === "azure-foundry" &&
+              current.configuration.authentication === "directory-oauth"
+            ) {
+              await this.#forgetCredentialForOldEndpoint(current.id);
+            }
             await this.#runtime.invalidateRuntime(current.id);
             this.#persistence.journal.append({
               aggregate: { aggregateType: "provider-instance", aggregateId: current.id },
@@ -1148,7 +1159,7 @@ export class ProviderService implements ProviderServiceApi {
             }
             eventName = "provider.instance-enabled-changed@1";
           }
-          if (credentialEndpoint(current) !== credentialEndpoint(instance)) {
+          if (credentialBinding(current) !== credentialBinding(instance)) {
             await this.#forgetCredentialForOldEndpoint(current.id);
           }
           this.#appendInstance(command.expectedVersion, eventName, instance);
@@ -2063,10 +2074,13 @@ export class ProviderService implements ProviderServiceApi {
   }
 
   /**
-   * A key is entered for one server. Changing the base URL kept it, so the
-   * next probe or turn sent it to the new server. It is deleted before the
-   * change is journaled: if it cannot be deleted the change is refused, and
-   * if the change then fails the person enters the key again.
+   * A key is entered for one server, and a sign-in is held for one tenant,
+   * client, and endpoint. Changing the base URL kept the key, so the next
+   * probe or turn sent it to the new server; switching between a key and an
+   * organization sign-in would read one as the other. The stored credential
+   * (and a sign-in's grant) is deleted before the change is journaled: if it
+   * cannot be deleted the change is refused, and if the change then fails the
+   * person enters the key or signs in again.
    */
   async #forgetCredentialForOldEndpoint(instanceId: ProviderInstanceId): Promise<void> {
     if (this.#clearProviderCredential === undefined) return;
@@ -2075,7 +2089,8 @@ export class ProviderService implements ProviderServiceApi {
     } catch {
       throw new ProviderServiceError({
         category: "unavailable",
-        message: "The stored key could not be removed, so the base URL was not changed. Try again.",
+        message:
+          "The stored key or sign-in could not be removed, so the change was not saved. Try again.",
       });
     }
   }
@@ -2118,15 +2133,27 @@ function sameCatalogContent(
 }
 
 /**
- * The base URL a stored key is sent to, for the endpoint profiles whose key the
- * host keeps by instance. Ollama also has a base URL but sends no key.
+ * What a stored credential is bound to, for the endpoint profiles whose
+ * credential the host keeps by instance: the base URL a key is sent to and,
+ * for Azure AI Foundry, how it signs in and the tenant and client a sign-in
+ * holds. Ollama also has a base URL but sends no key.
  */
-function credentialEndpoint(instance: ProviderInstance): string | undefined {
+function credentialBinding(instance: ProviderInstance): string | undefined {
   switch (instance.driverKind) {
     case "openai-compatible":
     case "anthropic-compatible":
-    case "azure-foundry":
       return instance.configuration.baseUrl;
+    case "azure-foundry": {
+      const configuration = instance.configuration;
+      return configuration.authentication === "directory-oauth"
+        ? [
+            configuration.baseUrl,
+            "directory-oauth",
+            String(configuration.directory.tenantId),
+            String(configuration.directory.clientId),
+          ].join("\n")
+        : [configuration.baseUrl, configuration.authentication].join("\n");
+    }
     case "bfl-image":
     case "ideogram-image":
       // Absent means the provider's own endpoint, so setting or clearing a

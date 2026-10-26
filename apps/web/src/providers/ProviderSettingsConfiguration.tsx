@@ -13,6 +13,7 @@ export {
 } from "./configuration/AcpConfigurationForms";
 export {
   AnthropicConfigurationForm,
+  DirectoryEndpointSignIn,
   FoundryConfigurationForm,
   HttpConfigurationForm,
   SubscriptionEndpointSignIn,

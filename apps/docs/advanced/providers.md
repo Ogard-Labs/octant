@@ -14,7 +14,7 @@ kind where it is used:
 - **Settings → Octant Harness → Model endpoints** holds the model endpoints
   Octant calls over an API itself: OpenAI-compatible, Anthropic-compatible,
   Ollama, and Azure AI Foundry, including the ones you sign in to with a
-  subscription.
+  subscription or your organization account.
 - **Settings → Voice & images** holds the image profiles and custom image
   sources.
 
@@ -468,7 +468,8 @@ Supported profiles:
 - **OpenAI-compatible** HTTP (`auto`, `responses`, or `chat-completions`)
 - **Anthropic-compatible** HTTP (`auto` or `messages`)
 - **Azure AI Foundry** (OpenAI-compatible v1 profile; base URL must end with
-  `/openai/v1/`; API-key only; at least one deployment)
+  `/openai/v1/`; an API key or your organization account; at least one
+  deployment)
 - **Ollama** local HTTP (loopback origin only)
 
 API keys are stored only by the Octant desktop app. In a browser, an endpoint
@@ -481,8 +482,9 @@ models you configured first and the rest under **Discovered on the endpoint**;
 an Azure AI Foundry provider offers only its configured deployments.
 
 Each endpoint is one row that says whether it works: **Ready**, **Sign in to
-use**, **Signed out**, **Checking…**, **Can't connect**, **Needs key**, **Key refused**,
-**Not working**, **No models yet**, or **Off**. A row that needs you says why
+use**, **Sign in again**, **Signed out**, **Checking…**, **Can't connect**, **Needs key**,
+**Key refused**, **No access**, **Sign-in doesn't match**, **Not working**, **No
+models yet**, or **Off**. A row that needs you says why
 in one sentence and offers one fix, such as **Try again**, **Replace key**,
 **Edit address**, or **Add model IDs**. Opening a row shows the endpoint's own
 page: its sign-in or key, its models (search them, show or hide each one, and
@@ -602,6 +604,61 @@ as a sign-in finishes. An endpoint you added yourself whose base URL is
 one of these offers the same sign-in beside its API key. The host refuses a
 sign-in started from a paired device; sign in from the Octant app or a browser
 on the host.
+
+### Azure AI Foundry with your organization account
+
+An Azure AI Foundry endpoint can sign in with your organization's Microsoft
+Entra ID account instead of an API key. Requests then run as you, under your
+organization's policies, and no key is stored.
+
+Your organization's administrator prepares this once:
+
+1. Registers an application in your Microsoft Entra ID tenant for Octant. It
+   is a public client: under **Authentication**, add the **Mobile and desktop
+   applications** platform with the redirect URI
+   `http://127.0.0.1/oauth/callback`. It needs no client secret or
+   certificate.
+2. Under **API permissions**, adds the delegated permission **Azure Cognitive
+   Services › user_impersonation**, and grants consent for the organization if
+   your tenant requires it.
+3. Gives you a role on the Azure AI Foundry resource that lets you call its
+   models, such as **Cognitive Services OpenAI User**.
+
+The administrator gives you the **Directory (tenant) ID** and the
+**Application (client) ID** from the registration's overview. Then:
+
+1. In **Add endpoint**, choose **Azure AI Foundry**, enter a name and the
+   resource's address, and set **Sign in with** to **Organization account
+   (Microsoft Entra ID)**.
+2. Paste the tenant ID and the client ID. Octant accepts only the IDs
+   themselves, not a domain name or `common`, and saves them in lowercase.
+3. Name at least one deployment and choose **Check and add**. The endpoint
+   reads **Sign in to use**.
+4. Open the endpoint and choose **Sign in with your organization**. Your
+   browser opens your organization's sign-in page on
+   `login.microsoftonline.com`; when you finish there, the endpoint shows who
+   is signed in and checks itself.
+
+The address must be on `openai.azure.com`, `services.ai.azure.com`, or
+`cognitiveservices.azure.com`. What the row says when the sign-in needs you:
+
+- **Sign in again**: your organization wants you to sign in in person again,
+  for example to complete multi-factor authentication. Octant keeps the
+  sign-in until you do; signing in again replaces it.
+- **Signed out**: the sign-in ended (it expired, your password changed, or an
+  administrator revoked it). Sign in again.
+- **No access**: you are signed in, but your account has no role on the
+  resource. Ask an administrator for one.
+- **Sign-in doesn't match**: the sign-in was for another tenant, application,
+  or address. Sign in again for this endpoint.
+
+Changing the tenant ID, the client ID, or the address signs the endpoint out,
+and switching between an API key and the organization account removes what was
+stored for the other. **Sign out** removes the sign-in from this computer only:
+your organization session continues until your organization ends it. A device
+paired for remote use can run turns on an endpoint you have signed in, but it
+cannot sign in or out. The sign-in itself stays in Octant's credential broker;
+each request carries only a short-lived token for that one endpoint.
 
 ### Presets added with a key
 

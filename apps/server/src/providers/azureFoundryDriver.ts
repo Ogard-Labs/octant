@@ -5,15 +5,17 @@ import type {
   ProviderModelId,
   ProviderObservedState,
 } from "@octant/contracts";
+import { AZURE_FOUNDRY_DIRECTORY_SIGN_IN } from "@octant/domain";
 import { Effect } from "effect";
+import type { DirectoryOAuthHost } from "@octant/provider-sdk/directory-oauth";
 import type { HarnessEndpointDriver } from "@octant/provider-sdk/harness-endpoint";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
+import type { DirectEndpointDirectoryOAuth } from "./directEndpointDirectoryOAuth";
 import {
   makeOpenAiCompatibleDriver,
   type OpenAiCompatibleDriverProfile,
 } from "./openAiCompatibleDriver";
 import type { CompatibleFetch } from "./openAiCompatibleEndpoint";
-import { ProviderDriverConfigurationError } from "./providerDriverFactory";
 import type { ProviderDriverRuntimeRegistry } from "./providerRuntimeRegistry";
 
 export interface AzureFoundryDriverOptions {
@@ -23,6 +25,12 @@ export interface AzureFoundryDriverOptions {
   readonly credentialResolver?: ProviderCredentialResolver;
   readonly fetch?: CompatibleFetch;
   readonly clock?: () => string;
+  /**
+   * The broker as an organization sign-in reaches it. Absent means a
+   * directory instance reads `unavailable`; a stored value is never sent in
+   * the sign-in's place.
+   */
+  readonly directoryOAuth?: DirectoryOAuthHost;
 }
 
 const FOUNDRY_PROFILE: OpenAiCompatibleDriverProfile = {
@@ -36,17 +44,13 @@ const FOUNDRY_PROFILE: OpenAiCompatibleDriverProfile = {
  * identity while routing requests through the shared OpenAI adapter with the
  * documented `api-key` header. Foundry deployments are exposed as manual model
  * IDs so the catalog orders them exactly as configured.
+ *
+ * A `directory-oauth` instance sends no stored value at all: each request
+ * carries a bearer the broker releases for the instance's tenant, client,
+ * the Foundry audience, and its endpoint origin, as `Authorization: Bearer`.
  */
 export function makeAzureFoundryDriver(options: AzureFoundryDriverOptions): HarnessEndpointDriver {
-  // The configuration contract already names directory sign-in, but this
-  // driver has no directory transport yet. Building the key path for such an
-  // instance would send whatever key the store holds in place of the
-  // organization's sign-in, so it refuses and reads as incompatible.
-  if (options.configuration.authentication === "directory-oauth") {
-    throw new ProviderDriverConfigurationError(
-      "Organization sign-in for Azure AI Foundry is not available in this version.",
-    );
-  }
+  const directory = foundryDirectorySignIn(options);
   const compatibleConfiguration: OpenAiCompatibleProviderConfiguration = {
     kind: "openai-compatible-http",
     baseUrl: options.configuration.baseUrl,
@@ -66,6 +70,7 @@ export function makeAzureFoundryDriver(options: AzureFoundryDriverOptions): Harn
       : { credentialResolver: options.credentialResolver }),
     ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     ...(options.clock === undefined ? {} : { clock: options.clock }),
+    ...(directory === undefined ? {} : { directoryOAuth: directory }),
     profile: FOUNDRY_PROFILE,
   });
   // Per the approved Foundry profile design, treat missing/incomplete model discovery as
@@ -128,5 +133,23 @@ export function makeAzureFoundryDriver(options: AzureFoundryDriverOptions): Harn
           return adjusted;
         }),
       ),
+  };
+}
+
+/** Where a directory instance may send its bearer; undefined for an API-key instance. */
+function foundryDirectorySignIn(
+  options: AzureFoundryDriverOptions,
+): DirectEndpointDirectoryOAuth | undefined {
+  const configuration = options.configuration;
+  if (configuration.authentication !== "directory-oauth") return undefined;
+  return {
+    endpoint: {
+      tenantId: configuration.directory.tenantId,
+      clientId: configuration.directory.clientId,
+      audience: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.audience,
+      baseUrl: configuration.baseUrl,
+      hostSuffixes: AZURE_FOUNDRY_DIRECTORY_SIGN_IN.hostSuffixes,
+    },
+    host: options.directoryOAuth,
   };
 }

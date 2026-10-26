@@ -11,6 +11,7 @@ import {
   type SubscriptionOAuthHost,
   type SubscriptionOAuthResolution,
 } from "@octant/provider-sdk/subscription-oauth";
+import { readDirectoryOAuthCredential } from "@octant/provider-sdk/directory-oauth";
 import type { ProviderCredentialResolver } from "./credentialBrokerClient";
 
 /**
@@ -80,7 +81,9 @@ export async function inspectDirectEndpointCredential(input: {
   }
   const pointer = raw.length === 0 ? undefined : readSubscriptionOAuthCredential(raw);
   if (pointer === undefined) {
-    if (raw.length === 0) return missingOrUnavailable(input.expectedDescriptorId);
+    if (raw.length === 0 || isDirectoryPointer(raw)) {
+      return missingOrUnavailable(input.expectedDescriptorId);
+    }
     return { kind: "plain", credential: raw };
   }
   if (
@@ -129,7 +132,7 @@ export function directEndpointRequestResolver(input: {
       const raw = (await input.credentialResolver?.resolve(input.instanceId)) ?? "";
       const pointer = raw.length === 0 ? undefined : readSubscriptionOAuthCredential(raw);
       if (pointer !== undefined) return resolveBearerForRequest(input, pointer);
-      if (raw.length === 0) {
+      if (raw.length === 0 || isDirectoryPointer(raw)) {
         throw failure("unauthenticated", "The provider credential is missing or unavailable.");
       }
       plain = raw;
@@ -177,6 +180,15 @@ function endpointBinding(
   );
   if (offer === undefined) return undefined;
   return { baseUrl, allowedEndpoint: offer.allowedEndpoint };
+}
+
+/**
+ * A directory sign-in's pointer left in the store after the instance moved to
+ * a key is a reference, not a key: sending it as one would hand the endpoint
+ * the grant's coordinates. It reads as no key.
+ */
+function isDirectoryPointer(raw: string): boolean {
+  return readDirectoryOAuthCredential(raw) !== undefined;
 }
 
 function missingOrUnavailable(

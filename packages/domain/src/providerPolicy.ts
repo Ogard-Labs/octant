@@ -16,6 +16,7 @@ import {
   acpAgentProfile,
   isAcpAgentKind,
 } from "@octant/contracts/acp-agent-profiles";
+import { isAzureFoundryDirectoryHost } from "./directorySignIn";
 import type {
   AcpAgentConfiguration,
   AcpAgentProviderInstance,
@@ -25,6 +26,7 @@ import type {
   AnthropicCompatibleProviderConfiguration,
   AnthropicCompatibleProviderInstance,
   AzureFoundryProviderConfiguration,
+  DirectoryBinding,
   AzureFoundryProviderInstance,
   BflImageProviderConfiguration,
   BflImageProviderInstance,
@@ -328,6 +330,41 @@ export interface AzureFoundryConfigurationInput {
   readonly authentication: AzureFoundryProviderConfiguration["authentication"];
   readonly protocol: AzureFoundryProviderConfiguration["protocol"];
   readonly manualModelIds: ReadonlyArray<string>;
+  /** The organization's tenant and client; present exactly for `directory-oauth`. */
+  readonly directory?: { readonly tenantId: string; readonly clientId: string };
+}
+
+const DIRECTORY_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * A directory sign-in's tenant and client, refused unless each is a lowercase
+ * GUID and the address lies under the Foundry host list: a typo or a crafted
+ * address must not become a place a directory bearer is sent.
+ */
+function azureFoundryDirectoryBinding(
+  baseUrl: string,
+  directory: AzureFoundryConfigurationInput["directory"],
+): DirectoryBinding {
+  if (
+    directory === undefined ||
+    !DIRECTORY_GUID.test(directory.tenantId) ||
+    !DIRECTORY_GUID.test(directory.clientId)
+  ) {
+    reject(
+      "invalid-authentication",
+      "Organization sign-in needs your directory's tenant ID and the application (client) ID your organization registered, each a GUID.",
+    );
+  }
+  if (!isAzureFoundryDirectoryHost(baseUrl)) {
+    reject(
+      "invalid-base-url",
+      "Organization sign-in works only with an Azure AI Foundry address under openai.azure.com, services.ai.azure.com, or cognitiveservices.azure.com.",
+    );
+  }
+  return {
+    tenantId: directory.tenantId as DirectoryBinding["tenantId"],
+    clientId: directory.clientId as DirectoryBinding["clientId"],
+  };
 }
 
 function normalizeAzureFoundryConfiguration(
@@ -342,11 +379,19 @@ function normalizeAzureFoundryConfiguration(
   if (!url.pathname.endsWith("/openai/v1/")) {
     reject("invalid-base-url", "Azure AI Foundry base URL must end with the /openai/v1/ path.");
   }
-  if (configuration.authentication !== "api-key") {
+  if (
+    configuration.authentication !== "api-key" &&
+    configuration.authentication !== "directory-oauth"
+  ) {
     reject(
       "invalid-authentication",
-      "Azure AI Foundry technical preview supports API-key authentication only.",
+      "Azure AI Foundry signs in with an API key or an organization account.",
     );
+  }
+  // An API-key instance carries no directory binding: one left from an
+  // earlier sign-in would read as a sign-in the instance no longer uses.
+  if (configuration.authentication === "api-key" && configuration.directory !== undefined) {
+    reject("invalid-authentication", "An API-key endpoint does not name a directory tenant.");
   }
   const manualModelIds = normalizeManualModelIds(
     configuration.manualModelIds,
@@ -358,13 +403,20 @@ function normalizeAzureFoundryConfiguration(
   if (manualModelIds.length === 0) {
     reject("invalid-model-ids", "Azure AI Foundry requires at least one deployment ID.");
   }
-  return {
+  const shared = {
     kind: configuration.kind,
     baseUrl,
-    authentication: configuration.authentication,
     protocol: configuration.protocol,
     manualModelIds,
   };
+  if (configuration.authentication === "directory-oauth") {
+    return {
+      ...shared,
+      authentication: "directory-oauth",
+      directory: azureFoundryDirectoryBinding(baseUrl, configuration.directory),
+    };
+  }
+  return { ...shared, authentication: "api-key" };
 }
 
 interface CreateProviderInput {

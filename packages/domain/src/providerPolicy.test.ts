@@ -51,6 +51,7 @@ import {
   providerCliUpdateArgs,
   supportsProviderCliUpdate,
   updateProviderDefaults,
+  type AzureFoundryConfigurationInput,
 } from "./providerPolicy";
 import * as providerPolicy from "./providerPolicy";
 
@@ -753,23 +754,99 @@ describe("provider instance policy", () => {
     ).toThrow("Azure AI Foundry base URL must end with the /openai/v1/ path.");
   });
 
-  it("refuses an Azure AI Foundry directory sign-in until a driver can speak it", () => {
-    expect(() =>
+  it("creates and changes an Azure AI Foundry endpoint that signs in with the organization's directory, keeping its tenant and client", () => {
+    const directory = {
+      tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+      clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+    };
+    const configuration = {
+      kind: "azure-foundry-openai-http" as const,
+      baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth" as const,
+      protocol: "auto" as const,
+      manualModelIds: ["deployment-a"],
+      directory,
+    };
+    const created = createAzureFoundryProvider({
+      id: ids.local,
+      displayName: "Azure Foundry Work",
+      configuration,
+      existingInstances: [],
+      expectedVersion: version(0),
+      createdAt,
+    });
+    expect(created.configuration).toEqual(configuration);
+
+    const { directory: _directory, ...withoutDirectory } = configuration;
+    const keyed = changeAzureFoundryConfiguration(
+      created,
+      { ...withoutDirectory, authentication: "api-key" },
+      createdAt,
+    );
+    expect(keyed.configuration).toEqual({
+      kind: "azure-foundry-openai-http",
+      baseUrl: configuration.baseUrl,
+      authentication: "api-key",
+      protocol: "auto",
+      manualModelIds: ["deployment-a"],
+    });
+    const signedIn = changeAzureFoundryConfiguration(keyed, configuration, createdAt);
+    expect(signedIn.configuration).toEqual(configuration);
+  });
+
+  it("refuses a directory sign-in without GUID tenant and client ids, or at an address off the Foundry hosts", () => {
+    const unbound: AzureFoundryConfigurationInput = {
+      kind: "azure-foundry-openai-http",
+      baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
+      authentication: "directory-oauth",
+      protocol: "auto",
+      manualModelIds: ["deployment-a"],
+    };
+    const create = (configuration: Partial<AzureFoundryConfigurationInput>) => () =>
       createAzureFoundryProvider({
         id: ids.local,
         displayName: "Azure Foundry Work",
         configuration: {
-          kind: "azure-foundry-openai-http",
-          baseUrl: "https://foundry.example.openai.azure.com/openai/v1/",
-          authentication: "directory-oauth",
-          protocol: "auto",
-          manualModelIds: ["deployment-a"],
+          ...unbound,
+          directory: {
+            tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+            clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+          },
+          ...configuration,
         },
         existingInstances: [],
         expectedVersion: version(0),
         createdAt,
+      });
+    const guids = "each a GUID";
+    expect(() =>
+      createAzureFoundryProvider({
+        id: ids.local,
+        displayName: "Azure Foundry Work",
+        configuration: unbound,
+        existingInstances: [],
+        expectedVersion: version(0),
+        createdAt,
       }),
-    ).toThrow("Azure AI Foundry technical preview supports API-key authentication only.");
+    ).toThrow(guids);
+    expect(
+      create({
+        directory: { tenantId: "common", clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d" },
+      }),
+    ).toThrow(guids);
+    expect(
+      create({
+        directory: {
+          tenantId: "6F1C2D3E-4A5B-4C6D-8E7F-9A0B1C2D3E4F",
+          clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+        },
+      }),
+    ).toThrow(guids);
+    expect(create({ baseUrl: "https://models.example.com/openai/v1/" })).toThrow(
+      "under openai.azure.com",
+    );
+    // An API-key endpoint names no tenant.
+    expect(create({ authentication: "api-key" })).toThrow("does not name a directory tenant");
   });
 
   it("rejects an Azure AI Foundry configuration with no deployment IDs", () => {
