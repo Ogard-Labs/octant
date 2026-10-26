@@ -14,7 +14,7 @@
 // standing when the remote gateway starts is cleared then, so a revoke that
 // committed just before a crash cannot leave one behind.
 
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { Schema } from "effect";
 import {
@@ -26,6 +26,7 @@ import {
   type RemotePushTokenReceiptV1,
 } from "@octant/contracts";
 import type { Journal } from "../persistence/journal";
+import { writeOwnerOnly } from "./selfMadeListenerCertificate";
 
 /** The registration file's path under the data directory; data removal names it too. */
 export const PUSH_REGISTRATIONS_FILE = join("remote", "push-registrations.json");
@@ -135,12 +136,13 @@ export function createPushNotificationTokenStore(
       return;
     }
     mkdirSync(directory, { recursive: true, mode: 0o700 });
-    const staging = `${path}.${process.pid}.tmp`;
-    writeFileSync(staging, JSON.stringify({ registrations: [...next.values()] }), { mode: 0o600 });
-    // writeFileSync applies the mode only when it creates the file, so a
-    // staging file left behind by a crashed write is narrowed here too.
-    chmodSync(staging, 0o600);
-    renameSync(staging, path);
+    // The host identity key creates the folder first, with the process
+    // umask's mode; narrow it to the owner.
+    chmodSync(directory, 0o700);
+    // A plain write would reuse a staging file a crashed write left behind,
+    // keeping its looser mode while the token lands in it, and would follow a
+    // link there to another file. This one creates the staging file anew.
+    writeOwnerOnly(path, JSON.stringify({ registrations: [...next.values()] }));
   };
 
   const append = (input: {

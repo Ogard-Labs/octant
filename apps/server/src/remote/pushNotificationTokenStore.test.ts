@@ -1,4 +1,15 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -91,6 +102,32 @@ describe("push registrations on the host", () => {
       recordedAt: now,
     });
     expect(JSON.stringify(events)).not.toContain("apns-secret-1");
+  });
+
+  it("narrows a remote folder another remote file left open before it writes a token there", () => {
+    const { dataDirectory, open } = host();
+    // The host identity key creates `remote/` with the process umask's mode.
+    mkdirSync(join(dataDirectory, "remote"), { mode: 0o755 });
+    chmodSync(join(dataDirectory, "remote"), 0o755);
+    open().register({ hostId, deviceId: phone, platform: "ios", token: "phone-token", now });
+    expect(statSync(join(dataDirectory, "remote")).mode & 0o777).toBe(0o700);
+  });
+
+  it("writes the token only into its own owner-only file when a crashed write left a link in the staging place", () => {
+    const { dataDirectory, open } = host();
+    mkdirSync(join(dataDirectory, "remote"), { mode: 0o700 });
+    const elsewhere = join(dataDirectory, "elsewhere.json");
+    writeFileSync(elsewhere, "", { mode: 0o644 });
+    const file = join(dataDirectory, PUSH_REGISTRATIONS_FILE);
+    symlinkSync(elsewhere, `${file}.${process.pid}.tmp`);
+
+    open().register({ hostId, deviceId: phone, platform: "ios", token: "phone-token", now });
+
+    expect(readFileSync(elsewhere, "utf8")).toBe("");
+    expect(statSync(elsewhere).mode & 0o777).toBe(0o644);
+    expect(lstatSync(file).isFile()).toBe(true);
+    expect(lstatSync(file).mode & 0o777).toBe(0o600);
+    expect(open().get({ hostId, deviceId: phone })?.token).toBe("phone-token");
   });
 
   it("journals an add, a change, and a clear once each, and a repeat of any of them not at all", () => {

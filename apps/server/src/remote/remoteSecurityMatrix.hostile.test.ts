@@ -25,7 +25,15 @@
 // (productDispatch is never invoked) — over brittle exact status codes.
 
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -1280,6 +1288,42 @@ describe("push registrations follow the paired device (in-memory gateway)", () =
     }
   });
 
+  it("drops at restart a registration whose device has no standing and keeps the paired phone's", async () => {
+    const harness = await setup();
+    const session = await establishSession(harness);
+    expect((await putPushToken(harness, session, "paired-phone-token")).status).toBe(200);
+    await harness.gateway.stop();
+    // A revoke that committed just before the host stopped, ahead of its
+    // clear, leaves a registration for a device that no longer stands.
+    const file = join(harness.directory, PUSH_REGISTRATIONS_FILE);
+    const stored = JSON.parse(readFileSync(file, "utf8")) as {
+      readonly registrations: ReadonlyArray<Record<string, string>>;
+    };
+    const unpaired = "99999999-9999-4999-8999-999999999999";
+    writeFileSync(
+      file,
+      JSON.stringify({
+        registrations: [
+          ...stored.registrations,
+          { ...stored.registrations[0], deviceId: unpaired, token: "unpaired-token" },
+        ],
+      }),
+    );
+
+    const restarted = await setup({ restartOf: harness.directory });
+    try {
+      expect(restarted.pushRegistrations.listDeviceIdsForHost(hostId)).toEqual([session.deviceId]);
+      expect(readFileSync(file, "utf8")).not.toContain("unpaired-token");
+      const cleared = pushRegistrationEvents(restarted).at(-1);
+      expect(JSON.parse(cleared?.payload_json ?? "{}")).toMatchObject({
+        deviceId: unpaired,
+        reason: "device-without-standing",
+      });
+    } finally {
+      await restarted.gateway.stop();
+    }
+  });
+
   const clearingPaths = [
     {
       path: "the host revokes the device",
@@ -1341,6 +1385,33 @@ describe("push registrations follow the paired device (in-memory gateway)", () =
       }
     },
   );
+
+  it("refuses a registration whose device is revoked while its body is being read, so none outlives the revoke", async () => {
+    const token = "device-token-raced-by-revoke";
+    const harness = await setup();
+    const session = await establishSession(harness);
+    const readBody = Request.prototype.text;
+    // The registration route reads its body after every earlier session
+    // check; the host revokes the device during that read, the one window a
+    // concurrent revoke can take.
+    const revokeDuringRead = vi
+      .spyOn(Request.prototype, "text")
+      .mockImplementationOnce(async function (this: Request) {
+        harness.gateway.localDeviceAdministration()?.revokeDevice({ deviceId: session.deviceId });
+        return await readBody.call(this);
+      });
+    try {
+      const raced = await putPushToken(harness, session, token);
+      expect(revokeDuringRead).toHaveBeenCalledOnce();
+      expect(raced.status).toBe(401);
+      expect(harness.pushRegistrations.listDeviceIdsForHost(hostId)).toEqual([]);
+      expect(existsSync(join(harness.directory, PUSH_REGISTRATIONS_FILE))).toBe(false);
+      expect(pushRegistrationEvents(harness)).toEqual([]);
+    } finally {
+      revokeDuringRead.mockRestore();
+      await harness.gateway.stop();
+    }
+  });
 
   it("refuses a registration without the device's own session, key, CSRF token, or origin, and stores nothing", async () => {
     const token = "device-token-hostile-attempt";
