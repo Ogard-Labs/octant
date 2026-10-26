@@ -12,6 +12,7 @@ import {
   type ProjectId,
   type ProviderExecutionPolicy,
   type ProviderInstanceId,
+  type ProviderResumeCursor,
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
@@ -34,6 +35,8 @@ import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
+import { createCodeJournalLookup } from "./nativeHarnessJournalLookup";
+import type { NativeHarnessTranscriptStore } from "./nativeHarnessTranscriptStore";
 import type {
   NativeHarnessApprovalStore,
   NativeHarnessCommandApprovalOutcome,
@@ -90,6 +93,21 @@ export interface NativeHarnessCompositionOptions {
   readonly resolveWebSearch?: () => NativeHarnessToolPorts["webSearch"];
   readonly webFetch?: NativeHarnessToolPorts["webFetch"];
   readonly contextHarness?: Pick<ContextHarnessService, "inspect">;
+  /**
+   * Code only: where a Code thread's harness conversation is journaled, read
+   * back by `journal-lookup`. Chat and Work start a fresh harness session each
+   * turn, so they have no conversation to read and the tool is not offered.
+   */
+  readonly codeJournal?: {
+    readonly transcripts: Pick<NativeHarnessTranscriptStore, "load">;
+    /** The provider session the thread's newest turn ran on, from its own journal. */
+    readonly latestSession: (threadId: CodeThread["id"]) =>
+      | {
+          readonly providerInstanceId: ProviderInstanceId;
+          readonly resumeCursor?: ProviderResumeCursor | undefined;
+        }
+      | undefined;
+  };
   /**
    * The advisor behind `second-opinion` for a lead thread; absent on a host
    * that cannot reach one, where the tool is simply not offered.
@@ -175,6 +193,11 @@ export interface NativeHarnessComposition {
     readonly thread: CodeThread;
     readonly checkoutRoot: string;
     readonly windowId: string;
+    /**
+     * The credential values the turn resolved. A lookup redacts them from
+     * what it returns; without them the lead is not offered `journal-lookup`.
+     */
+    readonly secrets?: ReadonlyArray<string>;
   }) => AppManagedToolSet | undefined;
   /** A managed child's tools, from its own clamped authority; it never delegates further. */
   readonly forAgentRun: (input: {
@@ -521,9 +544,19 @@ export function createNativeHarnessComposition(
         },
       });
     },
-    forCode: ({ thread, checkoutRoot, windowId }) => {
+    forCode: ({ thread, checkoutRoot, windowId, secrets }) => {
       if (!options.isHarnessProvider(thread.providerInstanceId)) return undefined;
       const threadId = String(thread.id);
+      const codeJournal = options.codeJournal;
+      const journalLookup =
+        codeJournal === undefined || secrets === undefined
+          ? undefined
+          : createCodeJournalLookup({
+              transcripts: codeJournal.transcripts,
+              latestSession: () => codeJournal.latestSession(thread.id),
+              providerInstanceId: thread.providerInstanceId,
+              secrets,
+            });
       const shell = codeShell({ threadId, projectId: String(thread.projectId) }, windowId);
       // Plan is the floor: a thread stored as Plan, or a turn narrowed to it,
       // is offered only the tools Plan allows.
@@ -557,6 +590,7 @@ export function createNativeHarnessComposition(
           ...(shell === undefined ? {} : { shell }),
           ...webPorts(),
           ...contextRemainingFor("code-thread", threadId),
+          ...(journalLookup === undefined ? {} : { journalLookup }),
           ...secondOpinion({
             threadId,
             mode: "code",

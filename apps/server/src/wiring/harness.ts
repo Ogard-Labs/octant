@@ -84,7 +84,10 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
   Pick<WorkspaceWiring, "contextHarness" | "goalService"> &
   Pick<
     ProvidersWiring,
-    "configuredDriverOptions" | "nativeHarnessLeadFallback" | "providerDataDirectory"
+    | "configuredDriverOptions"
+    | "nativeHarnessLeadFallback"
+    | "nativeHarnessTranscripts"
+    | "providerDataDirectory"
   > &
   Pick<
     HarnessStateWiring,
@@ -94,7 +97,7 @@ export type HarnessDependencies = Pick<ServerStart, "persistence"> &
     | "nativeHarnessSessions"
   > &
   Pick<WorkRequestStateWiring, "runningWorkTurnAccess"> &
-  Pick<FoundationsWiring, "workThreadProjection"> &
+  Pick<FoundationsWiring, "codeBoardEventStore" | "workThreadProjection"> &
   Pick<WorkspaceWiring, "projectService">;
 
 export function wireHarness(deps: HarnessDependencies) {
@@ -104,6 +107,7 @@ export function wireHarness(deps: HarnessDependencies) {
     agentRunInteractions,
     agentRunOrchestration,
     agentRunPersistence,
+    codeBoardEventStore,
     codeParentActiveTurn,
     codeSessionAuthority,
     configuredDriverOptions,
@@ -117,6 +121,7 @@ export function wireHarness(deps: HarnessDependencies) {
     nativeHarnessRouter,
     nativeHarnessRoutingStore,
     nativeHarnessSessions,
+    nativeHarnessTranscripts,
     persistence,
     providerDataDirectory,
     runningWorkTurnAccess,
@@ -543,6 +548,10 @@ export function wireHarness(deps: HarnessDependencies) {
       }
     },
     contextHarness,
+    codeJournal: {
+      transcripts: nativeHarnessTranscripts,
+      latestSession: (threadId) => codeBoardEventStore.latestProviderSession(threadId),
+    },
     hostId: deriveToolHostId(providerDataDirectory),
     readThreadTaint: (threadId) =>
       readThreadExternalContentTaint(persistence.connection, threadId).externalContentIngested,

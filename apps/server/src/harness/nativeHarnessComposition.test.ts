@@ -488,7 +488,10 @@ describe("native harness composition", () => {
     };
 
     it("offers the full conditional matrix per mode when every production port is supplied", () => {
-      const { composition } = harness(false, productionPorts);
+      const { composition } = harness(false, {
+        ...productionPorts,
+        codeJournal: { transcripts: { load: () => undefined }, latestSession: () => undefined },
+      });
       const chat = names(composition.forChat({ thread: chatThread, windowId: "window-1" })!);
       const work = names(
         composition.forWork({
@@ -502,6 +505,7 @@ describe("native harness composition", () => {
           thread: codeThread,
           checkoutRoot: "/nonexistent",
           windowId: "window-1",
+          secrets: [],
         })!,
       );
       // Chat's web tools wait on its research grant, so they are absent here by design.
@@ -514,10 +518,15 @@ describe("native harness composition", () => {
         "goal",
       ];
       const web = ["web-fetch", "web-search"];
+      // Only Code keeps a durable harness conversation to read back; Chat and
+      // Work are not offered journal-lookup until theirs is.
+      const codeLead = lead.flatMap((name) =>
+        name === "context-remaining" ? [name, "journal-lookup"] : [name],
+      );
       expect({ chat, work, code }).toEqual({
         chat: lead,
         work: ["read", "grep", "glob", "edit", "write", ...web, ...lead],
-        code: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...lead, "goal-check"],
+        code: ["read", "grep", "glob", "bash", "edit", "write", ...web, ...codeLead, "goal-check"],
       });
     });
 
