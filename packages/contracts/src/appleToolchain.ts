@@ -523,7 +523,8 @@ export type AppleDeviceRecord = typeof AppleDeviceRecord.Type;
 /**
  * Every operation in the device authority table. `provisioning-update` is
  * listed so that asking for one is refused by name; no posture offers it.
- * `upload` is the distribution layer's one operation and targets no device.
+ * `upload`, `submit-for-review`, and `release-version` are the distribution
+ * layer's operations and target no device.
  */
 export const AppleDeviceActionKind = Schema.Literal(
   "discover",
@@ -540,6 +541,8 @@ export const AppleDeviceActionKind = Schema.Literal(
   "uninstall",
   "provisioning-update",
   "upload",
+  "submit-for-review",
+  "release-version",
 );
 export type AppleDeviceActionKind = typeof AppleDeviceActionKind.Type;
 
@@ -587,7 +590,11 @@ export const AppleDeviceRequest = Schema.Struct({
   .annotations(strict)
   .pipe(
     Schema.filter((request) => {
-      const targetsNoDevice = request.kind === "discover" || request.kind === "upload";
+      const targetsNoDevice =
+        request.kind === "discover" ||
+        request.kind === "upload" ||
+        request.kind === "submit-for-review" ||
+        request.kind === "release-version";
       if (targetsNoDevice !== (request.deviceId === undefined)) return false;
       if (request.fromThreadId !== undefined && request.kind !== "use-device") return false;
       if (request.kind === "build" || request.kind === "run") {

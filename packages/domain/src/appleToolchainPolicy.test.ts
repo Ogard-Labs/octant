@@ -653,11 +653,17 @@ describe("evaluateAppleDeviceRequest", () => {
     logs: { bundleIdentifier: "sh.octant.Fixture" },
   };
 
+  const distributionKinds: ReadonlyArray<string> = [
+    "upload",
+    "submit-for-review",
+    "release-version",
+  ];
+
   function deviceRequest(
     kind: string,
     overrides: Readonly<Record<string, unknown>> = {},
   ): AppleDeviceRequest {
-    const targetsNoDevice = kind === "discover" || kind === "upload";
+    const targetsNoDevice = kind === "discover" || distributionKinds.includes(kind);
     return decodeAppleDeviceRequest({
       actionId: "40000000-0000-4000-8000-000000000002",
       correlationId: "40000000-0000-4000-8000-000000000003",
@@ -849,45 +855,49 @@ describe("evaluateAppleDeviceRequest", () => {
       }
     });
 
-    it("uploads only when a person at the Mac asks and confirms, never in Plan and never for an agent", () => {
-      const asked = deviceRequest("upload", { requestedBy: person, approval: approved });
-      expect(
-        evaluateAppleDeviceRequest(asked, approvedScope("plan"), distributing, nothingHeld),
-      ).toEqual(denied("read-only-policy"));
-      for (const posture of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+    it("uploads, submits for App Review, and releases only when a person at the Mac asks and confirms, never in Plan and never for an agent", () => {
+      for (const kind of distributionKinds) {
+        const asked = deviceRequest(kind, { requestedBy: person, approval: approved });
         expect(
-          evaluateAppleDeviceRequest(
-            deviceRequest("upload", { requestedBy: person }),
-            scope(posture),
-            distributing,
-            nothingHeld,
-          ),
-        ).toEqual(denied("confirmation-required"));
-        expect(
-          evaluateAppleDeviceRequest(asked, approvedScope(posture), distributing, nothingHeld),
-        ).toEqual(allowed);
-        expect(
-          evaluateAppleDeviceRequest(
-            deviceRequest("upload", { approval: approved }),
-            approvedScope(posture),
-            distributing,
-            nothingHeld,
-          ),
-        ).toEqual(denied("person-required"));
+          evaluateAppleDeviceRequest(asked, approvedScope("plan"), distributing, nothingHeld),
+        ).toEqual(denied("read-only-policy"));
+        for (const posture of ["approval-gated", "auto-accept-edits", "full-access"] as const) {
+          expect(
+            evaluateAppleDeviceRequest(
+              deviceRequest(kind, { requestedBy: person }),
+              scope(posture),
+              distributing,
+              nothingHeld,
+            ),
+          ).toEqual(denied("confirmation-required"));
+          expect(
+            evaluateAppleDeviceRequest(asked, approvedScope(posture), distributing, nothingHeld),
+          ).toEqual(allowed);
+          expect(
+            evaluateAppleDeviceRequest(
+              deviceRequest(kind, { approval: approved }),
+              approvedScope(posture),
+              distributing,
+              nothingHeld,
+            ),
+          ).toEqual(denied("person-required"));
+        }
       }
     });
 
-    it("refuses every upload while the release boundary does not admit distribution", () => {
-      for (const posture of postures) {
-        for (const requestedBy of [agent, person, remotePerson]) {
-          expect(
-            evaluateAppleDeviceRequest(
-              deviceRequest("upload", { requestedBy, approval: approved }),
-              approvedScope(posture),
-              mac,
-              nothingHeld,
-            ),
-          ).toEqual(denied("distribution-not-enabled"));
+    it("refuses every distribution step while the release boundary does not admit distribution", () => {
+      for (const kind of distributionKinds) {
+        for (const posture of postures) {
+          for (const requestedBy of [agent, person, remotePerson]) {
+            expect(
+              evaluateAppleDeviceRequest(
+                deviceRequest(kind, { requestedBy, approval: approved }),
+                approvedScope(posture),
+                mac,
+                nothingHeld,
+              ),
+            ).toEqual(denied("distribution-not-enabled"));
+          }
         }
       }
     });
@@ -910,7 +920,7 @@ describe("evaluateAppleDeviceRequest", () => {
         "terminate",
         "uninstall",
         "provisioning-update",
-        "upload",
+        ...distributionKinds,
       ]) {
         expect(
           evaluateAppleDeviceRequest(
@@ -1036,7 +1046,7 @@ describe("evaluateAppleDeviceRequest", () => {
         "launch",
         "terminate",
         "uninstall",
-        "upload",
+        ...distributionKinds,
       ]) {
         expect(
           evaluateAppleDeviceRequest(
@@ -1049,11 +1059,13 @@ describe("evaluateAppleDeviceRequest", () => {
       }
     });
 
-    it("never takes a lease, uninstall, or upload confirmation from a remote device", () => {
+    it("never takes a lease, uninstall, or distribution confirmation from a remote device", () => {
       for (const [kind, requestedBy, host] of [
         ["use-device", agent, { ...mac, leases: [] }],
         ["uninstall", person, mac],
         ["upload", person, distributing],
+        ["submit-for-review", person, distributing],
+        ["release-version", person, distributing],
       ] as const) {
         expect(
           evaluateAppleDeviceRequest(

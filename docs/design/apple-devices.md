@@ -41,7 +41,8 @@ TestFlight track for its mobile client is a separate operator runbook
   pure `evaluateAppleDeviceRequest` in
   [`appleToolchainPolicy.ts`](../../packages/domain/src/appleToolchainPolicy.ts)
   decide every row of the authority table below and every refusal named in
-  these rules; upload is refused until distribution is enabled. No host code
+  these rules; upload, submission, and release are refused until distribution
+  is enabled. No host code
   calls them yet: there is no device discovery, lease store, route, or tool
   operation.
 - Every build passes `CODE_SIGNING_ALLOWED=NO`
@@ -139,7 +140,7 @@ access covers neither the device lease nor any distribution step.
   ended or changed hands after the person was shown it, the move is refused
   (`lease-changed`), so a device is never taken from a thread the person did
   not see.
-- A lease, an `uninstall`, and an upload count as confirmed only when the
+- A lease, an `uninstall`, and each distribution step count as confirmed only when the
   host's receipt says a local person answered; an answer from a paired device
   is refused (`local-person-required`).
 - A lease may start on a device in any state but `unavailable`; each
@@ -179,7 +180,8 @@ access covers neither the device lease nor any distribution step.
   other apps. Octant stops and reads only the process it launched, never one by
   name (`process-not-owned`).
 - Every device request names who asked (`requestedBy`). An agent acting for a
-  different thread is refused (`thread-mismatch`), and `uninstall`, upload, or
+  different thread is refused (`thread-mismatch`), and `uninstall`, a
+  distribution step, or
   a lease move asked by anyone but a person is refused (`person-required`).
 - A provisioning update is refused by name under every posture
   (`provisioning-updates-not-offered`), and a device request has no field that
@@ -216,10 +218,11 @@ access covers neither the device lease nor any distribution step.
 ### Distribution
 
 - Until the Current Release Boundary admits distribution (decision 7), every
-  upload is refused (`distribution-not-enabled`) whoever asks and under every
-  posture. The host passes the boundary to the policy as an input that stays
-  off until the decision-7 PR turns it on; the upload row of the authority
-  table is the rule that applies after that.
+  upload, submission, and release is refused (`distribution-not-enabled`)
+  whoever asks and under every posture. The host passes the boundary to the
+  policy as an input that stays off until the decision-7 PR turns it on; the
+  distribution rows of the authority table are the rule that applies after
+  that.
 - Distribution never runs on an agent's word. When the person asks in the
   thread, its agent may request an upload, a submission, or a release through
   `octant_apple`; the request raises the same confirmation the workbench

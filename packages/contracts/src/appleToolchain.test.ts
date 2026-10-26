@@ -765,18 +765,12 @@ describe("Apple physical device contracts", () => {
     }
   });
 
-  it("names a device for every operation but discovery and upload", () => {
+  it("names a device for every operation but discovery and distribution", () => {
     const { deviceId: _deviceId, ...noDevice } = request;
-    expect(AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind: "discover" }).kind).toBe(
-      "discover",
-    );
-    expect(AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind: "upload" }).kind).toBe(
-      "upload",
-    );
-    expect(() =>
-      AppleContracts.decodeAppleDeviceRequest({ ...request, kind: "discover" }),
-    ).toThrow();
-    expect(() => AppleContracts.decodeAppleDeviceRequest({ ...request, kind: "upload" })).toThrow();
+    for (const kind of ["discover", "upload", "submit-for-review", "release-version"] as const) {
+      expect(AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind }).kind).toBe(kind);
+      expect(() => AppleContracts.decodeAppleDeviceRequest({ ...request, kind })).toThrow();
+    }
     expect(() =>
       AppleContracts.decodeAppleDeviceRequest({ ...noDevice, kind: "use-device" }),
     ).toThrow();

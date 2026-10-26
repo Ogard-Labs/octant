@@ -300,7 +300,17 @@ const DEVICE_TOOLING: Readonly<
   uninstall: ["uninstall-app"],
   "provisioning-update": [],
   upload: [],
+  "submit-for-review": [],
+  "release-version": [],
 };
+
+// The distribution layer: person-only App Store Connect steps that target no
+// device and wait on the release boundary admitting distribution.
+const DISTRIBUTION_KINDS: ReadonlySet<AppleDeviceKind> = new Set([
+  "upload",
+  "submit-for-review",
+  "release-version",
+]);
 
 // Effects a thread's posture decides, one approval per request.
 const DEVICE_EFFECT_KINDS: ReadonlySet<AppleDeviceKind> = new Set([
@@ -333,7 +343,7 @@ const deviceDenied = (reason: AppleDeviceRefusalReason): AppleDevicePolicyDecisi
  * Authority for a physical Apple device, distribution included
  * (docs/design/apple-devices.md). A Simulator grant, the thread's Full
  * access, and a device lease never stand in for one another: a lease starts,
- * moves, and an uninstall or upload runs only on a confirmation a person at
+ * moves, and an uninstall or distribution step runs only on a confirmation a person at
  * the Mac answered, under every posture. Every check that can refuse without
  * asking runs first, so nobody is asked to approve a call that would then be
  * refused.
@@ -356,7 +366,7 @@ export function evaluateAppleDeviceRequest(
   if (request.kind === "provisioning-update") {
     return deviceDenied("provisioning-updates-not-offered");
   }
-  if (request.kind === "upload" && !host.distributionEnabled) {
+  if (DISTRIBUTION_KINDS.has(request.kind) && !host.distributionEnabled) {
     return deviceDenied("distribution-not-enabled");
   }
   // Remote clients observe only; widening later is cheaper than narrowing.
@@ -365,7 +375,7 @@ export function evaluateAppleDeviceRequest(
   }
   if (
     (request.kind === "uninstall" ||
-      request.kind === "upload" ||
+      DISTRIBUTION_KINDS.has(request.kind) ||
       request.fromThreadId !== undefined) &&
     actor.kind !== "local-user"
   ) {
@@ -375,7 +385,7 @@ export function evaluateAppleDeviceRequest(
     scope.executionPolicy === "plan" &&
     (DEVICE_EFFECT_KINDS.has(request.kind) ||
       request.kind === "uninstall" ||
-      request.kind === "upload")
+      DISTRIBUTION_KINDS.has(request.kind))
   ) {
     return deviceDenied("read-only-policy");
   }
@@ -383,7 +393,7 @@ export function evaluateAppleDeviceRequest(
   if (DEVICE_TOOLING[request.kind].some((operation) => !host.tooling.includes(operation))) {
     return deviceDenied("operation-unavailable");
   }
-  if (request.kind === "upload") return confirmedByLocalPerson(request, scope);
+  if (DISTRIBUTION_KINDS.has(request.kind)) return confirmedByLocalPerson(request, scope);
   if (request.kind === "discover") return deviceAllowed;
 
   const device = host.devices.find(
