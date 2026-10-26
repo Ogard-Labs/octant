@@ -491,6 +491,11 @@ export interface ProviderOAuthCommand {
   readonly instanceId: ProviderInstanceId;
   readonly descriptorId: string;
   readonly attemptId: string;
+  /**
+   * An organization sign-in begun with a device code. Only the host-local
+   * `octant provider sign-in` route sets it; this route's commands never do.
+   */
+  readonly flow?: "device-code";
 }
 
 function readCommand(value: unknown): ProviderOAuthCommand | undefined {

@@ -12,10 +12,12 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { unlink } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { chmod, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { decodeDesktopLeaseId, type DesktopHostTag, type DesktopLeaseId } from "@octant/contracts";
 import type {
+  DesktopDeliverResult,
   DesktopLaunchPort,
   DesktopLaunchResult,
   DesktopReleaseResult,
@@ -313,6 +315,32 @@ export function createHostLocalDesktopLaunch(
     }
   };
 
+  /**
+   * The inbox is bound read-only into the desktop, so only the host writes
+   * it. The file is written whole beside `home` and `inbox` under a name the
+   * desktop never sees, made read-only, then renamed into place, so the
+   * desktop never sees a partial file and a second transfer under the same
+   * name replaces the first in one step.
+   */
+  const deliver: DesktopLaunchPort["deliver"] = async (
+    leaseId,
+    name,
+    bytes,
+  ): Promise<DesktopDeliverResult> => {
+    if (!isInboxName(name)) return { status: "refused", reason: "invalid-name" };
+    if (!running.has(String(leaseId))) return { status: "refused", reason: "not-running" };
+    const incoming = join(leaseDirectory(leaseId), `incoming-${randomUUID()}`);
+    try {
+      await writeFile(incoming, bytes, { flag: "wx", mode: 0o600 });
+      await chmod(incoming, 0o444);
+      await rename(incoming, join(leaseDirectory(leaseId), "inbox", name));
+      return { status: "delivered" };
+    } catch {
+      await unlink(incoming).catch(() => undefined);
+      return { status: "failed", reason: "write-failed" };
+    }
+  };
+
   const listOwned: DesktopLaunchPort["listOwned"] = async (hostTag) => {
     try {
       const ids = new Map<string, DesktopLeaseId>();
@@ -330,7 +358,19 @@ export function createHostLocalDesktopLaunch(
     }
   };
 
-  return { readiness, launch, stop, inspect, listOwned };
+  return { readiness, launch, stop, inspect, deliver, listOwned };
+}
+
+/** One file name that stays in the inbox: no separator, no NUL, not `.` or `..`. */
+function isInboxName(name: string): boolean {
+  return (
+    name.length > 0 &&
+    Buffer.byteLength(name) <= 255 &&
+    name !== "." &&
+    name !== ".." &&
+    !name.includes("/") &&
+    !name.includes("\0")
+  );
 }
 
 function leaseIdOrUndefined(value: string): DesktopLeaseId | undefined {

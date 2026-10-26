@@ -57,6 +57,19 @@ const DIRECTORY_INTERACTION_CODES: ReadonlySet<number> = new Set([50076, 50079, 
 // including 50173 (a password change or an administrator's revocation), is
 // read as revoked.
 const DIRECTORY_EXPIRED_CODES: ReadonlySet<number> = new Set([70008, 700082, 70043]);
+// The pages the directory sends a person to with a device code. A code shown
+// beside any other address would teach the person to type it into a page
+// Octant did not name, which is how device-code phishing works, so the
+// broker refuses the attempt instead of printing it.
+const DIRECTORY_VERIFICATION_HOSTS: ReadonlySet<string> = new Set([
+  "microsoft.com",
+  "login.microsoft.com",
+  "login.microsoftonline.com",
+]);
+// The directory keeps a device code for fifteen minutes; an answer claiming
+// longer would keep the broker polling for a code nobody can still enter.
+const DIRECTORY_DEVICE_MAX_SECONDS = 15 * 60;
+const VISIBLE_ASCII_PATTERN = /^[\x21-\x7e]{1,2048}$/;
 const ACCOUNT_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 .@_'-]{0,127}$/;
 // RFC 6749 §3.3 scope-token: printable ASCII without space, quote, or
 // backslash. A resource may advertise a URL-shaped scope; the authorize URL
@@ -369,6 +382,7 @@ interface DirectoryAuthority {
   /** The `iss` every identity token from this tenant carries. */
   readonly issuer: string;
   readonly authorizationEndpoint: string;
+  readonly deviceAuthorizationEndpoint: string;
   readonly tokenEndpoint: string;
   readonly jwksUrl: string;
 }
@@ -861,6 +875,7 @@ function directoryAuthority(issuerOrigin: string, tenantId: string): DirectoryAu
   return {
     issuer: `${tenant}/v2.0`,
     authorizationEndpoint: `${tenant}/oauth2/v2.0/authorize`,
+    deviceAuthorizationEndpoint: `${tenant}/oauth2/v2.0/devicecode`,
     tokenEndpoint: `${tenant}/oauth2/v2.0/token`,
     jwksUrl: `${tenant}/discovery/v2.0/keys`,
   };
@@ -970,7 +985,34 @@ async function exchangeDirectoryCode(input: {
     if (exchanged.reason === "unavailable") return { kind: "refused", reason: "unavailable" };
     return { kind: "refused", reason: "exchange-refused" };
   }
-  const { idToken, ...tokens } = exchanged.grant;
+  return directorySignedInGrant({
+    fetch: input.fetch,
+    now: input.now,
+    directory: input.directory,
+    grant: exchanged.grant,
+    nonce: input.nonce,
+  });
+}
+
+/**
+ * The grant a finished directory sign-in stores, once the echoed scope sits
+ * under the audience and the identity token proves the tenant. A loopback
+ * sign-in's token must echo the attempt's nonce; a device-code sign-in sends
+ * none, and its token comes straight from the tenant's token endpoint in
+ * answer to the attempt's own device code.
+ */
+async function directorySignedInGrant(input: {
+  readonly fetch: typeof fetch;
+  readonly now: () => number;
+  readonly directory: DirectoryContext;
+  readonly grant: StoredGrant;
+  readonly nonce: string | undefined;
+}): Promise<
+  | { readonly kind: "tokens"; readonly grant: StoredGrant }
+  | { readonly kind: "refused"; readonly reason: "exchange-refused" | "unavailable" }
+> {
+  const { binding } = input.directory;
+  const { idToken, ...tokens } = input.grant;
   if (idToken === undefined || !scopeBoundToAudience(tokens.scope, binding.audience)) {
     return { kind: "refused", reason: "exchange-refused" };
   }
@@ -979,7 +1021,7 @@ async function exchangeDirectoryCode(input: {
     now: input.now,
     idToken,
     directory: input.directory,
-    expectedNonce: input.nonce,
+    ...(input.nonce === undefined ? {} : { expectedNonce: input.nonce }),
   });
   if (identity.kind === "unavailable") return { kind: "refused", reason: "unavailable" };
   if (identity.kind !== "valid") return { kind: "refused", reason: "exchange-refused" };
@@ -995,6 +1037,155 @@ async function exchangeDirectoryCode(input: {
       ...(identity.accountLabel === undefined ? {} : { accountLabel: identity.accountLabel }),
     },
   };
+}
+
+/** A device code the tenant issued, with the page and code the person is shown. */
+interface DirectoryDeviceCode {
+  readonly deviceCode: string;
+  readonly userCode: string;
+  readonly verificationUri: string;
+  readonly expiresInSeconds: number;
+  readonly intervalSeconds: number;
+}
+
+/**
+ * Ask the tenant's own authority for a device code, requesting only the
+ * audience. The directory's free-text `message` is never read: the person is
+ * shown the code and a page from the closed list, and nothing the directory
+ * wrote. A 4xx answer (an app registration that does not allow public client
+ * flows, or a tenant that refuses the client) is refused; only an unreachable
+ * directory, a 429, or a 5xx reads unavailable.
+ */
+async function requestDirectoryDeviceCode(input: {
+  readonly fetch: typeof fetch;
+  readonly directory: DirectoryContext;
+}): Promise<
+  | { readonly kind: "issued"; readonly code: DirectoryDeviceCode }
+  | { readonly kind: "refused"; readonly reason: "exchange-refused" | "unavailable" }
+> {
+  const { binding, authority } = input.directory;
+  let response: Response;
+  try {
+    response = await input.fetch(authority.deviceAuthorizationEndpoint, {
+      method: "POST",
+      redirect: "error",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: binding.clientId,
+        scope: directoryScope(binding.audience),
+      }).toString(),
+    });
+  } catch {
+    return { kind: "refused", reason: "unavailable" };
+  }
+  if (response.status === 429 || response.status >= 500) {
+    return { kind: "refused", reason: "unavailable" };
+  }
+  const body = await readResponseJson(response);
+  if (!response.ok || body === undefined) return { kind: "refused", reason: "exchange-refused" };
+  const deviceCode = stringField(body, "device_code");
+  const userCode = stringField(body, "user_code");
+  const verificationUri = stringField(body, "verification_uri");
+  const expiresIn = numberField(body, "expires_in");
+  const interval = numberField(body, "interval") ?? DEFAULT_DEVICE_INTERVAL_MS / 1_000;
+  if (
+    deviceCode === undefined ||
+    deviceCode.length > MAX_TOKEN_CHARS ||
+    userCode === undefined ||
+    !USER_CODE_PATTERN.test(userCode) ||
+    verificationUri === undefined ||
+    !isDirectoryVerificationPage(verificationUri) ||
+    expiresIn === undefined ||
+    expiresIn <= 0
+  ) {
+    return { kind: "refused", reason: "exchange-refused" };
+  }
+  return {
+    kind: "issued",
+    code: {
+      deviceCode,
+      userCode,
+      verificationUri,
+      expiresInSeconds: Math.min(expiresIn, DIRECTORY_DEVICE_MAX_SECONDS),
+      intervalSeconds: Math.min(Math.max(1, interval), 60),
+    },
+  };
+}
+
+/**
+ * Whether a verification page is one the directory itself serves, over https.
+ * The command prints the page as the directory wrote it, and the URL parser
+ * drops line breaks and percent-encodes an escape character before it names
+ * the host, so the text itself must be visible ASCII as well.
+ */
+function isDirectoryVerificationPage(value: string): boolean {
+  if (!VISIBLE_ASCII_PATTERN.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.port === "" &&
+      DIRECTORY_VERIFICATION_HOSTS.has(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+type DevicePoll =
+  | { readonly kind: "tokens"; readonly grant: StoredGrant }
+  | { readonly kind: "pending"; readonly slowDown: boolean }
+  | { readonly kind: "refused"; readonly reason: HostOAuthRefusalReason };
+
+/**
+ * One poll of a directory device-code sign-in. The directory says a person
+ * declined with `authorization_declined`, a code ran out with
+ * `expired_token`, and anything else it refuses ends the attempt; a finished
+ * sign-in is held to the same scope and identity-token checks as a loopback
+ * one, without a nonce.
+ */
+async function pollDirectoryDevice(input: {
+  readonly fetch: typeof fetch;
+  readonly now: () => number;
+  readonly directory: DirectoryContext;
+  readonly deviceCode: string;
+}): Promise<DevicePoll> {
+  const { binding, authority } = input.directory;
+  const polled = await requestTokens({
+    fetch: input.fetch,
+    now: input.now,
+    endpoint: authority.tokenEndpoint,
+    form: {
+      grant_type: DEVICE_GRANT,
+      client_id: binding.clientId,
+      device_code: input.deviceCode,
+    },
+    clientId: binding.clientId,
+    tokenEndpoint: authority.tokenEndpoint,
+    previousRefresh: undefined,
+    generation: 0,
+    codeExchange: true,
+  });
+  if (polled.kind === "pending") return polled;
+  if (polled.kind === "transient") return { kind: "refused", reason: "unavailable" };
+  if (polled.kind === "refused") {
+    if (polled.reason === "denied" || polled.error === "authorization_declined") {
+      return { kind: "refused", reason: "denied" };
+    }
+    if (polled.reason === "timeout" || polled.reason === "unavailable") {
+      return { kind: "refused", reason: polled.reason };
+    }
+    return { kind: "refused", reason: "exchange-refused" };
+  }
+  return directorySignedInGrant({
+    fetch: input.fetch,
+    now: input.now,
+    directory: input.directory,
+    grant: polled.grant,
+    nonce: undefined,
+  });
 }
 
 /**
@@ -1853,6 +2044,10 @@ export function createHostOAuthRuntime(options: {
   };
 
   const beginDevice = async (descriptor: HostOAuthDescriptor): Promise<HostOAuthBeginResult> => {
+    const directoryBinding = descriptorDirectoryBinding(descriptor);
+    if (directoryBinding !== undefined) {
+      return beginDirectoryDevice(descriptor, directoryContext(directoryBinding));
+    }
     const deviceEndpoint = descriptor.deviceAuthorizationEndpoint;
     const tokenEndpoint = descriptor.tokenEndpoint;
     if (deviceEndpoint === undefined || tokenEndpoint === undefined) {
@@ -1908,6 +2103,79 @@ export function createHostOAuthRuntime(options: {
     return awaiting;
   };
 
+  /**
+   * A directory device-code sign-in, for a host without the desktop app. No
+   * listener opens: the person enters the code on another device, at a page
+   * from the closed list, and the broker polls the tenant's token endpoint.
+   */
+  const beginDirectoryDevice = async (
+    descriptor: HostOAuthDescriptor,
+    directory: DirectoryContext,
+  ): Promise<HostOAuthBeginResult> => {
+    const issued = await requestDirectoryDeviceCode({ fetch: fetchImpl, directory });
+    if (issued.kind === "refused") return issued;
+    const { code } = issued;
+    const attemptId = randomUUID();
+    const expiresAt = now() + code.expiresInSeconds * 1_000;
+    const awaiting: Extract<HostOAuthPublicState, { readonly kind: "awaiting-consent" }> = {
+      kind: "awaiting-consent",
+      attemptId,
+      descriptorId: descriptor.descriptorId,
+      flow: "device-code",
+      verificationUri: code.verificationUri,
+      userCode: code.userCode,
+      expiresAt: new Date(expiresAt).toISOString(),
+    };
+    const attempt: Attempt = {
+      descriptorId: descriptor.descriptorId,
+      closed: false,
+      listener: undefined,
+      timer: undefined,
+      status: awaiting,
+    };
+    attempts.set(attemptId, attempt);
+    void pollDevice({
+      attempt,
+      attemptId,
+      descriptor,
+      tokenEndpoint: directory.authority.tokenEndpoint,
+      deviceCode: code.deviceCode,
+      expiresAt,
+      intervalMs: code.intervalSeconds * 1_000,
+      directory,
+    });
+    return awaiting;
+  };
+
+  /** One poll of a standard device-code sign-in, read the way RFC 8628 words it. */
+  const pollStandardDevice = async (session: {
+    readonly descriptor: HostOAuthDescriptor;
+    readonly tokenEndpoint: string;
+    readonly deviceCode: string;
+  }): Promise<DevicePoll> => {
+    const polled = await requestTokens({
+      fetch: fetchImpl,
+      now,
+      endpoint: session.tokenEndpoint,
+      form: {
+        grant_type: DEVICE_GRANT,
+        device_code: session.deviceCode,
+        client_id: session.descriptor.clientId ?? "",
+      },
+      clientId: session.descriptor.clientId ?? "",
+      tokenEndpoint: session.tokenEndpoint,
+      previousRefresh: undefined,
+      generation: 0,
+      codeExchange: true,
+    });
+    if (polled.kind === "pending" || polled.kind === "tokens") return polled;
+    if (polled.kind === "transient") return { kind: "refused", reason: "unavailable" };
+    return {
+      kind: "refused",
+      reason: polled.reason === "verifier-mismatch" ? "timeout" : polled.reason,
+    };
+  };
+
   const pollDevice = async (session: {
     readonly attempt: Attempt;
     readonly attemptId: string;
@@ -1916,6 +2184,7 @@ export function createHostOAuthRuntime(options: {
     readonly deviceCode: string;
     readonly expiresAt: number;
     intervalMs: number;
+    readonly directory?: DirectoryContext;
   }) => {
     while (!closed && !session.attempt.closed) {
       if (now() >= session.expiresAt) {
@@ -1937,21 +2206,15 @@ export function createHostOAuthRuntime(options: {
         }
         return;
       }
-      const polled = await requestTokens({
-        fetch: fetchImpl,
-        now,
-        endpoint: session.tokenEndpoint,
-        form: {
-          grant_type: DEVICE_GRANT,
-          device_code: session.deviceCode,
-          client_id: session.descriptor.clientId ?? "",
-        },
-        clientId: session.descriptor.clientId ?? "",
-        tokenEndpoint: session.tokenEndpoint,
-        previousRefresh: undefined,
-        generation: 0,
-        codeExchange: true,
-      });
+      const polled =
+        session.directory === undefined
+          ? await pollStandardDevice(session)
+          : await pollDirectoryDevice({
+              fetch: fetchImpl,
+              now,
+              directory: session.directory,
+              deviceCode: session.deviceCode,
+            });
       if (polled.kind === "pending") {
         if (polled.slowDown) session.intervalMs += SLOW_DOWN_MS;
         continue;
@@ -1966,6 +2229,12 @@ export function createHostOAuthRuntime(options: {
             attemptId: session.attemptId,
             descriptorId: session.descriptor.descriptorId,
             credentialRef,
+            // Only the directory dialect's grant keeps a label, from the
+            // identity token it validated.
+            ...(polled.grant.dialect === DIRECTORY_DIALECT &&
+            polled.grant.accountLabel !== undefined
+              ? { accountLabel: polled.grant.accountLabel }
+              : {}),
           });
         } catch {
           publish(
@@ -1975,15 +2244,9 @@ export function createHostOAuthRuntime(options: {
         }
         return;
       }
-      const reason =
-        polled.kind === "refused"
-          ? polled.reason === "verifier-mismatch"
-            ? "timeout"
-            : polled.reason
-          : "unavailable";
       publish(
         session.attemptId,
-        refused(session.attemptId, session.descriptor.descriptorId, reason),
+        refused(session.attemptId, session.descriptor.descriptorId, polled.reason),
       );
       return;
     }
@@ -2728,15 +2991,17 @@ function validateDescriptor(descriptor: HostOAuthDescriptor): HostOAuthDescripto
 /**
  * A directory descriptor names its tenant, the organization's own public
  * client, an audience from the closed list, and the endpoint origin, and
- * nothing else: no URL (the broker builds the authority), no scope (the
- * broker requests only the audience), and only the loopback PKCE flow.
+ * nothing else: no URL (the broker builds the authority, device authorization
+ * included) and no scope (the broker requests only the audience). The flow is
+ * the loopback PKCE redirect or, for a host without the desktop app, a device
+ * code; the server decides which an instance may begin.
  */
 function validateDirectoryDescriptor(
   descriptor: HostOAuthDescriptor,
 ): HostOAuthDescriptor | undefined {
   const { tenantId, clientId, audience, endpointOrigin } = descriptor;
   if (
-    descriptor.flow !== "authorization-code-pkce" ||
+    (descriptor.flow !== "authorization-code-pkce" && descriptor.flow !== "device-code") ||
     tenantId === undefined ||
     !UUID_PATTERN.test(tenantId) ||
     clientId === undefined ||

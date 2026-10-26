@@ -1,4 +1,5 @@
 import type {
+  DesktopArtifactRefusalReason,
   DesktopLeaseEndReason,
   DesktopLeaseOwner,
   DesktopLeaseState,
@@ -146,4 +147,79 @@ export function desktopProviderExpiryHolds(input: {
 }): boolean {
   if (!input.billed) return true;
   return input.providerExpiresAt !== undefined && input.providerExpiresAt >= input.expiresAt;
+}
+
+export type DesktopArtifactPathDecision =
+  | {
+      readonly kind: "relative";
+      /** The path as journaled: `/`-separated, without `.` or empty segments. */
+      readonly path: string;
+      readonly segments: ReadonlyArray<string>;
+      /** The base name the file lands under. */
+      readonly name: string;
+    }
+  | {
+      readonly kind: "refused";
+      readonly reason: Extract<
+        DesktopArtifactRefusalReason,
+        "path-invalid" | "path-absolute" | "path-escapes-root" | "path-in-git"
+      >;
+    };
+
+/** One segment's limit in bytes, as a Linux or macOS filesystem names it. */
+const MAX_NAME_BYTES = 255;
+const MAX_PATH_LENGTH = 4_096;
+
+/**
+ * The checkout-relative path a transfer names, before the host touches the
+ * filesystem. Any `..` is refused, even one that would land back inside the
+ * root, so the journaled path is the only route to the file. `.git` is
+ * matched without case because a case-insensitive volume opens `.GIT` as the
+ * same directory.
+ */
+export function decideDesktopArtifactPath(path: string): DesktopArtifactPathDecision {
+  if (path.length === 0 || path.length > MAX_PATH_LENGTH || path.includes("\0")) {
+    return { kind: "refused", reason: "path-invalid" };
+  }
+  if (path.startsWith("/")) return { kind: "refused", reason: "path-absolute" };
+  const segments = path.split("/").filter((segment) => segment !== "" && segment !== ".");
+  if (segments.includes("..")) return { kind: "refused", reason: "path-escapes-root" };
+  if (segments.some((segment) => segment.toLowerCase() === ".git")) {
+    return { kind: "refused", reason: "path-in-git" };
+  }
+  const name = segments.at(-1);
+  if (
+    name === undefined ||
+    segments.some((segment) => new TextEncoder().encode(segment).byteLength > MAX_NAME_BYTES)
+  ) {
+    return { kind: "refused", reason: "path-invalid" };
+  }
+  return { kind: "relative", path: segments.join("/"), segments, name };
+}
+
+export type DesktopArtifactTransferGate =
+  | { readonly kind: "proceed" }
+  | { readonly kind: "refused"; readonly reason: "plan-mode" }
+  /** `in-thread` asks under ordinary posture rules; `off-machine` asks a person every time. */
+  | { readonly kind: "ask"; readonly asks: "in-thread" | "off-machine" };
+
+/**
+ * Plan refuses. A transfer to a cloud desktop sends the file off this machine,
+ * which no posture covers, so it always asks. A person sending a file to a
+ * host-local desktop has already decided; an agent asks unless the thread runs
+ * with Full access. Auto-accept-edits covers edits to the checkout, not
+ * sending a file out of it, so it asks as approval-gated does.
+ */
+export function decideDesktopArtifactTransfer(input: {
+  readonly executionPolicy: ProviderExecutionPolicy;
+  readonly locality: DesktopProviderLocality;
+  readonly initiator: EventActor["kind"];
+}): DesktopArtifactTransferGate {
+  if (input.executionPolicy === "plan") return { kind: "refused", reason: "plan-mode" };
+  if (input.locality !== "host-local") return { kind: "ask", asks: "off-machine" };
+  if (input.initiator === "local-user" || input.initiator === "remote-device") {
+    return { kind: "proceed" };
+  }
+  if (input.executionPolicy === "full-access") return { kind: "proceed" };
+  return { kind: "ask", asks: "in-thread" };
 }

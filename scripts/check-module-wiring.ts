@@ -651,6 +651,14 @@ export function findUnregisteredRouteModules(
  */
 export const KNOWN_UNCALLED_ENDPOINTS: ReadonlyMap<string, string> = new Map([
   [
+    "/api/apple/devices",
+    "2026-10-26: physical Apple device discovery and status are served ahead of their caller, the device pane of docs/design/apple-devices.md (delivery slice 4). Remove when the workbench's device picker calls it.",
+  ],
+  [
+    "/api/apple/device-leases",
+    "2026-10-26: starting and releasing a physical device's lease is served ahead of its caller, the device pane's lease confirmation of docs/design/apple-devices.md (delivery slice 4). Remove when the pane calls it.",
+  ],
+  [
     "/api/v1/shares",
     "Served by the public Canvas share service (the octant-webapp repository) and called by the host's share-service port in apps/server, which builds the address from the configured service URL; no window or device calls it. Remove when the checker counts apps/server as a caller of an external service's routes.",
   ],

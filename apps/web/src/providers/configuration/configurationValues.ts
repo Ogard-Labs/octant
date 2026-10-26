@@ -65,6 +65,8 @@ export function foundryConfigurationFrom(data: FormData): AzureFoundryProviderCo
       tenantId: directoryGuid(data.get("tenantId")) as DirectoryTenantId,
       clientId: directoryGuid(data.get("clientId")) as DirectoryClientId,
     },
+    // Off is the absence of the opt-in; the host stores no `false`.
+    ...(data.get("deviceCodeSignIn") === null ? {} : { deviceCodeSignIn: true }),
   };
 }
 

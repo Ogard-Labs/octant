@@ -615,8 +615,12 @@ delivery, keyboard layouts, and the managed streaming tools are specified in
 [Device workbench](design/device-workbench.md). Physical Apple devices,
 their person-confirmed leases and signing custody, and person-confirmed upload
 to App Store Connect are the design accepted on 2026-10-26, being implemented
-from its first slice, in
-[Apple physical devices and distribution](design/apple-devices.md).
+slice by slice, in
+[Apple physical devices and distribution](design/apple-devices.md). The host
+already discovers paired iPhones and iPads through `devicectl`, keeps the
+UDID, serial number, and ECID to itself, and holds a lease only after a person
+at the Mac confirms it; `/api/apple/devices` is readable by a paired device and
+`/api/apple/device-leases` is local-only.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
@@ -764,8 +768,10 @@ actions continue to report unavailable for plain folders.
 
 A Code Project bound to a folder on a machine this host reaches over SSH is a
 design accepted on 2026-10-26. Its admission policy, the executor, the SSH
-transport, host-key pinning from a local window or the local CLI, and Linux
-confinement attestation are built; no Project can bind a remote root yet. Its
+transport, host-key pinning from a local window or the local CLI, Linux
+confinement attestation, and binding a remote root with Files, Git status,
+and diff reads through the executor are built; threads cannot run there yet.
+SSH targets, their attestation digests, and remote bindings are journaled. Its
 admission, confinement attestation,
 transport, and how it differs from a paired host are owned by
 [Remote SSH environments](design/remote-ssh-environments.md).
@@ -2211,7 +2217,8 @@ flowchart LR
   can also take one `octant.host-export/1` cut of what this host holds: a thread bundle for
   every thread of every mode, Projects, Project memory, every Canvas (one a
   Chat thread owns outside every Project names no Project), a
-  non-secret settings summary, usage export rows, and retention windows
+  non-secret settings summary, SSH targets without their destination, host
+  key, or executor path, usage export rows, and retention windows
   with purge tombstones. That call is a host-control read on the loopback
   route chain. A remote principal and a paired device are refused, and the
   remote forward list does not carry the path. The same forbidden-key walk
@@ -2830,7 +2837,11 @@ modelId }`, and the model picker is provider-first. Each Claude instance is
   bearer per request through `DirectoryOAuthHost` and sends no stored value,
   and switching an instance between a key and a sign-in, or changing its
   tenant, client, or base URL, deletes the stored credential and forgets the
-  grant before the change is journaled. `cloud-iam` is not built.
+  grant before the change is journaled. A device-code sign-in begins only for
+  an instance opted in to it, and only from the host-local
+  `octant provider sign-in` command (see "Organization sign-in on a host
+  without the desktop app" under [security and authority](#security-and-authority)).
+  `cloud-iam` is not built.
   Secrets
   Octant holds for an integration use the same host credential path: the host
   keeps an opaque reference; plugins, the renderer, the journal, and diagnostics
@@ -5889,9 +5900,10 @@ same. This holds in Chat, Work, and Code.
   2026-10-26, in
   [Disposable desktops](design/disposable-desktops.md). The lease contract,
   the `desktop-provider` seam with its conformance suite, the host lease
-  service, and the host-local provider (a virtual X display in a dedicated
-  Bubblewrap launch, Linux only) are built; no recipe storage, transfer, agent
-  binding, or Desktop pane is, so every lease command refuses as a value.
+  service, the host-local provider (a virtual X display in a dedicated
+  Bubblewrap launch, Linux only), and artifact transfer are built; no recipe
+  storage, agent binding, or Desktop pane is, so every lease command refuses
+  as a value.
 
 **Canvas export.** A destination plugin contributes an export target through
 `@octant/plugin-api`. The contribution names the formats it accepts. The host
@@ -7795,6 +7807,22 @@ mechanisms are:
     an unreachable store leaves the request for the next start. The authority
     boundary above is unchanged: the new route sits behind the same bridge
     secret, window capability, no-`Origin`, and loopback checks.
+- **Organization sign-in on a host without the desktop app.** An Azure AI
+  Foundry endpoint that signs in with a directory account and opted in to it
+  (`deviceCodeSignIn`) signs in with a device code from
+  `octant provider sign-in <instance>`
+  ([`providerSignInCommand.ts`](../packages/cli/src/providerSignInCommand.ts),
+  [`providerDeviceSignInRoutes.ts`](../apps/server/src/providers/oauth/providerDeviceSignInRoutes.ts)).
+  Its `/api/desktop/provider-sign-in/begin` and `/poll` routes take exactly
+  the caller the provider key routes take (bridge secret, window capability,
+  no `Origin`, loopback), and the private listener never forwards them; the
+  browser sign-in route never begins a device code, so a code appears only in
+  the terminal that asked for it. The broker builds the tenant's device
+  authorization URL from its closed issuer host and refuses a verification
+  page off a closed list; the server follows an issued code until the broker
+  settles it, so an interrupted command never leaves a grant without a
+  pointer. [Enterprise provider identity](design/enterprise-provider-identity.md)
+  owns the rules.
 - **Artifact replica membership.** Each replica entry carries a detached
   Ed25519 signature from the device signing key the writing host holds for its
   replica instance, in a credential namespace of its own that provider

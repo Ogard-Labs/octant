@@ -35,7 +35,7 @@ async function session(...input: ReadonlyArray<Uint8Array>) {
       if (reading.status === "frames") frames.push(...reading.frames);
     },
     identity,
-    attest: async () => {
+    answer: async () => {
       attested += 1;
       return reply;
     },

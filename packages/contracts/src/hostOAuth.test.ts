@@ -138,6 +138,42 @@ describe("host OAuth contracts", () => {
     ).toThrow();
   });
 
+  it("lets only the directory dialect pair with a device-code sign-in, still naming no URL", () => {
+    const directory = {
+      descriptorId: "azure-foundry-directory",
+      dialect: "directory-oidc",
+      flow: "device-code",
+      clientId: "0a1b2c3d-4e5f-4a6b-9c7d-8e9f0a1b2c3d",
+      tenantId: "6f1c2d3e-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+      audience: "https://cognitiveservices.azure.com",
+      endpointOrigin: "https://contoso.openai.azure.com",
+      scopes: [],
+      termsId: "azure-foundry-directory-1",
+    } as const;
+    expect(decodeHostOAuthDescriptor(directory)).toEqual(directory);
+    // The broker builds the tenant's device authorization URL itself.
+    expect(() =>
+      decodeHostOAuthDescriptor({
+        ...directory,
+        deviceAuthorizationEndpoint: "https://login.example/devicecode",
+      }),
+    ).toThrow();
+    // Every other dialect's wire shape is not OAuth's, so none pairs with a device code.
+    expect(() =>
+      decodeHostOAuthDescriptor({
+        descriptorId: "mcp-server",
+        dialect: "mcp-authorization",
+        flow: "device-code",
+        clientId: "public-client",
+        tokenEndpoint: "https://idp.example/token",
+        deviceAuthorizationEndpoint: "https://idp.example/device",
+        resource: "https://mcp.example/",
+        scopes: [],
+        termsId: "mcp-terms-1",
+      }),
+    ).toThrow();
+  });
+
   it("names a directory account on a finished sign-in and a sign-in the organization wants repeated in person", () => {
     expect(
       decodeHostOAuthSignInState({

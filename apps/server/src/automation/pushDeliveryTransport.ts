@@ -1,11 +1,13 @@
 import type {
-  AutomationNotificationPayloadV1,
   AutomationNotificationProviderDelivery,
+  RemotePushEnvelopeV1,
   RemotePushPlatform,
 } from "@octant/contracts";
 
 export type PushDeliverySendResult =
   | { readonly kind: "delivered" }
+  /** The delivery path refused the destination as gone; the host clears it. */
+  | { readonly kind: "destination-gone" }
   | {
       readonly kind: "failed";
       readonly retryable: boolean;
@@ -19,14 +21,16 @@ export interface PushDeliveryDestination {
 }
 
 /**
- * Host-side push transport. Credentialed APNs/FCM remains a named validation
- * gate: the default transport reports `unavailable` and never invents success.
+ * Host-side push transport, shared by ordinary threads and Automation runs. It
+ * is handed only the sealed envelope, never the notification's content.
+ * Credentialed APNs/FCM remains a named validation gate: the default transport
+ * reports `unavailable` and never invents success.
  */
 export interface PushDeliveryTransport {
   readonly providerDelivery: () => AutomationNotificationProviderDelivery;
   readonly send: (input: {
     readonly destination: PushDeliveryDestination;
-    readonly payload: AutomationNotificationPayloadV1;
+    readonly envelope: RemotePushEnvelopeV1;
   }) => Promise<PushDeliverySendResult>;
 }
 
@@ -50,12 +54,12 @@ export function createRecordingPushDeliveryTransport(options?: {
 }): PushDeliveryTransport & {
   readonly sent: Array<{
     readonly destination: PushDeliveryDestination;
-    readonly payload: AutomationNotificationPayloadV1;
+    readonly envelope: RemotePushEnvelopeV1;
   }>;
 } {
   const sent: Array<{
     readonly destination: PushDeliveryDestination;
-    readonly payload: AutomationNotificationPayloadV1;
+    readonly envelope: RemotePushEnvelopeV1;
   }> = [];
   return {
     sent,

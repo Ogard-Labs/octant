@@ -5,7 +5,7 @@ import { ProviderChildActivityEvent } from "./providers";
 import { Schema } from "effect";
 import { AgentRunResultDeliveryMark, MAX_AGENT_RUN_ADMITTED_CONTEXT_BLOCKS } from "./agentRun";
 import { ExtensionSelection } from "./extensions";
-import { AppleActionRequest } from "./appleToolchain";
+import { AppleActionRequest, AppleDeviceRequest } from "./appleToolchain";
 import { AndroidEmulatorRequest } from "./androidToolchain";
 import {
   CodeAttachmentId,
@@ -2351,6 +2351,12 @@ export const CodeApprovalEffect = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("android-action"),
     request: AndroidEmulatorRequest,
+  }).annotations(strict),
+  // Starting or moving a physical device's lease asks a person at the Mac
+  // under every posture; no other device request is approved this way yet.
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-lease"),
+    request: AppleDeviceRequest.pipe(Schema.filter((request) => request.kind === "use-device")),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("create-thread-full-access"),

@@ -58,10 +58,16 @@ export async function dispatchDirectorySignIn(input: {
     return signedOut(false);
   }
   if (command.kind === "begin") {
+    // A device code is begun only for an instance the person opted in, and
+    // only by the host-local command that asks for one; Settings never does.
+    if (command.flow === "device-code" && target.deviceCodeSignIn !== true) {
+      return { kind: "refused", reason: "device-code-not-enabled" };
+    }
     const started = await dependencies.service.begin({
       principalKind: principal,
       actorId,
-      descriptor,
+      descriptor:
+        command.flow === "device-code" ? { ...descriptor, flow: "device-code" } : descriptor,
     });
     return finish(input, target, started);
   }
@@ -123,6 +129,8 @@ type SignInTarget =
       readonly kind: "target";
       readonly descriptor: HostOAuthDescriptor;
       readonly binding: DirectoryBindingFacts;
+      /** Whether the instance allows a device-code sign-in from the host-local command. */
+      readonly deviceCodeSignIn: boolean;
     }
   | { readonly kind: "refused"; readonly reason: string };
 
@@ -162,7 +170,12 @@ function signInTarget(
   ) {
     return { kind: "refused", reason: "invalid" };
   }
-  return { kind: "target", descriptor, binding: { tenantId, clientId, audience, endpointOrigin } };
+  return {
+    kind: "target",
+    descriptor,
+    binding: { tenantId, clientId, audience, endpointOrigin },
+    deviceCodeSignIn: instance.configuration.deviceCodeSignIn === true,
+  };
 }
 
 async function finish(
@@ -213,7 +226,17 @@ async function finish(
       expiresAt: state.expiresAt,
     };
   }
-  // The directory dialect signs in on a loopback redirect only.
+  // A device code is shown only to the host-local command that asked for one.
+  if (state.kind === "awaiting-consent" && command.flow === "device-code") {
+    return {
+      kind: "awaiting-consent",
+      attemptId: state.attemptId,
+      flow: "device-code",
+      verificationUri: state.verificationUri,
+      userCode: state.userCode,
+      expiresAt: state.expiresAt,
+    };
+  }
   return { kind: "refused", reason: "unavailable" };
 }
 

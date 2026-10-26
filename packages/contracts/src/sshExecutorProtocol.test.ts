@@ -31,6 +31,33 @@ describe("SSH executor protocol", () => {
     expect(decode({ type: "reply", id: 0, reply: { kind: "busy" } })._tag).toBe("Left");
   });
 
+  it("lets the host ask for reads only by a bound root and a path that stays inside it", () => {
+    const decode = Schema.decodeUnknownEither(SshExecutorHostFrame);
+    const request = (value: object) => decode({ type: "request", id: 3, request: value })._tag;
+    expect(request({ kind: "read-file", root: "/home/build/app", path: "src/main.ts" })).toBe(
+      "Right",
+    );
+    expect(request({ kind: "git-diff", root: "/home/build/app" })).toBe("Right");
+    for (const path of ["../.ssh/id_ed25519", "/etc/passwd", "src/../../x", "src\u0000x", ""]) {
+      expect(request({ kind: "read-file", root: "/home/build/app", path })).toBe("Left");
+    }
+    expect(request({ kind: "list-directory", root: "home/build/app" })).toBe("Left");
+    // No read writes: there is no request that could.
+    expect(request({ kind: "write-file", root: "/home/build/app", path: "a", content: "" })).toBe(
+      "Left",
+    );
+  });
+
+  it("reads a read refusal only with a reason the host can show", () => {
+    const decode = Schema.decodeUnknownEither(SshExecutorFrame);
+    expect(
+      decode({ type: "reply", id: 2, reply: { kind: "refused", reason: "outside-root" } })._tag,
+    ).toBe("Right");
+    expect(
+      decode({ type: "reply", id: 2, reply: { kind: "refused", reason: "ask the user" } })._tag,
+    ).toBe("Left");
+  });
+
   it("lets the host ask only for an attestation of named postures and probes", () => {
     const decode = Schema.decodeUnknownEither(SshExecutorHostFrame);
     expect(

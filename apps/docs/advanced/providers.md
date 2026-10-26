@@ -639,6 +639,13 @@ The administrator gives you the **Directory (tenant) ID** and the
    `login.microsoftonline.com`; when you finish there, the endpoint shows who
    is signed in and checks itself.
 
+On a host without the Octant desktop app, such as a headless Linux host, turn
+on **Allow sign-in with a code from this host's terminal** under the
+endpoint's **Name and address** and sign in with
+[`octant provider sign-in`](../guide/linux-host#sign-in-an-organization-endpoint-with-a-code)
+instead. The administrator's registration must then also set
+**Authentication › Allow public client flows** to **Yes**.
+
 The address must be on `openai.azure.com`, `services.ai.azure.com`, or
 `cognitiveservices.azure.com`. What the row says when the sign-in needs you:
 

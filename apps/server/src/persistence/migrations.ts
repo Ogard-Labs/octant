@@ -2308,6 +2308,29 @@ CREATE INDEX validation_evidence_authority_idx
     name: "open_provider_driver_kind",
     sql: OPEN_PROVIDER_DRIVER_KIND_SQL,
   },
+  {
+    version: 86,
+    name: "create_ssh_target_projection",
+    sql: `
+      CREATE TABLE ssh_target_projection (
+        target_id TEXT PRIMARY KEY CHECK(length(trim(target_id)) > 0),
+        target_json TEXT NOT NULL CHECK(json_valid(target_json)),
+        registered_at TEXT NOT NULL CHECK(length(trim(registered_at)) > 0),
+        attestation_json TEXT CHECK(attestation_json IS NULL OR json_valid(attestation_json)),
+        attested_at TEXT,
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+      CREATE TABLE ssh_remote_project_projection (
+        project_id TEXT PRIMARY KEY CHECK(length(trim(project_id)) > 0),
+        target_id TEXT NOT NULL CHECK(length(trim(target_id)) > 0),
+        project_json TEXT NOT NULL CHECK(json_valid(project_json)),
+        aggregate_version INTEGER NOT NULL CHECK(aggregate_version > 0),
+        last_sequence INTEGER NOT NULL CHECK(last_sequence > 0)
+      ) STRICT;
+      CREATE INDEX ssh_remote_project_target_idx ON ssh_remote_project_projection(target_id);
+    `,
+  },
 ];
 
 interface AppliedMigrationRow {

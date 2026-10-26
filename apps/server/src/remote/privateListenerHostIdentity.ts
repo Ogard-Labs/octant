@@ -69,6 +69,14 @@ export function resolvePrivateListenerHostIdentity(
   return { hostId, displayName, signing };
 }
 
+/**
+ * The name the listener shows a paired phone, read without touching key
+ * material: notifications name the computer the way its hello does.
+ */
+export function privateListenerDisplayName(connection: SqliteConnection): string {
+  return boundedDisplayName(readHostIdentity(connection)?.display_name ?? safeHostname());
+}
+
 function loadOrCreateHostId(directory: string): StableHostId {
   const path = join(directory, HOST_ID_FILE);
   if (existsSync(path)) {

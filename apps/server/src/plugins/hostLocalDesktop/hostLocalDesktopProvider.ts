@@ -385,8 +385,12 @@ export function createHostLocalDesktopProvider(launch: DesktopLaunchPort): Deskt
       reason: "unsupported",
       message: "This desktop does not take agent commands yet.",
     }),
-    // Artifact transfer arrives with its own slice and approval.
-    deliver: async () => ({ status: "refused", reason: "unsupported" }),
+    // The host owns the inbox; the file reaches it only through the launch
+    // port, and only while this desktop runs.
+    deliver: async (handle, name, bytes) =>
+      running(handle.leaseId) === undefined
+        ? unavailable("not-running")
+        : launch.deliver(handle.leaseId, name, bytes),
     release: async (handle) => {
       sessions.get(String(handle.leaseId))?.channel.close();
       sessions.delete(String(handle.leaseId));

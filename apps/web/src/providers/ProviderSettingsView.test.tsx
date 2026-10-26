@@ -1945,6 +1945,43 @@ describe("ProviderSettingsView", () => {
     expect(credential.value).toBe("");
   });
 
+  it("lets a Foundry organization sign-in opt in to signing in with a code from the host's terminal, and keeps the choice on save", async () => {
+    const user = userEvent.setup();
+    const props = {
+      ...fixture({
+        instance: directoryFoundryProvider(),
+        observed: observation({ models: [], directoryBinding: foundryBinding }),
+      }),
+      onProviderOAuth: vi.fn(async () => ({
+        kind: "signed-in" as const,
+        accountLabel: "person@contoso.example",
+      })),
+    };
+    renderExpanded(<ModelEndpointSettingsView {...props} />);
+    const card = screen.getByLabelText("Foundry relay");
+    const optIn = within(card).getByRole("checkbox", {
+      name: "Allow sign-in with a code from this host's terminal for Foundry relay",
+    });
+    const save = within(card).getByRole("button", {
+      name: "Save Azure AI Foundry settings for Foundry relay",
+    });
+
+    // Off unless the person turns it on, and it names the host-local command.
+    expect(optIn).not.toBeChecked();
+    expect(within(card).getByText('octant provider sign-in "Foundry relay"')).toBeVisible();
+    await user.click(optIn);
+    await user.click(save);
+
+    const saves = vi.mocked(props.onChangeAzureFoundryConfiguration).mock.calls;
+    expect(saves[0]?.[1]).toMatchObject({
+      authentication: "directory-oauth",
+      deviceCodeSignIn: true,
+    });
+    await user.click(optIn);
+    await user.click(save);
+    expect(saves[1]?.[1]).not.toHaveProperty("deviceCodeSignIn");
+  });
+
   it("says when the organization wants a Foundry sign-in repeated in person", async () => {
     const onProviderOAuth = vi.fn(async () => ({
       kind: "expired" as const,

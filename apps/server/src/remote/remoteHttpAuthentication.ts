@@ -865,6 +865,8 @@ async function handlePushTokenRoute(
       deviceId,
       platform: body.platform,
       token: body.token,
+      notificationPublicKey: body.notificationPublicKey,
+      preferences: body.preferences,
       now: occurredAt,
     });
     return jsonResponse(

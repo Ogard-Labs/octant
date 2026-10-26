@@ -128,7 +128,14 @@ export const HostOAuthDescriptor = Schema.Struct({
   .pipe(
     Schema.filter(
       (descriptor) => {
-        if (descriptor.dialect !== undefined && descriptor.flow !== "authorization-code-pkce") {
+        // The directory dialect speaks standard device authorization against
+        // the tenant's own authority; every other dialect's wire shape is
+        // not OAuth's, so none pairs with a device code.
+        if (
+          descriptor.dialect !== undefined &&
+          descriptor.dialect !== "directory-oidc" &&
+          descriptor.flow !== "authorization-code-pkce"
+        ) {
           return false;
         }
         // The directory dialect names its tenant, the organization's own
@@ -180,7 +187,7 @@ export const HostOAuthDescriptor = Schema.Struct({
       },
       {
         description:
-          "a standard flow requires a client ID and at least one scope; a dialect flow cannot pair with a device-code grant; the ChatGPT plan dialect requires at least one scope; only the directory dialect omits the token endpoint, and it names its tenant, client, audience, and endpoint and no URL or scope",
+          "a standard flow requires a client ID and at least one scope; only the directory dialect pairs with a device-code grant; the ChatGPT plan dialect requires at least one scope; only the directory dialect omits the token endpoint, and it names its tenant, client, audience, and endpoint and no URL or scope",
       },
     ),
   )

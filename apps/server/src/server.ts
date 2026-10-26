@@ -61,6 +61,7 @@ import { wireContext } from "./wiring/context";
 import { wireWorkFiles } from "./wiring/workFiles";
 import { wireCanvas } from "./wiring/canvas";
 import { wireAutomation } from "./wiring/automation";
+import { wireThreadNotifications } from "./wiring/notifications";
 import { wireWorkRequests } from "./wiring/workRequests";
 import { wireRoutes } from "./wiring/routes";
 import { wireRemote } from "./wiring/remote";
@@ -176,6 +177,7 @@ export function startOctantServer(
       agentRunParentAuthority,
       agentRunPersistence,
       androidInputGrants,
+      appleDeviceLeases,
       bindingReceiptStore,
       browserCaptureStore,
       browserCaptures,
@@ -317,6 +319,7 @@ export function startOctantServer(
       browserAuthority,
       externalContentIngestionStore,
       machineChangeFeed,
+      managedWorktreeReceipts,
       options,
       persistence,
       processAuthorityNow,
@@ -573,11 +576,13 @@ export function startOctantServer(
     });
     const {
       androidToolchainService,
+      appleDeviceService,
       appleToolchainService,
       bindDeviceApprovals,
       recordAppleEvidence,
     } = yield* wireDevices({
       androidInputGrants,
+      appleDeviceLeases,
       codeSessionAuthority,
       persistence,
       projectService,
@@ -588,6 +593,7 @@ export function startOctantServer(
     });
     const {
       androidToolchainRoutes,
+      appleDeviceRoutes,
       appleToolchainRoutes,
       baseRouteCodeService,
       codeCompletedThreadSource,
@@ -611,6 +617,7 @@ export function startOctantServer(
       androidToolchainService,
       bindDeviceApprovals,
       buildCodeService,
+      appleDeviceService,
       appleToolchainService,
       browserAuthority,
       canAccessCodeProject,
@@ -693,6 +700,7 @@ export function startOctantServer(
       windowAuthorityStore,
     });
     const {
+      chatHiddenThreadIds,
       chatRoutes,
       chatService,
       codeThreadMentionDirectory,
@@ -921,6 +929,9 @@ export function startOctantServer(
       automationRoutes,
       automationScheduler,
       completedThreadArchiveSweep,
+      hasPushStanding,
+      pushComputerLabel,
+      pushDeliveryTransport,
       pushNotificationTokenStore,
     } = wireAutomation({
       capacityScheduler,
@@ -934,6 +945,15 @@ export function startOctantServer(
       workThreadService,
       workThreadServiceWithWorkflows,
       workTurnService,
+    });
+    yield* wireThreadNotifications({
+      chatHiddenThreadIds,
+      hasPushStanding,
+      persistence,
+      pushComputerLabel,
+      pushDeliveryTransport,
+      pushNotificationTokenStore,
+      workThreadProjection,
     });
     const {
       fleetActivityRoutes,
@@ -996,6 +1016,7 @@ export function startOctantServer(
       agentRunRouteDependencies,
       agentRunSettingsRoutes,
       androidToolchainRoutes,
+      appleDeviceRoutes,
       appleToolchainRoutes,
       artifactLibraryRoutes,
       artifactMirrorRoutes,

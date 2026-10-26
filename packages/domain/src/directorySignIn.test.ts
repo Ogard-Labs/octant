@@ -28,6 +28,21 @@ describe("Azure AI Foundry organization sign-in", () => {
     });
   });
 
+  it("begins a device-code sign-in with the same binding when one is asked for", () => {
+    const descriptor = azureFoundryDirectoryDescriptor(
+      { baseUrl: "https://contoso.openai.azure.com/openai/v1/", directory },
+      "device-code",
+    );
+
+    expect(decodeHostOAuthDescriptor(descriptor)).toMatchObject({
+      dialect: "directory-oidc",
+      flow: "device-code",
+      tenantId: directory.tenantId,
+      clientId: directory.clientId,
+      endpointOrigin: "https://contoso.openai.azure.com",
+    });
+  });
+
   it.each([
     ["a host off the Foundry list", "https://models.example.com/openai/v1/"],
     ["a look-alike host", "https://contoso.openai.azure.com.example.com/openai/v1/"],

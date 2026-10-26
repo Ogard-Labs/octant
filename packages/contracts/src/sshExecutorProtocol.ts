@@ -9,14 +9,27 @@
  * its introduction and replies. It cannot start a turn, ask for approval, call
  * a tool, or write to the journal, and nothing it sends admits work: the host
  * decides admission from the facts in a reply.
+ *
+ * Every read names the remote root the host bound and a path relative to it.
+ * The executor refuses a root that moved and a path that resolves outside it,
+ * and no request writes.
  */
 
 import { Schema } from "effect";
+import { CodeRelativePath } from "./code";
+import {
+  SshRemoteDirectoryListing,
+  SshRemoteFileContent,
+  SshRemoteGitDiff,
+  SshRemoteGitStatus,
+  SshRemoteReadRefusalReason,
+} from "./sshRemoteProject";
 import {
   SshAttestationFacts,
   SshConfinedPosture,
   SshConfinementCanaryProbe,
   SshExecutorIdentityFacts,
+  SshRemotePath,
   SshRemoteUser,
 } from "./sshTarget";
 
@@ -67,7 +80,55 @@ export const SshExecutorAttestRequest = Schema.Struct({
 }).annotations(strict);
 export type SshExecutorAttestRequest = typeof SshExecutorAttestRequest.Type;
 
-export const SshExecutorRequest = SshExecutorAttestRequest;
+/**
+ * Resolve the folder a Project would bind to its canonical path, refused when
+ * it is not a directory or not a folder Octant confines reads to.
+ */
+export const SshExecutorResolveRootRequest = Schema.Struct({
+  kind: Schema.Literal("resolve-root"),
+  root: SshRemotePath,
+}).annotations(strict);
+export type SshExecutorResolveRootRequest = typeof SshExecutorResolveRootRequest.Type;
+
+/** One directory of the bound root, one level deep. */
+export const SshExecutorListDirectoryRequest = Schema.Struct({
+  kind: Schema.Literal("list-directory"),
+  root: SshRemotePath,
+  directory: Schema.optional(CodeRelativePath),
+}).annotations(strict);
+export type SshExecutorListDirectoryRequest = typeof SshExecutorListDirectoryRequest.Type;
+
+export const SshExecutorReadFileRequest = Schema.Struct({
+  kind: Schema.Literal("read-file"),
+  root: SshRemotePath,
+  path: CodeRelativePath,
+}).annotations(strict);
+export type SshExecutorReadFileRequest = typeof SshExecutorReadFileRequest.Type;
+
+export const SshExecutorGitStatusRequest = Schema.Struct({
+  kind: Schema.Literal("git-status"),
+  root: SshRemotePath,
+}).annotations(strict);
+export type SshExecutorGitStatusRequest = typeof SshExecutorGitStatusRequest.Type;
+
+export const SshExecutorGitDiffRequest = Schema.Struct({
+  kind: Schema.Literal("git-diff"),
+  root: SshRemotePath,
+  path: Schema.optional(CodeRelativePath),
+}).annotations(strict);
+export type SshExecutorGitDiffRequest = typeof SshExecutorGitDiffRequest.Type;
+
+/** The read requests. Each names the bound root, and none writes. */
+export const SshExecutorReadRequest = Schema.Union(
+  SshExecutorResolveRootRequest,
+  SshExecutorListDirectoryRequest,
+  SshExecutorReadFileRequest,
+  SshExecutorGitStatusRequest,
+  SshExecutorGitDiffRequest,
+);
+export type SshExecutorReadRequest = typeof SshExecutorReadRequest.Type;
+
+export const SshExecutorRequest = Schema.Union(SshExecutorAttestRequest, SshExecutorReadRequest);
 export type SshExecutorRequest = typeof SshExecutorRequest.Type;
 
 /** The only frame a host sends. */
@@ -95,7 +156,58 @@ export const SshExecutorBusyReply = Schema.Struct({
 }).annotations(strict);
 export type SshExecutorBusyReply = typeof SshExecutorBusyReply.Type;
 
-export const SshExecutorReply = Schema.Union(SshExecutorAttestedReply, SshExecutorBusyReply);
+export const SshExecutorRootResolvedReply = Schema.Struct({
+  kind: Schema.Literal("root-resolved"),
+  root: SshRemotePath,
+}).annotations(strict);
+export type SshExecutorRootResolvedReply = typeof SshExecutorRootResolvedReply.Type;
+
+export const SshExecutorDirectoryListedReply = Schema.Struct({
+  kind: Schema.Literal("directory-listed"),
+  listing: SshRemoteDirectoryListing,
+}).annotations(strict);
+export type SshExecutorDirectoryListedReply = typeof SshExecutorDirectoryListedReply.Type;
+
+export const SshExecutorFileReadReply = Schema.Struct({
+  kind: Schema.Literal("file-read"),
+  file: SshRemoteFileContent,
+}).annotations(strict);
+export type SshExecutorFileReadReply = typeof SshExecutorFileReadReply.Type;
+
+export const SshExecutorGitStatusReply = Schema.Struct({
+  kind: Schema.Literal("git-status"),
+  status: SshRemoteGitStatus,
+}).annotations(strict);
+export type SshExecutorGitStatusReply = typeof SshExecutorGitStatusReply.Type;
+
+export const SshExecutorGitDiffReply = Schema.Struct({
+  kind: Schema.Literal("git-diff"),
+  diff: SshRemoteGitDiff,
+}).annotations(strict);
+export type SshExecutorGitDiffReply = typeof SshExecutorGitDiffReply.Type;
+
+/** A read the executor answered without its result, and why. */
+export const SshExecutorRefusedReply = Schema.Struct({
+  kind: Schema.Literal("refused"),
+  reason: SshRemoteReadRefusalReason,
+}).annotations(strict);
+export type SshExecutorRefusedReply = typeof SshExecutorRefusedReply.Type;
+
+export const SshExecutorReadReply = Schema.Union(
+  SshExecutorRootResolvedReply,
+  SshExecutorDirectoryListedReply,
+  SshExecutorFileReadReply,
+  SshExecutorGitStatusReply,
+  SshExecutorGitDiffReply,
+  SshExecutorRefusedReply,
+);
+export type SshExecutorReadReply = typeof SshExecutorReadReply.Type;
+
+export const SshExecutorReply = Schema.Union(
+  SshExecutorAttestedReply,
+  SshExecutorBusyReply,
+  SshExecutorReadReply,
+);
 export type SshExecutorReply = typeof SshExecutorReply.Type;
 
 export const SshExecutorReplyFrame = Schema.Struct({

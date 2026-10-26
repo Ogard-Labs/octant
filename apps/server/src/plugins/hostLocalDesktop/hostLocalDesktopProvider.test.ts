@@ -66,6 +66,7 @@ function fakeLaunchPort(
 ) {
   const desktops = new Map<string, FakeDesktop>();
   const stopped: Array<string> = [];
+  const delivered: Array<{ leaseId: string; name: string; bytes: Uint8Array }> = [];
   const port: DesktopLaunchPort = {
     readiness: (programs) =>
       programs.includes("Xvfb") ? { status: "ready" } : { status: "refused", reason: "missing" },
@@ -120,6 +121,10 @@ function fakeLaunchPort(
     },
     inspect: async (leaseId) =>
       desktops.has(String(leaseId)) ? { status: "present" } : { status: "gone" },
+    deliver: async (leaseId, name, bytes) => {
+      delivered.push({ leaseId: String(leaseId), name, bytes: bytes.slice() });
+      return { status: "delivered" };
+    },
     listOwned: async (tag) => ({
       status: "listed",
       leaseIds: [...desktops.entries()]
@@ -127,7 +132,7 @@ function fakeLaunchPort(
         .map(([key]) => decodeDesktopLeaseId(key)),
     }),
   };
-  return { port, desktops, stopped };
+  return { port, desktops, stopped, delivered };
 }
 
 const freshLease = (): DesktopLeaseId => decodeDesktopLeaseId(randomUUID());
@@ -342,7 +347,7 @@ describe("host-local desktop provider", () => {
     await expect(screen.frame()).resolves.toEqual({ status: "not-connected" });
   });
 
-  it("refuses every agent command and every delivery until those slices bind them", async () => {
+  it("refuses every agent command until that slice binds them", async () => {
     const provider = createHostLocalDesktopProvider(fakeLaunchPort().port);
     const handle = await acquired(provider);
     await expect(
@@ -351,9 +356,24 @@ describe("host-local desktop provider", () => {
       kind: "refused",
       reason: "unsupported",
     });
-    await expect(provider.deliver(handle, "app", new Uint8Array(1))).resolves.toEqual({
-      status: "refused",
-      reason: "unsupported",
+  });
+
+  it("hands a delivery to the launch port only while its desktop runs", async () => {
+    const { port, delivered } = fakeLaunchPort();
+    const provider = createHostLocalDesktopProvider(port);
+    const handle = await acquired(provider);
+    await expect(provider.deliver(handle, "app.bin", encoder.encode("built"))).resolves.toEqual({
+      status: "delivered",
     });
+    expect(delivered).toEqual([
+      { leaseId: String(handle.leaseId), name: "app.bin", bytes: encoder.encode("built") },
+    ]);
+
+    await provider.release(handle);
+    await expect(provider.deliver(handle, "app.bin", encoder.encode("again"))).resolves.toEqual({
+      status: "failed",
+      reason: "not-running",
+    });
+    expect(delivered).toHaveLength(1);
   });
 });

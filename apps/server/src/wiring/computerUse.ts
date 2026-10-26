@@ -76,7 +76,7 @@ export type ComputerUseDependencies = Pick<ServerStart, "options" | "persistence
     AuthorityWiring,
     "machineChangeFeed" | "onWindowRevoked" | "processAuthorityNow" | "windowAuthorityStore"
   > &
-  Pick<AgentRunsWiring, "externalContentIngestionStore"> &
+  Pick<AgentRunsWiring, "externalContentIngestionStore" | "managedWorktreeReceipts"> &
   Pick<UsageWiring, "validationEventStore"> &
   Pick<FoundationsWiring, "browserAuthority" | "providerRuntimeRegistry" | "workThreadProjection">;
 
@@ -85,6 +85,7 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     browserAuthority,
     externalContentIngestionStore,
     machineChangeFeed,
+    managedWorktreeReceipts,
     onWindowRevoked,
     options,
     persistence,
@@ -209,9 +210,10 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
   syncComputerUseSettings();
   // No Project stores a recipe yet, so every lease command refuses as a
   // value; the service still reconciles and sweeps so a lease journaled by any
-  // later build is torn down on start. Callers bring their own authority when
-  // the Desktop pane and the agent's lease binding arrive, so until then no
-  // caller may open a thread here.
+  // later build is torn down on start. Callers bring their own authority and
+  // approval surface when the Desktop pane and the agent's lease binding
+  // arrive, so until then no caller may open a thread here and every lease or
+  // transfer confirmation declines.
   //
   // On Linux the bundled host-local driver is always loaded, so teardown and
   // restart reconciliation can reap its desktops even after the programs it
@@ -271,6 +273,45 @@ export function wireComputerUse(deps: ComputerUseDependencies) {
     computerUseEnabled: () =>
       (persistence.readShellSettings()?.settings ?? defaultShellSettings()).computerUse.enabled,
     confirm: async () => "declined",
+    // A thread bound to an older revision of its Project has no root, so a
+    // transfer never reads from a folder the Project has since left.
+    threadRoot: async (owner) => {
+      if (owner.mode === "work") {
+        const thread = workThreadProjection.read(decodeWorkThreadId(owner.threadId));
+        const project =
+          thread === undefined ? undefined : persistence.readProject(thread.projectId);
+        if (thread === undefined || project?.type !== "work" || project.lifecycle !== "active") {
+          return undefined;
+        }
+        const revision = project.bindingHistory.at(-1)?.revisionId;
+        return thread.bindingRevisionId !== undefined &&
+          String(thread.bindingRevisionId) === String(revision)
+          ? project.binding.canonicalRoot
+          : undefined;
+      }
+      const thread = persistence.readCodeThread(decodeCodeThreadId(owner.threadId));
+      const project = thread === undefined ? undefined : persistence.readProject(thread.projectId);
+      if (
+        thread === undefined ||
+        project?.type !== "code" ||
+        project.lifecycle !== "active" ||
+        String(thread.bindingRevisionId) !== String(project.bindingHistory.at(-1)?.revisionId)
+      ) {
+        return undefined;
+      }
+      const checkout = persistence.readCodeCheckout(thread.checkoutId);
+      if (checkout === undefined || checkout.availability !== "available") return undefined;
+      if (checkout.kind !== "managed-worktree") return project.binding.canonicalRoot;
+      const receipt = await managedWorktreeReceipts.load(String(checkout.ownershipReceiptId));
+      return receipt !== undefined &&
+        receipt.state === "ready" &&
+        String(receipt.threadId) === String(thread.id) &&
+        String(receipt.checkoutId) === String(checkout.id) &&
+        receipt.canonicalRepositoryPath === project.binding.canonicalRoot
+        ? receipt.canonicalWorktreePath
+        : undefined;
+    },
+    confirmTransfer: async () => "declined",
     systemActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
     now: () => Date.now(),
     uuid: randomUUID,

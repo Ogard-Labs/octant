@@ -414,6 +414,7 @@ describe("Project restart recovery", () => {
       { projection_name: "replica-membership", reason: "unknown-event-name" },
       { projection_name: "shell", reason: "unknown-event-name" },
       { projection_name: "spend-ceilings", reason: "unknown-event-name" },
+      { projection_name: "ssh-targets", reason: "unknown-event-name" },
       { projection_name: "theme", reason: "unknown-event-name" },
       { projection_name: "thread-checkpoint", reason: "unknown-event-name" },
       { projection_name: "thread-external-content-taint", reason: "unknown-event-name" },

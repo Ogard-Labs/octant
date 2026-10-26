@@ -398,6 +398,13 @@ export const AzureFoundryProviderConfiguration = Schema.Union(
     ...AzureFoundryConfigurationFields,
     authentication: Schema.Literal("directory-oauth"),
     directory: DirectoryBinding,
+    /**
+     * Present only when the person opted this instance in to a device-code
+     * sign-in from the host-local `octant provider sign-in` command, for a
+     * host without the desktop app. Absent is off: many organizations block
+     * the flow, and it is the easier one to phish.
+     */
+    deviceCodeSignIn: Schema.optional(Schema.Literal(true)),
   }).annotations(strict),
 );
 export type AzureFoundryProviderConfiguration = typeof AzureFoundryProviderConfiguration.Type;

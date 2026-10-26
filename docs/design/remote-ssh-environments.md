@@ -9,18 +9,21 @@ builds on: [modes and checkout binding](../architecture.md#modes-chat-work-and-c
 [persistence](../architecture.md#persistence), and
 [security and authority](../architecture.md#security-and-authority).
 
-**Delivery state.** Accepted 2026-10-26. Slices 2 and 3 are built. Slice 2 is
-the admission policy and contracts: the schemas in
+**Delivery state.** Accepted 2026-10-26. Slices 2, 3, and 4 are built. Slice 2
+is the admission policy and contracts: the schemas in
 `packages/contracts/src/sshTarget.ts` and the pure decision in
 `packages/domain/src/sshTargetAdmissionPolicy.ts`. Slice 3 is the executor,
 transport, and attestation in `apps/server/src/sshTarget/`: the executor behind
 `octant executor --stdio`, the framed protocol in
 `packages/contracts/src/sshExecutorProtocol.ts`, the host connection service,
-the local administration routes, `octant ssh-target`, and Linux canaries. No
-Project can bind a remote root yet, so nothing but attestation runs on a target;
-slices 4 to 8 are not built. Until slice 4 journals target events, a
-registration and its pin live only in the owner-only `ssh-targets` directory
-under the data directory, and attestation results only in memory. Remote SSH
+the local administration routes, `octant ssh-target`, and Linux canaries.
+Slice 4 binds a Code Project to a remote root from this machine and reads its
+Files, Git status, and diff through the executor
+([Remote-bound Projects and reads](#remote-bound-projects-and-reads)), and
+journals targets, attestation digests, and bindings
+(`packages/contracts/src/sshTargetEvents.ts`). No thread runs on a target yet,
+so nothing but attestation and those reads reaches one; slices 5 to 8 are not
+built. Remote SSH
 environments are authorized post-preview work as of 2026-10-26, when the
 maintainer unlocked the parked backlog and accepted the
 [maintainer decisions](#maintainer-decisions) below. That authorizes this design
@@ -230,10 +233,10 @@ to executor; the executor sends only replies, process output, exit status, and
 connection-head questions for egress (below). The executor cannot start a turn,
 ask for approval, call an app tool, or write to the journal.
 
-The protocol as slice 3 built it (`packages/contracts/src/sshExecutorProtocol.ts`)
-carries only the introduction and attestation; process channels and egress
-questions arrive with the launches that need them. These rules settle what the
-paragraph above leaves open:
+The protocol (`packages/contracts/src/sshExecutorProtocol.ts`) carries the
+introduction, the attestation, and since slice 4 the reads of a bound root;
+process channels and egress questions arrive with the launches that need them.
+These rules settle what the paragraph above leaves open:
 
 - **Framing.** A frame is a four-byte big-endian length and that many bytes of
   UTF-8 JSON, at most 1 MiB. A longer frame, a body that is not JSON, or a
@@ -247,7 +250,17 @@ paragraph above leaves open:
   host asks nothing of an executor whose introduction differs from this host in
   any of the three, and holds the connection as `executor-version-mismatch`; the
   policy refuses that state with the same reason. Requests run one at a time;
-  a second while one runs is answered `busy`.
+  a second while one runs is answered `busy`. The host writes the next request
+  only after the last was answered, and a frame that does not decode, a second
+  introduction, or a reply that answers no request in flight ends the session.
+- **A request that is not answered ends the session.** A read the executor has
+  not answered within a minute ends the session, so a late answer can never be
+  read as the reply to the request after it. A reply that would exceed the
+  frame bound, such as a diff of control characters whose JSON escapes outgrew
+  it, is answered `too-large` instead.
+- **Protocol 1 gained the reads.** The read requests joined protocol 1 before
+  any build with protocol 1 shipped, so the version did not change; the exact
+  build match still refuses any executor of another build.
 - **Why a session failed.** The client's own message is the only evidence of a
   refused key, so "host key verification failed" or "remote host identification
   has changed" reads as `host-key-changed`. The remote shell's 126 or 127 reads
@@ -257,10 +270,13 @@ paragraph above leaves open:
   is not an executor this host can speak to, and reads as
   `executor-version-mismatch`. An exit after a matching introduction is a lost
   session and reads as `target-unreachable`.
-- **When it connects.** Slice 3 connects on registration, re-pin, and an
+- **When it connects.** The host connects on registration, re-pin, and an
   explicit connect, and a connection that ends is held as `target-unreachable`
   with no attestation. Reconnecting on its own, with bounded backoff, arrives
-  with remote-bound Projects, which give it a reason to.
+  with remote threads (slice 5), which give it a reason to. Until then a
+  remote-bound Project whose session was lost refuses reads
+  `target-unreachable`, and the person connects again
+  (`octant ssh-target connect`); nothing reconnects unasked.
 
 **Rationale: an executor, not plain `ssh` commands.** Running each operation as
 `ssh target <command>` was rejected. Each call would be a command string parsed
@@ -425,11 +441,13 @@ details, each in the fail-closed direction:
 - **The network probes dial the SSH server.** It is the one address certain to
   be listening on the target, so a probe that cannot reach it was stopped by its
   confinement, and the executor needs no listener of its own.
-- **Scratch root until Projects bind roots.** Until slice 4 binds a remote root,
-  the canaries prove the posture's grants against a scratch root, its sibling
-  folder, a folder outside it, and a stand-in for another session's runtime
-  directory, all in the executor's own owner-only directory. Probes read no
-  file's contents back.
+- **Canaries prove grants on a scratch root.** The canaries prove the posture's
+  grants against a scratch root, its sibling folder, a folder outside it, and
+  a stand-in for another session's runtime directory, all in the executor's
+  own owner-only directory, even after Projects bind remote roots: a probe that
+  escaped would otherwise write into the person's folder, and the grants have
+  the same shape for every root. One attestation covers every Project on the
+  connection. Probes read no file's contents back.
 - **Writing postures have no network yet.** Until the executor's egress
   forwarder exists (slice 5), Octant's launches on a target in every confined
   posture get no network, so the probe that connects around the forwarder proves
@@ -438,6 +456,63 @@ details, each in the fail-closed direction:
 - **No canaries as root.** A uid 0 executor launches no probe: the host refuses
   `remote-root-user` before it looks at canaries, and a root launch would only
   add risk.
+
+### Remote-bound Projects and reads
+
+Slice 4 binds a Code Project to a folder on a registered target and reads it.
+These rules settle what binding and reading need, each in the fail-closed
+direction:
+
+- **Binding is local, and resolves the folder on the target.** Only a local
+  window or the local CLI binds (`octant ssh-target bind`), through the local
+  administration routes. The executor resolves the path to its canonical
+  folder, and the journal records that canonical path, the target, and the
+  name. A Project's binding never changes: one binding event per Project, and
+  a second under the same id is refused.
+- **A remote-bound Project is its own record until threads run there.** Its
+  events are the `ssh-remote-project` aggregate, apart from local Projects, so
+  no local Files, Git, terminal, or provider path can read a remote root as a
+  folder on this Mac. Remote threads (slice 5) and the Project picker
+  (slice 7) join it to the Project list.
+- **Reads outside a turn run in Plan.** Binding, listing, and reading a file
+  are file operations, and Git status and diff are Octant's own launches; each
+  is admitted only when this connection holds a passing Plan attestation, the
+  read-only posture. The admission decision and the request are made in one
+  step on the session that was admitted, so a request never travels on a
+  later session. A Project on a target that never attested, whose session was
+  lost, whose canary escaped, or that was removed reads nothing, and the
+  refusal carries the admission reason and its recovery.
+- **The executor keeps every path inside the bound root.** Paths are relative
+  (the same schema local Code reads use) and are checked on both sides. The
+  executor resolves each with the local containment sequence, so a symbolic
+  link whose target leaves the root is refused `outside-root` on the target,
+  and a listing leaves such an entry and `.git` out. A file is read from a
+  handle that must be the object containment resolved. A root that now
+  resolves elsewhere than where it was bound is refused `root-moved`.
+- **Some folders are never a root.** `/`, and a folder that holds or sits
+  inside the remote user's `~/.ssh` or the executor's runtime folder, are
+  refused `root-not-confinable`. Reads are confined by containment rather than
+  the sandbox, so a root that held the SSH keys would let Files read them.
+  Other credential folders (`~/.aws`, `~/.config/gh`) are not listed: the home
+  folder that holds them is already refused, only a local window or the local
+  CLI binds, and no list of credential folders can be complete.
+- **Git runs with Plan's grants and starts nothing else.** Git status and diff
+  run through the executor's `ProcessConfinementPort` with Plan's grants: no
+  write to the root, no process after Git itself, and no network. The
+  file-system monitor, external diff drivers, text conversion, the pager, and
+  submodule recursion are off, because each would start another program, and
+  every path is a literal name, never pathspec magic. A clean filter the
+  checkout names cannot be turned off by name; the no-process grant is what
+  keeps it from running, and the loopback smoke test reads a checkout whose
+  configuration names a program for each of these.
+- **Every read is bounded.** A listing is one directory level and at most
+  1,000 entries; a file at most 256 KiB, sent base64-encoded; a diff at most
+  256 KiB of text after decoding, since bytes that are not UTF-8 grow as they
+  decode; a status at most 2,000 entries. A cut listing, diff, or status says
+  it is truncated; a larger file is refused `too-large`.
+- **No paired device reads a target in this slice.** The reads sit on the local
+  administration routes, beside binding, until remote-bound Projects join the
+  product routes with their threads.
 
 ### Provider runtimes on a target
 
@@ -487,7 +562,7 @@ against remote files.
 | Data                                                      | Lives                                    | Lifecycle                                                  |
 | --------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------- |
 | Threads, turns, approvals, tool results, egress decisions | This host's journal                      | As any Code thread                                         |
-| Target registration, pinned key, attestation results      | This host's journal; pin file owner-only | Removed with the target                                    |
+| Target registration, pinned key, attestation results      | This host's journal; pin file owner-only | The pin file is removed with the target                    |
 | Connection state (connected, attesting, lost)             | This host's memory                       | Not journaled, like listener observation                   |
 | Remote root, managed worktrees                            | The target                               | The person's files; Octant never deletes them on removal   |
 | Executor runtime directory                                | The target, owner-only                   | Removed at session end; stale ones swept at the next start |
@@ -497,6 +572,29 @@ Every event about remote work is appended by this host, under the thread's actor
 with the target's id as provenance. The executor holds no journal, projection, or
 database. Target address, remote user, and remote paths are personal data and are
 handled as a local Project root path is in diagnostics and export.
+
+These rules settle how slice 4 records targets, each in the fail-closed
+direction:
+
+- **The journal is the record; the pin file is a copy.** Registration,
+  re-pin, attestation, and removal are `ssh-target` events. The client reads
+  keys only from a file, so each connection first writes the target's
+  owner-only pin file from the journaled key; an edited or stale file never
+  decides which key a session trusts. Removal deletes the pin file, and a
+  removed target's bound Projects keep their records and refuse new work
+  `target-removed`. Slice 3's file registry never shipped, so nothing imports
+  it.
+- **An attestation is journaled as a digest and decisions.** Each connection's
+  attestation is recorded as the SHA-256 of its facts as their schema encodes
+  them, the connection, and the decision for each confined posture. The
+  journaled result explains a refusal later and never admits anything.
+- **Diagnostics, export, and the data map name no target.** The data map lists
+  the pin folder and SSH target connections as outbound traffic. Diagnostics
+  show only how many target and binding events the journal holds. The host
+  export carries each target as its registration time, bound Project ids, and
+  last attestation's digest and decisions, without destination, host key, or
+  executor path, and each remote-bound Project as a Project's identity without
+  its folder.
 
 Removing a target is local-only, refuses while a thread in one of its Projects is
 running, and removes the registration and pin. Its Projects' threads stay
@@ -634,7 +732,17 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    (local-only), Files, Git status, and diff through the executor, each admitted
    by slice 2's policy. Accepted when a Project on an unattested target refuses
    creation and reads, and an attested one lists files and Git status from the
-   target. Journal replay test for target and binding events.
+   target. Journal replay test for target and binding events. Built 2026-10-26;
+   its evidence is `sshTargetLoopback.smoke.test.ts` (binding through a link,
+   files, a file, Git status, and diff read from the loopback target, a link
+   out of the root refused, and binding and reads refused after the session
+   ends, after removal, and on a target whose canary escaped),
+   `sshTargetConnectionService.test.ts` (the same admission against a stand-in
+   client, with no read frame sent when refused), `executorReads.test.ts`,
+   `sshTargetStore.test.ts` (journal replay of target and binding events, the
+   pin written from the journal, and export and diagnostics without target
+   details), and `sshTargetAdministrationRoutes.test.ts`. The projection
+   tables are migration 85.
 5. **Native harness on a target.** Container. Harness shell, edits, and tests run
    through the executor with approvals; egress heads decided and journaled on this
    host; disconnect interrupts the turn with `target-disconnected` and queues

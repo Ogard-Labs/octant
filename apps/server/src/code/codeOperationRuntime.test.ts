@@ -375,6 +375,78 @@ describe("CodeOperationRuntime", () => {
     fixture.close();
   });
 
+  it("asks a person to let the thread use a named device under every posture, once", async () => {
+    const deviceId = "90000000-0000-4000-8000-000000000021";
+    const fixture = runtimeFixture({
+      approvalValidator: false,
+      describeAppleDevice: (id) =>
+        String(id) === deviceId
+          ? {
+              name: "Henrik's iPhone",
+              model: "iPhone 16 Pro",
+              osVersion: "26.1",
+              connection: "wired",
+            }
+          : undefined,
+    });
+    // Full access starts no lease on its own; the person is still asked.
+    fixture.setThread(decodeCodeThread({ ...thread(), executionPolicy: "full-access" }));
+    const request = {
+      actionId: operationId(840) as never,
+      correlationId: operationId(841) as never,
+      authority: {
+        hostId: "90000000-0000-4000-8000-000000000010" as never,
+        mode: "code" as const,
+        projectId: thread().projectId,
+        providerInstanceId: thread().providerInstanceId,
+        extension: { kind: "core" as const },
+      },
+      threadId,
+      checkoutId,
+      kind: "use-device" as const,
+      deviceId: deviceId as never,
+      requestedBy: { kind: "local-user" as const, actorId: operationId(842) as never },
+      timeoutMs: 30_000,
+      approval: { kind: "pending" as const },
+    };
+    const challenge = await fixture.runtime.prepareApproval(windowId, {
+      effect: { kind: "apple-device-lease", request },
+    });
+    expect(challenge?.message).toBe("Let this thread use Henrik's iPhone?");
+    expect(challenge?.detail).toContain(`Thread: ${thread().title}`);
+    expect(challenge?.detail).toContain("iPhone 16 Pro");
+    // A device the host has not seen is never put to the person.
+    await expect(
+      fixture.runtime.prepareApproval(windowId, {
+        effect: {
+          kind: "apple-device-lease",
+          request: { ...request, deviceId: "90000000-0000-4000-8000-000000000022" as never },
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    const receipt = await fixture.runtime.confirmApproval(windowId, {
+      challengeId: challenge!.challengeId,
+    });
+    const approved = {
+      ...request,
+      approval: { kind: "approved" as const, approvalId: receipt!.approvalId as never },
+    };
+    await expect(
+      fixture.runtime.validateAppleDeviceLease?.(windowId, {
+        ...approved,
+        deviceId: "90000000-0000-4000-8000-000000000022" as never,
+      }),
+    ).resolves.toBe(false);
+    await expect(fixture.runtime.validateAppleDeviceLease?.(windowId, approved)).resolves.toBe(
+      true,
+    );
+    await expect(fixture.runtime.validateAppleDeviceLease?.(windowId, approved)).resolves.toBe(
+      false,
+    );
+    fixture.close();
+  });
+
   it("bounds oversized approval display details while preserving challenge creation", async () => {
     const fixture = runtimeFixture({ approvalValidator: false });
     const challenge = await fixture.runtime.prepareApproval(windowId, {
@@ -6000,6 +6072,7 @@ function runtimeFixture(options: {
     binary: boolean;
   }>;
   approvalValidator?: boolean | (() => boolean);
+  describeAppleDevice?: Parameters<typeof createCodeOperationRuntime>[0]["describeAppleDevice"];
   /** Where the runtime keeps its running turns, as the host passes it. */
   activeTurns?: CodeActiveTurns;
   /** Whether a window may access a Project; a function answers per Project. */
@@ -6219,6 +6292,9 @@ function runtimeFixture(options: {
     });
   const runtime = createCodeOperationRuntime({
     ...(options.activeTurns === undefined ? {} : { activeTurns: options.activeTurns }),
+    ...(options.describeAppleDevice === undefined
+      ? {}
+      : { describeAppleDevice: options.describeAppleDevice }),
     persistence: {
       journal,
       readCodeRuntimeWorkAggregateVersion: (id) =>

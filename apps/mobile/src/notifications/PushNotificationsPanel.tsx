@@ -41,10 +41,26 @@ export function PushNotificationsPanel(props: PushNotificationsPanelProps) {
         );
         return;
       }
+      const notificationPublicKey = await props.permission.getNotificationPublicKey(
+        props.transport.hostId,
+      );
+      if (notificationPublicKey === undefined) {
+        setMessage("This phone has no notification key for this computer yet.");
+        return;
+      }
+      // Thread names stay off the lock screen until the person turns them on.
       const receipt = await registerMobilePushToken({
         transport: props.transport,
         platform: props.permission.platform,
         token,
+        notificationPublicKey,
+        preferences: {
+          approvalNeeded: true,
+          waiting: true,
+          failure: true,
+          completion: true,
+          threadTitles: false,
+        },
       });
       setMessage(`Push token ${receipt.result} on this host.`);
     } catch (cause) {

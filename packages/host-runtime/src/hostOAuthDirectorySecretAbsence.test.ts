@@ -24,7 +24,7 @@ import {
  */
 
 const surfacesChecked: ReadonlyArray<string> = [
-  "sign-in begin and status answers (the server journals from these)",
+  "sign-in begin and status answers, loopback and device code (the server journals from these)",
   "refresh answers for every directory reply",
   "access refusals and the granted access answer",
   "sign-out answers",
@@ -71,6 +71,7 @@ describe("Directory sign-in secret-absence harness", () => {
     const broker = await startCredentialBroker(memoryStore(), undefined, {
       fetch: fake.fetch,
       timeoutMs: 5_000,
+      sleep: () => new Promise((resolve) => setTimeout(resolve, 1)),
     });
     open.push(broker);
     const answers: Array<{ readonly surface: string; readonly body: string }> = [];
@@ -86,6 +87,8 @@ describe("Directory sign-in secret-absence harness", () => {
     fake.flawExchangeIdToken("other-tenant");
     await signInThroughBroker(fake, answer).catch(() => undefined);
     fake.flawExchangeIdToken(undefined);
+    // A device-code sign-in: the device code is the directory's, never an answer's.
+    await signInWithDeviceCode(fake, answer);
 
     const replies: ReadonlyArray<FakeRefreshAnswer> = [
       { kind: "tokens", idToken: "same-subject" },
@@ -170,6 +173,33 @@ async function signInThroughBroker(
   const status = await answer("status", "/v1/oauth/status", { attemptId: started.attemptId });
   if (typeof status.credentialRef !== "string") throw new Error("expected a sign-in");
   return status.credentialRef;
+}
+
+async function signInWithDeviceCode(
+  fake: FakeDirectory,
+  answer: (surface: string, path: string, body: unknown) => Promise<Record<string, unknown>>,
+): Promise<void> {
+  const started = await answer("device-code begin", "/v1/oauth/begin", {
+    actorId: randomUUID(),
+    termsAcknowledgedAt: "2026-10-26T09:00:00.000Z",
+    descriptor: directoryDescriptor({ flow: "device-code" }),
+  });
+  if (typeof started.userCode !== "string") throw new Error("expected a device-code attempt");
+  await answer("device-code status while pending", "/v1/oauth/status", {
+    attemptId: started.attemptId,
+  });
+  fake.settleDeviceCode(started.userCode, "approved");
+  const deadline = Date.now() + 3_000;
+  let status = await answer("device-code status", "/v1/oauth/status", {
+    attemptId: started.attemptId,
+  });
+  while (status.kind === "awaiting-consent" && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    status = await answer("device-code status", "/v1/oauth/status", {
+      attemptId: started.attemptId,
+    });
+  }
+  if (status.kind !== "signed-in") throw new Error("expected a device-code sign-in");
 }
 
 function post(

@@ -3,6 +3,7 @@ import { inspectHeadlessArtifact, resolveReportedHostVersion } from "@octant/hos
 import { SSH_EXECUTOR_PROTOCOL_VERSION } from "@octant/contracts/ssh-executor-protocol";
 import type { SshExecutorIdentityFacts } from "@octant/contracts/ssh-target";
 import { attestExecutorConfinement, sshServerAddressFrom } from "./executorAttestation";
+import { answerExecutorRead } from "./executorReads";
 import { openExecutorRuntimeDirectory } from "./executorRuntimeDirectory";
 import { serveSshExecutor } from "./executorSession";
 
@@ -64,25 +65,32 @@ process.once("SIGTERM", exitNow);
 process.once("SIGINT", exitNow);
 
 const identity = await executorIdentity(process.env);
+const sessionDirectory = runtime.status === "opened" ? runtime.path : undefined;
+const sessionParent = runtime.status === "opened" ? runtime.parent : undefined;
 await serveSshExecutor({
   input: process.stdin,
   write: (bytes) => process.stdout.write(bytes),
   identity,
-  attest: (request) =>
-    attestExecutorConfinement(
-      {
-        identity,
-        platform: process.platform,
-        architecture: process.arch,
-        uid,
-        username: currentUsername(),
-        homeDirectory: homedir(),
-        runtimeExecutable: process.execPath,
-        sessionDirectory: runtime.status === "opened" ? runtime.path : undefined,
-        sessionParent: runtime.status === "opened" ? runtime.parent : undefined,
-        sshServerAddress: sshServerAddressFrom(process.env.SSH_CONNECTION),
-      },
-      request,
-    ),
+  answer: (request) =>
+    request.kind === "attest"
+      ? attestExecutorConfinement(
+          {
+            identity,
+            platform: process.platform,
+            architecture: process.arch,
+            uid,
+            username: currentUsername(),
+            homeDirectory: homedir(),
+            runtimeExecutable: process.execPath,
+            sessionDirectory,
+            sessionParent,
+            sshServerAddress: sshServerAddressFrom(process.env.SSH_CONNECTION),
+          },
+          request,
+        )
+      : answerExecutorRead(
+          { platform: process.platform, homeDirectory: homedir(), sessionDirectory, sessionParent },
+          request,
+        ),
 });
 exitNow();

@@ -332,6 +332,8 @@ export interface AzureFoundryConfigurationInput {
   readonly manualModelIds: ReadonlyArray<string>;
   /** The organization's tenant and client; present exactly for `directory-oauth`. */
   readonly directory?: { readonly tenantId: string; readonly clientId: string };
+  /** Whether the host-local command may sign this organization sign-in in with a device code. */
+  readonly deviceCodeSignIn?: boolean | undefined;
 }
 
 const DIRECTORY_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -393,6 +395,12 @@ function normalizeAzureFoundryConfiguration(
   if (configuration.authentication === "api-key" && configuration.directory !== undefined) {
     reject("invalid-authentication", "An API-key endpoint does not name a directory tenant.");
   }
+  if (configuration.authentication === "api-key" && configuration.deviceCodeSignIn === true) {
+    reject(
+      "invalid-authentication",
+      "Signing in with a device code needs an organization account; an API-key endpoint has no sign-in.",
+    );
+  }
   const manualModelIds = normalizeManualModelIds(
     configuration.manualModelIds,
   ) as AzureFoundryProviderConfiguration["manualModelIds"];
@@ -414,6 +422,8 @@ function normalizeAzureFoundryConfiguration(
       ...shared,
       authentication: "directory-oauth",
       directory: azureFoundryDirectoryBinding(baseUrl, configuration.directory),
+      // Off is the absence of the opt-in, so one spelling reaches the journal.
+      ...(configuration.deviceCodeSignIn === true ? { deviceCodeSignIn: true } : {}),
     };
   }
   return { ...shared, authentication: "api-key" };
