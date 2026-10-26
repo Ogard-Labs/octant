@@ -2337,6 +2337,14 @@ const APPROVAL_GATED_OPERATION_KINDS = new Set([
   "update-review-finding",
 ]);
 
+const APPROVAL_GATED_DEVICE_KINDS: ReadonlySet<string> = new Set([
+  "build",
+  "run",
+  "install",
+  "launch",
+  "terminate",
+]);
+
 export const CodeApprovalEffect = Schema.Union(
   Schema.Struct({
     kind: Schema.Literal("operation"),
@@ -2353,10 +2361,19 @@ export const CodeApprovalEffect = Schema.Union(
     request: AndroidEmulatorRequest,
   }).annotations(strict),
   // Starting or moving a physical device's lease asks a person at the Mac
-  // under every posture; no other device request is approved this way yet.
+  // under every posture.
   Schema.Struct({
     kind: Schema.Literal("apple-device-lease"),
     request: AppleDeviceRequest.pipe(Schema.filter((request) => request.kind === "use-device")),
+  }).annotations(strict),
+  // A device effect inside a lease follows the thread's posture, one approval
+  // per request. Reads need none, and uninstall and distribution are a local
+  // person's confirmation, not an approval of this kind.
+  Schema.Struct({
+    kind: Schema.Literal("apple-device-action"),
+    request: AppleDeviceRequest.pipe(
+      Schema.filter((request) => APPROVAL_GATED_DEVICE_KINDS.has(request.kind)),
+    ),
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("create-thread-full-access"),

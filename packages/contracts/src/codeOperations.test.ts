@@ -253,6 +253,46 @@ describe("Code operation contracts", () => {
     }
   });
 
+  it("asks for a one-use approval of each device build, run, install, launch, and terminate only", () => {
+    const deviceAction = {
+      actionId: "d0000000-0000-4000-8000-000000000001",
+      correlationId: "d0000000-0000-4000-8000-000000000002",
+      authority: {
+        hostId: "d0000000-0000-4000-8000-000000000003",
+        mode: "code",
+        projectId: "d0000000-0000-4000-8000-000000000004",
+        providerInstanceId: "d0000000-0000-4000-8000-000000000005",
+        extension: { kind: "core" },
+      },
+      threadId: "d0000000-0000-4000-8000-000000000006",
+      checkoutId: "d0000000-0000-4000-8000-000000000007",
+      requestedBy: { kind: "local-user", actorId: "d0000000-0000-4000-8000-000000000010" },
+      deviceId: "d0000000-0000-4000-8000-000000000008",
+      projectPath: "App.xcodeproj",
+      teamId: "A1B2C3D4E5",
+      artifact: "apple-device-product-1",
+      bundleIdentifier: "sh.octant.Fixture",
+      timeoutMs: 30_000,
+      approval: { kind: "approved", approvalId: "d0000000-0000-4000-8000-000000000009" },
+    };
+    for (const kind of ["build", "run", "install", "launch", "terminate"]) {
+      expect(
+        decodeCodeOperationApprovalRequest({
+          effect: { kind: "apple-device-action", request: { ...deviceAction, kind } },
+        }).effect.kind,
+      ).toBe("apple-device-action");
+    }
+    // A read needs no approval, a lease is its own confirmation, and the
+    // person-only and distribution steps are not approved this way.
+    for (const kind of ["logs", "use-device", "uninstall", "provisioning-update"]) {
+      expect(() =>
+        decodeCodeOperationApprovalRequest({
+          effect: { kind: "apple-device-action", request: { ...deviceAction, kind } },
+        }),
+      ).toThrow();
+    }
+  });
+
   it("decodes a core Android emulator action as a bounded one-shot approval effect", () => {
     const request = decodeCodeOperationApprovalRequest({
       effect: {
