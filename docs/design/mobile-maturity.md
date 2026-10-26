@@ -397,8 +397,9 @@ sender holding it. The sender is a minimal Octant push gateway
   less the multipart framing), sniffed exactly as the desktop's. The phone
   records mono AAC at 64 kbit/s, about 480 kB a minute.
 - The per-device budget is thirty clips in any rolling hour, counted when a
-  clip is admitted and before its body is read, so a malformed upload spends
-  budget too; the refusal is `429` `rate-limited` with the time until the
+  clip is admitted and before the route parses it (the listener has already
+  held the bytes in memory to check the device proof), so a malformed upload
+  spends budget too; the refusal is `429` `rate-limited` with the time until the
   oldest clip ages out. A device sends one clip at a time; a second while the
   first is transcribing is refused (`503`), so one phone cannot hold both host
   slots. The local window has no such budget. Reason: thirty one-minute clips

@@ -126,7 +126,7 @@ export class VoiceDictation {
         notice = "Could not finish the recording.";
       } else {
         const result = await this.#options.transcribe(stopped.clip);
-        if (result.status === "refused") notice = result.message;
+        if (result.status === "refused") notice = refusalNotice(result);
         else if (result.text.trim().length === 0) notice = "Nothing was heard in the recording.";
         else this.#options.appendToDraft(result.text);
       }
@@ -167,6 +167,17 @@ export function appendTranscript(draft: string, transcript: string): string {
   if (words.length === 0) return draft;
   if (draft.length === 0 || /\s$/.test(draft)) return `${draft}${words}`;
   return `${draft} ${words}`;
+}
+
+/**
+ * The host's refusal, with when to try again if the host said: a device over
+ * its hourly allowance otherwise reads only "later" and cannot tell how long.
+ */
+function refusalNotice(refusal: Extract<MobileTranscriptionResult, { status: "refused" }>): string {
+  if (refusal.retryAfterMs === undefined) return refusal.message;
+  const minutes = Math.ceil(refusal.retryAfterMs / 60_000);
+  const wait = minutes <= 1 ? "a minute" : `${minutes} minutes`;
+  return `${refusal.message} You can dictate again in about ${wait}.`;
 }
 
 function startTimeout(ms: number, fire: () => void): () => void {

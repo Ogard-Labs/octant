@@ -248,7 +248,8 @@ describe("speech routes for a paired device", () => {
       retryAfterMs:
         REMOTE_TRANSCRIPTION_BUDGET.windowMs - REMOTE_TRANSCRIPTION_BUDGET.maximum * 1_000,
     });
-    // Refused before the clip is read, so its audio is never held.
+    // Refused before the route parses the clip. The listener has already read
+    // the bytes in memory to check the device proof; nothing reaches disk.
     expect(overBudget.bodyUsed).toBe(false);
     expect(transcribe).toHaveBeenCalledTimes(REMOTE_TRANSCRIPTION_BUDGET.maximum);
 

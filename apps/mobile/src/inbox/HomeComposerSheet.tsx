@@ -236,6 +236,13 @@ export function HomeComposerSheet(props: {
           {props.error}
         </Text>
       )}
+      {/* The sheet is a modal over the floating composer, so a dictation
+          refusal (microphone denied, allowance used) must be said here too. */}
+      {props.voice?.notice === undefined ? null : (
+        <Text style={styles.placementReason} testID="mobile-home-composer-voice-notice">
+          {props.voice.notice}
+        </Text>
+      )}
 
       <View style={styles.toolbar}>
         <IconButton accessibilityLabel="Attachments unavailable" disabled name="add" size={38} />

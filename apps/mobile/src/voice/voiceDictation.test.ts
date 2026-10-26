@@ -117,7 +117,7 @@ describe("dictation on the phone", () => {
         status: "refused",
         category: "rate-limited",
         message: "This device has used its voice allowance for now. Try again later.",
-        retryAfterMs: 60_000,
+        retryAfterMs: 12 * 60_000 - 1,
       }),
     });
     run.dictation.setReady(true);
@@ -128,7 +128,7 @@ describe("dictation on the phone", () => {
     expect(run.draft()).toBe("Please");
     expect(run.events.at(-1)).toBe("discard");
     expect(run.notices.at(-1)).toBe(
-      "This device has used its voice allowance for now. Try again later.",
+      "This device has used its voice allowance for now. Try again later. You can dictate again in about 12 minutes.",
     );
   });
 
