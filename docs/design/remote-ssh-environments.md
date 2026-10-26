@@ -9,14 +9,17 @@ builds on: [modes and checkout binding](../architecture.md#modes-chat-work-and-c
 [persistence](../architecture.md#persistence), and
 [security and authority](../architecture.md#security-and-authority).
 
-**Delivery state.** Accepted 2026-10-26; implementation is starting with the
-first code slice (slice 2), since slice 1 is this specification. Remote SSH
+**Delivery state.** Accepted 2026-10-26. Slice 2, the admission policy and
+contracts, is built: the schemas in `packages/contracts/src/sshTarget.ts` and
+the pure decision in `packages/domain/src/sshTargetAdmissionPolicy.ts`. No host
+service calls it yet, so no Project can bind a remote root; slices 3 to 8 are
+not built. Remote SSH
 environments are authorized post-preview work as of 2026-10-26, when the
 maintainer unlocked the parked backlog and accepted the
 [maintainer decisions](#maintainer-decisions) below. That authorizes this design
 and its delivery slices; it does not change the
 [Current Release Boundary](../architecture.md#current-release-boundary), which a
-separate change updates. Nothing below exists in code today.
+separate change updates.
 
 ## Outcome
 
@@ -131,7 +134,10 @@ and pins it only when the person confirms it. Octant keeps its pins in its own
 owner-only known-hosts file under the data directory and connects with that file
 alone, so a later change to the person's own known-hosts file never re-trusts a
 target. A changed key refuses every connection `host-key-changed` until the
-person confirms the new key from a local window.
+person confirms the new key from a local window. A destination may not begin
+with `-` or hold whitespace or a control character, because it is one argument
+of the SSH client and a leading `-` would be read as an option such as
+`-oProxyCommand`.
 
 ### Transport
 
@@ -234,13 +240,54 @@ any effect with one of these reasons, each with the recovery the person sees:
 | `unsupported-platform`        | None on this target; use a Linux or macOS machine                                   |
 | `confinement-backend-missing` | Install bubblewrap on the target (command)                                          |
 | `user-namespaces-unavailable` | Enable unprivileged user namespaces for this user on the target                     |
+| `plan-filter-unavailable`     | Plan on Linux needs an x64 or arm64 CPU and an executable `/bin/sh` on the target   |
 | `confinement-canary-escaped`  | Names the posture and the action that succeeded; contact the target's administrator |
+| `not-attested`                | Names the posture and any probe that did not report a refusal; reconnect to attest  |
 | `runtime-not-attestable`      | Choose a runtime Octant confines on remote targets (below)                          |
+| `full-access-not-remembered`  | Remember Full access for this Project from a local window, or choose a narrower one |
 | `target-unreachable`          | Reconnect when the target is reachable                                              |
+| `target-removed`              | None for new work; the Project's threads stay readable on this host                 |
 
 The attestation result, its facts digest, and the postures it covers are
 journaled with the target (below), so a refusal can be explained later. Nothing a
 failed attestation covered is retried with weaker grants.
+
+The policy is `decideSshAdmission` in
+`packages/domain/src/sshTargetAdmissionPolicy.ts`. Its input is what the host
+knows at the moment of the request: its own build and protocol version, whether
+the target is still registered, the connection's state, the attestation it holds,
+the posture and whether Full access is remembered, and what the request would run
+(a file operation, one of Octant's own launches, or a provider runtime). These
+rules settle what the tables above leave open, each in the fail-closed direction:
+
+- **Only a probe that reported a refusal passes.** A probe reports `refused`,
+  `escaped`, or `inconclusive`. An inconclusive probe, a missing one, a posture
+  the report does not cover, and a probe reported twice with any copy other than
+  `refused` all refuse `not-attested`, because none of them shows the posture
+  confines. A new reason was needed: `confinement-canary-escaped` would claim an
+  escape nobody saw.
+- **One escape refuses the whole connection.** Every posture launches through the
+  same executor and backend, so an escape in one is not evidence Octant can
+  discount in another. Any escaped probe refuses every request on that
+  connection, Full access included, naming the posture and probe that escaped.
+- **An attestation counts only for its own connection.** Each attestation names
+  its connection; one from an earlier session, or none, refuses `not-attested`.
+- **Full access** must be remembered for the Project
+  (`full-access-not-remembered` otherwise, since a session-only grant is not the
+  explicit choice the local rule requires) and needs facts 1 and 2, and no
+  escape; it needs no backend or canaries.
+- **Provider runtimes** are admitted only where Octant wraps them in the requested
+  posture, the driver declares remote placement, and the runtime opens no
+  loopback tool listener on the target. Octant wraps no runtime in Full access,
+  so every provider runtime refuses `runtime-not-attestable` there. The native
+  harness is not a runtime on the target: its tools are Octant's own launches.
+- **Plan's process filter** on Linux needs an x64 or arm64 CPU and `/bin/sh`.
+  Without them Plan refuses `plan-filter-unavailable`, a reason of its own
+  because the bubblewrap recovery would be wrong; other postures do not need it.
+- **Order.** Reasons that reconnecting cannot change come first: a removed
+  target, Full access not remembered, a runtime that cannot be attested. Then the
+  connection, the attestation's connection, identity, platform, user, any escape,
+  the backend, and the requested posture's canaries.
 
 **What attestation proves, and what it does not.** It proves that this
 connection's executor is the matching Octant build and that confinement held
@@ -432,7 +479,8 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    focused domain tests show admission refuses for every unproven fact and
    posture in the tables above, admits only with a passing attestation for the
    requested posture, and refuses Full access unless remembered. This slice proves
-   the issue's acceptance criterion at the policy level.
+   the issue's acceptance criterion at the policy level. Built 2026-10-26; its
+   evidence is `sshTargetAdmissionPolicy.test.ts` and `sshTarget.test.ts`.
 3. **Executor, transport, and attestation.** Container. `octant executor --stdio`,
    framed protocol, the host connection service with the fixed SSH options, pin
    confirmation from a local window and the CLI, and Linux canaries. Accepted when

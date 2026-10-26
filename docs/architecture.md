@@ -754,8 +754,9 @@ claiming a checked-out branch; detached Git checkouts remain refused. Git-depend
 actions continue to report unavailable for plain folders.
 
 A Code Project bound to a folder on a machine this host reaches over SSH is a
-design accepted on 2026-10-26, not yet built; its admission, confinement
-attestation, transport, and how it differs from a paired host are owned by
+design accepted on 2026-10-26. Only its admission policy is built so far, and no
+Project can bind a remote root yet; its admission, confinement attestation,
+transport, and how it differs from a paired host are owned by
 [Remote SSH environments](design/remote-ssh-environments.md).
 
 An authorized repository test remains cancellable while the host rediscovers its

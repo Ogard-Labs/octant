@@ -108,6 +108,15 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "packages/client-runtime/src/remoteProductMutations.ts",
     "Remote product mutation exercisers whose only consumer is remoteExitEvidenceADriver.ts. Remove once a product caller serves that evidence or the smoke is retired.",
   ],
+  // ── Delivered ahead of its first caller by a staged design ──
+  [
+    "packages/domain/src/sshTargetAdmissionPolicy.ts",
+    "SSH target admission policy, delivered as its own reviewable slice of docs/design/remote-ssh-environments.md before the host connection service that calls it. Remove once that service admits remote launches and file operations through it.",
+  ],
+  [
+    "packages/contracts/src/sshTarget.ts",
+    "SSH target, attestation, and admission schemas, reached only through sshTargetAdmissionPolicy.ts until the executor protocol decodes frames with them. Remove once that policy's entry is removed.",
+  ],
   // ── Rule D: re-exported by a package barrel, used by nobody ──
   [
     "packages/provider-sdk/src/conformance.ts",
