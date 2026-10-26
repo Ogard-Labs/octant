@@ -4188,7 +4188,26 @@ Direct-endpoint providers (`openai-compatible`, `anthropic-compatible`,
 `azure-foundry`, and `ollama`) run under the native harness in
 `apps/server/src/harness`. Ollama stays a literal-loopback HTTP origin: its
 transport speaks Ollama's native `/api/chat` and refuses any other base URL,
-so a cloud, LAN, or tunnelled Ollama is not a harness endpoint.
+so a cloud, LAN, or tunnelled Ollama is not a harness endpoint. Ollama cuts a
+prompt longer than the window it loaded without an error, which can drop the
+harness's instructions and tool definitions, so every Ollama request names its
+window as `options.num_ctx` and the transport measures the request against
+that same number. The probe settles it per model from `/api/show`: the
+Modelfile's own `num_ctx` (held to the trained window, which Ollama never
+exceeds), else the `<general.architecture>.context_length` Ollama itself reads
+the trained window from, held to 32,768 tokens, else 4,096 tokens. The probe
+reports that window as the model's context limit in every case, so the planner
+and the meter plan against what Ollama actually loads. The cap exists because Ollama
+allocates the whole window's KV cache when it loads a model, whatever the
+prompt's length: an 8B model needs about 4 GiB of it at 32K and 16 GiB at a
+trained 128K, and a model trained for 1M would not load on most Macs. A
+Modelfile `num_ctx` is not capped, since it is a deliberate choice and what
+Ollama loads anyway. A window set on the model's catalogue entry wins and
+outlives every probe; when Ollama reports none, Octant assumes and asks for
+4,096 tokens, Ollama's own default on a machine with little GPU memory, rather
+than guessing larger.
+Verify tools sends the same window, so the check does not make Ollama reload
+the model at another size.
 
 - **Loop.** `createNativeHarnessConnection` is the harness's agent loop and
   the `ProviderConnection` every direct-endpoint driver hands out. Each driver
