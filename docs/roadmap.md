@@ -155,10 +155,11 @@ authority, privacy, and release boundaries.
   handoff remain primary; a full IDE would run as a separately launched
   companion. Design gates:
   [release-boundary holds](release-boundary-holds.md#full-lsp--extension-host--debugger).
-- **Apple devices and distribution of a person's own apps** — physical-device
-  tooling first, then TestFlight and App Store submission, beyond Octant's own
-  internal TestFlight remote-client track. Design:
-  [apple-devices-distribution.md](apple-devices-distribution.md).
+- **Apple devices and distribution** — paired physical devices, then
+  person-confirmed upload, App Review submission, and release of a person's own
+  app through App Store Connect, beyond the
+  internal TestFlight remote-client track (authorized post-preview, 2026-10-26). Design:
+  [Apple physical devices and distribution](design/apple-devices.md).
 - **Provider identity extensions** — Azure Entra ID/OAuth and full Amazon
   Bedrock Converse/IAM adapters beyond the API-key paths. Design:
   [enterprise-provider-identity.md](enterprise-provider-identity.md).
