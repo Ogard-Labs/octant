@@ -43,8 +43,7 @@ import { createPrivateListenerSetting } from "../remote/privateListenerSetting";
 import { createSelfMadeListenerCertificateStore } from "../remote/selfMadeListenerCertificate";
 import { createSshTargetAdministrationRouteHandler } from "../sshTarget/sshTargetAdministrationRoutes";
 import { SshRemoteProjectService } from "../sshTarget/sshRemoteProjectService";
-import { SshTargetConnectionService } from "../sshTarget/sshTargetConnectionService";
-import { SshTargetStore } from "../sshTarget/sshTargetStore";
+import type { SshTargetsWiring } from "./sshTargets";
 import { boundHostRuntimeDiagnostics, type HostRuntimeDiagnostics } from "@octant/host-runtime";
 import { MAX_JSON_REQUEST_BODY_SIZE, type ServerStart } from "./serverShape";
 import type { AuthorityWiring } from "./authority";
@@ -84,7 +83,8 @@ export type RemoteDependencies = Pick<
   Pick<AutomationWiring, "pushNotificationTokenStore"> &
   Pick<RoutesWiring, "authenticatedProductDispatch"> &
   Pick<FoundationsWiring, "workThreadProjection"> &
-  Pick<FoundationsWiring, "providerRuntimeRegistry">;
+  Pick<FoundationsWiring, "providerRuntimeRegistry"> &
+  Pick<SshTargetsWiring, "sshTargetConnections" | "sshTargetStore">;
 
 export function wireRemote(deps: RemoteDependencies) {
   const {
@@ -324,18 +324,7 @@ export function wireRemote(deps: RemoteDependencies) {
   });
   // SSH targets are administered from this machine alone, like the listener:
   // the routes sit on the loopback chain beside it, never in product dispatch.
-  const sshTargetStore = new SshTargetStore({
-    journal: persistence.journal,
-    connection: persistence.connection,
-    dataDirectory: providerDataDirectory,
-    uuid: randomUUID,
-    clock: () => new Date().toISOString(),
-    actor: { kind: "local-user", actorId: OCTANT_LOCAL_ACTOR_ID },
-  });
-  const sshTargetConnections = new SshTargetConnectionService({
-    store: sshTargetStore,
-    buildVersion: version,
-  });
+  const { sshTargetStore, sshTargetConnections } = deps;
   const sshTargetAdministrationRoutes = createSshTargetAdministrationRouteHandler({
     desktopBridgeSecret: options.desktopBridgeSecret,
     windowAuthorityStore,
@@ -560,7 +549,6 @@ export function wireRemote(deps: RemoteDependencies) {
     providerCredentialRoutes,
     remoteHost,
     sshTargetAdministrationRoutes,
-    sshTargetConnections,
   };
 }
 

@@ -15,6 +15,7 @@ import {
   type ToolActionAuthority,
   type WorkThread,
 } from "@octant/contracts";
+import type { SshRemoteProject } from "@octant/contracts/ssh-remote-project";
 import { hasKnownContextWindow } from "@octant/domain/context-policy";
 import { nativeHarnessResultTaintsThread } from "@octant/domain/untrusted-content-policy";
 import {
@@ -31,6 +32,7 @@ import type {
 import type { GoalService } from "../goal/goalService";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
 import { taintAppManagedToolResults } from "../providers/appManagedToolTaint";
+import type { SshRemoteHarnessBinding, SshRemoteHarnessInput } from "../sshTarget/sshRemoteHarness";
 import type { NativeHarnessAuthority } from "./nativeHarnessAuthority";
 import { NativeHarnessFileSystem } from "./nativeHarnessFileSystem";
 import { createNativeHarnessGoalPort } from "./nativeHarnessGoal";
@@ -79,6 +81,13 @@ export interface NativeHarnessCompositionOptions {
    * did before the rules existed.
    */
   readonly proxiedShell?: (scope: HarnessEgressScope) => NativeHarnessShellPort;
+  /**
+   * Code only: the file tools and shell of a Project bound to a remote root,
+   * bound to its SSH target's session for one turn. Absent, a remote-bound
+   * Project's thread gets no harness tools at all; nothing falls back to a
+   * folder on this host.
+   */
+  readonly remoteHarness?: (input: SshRemoteHarnessInput) => SshRemoteHarnessBinding;
   /**
    * A Code thread's access posture now, as the window running it holds it and
    * clamped to its running turn's, or nothing for a thread that is not one.
@@ -172,6 +181,20 @@ export type NativeHarnessChildInteractions = Pick<
   ) => Promise<NativeHarnessCommandApprovalOutcome>;
 };
 
+/** A remote-bound Code thread's tools, or why it has none this turn. */
+export type NativeHarnessRemoteComposition =
+  | {
+      readonly status: "composed";
+      readonly tools: AppManagedToolSet;
+      readonly release: () => void;
+    }
+  /** The thread's provider is not one the harness drives. */
+  | { readonly status: "not-harness" }
+  /** This host cannot reach remote targets at all. */
+  | { readonly status: "unavailable" }
+  /** The target does not admit the turn's work now; the decision names why. */
+  | Extract<SshRemoteHarnessBinding, { readonly status: "refused" }>;
+
 /** Whose egress rules a proxied command runs under: a child runs under its parent's. */
 export interface HarnessEgressScope {
   readonly threadId: string;
@@ -205,6 +228,22 @@ export interface NativeHarnessComposition {
      */
     readonly secrets?: ReadonlyArray<string>;
   }) => AppManagedToolSet | undefined;
+  /**
+   * A Code thread's tools when its Project is bound to a remote root: the
+   * same tools as `forCode`, with the file tools and shell acting on the
+   * target through its executor, bound to the session the target holds now.
+   * When that session ends, `onTargetDisconnected` is told once, and the
+   * turn running these tools stops as interrupted with `target-disconnected`;
+   * every later call refuses. It offers no delegation, since a child would
+   * run on this host. `release` ends the binding when the turn ends.
+   */
+  readonly forRemoteCode: (input: {
+    readonly thread: CodeThread;
+    readonly project: SshRemoteProject;
+    readonly windowId: string;
+    readonly secrets?: ReadonlyArray<string>;
+    readonly onTargetDisconnected: () => void;
+  }) => NativeHarnessRemoteComposition;
   /** A managed child's tools, from its own clamped authority; it never delegates further. */
   readonly forAgentRun: (input: {
     readonly run: AgentRun;
@@ -637,6 +676,71 @@ export function createNativeHarnessComposition(
           }),
         },
       });
+    },
+    forRemoteCode: ({ thread, project, windowId, secrets, onTargetDisconnected }) => {
+      if (!options.isHarnessProvider(thread.providerInstanceId)) return { status: "not-harness" };
+      if (options.remoteHarness === undefined) return { status: "unavailable" };
+      const threadId = String(thread.id);
+      const turnPosture = () => options.readCodeExecutionPolicy?.(threadId, windowId);
+      const bound = options.remoteHarness({
+        project,
+        scope: { threadId, projectId: String(thread.projectId) },
+        posture: () => {
+          const executionPolicy = turnPosture();
+          return executionPolicy === undefined
+            ? undefined
+            : { executionPolicy, permissionPersistence: thread.permissionPersistence };
+        },
+        onTargetDisconnected,
+      });
+      if (bound.status === "refused") return bound;
+      // A command a person confirmed hosts for takes them, as a local one does.
+      const shell: NativeHarnessShellPort = {
+        run: (input) => {
+          const confirmed =
+            input.callId === undefined ? undefined : confirmedCommandHosts.get(input.callId);
+          if (input.callId !== undefined) confirmedCommandHosts.delete(input.callId);
+          return bound.shell.run(
+            confirmed === undefined ? input : { ...input, confirmedHosts: confirmed },
+          );
+        },
+      };
+      const planned = thread.executionPolicy === "plan" || turnPosture() === "plan";
+      const tools = compose({
+        threadId,
+        mode: "code",
+        ...(planned ? { executionPolicy: "plan" as const } : {}),
+        turnExecutionPolicy: turnPosture,
+        ports: {
+          ...shared(threadId),
+          ...askUserFor({
+            parentThreadId: threadId,
+            mode: "code",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+            windowId,
+          }),
+          filesystem: bound.filesystem,
+          shell,
+          ...webPorts(),
+          ...contextRemainingFor("code-thread", threadId),
+          ...(secrets === undefined
+            ? {}
+            : journalLookupFor({
+                mode: "code",
+                providerInstanceId: thread.providerInstanceId,
+                latestSession: () => options.journal?.latestCodeSession(thread.id),
+                secrets,
+              })),
+          ...secondOpinion({
+            threadId,
+            mode: "code",
+            projectId: thread.projectId,
+            lead: leadOf(thread),
+          }),
+        },
+      });
+      return { status: "composed", tools, release: bound.release };
     },
     forAgentRun: ({ run, authority, projectRoot }) => {
       const target = run.routingReceipt.selectedFallback ?? {

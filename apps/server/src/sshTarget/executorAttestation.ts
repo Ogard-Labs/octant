@@ -1,5 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { accessSync, constants, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  constants,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -25,6 +33,7 @@ import {
   type ProcessConfinementPrepareInput,
 } from "../process/seatbeltProfile";
 import { DEFAULT_BWRAP_PATH } from "../process/linuxConfinement";
+import { LINUX_EGRESS_FORWARDER_PORT } from "../process/proxiedNetworkEgress";
 import { siblingSessionDirectoryName } from "./executorRuntimeDirectory";
 
 /**
@@ -47,30 +56,21 @@ const MAX_PROBE_OUTPUT_BYTES = 4_096;
 
 /**
  * The grants Octant's own launches on a target run with in each confined
- * posture. Until the executor's egress forwarder exists, no posture opens the
- * network, so the writing postures' probe that connects around the forwarder
- * proves that no connection leaves the capsule at all.
+ * posture, apart from the network. Plan reaches no network; the writing
+ * postures reach only their forwarder (`proxied`), and their canaries run
+ * through one, so the probe that connects around it proves that nothing else
+ * leaves the capsule.
  */
 export function postureGrants(
   posture: SshConfinedPosture,
 ): Pick<
   ProcessConfinementPrepareInput,
-  "writeBoundRoot" | "allowProcessExec" | "allowProcessFork" | "networkEgress"
+  "writeBoundRoot" | "allowProcessExec" | "allowProcessFork"
 > {
   if (posture === "plan") {
-    return {
-      writeBoundRoot: false,
-      allowProcessExec: false,
-      allowProcessFork: false,
-      networkEgress: "none",
-    };
+    return { writeBoundRoot: false, allowProcessExec: false, allowProcessFork: false };
   }
-  return {
-    writeBoundRoot: true,
-    allowProcessExec: true,
-    allowProcessFork: true,
-    networkEgress: "none",
-  };
+  return { writeBoundRoot: true, allowProcessExec: true, allowProcessFork: true };
 }
 
 /**
@@ -228,6 +228,14 @@ interface CanaryLayout {
   readonly siblingFile: string;
   readonly otherSessionFile: string;
   readonly otherSessionDirectory: string;
+  /**
+   * Where each writing posture's probe gets a forwarder directory of its own,
+   * as a proxied command does. Nothing listens on its socket: no probe needs
+   * the network. Probes run at once, and each launch writes its forwarder's
+   * script into that directory, so a shared one could be rewritten while
+   * another probe's capsule reads it.
+   */
+  readonly egressDirectory: string;
 }
 
 async function runCanaries(
@@ -293,6 +301,7 @@ function prepareCanaryLayout(
     const root = join(base, "root");
     const outside = join(base, "outside");
     const sibling = join(base, "sibling");
+    const egress = join(base, "egress");
     const otherSessionDirectory = join(sessionParent, siblingSessionDirectoryName(process.pid));
     for (const directory of [
       base,
@@ -301,6 +310,7 @@ function prepareCanaryLayout(
       root,
       outside,
       sibling,
+      egress,
       otherSessionDirectory,
     ]) {
       mkdirSync(directory, { mode: 0o700 });
@@ -320,6 +330,7 @@ function prepareCanaryLayout(
       siblingFile,
       otherSessionFile,
       otherSessionDirectory,
+      egressDirectory: egress,
     };
   } catch {
     return undefined;
@@ -355,7 +366,11 @@ function probeTarget(
       return [""];
     case "open-network-socket":
     case "connect-bypassing-forwarder":
-      return networkReachable && environment.sshServerAddress !== undefined
+      // Inside a proxied capsule the forwarder itself answers on its loopback
+      // port, so a server on that port could not tell an escape from it.
+      return networkReachable &&
+        environment.sshServerAddress !== undefined &&
+        environment.sshServerAddress.port !== LINUX_EGRESS_FORWARDER_PORT
         ? [environment.sshServerAddress.host, String(environment.sshServerAddress.port)]
         : undefined;
   }
@@ -374,6 +389,7 @@ async function runProbe(
   const nonce = randomBytes(16).toString("hex");
   let launch: ReturnType<ProcessConfinementPort["prepare"]>;
   try {
+    const egressSocket = join(mkdtempSync(join(layout.egressDirectory, "p-")), "s");
     launch = confinement.prepare({
       executable: environment.runtimeExecutable,
       args: [layout.probeScript, probe, nonce, ...target],
@@ -382,6 +398,12 @@ async function runProbe(
       readRoots: [layout.probeDirectory],
       privateHomeAllowPaths: [layout.root, layout.temporaryDirectory, layout.probeDirectory],
       ...postureGrants(posture),
+      // The writing postures' commands run proxied, so their probes do too;
+      // a capsule that only Plan's probes saw would prove nothing about them.
+      networkEgress:
+        posture === "plan"
+          ? "none"
+          : { kind: "proxied", endpoint: { kind: "unix-socket", path: egressSocket } },
     });
   } catch {
     return "inconclusive";

@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
-import { connect as netConnect, createServer, type Server, type Socket } from "node:net";
+import { connect as netConnect, createServer, Socket, type Server } from "node:net";
+import type { Duplex } from "node:stream";
 import { join } from "node:path";
 import { Option, Schema } from "effect";
 import {
@@ -116,11 +117,13 @@ export interface ToolEgressProxyOptions {
   /** Every address a name resolves to. Defaults to the lookup `web-fetch` uses. */
   readonly resolveAll?: (host: string) => Promise<ReadonlyArray<string>>;
   /**
-   * Opens a socket to an address the proxy already checked. It receives an
-   * address, never a name, so nothing resolves again at connect time. The
-   * socket must allow half-open closes.
+   * Opens a connection to an address the proxy already checked. It receives
+   * an address, never a name, so nothing resolves again at connect time. The
+   * connection must allow half-open closes and emit `connect` once it is
+   * open. A command on an SSH target gets one the target opens, carried over
+   * the session as a stream, rather than a socket of this host's.
    */
-  readonly connect?: (destination: { readonly address: string; readonly port: number }) => Socket;
+  readonly connect?: (destination: { readonly address: string; readonly port: number }) => Duplex;
   readonly limits?: Partial<ToolEgressProxyLimits>;
   /**
    * Told of every request refused for `no-rule` or `expired`, the two
@@ -165,7 +168,7 @@ interface Tally {
 
 interface Tunnel {
   readonly client: Socket;
-  readonly upstream: Socket;
+  readonly upstream: Duplex;
   readonly host: string;
   readonly port: number;
   readonly tally: Tally;
@@ -517,7 +520,7 @@ export class ToolEgressProxy {
     socket: Socket,
     destination: { readonly host: string; readonly port: number },
   ): Promise<
-    | { readonly upstream: Socket; readonly tally: Tally; readonly ruleId: ToolEgressRuleId }
+    | { readonly upstream: Duplex; readonly tally: Tally; readonly ruleId: ToolEgressRuleId }
     | undefined
   > {
     const addresses = await this.#resolve(destination.host);
@@ -662,7 +665,7 @@ export class ToolEgressProxy {
     if (heldBytes > 0) inspect();
   }
 
-  #relay(tunnel: Tunnel, from: Socket, to: Socket, direction: "sent" | "received"): void {
+  #relay(tunnel: Tunnel, from: Duplex, to: Duplex, direction: "sent" | "received"): void {
     from.on(
       "data",
       this.#guarded(tunnel, (chunk: Buffer) => {
@@ -868,11 +871,11 @@ export class ToolEgressProxy {
   }
 
   /** Tries each checked address in turn; the socket never resolves a name itself. */
-  async #connect(addresses: ReadonlyArray<string>, port: number): Promise<Socket | undefined> {
+  async #connect(addresses: ReadonlyArray<string>, port: number): Promise<Duplex | undefined> {
     const dial = this.#options.connect ?? defaultConnect;
     for (const address of addresses) {
       if (this.#closed) return undefined;
-      let socket: Socket;
+      let socket: Duplex;
       try {
         socket = dial({ address, port });
       } catch {
@@ -894,7 +897,7 @@ export class ToolEgressProxy {
         });
       });
       if (connected) {
-        socket.setNoDelay(true);
+        if (socket instanceof Socket) socket.setNoDelay(true);
         return socket;
       }
     }

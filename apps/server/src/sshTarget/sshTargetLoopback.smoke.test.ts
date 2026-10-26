@@ -9,25 +9,59 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { createServer as createHttpServer } from "node:http";
 import { createServer, connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Schema } from "effect";
+import { Effect, Fiber, Schema, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resolveReportedHostVersion } from "@octant/host-runtime";
+import {
+  decodeProviderInstanceId,
+  decodeProviderSessionId,
+  EventActor,
+  ToolEgressLaunchId,
+  type CodeThread,
+  type ProviderExecutionPolicy,
+  type ProviderModelId,
+  type ProviderRuntimeEvent,
+  type ToolActionAuthority,
+} from "@octant/contracts";
 import { decodeCodeRelativePath } from "@octant/contracts/code";
 import { decodeUtcTimestamp } from "@octant/contracts/events";
 import { decodeProjectId } from "@octant/contracts/projects";
+import type { SshRemoteProject } from "@octant/contracts/ssh-remote-project";
 import {
   SshDestination,
   SshExecutorPath,
   SshRemotePath,
   type SshTargetStatus,
 } from "@octant/contracts/ssh-target";
+import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
+import { ExternalContentIngestionStore } from "../context/externalContentIngestionStore";
+import type { NativeHarnessApprovalStore } from "../harness/nativeHarnessApprovals";
+import { createNativeHarnessComposition } from "../harness/nativeHarnessComposition";
+import {
+  ToolEgressRules,
+  toolEgressLaunchTaintReference,
+} from "../harness/nativeHarnessEgressRules";
+import { createNativeHarnessConnection } from "../harness/nativeHarnessLoop";
+import { MemoryNativeHarnessTranscriptStore } from "../harness/nativeHarnessTranscriptStore";
+import type {
+  NativeHarnessRequest,
+  NativeHarnessResponse,
+  NativeHarnessTransport,
+} from "../harness/nativeHarnessTransport";
+import type { Journal } from "../persistence/journal";
+import type { SqliteConnection } from "../persistence/sqlitePort";
+import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { ToolCallAuthorityService } from "../toolCallAuthorityService";
+import { bindSshRemoteHarness, type SshRemoteHarnessOptions } from "./sshRemoteHarness";
 import { SshRemoteProjectService } from "./sshRemoteProjectService";
 import { SshTargetConnectionService } from "./sshTargetConnectionService";
 import type { SshTargetStore } from "./sshTargetStore";
@@ -71,6 +105,7 @@ let root = "";
 let sshd: ChildProcess | undefined;
 let sshdPort = 0;
 let store: SshTargetStore | undefined;
+let journal: { readonly journal: Journal; readonly connection: SqliteConnection } | undefined;
 let closeStore = () => {};
 
 function run(command: string, args: ReadonlyArray<string>): void {
@@ -226,6 +261,306 @@ function remoteCheckout(): string {
   return checkout;
 }
 
+/** A checkout with a bug, and a test that fails until it is fixed. */
+function harnessCheckout(name: string): string {
+  const checkout = join(root, name);
+  mkdirSync(checkout);
+  writeFileSync(join(checkout, "math.js"), "export const add = (a, b) => a - b;\n");
+  writeFileSync(
+    join(checkout, "check.sh"),
+    "grep -q 'a + b' math.js && echo PASS || { echo FAIL; exit 1; }\n",
+  );
+  run("chown", ["-R", `${String(NOBODY)}:${String(NOBODY)}`, checkout]);
+  return checkout;
+}
+
+/** The executor of the session the target holds now, as its runtime directory names it. */
+function executorProcess(): number {
+  const parent = join(root, "nobody-tmp", `octant-executor-${String(NOBODY)}`);
+  const pids = readdirSync(parent)
+    .map((name) => /^session-(\d+)-/u.exec(name)?.[1])
+    .filter((pid): pid is string => pid !== undefined)
+    .map(Number)
+    .filter((pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  const [pid] = pids;
+  if (pids.length !== 1 || pid === undefined) throw new Error(`executors: ${pids.join(",")}`);
+  return pid;
+}
+
+function processRunning(pattern: string): boolean {
+  return spawnSync("pgrep", ["-f", pattern]).status === 0;
+}
+
+const harnessInstance = decodeProviderInstanceId("80000000-0000-4000-8000-000000000a01");
+const harnessSession = decodeProviderSessionId("80000000-0000-4000-8000-000000000a02");
+const harnessModel = "local-model-stub" as ProviderModelId;
+const isTerminal = (event: ProviderRuntimeEvent) =>
+  event.kind === "completed" || event.kind === "failed" || event.kind === "interrupted";
+
+/**
+ * One harness turn as a Code turn runner drives it: the native harness loop
+ * over a local model stub that answers from a script and keeps every request
+ * it was sent, each tool request executed through the turn's tool set and
+ * answered, and the turn interrupted when its target's session ends.
+ */
+async function harnessTurn(input: {
+  readonly tools: AppManagedToolSet;
+  readonly script: NativeHarnessResponse[];
+  readonly prompt: string;
+  /** Receives the turn's interrupt, for the tool set's disconnect to call. */
+  readonly interruptible?: (interrupt: () => void) => void;
+}): Promise<{
+  readonly events: ReadonlyArray<ProviderRuntimeEvent>;
+  readonly requests: ReadonlyArray<NativeHarnessRequest>;
+}> {
+  const requests: NativeHarnessRequest[] = [];
+  const transport: NativeHarnessTransport = {
+    open: async () => ({
+      fits: () => true,
+      send: async (request) => {
+        requests.push(request);
+        const next = input.script.shift();
+        if (next === undefined) throw new Error("The model stub ran out of replies.");
+        return next;
+      },
+      release: () => undefined,
+    }),
+  };
+  const events: ProviderRuntimeEvent[] = [];
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const connection = yield* createNativeHarnessConnection({
+          instanceId: harnessInstance,
+          driverKind: "openai-compatible",
+          projectRoot: "/unused-on-this-host",
+          mode: "code",
+          transport,
+          transcripts: new MemoryNativeHarnessTranscriptStore(),
+          admitTurn: () => undefined,
+          clock: () => new Date().toISOString(),
+          correlationId: () => randomUUID(),
+        });
+        yield* connection.start({
+          sessionId: harnessSession,
+          modelId: harnessModel,
+          executionPolicy: "approval-gated",
+          tools: input.tools.definitions,
+        });
+        const turn = new AbortController();
+        input.interruptible?.(() => {
+          turn.abort();
+          void Effect.runPromise(connection.interrupt(harnessSession)).catch(() => undefined);
+        });
+        const stream = yield* connection.subscribe;
+        const consumed = yield* Effect.fork(
+          stream.pipe(
+            Stream.takeUntil(isTerminal),
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                events.push(event);
+                if (event.kind !== "tool-request") return;
+                void input.tools
+                  .execute({
+                    name: event.toolName,
+                    inputJson: event.inputJson,
+                    signal: turn.signal,
+                  })
+                  .then((outcome) =>
+                    Effect.runPromise(
+                      connection.answerTool({
+                        sessionId: harnessSession,
+                        requestId: event.requestId,
+                        resultJson: JSON.stringify(outcome.result),
+                        isError: outcome.isError === true,
+                      }),
+                    ),
+                  )
+                  .catch(() => undefined);
+              }),
+            ),
+          ),
+        );
+        yield* connection.send({
+          sessionId: harnessSession,
+          prompt: input.prompt,
+          context: [],
+          attachments: [],
+          tools: input.tools.definitions,
+        });
+        yield* Fiber.join(consumed);
+      }),
+    ),
+  );
+  return { events, requests };
+}
+
+/** The result the model was handed for one call, from the request that followed it. */
+function toolResult(requests: ReadonlyArray<NativeHarnessRequest>, toolCallId: string): unknown {
+  for (const request of requests) {
+    for (const message of request.history) {
+      const found = message.toolResults?.find((result) => result.toolCallId === toolCallId);
+      if (found !== undefined) return JSON.parse(found.resultJson);
+    }
+  }
+  return undefined;
+}
+
+const systemActor = Schema.decodeUnknownSync(EventActor)({
+  kind: "system",
+  actorId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+});
+const personActor = Schema.decodeUnknownSync(EventActor)({
+  kind: "local-user",
+  actorId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+});
+/** The public address the test names for its fixture; the target dials the fixture instead. */
+const FIXTURE_ADDRESS = "93.184.216.10";
+
+/**
+ * This host's side of a remote-bound Code thread: the harness composition
+ * with the remote tool set, the egress rules and journal its commands'
+ * proxies decide and record with, and an approval surface that answers as the
+ * test says. The tool authority is the thread's posture now.
+ */
+function remoteHarnessHost(input: {
+  readonly connections: SshTargetConnectionService;
+  readonly project: SshRemoteProject;
+  readonly posture: () => ProviderExecutionPolicy;
+  readonly approve: Pick<NativeHarnessApprovalStore, "ask">["ask"];
+  readonly fixturePort?: number;
+}) {
+  if (journal === undefined) throw new Error("the journal opens before the tests");
+  const { journal: events, connection } = journal;
+  const thread = {
+    id: randomUUID(),
+    projectId: input.project.id,
+    providerInstanceId: harnessInstance,
+    modelId: harnessModel,
+    executionPolicy: "approval-gated",
+    permissionPersistence: "current-session",
+  } as unknown as CodeThread;
+  const threadId = String(thread.id);
+  const tainted = (id: string) =>
+    readThreadExternalContentTaint(connection, id).externalContentIngested;
+  const ingestion = new ExternalContentIngestionStore({
+    journal: events,
+    connection,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+    actor: systemActor,
+  });
+  const rules = new ToolEgressRules({
+    journal: events,
+    readCodeThread: (id) =>
+      id === threadId ? { projectId: String(input.project.id), commandsProxied: true } : undefined,
+    readThreadTaint: tainted,
+    recordLaunchTaint: ({ threadId: marked, launchId }) => {
+      const recorded = ingestion.record({
+        threadId: marked,
+        provenance: { origin: "external-content", sourceLabel: "tool-egress" },
+        contentReference: toolEgressLaunchTaintReference(launchId),
+        correlationId: launchId,
+        authorized: true,
+      });
+      return recorded.kind === "recorded" || recorded.kind === "already-recorded"
+        ? "recorded"
+        : "unavailable";
+    },
+    hostActor: systemActor,
+    personActor,
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+  });
+  const authority = {
+    hostId: "00000000-0000-4000-8000-0000000000aa",
+    mode: "code",
+    projectId: input.project.id,
+    providerInstanceId: harnessInstance,
+    extension: { kind: "core" },
+  } as unknown as ToolActionAuthority;
+  const { connections } = input;
+  // The target's resolver has no record for the fixture's name, and the
+  // proxy refuses a private address, so the test answers the name with a
+  // public address and has the target dial the fixture in its place. The
+  // decision, its record, and the connection from the target are the real
+  // ones.
+  const throughFixture: SshRemoteHarnessOptions["connections"] = {
+    admit: (targetId, request) => connections.admit(targetId, request),
+    session: (targetId) => connections.session(targetId),
+    harnessFile: (session, admission, request) =>
+      connections.harnessFile(session, admission, request),
+    runCommand: (session, admission, request, options) =>
+      connections.runCommand(session, admission, request, options),
+    resolveOnTarget: async (session, host) =>
+      host === "allowed.example.com"
+        ? [FIXTURE_ADDRESS]
+        : connections.resolveOnTarget(session, host),
+    dialFromTarget: (session, destination) =>
+      connections.dialFromTarget(
+        session,
+        destination.address === FIXTURE_ADDRESS && input.fixturePort !== undefined
+          ? { address: "127.0.0.1", port: input.fixturePort }
+          : destination,
+      ),
+  };
+  const egressDirectory = join(root, "host-egress");
+  mkdirSync(egressDirectory, { recursive: true, mode: 0o700 });
+  const composition = createNativeHarnessComposition({
+    authority: {
+      resolve: () => authority,
+      service: new ToolCallAuthorityService({
+        resolveGrantedAuthority: () => authority,
+        resolveLiveFacts: () => ({
+          providerAppManagedTools: "supported",
+          host: { computerUseEnabled: false },
+          executionPolicy: input.posture(),
+          approvalSatisfied: input.posture() === "full-access",
+          externalContentIngested: tainted(threadId),
+        }),
+      }),
+    },
+    isHarnessProvider: () => true,
+    approvals: { ask: input.approve },
+    readCodeExecutionPolicy: () => input.posture(),
+    remoteHarness: (bind) =>
+      bindSshRemoteHarness(
+        {
+          connections: throughFixture,
+          egress: {
+            startLaunch: (launch) => rules.startLaunch(launch),
+            endpoint: { kind: "unix-socket", parentDirectory: egressDirectory },
+            launchId: () => Schema.decodeUnknownSync(ToolEgressLaunchId)(randomUUID()),
+          },
+          uuid: randomUUID,
+        },
+        bind,
+      ),
+    hostId: authority.hostId,
+    readThreadTaint: tainted,
+    isChildAuthorityCurrent: () => false,
+    recordExternalContentIngestion: (record) => ingestion.record(record),
+    uuid: randomUUID,
+    clock: () => new Date().toISOString(),
+  });
+  return {
+    thread,
+    rules,
+    composition,
+    egressEvents: () =>
+      events
+        .replayAggregateType({ aggregateType: "thread-egress", afterSequence: 0, limit: 1_000 })
+        .filter((event) => String(event.aggregateId) === threadId),
+  };
+}
+
 function reasons(status: SshTargetStatus): ReadonlyArray<string> {
   return status.admission.map((entry) =>
     entry.decision.status === "admitted" ? "admitted" : entry.decision.reason,
@@ -284,6 +619,7 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
     // A data directory with a space, as macOS's Application Support is.
     const opened = openSshTargetTestStore(root, join(root, "Application Support"));
     store = opened.store;
+    journal = { journal: opened.journal, connection: opened.connection };
     closeStore = () => opened.connection.close();
     startSshd(join(root, "host-key"));
     await waitForPort(sshdPort);
@@ -622,4 +958,308 @@ describe.skipIf(!runnable)("SSH targets against a loopback sshd", () => {
     connections.close();
     connections.remove(status.target.id);
   }, 120_000);
+
+  it("runs a harness turn's reads, edits, tests, and network on the target with approvals, deciding and journaling its egress here", async () => {
+    const checkout = harnessCheckout("harness-app");
+    const fixture = createHttpServer((_request, response) => {
+      response.end("hello from the fixture\n");
+    });
+    await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
+    const fixtureAddress = fixture.address();
+    const fixturePort =
+      typeof fixtureAddress === "object" && fixtureAddress !== null ? fixtureAddress.port : 0;
+    const connections = service();
+    const status = await register(connections, target("harness", asNobody()));
+    expect(reasons(status)).toEqual(["admitted", "admitted", "admitted"]);
+    try {
+      const bound = await projectsOn(connections).bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(checkout),
+        name: "Harness app",
+      });
+      if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+      const approvals: string[] = [];
+      let posture: ProviderExecutionPolicy = "approval-gated";
+      const host = remoteHarnessHost({
+        connections,
+        project: bound.value,
+        posture: () => posture,
+        approve: async (ask) => {
+          approvals.push(ask.toolName);
+          return "approved";
+        },
+        fixturePort,
+      });
+      expect(
+        host.rules.answer({
+          threadId: String(host.thread.id),
+          principal: { kind: "local-window" },
+          grants: [
+            {
+              host: "allowed.example.com",
+              port: fixturePort,
+              scope: { kind: "thread", lifetime: "1h" },
+            },
+          ],
+        }),
+      ).toMatchObject({ kind: "answered" });
+      const composed = host.composition.forRemoteCode({
+        thread: host.thread,
+        project: bound.value,
+        windowId: "window",
+        onTargetDisconnected: () => undefined,
+      });
+      if (composed.status !== "composed") throw new Error(`tools refused: ${composed.status}`);
+      const call = (toolCallId: string, toolName: string, args: object) => ({
+        toolCallId,
+        toolName,
+        argumentsJson: JSON.stringify(args),
+      });
+      const turn = await harnessTurn({
+        tools: composed.tools,
+        prompt: "Fix add() and run the check.",
+        script: [
+          { text: "Reading.", toolCalls: [call("read-1", "read", { path: "math.js" })] },
+          {
+            text: "Fixing.",
+            toolCalls: [
+              call("edit-1", "edit", { path: "math.js", oldText: "a - b", newText: "a + b" }),
+            ],
+          },
+          {
+            text: "Testing.",
+            toolCalls: [
+              call("test-1", "bash", {
+                command: 'sh check.sh; ls "$HOME/.ssh" >/dev/null 2>&1 || echo SSH-HIDDEN',
+              }),
+            ],
+          },
+          {
+            text: "Fetching.",
+            toolCalls: [
+              call("net-1", "bash", {
+                command: [
+                  `curl -sS --max-time 20 http://allowed.example.com:${String(fixturePort)}/`,
+                  `curl -sS -o /dev/null -w 'blocked:%{http_code}\\n' --max-time 20 http://blocked.example.com:${String(fixturePort)}/`,
+                ].join("; "),
+              }),
+            ],
+          },
+          { text: "Fixed, tested, and fetched.", toolCalls: [] },
+        ],
+      });
+      expect(turn.events.at(-1)?.kind).toBe("completed");
+
+      expect(toolResult(turn.requests, "read-1")).toMatchObject({
+        kind: "file",
+        path: "math.js",
+        lines: ["export const add = (a, b) => a - b;", ""],
+      });
+      expect(toolResult(turn.requests, "edit-1")).toMatchObject({
+        kind: "edited",
+        path: "math.js",
+        replacements: 1,
+      });
+      // The edit landed in the target's folder, as the target's user.
+      expect(readFileSync(join(checkout, "math.js"), "utf8")).toBe(
+        "export const add = (a, b) => a + b;\n",
+      );
+      expect(statSync(join(checkout, "math.js")).uid).toBe(NOBODY);
+      // The check ran on the target, confined: the remote user's ~/.ssh is
+      // not there for it.
+      const tested = toolResult(turn.requests, "test-1");
+      expect(tested).toMatchObject({ status: "ran", exitCode: 0 });
+      expect(JSON.stringify(tested)).toContain("PASS");
+      expect(JSON.stringify(tested)).toContain("SSH-HIDDEN");
+      const fetched = JSON.stringify(toolResult(turn.requests, "net-1"));
+      expect(fetched).toContain("hello from the fixture");
+      expect(fetched).toContain("blocked:403");
+      // Each write and command asked first; reading did not.
+      expect(approvals).toEqual(["edit", "bash", "bash"]);
+
+      // This host's proxy decided both destinations and journaled them.
+      const recorded = host.egressEvents();
+      const names = recorded.map((event) => event.eventName);
+      expect(names).toContain("thread.egress-launch-started@1");
+      const summary = recorded.find(
+        (event) =>
+          event.eventName === "thread.egress-launch-summarized@1" &&
+          JSON.stringify(event.payload).includes("allowed.example.com"),
+      );
+      expect(summary?.payload).toMatchObject({
+        entries: expect.arrayContaining([
+          expect.objectContaining({
+            host: "allowed.example.com",
+            decision: "allowed",
+            requests: 1,
+          }),
+          expect.objectContaining({
+            host: "blocked.example.com",
+            decision: "refused",
+            reason: "no-rule",
+          }),
+        ]),
+      });
+
+      // Plan offers no tool that writes or runs a command on the target.
+      posture = "plan";
+      const planned = host.composition.forRemoteCode({
+        thread: host.thread,
+        project: bound.value,
+        windowId: "window",
+        onTargetDisconnected: () => undefined,
+      });
+      if (planned.status !== "composed") throw new Error("plan tools refused");
+      const offered = planned.tools.definitions.map((definition) => definition.name);
+      expect(offered).toContain("read");
+      expect(offered).not.toContain("bash");
+      expect(offered).not.toContain("edit");
+      expect(offered).not.toContain("write");
+      planned.release();
+      composed.release();
+    } finally {
+      fixture.close();
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 240_000);
+
+  it("interrupts the turn when the target's session ends, withdraws its approval, stops its command, and queues nothing", async () => {
+    const checkout = harnessCheckout("disconnect-app");
+    const connections = service();
+    const status = await register(connections, target("disconnect", asNobody()));
+    expect(reasons(status)).toEqual(["admitted", "admitted", "admitted"]);
+    try {
+      const bound = await projectsOn(connections).bind({
+        targetId: status.target.id,
+        remoteRoot: remotePath(checkout),
+        name: "Disconnect app",
+      });
+      if (bound.status !== "ok") throw new Error(`bind refused: ${bound.reason}`);
+
+      // A command running when the session ends dies with it.
+      const commandHost = remoteHarnessHost({
+        connections,
+        project: bound.value,
+        posture: () => "approval-gated",
+        approve: async () => "approved",
+      });
+      let disconnected = 0;
+      let interrupt: () => void = () => undefined;
+      const running = commandHost.composition.forRemoteCode({
+        thread: commandHost.thread,
+        project: bound.value,
+        windowId: "window",
+        onTargetDisconnected: () => {
+          disconnected += 1;
+          interrupt();
+        },
+      });
+      if (running.status !== "composed") throw new Error(`tools refused: ${running.status}`);
+      const longCommand = "sleep 37; touch ran-after-disconnect";
+      const turn = harnessTurn({
+        tools: running.tools,
+        prompt: "Run the slow job.",
+        interruptible: (stop) => {
+          interrupt = stop;
+        },
+        script: [
+          {
+            text: "Running.",
+            toolCalls: [
+              {
+                toolCallId: "slow-1",
+                toolName: "bash",
+                argumentsJson: JSON.stringify({ command: longCommand }),
+              },
+            ],
+          },
+          { text: "unused", toolCalls: [] },
+        ],
+      });
+      for (let attempt = 0; attempt < 100 && !processRunning("sleep 37"); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(processRunning("sleep 37")).toBe(true);
+      process.kill(executorProcess(), "SIGKILL");
+      const interrupted = await turn;
+      expect(interrupted.events.at(-1)?.kind).toBe("interrupted");
+      expect(disconnected).toBe(1);
+      for (let attempt = 0; attempt < 50 && processRunning("sleep 37"); attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      expect(processRunning("sleep 37")).toBe(false);
+      expect(connections.session(status.target.id)).toBeUndefined();
+
+      // An approval pending when the session ends is withdrawn, and the
+      // command it would have run never runs, on this session or the next.
+      expect((await connections.connect(status.target.id)).status).toBe("ok");
+      const withdrawn: string[] = [];
+      const askedHost = remoteHarnessHost({
+        connections,
+        project: bound.value,
+        posture: () => "approval-gated",
+        approve: (ask) =>
+          new Promise((resolve) => {
+            withdrawn.push("asked");
+            ask.signal?.addEventListener("abort", () => {
+              withdrawn.push("withdrawn");
+              resolve("cancelled");
+            });
+          }),
+      });
+      let stopAsked: () => void = () => undefined;
+      const asking = askedHost.composition.forRemoteCode({
+        thread: askedHost.thread,
+        project: bound.value,
+        windowId: "window",
+        onTargetDisconnected: () => stopAsked(),
+      });
+      if (asking.status !== "composed") throw new Error(`tools refused: ${asking.status}`);
+      const pending = harnessTurn({
+        tools: asking.tools,
+        prompt: "Mark it.",
+        interruptible: (stop) => {
+          stopAsked = stop;
+        },
+        script: [
+          {
+            text: "Marking.",
+            toolCalls: [
+              {
+                toolCallId: "mark-1",
+                toolName: "bash",
+                argumentsJson: JSON.stringify({ command: "touch approved-after-disconnect" }),
+              },
+            ],
+          },
+          { text: "unused", toolCalls: [] },
+        ],
+      });
+      for (let attempt = 0; attempt < 100 && withdrawn.length === 0; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      process.kill(executorProcess(), "SIGKILL");
+      expect((await pending).events.at(-1)?.kind).toBe("interrupted");
+      expect(withdrawn).toEqual(["asked", "withdrawn"]);
+
+      // A new session attests afresh, and nothing of either turn arrives.
+      expect((await connections.connect(status.target.id)).status).toBe("ok");
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      expect(existsSync(join(checkout, "ran-after-disconnect"))).toBe(false);
+      expect(existsSync(join(checkout, "approved-after-disconnect"))).toBe(false);
+      // The old turn's tools refuse rather than use the new session.
+      expect(
+        await asking.tools.execute({
+          name: "read",
+          inputJson: JSON.stringify({ path: "math.js" }),
+        }),
+      ).toMatchObject({ isError: true });
+      running.release();
+      asking.release();
+    } finally {
+      connections.close();
+      connections.remove(status.target.id);
+    }
+  }, 240_000);
 });
