@@ -91,10 +91,15 @@ const WorkRequestRecorded = Schema.Struct({
 const CodeRuntimeWorkUpdated = Schema.Struct({
   work: Schema.Struct({ id: Id, threadId: Id, kind: Schema.String, state: Schema.String }),
 });
+// A Code turn can ask several approvals and questions; each request is its
+// own run, so a second approval in one turn still reaches the phone.
+const RequestId = Schema.NonEmptyTrimmedString.pipe(Schema.maxLength(255));
 const CodeOperationEventRecorded = Schema.Struct({
   threadId: Id,
-  operationId: Id,
-  event: Schema.Struct({ kind: Schema.String }),
+  event: Schema.Union(
+    Schema.Struct({ kind: Schema.Literal("approval-requested"), approvalId: Id }),
+    Schema.Struct({ kind: Schema.Literal("input-requested"), requestId: RequestId }),
+  ),
 });
 const HarnessAsked = Schema.Struct({ id: Id });
 
@@ -156,13 +161,9 @@ function threadNotificationFactOf(event: CommittedFact): ThreadNotificationFact 
     case "code.operation-event-recorded@1": {
       const frame = read(CodeOperationEventRecorded, event.payload);
       if (frame === undefined) return undefined;
-      const kind =
-        frame.event.kind === "approval-requested"
-          ? "approval-needed"
-          : frame.event.kind === "input-requested"
-            ? "waiting"
-            : undefined;
-      return fact(frame.threadId, kind, frame.operationId);
+      return frame.event.kind === "approval-requested"
+        ? fact(frame.threadId, "approval-needed", frame.event.approvalId)
+        : fact(frame.threadId, "waiting", frame.event.requestId);
     }
     // The harness session aggregate is keyed by its thread.
     case "native-harness-approval-asked@1": {

@@ -9,10 +9,11 @@
 //
 // The construction is HPKE (RFC 9180) base mode with DHKEM(X25519,
 // HKDF-SHA256), HKDF-SHA256, and AES-256-GCM, single-shot (sequence 0, empty
-// associated data). The info string binds the host id and device id, so
-// content sealed for one phone and host does not open as another's. It is
-// built from `node:crypto` alone; the test checks it against the published
-// test vector for this suite. Nothing here logs or keeps what it seals.
+// associated data), over content padded to one fixed size. The info string
+// binds the host id and device id, so content sealed for one phone and host
+// does not open as another's. It is built from `node:crypto` alone; the test
+// checks it against the published test vector for this suite. Nothing here
+// logs or keeps what it seals.
 
 import {
   createCipheriv,
@@ -125,10 +126,16 @@ export function sealPushNotification(input: {
   readonly kind: RemotePushNotificationKind;
   readonly content: unknown;
 }): SealedPushNotification {
-  const plaintext = Buffer.from(JSON.stringify(input.content), "utf8");
-  if (plaintext.length > REMOTE_PUSH_SEALED_CONTENT_MAX_BYTES) {
+  const content = Buffer.from(JSON.stringify(input.content), "utf8");
+  if (content.length > REMOTE_PUSH_SEALED_CONTENT_MAX_BYTES) {
     return { status: "refused", reason: "too-large" };
   }
+  // Every seal is the full bound, padded with JSON whitespace the phone's
+  // parser skips. Unpadded, the ciphertext's length told the delivery path
+  // the kind (each kind's name and text differ in length) and the title's
+  // length, which the envelope is meant to hide.
+  const plaintext = Buffer.alloc(REMOTE_PUSH_SEALED_CONTENT_MAX_BYTES, 0x20);
+  content.copy(plaintext);
   const recipient = recipientKey(input.notificationPublicKey);
   if (recipient === undefined) return { status: "refused", reason: "unusable-key" };
 

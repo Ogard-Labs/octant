@@ -212,7 +212,9 @@ A notification has two layers:
   (content and tag), both unpadded base64url.
 - Sealing is single-shot HPKE (sequence 0) with empty associated data and the
   UTF-8 info `octant-push-v1\n<hostId>\n<deviceId>`, where the host id is the
-  one the phone paired with. The plaintext is the sealed content as JSON. The
+  one the phone paired with. The plaintext is the sealed content as JSON,
+  padded with trailing spaces to 2 KiB so the ciphertext's length names no
+  kind or title. The
   host builds it with `node:crypto` alone and checks it against the published
   RFC 9180 vector for this suite. Content over 2 KiB, or a key that is not a
   usable X25519 public key (a low-order point included), is refused and
@@ -247,7 +249,9 @@ A notification has two layers:
   that requests an approval or an answer; and the harness's
   `native-harness-approval-asked@1` and `native-harness-question-asked@1` in
   any mode. Interrupted and cancelled turns notify nothing. The run is the
-  attempt, turn, or operation; for a harness ask it is the ask.
+  attempt or turn for a lifecycle fact, and the request itself (the Work
+  request, the Code approval or question, the harness ask) for one that asks
+  the person, since one turn can ask several.
 - Every registration in the host's file is the host's own, under the listener
   host id the phone paired with; the host's local id names none of them. So
   delivery reads them all and seals each under its own host id. A device

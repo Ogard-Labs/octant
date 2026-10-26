@@ -200,8 +200,8 @@ export function remotePushPreferenceAllows(
 
 /**
  * One notification per thread, kind, and run. A run is the turn (a Chat
- * attempt, a Work turn, a Code operation) for lifecycle facts, and the request
- * for an approval or question the harness asked.
+ * attempt, a Work turn, a Code provider turn) for lifecycle facts, and the
+ * request itself for an approval or a question, since one turn can ask several.
  */
 export function remotePushDedupeKey(input: {
   readonly threadId: string;

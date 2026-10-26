@@ -152,8 +152,8 @@ const unpaddedBase64Url = (minimum: number, maximum: number) =>
 
 /**
  * HPKE output for one phone: the sender's encapsulated X25519 key and the
- * AES-256-GCM ciphertext (content plus its 16-byte tag), both unpadded
- * base64url.
+ * AES-256-GCM ciphertext (the content padded to its bound, plus the 16-byte
+ * tag), both unpadded base64url.
  */
 export const RemotePushSealedContentV1 = Schema.Struct({
   encapsulatedKey: unpaddedBase64Url(43, 43),

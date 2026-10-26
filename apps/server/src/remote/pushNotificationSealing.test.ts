@@ -109,6 +109,31 @@ describe("sealed push notifications", () => {
     ).not.toContain("Acme");
   });
 
+  it("seals every notification to the same size, so its length names no kind or title", () => {
+    const device = phone();
+    const sizeOf = (sealedContent: Record<string, string>) => {
+      const sealed = sealPushNotification({
+        hostId,
+        deviceId,
+        notificationPublicKey: device.publicKey,
+        collapseKey,
+        threadId,
+        kind: "completion",
+        content: sealedContent,
+      });
+      if (sealed.status !== "sealed") throw new Error("expected a sealed envelope");
+      expect(openEnvelope(sealed.envelope, device.privateKey)).toEqual(sealedContent);
+      return sealed.envelope.sealed.ciphertext.length;
+    };
+    const sizes = [
+      sizeOf({ ...content, kind: "approval-needed", title: "Approval needed" }),
+      sizeOf({ ...content, kind: "waiting", title: "Waiting for you" }),
+      sizeOf({ ...content, kind: "failure", title: "Thread failed" }),
+      sizeOf({ ...content, kind: "completion", title: "Thread completed: a longer title" }),
+    ];
+    expect(new Set(sizes).size).toBe(1);
+  });
+
   it("derives the collapse id per destination and thread with the destination's own key", () => {
     const device = phone();
     const collapseOf = (overrides: { threadId?: string; collapseKey?: string }) => {

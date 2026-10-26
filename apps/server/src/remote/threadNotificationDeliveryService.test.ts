@@ -2,7 +2,17 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RemotePushEnvelopeV1, RemotePushPreferencesV1 } from "@octant/contracts";
+import type { Brand } from "effect";
+import type {
+  ChatAttemptUpdated,
+  CodeOperationEventFrame,
+  CodeRuntimeWorkUpdated,
+  NativeHarnessApproval,
+  RemotePushEnvelopeV1,
+  RemotePushPreferencesV1,
+  WorkRequestFrame,
+  WorkTurnUpdated,
+} from "@octant/contracts";
 import { REMOTE_PUSH_RATE_LIMIT } from "@octant/domain/push-notification-policy";
 import {
   createRecordingPushDeliveryTransport,
@@ -155,16 +165,34 @@ function committed(
   return { events: [{ eventName, aggregateId, payload }] };
 }
 
+/**
+ * The part of a journaled payload a fact below spells out. The service reads
+ * these payloads leniently, so a field it reads that a contract renames would
+ * silently stop notifications; typing each fact against its contract makes
+ * that rename fail here instead.
+ */
+type Shape<T> =
+  T extends Brand.Brand<string | symbol>
+    ? string
+    : T extends string | number | boolean
+      ? T
+      : T extends ReadonlyArray<infer Element>
+        ? ReadonlyArray<Shape<Element>>
+        : { readonly [Key in keyof T]?: Shape<T[Key]> };
+
 const facts = {
   chatCompleted: (attemptId = "a0000000-0000-4000-8000-000000000001", threadId = chatThread) =>
     committed("chat.attempt-updated@1", {
       kind: "attempt-updated",
       attempt: { id: attemptId, threadId, outcome: "completed" },
-    }),
+    } satisfies Shape<ChatAttemptUpdated>),
   chatHarnessApproval: () =>
     committed(
       "native-harness-approval-asked@1",
-      { id: "b0000000-0000-4000-8000-000000000001", status: "pending" },
+      {
+        id: "b0000000-0000-4000-8000-000000000001",
+        status: "pending",
+      } satisfies Shape<NativeHarnessApproval>,
       chatThread,
     ),
   workFailed: () =>
@@ -173,7 +201,7 @@ const facts = {
       threadId: workThread,
       turnId: "f0000000-0000-4000-8000-000000000001",
       status: "failed",
-    }),
+    } satisfies Shape<WorkTurnUpdated>),
   workApproval: () =>
     committed("work.request-recorded@1", {
       kind: "requested",
@@ -182,7 +210,7 @@ const facts = {
         threadId: workThread,
         detail: { kind: "approval" },
       },
-    }),
+    } satisfies Shape<WorkRequestFrame>),
   codeWaiting: () =>
     committed("code.runtime-work-updated@1", {
       kind: "runtime-work-updated",
@@ -192,14 +220,21 @@ const facts = {
         kind: "provider-turn",
         state: "waiting",
       },
-    }),
-  codeApproval: () =>
+    } satisfies Shape<CodeRuntimeWorkUpdated>),
+  codeApproval: (approvalId = "e2000000-0000-4000-8000-000000000001") =>
     committed("code.operation-event-recorded@1", {
       threadId: codeThread,
       operationId: "e1000000-0000-4000-8000-000000000001",
       cursor: 4,
-      event: { kind: "approval-requested", approvalId: "e2000000-0000-4000-8000-000000000001" },
-    }),
+      event: { kind: "approval-requested", approvalId },
+    } satisfies Shape<CodeOperationEventFrame>),
+  codeQuestion: (requestId: string) =>
+    committed("code.operation-event-recorded@1", {
+      threadId: codeThread,
+      operationId: "e1000000-0000-4000-8000-000000000001",
+      cursor: 5,
+      event: { kind: "input-requested", requestId },
+    } satisfies Shape<CodeOperationEventFrame>),
 };
 
 describe("ordinary-thread notifications", () => {
@@ -314,6 +349,26 @@ describe("ordinary-thread notifications", () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(first.receipts()).toHaveLength(4);
     expect(first.transport?.sent).toHaveLength(4);
+  });
+
+  it("notifies each approval and question a Code turn asks, not only its first", async () => {
+    const { register, service, transport, receipts } = host();
+    register(phone);
+    service.onCommittedAppend(facts.codeApproval());
+    service.onCommittedAppend(facts.codeApproval("e2000000-0000-4000-8000-000000000002"));
+    service.onCommittedAppend(facts.codeQuestion("provider-question-1"));
+    service.onCommittedAppend(facts.codeQuestion("provider-question-2"));
+    // A repeat of the same approval stays silent.
+    service.onCommittedAppend(facts.codeApproval());
+    await vi.waitFor(() => expect(receipts()).toHaveLength(4));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(receipts().map((receipt) => receipt.kind)).toEqual([
+      "approval-needed",
+      "approval-needed",
+      "waiting",
+      "waiting",
+    ]);
+    expect(transport?.sent).toHaveLength(4);
   });
 
   it("holds back a device's notifications past the rate limit and journals each one it held", async () => {
