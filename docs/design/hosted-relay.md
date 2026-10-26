@@ -129,7 +129,22 @@ device ──TLS(relay)──▶ relay ◀──TLS(relay)── host connector
 - **Inner ClientHello.** Over the relay the device sends no SNI (pinned trust
   checks no name, and a mesh name would tell the relay the person's tailnet),
   offers ALPN `http/1.1` only, and sends no TLS early data. TLS 1.3 encrypts
-  the listener certificate, so the relay never sees the pin.
+  the listener certificate, so a relay that forwards a device's handshake
+  never sees the pin.
+- **Active probing.** That guarantee covers forwarded traffic only. The relay
+  operator, or anyone holding a route id, can open its own inner handshake
+  through a registered route and receive the listener certificate: its key
+  (so the pin) and the name it is made for, a private address or a mesh name.
+  Neither lets the prober impersonate the host or pass device authentication,
+  and the person is told before turning the relay on.
+
+Rationale for accepting the probe: the certificate authenticates the host but
+is not a secret, and a prober can already run the pre-authentication routes
+(see the threat model). Hiding it would need a device-authenticated gate in
+front of the listener handshake, a second authentication protocol with its own
+proofs and replay rules, which is what reusing the pinned session avoids. A
+person who does not want an operator to learn the mesh name self-hosts the
+relay.
 
 Rationale: reusing the pinned listener session keeps one cryptographic
 protocol, one audited trust rule, and one set of request proofs. A separate
@@ -239,17 +254,17 @@ device's own grant, a log line, diagnostics, or an error message.
 
 What each party can do once the relay is on:
 
-| Party                                    | Can                                                                                                                                       | Cannot, and why                                                                                                                                                                             |
-| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Relay operator, honest but curious       | See host and device IP addresses, when each connects, splice durations and byte counts, relayed devices per host, client TLS fingerprints | Read content, learn the listener key, host identity, device keys, host name, or mesh name: inner TLS 1.3 encrypts the certificate and no SNI is sent                                        |
-| Relay operator, malicious                | Drop, delay, or cut streams; swap a device onto another host's route; run handshakes against a route it knows                             | Impersonate the host (pin), replay a session (fresh TLS 1.3, no early data), mint or forge a grant (only the host issues one, over the pinned session), act as a device (device-key proofs) |
-| Network observer near either end         | See that the device or host talks to the relay                                                                                            | See route ids or inner traffic: the outer hop is TLS                                                                                                                                        |
-| Anyone without a route id                | Reach the relay                                                                                                                           | Reach the host: no inbound port; an unknown route is refused                                                                                                                                |
-| Holder of a leaked or revoked route id   | Open the listener's TLS handshake and pre-authentication routes over the relay                                                            | Pass device authentication; once withdrawn, reach the host at all                                                                                                                           |
-| A stolen paired device                   | Reach the host from any network, not only the private one, until revoked                                                                  | Exceed its device authority; outlive revocation or the existing inactivity and absolute device lifetimes                                                                                    |
-| Someone using the relay as a free tunnel | Move opaque bytes between two endpoints that both speak the frame protocol                                                                | Exceed per-route quotas and lifetimes (below)                                                                                                                                               |
+| Party                                    | Can                                                                                                                                                                                             | Cannot, and why                                                                                                                                                                             |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Relay operator, honest but curious       | See host and device IP addresses, when each connects, splice durations and byte counts, relayed devices per host, client TLS fingerprints                                                       | From forwarded traffic, read content or learn the listener key, host identity, device keys, host name, or mesh name: inner TLS 1.3 encrypts the certificate and no SNI is sent              |
+| Relay operator, malicious                | Drop, delay, or cut streams; swap a device onto another host's route; run handshakes against a route it knows and so read the listener certificate (key, pin, and private address or mesh name) | Impersonate the host (pin), replay a session (fresh TLS 1.3, no early data), mint or forge a grant (only the host issues one, over the pinned session), act as a device (device-key proofs) |
+| Network observer near either end         | See that the device or host talks to the relay                                                                                                                                                  | See route ids or inner traffic: the outer hop is TLS                                                                                                                                        |
+| Anyone without a route id                | Reach the relay                                                                                                                                                                                 | Reach the host: no inbound port; an unknown route is refused                                                                                                                                |
+| Holder of a leaked or revoked route id   | Open the listener's TLS handshake and pre-authentication routes over the relay, and read the listener certificate                                                                               | Pass device authentication; once withdrawn, reach the host at all                                                                                                                           |
+| A stolen paired device                   | Reach the host from any network, not only the private one, until revoked                                                                                                                        | Exceed its device authority; outlive revocation or the existing inactivity and absolute device lifetimes                                                                                    |
+| Someone using the relay as a free tunnel | Move opaque bytes between two endpoints that both speak the frame protocol                                                                                                                      | Exceed per-route quotas and lifetimes (below)                                                                                                                                               |
 
-Two changes are real and are stated where the person turns the relay on:
+Three changes are real and are stated where the person turns the relay on:
 
 - **Metadata leaves the private network.** The operator can link a device's
   address to the host's address and see when the host is used. Traffic size
@@ -260,6 +275,9 @@ Two changes are real and are stated where the person turns the relay on:
   holding a route id, where today they are reachable only from the private
   network. The existing budgets apply per route, and withdrawal cuts a route
   off.
+- **The listener certificate becomes readable.** Whoever can use a route,
+  the operator included, can read the listener's key and the private address
+  or mesh name it is made for (Active probing, above).
 
 ### Abuse and denial of service
 
