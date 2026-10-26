@@ -606,8 +606,12 @@ delivery, keyboard layouts, and the managed streaming tools are specified in
 [Device workbench](design/device-workbench.md). Physical Apple devices,
 their person-confirmed leases and signing custody, and person-confirmed upload
 to App Store Connect are the design accepted on 2026-10-26, being implemented
-from its first slice, in
-[Apple physical devices and distribution](design/apple-devices.md).
+slice by slice, in
+[Apple physical devices and distribution](design/apple-devices.md). The host
+already discovers paired iPhones and iPads through `devicectl`, keeps the
+UDID, serial number, and ECID to itself, and holds a lease only after a person
+at the Mac confirms it; `/api/apple/devices` is readable by a paired device and
+`/api/apple/device-leases` is local-only.
 
 On an approval-gated thread, **Allow input** is the confirmation that opens
 that destination; clicks, typing, Home, and Lock never raise it
