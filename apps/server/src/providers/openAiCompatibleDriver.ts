@@ -113,8 +113,9 @@ const initialCapabilities: ProviderCapabilities = {
   taskProgress: "unsupported",
   nativeChildAgents: "unsupported",
   harnessAutoReview: "unsupported",
-  // Octant Harness keeps a Code session's transcript and compacts it; Chat and
-  // Work send the host's planned history, which the host compacts itself.
+  // Octant Harness keeps a Code session's transcript and compacts it. Chat and
+  // Work continue their journaled session too, but the host plans and compacts
+  // their history and rebuilds a fresh session from it after a compaction.
   sessionCompaction: { chat: "unsupported", work: "unsupported", code: "supported" },
   ...unsupportedChatCapabilities,
 };
@@ -170,6 +171,9 @@ export function makeOpenAiCompatibleDriver(options: OpenAiCompatibleDriverOption
     admitTurn: (turn, modelId) => admitTurn(options, turn, modelId),
   });
   return {
+    // Harness sessions are journaled, so a Chat or Work follow-up resumes the
+    // last one, and the host can always rebuild the history when it cannot.
+    conversationOwnership: "host-resumable",
     kind: profile.driverKind,
     probe: ({ instanceId }) =>
       instanceId !== options.instanceId

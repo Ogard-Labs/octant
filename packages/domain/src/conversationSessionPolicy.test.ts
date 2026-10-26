@@ -3,6 +3,7 @@ import { decideConversationSession } from "./conversationSessionPolicy";
 
 const runtime = { providerInstanceId: "claude", owner: "runtime" } as const;
 const host = { providerInstanceId: "local", owner: "host" } as const;
+const harness = { providerInstanceId: "endpoint", owner: "host-resumable" } as const;
 
 describe("decideConversationSession", () => {
   it("rebuilds the history on the host for a provider that keeps none, whatever ran before", () => {
@@ -123,5 +124,54 @@ describe("decideConversationSession", () => {
         handoff: "refused",
       }),
     ).toEqual({ kind: "refuse", reason: "handoff-unavailable" });
+  });
+  describe("a provider whose sessions the host can always rebuild", () => {
+    it("continues the previous session on a new message to the same provider", () => {
+      expect(
+        decideConversationSession({
+          recipient: harness,
+          previous: { providerInstanceId: "endpoint", continuable: true },
+          handoff: "allowed",
+        }),
+      ).toEqual({ kind: "continue-session" });
+    });
+
+    it("rebuilds on the host rather than refuse or hand over when the session cannot continue", () => {
+      for (const input of [
+        { recipient: harness, handoff: "allowed" },
+        {
+          recipient: harness,
+          previous: { providerInstanceId: "endpoint", continuable: false },
+          handoff: "allowed",
+        },
+        {
+          recipient: harness,
+          previous: { providerInstanceId: "claude", continuable: true },
+          handoff: "allowed",
+        },
+        {
+          recipient: harness,
+          previous: { providerInstanceId: "endpoint", continuable: true },
+          handoff: "refused",
+        },
+        {
+          recipient: harness,
+          previous: {
+            providerInstanceId: "endpoint",
+            continuable: true,
+            undeliveredHandoff: "provider-switch",
+          },
+          handoff: "allowed",
+        },
+        {
+          recipient: harness,
+          previous: { providerInstanceId: "endpoint", continuable: true },
+          branchWithoutSession: true,
+          handoff: "allowed",
+        },
+      ] as const) {
+        expect(decideConversationSession(input)).toEqual({ kind: "host-rebuild" });
+      }
+    });
   });
 });

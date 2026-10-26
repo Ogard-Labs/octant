@@ -2860,6 +2860,195 @@ describe("WorkTurnService", () => {
     },
   );
 
+  it.each([
+    ["completed", true],
+    ["cancelled", true],
+    ["failed", false],
+  ] as const)(
+    "continues a host-resumable Work session after a %s turn only when it ended cleanly or was cancelled",
+    async (ending, continues) => {
+      const run = vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        input.onSessionReady?.({
+          sessionId: input.providerSessionId,
+          resumeCursor: {
+            driverKind: "openai-compatible" as const,
+            value: String(input.providerSessionId),
+          },
+        });
+        if (run.mock.calls.length === 1 && ending === "cancelled") {
+          return { kind: "cancelled" as const };
+        }
+        if (run.mock.calls.length === 1 && ending === "failed") {
+          return {
+            kind: "failed" as const,
+            failure: { category: "unavailable" as const, message: "The endpoint stopped." },
+          };
+        }
+        return { kind: "completed" as const, response: "Earlier harness reply" };
+      });
+      const fixture = serviceFixture({
+        turnRuntime: { run },
+        resolveDriver: (_id, fallback) => ({
+          ...fallback,
+          conversationOwnership: "host-resumable",
+        }),
+      });
+      await fixture.service.startFirstTurn(ids.window, startCommand());
+      await fixture.waitForIdle();
+      await fixture.service.startFirstTurn(ids.window, {
+        ...startCommand(),
+        requestId: decodeWorkTurnRequestId("cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+        turnId: decodeWorkTurnId("dddddddd-dddd-4ddd-8ddd-dddddddddddd"),
+        prompt: "Continue",
+      });
+      await fixture.waitForIdle();
+      const first = run.mock.calls[0]?.[0];
+      const second = run.mock.calls[1]?.[0];
+      if (continues) {
+        expect(second).toMatchObject({
+          providerSessionId: first?.providerSessionId,
+          resumeCursor: {
+            driverKind: "openai-compatible",
+            value: String(first?.providerSessionId),
+          },
+        });
+        expect(JSON.stringify(second?.context)).not.toContain("Summarize the brief");
+      } else {
+        expect(second?.providerSessionId).not.toBe(first?.providerSessionId);
+        expect(second?.resumeCursor).toBeUndefined();
+        expect(JSON.stringify(second?.context)).toContain("Summarize the brief");
+      }
+    },
+  );
+
+  describe("a host-resumable Work session", () => {
+    /** Reports a durable session the next turn can resume, as Octant Harness does. */
+    const resumableRun = (sent: Array<Parameters<WorkTurnRuntimePort["run"]>[0]>) =>
+      vi.fn(async (input: Parameters<WorkTurnRuntimePort["run"]>[0]) => {
+        sent.push(input);
+        input.onSessionReady?.({
+          sessionId: input.providerSessionId,
+          resumeCursor: {
+            driverKind: "openai-compatible" as const,
+            value: String(input.providerSessionId),
+          },
+        });
+        return { kind: "completed" as const, response: "Provider reply" };
+      });
+    const resumable = (_id: unknown, fallback: ProviderDriver): ProviderDriver => ({
+      ...fallback,
+      conversationOwnership: "host-resumable",
+    });
+    const prompt = (n: number, words: number) => `Turn ${n}:${" brief detail".repeat(words)}`;
+    async function runTurns(
+      fixture: ReturnType<typeof serviceFixture>,
+      count: number,
+      words: number,
+    ): Promise<void> {
+      for (let n = 1; n <= count; n += 1) {
+        const suffix = n.toString(16).padStart(12, "0");
+        const requestId = decodeWorkTurnRequestId(`aaaaaaaa-aaaa-4aaa-8aaa-${suffix}`);
+        await fixture.service.startFirstTurn(ids.window, {
+          ...startCommand(),
+          requestId,
+          turnId: decodeWorkTurnId(`bbbbbbbb-bbbb-4bbb-8bbb-${suffix}`),
+          prompt: prompt(n, words),
+        });
+        await fixture.waitForIdle(requestId);
+      }
+    }
+
+    it("lets a person compact a long conversation the session continued", async () => {
+      const root = await mkdtemp(join(tmpdir(), "octant-work-resumable-"));
+      attachmentRoots.push(root);
+      const connection = openSqlite(join(root, "context.sqlite3"));
+      try {
+        applyMigrations(connection, MIGRATIONS, () => now);
+        const registries = createPhase1RuntimeRegistries();
+        const journal = new Journal({
+          connection,
+          registry: registries.events,
+          projections: registries.projections,
+          clock: () => now,
+        });
+        let sequence = 0;
+        const contextHarness = new ContextHarnessService({
+          persistence: {
+            connection,
+            journal,
+            status: () => ({ state: "current", integrity: "ok" }),
+          },
+          uuid: () => `83000000-0000-4000-8000-${String(++sequence).padStart(12, "0")}`,
+          clock: () => now,
+        });
+        const sent: Array<Parameters<WorkTurnRuntimePort["run"]>[0]> = [];
+        const fixture = serviceFixture({
+          contextHarness,
+          turnRuntime: { run: resumableRun(sent) },
+          resolveDriver: resumable,
+          contextFacts: {
+            observeModelLimits: () =>
+              Effect.succeed([
+                {
+                  providerInstanceId: decodeProviderInstanceId(ids.provider),
+                  modelId: decodeProviderModelId("model-a"),
+                  contextWindow: 8_000,
+                  maxOutput: 200,
+                  source: "runtime-reported",
+                  confidence: "high",
+                  observedAt: now,
+                },
+              ]),
+            observeServiceLimits: () =>
+              Effect.succeed(
+                unavailableProviderServiceLimits(
+                  decodeProviderInstanceId(ids.provider),
+                  now,
+                  "runtime-reported",
+                ),
+              ),
+          },
+        });
+        await runTurns(fixture, 4, 160);
+        // The premise: every turn continued the one session, which was never
+        // sent the earlier turns again.
+        expect(new Set(sent.map((input) => String(input.providerSessionId))).size).toBe(1);
+        expect(sent.at(-1)?.context?.some((block) => block.text === prompt(1, 160))).toBe(false);
+        expect(
+          contextHarness.previewSessionCompaction({
+            subject: decodeContextSubjectRef({
+              aggregateType: "work-thread",
+              aggregateId: String(ids.thread),
+            }),
+            providerInstanceId: decodeProviderInstanceId(ids.provider),
+            modelId: decodeProviderModelId("model-a"),
+            conversation: fixture.service.sessionCompactionConversation(ids.thread),
+          }),
+        ).toMatchObject({ kind: "summarize" });
+      } finally {
+        connection.close();
+      }
+    });
+
+    it("rebuilds the history in a fresh session once the earlier turns no longer fit", async () => {
+      const sent: Array<Parameters<WorkTurnRuntimePort["run"]>[0]> = [];
+      const fixture = serviceFixture({
+        safeInputBudgetTokens: 1_000,
+        turnRuntime: { run: resumableRun(sent) },
+        resolveDriver: resumable,
+      });
+      await runTurns(fixture, 3, 92);
+      const [first, second, third] = sent;
+      // Two turns fit and the second continues the first one's session.
+      expect(String(second?.providerSessionId)).toBe(String(first?.providerSessionId));
+      // The third does not fit with every earlier turn, so the host plans what
+      // fits and sends it to a fresh session rather than the continued one.
+      expect(String(third?.providerSessionId)).not.toBe(String(first?.providerSessionId));
+      expect(third?.resumeCursor).toBeUndefined();
+      expect(third?.context?.some((block) => block.kind === "assistant-message")).toBe(true);
+    });
+  });
+
   it.each([true, false])(
     "keeps a native Work conversation after a switch to another model of the same provider only when it can: %s",
     async (canSwitch) => {
