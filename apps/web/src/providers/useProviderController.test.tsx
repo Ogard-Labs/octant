@@ -2,6 +2,8 @@ import {
   decodeProviderInstance,
   decodeProviderInstanceId,
   decodeProviderModelId,
+  type AcpAgentConfiguration,
+  type AcpAgentProviderInstance,
   type ProviderInstance,
   type ProviderCatalogSnapshot,
   type ProviderObservedState,
@@ -23,7 +25,6 @@ describe("useProviderController", () => {
   it.each([
     ["opencode", "create-opencode-provider", "OpenCode local", "/opt/homebrew/bin/opencode"],
     ["codex", "create-codex-provider", "Codex local", "/opt/homebrew/bin/codex"],
-    ["kimi-code", "create-kimi-code-provider", "Kimi local", "/opt/homebrew/bin/kimi"],
   ] as const)(
     "creates a %s instance through its strict command",
     async (driverKind, commandKind, displayName, binaryPath) => {
@@ -33,17 +34,11 @@ describe("useProviderController", () => {
         instance: provider(
           driverKind === "opencode"
             ? { displayName, configuration: { kind: "opencode-cli", binaryPath } }
-            : driverKind === "codex"
-              ? {
-                  displayName,
-                  driverKind: "codex",
-                  configuration: { kind: "codex-cli", binaryPath },
-                }
-              : {
-                  displayName,
-                  driverKind: "kimi-code",
-                  configuration: { kind: "kimi-code-acp", binaryPath },
-                },
+            : {
+                displayName,
+                driverKind: "codex",
+                configuration: { kind: "codex-cli", binaryPath },
+              },
         ),
       });
       const { result } = renderHook(() => useProviderController({ client: api }));
@@ -72,7 +67,15 @@ describe("useProviderController", () => {
 
     await act(async () => {
       await expect(
-        result.current.create("devin", "Devin local", "/Users/example/.local/bin/devin"),
+        result.current.createAcpAgent(
+          "Devin local",
+          {
+            kind: "devin-acp",
+            binaryPath: "/Users/example/.local/bin/devin",
+            authentication: "subscription",
+          },
+          transientCredential(""),
+        ),
       ).resolves.toBe(true);
     });
 
@@ -154,7 +157,11 @@ describe("useProviderController", () => {
 
     await act(async () => {
       await expect(
-        result.current.create("kilo", "Kilo local", "/opt/homebrew/bin/kilo"),
+        result.current.createAcpAgent(
+          "Kilo local",
+          { kind: "kilo-acp", binaryPath: "/opt/homebrew/bin/kilo" },
+          transientCredential(""),
+        ),
       ).resolves.toBe(true);
     });
 
@@ -166,6 +173,39 @@ describe("useProviderController", () => {
       }),
     );
     expect(JSON.stringify(vi.mocked(api.execute).mock.calls)).not.toMatch(/apiKey|oauthToken/);
+  });
+
+  it("creates Kimi Code through the shared ACP configuration command", async () => {
+    const api = client();
+    vi.mocked(api.execute).mockImplementationOnce(async (command) => ({
+      kind: "provider-created",
+      instance: provider({
+        id: "instanceId" in command ? command.instanceId : id,
+        displayName: "Kimi local",
+        driverKind: "kimi-code",
+        configuration: { kind: "kimi-code-acp", binaryPath: "/opt/homebrew/bin/kimi" },
+      }),
+    }));
+    const { result } = renderHook(() => useProviderController({ client: api }));
+    await waitFor(() => expect(result.current.status).toBe("ready"));
+
+    await act(async () => {
+      await expect(
+        result.current.createAcpAgent(
+          "Kimi local",
+          { kind: "kimi-code-acp", binaryPath: "/opt/homebrew/bin/kimi" },
+          transientCredential(""),
+        ),
+      ).resolves.toBe(true);
+    });
+
+    expect(api.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "create-kimi-code-provider",
+        displayName: "Kimi local",
+        configuration: { kind: "kimi-code-acp", binaryPath: "/opt/homebrew/bin/kimi" },
+      }),
+    );
   });
 
   it("creates and reconfigures Ollama through strict non-secret loopback commands", async () => {
@@ -1049,7 +1089,6 @@ describe("useProviderController", () => {
   it.each([
     {
       label: "GLM Agent",
-      create: "createGlm",
       commandKind: "create-glm-provider",
       driverKind: "glm",
       configuration: {
@@ -1061,7 +1100,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Gemini CLI",
-      create: "createGemini",
       commandKind: "create-gemini-provider",
       driverKind: "gemini",
       configuration: {
@@ -1073,7 +1111,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Cline",
-      create: "createCline",
       commandKind: "create-cline-provider",
       driverKind: "cline",
       configuration: {
@@ -1085,7 +1122,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Qwen Code",
-      create: "createQwen",
       commandKind: "create-qwen-provider",
       driverKind: "qwen",
       configuration: {
@@ -1097,7 +1133,7 @@ describe("useProviderController", () => {
     },
   ] as const)(
     "creates $label provider-owned configuration without credential mutation",
-    async ({ create, commandKind, driverKind, configuration, displayName }) => {
+    async ({ commandKind, driverKind, configuration, displayName }) => {
       const calls: string[] = [];
       const api = client();
       vi.mocked(api.execute).mockImplementation(async (command) => {
@@ -1123,7 +1159,7 @@ describe("useProviderController", () => {
 
       await act(async () => {
         await expect(
-          createDualAuthCliProvider(result.current, create, displayName, configuration, credential),
+          result.current.createAcpAgent(displayName, configuration, credential),
         ).resolves.toBe(true);
       });
 
@@ -1136,7 +1172,6 @@ describe("useProviderController", () => {
   it.each([
     {
       label: "GLM Agent",
-      create: "createGlm",
       commandKind: "create-glm-provider",
       driverKind: "glm",
       configuration: {
@@ -1148,7 +1183,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Gemini CLI",
-      create: "createGemini",
       commandKind: "create-gemini-provider",
       driverKind: "gemini",
       configuration: {
@@ -1160,7 +1194,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Cline",
-      create: "createCline",
       commandKind: "create-cline-provider",
       driverKind: "cline",
       configuration: {
@@ -1172,7 +1205,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Qwen Code",
-      create: "createQwen",
       commandKind: "create-qwen-provider",
       driverKind: "qwen",
       configuration: {
@@ -1184,7 +1216,7 @@ describe("useProviderController", () => {
     },
   ] as const)(
     "creates $label API-key configuration before write-only credential storage",
-    async ({ create, driverKind, configuration, displayName }) => {
+    async ({ driverKind, configuration, displayName }) => {
       const calls: string[] = [];
       const api = client();
       vi.mocked(api.execute).mockImplementation(async (command) => {
@@ -1206,7 +1238,7 @@ describe("useProviderController", () => {
 
       await act(async () => {
         await expect(
-          createDualAuthCliProvider(result.current, create, displayName, configuration, credential),
+          result.current.createAcpAgent(displayName, configuration, credential),
         ).resolves.toBe(true);
       });
 
@@ -1218,7 +1250,6 @@ describe("useProviderController", () => {
   it.each([
     {
       label: "GLM Agent",
-      change: "changeGlmConfiguration",
       commandKind: "change-glm-configuration",
       driverKind: "glm",
       configuration: {
@@ -1235,7 +1266,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Gemini CLI",
-      change: "changeGeminiConfiguration",
       commandKind: "change-gemini-configuration",
       driverKind: "gemini",
       configuration: {
@@ -1252,7 +1282,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Cline",
-      change: "changeClineConfiguration",
       commandKind: "change-cline-configuration",
       driverKind: "cline",
       configuration: {
@@ -1269,7 +1298,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Qwen Code",
-      change: "changeQwenConfiguration",
       commandKind: "change-qwen-configuration",
       driverKind: "qwen",
       configuration: {
@@ -1286,14 +1314,7 @@ describe("useProviderController", () => {
     },
   ] as const)(
     "updates $label provider-owned configuration without credential mutation",
-    async ({
-      change,
-      commandKind,
-      driverKind,
-      configuration,
-      updatedConfiguration,
-      displayName,
-    }) => {
+    async ({ commandKind, driverKind, configuration, updatedConfiguration, displayName }) => {
       const calls: string[] = [];
       const instance = dualAuthCliProvider({
         driverKind,
@@ -1324,7 +1345,7 @@ describe("useProviderController", () => {
 
       await act(async () => {
         await expect(
-          changeDualAuthCliConfiguration(result.current, change, updatedConfiguration, credential),
+          result.current.changeAcpAgentConfiguration(id, updatedConfiguration, credential),
         ).resolves.toBe(true);
       });
 
@@ -1336,7 +1357,6 @@ describe("useProviderController", () => {
   it.each([
     {
       label: "GLM Agent",
-      change: "changeGlmConfiguration" as const,
       commandKind: "change-glm-configuration",
       driverKind: "glm" as const,
       apiKeyConfiguration: {
@@ -1353,7 +1373,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Gemini CLI",
-      change: "changeGeminiConfiguration" as const,
       commandKind: "change-gemini-configuration",
       driverKind: "gemini" as const,
       apiKeyConfiguration: {
@@ -1370,7 +1389,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Cline",
-      change: "changeClineConfiguration" as const,
       commandKind: "change-cline-configuration",
       driverKind: "cline" as const,
       apiKeyConfiguration: {
@@ -1387,7 +1405,6 @@ describe("useProviderController", () => {
     },
     {
       label: "Qwen Code",
-      change: "changeQwenConfiguration" as const,
       commandKind: "change-qwen-configuration",
       driverKind: "qwen" as const,
       apiKeyConfiguration: {
@@ -1405,7 +1422,6 @@ describe("useProviderController", () => {
   ])(
     "clears the stored $label API key after switching to provider-owned authentication",
     async ({
-      change,
       commandKind,
       driverKind,
       apiKeyConfiguration,
@@ -1442,12 +1458,7 @@ describe("useProviderController", () => {
 
       await act(async () => {
         await expect(
-          changeDualAuthCliConfiguration(
-            result.current,
-            change,
-            providerOwnedConfiguration,
-            credential,
-          ),
+          result.current.changeAcpAgentConfiguration(id, providerOwnedConfiguration, credential),
         ).resolves.toBe(true);
       });
 
@@ -1520,7 +1531,7 @@ describe("useProviderController", () => {
 
     await act(async () => {
       await expect(
-        result.current.createMistralVibe(
+        result.current.createAcpAgent(
           "Mistral Vibe local",
           vibeProvider({
             configuration: {
@@ -2267,7 +2278,7 @@ describe("useProviderController", () => {
 
     await act(async () => {
       await expect(
-        result.current.changeGrokConfiguration(
+        result.current.changeAcpAgentConfiguration(
           id,
           { ...grokProvider().configuration, binaryPath: "/opt/homebrew/bin/grok" },
           transientCredential("", calls),
@@ -2348,7 +2359,7 @@ describe("useProviderController", () => {
 
     await act(async () => {
       await expect(
-        result.current.changeMistralVibeConfiguration(
+        result.current.changeAcpAgentConfiguration(
           id,
           vibeProvider().configuration,
           transientCredential("", calls),
@@ -2388,7 +2399,7 @@ describe("useProviderController", () => {
 
     await act(async () => {
       await expect(
-        result.current.changeMistralVibeConfiguration(
+        result.current.changeAcpAgentConfiguration(
           id,
           vibeProvider().configuration,
           transientCredential("", calls),
@@ -3250,9 +3261,7 @@ function anthropicProvider(
   } as Extract<ProviderInstance, { driverKind: "anthropic-compatible" }>;
 }
 
-function vibeProvider(
-  patch: Partial<ProviderInstance> = {},
-): Extract<ProviderInstance, { driverKind: "mistral-vibe" }> {
+function vibeProvider(patch: Partial<ProviderInstance> = {}): AcpAgentProviderInstance {
   return {
     id,
     displayName: "Mistral Vibe local",
@@ -3268,12 +3277,10 @@ function vibeProvider(
     createdAt: "2026-07-17T10:00:00.000Z" as ProviderInstance["createdAt"],
     updatedAt: "2026-07-17T10:00:00.000Z" as ProviderInstance["updatedAt"],
     ...patch,
-  } as Extract<ProviderInstance, { driverKind: "mistral-vibe" }>;
+  } as AcpAgentProviderInstance;
 }
 
-function grokProvider(
-  patch: Partial<ProviderInstance> = {},
-): Extract<ProviderInstance, { driverKind: "grok" }> {
+function grokProvider(patch: Partial<ProviderInstance> = {}): AcpAgentProviderInstance {
   return {
     id,
     displayName: "Grok Build local",
@@ -3289,12 +3296,10 @@ function grokProvider(
     createdAt: "2026-07-17T10:00:00.000Z" as ProviderInstance["createdAt"],
     updatedAt: "2026-07-17T10:00:00.000Z" as ProviderInstance["updatedAt"],
     ...patch,
-  } as Extract<ProviderInstance, { driverKind: "grok" }>;
+  } as AcpAgentProviderInstance;
 }
 
-function devinProvider(
-  patch: Partial<ProviderInstance> = {},
-): Extract<ProviderInstance, { driverKind: "devin" }> {
+function devinProvider(patch: Partial<ProviderInstance> = {}): AcpAgentProviderInstance {
   return {
     id,
     displayName: "Devin local",
@@ -3310,7 +3315,7 @@ function devinProvider(
     createdAt: "2026-07-18T10:00:00.000Z" as ProviderInstance["createdAt"],
     updatedAt: "2026-07-18T10:00:00.000Z" as ProviderInstance["updatedAt"],
     ...patch,
-  } as Extract<ProviderInstance, { driverKind: "devin" }>;
+  } as AcpAgentProviderInstance;
 }
 
 function piProvider(
@@ -3351,9 +3356,7 @@ function ohMyPiProvider(
   } as Extract<ProviderInstance, { driverKind: "oh-my-pi" }>;
 }
 
-function kiloProvider(
-  patch: Partial<ProviderInstance> = {},
-): Extract<ProviderInstance, { driverKind: "kilo" }> {
+function kiloProvider(patch: Partial<ProviderInstance> = {}): AcpAgentProviderInstance {
   return {
     id,
     displayName: "Kilo local",
@@ -3365,18 +3368,14 @@ function kiloProvider(
     createdAt: "2026-07-18T10:00:00.000Z" as ProviderInstance["createdAt"],
     updatedAt: "2026-07-18T10:00:00.000Z" as ProviderInstance["updatedAt"],
     ...patch,
-  } as Extract<ProviderInstance, { driverKind: "kilo" }>;
+  } as AcpAgentProviderInstance;
 }
 
 function dualAuthCliProvider(input: {
   readonly id?: ProviderInstance["id"];
   readonly driverKind: "glm" | "gemini" | "cline" | "qwen";
   readonly displayName: string;
-  readonly configuration:
-    | Extract<ProviderInstance, { driverKind: "glm" }>["configuration"]
-    | Extract<ProviderInstance, { driverKind: "gemini" }>["configuration"]
-    | Extract<ProviderInstance, { driverKind: "cline" }>["configuration"]
-    | Extract<ProviderInstance, { driverKind: "qwen" }>["configuration"];
+  readonly configuration: AcpAgentConfiguration;
 }): ProviderInstance {
   return decodeProviderInstance({
     id: input.id ?? id,
@@ -3389,63 +3388,6 @@ function dualAuthCliProvider(input: {
     createdAt: "2026-07-18T10:00:00.000Z",
     updatedAt: "2026-07-18T10:00:00.000Z",
   });
-}
-
-async function createDualAuthCliProvider(
-  controller: ReturnType<typeof useProviderController>,
-  create: "createGlm" | "createGemini" | "createCline" | "createQwen",
-  displayName: string,
-  configuration:
-    | Extract<ProviderInstance, { driverKind: "glm" }>["configuration"]
-    | Extract<ProviderInstance, { driverKind: "gemini" }>["configuration"]
-    | Extract<ProviderInstance, { driverKind: "cline" }>["configuration"]
-    | Extract<ProviderInstance, { driverKind: "qwen" }>["configuration"],
-  credential: ReturnType<typeof transientCredential>,
-): Promise<boolean> {
-  switch (create) {
-    case "createGlm":
-      if (configuration.kind !== "glm-acp") throw new Error("expected GLM configuration");
-      return controller.createGlm(displayName, configuration, credential);
-    case "createGemini":
-      if (configuration.kind !== "gemini-acp") throw new Error("expected Gemini configuration");
-      return controller.createGemini(displayName, configuration, credential);
-    case "createCline":
-      if (configuration.kind !== "cline-acp") throw new Error("expected Cline configuration");
-      return controller.createCline(displayName, configuration, credential);
-    case "createQwen":
-      if (configuration.kind !== "qwen-acp") throw new Error("expected Qwen configuration");
-      return controller.createQwen(displayName, configuration, credential);
-  }
-}
-
-async function changeDualAuthCliConfiguration(
-  controller: ReturnType<typeof useProviderController>,
-  change:
-    | "changeGlmConfiguration"
-    | "changeGeminiConfiguration"
-    | "changeClineConfiguration"
-    | "changeQwenConfiguration",
-  configuration:
-    | Extract<ProviderInstance, { driverKind: "glm" }>["configuration"]
-    | Extract<ProviderInstance, { driverKind: "gemini" }>["configuration"]
-    | Extract<ProviderInstance, { driverKind: "cline" }>["configuration"]
-    | Extract<ProviderInstance, { driverKind: "qwen" }>["configuration"],
-  credential: ReturnType<typeof transientCredential>,
-): Promise<boolean> {
-  switch (change) {
-    case "changeGlmConfiguration":
-      if (configuration.kind !== "glm-acp") throw new Error("expected GLM configuration");
-      return controller.changeGlmConfiguration(id, configuration, credential);
-    case "changeGeminiConfiguration":
-      if (configuration.kind !== "gemini-acp") throw new Error("expected Gemini configuration");
-      return controller.changeGeminiConfiguration(id, configuration, credential);
-    case "changeClineConfiguration":
-      if (configuration.kind !== "cline-acp") throw new Error("expected Cline configuration");
-      return controller.changeClineConfiguration(id, configuration, credential);
-    case "changeQwenConfiguration":
-      if (configuration.kind !== "qwen-acp") throw new Error("expected Qwen configuration");
-      return controller.changeQwenConfiguration(id, configuration, credential);
-  }
 }
 
 function ollamaProvider(

@@ -1391,7 +1391,7 @@ describe("ProviderService", () => {
         instanceId,
         expectedVersion: 0,
         displayName: "Kimi local",
-        binaryPath: "/opt/homebrew/bin/kimi",
+        configuration: { kind: "kimi-code-acp", binaryPath: "/opt/homebrew/bin/kimi" },
       }),
     ).resolves.toMatchObject({
       kind: "provider-created",
@@ -1411,10 +1411,10 @@ describe("ProviderService", () => {
     });
     await expect(
       fixture.service.execute(windowId, {
-        kind: "change-provider-binary",
+        kind: "change-kimi-code-configuration",
         instanceId,
         expectedVersion: 1,
-        binaryPath: "/usr/local/bin/kimi",
+        configuration: { kind: "kimi-code-acp", binaryPath: "/usr/local/bin/kimi" },
       }),
     ).resolves.toMatchObject({
       kind: "provider-updated",
@@ -1424,6 +1424,15 @@ describe("ProviderService", () => {
         version: 2,
       },
     });
+    // Kimi Code takes its binary through its configuration, like every ACP agent.
+    await expect(
+      fixture.service.execute(windowId, {
+        kind: "change-provider-binary",
+        instanceId,
+        expectedVersion: 2,
+        binaryPath: "/opt/homebrew/bin/kimi",
+      }),
+    ).rejects.toMatchObject({ failure: { category: "unsupported" } });
     expect(JSON.stringify(fixture.append.mock.calls)).not.toMatch(
       /apiKey|oauthToken|credential|account|KIMI_CODE_HOME/,
     );

@@ -92,6 +92,7 @@ export * from "./projects";
 export * from "./projectView";
 export * from "./sidebarThreadStatus";
 export * from "./settings";
+export * from "./acpAgentProfiles";
 export * from "./providers";
 export * from "./hostOAuth";
 export * from "./providerDiscovery";

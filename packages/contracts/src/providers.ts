@@ -1,6 +1,14 @@
 import { Schema } from "effect";
 import { AggregateVersion, CorrelationId, UtcTimestamp } from "./events";
 import { OctantMode } from "./modes";
+import {
+  ACP_AGENT_KINDS,
+  AcpAgentAuthentication,
+  acpAgentConfigurationKind,
+  acpAgentKindOfConfiguration,
+  acpAgentProfile,
+  type AcpAgentKind,
+} from "./acpAgentProfiles";
 
 const strict = { parseOptions: { onExcessProperty: "error" as const } };
 const brandedUuid = <B extends string>(brand: B) => Schema.UUID.pipe(Schema.brand(brand));
@@ -24,25 +32,18 @@ export const ThreadProviderHandoff = Schema.Struct({
 }).annotations(strict);
 export type ThreadProviderHandoff = typeof ThreadProviderHandoff.Type;
 
+/**
+ * The closed driver vocabulary. ACP agents join it through their profile row
+ * in `acpAgentProfiles.ts`; every other driver is named here.
+ */
 export const ProviderDriverKind = Schema.Literal(
   "codex",
   "claude",
   "opencode",
-  "kilo",
   "pi",
   "oh-my-pi",
-  "devin",
-  "mistral-vibe",
   "ollama",
-  "kimi-code",
-  "grok",
-  "goose",
-  "glm",
-  "gemini",
-  "copilot",
-  "cline",
-  "qwen",
-  "fx",
+  ...ACP_AGENT_KINDS,
   "openai-compatible",
   "anthropic-compatible",
   "azure-foundry",
@@ -243,104 +244,29 @@ export type OpenCodeProviderConfiguration = typeof OpenCodeProviderConfiguration
 const AbsoluteBinaryPath = Schema.NonEmptyTrimmedString.pipe(
   Schema.filter((path) => path.startsWith("/")),
 );
-export const KimiCodeProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("kimi-code-acp"),
-  binaryPath: AbsoluteBinaryPath,
-}).annotations(strict);
-export type KimiCodeProviderConfiguration = typeof KimiCodeProviderConfiguration.Type;
-
-export const KiloProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("kilo-acp"),
-  binaryPath: AbsoluteBinaryPath,
-}).annotations(strict);
-export type KiloProviderConfiguration = typeof KiloProviderConfiguration.Type;
-
-export const MistralVibeAuthentication = Schema.Literal("subscription", "api-key");
-export type MistralVibeAuthentication = typeof MistralVibeAuthentication.Type;
-export const MistralVibeProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("mistral-vibe-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: MistralVibeAuthentication,
-}).annotations(strict);
-export type MistralVibeProviderConfiguration = typeof MistralVibeProviderConfiguration.Type;
-
-export const GrokAuthentication = Schema.Literal("subscription", "api-key");
-export type GrokAuthentication = typeof GrokAuthentication.Type;
-export const GrokProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("grok-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: GrokAuthentication,
-}).annotations(strict);
-export type GrokProviderConfiguration = typeof GrokProviderConfiguration.Type;
-
-export const GooseProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("goose-acp"),
-  binaryPath: AbsoluteBinaryPath,
-}).annotations(strict);
-export type GooseProviderConfiguration = typeof GooseProviderConfiguration.Type;
-
-export const GlmAuthentication = Schema.Literal("provider-owned", "api-key");
-export type GlmAuthentication = typeof GlmAuthentication.Type;
-export const GlmProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("glm-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: GlmAuthentication,
-}).annotations(strict);
-export type GlmProviderConfiguration = typeof GlmProviderConfiguration.Type;
-
-export const GeminiAuthentication = Schema.Literal("provider-owned", "api-key");
-export type GeminiAuthentication = typeof GeminiAuthentication.Type;
-export const GeminiProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("gemini-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: GeminiAuthentication,
-}).annotations(strict);
-export type GeminiProviderConfiguration = typeof GeminiProviderConfiguration.Type;
-
-export const CopilotProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("copilot-acp"),
-  binaryPath: AbsoluteBinaryPath,
-}).annotations(strict);
-export type CopilotProviderConfiguration = typeof CopilotProviderConfiguration.Type;
-
-export const ClineAuthentication = Schema.Literal("provider-owned", "api-key");
-export type ClineAuthentication = typeof ClineAuthentication.Type;
-export const ClineProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("cline-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: ClineAuthentication,
-}).annotations(strict);
-export type ClineProviderConfiguration = typeof ClineProviderConfiguration.Type;
-
-export const QwenAuthentication = Schema.Literal("provider-owned", "api-key");
-export type QwenAuthentication = typeof QwenAuthentication.Type;
-export const QwenProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("qwen-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: QwenAuthentication,
-}).annotations(strict);
-export type QwenProviderConfiguration = typeof QwenProviderConfiguration.Type;
-
 /**
- * fx keeps its profile under `$HOME/.fx` and exposes no profile-path variable,
- * so Octant reaches it through an isolated managed home and authenticates it
- * with a Vercel AI Gateway key held by the host credential broker. There is no
- * provider-owned posture: the interactive `~/.fx` login is deliberately outside
- * the confined process.
+ * One configuration shape for every ACP agent: its kind, the binary it runs,
+ * and, for an agent whose profile lists postures, which one it signs in with.
+ * The posture must be one its profile lists, and an agent whose profile lists
+ * none carries no posture field.
  */
-export const FxProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("fx-acp"),
+export const AcpAgentConfiguration = Schema.Struct({
+  kind: Schema.Literal(...ACP_AGENT_KINDS.map(acpAgentConfigurationKind)),
   binaryPath: AbsoluteBinaryPath,
-  authentication: Schema.Literal("api-key"),
-}).annotations(strict);
-export type FxProviderConfiguration = typeof FxProviderConfiguration.Type;
-
-export const DevinProviderConfiguration = Schema.Struct({
-  kind: Schema.Literal("devin-acp"),
-  binaryPath: AbsoluteBinaryPath,
-  authentication: Schema.Literal("subscription"),
-}).annotations(strict);
-export type DevinProviderConfiguration = typeof DevinProviderConfiguration.Type;
+  authentication: Schema.optional(AcpAgentAuthentication),
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter((configuration) => {
+      const postures = acpAgentProfile(
+        acpAgentKindOfConfiguration(configuration.kind),
+      ).authentication;
+      return configuration.authentication === undefined
+        ? postures.length === 0
+        : postures.includes(configuration.authentication);
+    }),
+  );
+export type AcpAgentConfiguration = typeof AcpAgentConfiguration.Type;
 
 export const PiProviderConfiguration = Schema.Struct({
   kind: Schema.Literal("pi-rpc"),
@@ -663,89 +589,19 @@ export const ClaudeProviderInstance = Schema.Struct({
   configuration: ClaudeProviderConfiguration,
 }).annotations(strict);
 export type ClaudeProviderInstance = typeof ClaudeProviderInstance.Type;
-export const KimiCodeProviderInstance = Schema.Struct({
+/** An instance of any ACP agent; its configuration kind must match its driver kind. */
+export const AcpAgentProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
-  driverKind: Schema.Literal("kimi-code"),
-  configuration: KimiCodeProviderConfiguration,
-}).annotations(strict);
-export type KimiCodeProviderInstance = typeof KimiCodeProviderInstance.Type;
-
-export const KiloProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("kilo"),
-  configuration: KiloProviderConfiguration,
-}).annotations(strict);
-export type KiloProviderInstance = typeof KiloProviderInstance.Type;
-
-export const MistralVibeProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("mistral-vibe"),
-  configuration: MistralVibeProviderConfiguration,
-}).annotations(strict);
-export type MistralVibeProviderInstance = typeof MistralVibeProviderInstance.Type;
-
-export const GrokProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("grok"),
-  configuration: GrokProviderConfiguration,
-}).annotations(strict);
-export type GrokProviderInstance = typeof GrokProviderInstance.Type;
-
-export const GooseProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("goose"),
-  configuration: GooseProviderConfiguration,
-}).annotations(strict);
-export type GooseProviderInstance = typeof GooseProviderInstance.Type;
-
-export const GlmProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("glm"),
-  configuration: GlmProviderConfiguration,
-}).annotations(strict);
-export type GlmProviderInstance = typeof GlmProviderInstance.Type;
-
-export const GeminiProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("gemini"),
-  configuration: GeminiProviderConfiguration,
-}).annotations(strict);
-export type GeminiProviderInstance = typeof GeminiProviderInstance.Type;
-
-export const CopilotProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("copilot"),
-  configuration: CopilotProviderConfiguration,
-}).annotations(strict);
-export type CopilotProviderInstance = typeof CopilotProviderInstance.Type;
-
-export const ClineProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("cline"),
-  configuration: ClineProviderConfiguration,
-}).annotations(strict);
-export type ClineProviderInstance = typeof ClineProviderInstance.Type;
-
-export const QwenProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("qwen"),
-  configuration: QwenProviderConfiguration,
-}).annotations(strict);
-export type QwenProviderInstance = typeof QwenProviderInstance.Type;
-
-export const FxProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("fx"),
-  configuration: FxProviderConfiguration,
-}).annotations(strict);
-export type FxProviderInstance = typeof FxProviderInstance.Type;
-
-export const DevinProviderInstance = Schema.Struct({
-  ...ProviderInstanceFields,
-  driverKind: Schema.Literal("devin"),
-  configuration: DevinProviderConfiguration,
-}).annotations(strict);
-export type DevinProviderInstance = typeof DevinProviderInstance.Type;
+  driverKind: Schema.Literal(...ACP_AGENT_KINDS),
+  configuration: AcpAgentConfiguration,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (instance) => instance.configuration.kind === acpAgentConfigurationKind(instance.driverKind),
+    ),
+  );
+export type AcpAgentProviderInstance = typeof AcpAgentProviderInstance.Type;
 
 export const PiProviderInstance = Schema.Struct({
   ...ProviderInstanceFields,
@@ -821,18 +677,7 @@ export const ProviderInstance = Schema.Union(
   OpenCodeProviderInstance,
   CodexProviderInstance,
   ClaudeProviderInstance,
-  KimiCodeProviderInstance,
-  KiloProviderInstance,
-  MistralVibeProviderInstance,
-  GrokProviderInstance,
-  GooseProviderInstance,
-  GlmProviderInstance,
-  GeminiProviderInstance,
-  CopilotProviderInstance,
-  ClineProviderInstance,
-  QwenProviderInstance,
-  FxProviderInstance,
-  DevinProviderInstance,
+  AcpAgentProviderInstance,
   PiProviderInstance,
   OhMyPiProviderInstance,
   OllamaProviderInstance,
@@ -906,8 +751,20 @@ export const ProviderInstanceRenamed = Schema.Struct({ instance: ProviderInstanc
   strict,
 );
 export type ProviderInstanceRenamed = typeof ProviderInstanceRenamed.Type;
+/**
+ * Kimi Code changed its binary through this event before ACP agents took
+ * configuration commands; the journal still holds those events, so they
+ * decode. No other ACP agent ever recorded one.
+ */
+const KimiCodeBinaryChangedInstance = AcpAgentProviderInstance.pipe(
+  Schema.filter((instance) => instance.driverKind === "kimi-code"),
+);
 export const ProviderInstanceBinaryChanged = Schema.Struct({
-  instance: Schema.Union(OpenCodeProviderInstance, CodexProviderInstance, KimiCodeProviderInstance),
+  instance: Schema.Union(
+    OpenCodeProviderInstance,
+    CodexProviderInstance,
+    KimiCodeBinaryChangedInstance,
+  ),
 }).annotations(strict);
 export type ProviderInstanceBinaryChanged = typeof ProviderInstanceBinaryChanged.Type;
 export const ProviderInstanceConfigurationChanged = Schema.Struct({
@@ -920,17 +777,7 @@ export const ProviderInstanceConfigurationChanged = Schema.Struct({
     BflImageProviderInstance,
     IdeogramImageProviderInstance,
     ClaudeProviderInstance,
-    MistralVibeProviderInstance,
-    GrokProviderInstance,
-    GooseProviderInstance,
-    GlmProviderInstance,
-    GeminiProviderInstance,
-    CopilotProviderInstance,
-    ClineProviderInstance,
-    QwenProviderInstance,
-    FxProviderInstance,
-    KiloProviderInstance,
-    DevinProviderInstance,
+    AcpAgentProviderInstance,
     PiProviderInstance,
     OhMyPiProviderInstance,
     OllamaProviderInstance,
@@ -1515,6 +1362,53 @@ const CreateProviderCommandFields = {
   enabled: Schema.optional(Schema.Boolean),
 } as const;
 
+export type AcpAgentCreateCommandKind = `create-${AcpAgentKind}-provider`;
+export type AcpAgentChangeCommandKind = `change-${AcpAgentKind}-configuration`;
+
+export function acpAgentCreateCommandKind(kind: AcpAgentKind): AcpAgentCreateCommandKind {
+  return `create-${kind}-provider`;
+}
+
+export function acpAgentChangeCommandKind(kind: AcpAgentKind): AcpAgentChangeCommandKind {
+  return `change-${kind}-configuration`;
+}
+
+/**
+ * Every ACP agent is created and reconfigured through commands named for its
+ * driver kind that carry the shared configuration shape. The configuration
+ * must name the same agent as the command.
+ */
+export const CreateAcpAgentProviderCommand = Schema.Struct({
+  kind: Schema.Literal(...ACP_AGENT_KINDS.map(acpAgentCreateCommandKind)),
+  ...CreateProviderCommandFields,
+  displayName: Schema.NonEmptyTrimmedString,
+  configuration: AcpAgentConfiguration,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (command) =>
+        command.kind ===
+        acpAgentCreateCommandKind(acpAgentKindOfConfiguration(command.configuration.kind)),
+    ),
+  );
+export type CreateAcpAgentProviderCommand = typeof CreateAcpAgentProviderCommand.Type;
+
+export const ChangeAcpAgentConfigurationCommand = Schema.Struct({
+  kind: Schema.Literal(...ACP_AGENT_KINDS.map(acpAgentChangeCommandKind)),
+  ...ProviderInstanceCommandFields,
+  configuration: AcpAgentConfiguration,
+})
+  .annotations(strict)
+  .pipe(
+    Schema.filter(
+      (command) =>
+        command.kind ===
+        acpAgentChangeCommandKind(acpAgentKindOfConfiguration(command.configuration.kind)),
+    ),
+  );
+export type ChangeAcpAgentConfigurationCommand = typeof ChangeAcpAgentConfigurationCommand.Type;
+
 const ProviderAuthenticationAttemptId = brandedString("ProviderAuthenticationAttemptId");
 export const ProviderAuthenticationAttempt = Schema.Struct({
   attemptId: ProviderAuthenticationAttemptId,
@@ -1587,83 +1481,12 @@ export const ProviderRegistryCommand = Schema.Union(
     binaryPath: Schema.NonEmptyTrimmedString,
     accent: Schema.optional(ClaudeAccountAccent),
   }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-kimi-code-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    binaryPath: AbsoluteBinaryPath,
-  }).annotations(strict),
+  CreateAcpAgentProviderCommand,
   Schema.Struct({
     kind: Schema.Literal("create-claude-provider"),
     ...CreateProviderCommandFields,
     displayName: Schema.NonEmptyTrimmedString,
     configuration: ClaudeProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-mistral-vibe-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: MistralVibeProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-grok-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: GrokProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-goose-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: GooseProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-glm-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: GlmProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-gemini-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: GeminiProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-copilot-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: CopilotProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-cline-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: ClineProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-qwen-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: QwenProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-fx-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: FxProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-devin-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: DevinProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("create-kilo-provider"),
-    ...CreateProviderCommandFields,
-    displayName: Schema.NonEmptyTrimmedString,
-    configuration: KiloProviderConfiguration,
   }).annotations(strict),
   Schema.Struct({
     kind: Schema.Literal("create-pi-provider"),
@@ -1742,61 +1565,7 @@ export const ProviderRegistryCommand = Schema.Union(
     /** Replaces a leftover custom directory with Octant's assigned leaf. */
     reassignAccountDirectory: Schema.optional(Schema.Boolean),
   }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-mistral-vibe-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: MistralVibeProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-grok-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: GrokProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-goose-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: GooseProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-glm-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: GlmProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-gemini-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: GeminiProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-copilot-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: CopilotProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-cline-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: ClineProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-qwen-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: QwenProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-fx-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: FxProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-devin-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: DevinProviderConfiguration,
-  }).annotations(strict),
-  Schema.Struct({
-    kind: Schema.Literal("change-kilo-configuration"),
-    ...ProviderInstanceCommandFields,
-    configuration: KiloProviderConfiguration,
-  }).annotations(strict),
+  ChangeAcpAgentConfigurationCommand,
   Schema.Struct({
     kind: Schema.Literal("change-pi-configuration"),
     ...ProviderInstanceCommandFields,

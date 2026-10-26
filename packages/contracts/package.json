@@ -91,6 +91,7 @@
     "./project-view": "./src/projectView.ts",
     "./sidebar-thread-status": "./src/sidebarThreadStatus.ts",
     "./projects": "./src/projects.ts",
+    "./acp-agent-profiles": "./src/acpAgentProfiles.ts",
     "./providers": "./src/providers.ts",
     "./provider-discovery": "./src/providerDiscovery.ts",
     "./provider-driver-catalog": "./src/providerDriverCatalog.ts",

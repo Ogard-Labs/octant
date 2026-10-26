@@ -1,10 +1,12 @@
-import type {
-  AnthropicCompatibleProtocol,
-  DiscoverySnapshot,
-  OpenAiCompatibleProtocol,
-  ProviderInstance,
-  ProviderObservedState,
-  ProviderRefusalReason,
+import {
+  acpAgentProfile,
+  isAcpAgentKind,
+  type AnthropicCompatibleProtocol,
+  type DiscoverySnapshot,
+  type OpenAiCompatibleProtocol,
+  type ProviderInstance,
+  type ProviderObservedState,
+  type ProviderRefusalReason,
 } from "@octant/contracts";
 
 export const capabilityLabels: ReadonlyArray<
@@ -96,52 +98,14 @@ export function isModelEndpointDriverKind(
   return MODEL_ENDPOINT_DRIVER_KINDS.some((kind) => kind === driverKind);
 }
 
-export function driverLabel(
-  driverKind: ProviderInstance["driverKind"] | "oh-my-pi",
-):
-  | "OpenCode"
-  | "Codex"
-  | "Claude"
-  | "Kimi Code"
-  | "Devin"
-  | "Kilo"
-  | "Pi"
-  | "Oh My Pi"
-  | "Ollama"
-  | "Mistral Vibe"
-  | "Grok Build"
-  | "Goose"
-  | "GLM Agent ACP"
-  | "Gemini CLI"
-  | "GitHub Copilot"
-  | "Cline"
-  | "Qwen Code"
-  | "fx"
-  | "OpenAI-compatible"
-  | "Anthropic-compatible"
-  | "Azure AI Foundry"
-  | "OpenAI Image"
-  | "Gemini Image"
-  | "Black Forest Labs Image"
-  | "Ideogram Image" {
+export function driverLabel(driverKind: ProviderInstance["driverKind"]): string {
+  if (isAcpAgentKind(driverKind)) return acpAgentProfile(driverKind).name;
   if (driverKind === "opencode") return "OpenCode";
   if (driverKind === "codex") return "Codex";
   if (driverKind === "claude") return "Claude";
-  if (driverKind === "kimi-code") return "Kimi Code";
-  if (driverKind === "devin") return "Devin";
-  if (driverKind === "kilo") return "Kilo";
   if (driverKind === "pi") return "Pi";
   if (driverKind === "oh-my-pi") return "Oh My Pi";
   if (driverKind === "ollama") return "Ollama";
-  if (driverKind === "mistral-vibe") return "Mistral Vibe";
-  if (driverKind === "grok") return "Grok Build";
-  if (driverKind === "goose") return "Goose";
-  if (driverKind === "glm") return "GLM Agent ACP";
-  if (driverKind === "gemini") return "Gemini CLI";
-  if (driverKind === "copilot") return "GitHub Copilot";
-  if (driverKind === "cline") return "Cline";
-  if (driverKind === "qwen") return "Qwen Code";
-  if (driverKind === "fx") return "fx";
   if (driverKind === "anthropic-compatible") return "Anthropic-compatible";
   if (driverKind === "azure-foundry") return "Azure AI Foundry";
   if (driverKind === "openai-image") return "OpenAI Image";
@@ -205,7 +169,9 @@ export function providerConfiguredBinaryPath(instance: ProviderInstance): string
 
 export function providerAuthenticationFact(instance: ProviderInstance): string | undefined {
   const { configuration, driverKind } = instance;
-  if (!("authentication" in configuration)) return undefined;
+  if (!("authentication" in configuration) || configuration.authentication === undefined) {
+    return undefined;
+  }
   if (driverKind === "claude") {
     return configuration.authentication === "api-key" ? "Anthropic API key" : "Claude subscription";
   }
