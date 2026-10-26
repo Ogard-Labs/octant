@@ -377,6 +377,26 @@ describe("outside harness endpoint proxy", () => {
     expectNoHostileText(observed);
   });
 
+  it("fails a pending call at once when the driver exits, and leaves the instance unavailable", async () => {
+    const { probeFailure, driver, registry, channel } = harness({ probe: () => NO_ANSWER });
+    const failed = probeFailure();
+    await vi.waitFor(() =>
+      expect(driver.received.map((message) => message.method)).toContain("probe"),
+    );
+    channel.driver.exit();
+
+    expect(await failed).toEqual({
+      category: "unavailable",
+      reason: "runtime-unavailable",
+      message: "The provider driver stopped.",
+    });
+    expect(registry.observedState(instanceA)).toMatchObject({
+      readiness: "unavailable",
+      reason: "runtime-unavailable",
+      models: [],
+    });
+  });
+
   it("refuses a session whose driver agreed a protocol version the host does not speak", async () => {
     const { probeFailure, driver, registry, channel } = harness({
       initialize: () => ({ protocolVersion: "harness-endpoint/2" }),

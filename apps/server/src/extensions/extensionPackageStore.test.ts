@@ -175,7 +175,55 @@ function configuredServerInspection() {
   });
 }
 
-async function setup() {
+function driverInspection() {
+  const entries: ReadonlyArray<ExtensionArchiveEntry> = [
+    {
+      path: "driver/main.mjs",
+      kind: "file",
+      content: new TextEncoder().encode("export {};\n"),
+      executable: false,
+    },
+  ];
+  const manifest = {
+    manifestVersion: 1,
+    extensionId,
+    packageId,
+    slug: "loopback-driver",
+    displayName: "Loopback driver",
+    version: "0.1.0",
+    digest: `sha256:${"0".repeat(64)}`,
+    source: { kind: "local-folder", sourceRef: "folder-1" },
+    provenance: {
+      canonicalUrl: "https://example.com/loopback-driver",
+      publisher: "Example Publisher",
+      reviewed: false,
+    },
+    license: { kind: "spdx", identifier: "MIT" },
+    compatibility: { platforms: ["macos"], modes: ["chat", "work", "code"], providerFamilies: [] },
+    declaredCapabilities: [],
+    components: [
+      {
+        id: "driver",
+        kind: "provider-driver",
+        displayName: "Loopback driver",
+        declaredCapabilities: [],
+        entryPoint: "driver/main.mjs",
+      },
+    ],
+  };
+  manifest.digest = calculateExtensionPackageDigest(manifest, entries);
+  return inspectExtensionPackage({
+    format: "zip",
+    archiveBytes: 512,
+    manifest,
+    entries,
+    expectedDigest: manifest.digest as never,
+    appVersion: "1.0.0",
+    platform: "darwin",
+  });
+}
+
+async function setup(options: { readonly outsideDriverRuntime?: string } = {}) {
   const dataDirectory = await mkdtemp(join(tmpdir(), "octant-extension-store-"));
   directories.push(dataDirectory);
   let next = 0;
@@ -184,7 +232,11 @@ async function setup() {
     "42000000-0000-4000-8000-000000000011",
     "42000000-0000-4000-8000-000000000012",
   ];
-  const store = new ExtensionPackageStore({ dataDirectory, uuid: () => ids[next++]! });
+  const store = new ExtensionPackageStore({
+    dataDirectory,
+    uuid: () => ids[next++]!,
+    ...options,
+  });
   await store.initialize();
   return { store, dataDirectory };
 }
@@ -304,6 +356,49 @@ describe("host-private immutable extension package store", () => {
     expect(inventory.filter((item) => item.kind === "version")).toHaveLength(0);
     expect(inventory.filter((item) => item.kind === "staging")).toHaveLength(0);
     expect(inventory.filter((item) => item.kind === "quarantine")).toHaveLength(1);
+  });
+
+  it("runs an outside driver's entry only on the host's runtime, in its package root, with nothing else", async () => {
+    const runtime = "/opt/octant/bin/bun";
+    const { store } = await setup({ outsideDriverRuntime: runtime });
+    const target = await store.promote(await store.stage(driverInspection()));
+    const contentRoot = store.contentRoot(target);
+    const entryPoint = join(contentRoot, "driver", "main.mjs");
+    const launch = {
+      ...target,
+      componentId: "driver",
+      entryPoint,
+      command: runtime,
+      args: [entryPoint],
+      cwd: contentRoot,
+    };
+
+    await expect(store.authorizeRuntimeLaunch(launch)).resolves.toBe(true);
+    for (const refused of [
+      { ...launch, command: entryPoint },
+      { ...launch, command: "/usr/bin/env" },
+      { ...launch, args: [entryPoint, "--inspect"] },
+      { ...launch, args: ["-e", "process.exit()"] },
+      { ...launch, cwd: join(contentRoot, "driver") },
+      { ...launch, cwd: store.pluginDataRoot() },
+      { ...launch, entryPoint: "/tmp/attacker.mjs", args: ["/tmp/attacker.mjs"] },
+    ]) {
+      await expect(store.authorizeRuntimeLaunch(refused)).resolves.toBe(false);
+    }
+    const { store: withoutRuntime } = await setup();
+    const installed = await withoutRuntime.promote(await withoutRuntime.stage(driverInspection()));
+    const root = withoutRuntime.contentRoot(installed);
+    const entry = join(root, "driver", "main.mjs");
+    await expect(
+      withoutRuntime.authorizeRuntimeLaunch({
+        ...installed,
+        componentId: "driver",
+        entryPoint: entry,
+        command: runtime,
+        args: [entry],
+        cwd: root,
+      }),
+    ).resolves.toBe(false);
   });
 
   it("authorizes only the verified package-owned executable and content root", async () => {
