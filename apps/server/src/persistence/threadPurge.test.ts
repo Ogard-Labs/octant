@@ -283,8 +283,17 @@ describe("thread purge sweep", () => {
     seedCodeProjection(harness, threads.code.id);
     const purgedSession = "c3630000-0000-4000-8000-0000000000d1";
     const keptSession = "c3630000-0000-4000-8000-0000000000d2";
+    const neverReadySession = "c3630000-0000-4000-8000-0000000000d3";
     recordProviderSession(harness.connection, "code", threads.code.id, purgedSession);
-    for (const sessionId of [purgedSession, keptSession]) {
+    // Claude records the identity as its session starts; a turn whose session
+    // record could not be journaled afterwards names the session only in the
+    // turn's start.
+    insertEvent(harness.connection, "code-operation", randomUUID(), {
+      threadId: threads.code.id,
+      cursor: 1,
+      event: { kind: "conversation-turn-started", sessionId: neverReadySession },
+    });
+    for (const sessionId of [purgedSession, keptSession, neverReadySession]) {
       recordClaudeResumeIdentity(harness.connection, sessionId);
     }
 

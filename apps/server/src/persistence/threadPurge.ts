@@ -498,8 +498,11 @@ const SESSION_RECORDING_AGGREGATE_TYPES = ["chat-thread", "work-turn", "code-ope
  * Chat attempt, Work turn, or Code operation ran, not under the
  * native-harness session record's own id, and its events never name a
  * thread. The thread's own records are the only link: a Chat attempt or Work
- * turn names `providerSessionId`, and a Code operation records
- * `provider-session-ready`.
+ * turn names `providerSessionId`, and a Code operation names it when its turn
+ * starts and again at `provider-session-ready`. The start alone counts:
+ * Claude records a resume identity as its session opens, and a turn that fails
+ * to journal `provider-session-ready` afterwards names the session nowhere
+ * else.
  *
  * A session belongs to the thread that recorded it first. A Chat branch copies
  * its source's completed attempts with their real session ids, so the branch
@@ -520,7 +523,8 @@ function providerSessionsStartedBy(
      SELECT json_extract(payload_json, '$.event.sessionId') AS session_id
      FROM event_journal
      WHERE aggregate_type = ? AND aggregate_id = ?
-       AND json_extract(payload_json, '$.event.kind') = 'provider-session-ready'`,
+       AND json_extract(payload_json, '$.event.kind') IN
+         ('conversation-turn-started', 'provider-session-ready')`,
   );
   const firstRecorder = connection.prepare(
     `SELECT aggregate_type, aggregate_id FROM event_journal
