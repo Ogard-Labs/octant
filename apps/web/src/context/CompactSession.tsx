@@ -13,9 +13,22 @@ import {
 } from "./sessionCompactionPresentation";
 
 /**
+ * Why a thread offers no Compact session at all, when its runtime is the
+ * reason; nothing otherwise.
+ */
+export function CompactionNotOffered(props: {
+  readonly className: string;
+  readonly offer: CompactionOffer;
+}) {
+  if (props.offer.kind !== "not-offered") return null;
+  return <p className={props.className}>{props.offer.note}</p>;
+}
+
+/**
  * The secondary Compact session button. A refusal the person can wait out
  * keeps it in place, disabled, with the host's reason; one they cannot is
- * left out (see `compactionOffer`).
+ * left out, and `CompactionNotOffered` says why when the runtime is the
+ * reason (see `compactionOffer`).
  */
 export function CompactSessionButton(props: {
   readonly className?: string;
@@ -24,7 +37,7 @@ export function CompactSessionButton(props: {
   readonly starting: boolean;
 }) {
   const reasonId = useId();
-  if (props.offer.kind === "hidden") return null;
+  if (props.offer.kind === "hidden" || props.offer.kind === "not-offered") return null;
   const reason = props.offer.kind === "disabled" ? props.offer.reason : undefined;
   return (
     <>

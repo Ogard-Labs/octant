@@ -32,6 +32,7 @@ import { Deferred, Effect, Fiber, Scope, Stream } from "effect";
 import { summarizeTurnEnd, type TurnEndSummary } from "../metrics/turnEnd";
 import type { LiveTurnTracker } from "../liveTurn/liveTurnRegistry";
 import type { AppManagedToolSet } from "../providers/appManagedToolSet";
+import { heldTurnContext } from "../providers/heldTurnContext";
 import { subscribeThenSend } from "../providers/providerEventDelivery";
 import { TurnCompactions, type AutomaticCompactionSighting } from "../context/automaticCompaction";
 import {
@@ -473,7 +474,18 @@ export class WorkTurnRuntime implements WorkTurnRuntimePort {
             connection.send({
               sessionId: input.providerSessionId,
               prompt: input.command.prompt,
-              context: [...(input.context ?? [])],
+              // A runtime that keeps its own conversation already holds the
+              // standing context an earlier completed turn of this session
+              // carried.
+              context: [
+                ...(input.driver.conversationOwnership === "provider"
+                  ? heldTurnContext.forTurn({
+                      sessionId: input.providerSessionId,
+                      resumed: input.resumeCursor !== undefined,
+                      context: input.context,
+                    }).context
+                  : (input.context ?? [])),
+              ],
               attachments: [...(input.attachments ?? [])],
               tools: [...(input.appManagedTools?.definitions ?? [])],
             }),

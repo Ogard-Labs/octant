@@ -29,6 +29,7 @@ import {
   decodeContextSubjectRef,
   decodeContextSummaryId,
   decodeProviderInstanceId,
+  decodeProviderModelId,
   decodeProviderSessionId,
   decodeWindowId,
   decodeProviderObservedState,
@@ -217,6 +218,10 @@ function withProbe(
 function openFixture(options?: {
   readonly beforeAttachmentPurge?: (threadId: ChatThreadId) => Promise<void>;
   readonly nativeConversation?: boolean;
+  /** The provider keeps durable sessions the host can always rebuild, as Octant Harness does. */
+  readonly resumableHostConversation?: boolean;
+  /** The service's clock, for a scenario whose order the journal's timestamps must show. */
+  readonly clock?: () => string;
   /** Which provider instances keep their conversation in a session of their own; overrides `nativeConversation`. */
   readonly nativeConversationFor?: (providerInstanceId: string) => boolean;
   readonly driver?: ProviderDriver;
@@ -600,7 +605,11 @@ function openFixture(options?: {
     withProbe(
       options?.driver ??
         ({
-          ...(native ? { conversationOwnership: "provider" } : {}),
+          ...(native
+            ? { conversationOwnership: "provider" }
+            : options?.resumableHostConversation === true
+              ? { conversationOwnership: "host-resumable" }
+              : {}),
           acquire: (input: ProviderAcquireInput) => {
             acquireInputs.push(input);
             return Effect.succeed(connectionDriver);
@@ -671,7 +680,7 @@ function openFixture(options?: {
     persistence,
     dataDirectory,
     uuid: () => crypto.randomUUID(),
-    clock: () => now,
+    clock: options?.clock ?? (() => now),
     driver: (providerInstanceId) => {
       const refusal = options?.refuseDriverFor?.(String(providerInstanceId));
       if (refusal !== undefined) throw refusal;
@@ -775,6 +784,7 @@ async function untilThreadSlotReleased(fixture: {
 }
 
 interface SentTurn {
+  readonly sessionId?: string;
   readonly prompt: string;
   readonly context?: ReadonlyArray<{ readonly kind: string; readonly text: string }>;
 }
@@ -805,10 +815,17 @@ function compactionDriver(
      * as the material it replaced is what makes the replan drop it again.
      */
     readonly maintenanceOutputTokens?: number;
+    /** Keeps durable sessions a new message continues, as Octant Harness does. */
+    readonly resumable?: boolean;
   },
 ): ProviderDriver {
   let replies = 0;
+  const resumeCursor = (sessionId: string) => ({
+    driverKind: "openai-compatible" as const,
+    value: `session-${sessionId}`,
+  });
   return {
+    ...(options?.resumable === true ? { conversationOwnership: "host-resumable" } : {}),
     acquire: () =>
       Effect.sync(() => {
         const queue = Effect.runSync(Queue.unbounded<never>());
@@ -816,7 +833,17 @@ function compactionDriver(
         return {
           subscribe: Effect.succeed(Stream.fromQueue(queue)),
           start: (input: { readonly sessionId: string }) =>
-            Effect.succeed({ sessionId: input.sessionId }),
+            Effect.succeed({
+              sessionId: input.sessionId,
+              ...(options?.resumable === true
+                ? { resumeCursor: resumeCursor(input.sessionId) }
+                : {}),
+            }),
+          resume: (input: { readonly sessionId: string }) =>
+            Effect.succeed({
+              sessionId: input.sessionId,
+              resumeCursor: resumeCursor(input.sessionId),
+            }),
           send: (input: {
             readonly sessionId: string;
             readonly prompt: string;
@@ -824,6 +851,7 @@ function compactionDriver(
           }) =>
             Effect.suspend(() => {
               sent.push({
+                sessionId: input.sessionId,
                 prompt: input.prompt,
                 ...(input.context ? { context: input.context } : {}),
               });
@@ -1054,14 +1082,17 @@ function compactedSummaryText(prompt: string): string {
 }
 
 /** Context facts small enough that a few long turns no longer fit one request. */
-function compactionContextFacts(probe: ProviderProbeResult): ProviderDriver["contextFacts"] {
+function compactionContextFacts(
+  probe: ProviderProbeResult,
+  contextWindow = 1_200,
+): ProviderDriver["contextFacts"] {
   return {
     observeModelLimits: () =>
       Effect.succeed([
         {
           providerInstanceId: probe.instanceId,
           modelId: probe.models[0]!.id,
-          contextWindow: 1_200,
+          contextWindow,
           reasoning: "included",
           source: "runtime-reported",
           confidence: "high",
@@ -4520,6 +4551,213 @@ describe("ChatService", () => {
       ),
     ).toBe(false);
     expect(service.read(created.thread.id).turns[0]).toEqual(first.turns[0]);
+  });
+
+  describe("a provider whose sessions the host can rebuild", () => {
+    const historyIn = (
+      turn: { readonly context?: ReadonlyArray<{ readonly kind: string }> } | undefined,
+    ) =>
+      turn?.context?.some(
+        (block) => block.kind === "user-message" || block.kind === "assistant-message",
+      ) === true;
+
+    async function twoTurns(
+      outcome: (turnIndex: number) => "completed" | "interrupted" | "failed",
+      clock?: () => string,
+    ) {
+      const fixture = openFixture({
+        resumableHostConversation: true,
+        turnOutcome: outcome,
+        ...(clock === undefined ? {} : { clock }),
+      });
+      const created = await fixture.service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Harness continuity",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread.");
+      await fixture.service
+        .execute({
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: created.thread.version,
+          prompt: "Remember this conversation",
+        })
+        .catch(() => undefined);
+      const first = fixture.service.read(created.thread.id);
+      await fixture.service.execute({
+        kind: "send-chat-turn",
+        threadId: created.thread.id,
+        expectedVersion: first.thread.version,
+        prompt: "Continue",
+      });
+      return { ...fixture, threadId: created.thread.id, first };
+    }
+
+    it("continues the session on the next message instead of resending its history", async () => {
+      const { fakeDriver, first } = await twoTurns(() => "completed");
+      const attempt = first.turns[0]?.attempts[0];
+      expect(fakeDriver.startedSessionIds).toHaveLength(1);
+      expect(fakeDriver.resumeInputs).toEqual([
+        expect.objectContaining({
+          sessionId: attempt?.providerSessionId,
+          resumeCursor: attempt?.resumeCursor,
+        }),
+      ]);
+      expect(fakeDriver.sentTurns[1]?.sessionId).toBe(fakeDriver.sentTurns[0]?.sessionId);
+      expect(historyIn(fakeDriver.sentTurns[1])).toBe(false);
+    });
+
+    it("continues the session after a turn that was cut off", async () => {
+      const { fakeDriver } = await twoTurns((turnIndex) =>
+        turnIndex === 0 ? "interrupted" : "completed",
+      );
+      expect(fakeDriver.startedSessionIds).toHaveLength(1);
+      expect(fakeDriver.resumeInputs).toHaveLength(1);
+      expect(fakeDriver.sentTurns[1]?.sessionId).toBe(fakeDriver.sentTurns[0]?.sessionId);
+    });
+
+    it("rebuilds the history in a fresh session after a turn that failed", async () => {
+      const { fakeDriver } = await twoTurns((turnIndex) =>
+        turnIndex === 0 ? "failed" : "completed",
+      );
+      expect(fakeDriver.startedSessionIds).toHaveLength(2);
+      expect(fakeDriver.resumeInputs).toEqual([]);
+      expect(fakeDriver.sentTurns[1]?.sessionId).not.toBe(fakeDriver.sentTurns[0]?.sessionId);
+    });
+
+    it("retries a turn in a fresh session with the history rebuilt on the host", async () => {
+      const { service, fakeDriver, threadId } = await twoTurns(() => "completed");
+      const view = service.read(threadId);
+      const turn = view.turns[1];
+      const attempt = turn?.attempts[0];
+      if (turn === undefined || attempt === undefined) throw new Error("Expected attempt.");
+      await service.execute({
+        kind: "retry-chat-turn",
+        threadId,
+        expectedVersion: view.thread.version,
+        turnId: turn.id,
+        attemptId: attempt.id,
+      });
+      expect(fakeDriver.startedSessionIds).toHaveLength(2);
+      expect(fakeDriver.resumeInputs).toHaveLength(1);
+      expect(fakeDriver.sentTurns[2]?.sessionId).not.toBe(fakeDriver.sentTurns[0]?.sessionId);
+      expect(historyIn(fakeDriver.sentTurns[2])).toBe(true);
+    });
+
+    it("rebuilds the history after an earlier answer was regenerated, since the session holds the replaced one", async () => {
+      let tick = Date.parse(now);
+      const { service, fakeDriver, threadId } = await twoTurns(
+        () => "completed",
+        () => new Date((tick += 1000)).toISOString(),
+      );
+      const view = service.read(threadId);
+      const earlier = view.turns[0];
+      const attempt = earlier?.attempts[0];
+      if (earlier === undefined || attempt === undefined) throw new Error("Expected attempt.");
+      await service.execute({
+        kind: "retry-chat-turn",
+        threadId,
+        expectedVersion: view.thread.version,
+        turnId: earlier.id,
+        attemptId: attempt.id,
+      });
+      await service.execute({
+        kind: "send-chat-turn",
+        threadId,
+        expectedVersion: service.read(threadId).thread.version,
+        prompt: "And now?",
+      });
+      expect(fakeDriver.startedSessionIds).toHaveLength(3);
+      expect(fakeDriver.resumeInputs).toHaveLength(1);
+      expect(fakeDriver.sentTurns[3]?.sessionId).not.toBe(fakeDriver.sentTurns[1]?.sessionId);
+      expect(historyIn(fakeDriver.sentTurns[3])).toBe(true);
+    });
+
+    /**
+     * A conversation of `turns` long messages on a model with `contextWindow`
+     * tokens, sent one after another, with the size each turn was admitted at.
+     */
+    async function longConversation(contextWindow: number, turns: number, words: number) {
+      const probe = probeFixture();
+      const sent: Array<SentTurn> = [];
+      const fixture = openFixture({
+        probe,
+        driver: {
+          ...compactionDriver(sent, { resumable: true }),
+          contextFacts: compactionContextFacts(probe, contextWindow),
+        } as unknown as ProviderDriver,
+      });
+      const admittedTokens: Array<number> = [];
+      const submit = fixture.capacityScheduler.submit.bind(fixture.capacityScheduler);
+      fixture.capacityScheduler.submit = (request) => {
+        if (request.origin === "thread") admittedTokens.push(request.estimatedTokens);
+        return submit(request);
+      };
+      const created = await fixture.service.execute({
+        kind: "create-chat-thread",
+        hostId: "local",
+        title: "Long harness conversation",
+      });
+      if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+      for (let turn = 0; turn < turns; turn += 1) {
+        const accepted = await fixture.service.execute({
+          kind: "send-chat-turn",
+          threadId: created.thread.id,
+          expectedVersion: fixture.service.read(created.thread.id).thread.version,
+          prompt: `Turn ${turn}: ${"detail ".repeat(words)}`.trim(),
+        });
+        if (accepted.kind !== "turn-created") throw new Error("Expected turn-created result.");
+        await until(
+          () =>
+            fixture.service
+              .read(created.thread.id)
+              .turns.at(-1)
+              ?.attempts.some((attempt) => attempt.outcome === "completed") === true,
+        );
+        await untilThreadSlotReleased(fixture);
+      }
+      const replies = sent.filter((turn) => !turn.prompt.startsWith(MAINTENANCE_PROMPT_PREFIX));
+      return { ...fixture, threadId: created.thread.id, replies, admittedTokens };
+    }
+
+    it("lets a person compact a long conversation the session continued", async () => {
+      const { service, contextHarness, threadId, replies } = await longConversation(8_000, 3, 570);
+      // The premise: every turn continued the one session, which was never
+      // sent its earlier messages again.
+      expect(new Set(replies.map((turn) => turn.sessionId)).size).toBe(1);
+      expect(replies.at(-1)?.context?.some((block) => block.text.startsWith("Turn 0:"))).toBe(
+        false,
+      );
+      const thread = service.read(threadId).thread;
+      expect(
+        contextHarness.previewSessionCompaction({
+          subject: decodeContextSubjectRef({ aggregateType: "chat-thread", aggregateId: threadId }),
+          providerInstanceId: decodeProviderInstanceId(String(thread.providerInstanceId)),
+          modelId: decodeProviderModelId(String(thread.modelId)),
+          conversation: service.sessionCompactionConversation(threadId),
+        }),
+      ).toMatchObject({ kind: "summarize" });
+    });
+
+    it("admits a continued turn at a size that counts the history the session sends again", async () => {
+      const { admittedTokens, replies } = await longConversation(8_000, 3, 570);
+      expect(new Set(replies.map((turn) => turn.sessionId)).size).toBe(1);
+      // Each earlier exchange is about a thousand tokens of prompt and a short
+      // reply, all of which the continued session sends with the third turn.
+      const first = admittedTokens[0] ?? 0;
+      expect(admittedTokens.at(-1)).toBeGreaterThan(first + 2_000);
+    });
+
+    it("rebuilds the history on the host, compacted, once the conversation no longer fits", async () => {
+      const { replies } = await longConversation(1_200, 4, 228);
+      const rebuilt = replies.find(
+        (turn) => turn.context?.some((block) => block.kind === "conversation-summary") === true,
+      );
+      expect(rebuilt).toBeDefined();
+      expect(rebuilt?.sessionId).not.toBe(replies[0]?.sessionId);
+      expect(rebuilt?.context?.some((block) => block.text.startsWith("Turn 0:"))).toBe(false);
+    });
   });
 
   it.each([true, false])(

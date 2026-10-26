@@ -1,16 +1,19 @@
 import type {
+  ProviderCompactionOwner,
   ProviderObservedActivity,
   ProviderObservedState,
   ProviderResumeQuality,
   ProviderRuntimeIntegration,
   ProviderToolTransport,
   ProviderToolsUnavailableReason,
+  ProviderUsageReporting,
 } from "@octant/contracts";
 
 /**
- * Three facts about a runtime that a picker mention cannot establish: whether
- * Octant's tools reach its session and how, what its session reports, and how
- * a follow-up continues. Every line is read from the integration the server
+ * Facts about a runtime that a picker mention cannot establish: whether
+ * Octant's tools reach its session and how, what its session reports, how a
+ * follow-up continues, and whether its threads show a context window or can be
+ * compacted (an ACP agent does neither). Every line is read from the integration the server
  * reported; with none reported this says nothing rather than guessing.
  */
 export function ProviderRuntimeIntegrationFacts(props: {
@@ -23,6 +26,8 @@ export function ProviderRuntimeIntegrationFacts(props: {
   const tools = toolsFact(integration.tools, props.observed.verifiedToolModelIds?.length ?? 0);
   const activity = activityFact(integration.activity);
   const resume = resumeFact(integration.resume, integration.activity.source === "none");
+  const usage = USAGE_FACTS[integration.context.usage];
+  const compaction = COMPACTION_FACTS[integration.context.compaction];
   return (
     <section
       aria-labelledby={headingId}
@@ -39,6 +44,8 @@ export function ProviderRuntimeIntegrationFacts(props: {
         <IntegrationFact label="Octant tools" fact={tools} />
         <IntegrationFact label="Activity" fact={activity} />
         <IntegrationFact label="Resume" fact={resume} />
+        <IntegrationFact label="Context window" fact={usage} />
+        <IntegrationFact label="Compaction" fact={compaction} />
       </dl>
     </section>
   );
@@ -138,6 +145,47 @@ function resumeFact(resume: ProviderResumeQuality, noSession: boolean): Fact {
       : "This runtime cannot reopen an earlier session.",
   };
 }
+
+const USAGE_FACTS: Readonly<Record<ProviderUsageReporting, Fact>> = {
+  reported: {
+    value: "Reported",
+    detail: "Turns report what they use, so a thread shows how full its window is.",
+  },
+  "not-reported": {
+    value: "Not reported",
+    detail:
+      "This runtime reports no usage, so its threads show no context window and spend limits leave its turns out.",
+  },
+  "not-confirmed": {
+    value: "Not confirmed",
+    detail: "The last connection check did not establish whether turns report usage.",
+  },
+};
+
+const COMPACTION_FACTS: Readonly<Record<ProviderCompactionOwner, Fact>> = {
+  octant: {
+    value: "By Octant",
+    detail: "Octant plans the conversation from the thread and can summarize earlier turns.",
+  },
+  runtime: {
+    value: "By the runtime",
+    detail: "Compact session asks the runtime to summarize the session it keeps.",
+  },
+  "runtime-update-required": {
+    value: "Needs a newer version",
+    detail: "This version of the runtime can't compact; a newer release takes the request.",
+  },
+  none: {
+    value: "Not available",
+    detail:
+      "The runtime keeps its own history and Octant has no compaction request for it, so Octant can't see what it keeps or compact it.",
+  },
+  "not-confirmed": {
+    value: "Not confirmed",
+    detail:
+      "The runtime isn't ready, so its last connection check did not say whether it compacts.",
+  },
+};
 
 function listJoin(values: ReadonlyArray<string>): string {
   if (values.length <= 1) return values[0] ?? "";

@@ -46,6 +46,7 @@ import { toSafeExportRow } from "./usageExport";
 import { queryUsageRecords, readAllUsageRecords } from "./usageProjection";
 import { openSqlite, type SqliteConnection } from "./sqlitePort";
 import { purgeThreadArtifacts } from "./threadArtifactPurge";
+import { THREAD_AGGREGATE_TYPE_BY_MODE } from "./threadIdentity";
 import { erasePurgedProjectData } from "./threadPurge";
 import { managedWorktreeRoot } from "../code/managedWorktreeService";
 import { ThreadCheckpointProjection } from "./threadCheckpointProjection";
@@ -326,6 +327,67 @@ describe("thread purge sweep", () => {
     expect(remaining).toEqual([{ aggregate_id: keptSession }]);
   });
 
+  it.each(Object.values(threads))(
+    "erases every conversation a purged $mode thread's provider sessions and child runs journaled and keeps another thread's",
+    async (thread) => {
+      const harness = openHarness();
+      if (thread.mode === "chat") seedChatProjection(harness, thread.id, thread.marker);
+      if (thread.mode === "code") seedCodeProjection(harness, thread.id);
+      seedHarnessSession(harness, thread);
+      const ownSecond = uuidFor(thread.mode, "provider-session-second");
+      recordProviderSession(harness.connection, thread.mode, thread.id, ownSecond);
+      seedTranscript(harness.connection, ownSecond, thread.marker);
+      seedOllamaHistory(harness.connection, ownSecond, thread.marker);
+      // A child run's session is named only by its private session record.
+      const childSession = uuidFor(thread.mode, "child-run-session");
+      seedChildRunSession(harness, thread, childSession);
+      seedTranscript(harness.connection, childSession, thread.marker);
+      seedOllamaHistory(harness.connection, childSession, thread.marker);
+      const other = { id: controlThreadId, mode: thread.mode, marker: controlMarker };
+      if (thread.mode === "chat") seedChatProjection(harness, other.id, other.marker);
+      const otherSession = uuidFor(thread.mode, "provider-session-other");
+      recordProviderSession(harness.connection, other.mode, other.id, otherSession);
+      seedTranscript(harness.connection, otherSession, other.marker);
+      seedOllamaHistory(harness.connection, otherSession, other.marker);
+      // A Chat branch copies its source's completed attempts with their real
+      // session ids; the branch never ran that session, so purging the branch
+      // must leave the source's transcript.
+      if (thread.mode === "chat") {
+        recordProviderSession(harness.connection, "chat", thread.id, otherSession);
+      }
+
+      await harness.service.purge(
+        {
+          scope: {
+            kind: "thread",
+            mode: thread.mode,
+            threadId: decodeThreadRetentionThreadId(thread.id),
+          },
+          confirm: true,
+        },
+        "local-window",
+      );
+
+      expect(transcriptSessions(harness.connection)).toEqual([otherSession]);
+      expect(
+        harness.connection
+          .prepare(
+            `SELECT DISTINCT aggregate_id FROM event_journal
+             WHERE aggregate_type = 'ollama-session-history'`,
+          )
+          .all(),
+      ).toEqual([{ aggregate_id: otherSession }]);
+      expect(
+        harness.connection
+          .prepare(
+            `SELECT count(*) AS events FROM event_journal
+             WHERE aggregate_type = 'native-harness-transcript' AND aggregate_id = ?`,
+          )
+          .get(otherSession),
+      ).toEqual({ events: 2 });
+    },
+  );
+
   it("never erases another mode's thread that shares the purged thread's id", async () => {
     const harness = openHarness();
     const sharedId = threads.code.id;
@@ -356,7 +418,15 @@ describe("thread purge sweep", () => {
     expect(marked.kind).toBe("recorded");
     seedControlThread(harness);
     const needles = [sharedId, threads.code.marker, "marker-shared-chat-ledger"];
-    const before = scanHost(harness.connection, harness.directory, needles).map(formatHit);
+    // The rows themselves are scanned table by table. Which of the store's
+    // own files holds a page depends on when SQLite checkpoints its WAL,
+    // which a purge of an unrelated thread may trigger, so those files are
+    // not compared.
+    const rowsAndFiles = () =>
+      scanHost(harness.connection, harness.directory, needles)
+        .filter((hit) => !isSqliteStoreFile(hit.where))
+        .map(formatHit);
+    const before = rowsAndFiles();
 
     for (const mode of ["chat", "code"] as const) {
       expect(
@@ -393,7 +463,7 @@ describe("thread purge sweep", () => {
     });
 
     expect(readControl(harness.connection)).toBeUndefined();
-    expect(scanHost(harness.connection, harness.directory, needles).map(formatHit)).toEqual(before);
+    expect(rowsAndFiles()).toEqual(before);
     expect(
       readThreadExternalContentTaint(harness.connection, sharedId).externalContentIngested,
     ).toBe(true);
@@ -848,17 +918,119 @@ function seedFollowUp(harness: Harness, thread: SeededThread): void {
   });
 }
 
+/**
+ * A native-harness session record has an id of its own; the transcript is
+ * keyed by the provider session the thread's attempt, turn, or operation ran,
+ * so the two ids differ as they do in a real store.
+ */
 function seedHarnessSession(harness: Harness, thread: SeededThread): void {
-  const sessionId = uuidFor(thread.mode, "session");
   insertEvent(harness.connection, "native-harness-session", thread.id, {
-    id: sessionId,
+    id: uuidFor(thread.mode, "harness-session"),
     threadId: thread.id,
     note: thread.marker,
   });
-  insertEvent(harness.connection, "native-harness-transcript", sessionId, {
-    sessionId,
-    message: thread.marker,
+  const providerSessionId = uuidFor(thread.mode, "provider-session");
+  recordProviderSession(harness.connection, thread.mode, thread.id, providerSessionId);
+  seedTranscript(harness.connection, providerSessionId, thread.marker);
+}
+
+/** Journals the thread's own record of a provider session, the way its mode does. */
+function recordProviderSession(
+  connection: SqliteConnection,
+  mode: SeededThread["mode"],
+  threadId: string,
+  providerSessionId: string,
+): void {
+  if (mode === "chat") {
+    const head = connection
+      .prepare(
+        `SELECT coalesce(max(aggregate_version), 0) AS version FROM event_journal
+         WHERE aggregate_type = 'chat-thread' AND aggregate_id = ?`,
+      )
+      .get(threadId) as { readonly version: number };
+    insertEvent(
+      connection,
+      "chat-thread",
+      threadId,
+      { kind: "turn-created", turn: { threadId, attempts: [{ threadId, providerSessionId }] } },
+      "fixture.planted@1",
+      head.version + 1,
+    );
+    return;
+  }
+  if (mode === "work") {
+    insertEvent(connection, "work-turn", randomUUID(), {
+      kind: "turn-accepted",
+      threadId,
+      providerSessionId,
+    });
+    return;
+  }
+  insertEvent(connection, "code-operation", randomUUID(), {
+    threadId,
+    cursor: 1,
+    event: { kind: "provider-session-ready", sessionId: providerSessionId },
   });
+}
+
+function seedTranscript(connection: SqliteConnection, sessionId: string, marker: string): void {
+  insertEvent(
+    connection,
+    "native-harness-transcript",
+    sessionId,
+    { sessionId, message: { role: "user", text: marker } },
+    "native-harness-transcript-message-appended@1",
+  );
+  insertEvent(
+    connection,
+    "native-harness-transcript",
+    sessionId,
+    { sessionId, summary: marker, turns: 1, afterTurns: 2 },
+    "native-harness-transcript-compacted@1",
+    2,
+  );
+}
+
+function seedOllamaHistory(connection: SqliteConnection, sessionId: string, marker: string): void {
+  insertEvent(
+    connection,
+    "ollama-session-history",
+    sessionId,
+    { snapshot: { sessionId, history: [{ role: "user", content: marker }] } },
+    "ollama.history-recorded@1",
+  );
+}
+
+/** The private session record a child run keeps under its parent thread. */
+function seedChildRunSession(harness: Harness, thread: SeededThread, sessionId: string): void {
+  const runId = uuidFor(thread.mode, "child-run");
+  insertEvent(harness.connection, "agent-run", runId, {
+    run: { id: runId, parentThreadId: thread.id },
+  });
+  harness.connection
+    .prepare(
+      `INSERT INTO agent_run_content_store (
+        content_id, run_id, subject_type, subject_id, content_kind, body_text, created_at
+      ) VALUES (?, ?, ?, ?, 'managed-session', ?, ?)`,
+    )
+    .run(
+      `managed-session:${runId}`,
+      runId,
+      THREAD_AGGREGATE_TYPE_BY_MODE[thread.mode],
+      thread.id,
+      JSON.stringify({ binding: "fixture-binding", sessionId }),
+      now,
+    );
+}
+
+function transcriptSessions(connection: SqliteConnection): ReadonlyArray<string> {
+  const rows = connection
+    .prepare(
+      `SELECT DISTINCT aggregate_id FROM event_journal
+       WHERE aggregate_type = 'native-harness-transcript' ORDER BY aggregate_id`,
+    )
+    .all() as ReadonlyArray<{ readonly aggregate_id: string }>;
+  return rows.map((row) => row.aggregate_id);
 }
 
 function seedWorktree(directory: string, thread: SeededThread): void {

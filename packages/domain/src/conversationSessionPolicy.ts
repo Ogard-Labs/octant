@@ -8,8 +8,14 @@
  * it starts a new one and the host hands the earlier conversation over as
  * text. A thread that moves to a provider of the second kind needs nothing
  * handed over: the host already holds the history.
+ *
+ * A third kind (`host-resumable`) leaves the history to the host but keeps
+ * each session durably, as Octant Harness does. A plain follow-up continues
+ * the previous session so the endpoint's prompt cache and the lead's own tool
+ * state survive; anything else, or a session that cannot be taken up as it
+ * stands, falls back to the host's rebuild, which is always available.
  */
-export type ConversationOwner = "runtime" | "host";
+export type ConversationOwner = "runtime" | "host" | "host-resumable";
 
 export interface ConversationSessionInput {
   readonly recipient: {
@@ -71,6 +77,20 @@ export function decideConversationSession(
   input: ConversationSessionInput,
 ): ConversationSessionDecision {
   if (input.recipient.owner === "host") return { kind: "host-rebuild" };
+  if (input.recipient.owner === "host-resumable") {
+    // Callers name this owner only for a new message: a retry or an edit
+    // rewrites a conversation the session already holds a version of, so it
+    // is planned as `host` and rebuilt.
+    const { previous } = input;
+    return input.handoff === "allowed" &&
+      input.branchWithoutSession !== true &&
+      previous !== undefined &&
+      previous.providerInstanceId === input.recipient.providerInstanceId &&
+      previous.continuable &&
+      previous.undeliveredHandoff === undefined
+      ? { kind: "continue-session" }
+      : { kind: "host-rebuild" };
+  }
   // A branch carries messages even when its tail turn kept no attempt (it was
   // branched from a turn that failed or was interrupted), so it is checked
   // before "nothing ran yet".

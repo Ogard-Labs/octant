@@ -32,6 +32,7 @@ describe("provider runtime integration", () => {
         observes: ["replies", "tool-calls", "approvals", "task-progress"],
       },
       resume: "precise",
+      context: { usage: "reported", compaction: "none" },
     });
     expect(describeProviderRuntimeIntegration("claude", ready)?.tools).toEqual({
       status: "available",
@@ -80,6 +81,53 @@ describe("provider runtime integration", () => {
         capabilities: { ...capabilities, resume: "unsupported" },
       })?.resume,
     ).toBe("none");
+  });
+
+  it("says an ACP agent reports no usage and keeps a history nobody can compact", () => {
+    expect(
+      describeProviderRuntimeIntegration("devin", {
+        ...ready,
+        capabilities: { ...capabilities, usage: "unsupported" },
+      })?.context,
+    ).toEqual({ usage: "not-reported", compaction: "none" });
+  });
+
+  it("names who compacts: Octant for a history it plans, the runtime only where it takes the request", () => {
+    expect(describeProviderRuntimeIntegration("openai-compatible", ready)?.context).toEqual({
+      usage: "reported",
+      compaction: "octant",
+    });
+    const compacts = (
+      sessionCompaction: ProviderObservedState["capabilities"]["sessionCompaction"],
+    ) =>
+      describeProviderRuntimeIntegration("codex", {
+        ...ready,
+        capabilities: {
+          ...capabilities,
+          ...(sessionCompaction === undefined ? {} : { sessionCompaction }),
+        },
+      })?.context.compaction;
+    expect(compacts({ chat: "unsupported", work: "unsupported", code: "supported" })).toBe(
+      "runtime",
+    );
+    expect(compacts({ chat: "unavailable", work: "unavailable", code: "unavailable" })).toBe(
+      "runtime-update-required",
+    );
+    expect(compacts(undefined)).toBe("none");
+    // A signed-out Claude reports no capabilities at all; that is not a
+    // runtime that cannot compact.
+    expect(
+      describeProviderRuntimeIntegration("claude", {
+        readiness: "unauthenticated",
+        capabilities: { ...capabilities, usage: "unavailable" },
+      })?.context,
+    ).toEqual({ usage: "not-confirmed", compaction: "not-confirmed" });
+    expect(
+      describeProviderRuntimeIntegration("kilo", {
+        readiness: "checking",
+        capabilities: { ...capabilities, usage: "unavailable" },
+      })?.context.usage,
+    ).toBe("not-confirmed");
   });
 
   it("observes nothing from a runtime that runs no turns here, and describes no image profile", () => {

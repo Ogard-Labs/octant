@@ -1,5 +1,5 @@
 import type { ContextClient } from "@octant/client-runtime/context-client";
-import type { ProviderContextBreakdown } from "@octant/contracts";
+import type { ProviderContextBreakdown, ProviderUsageReporting } from "@octant/contracts";
 import type { ContextEntryId } from "@octant/contracts/context";
 import type { ContextInspectorSnapshot } from "@octant/contracts/context-rpc";
 import type { CodeProviderLimit } from "@octant/contracts/code-operations";
@@ -64,6 +64,13 @@ export interface ComposerContextUsageFallback {
    * popover says whose number it is.
    */
   readonly modelContextWindow?: number;
+  /**
+   * Whether the thread's runtime reports usage at all, as the host's last
+   * connection check described it. `not-reported` (an ACP agent) means no
+   * figure will ever arrive, which an empty meter must not present as one
+   * that simply has not arrived yet.
+   */
+  readonly usageReporting?: ProviderUsageReporting;
 }
 
 function ignoredRebuild(): void {}

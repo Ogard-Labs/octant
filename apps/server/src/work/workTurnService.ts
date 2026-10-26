@@ -854,11 +854,12 @@ export class WorkTurnService {
     }
     const acceptedAt = decodeTimestamp(this.#clock());
     const nativeConversation = driver.conversationOwnership === "provider";
+    const resumableHost = driver.conversationOwnership === "host-resumable";
     const previous = this.#projection.latestForThread(command.threadId);
     const sessionDecision = decideConversationSession({
       recipient: {
         providerInstanceId: String(command.authority.providerInstanceId),
-        owner: nativeConversation ? "runtime" : "host",
+        owner: nativeConversation ? "runtime" : resumableHost ? "host-resumable" : "host",
       },
       ...(previous === undefined
         ? {}
@@ -868,8 +869,25 @@ export class WorkTurnService {
               continuable:
                 previous.providerSessionId !== undefined &&
                 previous.resumeCursor !== undefined &&
-                (previous.authority.modelId === command.authority.modelId ||
-                  this.#supportsModelSwitch?.(command.authority.providerInstanceId) === true) &&
+                (resumableHost
+                  ? // A harness session resumes on the model it was opened
+                    // with, and is taken up only as it stands: after a turn
+                    // that ended cleanly, was cancelled, or was cut off by a
+                    // restart, and before any host compaction it would not read.
+                    previous.authority.modelId === command.authority.modelId &&
+                    (previous.status === "completed" ||
+                      previous.status === "cancelled" ||
+                      (previous.status === "failed" &&
+                        previous.failure?.category === "interrupted")) &&
+                    this.#contextHarness?.hostCompactedSince(
+                      decodeContextSubjectRef({
+                        aggregateType: "work-thread",
+                        aggregateId: String(command.threadId),
+                      }),
+                      previous.updatedAt,
+                    ) !== true
+                  : previous.authority.modelId === command.authority.modelId ||
+                    this.#supportsModelSwitch?.(command.authority.providerInstanceId) === true) &&
                 previous.authority.bindingRevisionId === command.authority.bindingRevisionId &&
                 previous.authority.workingDirectory === command.authority.workingDirectory,
               // The session cursor is recorded when the session starts, before
@@ -894,7 +912,7 @@ export class WorkTurnService {
         "This Work task's native session cannot be recovered under the current provider, model, and folder. Its history has been preserved.",
       );
     }
-    const continuing = sessionDecision.kind === "continue-session" ? previous : undefined;
+    let continuing = sessionDecision.kind === "continue-session" ? previous : undefined;
     if (sessionDecision.kind === "new-session-with-handoff" && thread === undefined) {
       // Without the thread there is no conversation to read, and a session
       // started anyway would answer as if it had never been given one.
@@ -912,9 +930,6 @@ export class WorkTurnService {
       thread !== undefined
         ? this.#selectConversationHandoff(thread, previous)
         : undefined;
-    const resumeCursor = continuing?.resumeCursor;
-    const providerSessionId =
-      continuing?.providerSessionId ?? decodeProviderSessionId(this.#uuid());
     const harnessContext =
       thread === undefined
         ? []
@@ -925,6 +940,13 @@ export class WorkTurnService {
             modelId: thread.modelId,
             projectId: thread.projectId,
           }) ?? []);
+    // A continued harness session already holds the earlier turns, but they
+    // are still planned: the plan is what a requested compaction summarizes
+    // from and what decides whether the conversation still fits. Only the
+    // send leaves them out (see `sessionHolds`).
+    const priorTranscript = nativeConversation
+      ? []
+      : this.#priorTranscriptContributions(command.threadId);
     const planned = planWorkTurnContext({
       threadId: command.threadId,
       providerInstanceId: command.authority.providerInstanceId,
@@ -966,7 +988,7 @@ export class WorkTurnService {
           }),
         ),
         ...(await this.#projectBriefContributions(project, command.threadId)),
-        ...(nativeConversation ? [] : this.#priorTranscriptContributions(command.threadId)),
+        ...priorTranscript,
         ...(handoff === undefined
           ? []
           : handoff.blocks.map(
@@ -1003,6 +1025,29 @@ export class WorkTurnService {
     if (planned.kind === "blocked") {
       throw this.#failure("invalid", planned.message);
     }
+    // A plan that leaves earlier turns out to fit cannot be met by the
+    // continued session, which would carry them all and drop older exchanges
+    // on its own. The host rebuilds the history in a fresh session instead,
+    // so what the model reads is what the plan journals.
+    if (
+      resumableHost &&
+      continuing !== undefined &&
+      planned.manifest.entries.some(
+        (entry) =>
+          entry.category === "conversation" &&
+          (entry.state === "omitted" || entry.state === "truncated"),
+      )
+    ) {
+      continuing = undefined;
+    }
+    const resumeCursor = continuing?.resumeCursor;
+    const providerSessionId =
+      continuing?.providerSessionId ?? decodeProviderSessionId(this.#uuid());
+    // Blocks of the earlier turns the continued session already holds; sending
+    // them again would duplicate every earlier message inside the session.
+    const sessionHolds = new Set<ProviderContextBlock>(
+      resumableHost && continuing !== undefined ? priorTranscript.map((item) => item.block) : [],
+    );
 
     // The turn journals on its own aggregate, so a Done mark committed while
     // the turn was prepared raises no version conflict. Reread the thread
@@ -1112,6 +1157,7 @@ export class WorkTurnService {
       driver,
       attachments: attachmentInputs,
       contextPlan: planned,
+      sessionHolds,
       ...(options?.admissionCurrent === undefined
         ? {}
         : { admissionCurrent: options.admissionCurrent }),
@@ -1358,6 +1404,14 @@ export class WorkTurnService {
     readonly driver: ProviderDriver;
     readonly attachments: ReadonlyArray<ProviderAttachmentInput>;
     readonly contextPlan: Extract<WorkTurnContextPlan, { readonly kind: "ok" }>;
+    /**
+     * Planned blocks a continued session already holds. They stay in the plan,
+     * so the context meter, a requested compaction and the plan's own fit see
+     * the whole conversation, and are left out of what is sent. Matched by
+     * identity: every planning stage passes a contribution's block through
+     * unchanged, and the context it sends names no entries.
+     */
+    readonly sessionHolds: ReadonlySet<ProviderContextBlock>;
     readonly admissionCurrent?: () => boolean;
     /** The selected MCP servers' tools, resolved when the turn was accepted. */
     readonly extensionTools?: AppManagedToolSet;
@@ -1478,7 +1532,9 @@ export class WorkTurnService {
         });
       return;
     }
-    const providerContext = published?.context ?? finalPlan.context;
+    const providerContext = (published?.context ?? finalPlan.context).filter(
+      (block) => !input.sessionHolds.has(block),
+    );
     const harnessScope: NativeHarnessTurnScope | undefined =
       input.thread === undefined
         ? undefined
@@ -1515,7 +1571,8 @@ export class WorkTurnService {
           : { outsideContentMarks: this.#outsideContentMarks }),
         ...(input.access === undefined ? {} : { access: input.access }),
         ...(input.resumeCursor === undefined ? {} : { resumeCursor: input.resumeCursor }),
-        ...(input.driver.conversationOwnership !== "provider"
+        ...(input.driver.conversationOwnership !== "provider" &&
+        input.driver.conversationOwnership !== "host-resumable"
           ? {}
           : {
               onSessionReady: (handle: ProviderSessionHandle) => {
