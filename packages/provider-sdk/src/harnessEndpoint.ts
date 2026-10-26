@@ -124,8 +124,9 @@ export interface HarnessEndpointResponse {
   /**
    * The model the endpoint said it served, when it named one: a deployment
    * with a name of its own may run a model whose window and inputs Octant
-   * knows. The host keeps it with the requested model, as it keeps the window
-   * a completed request proved from `usage`.
+   * knows. The host keeps it with the requested model, trimmed, as it keeps
+   * the window a completed request proved from `usage`; a blank name or one
+   * longer than 256 characters is ignored, and the response stands either way.
    */
   readonly servedModelId?: string;
 }

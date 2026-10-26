@@ -9,6 +9,7 @@ import {
 import type { ProviderDriver } from "@octant/provider-sdk/driver";
 import type {
   HarnessEndpointDriver,
+  HarnessEndpointResponse,
   HarnessEndpointTransport,
 } from "@octant/provider-sdk/harness-endpoint";
 import { Effect } from "effect";
@@ -141,35 +142,45 @@ function hostedTransport(
       return {
         fits: (request) => session.fits(request),
         send: (request, stream) => {
-          const learn = (outcome: EndpointRequestOutcome) =>
-            learnFromEndpointRequest({
-              runtimeRegistry: host.runtimeRegistry,
-              instanceId: host.instanceId,
-              modelId: request.modelId,
-              outcome,
-              memory: host.harness?.contextWindows,
-            });
+          // What the endpoint reports is untrusted and the observation it
+          // lands in is schema-checked, so a lesson the host cannot keep (a
+          // blank or overlong model name, a fractional token count) is
+          // dropped; it never turns the request it came with into a failure.
+          const learn = (outcome: EndpointRequestOutcome) => {
+            try {
+              learnFromEndpointRequest({
+                runtimeRegistry: host.runtimeRegistry,
+                instanceId: host.instanceId,
+                modelId: request.modelId,
+                outcome,
+                memory: host.harness?.contextWindows,
+              });
+            } catch {
+              // The request's own outcome stands without the lesson.
+            }
+          };
           return sendWithEndpointRetry({
             signal: stream.signal,
             onEvent: stream.onEvent,
             options: host.harness?.retry,
             attempt: async (attempt) => {
+              let response: HarnessEndpointResponse;
               try {
-                const response = await session.send(request, attempt);
-                learn({
-                  kind: "completed",
-                  servedModelId: response.servedModelId,
-                  usedTokens:
-                    response.usage === undefined
-                      ? undefined
-                      : response.usage.inputTokens + response.usage.outputTokens,
-                });
-                return response;
+                response = await session.send(request, attempt);
               } catch (error) {
                 const refusal = decodedFailure(error);
                 if (refusal !== undefined) learn({ kind: "refused", failure: refusal });
                 throw error;
               }
+              learn({
+                kind: "completed",
+                servedModelId: servedModelName(response.servedModelId),
+                usedTokens:
+                  response.usage === undefined
+                    ? undefined
+                    : response.usage.inputTokens + response.usage.outputTokens,
+              });
+              return response;
             },
           });
         },
@@ -177,6 +188,14 @@ function hostedTransport(
       };
     },
   };
+}
+
+/** The served model name as the catalogue keeps it, or undefined when it is blank or longer than 256 characters. */
+function servedModelName(reported: string | undefined): string | undefined {
+  const trimmed = reported?.trim();
+  return trimmed === undefined || trimmed.length === 0 || trimmed.length > 256
+    ? undefined
+    : trimmed;
 }
 
 function decodedFailure(error: unknown): ProviderFailure | undefined {

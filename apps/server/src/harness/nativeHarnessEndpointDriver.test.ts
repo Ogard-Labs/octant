@@ -296,6 +296,63 @@ describe("native harness endpoint port", () => {
     ]);
   });
 
+  it("answers with a port endpoint's response even when what it reports about its model cannot be kept", async () => {
+    const { driver } = portDriver([
+      {
+        text: "Answered.",
+        toolCalls: [],
+        usage: { inputTokens: 2_000.5, outputTokens: 500 },
+        servedModelId: "   ",
+      },
+      { text: "Answered again.", toolCalls: [], servedModelId: "x".repeat(300) },
+      { text: "Named.", toolCalls: [], servedModelId: "  served-model-2026-10-01 " },
+    ]);
+    const runtimeRegistry = new ProviderRuntimeRegistry();
+    runtimeRegistry.setObservedState({
+      instanceId,
+      readiness: "ready",
+      processState: "stopped",
+      models: [
+        {
+          id: modelId,
+          displayName: "Port model",
+          source: "manual",
+          verification: "unverified",
+          reasoning: "unavailable",
+          inputModalities: ["text"],
+          options: [],
+          learnedContextWindow: 1_500,
+        },
+      ],
+      capabilities: honestDirectEndpointCapabilities,
+      observedAt: "2026-10-26T09:00:00.000Z",
+    });
+    const endpoints = new NativeHarnessEndpointRegistry();
+    runOnNativeHarness(driver, {
+      ...host(new MemoryNativeHarnessTranscriptStore(), endpoints, runtimeRegistry),
+      harness: { endpoints, retry: { sleep: async () => undefined, random: () => 0.5 } },
+    });
+    const session = await endpoints.get(instanceId)?.open(modelId);
+    const request: HarnessEndpointRequest = {
+      sessionId,
+      modelId,
+      system: undefined,
+      history: [{ role: "user", text: "go" }],
+      tools: [],
+    };
+    const stream = { signal: new AbortController().signal, onEvent: () => undefined };
+
+    await expect(session?.send(request, stream)).resolves.toMatchObject({ text: "Answered." });
+    await expect(session?.send(request, stream)).resolves.toMatchObject({
+      text: "Answered again.",
+    });
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]?.servedModelId).toBeUndefined();
+    await expect(session?.send(request, stream)).resolves.toMatchObject({ text: "Named." });
+    expect(runtimeRegistry.observedState(instanceId)?.models[0]?.servedModelId).toBe(
+      "served-model-2026-10-01",
+    );
+  });
+
   it("refuses a connection without a product mode", async () => {
     const composed = runOnNativeHarness(
       portDriver([]).driver,
