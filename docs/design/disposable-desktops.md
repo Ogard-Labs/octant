@@ -8,12 +8,13 @@ app-managed ([Architecture: extensions and skills](../architecture.md#extensions
 launches go through the shared confinement port, and authority is checked on the
 server ([Architecture: security and authority](../architecture.md#security-and-authority)).
 
-**Delivery state.** Approved design direction, not built. The maintainer
-authorized this scope as post-preview work on 2026-10-26; it is not part of the
-first release, and the [Current Release Boundary](../../AGENTS.md#current-release-boundary)
-is unchanged by this document. No provider, lease, transfer, or Desktop pane
-exists. The [maintainer decisions](#maintainer-decisions) below must be answered
-before the slices that depend on them start; slice 1 depends on none of them.
+**Delivery state.** Accepted 2026-10-26; slice 1 is starting. The maintainer
+authorized this scope as post-preview work and accepted the
+[maintainer decisions](#maintainer-decisions) below on 2026-10-26; it is not
+part of the first release, and the
+[Current Release Boundary](../../AGENTS.md#current-release-boundary) is
+unchanged by this document. No provider, lease, transfer, or Desktop pane
+exists yet.
 
 **Name.** The product calls it a _disposable desktop_. "Computer" already names
 the Mac computer-use destination and the paired-host Computers card, and a
@@ -147,9 +148,9 @@ is a journal event carrying the lease id, thread, provider, and the acting
   revoked would leave a billed desktop running with no way to stop it.)
 - **Acquiring** is an effect. Plan refuses it. Approval-gated and
   auto-accept-edits ask in the thread. Full access proceeds for a host-local
-  provider. For a provider that bills the person, the rule is open as
-  [decision 2](#maintainer-decisions); until it is answered, no billed provider
-  ships.
+  provider. For a provider that bills the person, a person confirms every
+  billed lease in every posture, Full access included
+  ([decision 2](#maintainer-decisions)).
 - **Reading** the screen (a frame, a screenshot, a window list) needs no
   approval. **Agent input** follows the existing computer-use rules unchanged:
   `@Computer`-style per-send selection, per-application approval, sensitive-field
@@ -295,33 +296,38 @@ and `move-cursor` to the command set is its own contract change.
 
 ## Maintainer decisions
 
-1. **First provider.** (a) Host-local virtual display in a Bubblewrap launch:
-   no new runtime, no account, no cost, Linux hosts only, contents are the
-   host's installed apps, kernel-shared isolation. (b) Host-local OCI container
-   (rootless Podman): real per-Project images, but a container runtime the
-   person installs and a second confinement mechanism Octant must verify.
-   (c) Cloud provider on the person's account (the original plan named E2B):
+The maintainer accepted these on 2026-10-26. Each states the rule; the
+alternatives considered and the reason for the choice follow it.
+
+1. **First provider.** The first provider is a host-local virtual display in a
+   Bubblewrap launch: no new runtime, no account, no cost, Linux hosts only,
+   contents are the host's installed apps, kernel-shared isolation. The second
+   is a cloud provider on the person's account (the original plan named E2B):
    VM isolation and image templates, but an account, a key, billing, and data
-   leaving the machine. **Recommended: (a) first, (c) second.** (a) exercises
-   the whole seam, teardown, transfer, and pane in a Linux container with no
-   account, so the risky host-owned parts are proven before money is involved;
-   (b) only if per-Project images prove necessary locally.
-2. **Who may acquire a billed lease.** (a) Posture rules like any effect;
-   (b) a person confirms every billed lease in every posture. **Recommended:
-   (b).** Spending the person's money is not a code effect Full access covers.
-3. **Paired devices.** (a) View and operate from any client that may open the
-   thread; (b) view only from paired devices; (c) local windows only.
-   **Recommended: (a).** The desktop holds nothing of the host's, and a
-   headless host is mostly used remotely. Acquiring a billed lease still needs
-   decision 2's confirmation.
-4. **Lease limits.** **Recommended defaults:** 30-minute expiry, extendable by
-   a person to a recipe maximum of 4 hours; idle release after 15 minutes; two
-   leases per thread; two live host-local leases per host.
-5. **Host-local network.** (a) None; (b) none by default with a per-recipe
-   `allow` a person sets; (c) also forward one approved Local server port into
-   the desktop. **Recommended: (b) now, (c) as a later slice.** A web app is
-   tested from its built artifact first; a forwarded port is a new inbound path
-   and gets its own approval design.
+   leaving the machine. The host-local provider exercises the whole seam,
+   teardown, transfer, and pane in a Linux container with no account, so the
+   risky host-owned parts are proven before money is involved. Not planned: a
+   host-local OCI container provider (rootless Podman), which offers real
+   per-Project images but needs a container runtime the person installs and a
+   second confinement mechanism Octant must verify; it is reconsidered only if
+   per-Project images prove necessary locally.
+2. **Who may acquire a billed lease.** A person confirms every billed lease in
+   every posture. Rejected: ordinary posture rules, as for any effect. Spending
+   the person's money is not a code effect Full access covers.
+3. **Paired devices.** Any client that may open the thread may view and operate
+   its desktop. Rejected: view only from paired devices, and local windows
+   only. The desktop holds nothing of the host's, and a headless host is mostly
+   used remotely. Acquiring a billed lease still needs decision 2's
+   confirmation.
+4. **Lease limits.** A lease expires after 30 minutes and a person may extend
+   it to a recipe maximum of 4 hours; an idle lease is released after
+   15 minutes; a thread holds at most two leases; a host runs at most two live
+   host-local leases.
+5. **Host-local network.** A desktop has no network by default; a person may
+   set a per-recipe `allow`. Rejected: no network at all. Deferred to a later
+   slice: forwarding one approved Local server port into the desktop. A web app
+   is tested from its built artifact first; a forwarded port is a new inbound
+   path and gets its own approval design.
 
 ## Delivery plan
 
@@ -347,7 +353,7 @@ container with no account or hardware.
    unchanged. _Verify:_ focused contracts and server tests, typecheck consuming
    packages.
 2. **Host-local provider** (container with `bwrap` and a virtual X server
-   installed; needs decisions 1 and 5). Readiness detection, the dedicated
+   installed; per decisions 1 and 5). Readiness detection, the dedicated
    Bubblewrap launch, the standard-stream screen channel, receipts.
    _Accepts when_ real-`bwrap` negatives show the desktop cannot read the
    checkout, home, or keyring, cannot connect to host loopback, and gets no
@@ -357,8 +363,8 @@ container with no account or hardware.
    escaping, symlinked, `.git`, oversized, and changing files; path, size, and
    hash are journaled; Plan refuses and approval-gated asks. _Verify:_ focused
    server tests with permission negatives.
-4. **Agent control** (container with a scripted model; needs decision 3 only for
-   remote clients). The send selection binds `octant_computer` to a lease.
+4. **Agent control** (container with a scripted model; remote clients per
+   decision 3). The send selection binds `octant_computer` to a lease.
    _Accepts when_ a scripted turn launches a transferred GUI app, observes,
    clicks, types, and screenshots it; per-app approval, Plan refusal, taint, and
    `agent` attribution hold; a non-image model is refused `needs-image-model`.
@@ -370,7 +376,7 @@ container with no account or hardware.
    [Workspace](workspace.md) and the user guide. _Accepts when_ person input is
    journaled as `local-user`/`remote-device` with no approval, and a restored
    tab never reconnects. _Verify:_ component tests and rendered QA at each state.
-6. **Cloud provider driver** (needs decisions 1 and 2, a maintainer-owned
+6. **Cloud provider driver** (per decisions 1 and 2; needs a maintainer-owned
    account, an API key, and billing authority). Bundled driver through the seam,
    declared hosts, provider-side expiry and its extension, tag reconciliation.
    _Accepts when_ the conformance suite passes against a recorded transport, and

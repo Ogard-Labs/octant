@@ -5716,7 +5716,8 @@ same. This holds in Chat, Work, and Code.
   absent and refuses actions as a value rather than throwing. See
   [decisions/0053-computer-use-destinations.md](decisions/0053-computer-use-destinations.md).
   Thread-leased disposable Linux desktops, their provider seam, artifact
-  transfer, and verified lease teardown are approved post-preview design in
+  transfer, and verified lease teardown are post-preview design, accepted on
+  2026-10-26, in
   [Disposable desktops](design/disposable-desktops.md).
 
 **Canvas export.** A destination plugin contributes an export target through
