@@ -1265,6 +1265,30 @@ describe("RepositoryTestProcessPort", () => {
       port.readArtifact({ checkoutRoot: root, relativePath: "artifacts", maximumBytes: 3 }),
     ).rejects.toThrow();
   });
+
+  it.skipIf(process.platform === "win32")(
+    "refuses an artifact that is a FIFO without waiting for a writer",
+    async () => {
+      const root = temporaryDirectory();
+      mkdirSync(join(root, "artifacts"));
+      execFileSync("mkfifo", [join(root, "artifacts", "report.bin")]);
+      const port = new RepositoryTestProcessPort(confinedOptions());
+
+      const outcome = await Promise.race([
+        port
+          .readArtifact({
+            checkoutRoot: root,
+            relativePath: "artifacts/report.bin",
+            maximumBytes: 3,
+          })
+          .then(() => "read")
+          .catch(() => "refused"),
+        new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 2_000)),
+      ]);
+
+      expect(outcome).toBe("refused");
+    },
+  );
 });
 
 describe("defaultTemporaryDirectory", () => {

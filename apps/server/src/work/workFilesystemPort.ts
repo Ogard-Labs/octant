@@ -166,8 +166,13 @@ export const liveWorkFilesystem: WorkFilesystemPort = {
   openFile: async (path) => {
     // O_NOFOLLOW refuses a final component that is a symlink. It says nothing
     // about the ancestors, which is why the caller must still have run the
-    // containment sequence — this only closes the window after it.
-    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // containment sequence — this only closes the window after it. O_NONBLOCK
+    // keeps a FIFO swapped in after that sequence from holding the open until a
+    // writer appears; the caller's isFile check on the handle then refuses it.
+    const handle = await open(
+      path,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+    );
     return {
       stat: async () => {
         const info = await handle.stat({ bigint: true });
@@ -326,9 +331,13 @@ async function openLiveWriteFile(
   options: { readonly exclusiveCreate: boolean },
   noFollow: number = constants.O_NOFOLLOW,
 ): Promise<WorkOpenWriteFile> {
+  // An overwrite opens an existing name, so a FIFO swapped in after the
+  // containment check would hold a blocking open until a reader appeared.
+  // O_NONBLOCK refuses it with ENXIO instead; with a reader present the open
+  // succeeds and the caller's isFile check on the handle refuses it.
   const flags = options.exclusiveCreate
     ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollow
-    : constants.O_WRONLY | noFollow;
+    : constants.O_WRONLY | constants.O_NONBLOCK | noFollow;
   const handle = await open(path, flags, 0o600);
   return {
     stat: async () => {

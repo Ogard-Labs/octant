@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   chmod,
   lstat,
@@ -128,6 +129,31 @@ describe("Agent Plugins filesystem loader", () => {
       await rm(outside, { recursive: true, force: true });
     }
   });
+
+  it.skipIf(process.platform === "win32")(
+    "refuses a file swapped to a FIFO after discovery without waiting for a writer",
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), "octant-agent-plugins-"));
+      try {
+        const packageFile = join(root, "plugin.json");
+        await writeFile(packageFile, "safe");
+        const discovered = await lstat(packageFile);
+        await rm(packageFile);
+        execFileSync("mkfifo", [packageFile]);
+
+        const outcome = await Promise.race([
+          readVerifiedPluginFile(await realpath(root), packageFile, "plugin.json", discovered, 64)
+            .then(() => "read")
+            .catch(() => "refused"),
+          new Promise<"blocked">((resolve) => setTimeout(() => resolve("blocked"), 2_000)),
+        ]);
+
+        expect(outcome).toBe("refused");
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("counts directories against the local package entry limit", async () => {
     const root = await mkdtemp(join(tmpdir(), "octant-agent-plugins-"));
