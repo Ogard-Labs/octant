@@ -16,6 +16,7 @@ import {
   decodeChatAttachment,
   decodeChatAttachmentId,
   decodeChatAttempt,
+  decodeChatAttemptResponseAppended,
   decodeChatAttemptUpdated,
   decodeChatCitation,
   decodeChatCitationId,
@@ -344,6 +345,35 @@ const COMPACTION_SETTLED_EVENT_NAMES = new Set<string>([
  * and each attempt's run — goes through here, so preflight and the driver
  * agree on which options this route carries.
  */
+/**
+ * Whether an appended envelope's frame would only repeat what the next
+ * envelope already answers. Both are read back as the same attempt's current
+ * state for a subscriber without `appended`, so the earlier one of two
+ * consecutive appended events of one attempt can be dropped from its replay.
+ * An envelope the projection cannot decode is never superseded: it still
+ * reaches `#toEventFrame`, which decides what a strict reader makes of it.
+ */
+function appendedEnvelopeSuperseded(
+  envelope: {
+    readonly eventName: string;
+    readonly payload: unknown;
+  },
+  next: {
+    readonly eventName: string;
+    readonly payload: unknown;
+  } | undefined,
+): boolean {
+  if (next === undefined || next.eventName !== "chat.attempt-response-appended@1") return false;
+  try {
+    return (
+      String(decodeChatAttemptResponseAppended(envelope.payload).attemptId) ===
+      String(decodeChatAttemptResponseAppended(next.payload).attemptId)
+    );
+  } catch {
+    return false;
+  }
+}
+
 function threadAsRoutedFor(
   thread: ChatThread,
   route: {
@@ -1722,7 +1752,7 @@ export class ChatService {
         decodeReplayCursor({ afterSequence: cursor, limit: 100 }),
       );
       if (events.length === 0) break;
-      for (const envelope of events) {
+      for (const [index, envelope] of events.entries()) {
         cursor = envelope.globalSequence;
         if (
           options?.compaction === true &&
@@ -1733,6 +1763,19 @@ export class ChatService {
           continue;
         }
         if (!CHAT_EVENT_NAMES.has(envelope.eventName)) continue;
+        // A strict reader that did not opt in sees each appended envelope as
+        // a whole attempt read back from the projection, and consecutive
+        // envelopes of one attempt all answer with the same current state:
+        // only the last of a run needs to become a frame. Without this, a
+        // replay of one long streamed reply read the attempt row once more
+        // for every delta it journaled.
+        if (
+          options?.appended !== true &&
+          envelope.eventName === "chat.attempt-response-appended@1" &&
+          appendedEnvelopeSuperseded(envelope, events[index + 1])
+        ) {
+          continue;
+        }
         const frame = this.#toEventFrame(
           threadId,
           envelope,

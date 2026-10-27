@@ -9742,6 +9742,45 @@ describe("completing and snoozing a Chat thread", () => {
   });
 });
 
+/**
+ * A driver whose one reply streams the given deltas and then completes, so
+ * the journal holds the first delta's `attempt-updated` and one appended
+ * event per further delta — the shape a long streamed reply leaves for a
+ * subscriber that replays it.
+ */
+function streamedReplyDriver(deltas: ReadonlyArray<string>): ProviderDriver {
+  return {
+    acquire: () =>
+      Effect.sync(() => {
+        const queue = Effect.runSync(Queue.unbounded<never>());
+        let sessionId = "";
+        const emit = (event: Record<string, unknown>) =>
+          Queue.offer(queue, { sessionId, ...event } as never);
+        return {
+          subscribe: Effect.succeed(Stream.fromQueue(queue)),
+          start: (input: { readonly sessionId: string }) =>
+            Effect.sync(() => {
+              sessionId = input.sessionId;
+              return { sessionId: input.sessionId };
+            }),
+          send: () =>
+            Effect.gen(function* () {
+              for (const text of deltas) {
+                yield* emit({ kind: "text-delta", text });
+              }
+              yield* emit({ kind: "usage", inputTokens: 10, outputTokens: 5 });
+              yield* emit({ kind: "completed" });
+            }),
+          interrupt: () => Effect.void,
+          stop: () => Effect.void,
+          answerApproval: () => Effect.void,
+          answerUserInput: () => Effect.void,
+          answerTool: () => Effect.void,
+        };
+      }),
+  } as unknown as ProviderDriver;
+}
+
 describe("ChatService streamed delta bodies", () => {
   it("puts the body a delta appended on its frame, and only for subscribers that asked", async () => {
     const { service } = openFixture();
@@ -9786,6 +9825,61 @@ describe("ChatService streamed delta bodies", () => {
     for await (const frame of service.subscribe(created.thread.id, 0)) plain.push(frame);
     expect(plain.length).toBe(asked.length);
     expect(plain.every((frame) => frame.contents === undefined)).toBe(true);
+  });
+
+  it("replays a run of streamed deltas to a strict reader as one frame, not one per delta", async () => {
+    const deltas = ["one ", "two ", "three ", "four ", "five."];
+    const { service } = openFixture({ driver: streamedReplyDriver(deltas) });
+    const created = await service.execute({
+      kind: "create-chat-thread",
+      hostId: "local",
+      title: "Streamed burst",
+    });
+    if (created.kind !== "thread-created") throw new Error("Expected thread-created result.");
+    const sent = await service.execute({
+      kind: "send-chat-turn",
+      threadId: created.thread.id,
+      expectedVersion: created.thread.version,
+      prompt: "Hello",
+    });
+    if (sent.kind !== "turn-created") throw new Error("Expected turn-created result.");
+    await until(
+      () => service.read(created.thread.id).turns[0]?.attempts[0]?.outcome === "completed",
+    );
+
+    const strict = [];
+    for await (const frame of service.subscribe(created.thread.id, 0, undefined, {
+      contents: true,
+    })) {
+      strict.push(frame);
+    }
+    expect(strict.filter((frame) => frame.event.kind === "attempt-response-appended")).toEqual([]);
+    const attempts = strict.flatMap((frame) =>
+      frame.event.kind === "attempt-updated" ? [frame.event.attempt] : [],
+    );
+    expect(attempts.map((attempt) => attempt.outcome)).toEqual([
+      "streaming",
+      "completed",
+      "completed",
+    ]);
+    expect(attempts.map((attempt) => attempt.responseRefs.length)).toEqual([
+      1,
+      deltas.length,
+      deltas.length,
+    ]);
+
+    const optedIn = [];
+    for await (const frame of service.subscribe(created.thread.id, 0, undefined, {
+      contents: true,
+      appended: true,
+    })) {
+      optedIn.push(frame);
+    }
+    expect(
+      optedIn.flatMap((frame) =>
+        frame.event.kind === "attempt-response-appended" ? [frame.contents?.[0]?.body] : [],
+      ),
+    ).toEqual(deltas.slice(1));
   });
 });
 
