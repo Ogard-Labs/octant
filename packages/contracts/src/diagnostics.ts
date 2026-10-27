@@ -277,12 +277,15 @@ export const DiagnosticEvidencePacket = Schema.Struct({
   ),
   redactions: Schema.Array(DiagnosticRedactionTag).pipe(Schema.maxItems(MAX_DIAGNOSTIC_REDACTIONS)),
   redacted: Schema.Literal(true),
-  /** Version 2 only; absent when the host reports no counters. */
+  /** Version 2 or later; absent when the host reports no counters. */
   hostHealth: Schema.optional(DiagnosticHostHealth),
   generatedAt: UtcTimestamp,
   /** Version 2 or later; absent when the host could not read the journal. */
   journalGrowth: Schema.optional(JournalGrowth),
-  /** Version 3 only, and always there: absent when no session started or ended in the window. */
+  /**
+   * Required in a version 3 packet and refused in any other. Absent, so the
+   * packet stays version 1 or 2, when no session started or ended in the window.
+   */
   debugSessions: Schema.optional(DiagnosticDebugSessions),
 }).pipe(
   Schema.filter(
