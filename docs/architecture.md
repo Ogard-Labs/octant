@@ -5131,8 +5131,9 @@ Saying so is the honest boundary; routing those runtimes through the proxy
 with provider-endpoint rules is a separate follow-up. An approved
 `repo-tooling` language server also runs on `proxied`, whatever the starting
 thread's posture, with the same proxy and launch records on an aggregate of
-its own: it serves a checkout, so only its Project's rules apply, its bytes
-taint no thread, and it raises no proposals
+its own: it serves a checkout, so only its Project's rules apply, suspended
+while any thread that can write its folder is tainted, whichever Project that
+thread is in; its bytes taint no thread, and it raises no proposals
 ([Repository tooling](design/language-services.md#repository-tooling)).
 
 **Enforcement point.** A forward proxy owned by the server process, one
@@ -5266,7 +5267,10 @@ listener per confined launch:
   offer 7 days (the default) and 30 days. The proxy compares `now` against
   `expiresAt` on every new request and on every chunk relayed through an open
   tunnel, so a rule is dead at `expiresAt` whatever a timer or a sleeping
-  machine did, and its tunnels close then. Revocation closes them at once.
+  machine did, and its tunnels close then. Revocation, and a thread taking in
+  outside content, close them at once: the host decides every open tunnel
+  again, for every proxy these rules serve, a `repo-tooling` language
+  server's included, so an idle tunnel does not wait for its next chunk.
   Expiry is derived from the stored timestamp rather than journaled as its own
   event, so replay reaches the same answer with no clock-dependent record.
   The host keeps an expired rule in memory for 24 hours after it first sees
@@ -6616,7 +6620,15 @@ mechanisms are:
   recorded in [decisions/0057-linux-confinement-bubblewrap.md](decisions/0057-linux-confinement-bubblewrap.md).
   The child runs `--unshare-all`, regains the network only when egress
   resolves to `allow`, dies with its parent, and gets a new session except for
-  interactive terminals. Every confined launch passes `--cap-drop ALL`, so the
+  interactive terminals. Its own PID namespace ends with the capsule, so a
+  descendant that called `setsid()` still ends when a terminal or a
+  `repo-tooling` language server stops. Seatbelt has no PID namespace: on
+  macOS such a descendant leaves the process group the host ends and
+  outlives the stop, still under that launch's Seatbelt profile; a
+  `repo-tooling` server's proxy closes with the server, so its descendant
+  keeps no network. Terminals and `repo-tooling` servers share this residual; the
+  Mac measurement a shared fix waits on is named under
+  [Repository tooling](design/language-services.md#repository-tooling). Every confined launch passes `--cap-drop ALL`, so the
   capsule's effective capability set is empty whether or not the server runs
   as root. Bubblewrap started by uid 0 otherwise keeps every capability:
   measured on bwrap 0.9.0, a root capsule remounted a read-only bind writable

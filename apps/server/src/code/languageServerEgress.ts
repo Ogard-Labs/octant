@@ -19,8 +19,10 @@ import { Schema } from "effect";
 import {
   startToolEgressProxy,
   type ToolEgressProxyEndpointRequest,
+  type ToolEgressProxyOptions,
   type ToolEgressRecordAppend,
 } from "../harness/nativeHarnessEgressProxy";
+import type { ToolEgressRecheckable } from "../harness/nativeHarnessEgressRules";
 import type { Journal } from "../persistence/journal";
 import type { EgressProxyEndpoint } from "../process/threadEgressPolicy";
 
@@ -30,7 +32,8 @@ import type { EgressProxyEndpoint } from "../process/threadEgressPolicy";
  *
  * The server serves a checkout, not a thread, so its connections are decided
  * on its Code Project's rules alone (D6): no thread rule applies, and the
- * Project's rules are suspended while any active thread on the checkout has
+ * Project's rules are suspended while any active thread that can write the
+ * server's folder, in this Project or another bound to the same folder, has
  * taken in outside content, because that thread's agent may have written the
  * tooling the server runs. Every decision goes through the proxy harness
  * commands use, and its records are the same payloads on an aggregate of the
@@ -51,7 +54,7 @@ const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp);
 export interface LanguageServerEgressScope {
   readonly projectId: string;
   readonly threadId: string;
-  /** Whether any active thread on the server's checkout has taken in outside content now. */
+  /** Whether any active thread that can write the server's folder has taken in outside content now. */
   readonly checkoutTainted: () => boolean;
 }
 
@@ -74,7 +77,16 @@ export interface LanguageServerEgressOptions {
   readonly journal: Pick<Journal, "append">;
   /** The Project's live rules, read for every decision. */
   readonly projectRules: (projectId: string) => ReadonlyArray<ToolEgressRule>;
+  /**
+   * Puts the proxy on the egress rules' active recheck, so a revocation or a
+   * taint change closes an idle tunnel at once rather than at its next chunk;
+   * the returned call takes it off when the proxy closes.
+   */
+  readonly joinRecheck: (proxy: ToolEgressRecheckable) => () => void;
   readonly endpoint: ToolEgressProxyEndpointRequest;
+  /** The proxy's own lookup and sockets unless given, as for a harness launch. */
+  readonly resolveAll?: ToolEgressProxyOptions["resolveAll"];
+  readonly connect?: ToolEgressProxyOptions["connect"];
   readonly hostActor: EventActorValue;
   readonly uuid: () => string;
   readonly clock: () => string;
@@ -137,6 +149,8 @@ export function createLanguageServerEgress(
         rules: () => options.projectRules(scope.projectId),
         clock: options.clock,
         endpoint: options.endpoint,
+        ...(options.resolveAll === undefined ? {} : { resolveAll: options.resolveAll }),
+        ...(options.connect === undefined ? {} : { connect: options.connect }),
         records: {
           launchStarted: async (payload) =>
             record(CODE_LANGUAGE_SERVER_EVENT_NAMES.egressLaunchStarted, payload),
@@ -148,6 +162,14 @@ export function createLanguageServerEgress(
       });
       if (started.status === "refused") return { status: "refused" };
       const proxy = started.proxy;
+      let leaveRecheck: () => void;
+      try {
+        leaveRecheck = options.joinRecheck(proxy);
+      } catch {
+        // A proxy no revocation can reach would keep an idle tunnel open.
+        await proxy.close().catch(() => undefined);
+        return { status: "refused" };
+      }
       const endpoint: EgressProxyEndpoint =
         proxy.endpoint.kind === "loopback"
           ? { kind: "loopback", port: proxy.endpoint.port }
@@ -157,6 +179,7 @@ export function createLanguageServerEgress(
         endpoint,
         token: proxy.token,
         close: async () => {
+          leaveRecheck();
           await proxy.close().catch(() => undefined);
         },
       };

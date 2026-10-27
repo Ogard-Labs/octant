@@ -12,6 +12,7 @@ import {
   TOOL_EGRESS_EVENT_NAMES,
   TOOL_EGRESS_PROJECT_AGGREGATE,
   TOOL_EGRESS_THREAD_AGGREGATE,
+  THREAD_EXTERNAL_CONTENT_AGGREGATE,
   THREAD_EXTERNAL_CONTENT_EVENT_NAMES,
   ToolEgressLaunchId,
   ToolEgressRuleId,
@@ -51,6 +52,7 @@ import {
   makeOpenAiCompatibleEndpoint,
   requestGeneration,
 } from "../providers/openAiCompatibleEndpoint";
+import { createLanguageServerEgress } from "../code/languageServerEgress";
 import { RepositoryTestProcessPort } from "../code/repositoryTestProcessPort";
 import { ToolCallAuthorityService } from "../toolCallAuthorityService";
 import { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
@@ -3465,6 +3467,100 @@ describe("native harness tool egress grants and learn mode", () => {
         }
       },
     );
+  });
+
+  describe("a repository-tooling language server's proxy", () => {
+    const closes: Array<() => Promise<void>> = [];
+    afterEach(async () => {
+      await Promise.all(closes.splice(0).map((close) => close()));
+    });
+
+    /** Starts a server's proxy over the host's rules, with the checkout's taint read from `tainted`. */
+    async function startServerProxy(host: EgressHost, origin: number, tainted: () => boolean) {
+      const network = fixtureNetwork(new Map([["93.184.216.10", origin]]));
+      const egress = createLanguageServerEgress({
+        journal: host.journal,
+        projectRules: (projectId) => host.rules.projectRules(projectId),
+        joinRecheck: (proxy) => host.rules.joinRecheck(proxy),
+        endpoint: { kind: "loopback" },
+        resolveAll: network.resolveAll,
+        connect: network.connect,
+        hostActor,
+        uuid: randomUUID,
+        clock: () => new Date(egressStart).toISOString(),
+      });
+      const started = await egress.start({
+        projectId: String(egressProject),
+        threadId: String(egressThread),
+        checkoutTainted: tainted,
+      });
+      if (started.status !== "listening" || started.endpoint.kind !== "loopback") {
+        throw new Error("the server's proxy did not start on loopback");
+      }
+      closes.push(started.close);
+      return {
+        proxy: { endpoint: { kind: "loopback", host: "127.0.0.1", port: started.endpoint.port } },
+        authorization: basicAuthorization(started.token),
+      } as const;
+    }
+
+    const grantProjectRule = (host: EgressHost) => {
+      const granted = host.rules.answer({
+        threadId: String(egressThread),
+        principal: person,
+        grants: [
+          { host: "registry.example.com", port: 443, scope: { kind: "project", lifetime: "7d" } },
+        ],
+      });
+      if (granted.kind !== "answered") throw new Error("the Project rule was not granted");
+      return String(granted.ruleIds[0]);
+    };
+
+    it("closes an idle tunnel the moment the Project rule it used is revoked", async () => {
+      const host = egressHost();
+      const origin = await tcpFixture();
+      const ruleId = grantProjectRule(host);
+      const server = await startServerProxy(host, origin.port, () => false);
+      const tunnel = await openTunnel(
+        server.proxy,
+        "registry.example.com:443",
+        server.authorization,
+      );
+      expect(await roundTrip(tunnel.socket, "before", 6)).toBe("before");
+      expect(
+        host.rules.revoke({ threadId: String(egressThread), principal: person, ruleId }),
+      ).toEqual({ kind: "answered", ruleIds: [] });
+      // Nothing is written after the revocation, so only an active recheck closes it.
+      await waitFor(() => tunnel.socket.closed);
+      expect(origin.seen()).toBe("before");
+    });
+
+    it("closes an idle tunnel the moment a thread sharing the checkout is tainted", async () => {
+      const host = egressHost();
+      // As the host does: every committed taint rechecks every open tunnel.
+      const unsubscribe = host.journal.subscribeCommitted((append) => {
+        if (
+          append.events.some((event) => event.aggregateType === THREAD_EXTERNAL_CONTENT_AGGREGATE)
+        ) {
+          host.rules.recheck();
+        }
+      });
+      closes.push(async () => unsubscribe());
+      const origin = await tcpFixture();
+      grantProjectRule(host);
+      const server = await startServerProxy(host, origin.port, () =>
+        host.tainted(String(egressOtherThread)),
+      );
+      const tunnel = await openTunnel(
+        server.proxy,
+        "registry.example.com:443",
+        server.authorization,
+      );
+      expect(await roundTrip(tunnel.socket, "before", 6)).toBe("before");
+      expect(host.taint(String(egressOtherThread)).kind).toBe("recorded");
+      await waitFor(() => tunnel.socket.closed);
+      expect(origin.seen()).toBe("before");
+    });
   });
 
   describe("records", () => {

@@ -26,6 +26,7 @@ import { LanguageServerApprovalStore } from "../code/languageServerApprovals";
 import { createLanguageServerEgress } from "../code/languageServerEgress";
 import { readThreadExternalContentTaint } from "../context/externalContentTaintProjection";
 import { LanguageServerProcessPort } from "../code/languageServerProcess";
+import { managedTargetPath } from "../code/managedWorktreeService";
 import { installedLanguageServerComponents } from "../code/installedLanguageServers";
 import { isExtensionCompatibilityCompatible } from "../extensions/packageInspector";
 import { EXTENSION_AGGREGATE_TYPE } from "../persistence/extensionProjection";
@@ -199,6 +200,7 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
             egress: createLanguageServerEgress({
               journal: persistence.journal,
               projectRules: (projectId) => toolEgressRules.projectRules(projectId),
+              joinRecheck: (proxy) => toolEgressRules.joinRecheck(proxy),
               endpoint: languageServerEgressEndpoint,
               hostActor: { kind: "system", actorId: OCTANT_LOCAL_ACTOR_ID },
               uuid: randomUUID,
@@ -211,6 +213,18 @@ export function wireCodeTooling(deps: CodeToolingDependencies) {
         readThread: persistence.readCodeThread,
         readThreads: persistence.readCodeThreads,
         readCheckout: persistence.readCodeCheckout,
+        // Read for every proxy decision, so it cannot wait on a receipt file:
+        // a managed worktree's folder is the one its receipt must name, which
+        // derives from the repository root and the thread.
+        readThreadFolder: (thread) => {
+          const project = persistence.readProject(thread.projectId);
+          const checkout = persistence.readCodeCheckout(thread.checkoutId);
+          if (project?.type !== "code" || checkout === undefined) return undefined;
+          const root = project.binding.canonicalRoot;
+          return checkout.kind === "managed-worktree"
+            ? managedTargetPath(root, String(thread.repositoryId), String(thread.id))
+            : root;
+        },
         canAccessProject: canAccessCodeProject,
         effectiveThread: (scopeId, thread) => codeSessionAuthority.effectiveThread(scopeId, thread),
         resolveRoot: (scopeId, thread, checkout, relativePath) =>
