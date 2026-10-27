@@ -106,6 +106,24 @@ octant ssh-target worktrees
 octant ssh-target worktree remove <worktree-id>
 ```
 
+## Where a provider runs on the target
+
+A provider's own runtime runs on a target only from the path you set for it
+there, never from one the model, the repository, or the target suggests. Set
+it from a terminal on this Mac, naming the target, the provider instance's
+id, and the program's path on the target:
+
+```sh
+octant ssh-target runtime <target-id> <provider-id> /home/build/.local/bin/agent
+```
+
+Octant checks the file on the target before every launch: it must be an
+executable that only you or root can change, outside the Project's folder
+and your `~/.ssh`. Setting another path takes effect the next time the
+runtime starts. Threads in remote Projects are not available yet, so nothing
+runs from this path until they are, and no provider Octant ships can run on
+a target yet.
+
 ## Removing a target
 
 **Remove…** on a target ends its session and forgets its pinned key. Its

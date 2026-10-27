@@ -40,9 +40,16 @@ runtime process beside the request slot on a stream of its own, its home,
 binary, and account-state checks, the runtime canaries, and its egress
 through a proxy of its own on this host, journaled
 (`apps/server/src/sshTarget/executorProcesses.ts`,
-`executorRuntimeGrants.ts`, `providerRuntimeEgress.ts`). No driver declares
-remote placement yet, so no provider's runtime has been launched on a
-target; ACP's declaration (6c) is next. Slice 7 is
+`executorRuntimeGrants.ts`, `providerRuntimeEgress.ts`). Since 6c the ACP
+driver declares placement for a profile whose whole launch can be stated on
+a target, starts its agent only through the placement at the path the
+person set for that provider instance on the target, and runs its client
+file and terminal requests through the executor
+(`apps/server/src/providers/acpPlacement.ts`, `createRemoteCodeAcpClientTools`
+in `apps/server/src/code/codeAcpClientTools.ts`,
+[As built in 6c](#as-built-in-6c)). No shipped ACP profile can be stated
+there yet, so no provider's runtime runs on a target in the product; the
+real-provider smoke (6d) is next. Slice 7 is
 built: a person's terminals and managed worktrees on a remote-bound Project,
 under the same admission
 ([Terminals and managed worktrees](#terminals-and-managed-worktrees)),
@@ -806,6 +813,10 @@ These rules settle what the seam needs, each in the fail-closed direction:
   acquires through it (`codeOperationRuntime.ts`). A driver written before the seam
   reads `projectRoot` as a folder on this host, so handed a remote root it
   would run the runtime here against a path that names something else.
+- **The placement names the runtime.** `ProviderRemoteProcessPlacement.executable`
+  is the path the person set for the provider instance on that target
+  (R2); a driver launches exactly it, the host refuses a launch of any other
+  path, and conformance fails a driver that names one of its own.
 - **A placed launch names a program and its arguments, nothing more.** The
   driver gives the runtime's absolute path on the target and its arguments.
   The working directory is the bound root and the environment is built on the
@@ -827,10 +838,11 @@ grants a runtime needs beyond a command's (its own home on the target, its
 binary's folder, and the target's own account state), and the network a
 placed runtime gets, all settled under [Runtime placement](#runtime-placement).
 A driver reaches it through the placement this host hands it
-(`placement` in `apps/server/src/sshTarget/sshTargetConnectionService.ts`). No
-in-tree driver declares placement yet; a wrapped runtime's driver (ACP first)
-then declares it and passes this conformance against the loopback target
-before the real-provider smoke.
+(`placement` in `apps/server/src/sshTarget/sshTargetConnectionService.ts`).
+Since 6c the ACP driver declares it for a profile that can be placed, and an
+ACP profile backed by a fixture agent passes this conformance against the
+loopback target in every posture it declares
+([As built in 6c](#as-built-in-6c)); the real-provider smoke follows.
 
 ### Runtime placement
 
@@ -1115,6 +1127,36 @@ Each is its own reviewable change with this section updated in place.
     closes; and a client file write in Plan is refused before the executor.
   - _Verify:_ provider-sdk placement conformance, ACP conformance, and the
     loopback smoke.
+  - _Built 2026-10-27_ (`acpPlacement.ts` and the placed path of
+    `acpDriver.ts` in `apps/server/src/providers/`,
+    `createRemoteCodeAcpClientTools` in `apps/server/src/code/codeAcpClientTools.ts`,
+    and the per-target runtime path; [As built in 6c](#as-built-in-6c)).
+    Its evidence is `sshTargetLoopback.smoke.test.ts` (an ACP profile backed
+    by a fixture agent passing placement conformance against the loopback
+    target in Plan, approval-gated, and auto-accept-edits, every agent it
+    placed gone from the target afterwards and none started here; the agent
+    in the bound root, signed in with the target's own account state; in
+    Plan a client write refused with no request reaching the executor and a
+    read answered through it; in approval-gated a write and a terminal run on
+    the target through the executor), `acpConformance.test.ts` (that profile
+    passing placement conformance against a stand-in target, launching the
+    person's path with the profile's arguments and account state, no placed
+    agent kept for a later session, and every shipped profile reporting
+    placement unsupported), `acpPlacement.test.ts` (which profiles and
+    postures can be placed, the account state, an agent refused for its
+    version or identity, and a session refused before any
+    launch in an undeclared posture, with bridge tools, or for a key-signed
+    instance), `codeAcpClientTools.test.ts` (a client write or terminal in
+    Plan refused before the target is asked, reads run after run, writes,
+    terminals as one command, kill, and the working folder and variables
+    refused), `processPlacementConformance.test.ts` (a driver launching a
+    path of its own fails), `sshTargetConnectionService.test.ts` (no
+    placement without the person's path, and a launch of another path or
+    after the path changed refused before any frame), `sshTargetStore.test.ts`
+    (runtime paths replayed from the journal, dropped with their target, and
+    left out of the export), `sshTargetAdministrationRoutes.test.ts`, and
+    `sshTargetCommand.test.ts`.
+    The projection table is migration 88.
 - **6d. Real-provider smoke.** Maintainer.
   - _Accepts when:_ one real ACP agent, signed in on a Linux target with its
     own account state, runs a Code turn on a remote-bound Project from this
@@ -1200,11 +1242,90 @@ fail-closed direction:
   thread, Project, provider instance, target, and session; decisions and the
   summary carry the proxy's own entries, without a thread's taint.
 
-Not built in 6b, and named here so a later change owns it: the person's
-per-target binary setting R2 names (6c records it with the first driver that
-declares placement), summarizing a runtime egress launch that a host restart
-left open (as `thread.egress-launch-incomplete@1` does for commands), and
-removing a thread's runtime egress records when the thread is purged.
+Not built in 6b, and named here so a later change owns it: summarizing a
+runtime egress launch that a host restart left open (as
+`thread.egress-launch-incomplete@1` does for commands), and removing a
+thread's runtime egress records when the thread is purged. The person's
+per-target binary setting R2 names is built in 6c.
+
+#### As built in 6c
+
+6c settled these details the decisions above leave open, each in the
+fail-closed direction:
+
+- **A profile is placed only where its whole launch can be stated there.**
+  A placed launch carries a program, its arguments, and home-relative
+  account state, so an ACP profile opts in with `remote` (its arguments on a
+  target), and `acpRemotePlacement` declares nothing for one whose local
+  launch sets a guard or a variable, writes a managed file, reads a host
+  path, denies a path in its sign-in folder or the root, or refuses
+  Projects by their files: each would be silently left behind on the
+  target. Postures the profile refuses, and Plan for an agent that forks a
+  child server, are left out. Every shipped profile sets guards or
+  variables today, so none is placed; 6d makes the first real profile
+  placeable, with whatever seam change its launch then needs (a fixed guard
+  variable, say) as its own reviewed step. Rejected: dropping what the seam
+  cannot carry, which would run an agent on a target with its own project
+  configuration, auto-update, or extension loading that Octant turns off
+  here.
+- **Account state is the sign-in folder one variable names.** The profile's
+  `hostAuthentication` folder, at the same path under the target user's
+  home, read-write as the local launch grants it, and named by the one
+  variable the profile points the agent at it with. A placed agent's `HOME`
+  is its own runtime home, so a folder no variable names would never be
+  found; a credential file the local launch links into its managed home, a
+  variable whose value is not the folder itself, a folder outside the home,
+  and entries denied inside it are not stated, and the profile is not
+  placed.
+- **No key crosses.** An instance that signs in with an API key or a browser
+  sign-in here declares nothing and is never placed, because provider
+  credentials never reach a target (decision 4).
+- **The agent's version is its own answer.** No version probe runs on the
+  target, so the version is the one the agent's `initialize` answer
+  reports; one that reports none Octant can compare, one below the
+  profile's minimum, or another agent is refused `incompatible`, and the
+  placed process is stopped with the start's scope.
+- **The runtime path is the person's, journaled.**
+  `ssh-target.runtime-binary-set@1` records one path per provider instance
+  on a target, set only from a local window's administration route or
+  `octant ssh-target runtime`, at most 64 per target, and removed with the
+  target. `placement` hands no placement for an instance without one; the
+  placement carries it, and a launch naming any other path, or made after
+  the person changed it, is refused before any frame. The path names a
+  file on the target, so the host export and diagnostics leave it out, as
+  they leave out the executor path. Settings › SSH targets shows no control for it
+  yet; a local window reaches it through the route, and the CLI is the
+  person's way in until that page gains one.
+- **Client requests run as the remote harness's own calls.** A placed ACP
+  session's client tools are `createRemoteCodeAcpClientTools` over the
+  turn's remote harness binding: a read or write is its file tool on the
+  bound root, and a terminal is one harness command through the executor,
+  each admitted in the turn's posture at that call on the session the turn
+  holds. Plan offers only the read; a write or a terminal the agent asks
+  for anyway is refused by the driver before the tool set, which refuses it
+  again before anything reaches the target. The executor answers a command
+  only once it ended, so a terminal's output reads empty and without an
+  exit status until then, and its wait returns both. A terminal's working
+  folder must lie inside the bound root, and its variables may not name
+  `PATH`, `HOME`, `TMPDIR`, or a proxy, because a proxied command's proxy
+  variables carry its launch's egress token.
+- **A placed agent is never kept.** Locally a completed session of a
+  release that passed warm-reuse evidence keeps its agent for the next
+  turn. A placed agent was admitted, and its egress is recorded, for one
+  placement's thread and posture, so it stops with its session instead, and
+  a placed session never takes up a kept agent, which runs on this host.
+- **No tool bridge on a target.** The HTTP MCP bridge is a listener, so a
+  placed session refuses app-managed tools that need it `unsupported`
+  before anything launches, whatever this host's platform.
+- **The output reader never holds the stop.** A placed process's output
+  ends only once the process does, so the agent's output reader is asked
+  to stop with the scope rather than waited for; waiting for it before the
+  launch's own release hung against the loopback target.
+
+Not built in 6c, and named here so a later change owns it: the Code turn
+runtime composing a remote-bound Project's ACP thread (it waits for remote
+threads, as the native harness does), a Settings › SSH targets control for
+the runtime path, and clearing a path short of removing the target.
 
 ### Credential custody
 
@@ -1232,6 +1353,7 @@ removing a thread's runtime egress records when the thread is purged.
 | Remote root, managed worktrees                            | The target                               | The person's files; Octant never deletes them on removal   |
 | Executor runtime directory                                | The target, owner-only                   | Removed at session end; stale ones swept at the next start |
 | A provider runtime's own session files                    | The target, in that runtime's own home   | Provider-owned, as locally                                 |
+| A provider instance's runtime path on a target            | This host's journal                      | Removed with the target; never exported                    |
 
 Every event about remote work is appended by this host, under the thread's actor,
 with the target's id as provenance. The executor holds no journal, projection, or
@@ -1444,8 +1566,8 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    `runtime-not-attestable` for no declaration, an undeclared posture, Full
    access, or a loopback tool listener). The executor's runtime launches are
    built as 6b under [Runtime placement](#runtime-placement), with its
-   evidence there; a driver declaring placement (6c) and the real-provider
-   smoke (6d) remain.
+   evidence there, and the ACP driver's declaration as 6c, with its
+   evidence there; the real-provider smoke (6d) remains.
 7. **Terminals, managed worktrees, and Settings.** Container for behavior and
    rendered QA in a browser; desktop packaged smoke needs a Mac (maintainer).
    Remote terminals and worktrees under the same admission, the SSH targets
