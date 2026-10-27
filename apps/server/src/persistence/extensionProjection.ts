@@ -614,7 +614,9 @@ function hasCapabilityExpansion(
  * Whether an updated component may do more than the one a person reviewed.
  * A language server's launch class is part of its grant: moving to
  * `repo-tooling` lets it write the checkout, run tooling, and reach the
- * network with the same kind and the same declared capabilities.
+ * network with the same kind and the same declared capabilities. A debug
+ * adapter's `launch` body decides how the program it runs is started, and a
+ * debug port opens loopback, so a changed body or an added port is new too.
  */
 function componentWidened(
   prior: ExtensionPackageManifest["components"][number] | undefined,
@@ -627,8 +629,25 @@ function componentWidened(
       (capability) => !prior.declaredCapabilities.includes(capability),
     ) ||
     (component.languageServer?.launchClass === "repo-tooling" &&
-      prior.languageServer?.launchClass !== "repo-tooling")
+      prior.languageServer?.launchClass !== "repo-tooling") ||
+    (component.debugAdapter !== undefined &&
+      (prior.debugAdapter === undefined ||
+        component.debugAdapter.debugPorts > prior.debugAdapter.debugPorts ||
+        canonicalJson(component.debugAdapter.launchArguments) !==
+          canonicalJson(prior.debugAdapter.launchArguments)))
   );
+}
+
+/** JSON with every object's keys sorted, so key order alone is not a change. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (typeof value === "object" && value !== null) {
+    return `{${Object.entries(value)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function preserveUnchangedComponentDesired(

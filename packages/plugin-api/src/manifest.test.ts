@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { decodeExtensionPackageManifest, ExtensionLanguageServerClass } from "./manifest";
+import {
+  decodeExtensionPackageManifest,
+  EXTENSION_DEBUG_LAUNCH_PLACEHOLDERS,
+  ExtensionLanguageServerClass,
+} from "./manifest";
 
 const extensionId = "10000000-0000-4000-8000-000000000001";
 const packageId = "20000000-0000-4000-8000-000000000001";
@@ -211,6 +215,34 @@ describe("plugin-api manifest re-exports", () => {
         }),
       ),
     ).toThrow();
+  });
+
+  it("accepts a debug-adapter component through the public package and names the placeholders it fills", () => {
+    const component = {
+      id: "adapter",
+      kind: "debug-adapter",
+      displayName: "Node debugger",
+      declaredCapabilities: [],
+      entryPoint: "bin/adapter",
+      debugAdapter: {
+        runtimes: ["node"],
+        launchArguments: { program: "{{program}}" },
+        importTypes: ["node"],
+        debugPorts: 0,
+      },
+    };
+    const decoded = decodeExtensionPackageManifest(
+      manifest({ slug: "node-debugger", components: [component] }),
+    );
+    expect(decoded.components[0]?.debugAdapter?.runtimes).toEqual(["node"]);
+    expect(EXTENSION_DEBUG_LAUNCH_PLACEHOLDERS).toEqual([
+      "{{program}}",
+      "{{args}}",
+      "{{cwd}}",
+      "{{env}}",
+      "{{stopOnEntry}}",
+      "{{debugPort}}",
+    ]);
   });
 
   it("rejects an unknown contribution point through the public package", () => {

@@ -15,6 +15,7 @@
     "./desktop-provider-conformance": "./src/desktopProviderConformance.ts",
     "./provider-driver-catalog": "./src/providerDriverCatalog.ts",
     "./language-server-package": "./src/languageServerPackage.ts",
+    "./debug-adapter-package": "./src/debugAdapterPackage.ts",
     "./outside-provider-driver": "./src/outsideProviderDriver.ts"
   },
   "scripts": {
