@@ -26,8 +26,8 @@ process) is built: one supervised process per instance under the driver
 profile from the shared confinement builder, a fixed environment, the
 process's stdio as the proxy's channel, the crash limit, and `host-prohibited`
 on Linux (see [Driver process rules](#driver-process-rules)); its acceptance,
-the escape tests on macOS, runs in the `macos-15` CI job (pending its first
-run there). Slice 5 (admission end
+the escape tests on macOS, runs in the `macos-15` CI job and passed there on
+2026-10-27 ([job][macos-escape-2026-10-27]). Slice 5 (admission end
 to end) is built: trusting the source admits the selected digest, a provider
 is added from an effective driver (off, at a local window), its first check
 starts the driver's process, the host runs Verify tools through the proxy,
@@ -244,11 +244,11 @@ the fail-closed option.
   explicitly. Exec: the runtime alone, by its path and its resolved path. No
   fork, no network, no Mach service. The builder's own denials (the Keychain,
   `/private` outside these grants, other people's home folders) apply as for
-  every confined launch. None of this is measured on macOS yet: the escape
-  tests in `outsideDriverProcess.escape.test.ts` are that measurement, run by
-  the `macos-15` CI job (pending its first run there), and a
-  grant the runtime turns out to need is added only with its observed
-  failure.
+  every confined launch. The escape tests in
+  `outsideDriverProcess.escape.test.ts` measure this on macOS in the
+  `macos-15` CI job, which passed on 2026-10-27 with no grant added
+  ([job][macos-escape-2026-10-27]); a grant the runtime turns out to need is
+  added only with its observed failure.
 - **The environment.** Exactly `PATH=/usr/bin:/bin`, `LANG=en_US.UTF-8`, and
   the process's temporary folder as both `TMPDIR` and `HOME`, so a runtime
   that keeps a cache under its home writes only into the folder removed at
@@ -625,10 +625,10 @@ put a package in front of the person. Controls marked new are this design's;
 
 | Threat                                                              | Control                                                                                                                                                             |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Exfiltrates prompts, code, or files                                 | New, built (macOS acceptance pending): no network, read only its package, no Project path; only egress is the brokered call to the configured origin                |
+| Exfiltrates prompts, code, or files                                 | New, built (escape tests pass on macOS): no network, read only its package, no Project path; only egress is the brokered call to the configured origin              |
 | Steals or replays a credential                                      | New, built for the brokered call: never holds one; host injects the header per request and strips it from responses; broker coordinates absent from the environment |
 | Uses another instance's or provider's credential                    | New, built: one process and one request channel per instance; the lease is keyed by that instance                                                                   |
-| Escapes to the host (files, processes, other extensions)            | New, built (macOS acceptance pending): deny-default Seatbelt without exec or fork; Linux refuses to launch                                                          |
+| Escapes to the host (files, processes, other extensions)            | New, built (escape tests pass on macOS): deny-default Seatbelt without exec or fork; Linux refuses to launch                                                        |
 | Over-claims capabilities (tools, approvals, resume)                 | New, built: host ceiling clamp; `admitTurn` computed by the host; host-run Verify tools                                                                             |
 | Fabricates tool calls or injects instructions in output             | Existing: model output is untrusted; the harness offers, approves, and runs tools under thread authority; taint rules apply                                         |
 | Puts attacker text in Settings or diagnostics                       | New, built: closed reasons only; stderr bounded and kept out of clients                                                                                             |
@@ -723,3 +723,5 @@ run in slice 3 are the security acceptance; the macOS loopback smoke in slice 5
 is the product acceptance. The security architecture threat model carries the
 rogue provider driver abuse case
 ([AC6](../security/security-architecture-threat-model.md#ac6--rogue-outside-provider-driver)).
+
+[macos-escape-2026-10-27]: https://github.com/Ogard-Labs/octant/actions/runs/40537495871/job/122306586053

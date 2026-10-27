@@ -230,8 +230,8 @@ driver, and cover hostile failure text, over-claims, protocol violations, and th
 origin, lease, header, and redirect negatives. The confined process's escape tests
 (`outsideDriverProcess.escape.test.ts`) try the network, files outside the package and its folder,
 the home folder and its keychains, another program, and the host's environment from a real Seatbelt
-process; they run on macOS only, and until they pass there the process control is built but not
-accepted.
+process; they run on macOS only, in the `macos-15` CI job, and passed there on 2026-10-27
+([job](https://github.com/Ogard-Labs/octant/actions/runs/40537495871/job/122306586053)).
 
 ## Server-Side Tool-Call Policy Engine
 
@@ -708,7 +708,7 @@ crosses a server authority or sandbox boundary without additional local compromi
 | Extension quarantine, activation ladder, supervised processes        | Exists          | `packages/plugin-host/src/activation.ts`, `apps/server/src/extensions/`                        |
 | Declared-capability ceiling enforced at call resolution              | Newly specified | policy engine + extension manifest data                                                        |
 | Outside driver proxy: strict decoding, closed failures, brokered key | Exists          | `apps/server/src/providers/outsideHarnessEndpointProxy.ts`, `outsideDriverCeiling.ts`          |
-| Outside driver process confinement                                   | Exists          | `outsideDriverProcess.ts`, `nodeExtensionProcessPort.ts` (macOS escape acceptance pending)     |
+| Outside driver process confinement                                   | Exists          | `outsideDriverProcess.ts`, `nodeExtensionProcessPort.ts` (escape tests pass on macOS CI)       |
 | Remote principal separation, closed action catalog, clamps           | Exists          | `remoteAccessPolicy.ts`, `clientPrincipal.ts`, `remoteRoutePolicy.ts`, `codePolicy.ts`         |
 | Consolidated audit taxonomy with principal attribution               | Newly specified | `packages/contracts/src/events.ts` or audit payload schemas + owning services                  |
 | Escape suite fixtures and exit gate                                  | Newly specified | `apps/server/src/security/escapeSuite/` (new) + domain policy tests                            |

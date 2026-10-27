@@ -1700,7 +1700,7 @@ which runs the development and headless servers
 in `apps/server`), as well as under Node, which runs the packaged desktop's
 server, through `bun run test`. The `macos-15` CI job runs the file under
 Node as well, which is the evidence that `/usr/bin/id -P` finds the home on
-macOS (pending its first run). It also covers a whole stream, its shared
+macOS; it passed there on 2026-10-27 ([job](https://github.com/Ogard-Labs/octant/actions/runs/40537495871/job/122306586053)). It also covers a whole stream, its shared
 bound, a unary call refusing two messages, a `stream` that is not a boolean,
 and a stream that never ends.
 `protobufWire.test.ts` covers protobuf's documented encodings, a negative
