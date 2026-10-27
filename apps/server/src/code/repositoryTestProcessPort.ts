@@ -527,6 +527,13 @@ export class RepositoryTestProcessPort {
     }
     if (settledProcess?.kind === "timed-out" || settledProcess?.kind === "cancelled") {
       const cleanup = await this.#terminate(child, closed, input.interruptFirst === true);
+      // A group that survived cleanup can only be reaped by restart
+      // reconciliation, which needs its receipt on disk.  The write starts
+      // after spawn and can still be in flight when a short timeout expires,
+      // so an uncertain result waits for it to settle; a failed write leaves
+      // the result uncertain with no durable owner, as the receipt-error path
+      // below reports it.
+      if (cleanup.uncertain) await receiptAttempt.catch(() => undefined);
       void receiptAttempt
         .then(async (value) => {
           if (await this.#waitForProcessGroupExit(child.pid ?? -1)) {
