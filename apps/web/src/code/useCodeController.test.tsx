@@ -1397,6 +1397,59 @@ describe("useCodeController", () => {
     await waitFor(() => expect(result.current.turnStatus).toBe("idle"));
   });
 
+  it("carries the host's stated failure category when a turn parks on a refused resume", async () => {
+    const operationId = "70000000-0000-4000-8000-000000000044";
+    async function* frames() {
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 1,
+        occurredAt: now,
+        event: {
+          kind: "operation-result",
+          result: {
+            kind: "provider-turn-state",
+            operationId,
+            state: "running",
+          },
+        },
+      };
+      yield {
+        threadId: ids.thread,
+        operationId,
+        cursor: 2,
+        occurredAt: now,
+        event: {
+          kind: "operation-state",
+          state: "waiting",
+          failure: {
+            category: "stale",
+            message: "Mistral Vibe resume identity does not match this Project.",
+          },
+        },
+      };
+    }
+    const client = fakeClient({
+      executeOperation: vi.fn(async () => ({
+        kind: "provider-turn-state",
+        operationId,
+        state: "running",
+      })) as never,
+      subscribeOperation: vi.fn(() => frames()) as never,
+    });
+    const { result } = renderHook(() =>
+      useCodeController({ activeThreadId: ids.thread, client, reconnectDelayMs: 60_000 }),
+    );
+    await waitFor(() => expect(result.current.activeView?.thread.id).toBe(ids.thread));
+
+    await act(async () => {
+      await result.current.sendFollowUp("continue");
+    });
+    await waitFor(() => expect(result.current.turnStatus).toBe("waiting"));
+    expect(result.current.turnError).toBe("Mistral Vibe resume identity does not match this Project.");
+    expect(result.current.turnErrorCategory).toBe("stale");
+  });
+
   it("stops a running turn by cancelling the provider turn on the host", async () => {
     const operationId = "70000000-0000-4000-8000-000000000043";
     const interrupted = deferred<void>();

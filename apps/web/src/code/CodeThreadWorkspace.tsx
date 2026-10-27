@@ -649,14 +649,14 @@ export function CodeThreadWorkspace(props: CodeThreadWorkspaceProps) {
     ...(turnAccessOverride === undefined ? {} : { requested: turnAccessOverride }),
   });
   const trimmed = draft.trim();
-  // A wait with no request to answer and no limit to show is a refused resume —
-  // the observed case is Mistral Vibe's "resume identity does not match this
-  // Project" — and the refused turn's operation has already ended.
+  // The host stated that this thread's saved provider session cannot be
+  // resumed — the observed case is Mistral Vibe's "resume identity does not
+  // match this Project" — and the refused turn's operation has already ended.
+  // Keyed on the journaled failure category, not on the absence of a request
+  // or a limit, which a future provider could park without refusing a resume.
   const parkedTurn =
     props.controller.turnStatus === "waiting" &&
-    props.controller.providerRequests.length === 0 &&
-    props.controller.turnUsageLimit === undefined &&
-    props.controller.turnError !== undefined;
+    props.controller.turnErrorCategory === "stale";
   const busy =
     props.controller.turnStatus === "sending" ||
     props.controller.turnStatus === "running" ||

@@ -934,6 +934,7 @@ describe("CodeThreadWorkspace", () => {
         controller={controller({
           turnStatus: "waiting",
           turnError: "Mistral Vibe resume identity does not match this Project.",
+          turnErrorCategory: "stale",
         })}
         onNewThreadInProject={onNewThreadInProject}
         threadId={threadId}
@@ -956,6 +957,7 @@ describe("CodeThreadWorkspace", () => {
         controller={controller({
           turnStatus: "waiting",
           turnError: "Mistral Vibe resume identity does not match this Project.",
+          turnErrorCategory: "stale",
         })}
         threadId={threadId}
       />,
@@ -964,6 +966,28 @@ describe("CodeThreadWorkspace", () => {
     await user.type(screen.getByLabelText("Follow-up message"), "Try a different approach");
     expect(screen.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Queue message" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a waiting turn busy when its failure is not a refused resume", async () => {
+    const user = userEvent.setup();
+    render(
+      <CodeThreadWorkspace
+        controller={controller({
+          turnStatus: "waiting",
+          turnError: "Mistral Vibe resume identity does not match this Project.",
+          turnErrorCategory: "failed",
+        })}
+        threadId={threadId}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "New task in this Project" }),
+    ).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Follow-up message"), "Queue this instead");
+    // A busy wait offers to queue the follow-up, where a parked one sends it.
+    expect(screen.getByRole("button", { name: "Queue message" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send follow-up" })).not.toBeInTheDocument();
   });
 
   it("says why the host refused an answer while the request stays open", () => {
