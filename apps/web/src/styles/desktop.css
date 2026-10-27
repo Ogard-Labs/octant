@@ -1,0 +1,66 @@
+/* The Desktop pane: a Code thread's disposable desktop in the dock. It shares
+   the device pane's toolbar, line, stage, and cards; the screen is a plain
+   framed picture fitted to the stage in both directions, with its caption
+   row kept under it. */
+
+.desktop-pane__stage {
+  padding: var(--oct-space-3);
+}
+
+.desktop-pane__fit {
+  container-type: size;
+  display: grid;
+  grid-template-rows: auto var(--device-caption-room);
+  align-content: center;
+  justify-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.desktop-pane__screen {
+  position: relative;
+  display: grid;
+  place-items: center;
+  max-width: 100cqw;
+  max-height: calc(100cqh - var(--device-caption-room));
+  overflow: hidden;
+  border-radius: var(--oct-radius-sm);
+  background: var(--device-screen-off);
+  box-shadow: 0 0 0 1px var(--oct-border);
+  cursor: default;
+  touch-action: none;
+  outline: none;
+}
+
+.desktop-pane__screen:focus-visible,
+.desktop-pane__screen[data-focused="true"] {
+  box-shadow: 0 0 0 2px var(--oct-focus-ring);
+}
+
+.desktop-pane__picture {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100cqw;
+  max-height: calc(100cqh - var(--device-caption-room));
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.desktop-pane__waiting {
+  display: grid;
+  place-items: center;
+  width: min(100cqw, 480px);
+  aspect-ratio: 16 / 10;
+}
+
+.desktop-pane__leases {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+}
+
+.desktop-pane__caption {
+  gap: var(--oct-space-1);
+}

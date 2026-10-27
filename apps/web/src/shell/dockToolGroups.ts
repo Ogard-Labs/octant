@@ -22,7 +22,7 @@ const TOOL_GROUPS: ReadonlyArray<{
     columns: "fit",
     ids: ["files", "terminal", "browser", "tests", "pull-requests"],
   },
-  { label: "Devices", columns: "fit", ids: ["ios-simulator", "android-emulator"] },
+  { label: "Devices", columns: "fit", ids: ["ios-simulator", "android-emulator", "desktop"] },
 ];
 
 export function groupDockTools<T extends { readonly id: RightUtilityDockSurfaceId }>(

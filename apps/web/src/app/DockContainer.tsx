@@ -571,6 +571,7 @@ export const DockContainer = memo(function DockContainer(props: DockContainerPro
             ? undefined
             : threadUtility("android-emulator")
         }
+        desktop={threadUtility("desktop")}
         launchableSurfaces={launchableDockSurfaces}
         launchableReferences={launchableDockReferences}
         onClose={actions.closeDock}
