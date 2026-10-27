@@ -95,10 +95,6 @@ export const KNOWN_ISLANDS: ReadonlyMap<string, string> = new Map([
     "apps/server/src/persistence/sqlitePort.conformance.ts",
     "Conformance kit that sqlitePort.test.ts and sqlitePort.smoke.ts run against the SQLite port; test scaffolding by intent, and reachable only from tests is its correct state. Remove once a product runner imports it or the port's last conformance test is retired.",
   ],
-  [
-    "apps/server/src/computerUse/desktopDaemonPort.ts",
-    "The host's local-daemon port for desktop drivers, run today by its own tests against a real test daemon on a Unix socket. No bundled driver declares a daemon yet: the Cua Spaces driver that the wiring builds it for is the next delivery sub-slice of docs/design/disposable-desktops.md. Remove once the computer-use wiring builds it for that driver.",
-  ],
   // ── Reached only through another island, so an island with it ──
   [
     "packages/contracts/src/codeDebug.ts",
