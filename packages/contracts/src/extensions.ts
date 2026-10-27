@@ -865,6 +865,14 @@ export const ExtensionPackageState = Schema.Struct({
   version: ExtensionPackageVersion,
   digest: ExtensionContentDigest,
   source: ExtensionSource,
+  /**
+   * Present only on a package this host wrote itself for an MCP server the
+   * person added in Settings, by hand or from Connectors. The installed
+   * `source` reads `plugin-package` for those too, and a slug can be chosen by
+   * any plugin author, so neither tells them apart; the host sets this from
+   * its own record of the folders it wrote, never from the package.
+   */
+  addedInSettings: Schema.optional(Schema.Literal(true)),
   compatibility: ExtensionCompatibility,
   activation: ExtensionActivationState,
   components: Schema.Array(

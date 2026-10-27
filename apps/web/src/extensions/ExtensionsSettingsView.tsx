@@ -23,6 +23,7 @@ import type {
   ExtensionProjectPinListing,
 } from "@octant/contracts/extension-rpc";
 import { LOCAL_HOST_ID } from "@octant/contracts/host";
+import { CONNECTOR_PACKAGE_PREFIX } from "@octant/domain";
 import { SettingsDisclosure, SettingsSection } from "../settings/primitives";
 import { AddMcpServerDialog } from "./AddMcpServerDialog";
 import { DiscoveredToolingSection } from "./DiscoveredToolingSection";
@@ -96,6 +97,26 @@ function sourceLabel(source: ExtensionSnapshot["packages"][number]["source"]): s
     case "user-added":
       return "Added by you";
   }
+}
+
+/**
+ * What an installed card is called and where it says the package came from.
+ * The host names a package it wrote for a server added in Settings after its
+ * slug, and reports its source as a plain plugin package, so those cards read
+ * "connector-linear · Plugin package"; the name the person typed is the one
+ * server's own name, and the host's mark says it wrote the package.
+ */
+function installedPackageName(pkg: ExtensionSnapshot["packages"][number]): string {
+  const server =
+    pkg.addedInSettings === true
+      ? pkg.components.find((entry) => entry.component.kind === "mcp-server")
+      : undefined;
+  return server?.component.displayName ?? pkg.displayName ?? pkg.slug ?? pkg.extensionId;
+}
+
+function installedSourceLabel(pkg: ExtensionSnapshot["packages"][number]): string {
+  if (pkg.addedInSettings !== true) return sourceLabel(pkg.source);
+  return pkg.slug?.startsWith(CONNECTOR_PACKAGE_PREFIX) === true ? "Connector" : "Added by you";
 }
 
 /**
@@ -1792,7 +1813,7 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
       <span aria-hidden="true" className="icon-mark">
         <Puzzle aria-hidden="true" className="icon" size={16} strokeWidth={1.5} />
       </span>
-      <span className="extcard-name">{pkg.displayName ?? pkg.slug ?? pkg.extensionId}</span>
+      <span className="extcard-name">{installedPackageName(pkg)}</span>
       <span className="extcard-right">
         <OctantButton
           size="sm"
@@ -1828,7 +1849,7 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
         </OctantButton>
       </span>
       <span className="extcard-src">
-        {sourceLabel(pkg.source)} · v<span>{pkg.version}</span>
+        {installedSourceLabel(pkg)} · v<span>{pkg.version}</span>
       </span>
       <ProviderFitLine packageState={pkg} />
       <div className="extcard-scopes">
@@ -1893,11 +1914,9 @@ function InstalledPackageCard(props: InstalledPackageCardProps) {
                     ? "Disable component"
                     : "Enable component"}
                 </OctantButton>
-                {/* The host reports the packages it writes for servers a
-                    person added as "plugin-package", so the card cannot tell
-                    them apart; the host's sign-in status answers
-                    "not-applicable" for every other server, and the control
-                    then shows nothing. */}
+                {/* The host's sign-in status decides: it answers
+                    "not-applicable" for every server but a hosted one it
+                    wrote, and the control then shows nothing. */}
                 {props.signIn !== undefined && componentState.component.kind === "mcp-server" ? (
                   <McpServerSignInControl
                     client={props.signIn}

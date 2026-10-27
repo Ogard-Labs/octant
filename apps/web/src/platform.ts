@@ -26,6 +26,19 @@ export function isApplePlatform(
   return /^(mac|iphone|ipad|ipod)/i.test(reportedPlatform(navigatorLike));
 }
 
+/**
+ * How copy names the computer this window runs on: "this Mac" on Apple
+ * hardware, "this computer" anywhere else. The host reports no platform of its
+ * own to the renderer, so this answers for the host only where the window is
+ * on the host itself (a loopback client, the only one that can keep a secret);
+ * a paired device's platform says nothing about the host's.
+ */
+export function thisComputerName(
+  navigatorLike: PlatformNavigator | undefined = globalThis.navigator,
+): "this Mac" | "this computer" {
+  return isApplePlatform(navigatorLike) ? "this Mac" : "this computer";
+}
+
 function reportedPlatform(navigatorLike: PlatformNavigator | undefined): string {
   // `userAgentData.platform` ("macOS") is the supported reading. `platform`
   // ("MacIntel") is deprecated but is what current WebKit still answers, and
