@@ -19,6 +19,7 @@ import {
   type WindowId,
 } from "@octant/contracts";
 import { turnBlocksInPlaceRestore } from "@octant/domain/code-policy";
+import { REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE } from "@octant/domain/ssh-target-recovery";
 import { describe, expect, it, vi } from "vitest";
 import {
   CodeOperationService,
@@ -2392,6 +2393,39 @@ describe("CodeOperationService", () => {
     expect(fixture.turns.start.mock.calls[0]?.[0].extensionTools).toBe(tools);
   });
 
+  it("refuses a connector selected for a thread on an SSH target before any extension starts", async () => {
+    // A connector's tools run on this host; a remote turn has only the
+    // harness's tools on the target, so a selection used to be started and
+    // then dropped from the turn without a word.
+    const resolveSelectedExtensions = vi.fn(async () => ({
+      kind: "resolved" as const,
+      context: [],
+      tools: { definitions: [], execute: async () => ({ result: "" }) },
+    }));
+    const fixture = providerTurnFixture({ resolveSelectedExtensions, remoteRoot: true });
+    const result = await fixture.service.execute(ids.window, {
+      ...startProviderTurn,
+      extensionSelections: [
+        {
+          kind: "plugin",
+          extensionId: "94000000-0000-4000-8000-000000000011",
+          packageId: "94000000-0000-4000-8000-000000000012",
+          componentId: "notes-server",
+          packageVersion: "1.0.0",
+          packageDigest: `sha256:${"a".repeat(64)}`,
+          catalogEpoch: `sha256:${"b".repeat(64)}`,
+          origin: { kind: "draft", reference: "notes" },
+        },
+      ],
+    });
+    expect(result).toMatchObject({
+      kind: "operation-failed",
+      failure: { category: "unavailable", message: REMOTE_CODE_THREAD_CONNECTORS_UNAVAILABLE },
+    });
+    expect(resolveSelectedExtensions).not.toHaveBeenCalled();
+    expect(fixture.turns.start).not.toHaveBeenCalled();
+  });
+
   it("refuses a selected skill before Code provider execution when no material resolver exists", async () => {
     const fixture = providerTurnFixture();
     const result = await fixture.service.execute(ids.window, {
@@ -2891,9 +2925,14 @@ function providerTurnFixture(
       | "confirmAgentMessagesDelivered"
       | "takeProductFeedbackForTurn"
     >
-  > & { readonly thread?: CodeThread; readonly recordEvents?: boolean } = {},
+  > & {
+    readonly thread?: CodeThread;
+    readonly recordEvents?: boolean;
+    /** The thread's checkout is a remote root on an SSH target. */
+    readonly remoteRoot?: boolean;
+  } = {},
 ) {
-  const { thread: threadOverride, recordEvents, ...serviceOptions } = options;
+  const { thread: threadOverride, recordEvents, remoteRoot, ...serviceOptions } = options;
   const activeThread = threadOverride ?? thread();
   const turns = {
     start: vi.fn<CodeOperationServiceOptions["turns"]["start"]>(async () => ({ state: "running" })),
@@ -2934,10 +2973,14 @@ function providerTurnFixture(
         decodeCodeCheckoutIdentity({
           id: ids.checkout,
           repositoryId: activeThread.repositoryId,
-          kind: "existing-worktree",
           availability: "available",
-          head: { kind: "branch", name: "feature/exact", oid: "b".repeat(40) },
           observedAt: "2026-07-21T10:00:00.000Z",
+          ...(remoteRoot === true
+            ? { kind: "remote-root", head: { kind: "none" } }
+            : {
+                kind: "existing-worktree",
+                head: { kind: "branch", name: "feature/exact", oid: "b".repeat(40) },
+              }),
         }),
       ),
       canAccessProject: vi.fn(async () => true),

@@ -61,6 +61,44 @@ describe("ComposerProjectSelector", () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it("offers a Project on an SSH target for a thread, marked with where it is", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const remoteEntry: ComposerProjectEntry = {
+      kind: "remote-project",
+      projectId: "00000000-0000-0000-0000-000000000002" as ProjectId,
+      displayName: "Service",
+      location: "build@devbox:/home/build/service",
+    };
+    const { rerender } = render(
+      <ComposerProjectSelector
+        entries={[...entries, remoteEntry]}
+        onAddFolder={() => {}}
+        onSelect={onSelect}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Project: Choose a Project" }));
+    const remote = screen.getByRole("option", { name: /^Service/ });
+    expect(remote).not.toHaveAttribute("aria-disabled");
+    expect(remote).toHaveTextContent("build@devbox:/home/build/service");
+    await user.click(remote);
+    expect(onSelect).toHaveBeenCalledWith(remoteEntry);
+
+    rerender(
+      <ComposerProjectSelector
+        entries={[...entries, remoteEntry]}
+        onAddFolder={() => {}}
+        onSelect={onSelect}
+        selection={{ projectId: remoteEntry.projectId, displayName: "Service" }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Project: Service" }));
+    expect(screen.getByRole("option", { name: /^Service/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
   it("offers the default folder as a way to start without choosing a Project", async () => {
     const onSelect = vi.fn();
     render(

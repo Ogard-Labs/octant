@@ -18,6 +18,8 @@ import { projectViewEnvironmentOptionsFromHosts } from "../code/codeProjectViewM
 import type { CodeReadCursorStore, CodeThreadRestOutcome } from "../code/useCodeController";
 import { mergeThreadRowActions } from "../projects/mergeThreadRowActions";
 import { ProjectSidebarSection } from "../projects/ProjectSidebarSection";
+import { RemoteProjectsSidebarGroup } from "../projects/RemoteProjectsSidebarGroup";
+import { useRemoteCodeProjects } from "../projects/sshRemoteProjectEntries";
 import type { ThreadRowActions } from "../projects/ThreadRowMenu";
 import type { useProjectController } from "../projects/useProjectController";
 import {
@@ -473,6 +475,22 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
   const selectWorkSideThread = workSideRows.select;
   const workSideRowActions = workSideRows.actions;
   const codeThreadRowActions = rowActions.code;
+  // Projects on SSH targets are not in the Project catalog, so their threads
+  // are listed under them in a group of their own rather than as unfiled.
+  const remoteCodeProjects = useRemoteCodeProjects().projects;
+  const remoteProjectIds = useMemo(
+    () => new Set(remoteCodeProjects.map((project) => String(project.projectId))),
+    [remoteCodeProjects],
+  );
+  const localCodeProjectThreads = useMemo(
+    () =>
+      remoteProjectIds.size === 0
+        ? codeProjectThreads
+        : codeProjectThreads.filter(
+            (thread) => thread.projectId === undefined || !remoteProjectIds.has(thread.projectId),
+          ),
+    [codeProjectThreads, remoteProjectIds],
+  );
   const workThreadRowActions = rowActions.work;
 
   return (
@@ -610,141 +628,159 @@ export const SidebarContainer = memo(function SidebarContainer(props: SidebarCon
               </OctantButton>
             </OctantAlert>
           ) : (
-            <ProjectSidebarSection
-              projectViewsEnabled
-              projectViewsMode={activeMode === "code" ? "code" : "work"}
-              projectViewSwitcherPresentation={settings.projectViewSwitcherPresentation}
-              onProjectViewSwitcherPresentationChange={(presentation) =>
-                void updateSettings({
-                  projectViewSwitcherPresentation: presentation,
-                })
-              }
-              projectViewEnvironmentOptions={projectViewEnvironmentOptionsFromHosts(hosts)}
-              activityMode={activeMode === "code" ? "code" : "work"}
-              {...(sidebarFilterQuery === "" ? {} : { searchQuery: sidebarFilterQuery })}
-              {...(sidebarListRequest === undefined ? {} : { listRequest: sidebarListRequest })}
-              rowProperties={settings.sidebarRowProperties}
-              onRowPropertiesChange={(sidebarRowProperties) => {
-                void updateSettings({ sidebarRowProperties });
-              }}
-              {...(activeProjectId === undefined ? {} : { activeProjectId })}
-              {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
-                ? { expandProjectThreadsRequest: chatProjectThreadListRequest }
-                : {})}
-              {...(activeSidebarDestination === undefined &&
-              ((activeMode === "chat" &&
-                chatStatus === "ready" &&
-                activeChatThreadId !== undefined) ||
-                (activeMode === "code" &&
-                  codeStatus === "ready" &&
-                  activeCodeThreadId !== undefined) ||
-                (activeMode === "work" &&
-                  workStatus === "ready" &&
-                  activeWorkThreadId !== undefined))
-                ? {
-                    activeThreadId:
-                      activeMode === "code"
-                        ? String(activeCodeThreadId)
-                        : activeMode === "work"
-                          ? String(activeWorkThreadId)
-                          : String(activeChatThreadId),
-                  }
-                : {})}
-              {...(openSidebarThreadIds === undefined || openSidebarThreadIds.length === 0
-                ? {}
-                : { openThreadIds: openSidebarThreadIds })}
-              archivedProjects={workSide ? workSideArchivedProjects : archivedProjects}
-              availabilityByProject={availabilityByProject}
-              contextHealthByProject={contextHealthByProject}
-              onOpenContextHealth={(projectId) => void openProjectContextHealth(projectId)}
-              {...(activeMode === "chat" && chatStatus === "ready"
-                ? {
-                    addProjectLabel: "chat-project" as const,
-                    onAddProject: () => openProjectCreate(),
-                    unfiledLabel: "No project" as const,
-                  }
-                : {
-                    onAddProject: () => openProjectCreate(),
-                    unfiledLabel: "No project" as const,
-                  })}
-              onArchive={(projectId) => void actions.setProjectArchived(projectId, true)}
-              onColorChange={(projectId, color) => {
-                void actions.setProjectColor(projectId, color);
-              }}
-              onMove={(projectId, pinned) => void actions.moveProject(projectId, pinned)}
-              {...(activeMode === "chat"
-                ? {
-                    newThreadVerb: "chat" as const,
-                    onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
-                  }
-                : activeMode === "code"
+            <>
+              <ProjectSidebarSection
+                projectViewsEnabled
+                projectViewsMode={activeMode === "code" ? "code" : "work"}
+                projectViewSwitcherPresentation={settings.projectViewSwitcherPresentation}
+                onProjectViewSwitcherPresentationChange={(presentation) =>
+                  void updateSettings({
+                    projectViewSwitcherPresentation: presentation,
+                  })
+                }
+                projectViewEnvironmentOptions={projectViewEnvironmentOptionsFromHosts(hosts)}
+                activityMode={activeMode === "code" ? "code" : "work"}
+                {...(sidebarFilterQuery === "" ? {} : { searchQuery: sidebarFilterQuery })}
+                {...(sidebarListRequest === undefined ? {} : { listRequest: sidebarListRequest })}
+                rowProperties={settings.sidebarRowProperties}
+                onRowPropertiesChange={(sidebarRowProperties) => {
+                  void updateSettings({ sidebarRowProperties });
+                }}
+                {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                {...(activeMode === "chat" && chatProjectThreadListRequest !== undefined
+                  ? { expandProjectThreadsRequest: chatProjectThreadListRequest }
+                  : {})}
+                {...(activeSidebarDestination === undefined &&
+                ((activeMode === "chat" &&
+                  chatStatus === "ready" &&
+                  activeChatThreadId !== undefined) ||
+                  (activeMode === "code" &&
+                    codeStatus === "ready" &&
+                    activeCodeThreadId !== undefined) ||
+                  (activeMode === "work" &&
+                    workStatus === "ready" &&
+                    activeWorkThreadId !== undefined))
                   ? {
-                      newThreadVerb: "thread" as const,
+                      activeThreadId:
+                        activeMode === "code"
+                          ? String(activeCodeThreadId)
+                          : activeMode === "work"
+                            ? String(activeWorkThreadId)
+                            : String(activeChatThreadId),
+                    }
+                  : {})}
+                {...(openSidebarThreadIds === undefined || openSidebarThreadIds.length === 0
+                  ? {}
+                  : { openThreadIds: openSidebarThreadIds })}
+                archivedProjects={workSide ? workSideArchivedProjects : archivedProjects}
+                availabilityByProject={availabilityByProject}
+                contextHealthByProject={contextHealthByProject}
+                onOpenContextHealth={(projectId) => void openProjectContextHealth(projectId)}
+                {...(activeMode === "chat" && chatStatus === "ready"
+                  ? {
+                      addProjectLabel: "chat-project" as const,
+                      onAddProject: () => openProjectCreate(),
+                      unfiledLabel: "No project" as const,
+                    }
+                  : {
+                      onAddProject: () => openProjectCreate(),
+                      unfiledLabel: "No project" as const,
+                    })}
+                onArchive={(projectId) => void actions.setProjectArchived(projectId, true)}
+                onColorChange={(projectId, color) => {
+                  void actions.setProjectColor(projectId, color);
+                }}
+                onMove={(projectId, pinned) => void actions.moveProject(projectId, pinned)}
+                {...(activeMode === "chat"
+                  ? {
+                      newThreadVerb: "chat" as const,
                       onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
                     }
-                  : activeMode === "work"
+                  : activeMode === "code"
                     ? {
                         newThreadVerb: "thread" as const,
                         onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
                       }
-                    : {})}
-              onReorder={(projectId, pinned, beforeProjectId, afterProjectId) =>
-                void actions.moveProject(projectId, pinned, beforeProjectId, afterProjectId)
-              }
-              onRestore={(projectId) => void actions.setProjectArchived(projectId, false)}
-              onProjectOpen={openSelectedProject}
-              {...(workSide
-                ? {
-                    onSelectThread: selectWorkSideThread,
-                    threadActions: workSideRowActions,
-                    threads: workSideThreads,
-                  }
-                : activeMode === "code"
+                    : activeMode === "work"
+                      ? {
+                          newThreadVerb: "thread" as const,
+                          onNewThreadInProject: (projectId) => void openDraftInProject(projectId),
+                        }
+                      : {})}
+                onReorder={(projectId, pinned, beforeProjectId, afterProjectId) =>
+                  void actions.moveProject(projectId, pinned, beforeProjectId, afterProjectId)
+                }
+                onRestore={(projectId) => void actions.setProjectArchived(projectId, false)}
+                onProjectOpen={openSelectedProject}
+                {...(workSide
                   ? {
-                      onSelectThread: selectCodeThread,
-                      threadActions: codeThreadRowActions,
-                      onRenameThread: renameCodeThread,
-                      ...(markedThreadGroups === undefined
-                        ? codeStatus === "ready"
-                          ? { threads: codeProjectThreads.map(withProviderMark) }
-                          : {}
-                        : { threadGroups: markedThreadGroups }),
+                      onSelectThread: selectWorkSideThread,
+                      threadActions: workSideRowActions,
+                      threads: workSideThreads,
                     }
-                  : activeMode === "work"
+                  : activeMode === "code"
                     ? {
-                        onSelectThread: selectWorkThread,
-                        threadActions: workThreadRowActions,
+                        onSelectThread: selectCodeThread,
+                        threadActions: codeThreadRowActions,
+                        onRenameThread: renameCodeThread,
                         ...(markedThreadGroups === undefined
-                          ? workStatus === "ready"
-                            ? { threads: workProjectThreads.map(withProviderMark) }
+                          ? codeStatus === "ready"
+                            ? { threads: localCodeProjectThreads.map(withProviderMark) }
                             : {}
                           : { threadGroups: markedThreadGroups }),
                       }
+                    : activeMode === "work"
+                      ? {
+                          onSelectThread: selectWorkThread,
+                          threadActions: workThreadRowActions,
+                          ...(markedThreadGroups === undefined
+                            ? workStatus === "ready"
+                              ? { threads: workProjectThreads.map(withProviderMark) }
+                              : {}
+                            : { threadGroups: markedThreadGroups }),
+                        }
+                      : {})}
+                {...(activeMode === "chat"
+                  ? {}
+                  : {
+                      threadStatus: threadStatus,
+                      ...(threadErrorMessage === undefined
+                        ? {}
+                        : { threadErrorMessage: threadErrorMessage }),
+                      onRetryThreads: retryActiveModeThreads,
+                    })}
+                projects={workSide ? workSideProjects : projects}
+                {...(workSide &&
+                workSideProjects.length === 0 &&
+                allProjects.some(
+                  (project) => project.type === "code" && project.lifecycle === "active",
+                )
+                  ? {
+                      otherModeProjectsHint: {
+                        message: "Your Projects are in Code.",
+                        actionLabel: "Switch to Code",
+                        onSwitch: () => selectMode("code"),
+                      },
+                    }
+                  : {})}
+              />
+              {activeMode === "code" && codeStatus === "ready" ? (
+                <RemoteProjectsSidebarGroup
+                  actions={codeThreadRowActions}
+                  {...(activeProjectId === undefined ? {} : { activeProjectId })}
+                  {...(activeSidebarDestination === undefined && activeCodeThreadId !== undefined
+                    ? { activeThreadId: String(activeCodeThreadId) }
                     : {})}
-              {...(activeMode === "chat"
-                ? {}
-                : {
-                    threadStatus: threadStatus,
-                    ...(threadErrorMessage === undefined
-                      ? {}
-                      : { threadErrorMessage: threadErrorMessage }),
-                    onRetryThreads: retryActiveModeThreads,
-                  })}
-              projects={workSide ? workSideProjects : projects}
-              {...(workSide &&
-              workSideProjects.length === 0 &&
-              allProjects.some(
-                (project) => project.type === "code" && project.lifecycle === "active",
-              )
-                ? {
-                    otherModeProjectsHint: {
-                      message: "Your Projects are in Code.",
-                      actionLabel: "Switch to Code",
-                      onSwitch: () => selectMode("code"),
-                    },
-                  }
-                : {})}
-            />
+                  {...(openSidebarThreadIds === undefined
+                    ? {}
+                    : { openThreadIds: openSidebarThreadIds })}
+                  onOpenProject={(projectId) => void openDraftInProject(projectId)}
+                  onSelectThread={selectCodeThread}
+                  projects={remoteCodeProjects}
+                  threads={codeProjectThreads.map(withProviderMark)}
+                />
+              ) : null}
+            </>
           )}
         </>
       }

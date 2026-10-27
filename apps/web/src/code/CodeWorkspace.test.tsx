@@ -26,6 +26,41 @@ describe("CodeWorkspace", () => {
     expect(screen.getByText("Loading exact checkout status and diff evidence.")).toBeVisible();
   });
 
+  it("says a remote thread's Git and terminal tabs are not available here, and asks the host nothing", () => {
+    const client = codeClient();
+    const base = controller("approval-gated") as {
+      readonly activeView: { readonly checkout: object };
+    };
+    const remote = {
+      ...base,
+      activeView: {
+        ...base.activeView,
+        checkout: { ...base.activeView.checkout, kind: "remote-root", head: { kind: "none" } },
+      },
+    } as never;
+    for (const [kind, title] of [
+      ["code-git", "Git"],
+      ["code-terminal", "Terminal"],
+    ] as const) {
+      const { unmount } = render(
+        <CodeWorkspace
+          client={client}
+          controller={remote}
+          createUuid={uuidFactory()}
+          tab={tab(kind, title)}
+        />,
+      );
+      expect(screen.getByRole("heading", { name: `${title} is not available here` })).toBeVisible();
+      expect(
+        screen.getByText(
+          "This thread's checkout is on an SSH target, where this operation is not available.",
+        ),
+      ).toBeVisible();
+      unmount();
+    }
+    expect(client.executeOperation).not.toHaveBeenCalled();
+  });
+
   it("loads an exact authoritative Git observation for Git tabs", async () => {
     const client = codeClient();
     (client.executeOperation as ReturnType<typeof vi.fn>).mockResolvedValue(gitObservation);

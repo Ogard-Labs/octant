@@ -850,12 +850,14 @@ a `remote-root` checkout no local Files, Git, terminal, test, or checkpoint
 path resolves, and the Code turn runtime runs its turns on the native harness
 with that remote tool set alone; every other provider is refused before
 anything launches, other Code operations on the thread are refused, and Full
-access is not offered there yet. The composer does not offer such a Project
-yet, so a local window starts no remote thread; a paired device can, under
-the Project's authority. A person's terminals and managed worktrees on a remote-bound
-Project are built, from a local window (Settings › SSH targets) or the local
-CLI, under the same admission; the composer's Project picker lists such a
-Project without offering it for a thread. The provider-sdk seam for placing a
+access is not offered there yet. A local desktop window lists such Projects
+in the Code sidebar and the composer and starts their threads: a Code draft
+in one binds the window to it with no folder of this host (`boundRoot` null),
+so root-backed surfaces fail closed, and only the thread's own view opens; a
+paired device reaches them under the Project's authority. A person's
+terminals and managed worktrees on a remote-bound Project are built, from a
+local window (Settings › SSH targets) or the local CLI, under the same
+admission. The provider-sdk seam for placing a
 runtime on a target, its conformance, and the executor's confined runtime
 launches with their own proxy on this host are built, and the ACP driver
 declares placement for a profile whose whole launch can be stated on a

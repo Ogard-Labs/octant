@@ -40,9 +40,9 @@ export type ComposerProjectEntry =
   | { readonly kind: "unfiled" }
   | { readonly kind: "add-folder" }
   /**
-   * A Code Project whose folder is on an SSH target. It is listed so the
-   * person sees where it is, and offered only once threads can run there;
-   * until then it carries the reason it cannot be chosen.
+   * A Code Project whose folder is on an SSH target, listed with where it is.
+   * A window that cannot start a thread there (one with no SSH target
+   * administration) lists it with the reason it cannot be chosen.
    */
   | {
       readonly kind: "remote-project";
@@ -50,7 +50,7 @@ export type ComposerProjectEntry =
       readonly displayName: string;
       /** `destination:folder`, as the target names it. */
       readonly location: string;
-      readonly disabledReason: string;
+      readonly disabledReason?: string;
     }
   /** Binds a folder on an SSH target, in Settings › SSH targets. */
   | { readonly kind: "add-remote" }
@@ -182,7 +182,7 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
         return;
       }
       if (entry.kind === "default-folder" && entry.disabled === true) return;
-      if (entry.kind === "remote-project") return;
+      if (entry.kind === "remote-project" && entry.disabledReason !== undefined) return;
       if (entry.kind === "add-folder") props.onAddFolder();
       else if (entry.kind === "add-remote") props.onAddRemote?.();
       else props.onSelect(entry);
@@ -392,16 +392,17 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                 )}
                 {remoteEntries.map((entry, offset) => {
                   const index = savedEntries.length + offset;
+                  const isSelected = String(entry.projectId) === String(props.selection?.projectId);
                   return (
                     <OctantButton
-                      aria-disabled
-                      aria-selected={false}
-                      className={optionClass(index)}
+                      {...(entry.disabledReason === undefined ? {} : { "aria-disabled": true })}
+                      aria-selected={isSelected}
+                      className={optionClass(index, isSelected)}
                       id={`${listboxId}-option-${index}`}
                       key={String(entry.projectId)}
                       onClick={() => activate(entry)}
                       role="option"
-                      title={entry.disabledReason}
+                      title={entry.disabledReason ?? entry.location}
                       type="button"
                       variant="ghost"
                     >
@@ -413,10 +414,20 @@ export function ComposerProjectSelector(props: ComposerProjectSelectorProps) {
                         <span className="composer-folder-selector__option-path">
                           {entry.location}
                         </span>
-                        <span className="composer-folder-selector__option-reason">
-                          {entry.disabledReason}
-                        </span>
+                        {entry.disabledReason === undefined ? null : (
+                          <span className="composer-folder-selector__option-reason">
+                            {entry.disabledReason}
+                          </span>
+                        )}
                       </span>
+                      {isSelected ? (
+                        <Check
+                          aria-hidden="true"
+                          className="composer-folder-selector__check"
+                          size={14}
+                          strokeWidth={2}
+                        />
+                      ) : null}
                     </OctantButton>
                   );
                 })}

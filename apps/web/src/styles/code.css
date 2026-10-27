@@ -2065,6 +2065,12 @@ html[data-octant-increased-contrast="true"] .github-picker__option[aria-selected
   min-width: 0;
   color: var(--oct-fg);
 }
+/* Why a thread on an SSH target takes no message now, above its composer. */
+.code-thread-workspace__remote-notice {
+  margin-block: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+}
 .code-checkout-bar {
   display: flex;
   min-width: 0;

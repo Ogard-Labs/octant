@@ -3029,6 +3029,14 @@ form > .work-composer-adapter__attachments {
   font-size: var(--oct-text-sm);
 }
 
+/* Why a thread on an SSH target cannot start yet: a fact, not a failure. */
+.code-composer-adapter__notice {
+  margin: 0;
+  color: var(--oct-meta);
+  font-size: var(--oct-text-sm);
+  text-align: center;
+}
+
 /* Quiet worktree-source status line below the context strip. */
 .code-worktree-source {
   display: grid;

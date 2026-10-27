@@ -1193,9 +1193,12 @@ and New Project from GitHub repository. Choosing GitHub swaps the menu's body
 for the managed-clone flow in place, so there is no second repository control
 beside the Project. In a desktop window's Code composer, Projects bound to a
 folder on an SSH target follow the saved Projects under "On SSH targets",
-each with its `destination:folder` and, until threads run there, disabled with
-the reason in the row; New Project on an SSH target… opens Settings › SSH
-targets at binding. Access is
+each with its `destination:folder`; choosing one turns the branch chip into
+that folder and narrows Access to Plan and Ask for approvals, with no
+Workspace control, and a sentence under the prompt says why Start is
+unavailable while the target is not connected
+([Remote SSH environments](docs/design/remote-ssh-environments.md#in-a-local-window)).
+New Project on an SSH target… opens Settings › SSH targets at binding. Access is
 a titled menu on the prompt card, next to the model picker, and carries the
 "Remember for this Project" switch.
 Every composer's control row is two groups with the row's free space between

@@ -32,10 +32,11 @@ remote-bound Project through the Code commands, and the Code turn runtime
 composes that tool set for a native-harness thread there, refusing every
 other provider before anything launches
 ([Remote-bound Code threads](#remote-bound-code-threads),
-`apps/server/src/sshTarget/sshRemoteCodeThreads.ts`). The composer does not
-offer a remote-bound Project yet, and a local window's workspace cannot name
-one, so a local window starts no such thread until that surface lands; a
-paired device can, under the Project's authority. Reconnecting on its own
+`apps/server/src/sshTarget/sshRemoteCodeThreads.ts`). A local desktop window
+lists remote-bound Projects in the Code sidebar and the composer, binds to
+one, and starts and uses its threads
+([In a local window](#in-a-local-window)); a paired device reaches them
+under the Project's authority. Reconnecting on its own
 and restart recovery of remote turns are not built. Slice 6 is built in part:
 the provider-sdk process-placement seam, its conformance harness, and this
 host's admission of a placed runtime from its driver's declaration
@@ -561,9 +562,9 @@ direction:
   `ssh-remote-project` aggregate, apart from local Projects, so no local
   Files, Git, terminal, or provider path can read a remote root as a folder
   on this Mac. Its threads are ordinary Code threads on a `remote-root`
-  checkout ([Remote-bound Code threads](#remote-bound-code-threads)). The
-  composer's Project picker lists it (slice 7) but does not offer it for a
-  thread yet.
+  checkout ([Remote-bound Code threads](#remote-bound-code-threads)), which
+  a local window starts from the composer
+  ([In a local window](#in-a-local-window)).
 - **Reads outside a turn run in Plan.** Binding, listing, and reading a file
   are file operations, and Git status and diff are Octant's own launches; each
   is admitted only when this connection holds a passing Plan attestation, the
@@ -725,15 +726,81 @@ These rules settle what the step needs, each in the fail-closed direction:
   `target-disconnected`, aborting its calls; a session lost before the turn
   is taken on refuses the start. A new turn binds only to a session that
   attested anew.
-- **Not built in 5b.** Reconnecting on its own; restart recovery of remote
+- **A connector or plugin is refused, not dropped.** Its tools run on this
+  host, so a send that selects one on a remote thread is refused before any
+  extension is resolved or started, and no pinned extension starts for a
+  remote turn.
+- **Not built.** Reconnecting on its own; restart recovery of remote
   turns (a restart ends every session and leaves an in-flight provider turn
   waiting as for any turn, so a resumed turn binds again only to a session
   the person connected and that attested anew, and nothing reconnects
-  unasked); the composer offering a remote-bound Project and a local
-  window's workspace naming one, so no local window starts such a thread
-  yet; refusing a target's removal while one of its threads runs (removal
-  today ends the turn `target-disconnected`); and the turn runtime composing
-  a placed ACP thread.
+  unasked); refusing a target's removal while one of its threads runs
+  (removal today ends the turn `target-disconnected`); the turn runtime
+  composing a placed ACP thread; observing a remote thread's delivery
+  target, so nothing marks one Done from Git evidence; and listing remote
+  threads in the sidebar's activity and status arrangements, which show the
+  Project tree's local Projects only.
+
+#### In a local window
+
+A desktop window reads its remote-bound Projects and their targets' status
+through its main process (the local administration routes), every five
+seconds while it has any and every thirty while it has none, and every
+surface below shows only what that read and the Code bootstrap report. The
+host binds the window, creates the thread, and admits each turn and call
+itself; the window grants nothing. These rules settle what the step needs,
+each in the fail-closed direction:
+
+- **A window binds with no folder of this host.** The shell service reads
+  remote-bound Projects from the SSH target store. A Code draft that names
+  one binds the window's Code context to it with `boundRoot` null, so Files,
+  Browser, and every other root-backed surface fail closed, and the binding
+  survives bootstrap. A remote thread opens only its own view (`code-overview`):
+  its terminal, Git, test, file, pull-request, Apple, and Browser tabs do not
+  resolve, and a Project tab stays local-only, since the Project overview
+  reads the local catalog.
+- **The sidebar lists them apart.** In Code, the sidebar shows "On SSH
+  targets" under the local Projects: each Project's name, its
+  `destination:folder`, whether its target is connected, and its threads.
+  Choosing a Project opens a new thread's composer in it, which is the
+  binding; its threads are no longer listed as unfiled.
+- **The composer offers only what the host runs.** The Project picker
+  offers remote-bound Projects under "On SSH targets". For one, the
+  composer names the folder on the target and offers the bound folder only
+  (no branch, worktree, or Start from origin); Plan and Ask for approvals
+  only, with nothing remembered for the Project; every provider but the
+  native harness listed unavailable with the reason; and no Browser,
+  Computer, or connector, each shown blocked if typed. It offers no Start
+  while the host's status of the target refuses the chosen posture
+  (`remoteCodeTurnReadiness` in `packages/domain/src/sshTargetRecovery.ts`
+  reads the connection and the admission the host reported), and says why.
+  The thread is created through `prepare-code-project-checkout` and
+  `create-code-thread` on the `remote-root` checkout; the planner refuses a
+  managed worktree there.
+- **The thread view keeps only the turn.** A remote thread names
+  `destination:folder` where a local one names its branch, and offers no
+  fork, merge-back, checkpoint, rewind, restore, `@` path mention, scaffold,
+  workspace preset, changed-files count, or pull request. Raising its access
+  stops at Ask for approvals. While the host reports its target unable to take
+  the next turn's posture, the thread says why and offers no send until the
+  host reports it back. Its other tabs say the operation is not available on
+  an SSH target (the host's own refusal sentence), and the dock keeps only
+  Side Chat, Document, Canvas, Plan, and Agents. The board names its
+  checkout "On an SSH target".
+- **A window that cannot read SSH targets decides nothing.** Only a desktop
+  window reads them. Any other window lists no remote-bound Project and gates
+  no send on a target's status; the host refuses what it must.
+
+**Rationale: Ask for approvals, not Auto-accept edits.** Admission would
+admit Auto-accept edits on a target that attests it, but a remote turn takes
+no checkpoint, so an edit accepted without review has no way back on the
+target. The window offers Plan and Ask for approvals, and each write there is
+approved. The host enforces the same rule: `create-code-thread` on a
+`remote-root` checkout refuses Auto-accept edits and Full access, and
+`change-code-thread-access` on such a thread refuses raising it to either,
+before any approval is consulted (`remoteCodeThreadPostureRefusal` in
+`packages/domain/src/sshTargetRecovery.ts`, applied in
+`apps/server/src/code/codeService.ts`).
 
 ### Terminals and managed worktrees
 
@@ -826,10 +893,10 @@ remove` without force: a worktree holding a change, an untracked file, or a
   than leave a shell nothing can reach again. A key is pinned only after the
   person confirms the fingerprint in a dialog that also says what the pin and
   the attestation do not prove. Any other window shows where to do it.
-- **The Project picker lists a remote-bound Project without offering it.**
-  In Code, the composer's picker lists remote-bound Projects under "On SSH
-  targets" with their `destination:folder`, disabled with the reason that
-  threads on SSH targets are not available yet, and offers "New Project on an
+- **The Project picker lists remote-bound Projects.** In Code, the
+  composer's picker lists them under "On SSH targets" with their
+  `destination:folder` and offers them for a thread
+  ([In a local window](#in-a-local-window)), and offers "New Project on an
   SSH target…", which opens Settings › SSH targets at binding. A thread is
   never started in a local Project in their place.
 
@@ -1622,9 +1689,17 @@ agent can implement and verify it in a Linux container with OpenSSH installed an
    the executor's side of it, and on 2026-10-27 (5b) as thread creation in a
    remote-bound Project and the Code turn runtime composing the tool set for
    a native-harness thread there
-   ([Remote-bound Code threads](#remote-bound-code-threads)); reconnecting on
-   its own, restart recovery of remote turns, and the composer offering a
-   remote-bound Project remain (see the delivery state). 5b's evidence is
+   ([Remote-bound Code threads](#remote-bound-code-threads)), and the same
+   day as a local window's binding, sidebar, composer, and thread view
+   ([In a local window](#in-a-local-window)); reconnecting on its own and
+   restart recovery of remote turns remain (see the delivery state). The
+   window step's evidence is `shellService.test.ts` (a Code draft binds the
+   window with `boundRoot` null, the binding survives bootstrap with Files
+   unavailable, a remote thread's view opens and its terminal is refused),
+   `codeOperationService.test.ts` (a connector refused before any extension
+   resolves), `codeThreadCreate.test.ts`, and the web tests of the sidebar
+   group, Project picker, composer, thread view, Code workspace tabs, dock,
+   and board. 5b's evidence is
    `sshTargetLoopback.smoke.test.ts` (a Code thread created in a
    remote-bound Project through the Code service and its harness turn run
    through the Code turn runtime over a model stub: a read, an edit, a test,
