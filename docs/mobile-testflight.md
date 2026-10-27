@@ -187,7 +187,8 @@ physical Android phone, plus the Android items at its end.
   hardware (or record that the phone offers none).
 - Android: with only a face unlock that Android rates Class 2 enrolled beside
   a PIN, confirm unlock and approval ask for the PIN; with a fingerprint
-  enrolled, confirm it is accepted.
+  enrolled, confirm it is accepted. On Android 9 or 10, confirm the prompt
+  opens without a crash (it may accept the face unlock there).
 - Android: confirm the app's system settings list no location or overlay
   permission, and that Android backup offers no Octant data.
 - Android: record the EAS build ID, version code, device, Android version and

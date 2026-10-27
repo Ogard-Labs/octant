@@ -39,8 +39,10 @@ directly.
    TestFlight environment's token may be reused, or a separate one made so
    either can be revoked alone.
 3. From `apps/mobile`, signed in to Expo as the maintainer, run
-   `eas credentials --platform android`, choose the `android-internal`
-   profile, and let EAS generate the keystore. Keep EAS as its only store.
+   `eas credentials --platform android`, choose the `android-internal` build
+   profile, then "Keystore: Manage everything needed to build your project"
+   and "Set up a new keystore", and let EAS generate it. Keep EAS as its only
+   store.
 4. Confirm the environment allows only `main` and has the reviewer before
    running the workflow.
 
@@ -70,7 +72,8 @@ Treat the states independently:
   software only, from a probe key made the same way.
 - **Biometric gate.** Unlock and high-risk confirmations accept Class 3
   biometrics or the device PIN, pattern, or password, never a Class 2 face
-  unlock.
+  unlock. Android 9 and 10 cannot ask for that pair, so there the prompt
+  keeps Android's default and also accepts a Class 2 biometric.
 - **Pinned TLS.** The in-tree exchange (`modules/octant-pinned-tls/android`)
   dials the judged address and passes the TLS 1.3 handshake only for the
   pinned key. The server smoke test runs this Kotlin source on a JVM against a

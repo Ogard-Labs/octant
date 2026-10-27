@@ -117,7 +117,7 @@ These rules hold for every phase and are not reopened by any slice:
 - Acceptance is the [device acceptance pass](../mobile-testflight.md#device-acceptance-pass)
   on a physical Android device, with the build and device recorded.
 
-#### Android build rules
+### Android build rules
 
 The operator steps live in the
 [Android runbook](../mobile-android-internal.md).
@@ -149,7 +149,11 @@ The operator steps live in the
   would leave a lost phone's recents unprotected.
 - Unlock and high-risk confirmations ask Android for Class 3 biometrics or the
   device credential, never Class 2 (a camera face unlock). Reason: Face ID and
-  Touch ID are Class 3, so this is parity, not a stronger rule.
+  Touch ID are Class 3, so this is parity, not a stronger rule. Android 9 and
+  10 (API 28 and 29) are the exception: AndroidX refuses to pair Class 3 with
+  the device credential there, throwing on the main thread, which would crash
+  every prompt, so those two versions keep Android's default (any enrolled
+  biometric or the credential).
 - Secure storage keeps expo-secure-store's keystore-backed encryption. Settings
   states where the keystore holds a key made the same way (secure hardware or
   software only), from a probe key made and deleted in one call; a damaged or
