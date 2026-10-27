@@ -13,10 +13,10 @@ import { RemoveHostPanel } from "../hosts/RemoveHostPanel";
 import { createUnavailableNotificationPermissionPort } from "../notifications/notificationPermissionPort";
 import { PushNotificationsPanel } from "../notifications/PushNotificationsPanel";
 import { createUnavailableDeviceIntegrityPort } from "../security/deviceIntegrityPort";
+import { mobileKeyStorageProtection, mobileScreenshotPrivacy } from "../security/deviceProtection";
 import { createExpoBiometricAuthenticator } from "../security/expoBiometricAuthenticator";
 import { PrivacySecurityPanel } from "../security/PrivacySecurityPanel";
 import { AppearanceBackgroundPanel } from "../appearance/AppearanceBackgroundPanel";
-import { createUnavailableScreenshotPrivacyPort } from "../security/screenshotPrivacyPort";
 import { useMobileSession } from "../session/MobileSessionContext";
 import { createMobileHostRemover } from "../session/mobileSessionLifecycle";
 import { mobileRadii, mobileSpacing, mobileTypography } from "../theme/tokens";
@@ -77,7 +77,6 @@ function HostsBody(props: {
   const authenticator = useMemo(() => createExpoBiometricAuthenticator(), []);
   const notificationPermission = useMemo(() => createUnavailableNotificationPermissionPort(), []);
   const deviceIntegrity = useMemo(() => createUnavailableDeviceIntegrityPort(), []);
-  const screenshotPrivacy = useMemo(() => createUnavailableScreenshotPrivacyPort(), []);
   const healthTint = {
     neutral: colors.textSecondary,
     warning: colors.warning,
@@ -327,7 +326,8 @@ function HostsBody(props: {
                     : "idle"
               }
               integrity={deviceIntegrity}
-              screenshotPrivacy={screenshotPrivacy}
+              keyStorage={mobileKeyStorageProtection}
+              screenshotPrivacy={mobileScreenshotPrivacy}
             />
           </>
         )}
