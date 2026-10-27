@@ -147,6 +147,13 @@ export function providerRefusalCopy(
         "Octant runs this provider only once its driver package is installed, trusted, and enabled.",
     };
   }
+  if (reason === "driver-incompatible") {
+    return {
+      reason: "This provider's driver package does not speak a protocol Octant can use.",
+      nextStep:
+        "Octant stopped the driver. Install a version of the package built for this Octant, then check the connection again.",
+    };
+  }
   if (reason === "runtime-unavailable") {
     return {
       reason: `The ${label} runtime could not be started.`,

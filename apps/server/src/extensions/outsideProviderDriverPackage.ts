@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ExtensionSource } from "@octant/contracts/extensions";
+import { HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS } from "@octant/contracts/outside-driver-protocol";
 import {
   OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH,
   readOutsideProviderDriverEntry,
@@ -29,13 +30,6 @@ export interface OutsideProviderDriverPackageInput {
 export type OutsideProviderDriverPackageReading =
   | { readonly status: "accepted"; readonly resolved: ResolvedExtensionPackage }
   | { readonly status: "refused"; readonly reason: OutsideProviderDriverRefusalReason };
-
-/**
- * The harness endpoint protocol versions this host speaks. A package that
- * declares none of them could never complete its handshake, so it is refused
- * at inspection rather than installed to fail later.
- */
-const HOST_PROTOCOL_VERSIONS: ReadonlySet<string> = new Set(["harness-endpoint/1"]);
 
 /**
  * Manifest facts only the host can state: where the package came from, what
@@ -95,7 +89,13 @@ export function readOutsideProviderDriverPackage(
   };
   const reading = readOutsideProviderDriverEntry({ ...document, manifest });
   if (reading.status === "refused") return reading;
-  if (!reading.entry.protocolVersions.some((version) => HOST_PROTOCOL_VERSIONS.has(version))) {
+  // A package that declares no version the host speaks could never complete
+  // its handshake, so it is refused here rather than installed to fail later.
+  if (
+    !reading.entry.protocolVersions.some((version) =>
+      HOST_HARNESS_ENDPOINT_PROTOCOL_VERSIONS.includes(version),
+    )
+  ) {
     return refused("protocol-incompatible");
   }
   const entryPoint = reading.entry.manifest.components[0]?.entryPoint;

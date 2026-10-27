@@ -2537,6 +2537,9 @@ function redactedProbeFailureMessage(error: unknown): string {
   if (failure.reason === "authentication-required") return "Provider authentication is required.";
   if (failure.reason === "runtime-unavailable") return "Provider runtime is unavailable.";
   if (failure.reason === "no-usable-model") return "No usable model is available.";
+  if (failure.reason === "driver-incompatible") {
+    return "This provider driver does not speak a protocol Octant can use.";
+  }
   if (failure.category === "unauthenticated") return "Provider authentication is required.";
   if (failure.category === "invalid-configuration") return "Provider configuration is invalid.";
   if (failure.category === "unsupported") return "Provider operation is unsupported.";

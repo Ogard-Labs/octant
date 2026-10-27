@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 import { ExtensionPackageManifest } from "@octant/contracts/extensions";
+import { OutsideProviderDriverProtocolVersion } from "@octant/contracts/outside-driver-protocol";
 import { ProviderDriverKind } from "@octant/contracts/providers";
 
 /**
@@ -28,11 +29,7 @@ export const OUTSIDE_PROVIDER_DRIVER_KIND = "outside-harness-endpoint" as const;
 export const OUTSIDE_PROVIDER_DRIVER_DOCUMENT_PATH = "octant-provider-driver.json";
 
 /** A harness endpoint wire protocol major version, such as `harness-endpoint/1`. */
-export const OutsideProviderDriverProtocolVersion = Schema.String.pipe(
-  Schema.pattern(/^harness-endpoint\/[1-9][0-9]{0,3}$/),
-  Schema.brand("OutsideProviderDriverProtocolVersion"),
-);
-export type OutsideProviderDriverProtocolVersion = typeof OutsideProviderDriverProtocolVersion.Type;
+export { OutsideProviderDriverProtocolVersion };
 
 /**
  * Why an outside driver package was refused. The set is closed and the host
