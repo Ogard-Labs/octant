@@ -581,7 +581,8 @@ The board reads the same host list as the Needs you card (the
 [pending-requests read](host-reads-and-commands.md#pending-requests)) once for the whole board, only while the board is mounted, on the same
 change-feed, settings, and workspace signals, and never on a timer. A card is
 matched to its request by thread and mode. A thread whose live turn waits on an
-approval or a question, or on the agent's own harness approval, files under
+approval or a question, or on the agent's own harness approval or Work
+question, files under
 Waiting with the awaiting-input reason, not In progress: the provider session stays open while it waits, so the host
 reads the wait from the running turn's open approvals and questions (Code) or
 the open request (Work) rather than from the turn's running record. Those are

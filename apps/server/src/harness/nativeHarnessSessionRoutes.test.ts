@@ -49,4 +49,49 @@ describe("native harness session routes", () => {
     expect((await response)?.status).toBe(200);
     expect(lifted).not.toHaveBeenCalled();
   });
+
+  it("refuses an answer to the lead's question from a window that may not open the thread", async () => {
+    // The thread's inline question card and the Agents tab both post here; the
+    // window's reach is checked on the host, never only by the card.
+    const questionId = "00000000-0000-4000-8000-000000000022";
+    let mayOpen = false;
+    const answerQuestion = vi.fn(() => "answered" as const);
+    const handler = createNativeHarnessSessionRouteHandler({
+      windowAuthorityStore: new WindowAuthorityStore(),
+      store: {
+        read: () => ({
+          session: { id: sessionId, version: 3, status: "running", mode: "work" },
+          questions: [
+            {
+              id: questionId,
+              prompt: "Which quarter?",
+              options: [],
+              status: "answered",
+              answer: "Q3",
+              askedAt: "2026-10-06T08:00:00.000Z",
+            },
+          ],
+        }),
+      } as never,
+      followUps: {} as never,
+      authorizeThread: () => mayOpen,
+      answerQuestion,
+    });
+    const answer = () => {
+      const request = new Request(
+        `http://127.0.0.1/api/native-harness/sessions/${threadId}/questions`,
+        { method: "POST", body: JSON.stringify({ questionId, answer: "Q3" }) },
+      );
+      bindPrincipalRouteContext(request, {
+        principal: { kind: "local-window" } as never,
+        scopeId: windowId,
+      });
+      return handler(request);
+    };
+    expect((await answer())?.status).toBe(403);
+    expect(answerQuestion).not.toHaveBeenCalled();
+    mayOpen = true;
+    expect((await answer())?.status).toBe(200);
+    expect(answerQuestion).toHaveBeenCalledExactlyOnceWith({ threadId, questionId, answer: "Q3" });
+  });
 });

@@ -6,6 +6,7 @@ import {
   codeDecision,
   workChildApproval,
   workLeadApproval,
+  workLeadQuestion,
 } from "../palette/pendingRequests.test-fixtures";
 import { PendingRequestRow } from "./PendingRequestRow";
 
@@ -149,6 +150,34 @@ describe("an agent approval row", () => {
         .slice(1)
         .map((button) => button.textContent),
     ).toEqual(["Review request"]);
+    await user.click(screen.getByRole("button", { name: "Review request" }));
+    expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
+    expect(onAnswer).not.toHaveBeenCalled();
+  });
+
+  it("says a Work agent's own question is waiting and offers only Review request, never a choice", async () => {
+    const user = userEvent.setup();
+    const onAnswer = vi.fn();
+    const onOpenThread = vi.fn();
+    const request = workLeadQuestion();
+    render(
+      <PendingRequestRow
+        now={NOW}
+        onAnswer={onAnswer}
+        onOpenThread={onOpenThread}
+        request={request}
+      />,
+    );
+    const row = screen.getByRole("group", { name: "Quarterly report is waiting for your answer" });
+    expect(within(row).getByText("Which quarter should the summary cover?")).toBeInTheDocument();
+    expect(
+      within(row)
+        .getAllByRole("button")
+        .slice(1)
+        .map((button) => button.textContent),
+    ).toEqual(["Review request"]);
+    await user.tab();
+    await user.keyboard("1");
     await user.click(screen.getByRole("button", { name: "Review request" }));
     expect(onOpenThread).toHaveBeenCalledExactlyOnceWith(request);
     expect(onAnswer).not.toHaveBeenCalled();

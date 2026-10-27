@@ -87,13 +87,34 @@ export function isLeadApprovalPendingRequest(
 }
 
 /**
+ * A Work thread's agent waiting on its own question. The row finds the
+ * question; the question card in the thread is where it is answered, so there
+ * is nothing to answer here.
+ */
+export type LeadQuestionPendingRequest = Extract<
+  PendingRequest,
+  { readonly kind: "lead-question" }
+>;
+
+export function isLeadQuestionPendingRequest(
+  request: PendingRequest,
+): request is LeadQuestionPendingRequest {
+  return request.kind === "lead-question";
+}
+
+/**
  * A row that finds a request and leaves the answer to the thread: a waiting
- * subagent, or the agent's own approval. Neither carries an answer handle.
+ * subagent, or the agent's own approval or Work question. None carries an
+ * answer handle.
  */
 export function isFindOnlyPendingRequest(
   request: PendingRequest,
-): request is ChildPendingRequest | LeadApprovalPendingRequest {
-  return isChildPendingRequest(request) || isLeadApprovalPendingRequest(request);
+): request is ChildPendingRequest | LeadApprovalPendingRequest | LeadQuestionPendingRequest {
+  return (
+    isChildPendingRequest(request) ||
+    isLeadApprovalPendingRequest(request) ||
+    isLeadQuestionPendingRequest(request)
+  );
 }
 
 const ROLE_WORD: Readonly<Record<ChildPendingRequest["child"]["role"], string>> = {
@@ -121,14 +142,14 @@ export function pendingRequestKey(request: PendingRequest): string {
 
 /**
  * A decision is named by the turn that asked it, a subagent's request by its
- * run and when it asked, the agent's own approval by when it asked, and every
- * other request by its own id.
+ * run and when it asked, the agent's own approval or question by when it
+ * asked, and every other request by its own id.
  */
 function answerHandle(request: PendingRequest): string {
   if (isChildPendingRequest(request)) {
     return `${request.kind}:${String(request.child.runId)}:${request.requestedAt}:${request.text}`;
   }
-  if (isLeadApprovalPendingRequest(request)) {
+  if (isLeadApprovalPendingRequest(request) || isLeadQuestionPendingRequest(request)) {
     return `${request.kind}:${request.requestedAt}:${request.text}`;
   }
   if (request.kind === "decision") {

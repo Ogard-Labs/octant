@@ -22,7 +22,9 @@ import {
   awaitsLeadQuestion,
   leadApprovalFor,
   listLeadApprovalRequests,
+  listLeadQuestionRequests,
   type LeadApprovalRowSources,
+  type LeadQuestionRowSources,
 } from "./leadApprovalAttention";
 import { NativeHarnessApprovalStore } from "./nativeHarnessApprovals";
 import { registerNativeHarnessEvents } from "./nativeHarnessEvents";
@@ -385,5 +387,131 @@ describe("the rows a window lists for a waiting harness approval", () => {
     const after = openStores(before.connection);
     const [request] = await listLeadApprovalRequests(rowSources(after), windowId);
     expect(request).toMatchObject({ kind: "lead-approval", mode: "chat", lostInRestart: true });
+  });
+});
+
+describe("the rows a window lists for a Work lead's waiting question", () => {
+  function askQuestion(
+    stores: ReturnType<typeof fixture>,
+    input: {
+      readonly mode?: OctantMode;
+      readonly child?: boolean;
+      readonly prompt?: string;
+      readonly signal?: AbortSignal;
+    } = {},
+  ) {
+    return stores.questions.ask({
+      threadId: thread,
+      mode: input.mode ?? "work",
+      projectId: projectId as never,
+      lead,
+      ...(input.child === true ? { source: child } : {}),
+      prompt: input.prompt ?? "Which report should I update?",
+      options: ["Q3", "Q4"],
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    });
+  }
+
+  function rowSources(
+    stores: ReturnType<typeof fixture> | ReturnType<typeof openStores>,
+    overrides: Partial<Pick<LeadQuestionRowSources, "threadFacts" | "authorizeThread">> = {},
+  ): LeadQuestionRowSources {
+    return {
+      questions: stores.questions,
+      sessions: stores.sessions,
+      threadFacts: () => ({ title: "Quarterly report", projectId: projectId as never }),
+      authorizeThread: ({ windowId: asked, mode }) => {
+        expect(asked).toBe(windowId);
+        expect(mode).toBe("work");
+        return true;
+      },
+      ...overrides,
+    };
+  }
+
+  it("lists the question with the thread's title and no way to answer it, until any surface answers", async () => {
+    const stores = fixture();
+    const outcome = askQuestion(stores);
+    const requests = await listLeadQuestionRequests(rowSources(stores), windowId);
+    expect(requests).toEqual([
+      {
+        mode: "work",
+        kind: "lead-question",
+        projectId,
+        threadId: thread,
+        threadTitle: "Quarterly report",
+        text: "Which report should I update?",
+        requestedAt: now,
+      },
+    ]);
+    expect(requests[0]).not.toHaveProperty("answer");
+    expect(requests[0]).not.toHaveProperty("options");
+    const pending = stores.sessions.read(thread)?.questions[0];
+    expect(stores.questions.answer(thread, String(pending?.id), "Q4")).toBe("answered");
+    await outcome;
+    expect(await listLeadQuestionRequests(rowSources(stores), windowId)).toEqual([]);
+  });
+
+  it("stops listing it when the turn is cancelled or the question expires", async () => {
+    const cancelled = fixture();
+    const controller = new AbortController();
+    const wait = askQuestion(cancelled, { signal: controller.signal });
+    expect(await listLeadQuestionRequests(rowSources(cancelled), windowId)).toHaveLength(1);
+    controller.abort();
+    await wait;
+    expect(await listLeadQuestionRequests(rowSources(cancelled), windowId)).toEqual([]);
+
+    const expired = fixture({ timeoutMs: 5 });
+    await askQuestion(expired);
+    expect(await listLeadQuestionRequests(rowSources(expired), windowId)).toEqual([]);
+  });
+
+  it("lists nothing for a subagent's question, which the subagent rows carry", async () => {
+    const stores = fixture();
+    void askQuestion(stores, { child: true });
+    expect(await listLeadQuestionRequests(rowSources(stores), windowId)).toEqual([]);
+  });
+
+  it("lists nothing for a question no turn waits on any more, as after a restart", async () => {
+    const before = fixture();
+    void askQuestion(before);
+    const after = openStores(before.connection);
+    expect(after.sessions.read(thread)?.questions[0]?.status).toBe("pending");
+    expect(await listLeadQuestionRequests(rowSources(after), windowId)).toEqual([]);
+  });
+
+  it("lists nothing for a Code or Chat lead's question, which those modes list with an answer", async () => {
+    const code = fixture();
+    void askQuestion(code, { mode: "code" });
+    expect(await listLeadQuestionRequests(rowSources(code), windowId)).toEqual([]);
+    const chat = fixture();
+    void askQuestion(chat, { mode: "chat" });
+    expect(await listLeadQuestionRequests(rowSources(chat), windowId)).toEqual([]);
+  });
+
+  it("lists nothing for a window that may not open the thread, or a thread with no title", async () => {
+    const stores = fixture();
+    void askQuestion(stores);
+    expect(
+      await listLeadQuestionRequests(
+        rowSources(stores, { authorizeThread: () => false }),
+        windowId,
+      ),
+    ).toEqual([]);
+    expect(
+      await listLeadQuestionRequests(
+        rowSources(stores, { threadFacts: () => undefined }),
+        windowId,
+      ),
+    ).toEqual([]);
+  });
+
+  it("redacts a path or URL from the question, as a Work request does", async () => {
+    const stores = fixture();
+    void askQuestion(stores, {
+      prompt: "Update /Users/me/report.md from https://example.com/x",
+    });
+    const [request] = await listLeadQuestionRequests(rowSources(stores), windowId);
+    expect(request?.text).toBe("Update [redacted path] from [redacted reference]");
   });
 });

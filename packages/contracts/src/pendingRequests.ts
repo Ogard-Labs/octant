@@ -250,6 +250,27 @@ const leadTextKeepsModeBounds = (request: {
       ? isCodeApprovalText(request.text)
       : request.text.length <= MAX_LEAD_APPROVAL_TEXT_LENGTH;
 
+/**
+ * A Work thread's lead waiting on its own `ask-user` question. Like the lead's
+ * approval, the row finds the question and cannot answer it: there is no
+ * `answer` and no `options`. The thread's inline question card answers it
+ * through the harness session's own route, which checks the window and the
+ * principal first. Work only: a Code lead's question goes through Code's inline
+ * question path and is listed as a Code question, and a Chat lead's question
+ * parks the Chat attempt and is listed as a Chat question, each with its own
+ * answer handle. A question a restart left behind reaches no turn and is never
+ * listed, so there is no `lostInRestart`. The text is Work's sanitized request
+ * text, with no path or URL.
+ */
+const LeadQuestionFields = {
+  ...PendingRequestFields,
+  mode: Schema.Literal("work"),
+  kind: Schema.Literal("lead-question"),
+  projectId: ProjectId,
+  threadId: WorkThreadId,
+  text: WorkRequestSanitizedText,
+} as const;
+
 export const PendingRequest = Schema.Union(
   Schema.Struct({ ...WorkPendingRequestFields, kind: Schema.Literal("approval") }).annotations(
     strict,
@@ -322,6 +343,7 @@ export const PendingRequest = Schema.Union(
   Schema.Struct(LeadApprovalFields)
     .annotations(strict)
     .pipe(Schema.filter(leadTextKeepsModeBounds, { jsonSchema: {} })),
+  Schema.Struct(LeadQuestionFields).annotations(strict),
   Schema.Struct({
     ...PendingRequestFields,
     mode: Schema.Literal("chat"),
