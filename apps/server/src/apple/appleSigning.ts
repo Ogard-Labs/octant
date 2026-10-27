@@ -60,37 +60,27 @@ export function parsePropertyList(xml: string): PropertyListValue | undefined {
   }
 }
 
-// One pass can leave a marker that overlapping ones form (`<!-<!-- -->-`), so
-// declarations and comments are removed until nothing changes.
-function withoutDeclarationsOrComments(xml: string): string {
-  let previous: string;
-  let current = xml;
-  do {
-    previous = current;
-    current = previous
-      .replace(/<\?[\s\S]*?\?>/g, "")
-      .replace(/<!--[\s\S]*?-->/g, "")
-      .replace(/<!DOCTYPE[^>]*>/g, "");
-  } while (current !== previous);
-  return current;
-}
-
+// Declarations and comments are skipped as the scan reaches them rather than
+// stripped beforehand: stripping once leaves a comment that overlapping
+// markers form (`<!-<!-- -->-`). Here such a marker, or one never closed, is a
+// stray `<` and the whole document is unreadable.
 function tokenize(xml: string): ReadonlyArray<Token> | undefined {
-  const body = withoutDeclarationsOrComments(xml);
   const tokens: Token[] = [];
-  const pattern = /<(\/?)([A-Za-z]+)(?:\s[^<>]*?)?\s*(\/?)>|([^<]+)|(<)/g;
-  for (const match of body.matchAll(pattern)) {
-    if (tokens.length >= MAX_PROPERTY_LIST_TOKENS || match[5] !== undefined) return undefined;
-    const text = match[4];
+  const pattern =
+    /(<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<!DOCTYPE[^>]*>)|<(\/?)([A-Za-z]+)(?:\s[^<>]*?)?\s*(\/?)>|([^<]+)|(<)/g;
+  for (const match of xml.matchAll(pattern)) {
+    if (tokens.length >= MAX_PROPERTY_LIST_TOKENS || match[6] !== undefined) return undefined;
+    if (match[1] !== undefined) continue;
+    const text = match[5];
     if (text !== undefined) {
       tokens.push({ kind: "text", value: text });
       continue;
     }
-    const name = match[2] ?? "";
+    const name = match[3] ?? "";
     tokens.push(
-      match[1] === "/"
+      match[2] === "/"
         ? { kind: "close", name }
-        : match[3] === "/"
+        : match[4] === "/"
           ? { kind: "empty", name }
           : { kind: "open", name },
     );
